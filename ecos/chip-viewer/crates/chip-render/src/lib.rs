@@ -4,6 +4,17 @@ use std::sync::Arc;
 use chip_view_db::ChipViewDb;
 use chipgeom_format::{GeometryViewTileRecord, Rect32, ShapeId};
 
+/// Viewport quantization grid for draw-path cache keys, in dbu.
+///
+/// Keys of the pure-draw caches (`RenderPlanCache`, `ViewTilePlaneCache`) are
+/// aligned outward to multiples of this quantum so small pans/zooms reuse the
+/// previous entry. The value must cover the largest LOD tile cell (the writer
+/// builds tiles from a 4096 dbu base cell shifted by LOD level), so a
+/// quantized rectangle never spans a coarser LOD tier than the real viewport
+/// would. Cached results may be a superset of the exact viewport; every
+/// consumer must be a draw path that clips to the canvas.
+pub const VIEWPORT_CACHE_QUANTUM_DBU: i32 = 4096;
+
 pub struct RenderPlanner;
 
 impl RenderPlanner {
@@ -31,7 +42,7 @@ pub struct RenderPlanKey {
 
 impl RenderPlanKey {
     pub fn new(layer_id: u16, viewport: Rect32) -> Self {
-        let viewport = normalize_rect(viewport);
+        let viewport = quantize_viewport_outward(normalize_rect(viewport));
         Self {
             layer_id,
             lx: viewport.lx,
@@ -53,7 +64,7 @@ pub struct RenderLayersPlanKey {
 
 impl RenderLayersPlanKey {
     pub fn new(layer_ids: &[u16], viewport: Rect32) -> Self {
-        let viewport = normalize_rect(viewport);
+        let viewport = quantize_viewport_outward(normalize_rect(viewport));
         let mut layer_ids = layer_ids.to_vec();
         layer_ids.sort_unstable();
         layer_ids.dedup();
@@ -100,7 +111,7 @@ pub struct ViewTilePlaneKey {
 
 impl ViewTilePlaneKey {
     pub fn new(lod_level: u8, layer_id: u16, viewport: Rect32) -> Self {
-        let viewport = normalize_rect(viewport);
+        let viewport = quantize_viewport_outward(normalize_rect(viewport));
         Self {
             lod_level,
             layer_id,
@@ -113,7 +124,7 @@ impl ViewTilePlaneKey {
 }
 
 pub struct ViewTilePlaneCache {
-    entries: BTreeMap<ViewTilePlaneKey, Vec<GeometryViewTileRecord>>,
+    entries: BTreeMap<ViewTilePlaneKey, Arc<[GeometryViewTileRecord]>>,
     hits: usize,
     max_entries: usize,
     misses: usize,
@@ -241,7 +252,7 @@ impl ViewTilePlaneCache {
         lod_level: u8,
         layer_id: u16,
         viewport: Rect32,
-    ) -> Vec<GeometryViewTileRecord> {
+    ) -> Arc<[GeometryViewTileRecord]> {
         let key = ViewTilePlaneKey::new(lod_level, layer_id, viewport);
         self.get_or_insert_with(key, || {
             db.query_view_tiles(lod_level, layer_id, viewport)
@@ -255,15 +266,15 @@ impl ViewTilePlaneCache {
         &mut self,
         key: ViewTilePlaneKey,
         build: impl FnOnce() -> Vec<GeometryViewTileRecord>,
-    ) -> Vec<GeometryViewTileRecord> {
+    ) -> Arc<[GeometryViewTileRecord]> {
         if let Some(tiles) = self.entries.get(&key) {
             self.hits += 1;
-            return tiles.clone();
+            return Arc::clone(tiles);
         }
 
         self.misses += 1;
-        let tiles = build();
-        self.insert(key, tiles.clone());
+        let tiles: Arc<[GeometryViewTileRecord]> = build().into();
+        self.insert(key, Arc::clone(&tiles));
         tiles
     }
 
@@ -275,7 +286,7 @@ impl ViewTilePlaneCache {
         }
     }
 
-    fn insert(&mut self, key: ViewTilePlaneKey, tiles: Vec<GeometryViewTileRecord>) {
+    fn insert(&mut self, key: ViewTilePlaneKey, tiles: Arc<[GeometryViewTileRecord]>) {
         if !self.entries.contains_key(&key) {
             self.order.push_back(key);
         }
@@ -308,6 +319,27 @@ fn normalize_rect(rect: Rect32) -> Rect32 {
         ly: rect.ly.min(rect.hy),
         hx: rect.lx.max(rect.hx),
         hy: rect.ly.max(rect.hy),
+    }
+}
+
+/// Align a normalized viewport outward to `VIEWPORT_CACHE_QUANTUM_DBU`
+/// multiples so quantized rectangles always cover the exact viewport.
+fn quantize_viewport_outward(rect: Rect32) -> Rect32 {
+    let quantum = i64::from(VIEWPORT_CACHE_QUANTUM_DBU);
+    let floor_quantum = |value: i32| {
+        let value = i64::from(value);
+        (value.div_euclid(quantum) * quantum).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+    };
+    let ceil_quantum = |value: i32| {
+        let value = i64::from(value);
+        (-(-value).div_euclid(quantum) * quantum).clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+            as i32
+    };
+    Rect32 {
+        lx: floor_quantum(rect.lx),
+        ly: floor_quantum(rect.ly),
+        hx: ceil_quantum(rect.hx),
+        hy: ceil_quantum(rect.hy),
     }
 }
 
@@ -565,5 +597,110 @@ mod tests {
         cache.clear();
 
         assert_eq!(cache.stats(), RenderCacheStats::default());
+    }
+
+    #[test]
+    fn cache_keys_quantize_viewports_outward_to_quantum_multiples() {
+        let key = RenderPlanKey::new(
+            1,
+            Rect32 {
+                lx: 1,
+                ly: 2,
+                hx: 10,
+                hy: 20,
+            },
+        );
+        assert_eq!(
+            (key.lx, key.ly, key.hx, key.hy),
+            (0, 0, VIEWPORT_CACHE_QUANTUM_DBU, VIEWPORT_CACHE_QUANTUM_DBU)
+        );
+
+        let negative = ViewTilePlaneKey::new(
+            1,
+            2,
+            Rect32 {
+                lx: -1,
+                ly: -4097,
+                hx: 4097,
+                hy: 4096,
+            },
+        );
+        assert_eq!(
+            (negative.lx, negative.ly, negative.hx, negative.hy),
+            (
+                -VIEWPORT_CACHE_QUANTUM_DBU,
+                -2 * VIEWPORT_CACHE_QUANTUM_DBU,
+                2 * VIEWPORT_CACHE_QUANTUM_DBU,
+                VIEWPORT_CACHE_QUANTUM_DBU
+            )
+        );
+    }
+
+    #[test]
+    fn quantized_keys_reuse_entries_for_nearby_viewports() {
+        let mut cache = RenderPlanCache::new(8);
+        let first = RenderPlanKey::new(
+            1,
+            Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 100,
+                hy: 100,
+            },
+        );
+        let nearby = RenderPlanKey::new(
+            1,
+            Rect32 {
+                lx: 30,
+                ly: 40,
+                hx: 200,
+                hy: 900,
+            },
+        );
+        let mut calls = 0;
+
+        assert_eq!(
+            &*cache.get_or_insert_with(first, || {
+                calls += 1;
+                vec![7]
+            }),
+            [7]
+        );
+        assert_eq!(
+            &*cache.get_or_insert_with(nearby, || {
+                calls += 1;
+                vec![9]
+            }),
+            [7]
+        );
+        assert_eq!(calls, 1);
+        assert_eq!(cache.stats().hits, 1);
+        assert_eq!(cache.stats().entries, 1);
+    }
+
+    #[test]
+    fn view_tile_plane_cache_hits_share_one_arc_allocation() {
+        let mut cache = ViewTilePlaneCache::new(8);
+        let key = ViewTilePlaneKey::new(
+            2,
+            3,
+            Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 10,
+                hy: 10,
+            },
+        );
+
+        let first = cache.get_or_insert_with(key, || {
+            vec![chipgeom_format::GeometryViewTileRecord {
+                layer_id: 3,
+                ..chipgeom_format::GeometryViewTileRecord::default()
+            }]
+        });
+        let second = cache.get_or_insert_with(key, || Vec::new());
+
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(cache.stats().hits, 1);
     }
 }

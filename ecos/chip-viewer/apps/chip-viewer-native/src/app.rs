@@ -33,6 +33,7 @@ use crate::macro_staging::{
 };
 use crate::map_data::{ColormapMode, HeatmapData, MapCatalog, MapItem};
 
+mod gpu_overview;
 mod gpu_tile_worker;
 mod snapshot_reload;
 use gpu_tile_worker::GpuTileWorker;
@@ -227,6 +228,7 @@ struct LoadedViewer {
     next_snapshot_refresh_check: Instant,
     render_cache: RenderPlanCache,
     view_tile_cache: ViewTilePlaneCache,
+    view_tiles_latch: gpu_overview::ViewTileOverviewLatch,
     next_command_counter: u32,
     drc_overlay: Option<DrcOverlay>,
     selected_drc: Option<usize>,
@@ -2317,6 +2319,7 @@ impl LoadedViewer {
             next_snapshot_refresh_check: Instant::now() + SNAPSHOT_REFRESH_CHECK_INTERVAL,
             render_cache: RenderPlanCache::default(),
             view_tile_cache: ViewTilePlaneCache::default(),
+            view_tiles_latch: gpu_overview::ViewTileOverviewLatch::default(),
             next_command_counter: 1,
             drc_overlay,
             selected_drc: None,
@@ -3933,7 +3936,7 @@ impl LoadedViewer {
             .collect();
         let query_layer_ids = render_query_layer_ids(&self.layers, self.object_visibility);
         let viewport = screen_to_world_rect(canvas, world, canvas, self.zoom, self.pan);
-        let use_view_tiles = self.should_use_view_tiles(viewport, world);
+        let use_view_tiles = self.should_use_view_tiles(viewport, world, canvas);
         let hover_world_point = ui
             .ctx()
             .input(|input| input.pointer.hover_pos())
@@ -4088,7 +4091,7 @@ impl LoadedViewer {
             }
         }
         let mut drawn = 0usize;
-        let use_view_tiles = self.should_use_view_tiles(viewport, world);
+        let use_view_tiles = self.should_use_view_tiles(viewport, world, canvas);
         let view_lod = self.view_lod_level();
         let hover_nearest = if use_view_tiles {
             None
@@ -4115,19 +4118,31 @@ impl LoadedViewer {
             && !pointer_over_heatmap;
 
         if use_view_tiles {
-            for (layer_id, style) in &visible_layers {
-                for tile in self
-                    .view_tile_cache
-                    .visible_tiles(&self.db, view_lod, *layer_id, viewport)
-                {
-                    let screen =
-                        world_to_screen_rect(tile.bbox, world, canvas, self.zoom, self.pan);
-                    if !screen.is_positive() || !screen.intersects(canvas) {
-                        continue;
+            if self.is_gpu_active() {
+                drawn += self.paint_gpu_2d_overview(
+                    ui,
+                    canvas,
+                    world,
+                    view_lod,
+                    &visible_layers,
+                    is_interacting,
+                );
+            } else {
+                for (layer_id, style) in &visible_layers {
+                    for tile in self
+                        .view_tile_cache
+                        .visible_tiles(&self.db, view_lod, *layer_id, viewport)
+                        .iter()
+                    {
+                        let screen =
+                            world_to_screen_rect(tile.bbox, world, canvas, self.zoom, self.pan);
+                        if !screen.is_positive() || !screen.intersects(canvas) {
+                            continue;
+                        }
+                        let color = overview_tile_color(*style, tile.shape_count);
+                        painter.rect_filled(screen, 0.0, color);
+                        drawn += 1;
                     }
-                    let color = overview_tile_color(*style, tile.shape_count);
-                    painter.rect_filled(screen, 0.0, color);
-                    drawn += 1;
                 }
             }
         } else {
@@ -4181,28 +4196,14 @@ impl LoadedViewer {
                             == self.visibility_rules_cache.layer_visibility_hash
                 });
 
-                let gpu_scale = world_to_screen_scale(world, canvas, self.zoom);
-                let world_cx = (world.lx + world.hx) as f32 * 0.5;
-                let world_cy = (world.ly + world.hy) as f32 * 0.5;
                 let _gpu_canvas_center = canvas.center() + self.pan;
 
-                let uniform = crate::canvas_gpu::CanvasUniform {
-                    world_center_dbu: [world_cx, world_cy],
-                    canvas_center_px: [
-                        canvas.width() * 0.5 + self.pan.x,
-                        canvas.height() * 0.5 + self.pan.y,
-                    ],
-                    scale_px_per_dbu: gpu_scale,
-                    pixels_per_point: ui.ctx().pixels_per_point(),
-                    pattern_min_size_px: crate::canvas_gpu::PATTERN_MIN_SIZE_PX,
-                    min_shape_screen_size: crate::canvas_gpu::MIN_SHAPE_SCREEN_SIZE,
-                    screen_size_px: [canvas.width(), canvas.height()],
-                    is_interacting: if is_interacting { 1.0 } else { 0.0 },
-                    global_alpha: 1.0,
-                    visibility_mask: self.object_visibility.gpu_visibility_mask(),
-                    show_context: u32::from(self.zoom > 1.25),
-                    reserved: [0; 2],
-                };
+                let uniform = self.gpu_canvas_uniform(
+                    world,
+                    canvas,
+                    ui.ctx().pixels_per_point(),
+                    is_interacting,
+                );
 
                 let tiles = crate::canvas_gpu::tile_coords_for_bbox(
                     viewport,
@@ -4258,11 +4259,18 @@ impl LoadedViewer {
                         hx: (tx + 1) * crate::canvas_gpu::GPU_TILE_SIZE_DBU,
                         hy: (ty + 1) * crate::canvas_gpu::GPU_TILE_SIZE_DBU,
                     };
+                    // Labels are only painted on non-interacting frames, so
+                    // the worker skips the owner-name/label allocations
+                    // while interacting. The tier keeps label-less and
+                    // label-carrying buffers from sharing a cache key; the
+                    // 16ms repaint catch-up rebuilds labels when a pan or
+                    // zoom ends.
+                    let build_labels = !is_interacting;
                     let buffer_key = crate::canvas_gpu::GpuBufferKey {
                         geometry_epoch: self.geometry_epoch,
                         tile_x: tx,
                         tile_y: ty,
-                        zoom_tier: 0,
+                        zoom_tier: u8::from(build_labels),
                         layer_visibility_hash: self.visibility_rules_cache.layer_visibility_hash,
                         object_visibility_bits: 0,
                     };
@@ -4273,6 +4281,7 @@ impl LoadedViewer {
                             tile_bbox,
                             &query_layer_ids,
                             layer_index,
+                            build_labels,
                         ) {
                             log::error!("{err}");
                             if let Some(gpu_canvas) = self.gpu_canvas.as_mut() {
@@ -5150,8 +5159,17 @@ impl LoadedViewer {
         };
 
         let visibility_hash = layers_visibility_hash(&self.layers);
-        let using_overview_tiles = false;
-        let overview_lod = 0;
+        // Overview slabs replace per-shape instances once the camera is far
+        // enough out that shapes are meaningless; the lod rides in the
+        // cache key so a lod switch rebuilds the buffer.
+        let using_overview_tiles = self.is_gpu_active()
+            && self.db.view_tile_count() > 0
+            && crate::canvas_gpu3d::use_overview_slabs(current_camera, world);
+        let overview_lod = if using_overview_tiles {
+            crate::canvas_gpu3d::overview_lod_level(current_camera, world)
+        } else {
+            0
+        };
         let pixels_per_point = ui.ctx().pixels_per_point();
 
         // Base key for cached 3D instance buffer (state that invalidates the whole cache)
@@ -6380,20 +6398,25 @@ impl LoadedViewer {
         best.map(|(_, shape_id)| shape_id)
     }
 
-    fn should_use_view_tiles(&self, viewport: Rect32, world: Rect32) -> bool {
-        if self.is_gpu_active() {
+    fn should_use_view_tiles(
+        &mut self,
+        viewport: Rect32,
+        world: Rect32,
+        canvas: egui::Rect,
+    ) -> bool {
+        if !self.object_visibility.is_all_visible() {
+            self.view_tiles_latch.reset();
             return false;
         }
-        should_use_view_tiles_for_state(
+        self.view_tiles_latch.update(
             self.db.view_tile_count(),
-            !self.highlighted.is_empty(),
-            self.selected.is_some(),
             self.draft.is_some(),
             self.edit_enabled,
             self.zoom,
             viewport,
             world,
-        ) && self.object_visibility.is_all_visible()
+            canvas,
+        )
     }
 
     fn view_lod_level(&self) -> u8 {
@@ -8894,9 +8917,8 @@ fn single_line_query_text(text: &str) -> String {
 }
 
 fn overview_tile_color(style: LayerStyle, shape_count: u32) -> egui::Color32 {
-    let occupancy_alpha = 16.0 + (shape_count.max(1) as f32).sqrt() * 4.0;
-    let alpha = occupancy_alpha.round().clamp(16.0, 52.0) as u8;
-    egui::Color32::from_rgba_unmultiplied(style.rgba[0], style.rgba[1], style.rgba[2], alpha)
+    let [r, g, b, a] = gpu_overview::overview_tile_rgba(style, shape_count);
+    egui::Color32::from_rgba_unmultiplied(r, g, b, a)
 }
 
 fn style_for_shape(style: LayerStyle, owner: Option<&OwnerRef>) -> LayerStyle {
@@ -11140,35 +11162,6 @@ fn overview_tiles_for_layer<'a>(
     Vec::new()
 }
 
-fn should_use_view_tiles_for_state(
-    view_tile_count: usize,
-    _has_highlight: bool,
-    _has_selection: bool,
-    has_draft: bool,
-    edit_enabled: bool,
-    zoom: f32,
-    viewport: Rect32,
-    world: Rect32,
-) -> bool {
-    if view_tile_count == 0 {
-        return false;
-    }
-    if has_draft || edit_enabled {
-        return false;
-    }
-
-    let viewport_width = (viewport.hx - viewport.lx).max(1) as i64;
-    let viewport_height = (viewport.hy - viewport.ly).max(1) as i64;
-    let world_width = (world.hx - world.lx).max(1) as i64;
-    let world_height = (world.hy - world.ly).max(1) as i64;
-    let viewport_area = viewport_width.saturating_mul(viewport_height);
-    let world_area = world_width.saturating_mul(world_height).max(1);
-
-    // Highlights and selection are rendered as exact overlays on top of the
-    // tile summary. Draft/edit mode still needs the exact base geometry.
-    zoom <= 0.35 && viewport_area >= world_area.saturating_mul(6)
-}
-
 fn can_start_edit_command(
     has_draft: bool,
     has_pending_edit: bool,
@@ -12299,6 +12292,7 @@ mod tests {
                 },
                 &[],
                 &LayerRenderIndex::default(),
+                true,
             )
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -12767,9 +12761,10 @@ mod tests {
             hx: 1000,
             hy: 1000,
         };
+        let canvas = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1000.0, 800.0));
 
-        assert!(!should_use_view_tiles_for_state(
-            16, false, false, false, false, 1.0, world, world,
+        assert!(!gpu_overview::should_use_view_tiles_for_state(
+            16, false, false, 1.0, world, world, canvas,
         ));
     }
 
@@ -12861,26 +12856,25 @@ mod tests {
             hx: 2000,
             hy: 2000,
         };
+        let canvas = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1000.0, 800.0));
 
-        assert!(!should_use_view_tiles_for_state(
+        assert!(!gpu_overview::should_use_view_tiles_for_state(
             16,
-            false,
-            false,
             false,
             true,
             0.25,
             overview_viewport,
             world,
+            canvas,
         ));
-        assert!(!should_use_view_tiles_for_state(
+        assert!(!gpu_overview::should_use_view_tiles_for_state(
             16,
-            false,
-            false,
             true,
             false,
             0.25,
             overview_viewport,
             world,
+            canvas,
         ));
     }
 
@@ -12898,36 +12892,18 @@ mod tests {
             hx: 2000,
             hy: 2000,
         };
+        let canvas = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1000.0, 800.0));
 
-        assert!(should_use_view_tiles_for_state(
+        // Highlights and selection render as exact overlays on top of the
+        // tile summary, so they never block the overview path.
+        assert!(gpu_overview::should_use_view_tiles_for_state(
             16,
-            false,
-            false,
             false,
             false,
             0.25,
             overview_viewport,
             world,
-        ));
-        assert!(should_use_view_tiles_for_state(
-            16,
-            true,
-            false,
-            false,
-            false,
-            0.25,
-            overview_viewport,
-            world,
-        ));
-        assert!(should_use_view_tiles_for_state(
-            16,
-            false,
-            true,
-            false,
-            false,
-            0.25,
-            overview_viewport,
-            world,
+            canvas,
         ));
     }
 

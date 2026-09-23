@@ -18,6 +18,9 @@ use chipgeom_reader::{GeometrySnapshot, LayerMetadata};
 use regex::Regex;
 use rstar::{RTree, RTreeObject, AABB};
 
+mod view_tiles;
+pub use view_tiles::ViewTileIndex;
+
 pub struct ChipViewDb {
     connectivity_index: ConnectivityIndex,
     layer_index: LayerShapeIndex,
@@ -188,11 +191,6 @@ pub struct LayerShapeIndex {
 #[derive(Clone, Debug, Default)]
 pub struct ShapeIdIndex {
     by_id: HashMap<ShapeId, usize>,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct ViewTileIndex {
-    by_lod_layer: BTreeMap<(u8, u16), Vec<usize>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -634,51 +632,6 @@ impl ShapeIdIndex {
         self.by_id
             .get(&shape_id)
             .and_then(|index| shapes.get(*index))
-    }
-}
-
-impl ViewTileIndex {
-    pub fn from_tiles(tiles: &[GeometryViewTileRecord]) -> Self {
-        let mut by_lod_layer = BTreeMap::<(u8, u16), Vec<usize>>::new();
-        for (index, tile) in tiles.iter().enumerate() {
-            if tile.shape_count == 0 {
-                continue;
-            }
-            by_lod_layer
-                .entry((tile.lod_level, tile.layer_id))
-                .or_default()
-                .push(index);
-        }
-        Self { by_lod_layer }
-    }
-
-    pub fn estimated_heap_bytes(&self) -> usize {
-        size_of::<Self>()
-            + self
-                .by_lod_layer
-                .values()
-                .map(|indices| {
-                    size_of::<(u8, u16)>()
-                        + size_of::<Vec<usize>>()
-                        + indices.capacity() * size_of::<usize>()
-                })
-                .sum::<usize>()
-    }
-
-    pub fn query_tiles<'a>(
-        &self,
-        tiles: &'a [GeometryViewTileRecord],
-        lod_level: u8,
-        layer_id: u16,
-        bbox: Rect32,
-    ) -> Vec<&'a GeometryViewTileRecord> {
-        self.by_lod_layer
-            .get(&(lod_level, layer_id))
-            .into_iter()
-            .flat_map(|indices| indices.iter().copied())
-            .filter_map(|index| tiles.get(index))
-            .filter(|tile| tile.bbox.intersects(bbox))
-            .collect()
     }
 }
 
@@ -1405,7 +1358,7 @@ fn is_pickable_shape_kind(kind: u8) -> bool {
     kind == ShapeKind::Rect as u8 || kind == ShapeKind::Line as u8 || kind == ShapeKind::Point as u8
 }
 
-fn rect_envelope(rect: Rect32) -> AABB<[i32; 2]> {
+pub(crate) fn rect_envelope(rect: Rect32) -> AABB<[i32; 2]> {
     AABB::from_corners(
         [rect.lx.min(rect.hx), rect.ly.min(rect.hy)],
         [rect.lx.max(rect.hx), rect.ly.max(rect.hy)],
