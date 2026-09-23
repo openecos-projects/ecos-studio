@@ -57,7 +57,10 @@ from ecos_agent.optimization.knowledge.retrieval import (
 from ecos_agent.optimization.rules import freeze_optimization_objective
 from ecos_agent.optimization.parameters.contracts import (
     MaterializationRef,
+    ParameterApplication,
     ParameterApplicationReceipt,
+    ParameterEvidence,
+    ParameterValueEvidence,
 )
 from ecos_agent.optimization.parameters.semantics import card_hash, load_parameter_cards
 
@@ -380,11 +383,17 @@ def _native_receipt(
             "unit": unit,
             "context_sha256": build_context_fingerprint(domain_context),
         },
-        "requested": {
-            "knob_id": requested.knob_id.value,
-            "value": requested.value,
-            "unit": unit,
-        },
+        "parameter": ParameterEvidence(
+            knob_id=requested.knob_id,
+            requested=ParameterValueEvidence(value=requested.value, unit=unit),
+            written=ParameterValueEvidence(
+                value=requested.value * 200 if is_padding else requested.value,
+                unit="dbu" if is_padding else unit,
+            ),
+            consumed=ParameterValueEvidence(
+                value=effective_value, unit=unit, source="test.native_consumer"
+            ),
+        ),
         "materialization": MaterializationRef(
             receipt_ref="analysis/candidate_materialization.v1.json",
             receipt_sha256=HASH,
@@ -397,9 +406,12 @@ def _native_receipt(
             written_value=requested.value * 200 if is_padding else requested.value,
             unit="dbu" if is_padding else unit,
         ),
-        "actual_value": effective_value,
-        "status": "effective",
-        "reason": None,
+        "application": ParameterApplication(
+            status="applied",
+            relation="converted" if is_padding else (
+                "exact" if effective_value == requested.value else "transformed"
+            ),
+        ),
         "observation": observation,
     }
     draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=HASH)

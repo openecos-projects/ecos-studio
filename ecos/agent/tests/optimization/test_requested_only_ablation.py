@@ -28,11 +28,17 @@ def _requested() -> RequestedKnobValue:
 
 
 def _inactive_receipt():
-    return _native_receipt(_requested()).model_copy(
+    receipt = _native_receipt(_requested())
+    return receipt.model_copy(
         update={
-            "status": "inactive",
-            "actual_value": None,
-            "reason": "knob did not reach the native consumer",
+            "application": receipt.application.model_copy(
+                update={
+                    "status": "inactive",
+                    "relation": "unknown",
+                    "reason": "knob did not reach the native consumer",
+                }
+            ),
+            "parameter": receipt.parameter.model_copy(update={"consumed": None}),
         }
     )
 

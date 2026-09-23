@@ -47,7 +47,10 @@ from ecos_agent.optimization.metrics.contracts import (
 from ecos_agent.optimization.rules import freeze_optimization_objective
 from ecos_agent.optimization.parameters.contracts import (
     MaterializationRef,
+    ParameterApplication,
     ParameterApplicationReceipt,
+    ParameterEvidence,
+    ParameterValueEvidence,
 )
 from ecos_agent.optimization.parameters.semantics import card_hash, load_parameter_cards
 
@@ -132,11 +135,14 @@ def _parameter_application_receipt(value: int) -> ParameterApplicationReceipt:
             "lattice_version": "ecos.optimization_lattice.v1",
             "parameter_card_sha256": card_hash(card),
         },
-        "requested": {
-            "knob_id": "place.cell_padding_x",
-            "value": value,
-            "unit": "site",
-        },
+        "parameter": ParameterEvidence(
+            knob_id="place.cell_padding_x",
+            requested=ParameterValueEvidence(value=value, unit="site"),
+            written=ParameterValueEvidence(value=effective, unit="dbu"),
+            consumed=ParameterValueEvidence(
+                value=value, unit="site", source="test.native_consumer"
+            ),
+        ),
         "materialization": MaterializationRef(
             receipt_ref="analysis/candidate_materialization.v1.json",
             receipt_sha256=HASH,
@@ -149,9 +155,7 @@ def _parameter_application_receipt(value: int) -> ParameterApplicationReceipt:
             written_value=effective,
             unit="dbu",
         ),
-        "actual_value": value,
-        "status": "effective",
-        "reason": None,
+        "application": ParameterApplication(status="applied", relation="converted"),
         "observation": observation,
     }
     draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=HASH)
@@ -482,8 +486,8 @@ def test_task_memory_roundtrips_requested_and_actual_parameter_values(tmp_path: 
     entry = replay.entries[0]
     assert entry.schema_version == "ecos.optimization_task_memory_entry.v2"
     assert entry.parameter_application_receipt == receipt
-    assert entry.parameter_application_receipt.actual_value == 1
-    assert entry.parameter_application_receipt.requested["unit"] == "site"
+    assert entry.parameter_application_receipt.parameter.consumed.value == 1
+    assert entry.parameter_application_receipt.parameter.requested.unit == "site"
     assert snapshot.schema_version == "ecos.optimization_task_memory_snapshot.v2"
     assert snapshot.summaries[0].parameter_application_receipts == (receipt,)
     assert "application_receipt" not in entry.model_dump()
@@ -593,14 +597,24 @@ def test_task_memory_requires_eligible_v3_terminal_observation(tmp_path: Path) -
             }
         },
         {
-            "status": "inactive",
-            "actual_value": None,
-            "reason": "Padding was not applied.",
+            "application": ParameterApplication(
+                status="inactive", relation="unknown", reason="Padding was not applied."
+            ),
+            "parameter": ParameterEvidence(
+                knob_id="place.cell_padding_x",
+                requested=ParameterValueEvidence(value=1, unit="site"),
+                written=ParameterValueEvidence(value=200, unit="dbu"),
+            ),
         },
         {
-            "status": "unknown",
-            "actual_value": None,
-            "reason": "Padding application was not observed.",
+            "application": ParameterApplication(
+                status="unknown", relation="unknown", reason="Padding application was not observed."
+            ),
+            "parameter": ParameterEvidence(
+                knob_id="place.cell_padding_x",
+                requested=ParameterValueEvidence(value=1, unit="site"),
+                written=ParameterValueEvidence(value=200, unit="dbu"),
+            ),
         },
     ),
 )

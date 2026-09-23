@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ecos_agent.optimization.contracts import ObjectiveMetric, TerminalObservation
+from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
 
 if TYPE_CHECKING:
     from ecos_agent.optimization.planning import (
@@ -44,6 +45,20 @@ def _metric(
     return payload
 
 
+def _receipt_payload(receipt: ParameterApplicationReceipt) -> dict[str, object]:
+    """Expose v3 semantic layers without reintroducing an ambiguous alias."""
+    return {
+        "schema_version": receipt.schema_version,
+        "receipt_id": receipt.receipt_id,
+        "tool": {"name": receipt.tool.name, "revision": receipt.tool.revision},
+        "context_sha256": receipt.context.get("context_sha256"),
+        "parameter": receipt.parameter.model_dump(mode="json"),
+        "application": receipt.application.model_dump(mode="json"),
+        "observation": receipt.observation,
+        "evidence_sha256": receipt.evidence_sha256,
+    }
+
+
 def planner_trajectory_payload(
     item: OptimizationHistory,
     *,
@@ -51,16 +66,17 @@ def planner_trajectory_payload(
     primary_metric: ObjectiveMetric | None,
     preserve_metrics: tuple[ObjectiveMetric, ...],
 ) -> dict[str, object]:
-    """Keep decision evidence model-visible and full evidence ledger-bound."""
+    """Keep v3 decision evidence model-visible and full evidence ledger-bound."""
     receipt = item.parameter_application_receipt
     payload: dict[str, object] = {
         "schema_version": "ecos.planner_trajectory.v1",
         "reference": item.reference.model_dump(mode="json"),
         "outcome": item.outcome.value,
         "knob_id": item.action.knob_id.value,
-        "requested_value": item.requested.value,
-        "actual_value": receipt.actual_value if receipt is not None else None,
-        "receipt_status": receipt.status if receipt is not None else None,
+        "requested": item.requested.model_dump(mode="json"),
+        "parameter_application_receipt": (
+            _receipt_payload(receipt) if receipt is not None else None
+        ),
         "primary_metric": (
             _metric(primary_metric, item.terminal_observation, incumbent)
             if primary_metric is not None
@@ -72,15 +88,6 @@ def planner_trajectory_payload(
         ],
         "incumbent_decision": item.incumbent_decision,
     }
-    if receipt is not None:
-        materialization = getattr(receipt, "materialization", None)
-        if materialization is not None:
-            payload["written_value"] = materialization.written_value
-            payload["written_unit"] = materialization.unit
-        if receipt.reason is not None:
-            payload["receipt_reason"] = receipt.reason
-        if receipt.observation:
-            payload["receipt_observation"] = receipt.observation
     if item.rationale_summary is not None:
         payload["rationale_summary"] = item.rationale_summary
     return payload

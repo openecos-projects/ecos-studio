@@ -442,24 +442,61 @@ class MaterializationRef(_Model):
         return self
 
 
+class ParameterValueEvidence(_Model):
+    value: Scalar
+    unit: str
+    source: str | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @field_validator("unit")
+    @classmethod
+    def valid_unit(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("parameter value unit is invalid")
+        return value
+
+    @field_validator("source")
+    @classmethod
+    def valid_source(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("parameter value source is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def finite(self) -> "ParameterValueEvidence":
+        if isinstance(self.value, float) and not math.isfinite(self.value):
+            raise ValueError("parameter value must be finite")
+        return self
+
+
+class ParameterApplication(_Model):
+    status: Literal["applied", "inactive", "failed", "unknown"]
+    relation: Literal[
+        "exact", "converted", "quantized", "clamped", "floored",
+        "transformed", "rederived", "unknown",
+    ]
+    reason: str | None = None
+
+
+class ParameterEvidence(_Model):
+    knob_id: OptimizationKnob
+    requested: ParameterValueEvidence
+    written: ParameterValueEvidence
+    consumed: ParameterValueEvidence | None = None
+    realized: ParameterValueEvidence | None = None
+
+
 class ParameterApplicationReceipt(_Model):
     """Tool-observed parameter evidence; this alone does not prove QoR improvement."""
 
-    schema_version: Literal["tool.parameter_application_receipt.v2"] = (
-        "tool.parameter_application_receipt.v2"
+    schema_version: Literal["tool.parameter_application_receipt.v3"] = (
+        "tool.parameter_application_receipt.v3"
     )
     receipt_id: str
     tool: ToolRef
     context: dict[str, Any]
-    requested: dict[str, Any] = Field(
-        description=(
-            "The proposal intent before materialization; it does not prove what the tool used."
-        )
-    )
+    parameter: ParameterEvidence
     materialization: MaterializationRef
-    actual_value: Scalar | None = Field(description="Actual value in the requested unit.")
-    status: Literal["effective", "inactive", "unknown"]
-    reason: str | None = None
+    application: ParameterApplication
     observation: dict[str, Any] = Field(default_factory=dict)
     evidence_sha256: str
 
@@ -479,41 +516,42 @@ class ParameterApplicationReceipt(_Model):
 
     @model_validator(mode="after")
     def verify_receipt(self) -> "ParameterApplicationReceipt":
-        knob = self.requested.get("knob_id")
-        if knob not in {item.value for item in OptimizationKnob}:
-            raise ValueError("receipt requested knob is invalid")
-        try:
-            from ecos_agent.optimization.contracts import RequestedKnobValue
+        from ecos_agent.optimization.contracts import RequestedKnobValue
 
-            RequestedKnobValue(knob_id=knob, value=self.requested.get("value"))
-        except (TypeError, ValueError):
-            raise ValueError("receipt requested value is outside the bounded domain")
-        if not isinstance(self.requested.get("unit"), str) or not self.requested.get(
-            "unit"
-        ):
+        requested = self.parameter.requested
+        written = self.parameter.written
+        if requested.unit == "":
             raise ValueError("receipt requested unit is invalid")
-        requested = self.requested["value"]
-        written = self.materialization.written_value
-        if isinstance(written, float) and not math.isfinite(written):
-            raise ValueError("materialization written value must be finite")
-        if knob == OptimizationKnob.CELL_PADDING_X.value and (
-            isinstance(written, bool) or written < 0
+        try:
+            RequestedKnobValue(knob_id=self.parameter.knob_id, value=requested.value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("receipt requested value is outside the bounded domain") from exc
+        if (
+            written.value != self.materialization.written_value
+            or isinstance(written.value, bool)
+            != isinstance(self.materialization.written_value, bool)
+        ):
+            raise ValueError("parameter written value does not match materialization")
+        if written.unit != self.materialization.unit:
+            raise ValueError("parameter written unit does not match materialization")
+        if self.parameter.knob_id == OptimizationKnob.CELL_PADDING_X and (
+            isinstance(written.value, bool) or written.value < 0
         ):
             raise ValueError("materialization padding value is invalid")
-        if knob != OptimizationKnob.CELL_PADDING_X.value and (
-            written != requested
-            or isinstance(written, bool) != isinstance(requested, bool)
+        if self.parameter.knob_id != OptimizationKnob.CELL_PADDING_X and (
+            written.value != requested.value
+            or isinstance(written.value, bool) != isinstance(requested.value, bool)
         ):
             raise ValueError("materialization written value does not match request")
-        if self.actual_value is not None:
-            if isinstance(self.actual_value, bool) != isinstance(requested, bool):
-                raise ValueError("actual parameter value type does not match request")
-            if isinstance(self.actual_value, float) and not math.isfinite(self.actual_value):
-                raise ValueError("actual parameter value must be finite")
-        if self.status == "effective" and self.actual_value is None:
-            raise ValueError("effective parameter requires an actual value")
-        if self.status == "unknown" and self.actual_value is not None:
-            raise ValueError("unknown parameter cannot claim an actual value")
+        if self.application.status == "applied" and self.parameter.consumed is None:
+            raise ValueError("applied parameter requires consumed evidence")
+        if self.parameter.consumed is not None and (
+            isinstance(self.parameter.consumed.value, bool)
+            != isinstance(requested.value, bool)
+        ):
+            raise ValueError("consumed parameter value type does not match request")
+        if self.application.status == "unknown" and self.parameter.consumed is not None:
+            raise ValueError("unknown parameter cannot claim consumed evidence")
         if self.evidence_sha256 != canonical_sha256(
             self.model_dump(mode="json", exclude={"evidence_sha256"})
         ):

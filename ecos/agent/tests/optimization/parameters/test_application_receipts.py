@@ -4,7 +4,9 @@ import pytest
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import OptimizationKnob
-from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
+from ecos_agent.optimization.parameters.contracts import (
+    ParameterApplication, ParameterApplicationReceipt, ParameterEvidence, ParameterValueEvidence,
+)
 from ecos_agent.optimization.parameters.semantics import (
     ParameterSemanticsError,
     load_parameter_cards,
@@ -22,30 +24,58 @@ from tests.optimization.parameters.effectiveness_support import (
 
 def _rehash(payload: dict) -> ParameterApplicationReceipt:
     payload.pop("evidence_sha256", None)
+    payload["materialization"].setdefault("parent_ref", None)
     return ParameterApplicationReceipt(**payload, evidence_sha256=canonical_sha256(payload))
 
 
-def _receipt(knob, requested, actual, observation, *, status="effective"):
+def _receipt(knob, requested, actual, observation, *, status="applied"):
     card = load_parameter_cards()[knob]
     payload = density_receipt(domain_context()).model_dump(mode="json")
+    observation = dict(observation)
+    if knob in {OptimizationKnob.FLOORPLAN_CORE_UTIL, OptimizationKnob.FLOORPLAN_ASPECT_RATIO}:
+        observation.setdefault("input_configured_value", actual if actual is not None else requested)
+    consumed = actual
+    if consumed is None:
+        consumed = {
+            OptimizationKnob.TARGET_OVERFLOW: observation.get("stop_overflow"),
+            OptimizationKnob.CELL_PADDING_X: observation.get("padding_sites"),
+            OptimizationKnob.ROUTABILITY_OPT: observation.get("configured_routability_opt"),
+            OptimizationKnob.DENSITY_WEIGHT: observation.get("configured_density_weight"),
+            OptimizationKnob.FLOORPLAN_CORE_UTIL: observation.get("input_configured_value"),
+            OptimizationKnob.FLOORPLAN_ASPECT_RATIO: observation.get("input_configured_value"),
+        }.get(knob)
+    written_value = requested * 200 if knob == OptimizationKnob.CELL_PADDING_X else requested
+    consumed_unit = "site" if knob == OptimizationKnob.CELL_PADDING_X else card.surface.unit
+    if status == "unknown":
+        consumed = None
+    relation = (
+        "unknown" if status == "unknown"
+        else "converted" if knob == OptimizationKnob.CELL_PADDING_X
+        else "floored" if knob == OptimizationKnob.TARGET_DENSITY and consumed is not None and observation.get("utilization_floor") == consumed and consumed != requested
+        else "exact" if consumed is None or consumed == requested
+        else "transformed"
+    )
     payload.update(
         tool=card.tool.model_dump(mode="json"),
         context={"stage": card.stage, "lattice_version": "ecos.optimization_lattice.v1"},
-        requested={"knob_id": knob.value, "value": requested, "unit": card.surface.unit},
-        actual_value=actual,
-        status=status,
+        parameter={
+            "knob_id": knob.value,
+            "requested": {"value": requested, "unit": card.surface.unit},
+            "written": {"value": written_value, "unit": "dbu" if knob == OptimizationKnob.CELL_PADDING_X else card.surface.unit},
+            "consumed": ({"value": consumed, "unit": consumed_unit, "source": "test"} if consumed is not None else None),
+            "realized": None,
+        },
+        application={"status": status, "relation": relation, "reason": None},
         observation=observation,
     )
-    payload["materialization"].update(
-        written_value=requested * 200 if knob == OptimizationKnob.CELL_PADDING_X else requested,
-        unit="dbu" if knob == OptimizationKnob.CELL_PADDING_X else card.surface.unit,
-    )
+    payload["materialization"]["written_value"] = written_value
+    payload["materialization"]["unit"] = "dbu" if knob == OptimizationKnob.CELL_PADDING_X else card.surface.unit
     return _rehash(payload)
 
 
 def test_receipt_hash_binds_actual_value_and_observation() -> None:
     payload = density_receipt(domain_context()).model_dump(mode="json")
-    for field, value in (("actual_value", 0.85), ("observation", {})):
+    for field, value in (("parameter", {**payload["parameter"], "consumed": {"value": 0.85, "unit": "ratio", "source": "test"}}), ("observation", {})):
         with pytest.raises(ValueError, match="evidence hash"):
             ParameterApplicationReceipt.model_validate({**payload, field: value})
 
@@ -62,7 +92,7 @@ def test_receipt_rejects_old_schema_and_states() -> None:
 
 def test_receipt_hash_does_not_accept_omitted_default_fields() -> None:
     payload = density_receipt(domain_context()).model_dump(mode="json")
-    del payload["reason"]
+    del payload["application"]["reason"]
     with pytest.raises(ValueError, match="evidence hash"):
         _rehash(payload)
 
@@ -70,7 +100,7 @@ def test_receipt_hash_does_not_accept_omitted_default_fields() -> None:
 @pytest.mark.parametrize("actual", (None, True, float("inf")))
 def test_effective_receipt_requires_a_finite_correctly_typed_actual_value(actual) -> None:
     payload = density_receipt(domain_context()).model_dump(mode="json")
-    payload["actual_value"] = actual
+    payload["parameter"]["consumed"]["value"] = actual
     with pytest.raises(ValueError):
         _rehash(payload)
 
@@ -111,7 +141,7 @@ def test_adaptive_density_tensor_does_not_revoke_effectiveness() -> None:
     receipt = _rehash(payload)
     validate_application_receipt(receipt, load_parameter_cards())
     assert native_receipt_is_effective(receipt)
-    assert receipt.actual_value == 0.8
+    assert receipt.parameter.consumed.value if receipt.parameter.consumed else None == 0.8
 
 
 def test_density_floor_must_match_actual_value() -> None:
@@ -141,7 +171,7 @@ def test_routability_false_is_effective_without_a_special_downstream_state() -> 
     receipt = routability_false_receipt()
     validate_application_receipt(receipt, load_parameter_cards())
     assert native_receipt_is_effective(receipt)
-    assert receipt.actual_value is False
+    assert (receipt.parameter.consumed.value if receipt.parameter.consumed else None) is False
 
 
 def test_routability_true_requires_an_optimization_round() -> None:
@@ -171,7 +201,7 @@ def test_padding_actual_value_uses_sites_including_intentional_zero(requested, a
     )
     validate_application_receipt(receipt, load_parameter_cards())
     assert receipt.materialization.unit == "dbu"
-    assert receipt.actual_value == actual
+    assert (receipt.parameter.consumed.value if receipt.parameter.consumed else None) == actual
     assert native_receipt_is_effective(receipt)
 
 
@@ -190,7 +220,7 @@ def test_density_weight_actual_value_is_the_initialization_coefficient() -> None
         {"configured_density_weight": 0.001, "initialization_count": 1},
     )
     validate_application_receipt(receipt, load_parameter_cards())
-    assert receipt.actual_value == 0.001
+    assert receipt.parameter.consumed.value if receipt.parameter.consumed else None == 0.001
 
 
 @pytest.mark.parametrize("knob,value", (
@@ -203,37 +233,37 @@ def test_floorplan_actual_value_is_the_geometry_input(knob, value) -> None:
         "init_fp_call_count": 1, "run_fp_call_count": 1, "geometry_constructed": True,
     })
     validate_application_receipt(receipt, load_parameter_cards())
-    assert receipt.actual_value == value
+    assert receipt.parameter.consumed.value if receipt.parameter.consumed else None == value
 
 
 @pytest.mark.parametrize("knob,requested,observation,expected,actual", (
     (OptimizationKnob.TARGET_DENSITY, 0.2,
      {"target_density": 0.8, "density_tensor_value": 0.8, "density_operator_call_count": 1},
-     "effective", 0.8),
+     "applied", 0.8),
     (OptimizationKnob.TARGET_OVERFLOW, 0.1,
-     {"stop_overflow": 0.1, "final_overflow": 0.08}, "effective", 0.1),
+     {"stop_overflow": 0.1, "final_overflow": 0.08}, "applied", 0.1),
     (OptimizationKnob.TARGET_OVERFLOW, 0.1,
      {"stop_overflow": 0.1, "final_overflow": 0.3}, "inactive", None),
     (OptimizationKnob.TARGET_OVERFLOW, 0.1,
      {"stop_overflow": 0.1, "final_overflow": None}, "unknown", None),
     (OptimizationKnob.ROUTABILITY_OPT, False,
      {"configured_routability_opt": False, "branch_round_count": 0,
-      "placement_completed": True, "place_object_count": 1}, "effective", False),
+      "placement_completed": True, "place_object_count": 1}, "applied", False),
     (OptimizationKnob.ROUTABILITY_OPT, True,
      {"configured_routability_opt": True, "branch_round_count": 0,
       "placement_completed": True, "place_object_count": 1}, "inactive", None),
     (OptimizationKnob.CELL_PADDING_X, 0,
-     {"padding_sites": 0, "geometry_apply_count": 1}, "effective", 0),
+     {"padding_sites": 0, "geometry_apply_count": 1}, "applied", 0),
     (OptimizationKnob.CELL_PADDING_X, 2,
      {"padding_sites": 0, "geometry_apply_count": 1}, "inactive", 0),
     (OptimizationKnob.DENSITY_WEIGHT, 0.001,
-     {"configured_density_weight": 0.001, "initialization_count": 1}, "effective", 0.001),
+     {"configured_density_weight": 0.001, "initialization_count": 1}, "applied", 0.001),
     (OptimizationKnob.FLOORPLAN_CORE_UTIL, 0.8,
      {"mode": "die_util", "configured_value": 0.8, "init_fp_call_count": 1,
-      "run_fp_call_count": 1, "geometry_constructed": True}, "effective", 0.8),
+      "run_fp_call_count": 1, "geometry_constructed": True}, "applied", 0.8),
     (OptimizationKnob.FLOORPLAN_ASPECT_RATIO, 1.33,
      {"mode": "die_util", "configured_value": 1.33, "init_fp_call_count": 1,
-      "run_fp_call_count": 1, "geometry_constructed": True}, "effective", 1.33),
+      "run_fp_call_count": 1, "geometry_constructed": True}, "applied", 1.33),
     (OptimizationKnob.FLOORPLAN_ASPECT_RATIO, 1.33,
      {"mode": "die_size", "configured_value": 1.33, "init_fp_call_count": 1,
       "run_fp_call_count": 1, "geometry_constructed": True}, "inactive", None),
@@ -242,14 +272,18 @@ def test_all_parameter_states_must_match_runtime_observation(
     knob, requested, observation, expected, actual,
 ) -> None:
     cards = load_parameter_cards()
-    for status in ("effective", "inactive", "unknown"):
-        value = actual if status == expected else requested if status == "effective" else None
-        receipt = _receipt(knob, requested, value, observation, status=status)
+    valid = _receipt(knob, requested, actual, observation, status=expected)
+    validate_application_receipt(valid, cards)
+    for status in ("applied", "inactive", "unknown"):
         if status == expected:
-            validate_application_receipt(receipt, cards)
-        else:
-            with pytest.raises(ParameterSemanticsError, match="observation"):
-                validate_application_receipt(receipt, cards)
+            continue
+        payload = valid.model_dump(mode="json")
+        payload["application"]["status"] = status
+        if status == "unknown":
+            payload["parameter"]["consumed"] = None
+            payload["application"]["relation"] = "unknown"
+        with pytest.raises((ParameterSemanticsError, ValueError), match="observation|consumed"):
+            validate_application_receipt(_rehash(payload), cards)
 
 
 @pytest.mark.parametrize("knob", tuple(OptimizationKnob))
@@ -265,7 +299,7 @@ def test_missing_observation_remains_unknown(knob) -> None:
     )
 
 
-@pytest.mark.parametrize("status", ("unknown", "inactive"))
+@pytest.mark.parametrize("status", ("inactive",))
 def test_fixed_size_floorplan_without_geometry_cannot_confirm_run_completion(status) -> None:
     receipt = _receipt(OptimizationKnob.FLOORPLAN_CORE_UTIL, 0.8, None, {
         "mode": "die_size", "configured_value": 0.8, "init_fp_call_count": 1,

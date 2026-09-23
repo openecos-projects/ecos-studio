@@ -84,8 +84,8 @@ class TerminalEmpiricalCase(_Model):
     binding_id: str
     toolchain_ref: str
     requested_value: Scalar
-    actual_value: Scalar | None = None
-    parameter_status: Literal["effective", "inactive", "unknown"]
+    consumed_value: Scalar | None = None
+    application_status: Literal["applied", "inactive", "unknown"]
     proposal_sha256: str
     effective_domain_sha256: str
     parameter_card_sha256: str
@@ -132,7 +132,7 @@ class TerminalEmpiricalCase(_Model):
     @model_validator(mode="after")
     def validate_semantics(self) -> "TerminalEmpiricalCase":
         if self.outcome_class == EmpiricalOutcome.SUPPORTED and (
-            self.parameter_status != "effective" or self.guardrail_status != "pass"
+            self.application_status != "applied" or self.guardrail_status != "pass"
         ):
             raise ValueError(
                 "supported empirical cases require effective parameter status and passing guardrails"
@@ -347,8 +347,8 @@ def build_terminal_empirical_case(
     if receipt.context.get("context_sha256") != effective_domain.context_sha256:
         raise ValueError("native receipt context does not match effective domain")
     if (
-        receipt.requested.get("knob_id") != action.knob_id.value
-        or receipt.requested.get("value") != action.requested_value
+        receipt.parameter.knob_id.value != action.knob_id.value
+        or receipt.parameter.requested.value != action.requested_value
     ):
         raise ValueError("native receipt request does not match proposal")
     parameter_card_sha256 = receipt.context.get("parameter_card_sha256")
@@ -374,7 +374,7 @@ def build_terminal_empirical_case(
         not terminal.eligible_for_incumbent
     ):
         raise ValueError("supported empirical case requires an eligible terminal observation")
-    requested = receipt.requested.get("value")
+    requested = receipt.parameter.requested.value
     if requested is None:
         raise ValueError("native receipt requested value is missing")
     derived = {
@@ -399,8 +399,8 @@ def build_terminal_empirical_case(
         case_id=case_id,
         **derived,
         requested_value=requested,
-        actual_value=receipt.actual_value,
-        parameter_status=receipt.status,
+        consumed_value=receipt.parameter.consumed.value if receipt.parameter.consumed else None,
+        application_status=receipt.application.status,
         proposal_sha256=canonical_sha256(proposal.model_dump(mode="json")),
         effective_domain_sha256=effective_domain.snapshot_sha256,
         parameter_card_sha256=parameter_card_sha256,
@@ -564,7 +564,7 @@ def _case_is_selectable(case: TerminalEmpiricalCase) -> bool:
     return (
         _case_chain_complete(case)
         and case.evidence_status == "current"
-        and case.parameter_status == "effective"
+        and case.application_status == "applied"
         and case.split != "held_out"
     )
 

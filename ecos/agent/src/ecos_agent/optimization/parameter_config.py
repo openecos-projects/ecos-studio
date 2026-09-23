@@ -64,7 +64,7 @@ def mpc_configured(parameters: dict[str, Any]) -> bool:
 
 def placement_convergence_state_evidence(root: Path) -> tuple[StageEvidenceFeature, ...]:
     # Read the same incumbent evidence before and after choosing a planning stage.
-    relative_path = "analysis/parameter_runtime_report.v2.json"
+    relative_path = "analysis/parameter_runtime_report.v3.json"
     path = root / relative_path
     if not (path.exists() or path.is_symlink()):
         return ()
@@ -74,8 +74,10 @@ def placement_convergence_state_evidence(root: Path) -> tuple[StageEvidenceFeatu
         raise OptimizationObservationError(str(exc)) from exc
     tool = report.get("tool")
     observation = report.get("observation")
-    if (report.get("schema_version") != "tool.parameter_runtime_report.v2"
-            or report.get("knob_id") != "place.target_overflow"
+    parameter = report.get("parameter")
+    if (report.get("schema_version") != "tool.parameter_runtime_report.v3"
+            or not isinstance(parameter, dict)
+            or parameter.get("knob_id") != "place.target_overflow"
             or not isinstance(tool, dict) or tool.get("name") != "DREAMPlace"
             or not isinstance(observation, dict)):
         return ()

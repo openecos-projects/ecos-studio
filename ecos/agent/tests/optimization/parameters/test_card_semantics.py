@@ -106,19 +106,12 @@ def test_single_card_loader_ignores_unrelated_invalid_card(tmp_path) -> None:
 def test_parameter_receipt_schema_explains_evidence_boundaries() -> None:
     schema = ParameterApplicationReceipt.model_json_schema()
 
-    assert schema["properties"]["requested"]["description"] == (
-        "The proposal intent before materialization; it does not prove what the tool used."
-    )
+    assert schema["properties"]["parameter"]["$ref"].endswith("/ParameterEvidence")
+    assert schema["properties"]["application"]["$ref"].endswith("/ParameterApplication")
     assert schema["$defs"]["MaterializationRef"]["properties"]["written_value"][
         "description"
     ] == "The value actually written to the tool input, after unit mapping."
-    assert schema["properties"]["actual_value"]["description"] == (
-        "Actual value in the requested unit."
-    )
-    assert schema["properties"]["status"]["enum"] == ["effective", "inactive", "unknown"]
-    assert not {"activation", "effective_initial", "effective_final", "transitions"} & set(
-        schema["properties"]
-    )
+    assert not {"requested", "actual_value", "status", "reason"} & set(schema["properties"])
     assert schema["description"] == (
         "Tool-observed parameter evidence; this alone does not prove QoR improvement."
     )

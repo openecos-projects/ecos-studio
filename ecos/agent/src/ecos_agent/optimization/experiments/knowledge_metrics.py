@@ -145,14 +145,14 @@ def truncation_loss(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
 def summarize_mediation(rows: Iterable[Mapping[str, object]]) -> dict[str, object]:
     values = list(rows)
     statuses = Counter(str(row.get("support_status", "unknown")) for row in values)
-    receipts = Counter(str(row.get("receipt_status", "unknown")) for row in values)
+    receipts = Counter(str(row.get("application_status", "unknown")) for row in values)
     terminal = Counter(str(row.get("terminal_delta_vs_epsilon", "unobserved")) for row in values)
     claim_bound = sum(bool(row.get("claim_bound")) for row in values)
     return {
         "schema_version": "ecos.knowledge_mediation_summary.v1",
         "rows": len(values),
         "support_status_counts": dict(sorted(statuses.items())),
-        "receipt_status_counts": dict(sorted(receipts.items())),
+        "application_status_counts": dict(sorted(receipts.items())),
         "terminal_delta_counts": dict(sorted(terminal.items())),
         "claim_bound_rows": claim_bound,
         "claim_bound_ratio": claim_bound / len(values) if values else 0.0,
@@ -172,7 +172,7 @@ def build_feedback_ledger(rows: Iterable[Mapping[str, object]]) -> list[dict[str
             grouped.setdefault(str(claim), []).append(row)
     ledger = []
     for claim_id, values in sorted(grouped.items()):
-        receipts = Counter(str(row.get("receipt_status", "unknown")) for row in values)
+        receipts = Counter(str(row.get("application_status", "unknown")) for row in values)
         terminal = Counter(str(row.get("terminal_delta_vs_epsilon", "unobserved")) for row in values)
         promotions = Counter(
             str(row.get("promotion_decision")) for row in values
@@ -183,7 +183,7 @@ def build_feedback_ledger(rows: Iterable[Mapping[str, object]]) -> list[dict[str
         ledger.append({
             "claim_id": claim_id,
             "observations": len(values),
-            "receipt_status_counts": dict(sorted(receipts.items())),
+            "application_status_counts": dict(sorted(receipts.items())),
             "terminal_delta_counts": dict(sorted(terminal.items())),
             "promotion_decision_counts": dict(sorted(promotions.items())),
             "requested_actual_consistent": requested_actual_consistent,
@@ -200,12 +200,12 @@ def _requested_actual_consistent(values: list[Mapping[str, object]]) -> bool | N
     comparable = [
         row
         for row in values
-        if row.get("requested_value") is not None and row.get("actual_value") is not None
+        if row.get("requested_value") is not None and row.get("consumed_value") is not None
     ]
     if not comparable:
         return None
     return all(
-        row.get("requested_value") == row.get("actual_value") for row in comparable
+        row.get("requested_value") == row.get("consumed_value") for row in comparable
     )
 
 

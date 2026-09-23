@@ -22,9 +22,9 @@ from tests.optimization.parameters.acceptance_trace_support import (
 )
 
 
-@pytest.mark.parametrize("status", ("effective", "inactive", "unknown"))
-def test_acceptance_uses_unified_parameter_status(status: str) -> None:
-    assert acceptance._receipt_is_effective({"status": status}) is (status == "effective")
+@pytest.mark.parametrize("status", ("applied", "inactive", "unknown"))
+def test_acceptance_uses_v3_parameter_status(status: str) -> None:
+    assert acceptance._receipt_is_effective({"application": {"status": status}}) is (status == "applied")
 
 
 @pytest.mark.parametrize(
@@ -88,9 +88,10 @@ def test_acceptance_fails_closed_on_unbound_evidence(
         rewrite_receipt(
             paths,
             lambda receipt: (
-                receipt["requested"].update(value=0.05),
+                receipt["parameter"]["requested"].update(value=0.05),
+                receipt["parameter"]["written"].update(value=0.05),
+                receipt["parameter"]["consumed"].update(value=0.05),
                 receipt["materialization"].update(written_value=0.05),
-                receipt.update(actual_value=0.05),
                 receipt["observation"].update(
                     target_density=0.05,
                     density_tensor_value=0.05,
@@ -105,7 +106,7 @@ def test_acceptance_fails_closed_on_unbound_evidence(
         write_json(paths["runtime"], runtime)
     elif case == "foreign_runtime_written":
         runtime = json.loads(paths["runtime"].read_text(encoding="utf-8"))
-        runtime["written_value"] = 0.7
+        runtime["parameter"]["written"]["value"] = 0.7
         write_json(paths["runtime"], runtime)
     elif case == "missing_runtime":
         paths["runtime"].unlink()

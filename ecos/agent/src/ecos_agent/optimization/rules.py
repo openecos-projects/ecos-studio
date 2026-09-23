@@ -154,7 +154,7 @@ ACTIVE_OPTIMIZATION_KNOBS = tuple(
 
 def native_receipt_is_effective(receipt: ParameterApplicationReceipt) -> bool:
     """Return whether a native receipt is a valid optimization intervention."""
-    return receipt.status == "effective"
+    return receipt.application.status == "applied"
 
 
 def terminal_quality_outcome(

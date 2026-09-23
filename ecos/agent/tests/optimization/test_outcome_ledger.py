@@ -31,7 +31,10 @@ from ecos_agent.optimization.ledger import (
 )
 from ecos_agent.optimization.parameters.contracts import (
     MaterializationRef,
+    ParameterApplication,
     ParameterApplicationReceipt,
+    ParameterEvidence,
+    ParameterValueEvidence,
     ToolRef,
 )
 from ecos_agent.optimization.rules import IncumbentDecision
@@ -72,15 +75,24 @@ def _terminal(
 def _native_application_receipt(
     status: str = "effective", actual_value: float | None = 0.65
 ) -> ParameterApplicationReceipt:
+    application_status = "applied" if status == "effective" else status
     payload = {
         "receipt_id": "parameter-receipt-1",
         "tool": ToolRef(name="DREAMPlace", revision="test", source_sha256=HASH),
         "context": {"parameter_card_sha256": HASH},
-        "requested": {
-            "knob_id": "place.target_density",
-            "value": 0.65,
-            "unit": "ratio",
-        },
+        "parameter": ParameterEvidence(
+            knob_id="place.target_density",
+            requested=ParameterValueEvidence(value=0.65, unit="ratio"),
+            written=ParameterValueEvidence(value=0.65, unit="ratio"),
+            consumed=(
+                ParameterValueEvidence(
+                    value=actual_value, unit="ratio", source="test.native_consumer"
+                )
+                if actual_value is not None
+                else None
+            ),
+            realized=None,
+        ),
         "materialization": MaterializationRef(
             receipt_ref="analysis/candidate_materialization.v1.json",
             receipt_sha256=HASH,
@@ -93,10 +105,20 @@ def _native_application_receipt(
             written_value=0.65,
             unit="ratio",
         ),
-        "actual_value": actual_value,
-        "status": status,
-        "reason": None if status == "effective" else "No parameter use observed.",
-        "observation": {},
+        "application": ParameterApplication(
+            status=application_status,
+            relation=(
+                "unknown"
+                if application_status != "applied"
+                else "exact" if actual_value == 0.65 else "transformed"
+            ),
+            reason=None if status == "effective" else "No parameter use observed.",
+        ),
+        "observation": {
+            "target_density": actual_value,
+            "density_tensor_value": actual_value,
+            "density_operator_call_count": 1,
+        },
     }
     draft = ParameterApplicationReceipt.model_construct(
         **payload, evidence_sha256=HASH

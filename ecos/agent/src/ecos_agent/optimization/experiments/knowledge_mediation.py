@@ -29,8 +29,8 @@ def build_mediation_row(
     knob: str | None,
     direction: str | None,
     requested_value: Any,
-    actual_value: Any,
-    receipt_status: str | None,
+    consumed_value: Any,
+    application_status: str | None,
     terminal_delta: float | None,
     epsilon: float,
     promotion_decision: str | None = None,
@@ -52,8 +52,8 @@ def build_mediation_row(
         "knob": knob,
         "direction": direction,
         "requested_value": requested_value,
-        "actual_value": actual_value,
-        "receipt_status": receipt_status,
+        "consumed_value": consumed_value,
+        "application_status": application_status,
         "terminal_delta": terminal_delta,
         "terminal_delta_vs_epsilon": classify_terminal_delta(terminal_delta, epsilon),
         "promotion_decision": promotion_decision,
@@ -180,8 +180,12 @@ def audit_episode_mediation(
         intervention_id = _attr(start, "intervention_id") if start else None
         outcome = outcomes.get(str(intervention_id)) if intervention_id else None
         receipt = _attr(outcome, "parameter_application_receipt") if outcome else None
-        receipt_status = getattr(receipt, "status", None) if receipt else None
-        actual_value = getattr(receipt, "actual_value", None) if receipt else None
+        application_status = receipt.application.status if receipt else None
+        consumed_value = (
+            receipt.parameter.consumed.value
+            if receipt and receipt.parameter.consumed
+            else None
+        )
         terminal_observation = (
             _attr(outcome, "terminal_observation") if outcome else None
         )
@@ -197,7 +201,7 @@ def audit_episode_mediation(
             if promotion_decision is not None
             else None
         )
-        if receipt_status is None:
+        if application_status is None:
             missing.append("receipt_link")
         if terminal_observation is None:
             missing.append("terminal_observation_link")
@@ -230,8 +234,8 @@ def audit_episode_mediation(
                 "knob": knob,
                 "direction": direction,
                 "requested_value": requested_value,
-                "actual_value": actual_value,
-                "receipt_status": receipt_status,
+                "consumed_value": consumed_value,
+                "application_status": application_status,
                 "terminal_delta": terminal_delta,
                 "terminal_delta_vs_epsilon": (
                     classify_terminal_delta(terminal_delta, epsilon)
@@ -286,7 +290,7 @@ def summarize_episode_mediation(
             bool(call.get("counts_toward_knowledge_attribution")) for call in calls
         ),
         "activated_rows": sum(
-            call.get("receipt_status") == "effective" for call in calls
+            call.get("application_status") == "applied" for call in calls
         ),
         "terminal_response_rows": sum(
             call.get("terminal_delta") is not None for call in calls
@@ -345,8 +349,8 @@ def audit_planning_calls(
                 "knob": action.get("knob_id"),
                 "direction": action.get("direction"),
                 "requested_value": action.get("requested_value"),
-                "actual_value": None,
-                "receipt_status": "unknown",
+                "consumed_value": None,
+                "application_status": "unknown",
                 "terminal_delta": None,
                 "promotion_decision": None,
                 "counts_toward_knowledge_attribution": claim_bound and not missing,

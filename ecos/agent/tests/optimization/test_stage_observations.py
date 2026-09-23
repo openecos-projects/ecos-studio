@@ -201,9 +201,9 @@ def test_absent_floorplan_mode_remains_unknown(frozen_workspace: Path) -> None:
 
 @pytest.mark.parametrize("final", [0.0, 0.2, None, -1, True, "0.2", float("inf")])
 def test_convergence_evidence_is_hash_bound_and_stage_independent(frozen_workspace, final):
-    relative = "analysis/parameter_runtime_report.v2.json"
+    relative = "analysis/parameter_runtime_report.v3.json"
     _write_json(frozen_workspace / relative, {
-        "schema_version": "tool.parameter_runtime_report.v2",
+        "schema_version": "tool.parameter_runtime_report.v3",
         "knob_id": "place.target_overflow",
         "tool": {"name": "DREAMPlace"},
         "observation": {"stop_overflow": 0.1, "final_overflow": final},
@@ -231,12 +231,12 @@ def test_convergence_evidence_is_hash_bound_and_stage_independent(frozen_workspa
 ])
 def test_convergence_report_requires_placement_observation(frozen_workspace, field, value):
     payload = {
-        "schema_version": "tool.parameter_runtime_report.v2",
+        "schema_version": "tool.parameter_runtime_report.v3",
         "knob_id": "place.target_overflow", "tool": {"name": "DREAMPlace"},
         "observation": {"stop_overflow": 0.1, "final_overflow": 0.05},
     }
     payload[field] = value
-    _write_json(frozen_workspace / "analysis/parameter_runtime_report.v2.json", payload)
+    _write_json(frozen_workspace / "analysis/parameter_runtime_report.v3.json", payload)
     observation = build_stage_observation(frozen_workspace, "place", budget=_budget())
     assert not any(item.feature_id == "place_final_density_overflow"
                    for item in observation.state_evidence)

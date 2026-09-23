@@ -236,7 +236,7 @@ class _RoutabilityFalseExecutor(_SuccessfulExecutor):
                     parameter_application_receipt=_native_receipt(
                         "place.routability_opt",
                         False,
-                        status="effective",
+                        status="applied",
                     ),
                 ),
             )
@@ -298,7 +298,13 @@ def _native_receipt(
                 load_parameter_cards()[OptimizationKnob(knob_id)]
             ),
         },
-        "requested": {"knob_id": knob_id, "value": value, "unit": unit},
+        "parameter": {
+            "knob_id": knob_id,
+            "requested": {"value": value, "unit": unit},
+            "written": {"value": value * 200 if unit == "site" else value, "unit": "dbu" if unit == "site" else unit},
+            "consumed": ({"value": effective_value, "unit": "site" if unit == "site" else unit, "source": "test"} if effective_value is not None else None),
+            "realized": None,
+        },
         "materialization": MaterializationRef(
             receipt_ref="analysis/candidate_materialization.v1.json",
             receipt_sha256=_HASH,
@@ -311,9 +317,11 @@ def _native_receipt(
             written_value=value * 200 if unit == "site" else value,
             unit="dbu" if unit == "site" else unit,
         ),
-        "actual_value": effective_value if status == "effective" else None,
-        "status": status,
-        "reason": None if status == "effective" else "Parameter did not take effect",
+        "application": {
+            "status": "applied" if status == "effective" else status,
+            "relation": "converted" if unit == "site" else "exact",
+            "reason": None if status == "effective" else "Parameter did not take effect",
+        },
         "observation": observation,
     }
     draft = ParameterApplicationReceipt.model_construct(

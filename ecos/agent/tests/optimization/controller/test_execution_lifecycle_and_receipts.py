@@ -155,7 +155,7 @@ def test_controller_persists_native_receipt_in_terminal_ledger(tmp_path: Path) -
 
     outcome = controller.ledger.replay().terminal_outcomes[0]
     assert outcome.parameter_application_receipt is not None
-    assert outcome.parameter_application_receipt.actual_value == 2
+    assert outcome.parameter_application_receipt.parameter.consumed.value == 2
 
 
 def _complete_padding_probe(controller: OptimizationEpisodeController) -> None:

@@ -170,7 +170,10 @@ def test_episode_mediation_join_fills_every_link() -> None:
     outcome = SimpleNamespace(
         intervention_id="intervention-01",
         parameter_application_receipt=SimpleNamespace(
-            status="effective", actual_value=0.6678
+            application=SimpleNamespace(status="applied"),
+            parameter=SimpleNamespace(
+                consumed=SimpleNamespace(value=0.6678)
+            ),
         ),
         terminal_observation=_observation(900.0),
         incumbent_decision=SimpleNamespace(value="candidate_better"),
@@ -189,8 +192,8 @@ def test_episode_mediation_join_fills_every_link() -> None:
     assert len(calls) == 1
     call = calls[0]
     assert call["claim_bound"] is True
-    assert call["receipt_status"] == "effective"
-    assert call["actual_value"] == 0.6678
+    assert call["application_status"] == "applied"
+    assert call["consumed_value"] == 0.6678
     assert call["terminal_delta"] == -100.0
     assert call["terminal_delta_vs_epsilon"] == "outside"
     assert call["promotion_decision"] == "candidate_better"

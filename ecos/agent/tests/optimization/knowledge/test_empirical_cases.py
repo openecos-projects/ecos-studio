@@ -34,6 +34,9 @@ from ecos_agent.optimization.ledger import (
 from ecos_agent.optimization.parameters.contracts import (
     MaterializationRef,
     NumericProposalActionV2,
+    ParameterApplication,
+    ParameterEvidence,
+    ParameterValueEvidence,
     OptimizationProposalV2,
     ParameterApplicationReceipt,
     ToolRef,
@@ -103,11 +106,15 @@ def _receipt(*, receipt_id: str = "receipt-1") -> ParameterApplicationReceipt:
             "context_sha256": HASH,
             "parameter_card_sha256": CARD_HASH,
         },
-        "requested": {
-            "knob_id": OptimizationKnob.TARGET_DENSITY.value,
-            "value": 0.85,
-            "unit": "ratio",
-        },
+        "parameter": ParameterEvidence(
+            knob_id=OptimizationKnob.TARGET_DENSITY,
+            requested=ParameterValueEvidence(value=0.85, unit="ratio"),
+            written=ParameterValueEvidence(value=0.85, unit="ratio"),
+            consumed=ParameterValueEvidence(
+                value=0.85, unit="ratio", source="test.native_consumer"
+            ),
+            realized=None,
+        ),
         "materialization": MaterializationRef(
             receipt_ref="analysis/materialization.json",
             receipt_sha256=MATERIALIZATION_HASH,
@@ -120,10 +127,14 @@ def _receipt(*, receipt_id: str = "receipt-1") -> ParameterApplicationReceipt:
             written_value=0.85,
             unit="ratio",
         ),
-        "actual_value": 0.85,
-        "status": "effective",
-        "reason": None,
-        "observation": {},
+        "application": ParameterApplication(
+            status="applied", relation="exact", reason=None
+        ),
+        "observation": {
+            "target_density": 0.85,
+            "density_tensor_value": 0.85,
+            "density_operator_call_count": 1,
+        },
     }
     draft = ParameterApplicationReceipt.model_construct(
         **payload, evidence_sha256=HASH
@@ -183,8 +194,8 @@ def _case(
         binding_id=binding,
         toolchain_ref=toolchain,
         requested_value=0.85,
-        actual_value=0.85,
-        parameter_status="effective",
+        consumed_value=0.85,
+        application_status="applied",
         proposal_sha256=HASH,
         effective_domain_sha256=DOMAIN_HASH,
         parameter_card_sha256=CARD_HASH,
@@ -218,8 +229,8 @@ def test_builder_binds_receipt_and_terminal_outcome() -> None:
     )
 
     assert case.claim_id == "claim.one"
-    assert case.requested_value == case.actual_value == 0.85
-    assert case.parameter_status == "effective"
+    assert case.requested_value == case.consumed_value == 0.85
+    assert case.application_status == "applied"
     assert case.binding_id == "binding.one"
     assert case.toolchain_ref == TOOLCHAIN_HASH
     assert case.proposal_sha256 == canonical_sha256(proposal.model_dump(mode="json"))

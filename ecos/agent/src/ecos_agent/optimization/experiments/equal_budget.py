@@ -88,8 +88,8 @@ class CandidateTrace:
     qor_summary: float | None = None
     requested_value: str | float | int | bool | None = None
     requested_knob: str | None = None
-    actual_value: float | int | bool | None = None
-    parameter_status: Literal["effective", "inactive", "unknown"] = "unknown"
+    consumed_value: float | int | bool | None = None
+    application_status: Literal["applied", "inactive", "unknown"] = "unknown"
     parameter_reason: str | None = None
     # Feasible = signoff-eligible terminal; promoted = became the incumbent.
     feasible: bool = False
@@ -223,11 +223,11 @@ def build_candidate_trace(
         qor_power=_evaluation_value(evaluation, "qor_power_quality"),
         qor_robustness=_evaluation_value(evaluation, "qor_robustness_quality"),
         qor_summary=_evaluation_value(evaluation, "qor_summary_balanced"),
-        requested_value=(receipt.requested.get("value") if receipt else None),
-        requested_knob=(receipt.requested.get("knob_id") if receipt else None),
-        actual_value=(receipt.actual_value if receipt else None),
-        parameter_status=(receipt.status if receipt else "unknown"),
-        parameter_reason=(receipt.reason if receipt else "Parameter receipt is missing."),
+        requested_value=(receipt.parameter.requested.value if receipt else None),
+        requested_knob=(receipt.parameter.knob_id.value if receipt else None),
+        consumed_value=(receipt.parameter.consumed.value if receipt and receipt.parameter.consumed else None),
+        application_status=(receipt.application.status if receipt else "unknown"),
+        parameter_reason=(receipt.application.reason if receipt else "Parameter receipt is missing."),
         feasible=(
             terminal_success
             and terminal_observation is not None
@@ -497,7 +497,7 @@ def evaluate_equal_budget(
         raise ValueError("planning calls exceed the frozen budget")
     selected = list(traces)
     for item in selected:
-        if item.parameter_status not in {"effective", "inactive", "unknown"}:
+        if item.application_status not in {"applied", "inactive", "unknown"}:
             raise ValueError("candidate parameter status is invalid")
         if item.planning_mode != mode:
             raise ValueError("candidate trace planning mode does not match evaluation mode")
@@ -525,8 +525,8 @@ def evaluate_equal_budget(
     started = [item for item in selected if item.started]
     if len(started) > config.candidate_limit:
         raise ValueError("started candidate traces exceed the frozen budget")
-    effective = sum(item.parameter_status == "effective" for item in started)
-    inactive = sum(item.parameter_status == "inactive" for item in started)
+    effective = sum(item.application_status == "applied" for item in started)
+    inactive = sum(item.application_status == "inactive" for item in started)
     receipt_missing = sum(item.receipt_status == "missing" for item in selected)
     parser_failure = sum(item.receipt_status == "parser_failure" for item in selected)
     producer_failure = sum(item.receipt_status == "producer_failure" for item in selected)
@@ -569,7 +569,7 @@ def evaluate_equal_budget(
         effective_rate=effective / len(started) if started else 0.0,
         inactive=inactive,
         inactive_rate=inactive / len(started) if started else 0.0,
-        unknown=sum(item.parameter_status == "unknown" for item in started),
+        unknown=sum(item.application_status == "unknown" for item in started),
         stale_rule=sum(item.stale_rule for item in selected),
         fail_closed=sum(item.fail_closed for item in selected),
         proposal_reject=sum(item.proposal_outcome == "reject" for item in selected),
@@ -606,7 +606,7 @@ def summarize_candidate_metrics(
         if item.requested_knob is not None and item.requested_value is not None
     ]
     response_signatures = [
-        (item.requested_knob, item.actual_value, item.parameter_status)
+        (item.requested_knob, item.consumed_value, item.application_status)
         for item in started
         if item.requested_knob is not None
     ]
@@ -642,7 +642,7 @@ def summarize_candidate_metrics(
         raise ValueError("feasible candidate traces must carry terminal utility")
     mispromotions = [
         item for item in started
-        if item.promoted and item.parameter_status != "effective"
+        if item.promoted and item.application_status != "applied"
     ]
     if mode == "receipt-aware" and mispromotions:
         raise ValueError(
@@ -703,11 +703,11 @@ def _requested_actual_divergence(started: list[CandidateTrace]) -> dict[str, obj
     """
     observed = adjusted = 0
     for item in started:
-        if not _numeric_pair(item.requested_value, item.actual_value):
+        if not _numeric_pair(item.requested_value, item.consumed_value):
             continue
         observed += 1
         if meaningful_metric_change(
-            float(item.requested_value), float(item.actual_value)
+            float(item.requested_value), float(item.consumed_value)
         ):
             adjusted += 1
     return {
@@ -729,9 +729,9 @@ def _shadow_duplicate_configs(started: list[CandidateTrace]) -> dict[str, object
     duplicates = 0
     events: list[dict[str, object]] = []
     for item in started:
-        if item.requested_knob is None or item.actual_value is None:
+        if item.requested_knob is None or item.consumed_value is None:
             continue
-        key = (item.requested_knob, item.actual_value)
+        key = (item.requested_knob, item.consumed_value)
         first_requested = seen.get(key, _MISSING)
         if first_requested is _MISSING:
             seen[key] = item.requested_value
@@ -743,7 +743,7 @@ def _shadow_duplicate_configs(started: list[CandidateTrace]) -> dict[str, object
                 {
                     "candidate_id": item.candidate_id,
                     "requested": item.requested_value,
-                    "actual": item.actual_value,
+                    "actual": item.consumed_value,
                     "first_requested": first_requested,
                 }
             )
@@ -780,7 +780,7 @@ def _misleading_step_counts(started: list[CandidateTrace]) -> list[int]:
                 counts.append(steps)
                 window_open = False
             steps = 0
-            window_open = item.parameter_status != "effective"
+            window_open = item.application_status != "applied"
         elif window_open:
             steps += 1
     if window_open:
@@ -812,18 +812,18 @@ def _deviation_spectrum(started: list[CandidateTrace]) -> dict[str, object]:
     for item in started:
         if (
             item.requested_knob is None
-            or item.actual_value is None
+            or item.consumed_value is None
             or isinstance(item.requested_value, bool)
-            or isinstance(item.actual_value, bool)
+            or isinstance(item.consumed_value, bool)
             or not isinstance(item.requested_value, (int, float))
         ):
             if item.requested_knob is not None and isinstance(
-                item.actual_value, bool
+                item.consumed_value, bool
             ):
                 skipped_boolean += 1
             continue
         by_knob.setdefault(item.requested_knob, []).append(
-            float(item.actual_value) - float(item.requested_value)
+            float(item.consumed_value) - float(item.requested_value)
         )
     spectrum: dict[str, object] = {}
     for knob, deltas in sorted(by_knob.items()):

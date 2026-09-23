@@ -190,8 +190,9 @@ class OptimizationTaskMemoryEntry(_MemoryModel):
         if self.evidence.source_episode_id != self.scope.episode_id:
             raise ValueError("task memory evidence does not match its scope")
         if self.parameter_application_receipt is not None:
-            requested = self.parameter_application_receipt.requested
-            if requested.get("knob_id") != self.requested.knob_id.value or requested.get("value") != self.requested.value:
+            receipt = self.parameter_application_receipt
+            requested = receipt.parameter.requested
+            if receipt.parameter.knob_id.value != self.requested.knob_id.value or requested.value != self.requested.value:
                 raise ValueError("task memory parameter receipt does not match requested value")
         expected = _entry_sha256(
             self.sequence,
@@ -242,7 +243,7 @@ class OptimizationTaskMemorySummary(_MemoryModel):
     @model_validator(mode="after")
     def validate_summary_hash(self) -> "OptimizationTaskMemorySummary":
         if any(
-            receipt.requested.get("knob_id") != self.knob_id.value
+            receipt.parameter.knob_id.value != self.knob_id.value
             for receipt in self.parameter_application_receipts
         ):
             raise ValueError("task memory summary receipt knob does not match")
@@ -593,8 +594,8 @@ def _eligible(start, terminal) -> bool:
     return (
         terminal.parameter_card_sha256 == card_hash(card)
         and terminal.receipt_sha256 == receipt.evidence_sha256
-        and receipt.requested.get("knob_id") == start.requested.knob_id.value
-        and receipt.requested.get("value") == start.requested.value
+        and receipt.parameter.knob_id.value == start.requested.knob_id.value
+        and receipt.parameter.requested.value == start.requested.value
         and native_receipt_is_effective(receipt)
     )
 

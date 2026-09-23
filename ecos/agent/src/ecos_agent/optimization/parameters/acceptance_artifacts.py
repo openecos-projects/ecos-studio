@@ -16,8 +16,8 @@ def candidate_paths(workspace: Path, candidate_id: str) -> dict[str, Path]:
         "root": root,
         "manifest": analysis / "candidate_workspace.v1.json",
         "materialization": analysis / "candidate_materialization.v1.json",
-        "receipt": analysis / "parameter_application_receipt.v2.json",
-        "runtime_report": analysis / "parameter_runtime_report.v2.json",
+        "receipt": analysis / "parameter_application_receipt.v3.json",
+        "runtime_report": analysis / "parameter_runtime_report.v3.json",
         "replay": analysis / "candidate_execution_receipt.v1.json",
     }
 
@@ -76,10 +76,11 @@ def build_entry_payload(
         "native_receipt_sha256": (
             file_sha256(paths["receipt"]) if paths["receipt"].is_file() else None
         ),
-        "requested": receipt_payload.get("requested", {}).get("value"),
-        "actual_value": receipt_payload.get("actual_value"),
-        "status": receipt_payload.get("status"),
-        "reason": receipt_payload.get("reason"),
+        "requested": receipt_payload.get("parameter", {}).get("requested", {}).get("value"),
+        "consumed": receipt_payload.get("parameter", {}).get("consumed", {}).get("value") if receipt_payload.get("parameter", {}).get("consumed") else None,
+        "application_status": receipt_payload.get("application", {}).get("status"),
+        "value_relation": receipt_payload.get("application", {}).get("relation"),
+        "reason": receipt_payload.get("application", {}).get("reason"),
         "issues": issues,
         "terminal_observation_ref": observation_path.relative_to(output).as_posix(),
         "terminal_observation_sha256": terminal_sha256,
@@ -132,7 +133,7 @@ def write_acceptance_outputs(
             entry["knob_id"]
             for entry in entries
             if not entry["issues"]
-            and entry["status"] == "effective"
+            and entry["application_status"] == "applied"
         ],
         "entries": entries,
         "provenance": provenance,

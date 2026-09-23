@@ -30,7 +30,10 @@ from ecos_agent.optimization.metrics.contracts import (
 )
 from ecos_agent.optimization.parameters.contracts import (
     MaterializationRef,
+    ParameterApplication,
     ParameterApplicationReceipt,
+    ParameterEvidence,
+    ParameterValueEvidence,
     ToolRef,
 )
 
@@ -57,7 +60,7 @@ def _load_experiment_execution():
     return knowledge_treatment_execution
 
 
-def test_equal_budget_counts_parameter_status_and_receipts() -> None:
+def test_equal_budget_counts_application_status_and_receipts() -> None:
     traces = [
         CandidateTrace(
             design_id="gcd",
@@ -66,7 +69,7 @@ def test_equal_budget_counts_parameter_status_and_receipts() -> None:
             planning_mode="receipt-aware",
             terminal_success=True,
             terminal_utility=10.0,
-            parameter_status="effective",
+            application_status="applied",
             proposal_outcome="repair",
             runtime_seconds=2.0,
             peak_memory_mb=4.0,
@@ -77,7 +80,7 @@ def test_equal_budget_counts_parameter_status_and_receipts() -> None:
             started=True,
             planning_mode="receipt-aware",
             terminal_success=False,
-            parameter_status="inactive",
+            application_status="inactive",
             receipt_status="missing",
             proposal_outcome="reject",
             runtime_seconds=3.0,
@@ -112,7 +115,7 @@ def test_equal_budget_counts_parameter_status_and_receipts() -> None:
 def test_equal_budget_rejects_unknown_status_vocabulary() -> None:
     trace = CandidateTrace(
         design_id="gcd", candidate_id="c1", started=True,
-        terminal_success=True, planning_mode="receipt-aware", parameter_status="used",
+        terminal_success=True, planning_mode="receipt-aware", application_status="used",
     )
     with pytest.raises(ValueError, match="parameter status is invalid"):
         evaluate_equal_budget((trace,), mode="receipt-aware")
@@ -185,11 +188,15 @@ def test_build_candidate_trace_uses_native_receipt_and_terminal_metrics() -> Non
         "receipt_id": "receipt-1",
         "tool": ToolRef(name="DREAMPlace", revision="bound"),
         "context": {"stage": "place"},
-        "requested": {
-            "knob_id": "place.target_density",
-            "value": 0.2,
-            "unit": "ratio",
-        },
+        "parameter": ParameterEvidence(
+            knob_id="place.target_density",
+            requested=ParameterValueEvidence(value=0.2, unit="ratio"),
+            written=ParameterValueEvidence(value=0.2, unit="ratio"),
+            consumed=ParameterValueEvidence(
+                value=0.8, unit="ratio", source="test.native_consumer"
+            ),
+            realized=None,
+        ),
         "materialization": MaterializationRef(
             receipt_ref="analysis/candidate_materialization.v1.json",
             receipt_sha256=HASH,
@@ -202,10 +209,14 @@ def test_build_candidate_trace_uses_native_receipt_and_terminal_metrics() -> Non
             written_value=0.2,
             unit="ratio",
         ),
-        "actual_value": 0.8,
-        "status": "effective",
-        "reason": None,
-        "observation": {},
+        "application": ParameterApplication(
+            status="applied", relation="transformed", reason=None
+        ),
+        "observation": {
+            "target_density": 0.8,
+            "density_tensor_value": 0.8,
+            "density_operator_call_count": 1,
+        },
     }
     receipt = ParameterApplicationReceipt.model_construct(
         **receipt_payload,
@@ -249,8 +260,8 @@ def test_build_candidate_trace_uses_native_receipt_and_terminal_metrics() -> Non
     assert trace.die_area is None
     assert trace.hold_wns == 0.0
     assert trace.qor_score is None
-    assert trace.parameter_status == "effective"
-    assert trace.actual_value == 0.8
+    assert trace.application_status == "applied"
+    assert trace.consumed_value == 0.8
     assert trace.requested_value == 0.2
     assert trace.receipt_status == "ok"
 

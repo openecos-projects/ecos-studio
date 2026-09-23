@@ -66,7 +66,7 @@ def test_adapter_rejects_application_receipt_from_foreign_parameter_card(
     native["evidence_sha256"] = canonical_sha256(
         {key: value for key, value in native.items() if key != "evidence_sha256"}
     )
-    receipt_path = paths["manifest"].with_name("parameter_application_receipt.v2.json")
+    receipt_path = paths["manifest"].with_name("parameter_application_receipt.v3.json")
     receipt_path.write_text(json.dumps(native), encoding="utf-8")
     evidence["parameterApplicationReceiptSha256"] = file_sha256(receipt_path)
     rpc = _FakeEccRpc(
@@ -229,13 +229,14 @@ def test_adapter_validates_native_receipt_bound_to_candidate_materialization(
 ) -> None:
     native, evidence, paths = _write_candidate_evidence(tmp_path)
     if status != "effective":
-        native.update(status=status, actual_value=None, reason="No density use observed.")
+        native["application"].update(status=status, reason="No density use observed.")
+        native["parameter"]["consumed"] = None
         if not contradictory:
             native["observation"] = {}
         native["evidence_sha256"] = canonical_sha256(
             {key: value for key, value in native.items() if key != "evidence_sha256"}
         )
-        receipt_path = paths["manifest"].with_name("parameter_application_receipt.v2.json")
+        receipt_path = paths["manifest"].with_name("parameter_application_receipt.v3.json")
         receipt_path.write_text(json.dumps(native), encoding="utf-8")
         evidence["parameterApplicationReceiptSha256"] = file_sha256(receipt_path)
     rpc = _FakeEccRpc(
@@ -255,14 +256,14 @@ def test_adapter_validates_native_receipt_bound_to_candidate_materialization(
     if contradictory:
         with pytest.raises(OptimizationEccAdapterError, match="card binding") as error:
             adapter.wait_for_terminal("operation-1")
-        assert "contradicts observation" in str(error.value.__cause__)
+        assert "parameter observation" in str(error.value.__cause__)
         return
     receipt = adapter.wait_for_terminal("operation-1")
 
     assert receipt.parameter_application_receipt is not None
-    assert receipt.parameter_application_receipt.status == status
-    assert receipt.parameter_application_receipt.actual_value == native["actual_value"]
-    assert receipt.parameter_application_receipt.requested["value"] == 0.65
+    assert receipt.parameter_application_receipt.application.status == ("applied" if status == "effective" else status)
+    assert (receipt.parameter_application_receipt.parameter.consumed.value if receipt.parameter_application_receipt.parameter.consumed else None) == (native["parameter"]["consumed"]["value"] if native["parameter"]["consumed"] else None)
+    assert receipt.parameter_application_receipt.parameter.requested.value == 0.65
 
 
 def test_adapter_binds_candidate_parent_manifest(tmp_path: Path) -> None:
@@ -424,9 +425,10 @@ def test_materialization_numeric_representation_preserves_requested_domain(
     native["materialization"]["patch_sha256"] = materialization["patch_sha256"]
     native["materialization"]["receipt_sha256"] = materialization["receipt_sha256"]
     native["materialization"]["written_value"] = float(requested)
-    native["requested"]["knob_id"] = knob_id
-    native["requested"]["value"] = float(requested)
-    native["actual_value"] = float(requested)
+    native["parameter"]["knob_id"] = knob_id
+    native["parameter"]["requested"]["value"] = float(requested)
+    native["parameter"]["written"]["value"] = float(requested)
+    native["parameter"]["consumed"] = {"value": float(requested), "unit": native["parameter"]["consumed"]["unit"], "source": "test"}
     native["evidence_sha256"] = canonical_sha256(
         {key: value for key, value in native.items() if key != "evidence_sha256"}
     )
@@ -608,7 +610,7 @@ def test_adapter_rejects_foreign_candidate_even_when_receipts_agree(
     native["evidence_sha256"] = canonical_sha256(
         {key: value for key, value in native.items() if key != "evidence_sha256"}
     )
-    receipt_path = paths["manifest"].with_name("parameter_application_receipt.v2.json")
+    receipt_path = paths["manifest"].with_name("parameter_application_receipt.v3.json")
     receipt_path.write_text(json.dumps(native), encoding="utf-8")
     evidence["parameterApplicationReceiptSha256"] = file_sha256(receipt_path)
     rpc = _FakeEccRpc(

@@ -745,7 +745,7 @@ class ControllerContextMixin:
                             knob=str(start.requested.knob_id),
                             requested=start.requested.value,
                             actual=(
-                                getattr(outcome.parameter_application_receipt, "actual_value", None)
+                                outcome.parameter_application_receipt.parameter.consumed.value if outcome.parameter_application_receipt and outcome.parameter_application_receipt.parameter.consumed else None
                                 if include_receipts
                                 else None
                             ),

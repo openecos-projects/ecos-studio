@@ -25,8 +25,8 @@ _PROPOSAL_KEYS = (
 # Links only the native execution chain can supply; any missing link keeps
 # the row out of utility analysis instead of being inferred.
 _RESULT_LINKS = (
-    "actual_value",
-    "receipt_status",
+    "consumed_value",
+    "application_status",
     "terminal_observation_hash",
     "terminal_delta",
     "promotion_decision",
@@ -89,8 +89,8 @@ def run_activation(
         "knob": row.get("knob"),
         "direction": row.get("direction"),
         "requested_value": row.get("requested_value"),
-        "actual_value": None,
-        "receipt_status": "unknown",
+        "consumed_value": None,
+        "application_status": "unknown",
         "terminal_observation_hash": None,
         "terminal_delta": None,
         "epsilon_comparison": "unobserved",

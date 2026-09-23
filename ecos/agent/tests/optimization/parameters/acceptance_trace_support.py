@@ -75,7 +75,7 @@ def write_trace(
     native = ParameterApplicationReceipt.model_validate_json(
         paths["receipt"].read_bytes()
     )
-    knob = OptimizationKnob(native.requested["knob_id"])
+    knob = native.parameter.knob_id
     action = ProposalAction(
         knob_id=knob,
         direction=StrategyDirection.DECREASE,
@@ -137,7 +137,7 @@ def write_trace(
             proposal_action=action,
             requested=RequestedKnobValue(
                 knob_id=knob,
-                value=native.requested["value"],
+                value=native.parameter.requested.value,
             ),
         )
     )
@@ -215,13 +215,13 @@ def build_acceptance(
         (
             workspace
             / ".agent/candidates/candidate-acceptance-test/analysis"
-            / "parameter_application_receipt.v2.json"
+            / "parameter_application_receipt.v3.json"
         ).read_text(encoding="utf-8")
     )
     return acceptance.build_acceptance(
         workspace,
         output,
-        candidates={receipt["requested"]["knob_id"]: "candidate-acceptance-test"},
+        candidates={receipt["parameter"]["knob_id"]: "candidate-acceptance-test"},
         episode_roots=episode_roots,
         expected_ecos_revision=acceptance._current_revisions()["ecos_revision"],
         expected_ecc_revision="ecc-test-revision",

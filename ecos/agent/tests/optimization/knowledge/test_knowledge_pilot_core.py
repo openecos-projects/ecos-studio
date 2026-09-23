@@ -57,8 +57,8 @@ def test_mediation_row_requires_claim_binding_and_compares_epsilon() -> None:
         knob="place.target_density",
         direction="decrease",
         requested_value=0.4,
-        actual_value=0.4,
-        receipt_status="effective",
+        consumed_value=0.4,
+        application_status="applied",
         terminal_delta=-2.0,
         epsilon=0.5,
         promotion_decision="promote",
@@ -83,8 +83,8 @@ def test_mediation_row_marks_unbound_claims() -> None:
         knob="place.target_density",
         direction="increase",
         requested_value=0.5,
-        actual_value=None,
-        receipt_status="unknown",
+        consumed_value=None,
+        application_status="unknown",
         terminal_delta=None,
         epsilon=0.1,
         missing_evidence_reason="receipt_link,terminal_observation_link",
@@ -126,8 +126,8 @@ def test_planning_call_audit_reports_missing_evidence_explicitly() -> None:
     assert linked["knob"] == "place.target_density"
     assert linked["requested_value"] == 0.4
     assert linked["matched_claim_ids"] == ["entity-9"]
-    assert linked["actual_value"] is None
-    assert linked["receipt_status"] == "unknown"
+    assert linked["consumed_value"] is None
+    assert linked["application_status"] == "unknown"
     assert linked["terminal_delta"] is None
     assert linked["promotion_decision"] is None
     assert linked["counts_toward_knowledge_attribution"] is False
@@ -148,7 +148,7 @@ def test_planning_call_audit_without_observations_marks_every_call() -> None:
 
 
 def test_feedback_ledger_is_conservative_without_terminal_effect() -> None:
-    result = build_feedback_ledger([{"claim_id": "c", "receipt_status": "effective", "terminal_delta_vs_epsilon": "tie"}])
+    result = build_feedback_ledger([{"claim_id": "c", "application_status": "applied", "terminal_delta_vs_epsilon": "tie"}])
     assert result[0]["confidence"] == "unknown"
     assert result[0]["decision"] == "unknown"
 
@@ -156,8 +156,8 @@ def test_feedback_ledger_is_conservative_without_terminal_effect() -> None:
 def test_feedback_ledger_decides_keep_weak_and_contradicted() -> None:
     kept = build_feedback_ledger([
         {
-            "claim_id": "keep", "receipt_status": "effective",
-            "requested_value": 0.4, "actual_value": 0.4,
+            "claim_id": "keep", "application_status": "applied",
+            "requested_value": 0.4, "consumed_value": 0.4,
             "promotion_decision": "promote",
             "terminal_delta_vs_epsilon": "outside", "terminal_delta": -2.0,
         }
@@ -166,16 +166,16 @@ def test_feedback_ledger_decides_keep_weak_and_contradicted() -> None:
     assert kept["contradiction_status"] == "unknown"
     weak = build_feedback_ledger([
         {
-            "claim_id": "weak", "receipt_status": "effective",
-            "requested_value": 0.4, "actual_value": 0.45,
+            "claim_id": "weak", "application_status": "applied",
+            "requested_value": 0.4, "consumed_value": 0.45,
             "terminal_delta_vs_epsilon": "outside", "terminal_delta": -2.0,
         }
     ])[0]
     assert weak["decision"] == "weak"
     contradicted = build_feedback_ledger([
         {
-            "claim_id": "contra", "receipt_status": "effective",
-            "requested_value": 0.4, "actual_value": 0.4,
+            "claim_id": "contra", "application_status": "applied",
+            "requested_value": 0.4, "consumed_value": 0.4,
             "promotion_decision": "promote",
             "terminal_delta_vs_epsilon": "outside", "terminal_delta": 3.0,
         }
@@ -184,8 +184,8 @@ def test_feedback_ledger_decides_keep_weak_and_contradicted() -> None:
     assert contradicted["contradiction_status"] == "contradicted"
     unrealized = build_feedback_ledger([
         {
-            "claim_id": "unreal", "receipt_status": "effective",
-            "requested_value": 0.4, "actual_value": 0.4,
+            "claim_id": "unreal", "application_status": "applied",
+            "requested_value": 0.4, "consumed_value": 0.4,
             "promotion_decision": "promote",
             "terminal_delta_vs_epsilon": "tie", "terminal_delta": 0.1,
         }

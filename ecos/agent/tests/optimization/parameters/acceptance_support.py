@@ -66,8 +66,8 @@ def write_candidate(
     candidate_root = workspace / candidate_ref
     analysis = candidate_root / "analysis"
     materialization_path = analysis / "candidate_materialization.v1.json"
-    receipt_path = analysis / "parameter_application_receipt.v2.json"
-    runtime_path = analysis / "parameter_runtime_report.v2.json"
+    receipt_path = analysis / "parameter_application_receipt.v3.json"
+    runtime_path = analysis / "parameter_runtime_report.v3.json"
     manifest_path = analysis / "candidate_workspace.v1.json"
     replay_path = analysis / "candidate_execution_receipt.v1.json"
     config_path = candidate_root / "config/dreamplace_ecc.json"
@@ -116,18 +116,42 @@ def write_candidate(
         "density_tensor_value": actual_value,
         "density_operator_call_count": 1,
     }
+    application_status = "applied" if status == "effective" else status
+    consumed = (
+        {"value": actual_value, "unit": requested_unit, "source": "test.native_consumer"}
+        if actual_value is not None
+        else None
+    )
+    relation = (
+        "unknown"
+        if application_status != "applied"
+        else "converted"
+        if knob == OptimizationKnob.CELL_PADDING_X
+        else "exact"
+        if actual_value == requested_value
+        else "floored"
+        if observation.get("utilization_floor") == actual_value
+        else "transformed"
+    )
     runtime = {
+        "schema_version": "tool.parameter_runtime_report.v3",
         "tool": parameter_card.tool.model_dump(mode="json"),
-        "knob_id": knob.value,
-        "written_value": written,
-        "status": status,
-        "actual_value": actual_value,
-        "reason": reason,
+        "parameter": {
+            "knob_id": knob.value,
+            "written": {"value": written, "unit": written_unit},
+            "consumed": consumed,
+            "realized": None,
+        },
+        "application": {
+            "status": application_status,
+            "relation": relation,
+            "reason": reason,
+        },
         "observation": observation,
     }
     write_json(runtime_path, runtime)
     receipt = {
-        "schema_version": "tool.parameter_application_receipt.v2",
+        "schema_version": "tool.parameter_application_receipt.v3",
         "receipt_id": "parameter-receipt-acceptance-test",
         "tool": parameter_card.tool.model_dump(mode="json"),
         "context": {
@@ -139,10 +163,18 @@ def write_candidate(
             "parameter_card_sha256": card_hash(parameter_card),
             "context_sha256": HASH,
         },
-        "requested": {
+        "parameter": {
             "knob_id": knob.value,
-            "value": requested_value,
-            "unit": requested_unit,
+            "requested": {
+                "value": requested_value,
+                "unit": requested_unit,
+            },
+            "written": {
+                "value": written,
+                "unit": written_unit,
+            },
+            "consumed": consumed,
+            "realized": None,
         },
         "materialization": {
             "receipt_ref": "analysis/candidate_materialization.v1.json",
@@ -166,9 +198,7 @@ def write_candidate(
             "parent_manifest_sha256": None,
             "parent_state_sha256": HASH,
         },
-        "status": runtime["status"],
-        "actual_value": runtime["actual_value"],
-        "reason": runtime["reason"],
+        "application": runtime["application"],
         "observation": runtime["observation"],
     }
     receipt["evidence_sha256"] = canonical_sha256(receipt_hash_payload(receipt))
@@ -195,11 +225,11 @@ def write_candidate(
                 "sha256": file_sha256(materialization_path),
             },
             "parameter_application_receipt": {
-                "ref": "analysis/parameter_application_receipt.v2.json",
+                "ref": "analysis/parameter_application_receipt.v3.json",
                 "sha256": file_sha256(receipt_path),
             },
             "parameter_runtime_report": {
-                "ref": "analysis/parameter_runtime_report.v2.json",
+                "ref": "analysis/parameter_runtime_report.v3.json",
                 "sha256": file_sha256(runtime_path),
             },
         },

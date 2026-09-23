@@ -107,8 +107,10 @@ def test_request_binds_parent_checkpoint_and_proposal_content() -> None:
 
 def test_effective_improving_probe_maps_to_promote() -> None:
     class _Receipt:
-        status = "effective"
-        actual_value = 0.4
+        application = type("A", (), {"status": "applied"})()
+        parameter = type(
+            "P", (), {"consumed": type("V", (), {"value": 0.4})()}
+        )()
 
     outcome = evaluate_activation_outcome(
         parent_observation=_observation(1000.0),
@@ -117,8 +119,8 @@ def test_effective_improving_probe_maps_to_promote() -> None:
         objective_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
         noise_epsilon=NOISE_EPSILON,
     )
-    assert outcome["receipt_status"] == "effective"
-    assert outcome["actual_value"] == 0.4
+    assert outcome["application_status"] == "applied"
+    assert outcome["consumed_value"] == 0.4
     assert outcome["terminal_delta"] == pytest.approx(-100.0)
     assert outcome["promotion_decision"] == "promote"
     assert outcome["terminal_observation_hash"] == HASH
@@ -126,8 +128,10 @@ def test_effective_improving_probe_maps_to_promote() -> None:
 
 def test_activation_ignores_unrelated_calibration_metrics() -> None:
     class _Receipt:
-        status = "effective"
-        actual_value = 0.4
+        application = type("A", (), {"status": "applied"})()
+        parameter = type(
+            "P", (), {"consumed": type("V", (), {"value": 0.4})()}
+        )()
 
     outcome = evaluate_activation_outcome(
         parent_observation=_observation(1000.0),
@@ -141,8 +145,8 @@ def test_activation_ignores_unrelated_calibration_metrics() -> None:
 
 def test_ineffective_receipt_blocks_promotion_despite_gain() -> None:
     class _Receipt:
-        status = None
-        actual_value = None
+        application = type("A", (), {"status": "unknown"})()
+        parameter = type("P", (), {"consumed": None})()
 
     outcome = evaluate_activation_outcome(
         parent_observation=_observation(1000.0),
@@ -152,7 +156,7 @@ def test_ineffective_receipt_blocks_promotion_despite_gain() -> None:
         noise_epsilon=NOISE_EPSILON,
     )
     assert outcome["promotion_decision"] == "better"
-    assert outcome["receipt_status"] is None
+    assert outcome["application_status"] == "unknown"
 
 
 @pytest.mark.parametrize(
@@ -163,8 +167,10 @@ def test_non_improving_probes_keep_the_comparison_label(
     wirelength: float, expected: str
 ) -> None:
     class _Receipt:
-        status = "effective"
-        actual_value = 0.4
+        application = type("A", (), {"status": "applied"})()
+        parameter = type(
+            "P", (), {"consumed": type("V", (), {"value": 0.4})()}
+        )()
 
     outcome = evaluate_activation_outcome(
         parent_observation=_observation(1000.0),
@@ -197,7 +203,12 @@ def test_runner_glue_executes_probe_and_closes_rpc() -> None:
             class _Receipt:
                 outcome = object()  # terminal: ends the wait loop immediately
                 parameter_application_receipt = type(
-                    "R", (), {"status": "effective", "actual_value": 0.4}
+                    "R", (), {
+                        "application": type("A", (), {"status": "applied"})(),
+                        "parameter": type(
+                            "P", (), {"consumed": type("V", (), {"value": 0.4})()}
+                        )(),
+                    }
                 )()
 
                 class evidence:
