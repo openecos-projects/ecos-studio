@@ -111,7 +111,7 @@ function resetFlowLogState(): void {
   fullContentLoads.clear()
 }
 
-export function resetSharedHomeDataProjectState(): void {
+export function resetSharedFlowLogWorkspaceState(): void {
   activeWorkspacePath = ''
   activeWorkspaceSessionId = ''
   resetFlowLogState()

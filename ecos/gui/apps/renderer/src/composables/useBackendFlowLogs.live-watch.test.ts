@@ -102,8 +102,8 @@ function runtimeEvent(data: Record<string, unknown>): DesignRuntimeEvent {
 
 describe('useBackendFlowLogs runtime updates', () => {
   beforeEach(async () => {
-    const { resetSharedHomeDataProjectState } = await import('./useBackendFlowLogs')
-    resetSharedHomeDataProjectState()
+    const { resetSharedFlowLogWorkspaceState } = await import('./useBackendFlowLogs')
+    resetSharedFlowLogWorkspaceState()
     eventSequence = 0
     testState.workspaceSession = ref({
       sessionId: 'session-1',
@@ -493,7 +493,7 @@ describe('useBackendFlowLogs runtime updates', () => {
         ],
       },
     })
-    const { resetSharedHomeDataProjectState, useBackendFlowLogs } =
+    const { resetSharedFlowLogWorkspaceState, useBackendFlowLogs } =
       await import('./useBackendFlowLogs')
     const scope = effectScope()
     const home = scope.run(() => useBackendFlowLogs())!
@@ -514,7 +514,7 @@ describe('useBackendFlowLogs runtime updates', () => {
     expect(segment).toBeUndefined()
     expect(testState.readOptionalProjectTextFileTail).not.toHaveBeenCalled()
     scope.stop()
-    resetSharedHomeDataProjectState()
+    resetSharedFlowLogWorkspaceState()
   })
 
   it('loads only the truncated tail of a completed step log', async () => {
