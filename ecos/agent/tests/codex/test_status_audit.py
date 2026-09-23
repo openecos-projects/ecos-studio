@@ -36,7 +36,7 @@ def test_status_is_bounded_without_mutating_authoritative_input():
 
 
 def test_sent_prompt_equals_audit_envelope_and_telemetry_does_not_change_business_hash(tmp_path):
-    provider = _provider(tmp_path)
+    provider = _provider(tmp_path, planning_thread_policy="reuse")
     context = _context()
     domain = _domain()
     expected = planning_context_payload(context)
@@ -94,8 +94,7 @@ def test_sent_prompt_equals_audit_envelope_and_telemetry_does_not_change_busines
 
 
 def test_planning_metrics_expose_fresh_thread_overhead(tmp_path):
-    provider = _provider(tmp_path)
-    provider.planning_thread_policy = "fresh"
+    provider = _provider(tmp_path, planning_thread_policy="fresh")
     context = _context()
     domain = _domain()
     thread_starts = 0

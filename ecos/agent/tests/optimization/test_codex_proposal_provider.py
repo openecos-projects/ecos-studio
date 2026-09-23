@@ -43,11 +43,27 @@ HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64
 
 
-def _provider(tmp_path: Path) -> CodexAppServerProposalProvider:
+def _provider(
+    tmp_path: Path,
+    *,
+    planning_thread_policy: str = "reuse",
+) -> CodexAppServerProposalProvider:
     codex = tmp_path / "codex"
     codex.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
     codex.chmod(0o755)
-    return CodexAppServerProposalProvider(codex_bin=str(codex), cwd=tmp_path)
+    return CodexAppServerProposalProvider(
+        codex_bin=str(codex),
+        cwd=tmp_path,
+        planning_thread_policy=planning_thread_policy,
+    )
+
+
+def test_provider_defaults_to_fresh_planning_thread_policy(tmp_path: Path) -> None:
+    codex = tmp_path / "codex"
+    codex.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    codex.chmod(0o755)
+    provider = CodexAppServerProposalProvider(codex_bin=str(codex), cwd=tmp_path)
+    assert provider.planning_thread_policy == "fresh"
 
 
 def test_prompt_policy_partitions_control_from_user_and_evidence_data() -> None:

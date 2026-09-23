@@ -146,7 +146,7 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
         progress_callback: Callable[[str | dict[str, Any]], None] | None = None,
         diagnostics_path: Path | None = None,
         ephemeral: bool = True,
-        planning_thread_policy: Literal["reuse", "fresh"] = "reuse",
+        planning_thread_policy: Literal["reuse", "fresh"] = "fresh",
     ) -> None:
         self.cwd = Path(cwd or Path.cwd())
         self.env = dict(env or os.environ)
@@ -925,7 +925,7 @@ def create_required_codex_provider(
     progress_callback: Callable[[str | dict[str, Any]], None] | None = None,
     diagnostics_path: Path | None = None,
     ephemeral: bool = True,
-    planning_thread_policy: Literal["reuse", "fresh"] = "reuse",
+    planning_thread_policy: Literal["reuse", "fresh"] = "fresh",
 ) -> CodexAppServerProposalProvider:
     return CodexAppServerProposalProvider(
         cwd=cwd,
