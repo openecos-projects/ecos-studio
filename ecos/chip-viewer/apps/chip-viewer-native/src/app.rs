@@ -8949,9 +8949,7 @@ fn style_for_shape(style: LayerStyle, owner: Option<&OwnerRef>) -> LayerStyle {
             owner_texture_style(style, 76, 235, FillPattern::Grid, 2)
         }
         Some(OwnerType::InstanceBBox) => solid_owner_texture_style(style, 64, 172, 1),
-        Some(OwnerType::InstanceHalo) => {
-            owner_texture_style(style, 38, 156, FillPattern::HorizontalHatch, 1)
-        }
+        Some(OwnerType::InstanceHalo) => halo_texture_style(style),
         Some(OwnerType::Blockage) => {
             owner_texture_style(style, 66, 220, FillPattern::CrossHatch, 1)
         }
@@ -9020,6 +9018,18 @@ fn io_pin_texture_style(mut style: LayerStyle) -> LayerStyle {
     style.frame_alpha = style.frame_rgba[3];
     style.fill_pattern = FillPattern::CrossHatch;
     style.line_width_px = 2;
+    style
+}
+
+/// Halo keeps a fixed orange regardless of the owning layer's color so it
+/// reads as placement keep-out context instead of layer geometry.
+fn halo_texture_style(mut style: LayerStyle) -> LayerStyle {
+    style.rgba = [255, 140, 0, 38];
+    style.frame_rgba = [255, 140, 0, 156];
+    style.fill_alpha = style.rgba[3];
+    style.frame_alpha = style.frame_rgba[3];
+    style.fill_pattern = FillPattern::HorizontalHatch;
+    style.line_width_px = 1;
     style
 }
 
@@ -14204,6 +14214,22 @@ mod tests {
         assert_eq!(&io_pin_style.frame_rgba[..3], &[255, 222, 89]);
         assert_eq!(io_pin_style.fill_pattern, FillPattern::CrossHatch);
         assert_eq!(io_pin_style.line_width_px, 2);
+
+        let halo = OwnerRef {
+            owner_type: OwnerType::InstanceHalo as u8,
+            ..OwnerRef::default()
+        };
+        let halo_style = style_for_shape(base, Some(&halo));
+        assert_eq!(&halo_style.rgba[..3], &[255, 140, 0]);
+        assert_eq!(&halo_style.frame_rgba[..3], &[255, 140, 0]);
+        assert_eq!(halo_style.fill_pattern, FillPattern::HorizontalHatch);
+        assert_eq!(halo_style.line_width_px, 1);
+        // The fixed orange must not follow the owning layer's color.
+        let other_base =
+            LayerStyle::default_for_metadata(9, "MET3", 0, chip_display::ColorTheme::Vivid);
+        let other_halo_style = style_for_shape(other_base, Some(&halo));
+        assert_eq!(&other_halo_style.rgba[..3], &[255, 140, 0]);
+        assert_eq!(&other_halo_style.frame_rgba[..3], &[255, 140, 0]);
 
         let via = OwnerRef {
             owner_type: OwnerType::Via as u8,
