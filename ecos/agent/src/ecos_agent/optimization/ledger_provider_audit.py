@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import os
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -12,6 +11,7 @@ from typing import Iterator, Literal
 from pydantic import Field, StrictInt, field_validator, model_validator
 
 from ecos_agent.optimization.contracts import PlanningProviderEvidence
+from ecos_agent.optimization.file_lock import exclusive_lock
 from ecos_agent.optimization.ledger import (
     _LedgerModel,
     OptimizationPlanningProviderAuditIntegrityError,
@@ -150,9 +150,5 @@ class OptimizationPlanningProviderEvidenceAudit:
 
     @contextmanager
     def _exclusive_lock(self) -> Iterator[None]:
-        with self._lock_path.open("a+b") as lock:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        with exclusive_lock(self._lock_path):
+            yield

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import re
@@ -35,6 +34,7 @@ from ecos_agent.optimization.contracts import (
     SelectionMetric,
     TerminalObservation,
 )
+from ecos_agent.optimization.file_lock import exclusive_lock
 from ecos_agent.optimization.objective_alignment import ActiveOptimizationObjective
 from ecos_agent.optimization.rules import IncumbentDecision
 from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
@@ -614,12 +614,8 @@ class OptimizationPlanningAudit:
 
     @contextmanager
     def _exclusive_lock(self) -> Iterator[None]:
-        with self._lock_path.open("a+b") as lock:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        with exclusive_lock(self._lock_path):
+            yield
 
 
 class OptimizationLedger:
@@ -754,12 +750,8 @@ class OptimizationLedger:
 
     @contextmanager
     def _exclusive_lock(self) -> Iterator[None]:
-        with self._lock_path.open("a+b") as lock:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        with exclusive_lock(self._lock_path):
+            yield
 
 
 

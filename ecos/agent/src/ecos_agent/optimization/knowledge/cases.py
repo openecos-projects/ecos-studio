@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 from contextlib import contextmanager
@@ -27,6 +26,7 @@ from pydantic import (
 from ecos_agent.optimization.parameters.effective_domain import EffectiveDomainSnapshot
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import TerminalObservation
+from ecos_agent.optimization.file_lock import exclusive_lock
 from ecos_agent.optimization.ledger import OptimizationTerminalOutcome
 from ecos_agent.optimization.ledger_artifacts import _fsync_directory
 from ecos_agent.optimization.rules import native_receipt_is_effective
@@ -702,12 +702,8 @@ class EmpiricalCaseAuditStore:
 
     @contextmanager
     def _exclusive_lock(self) -> Iterator[None]:
-        with self._lock_path.open("a+b") as lock:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        with exclusive_lock(self._lock_path):
+            yield
 
 
 def _replay_audit_entries(
