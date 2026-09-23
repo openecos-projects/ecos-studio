@@ -22,7 +22,7 @@ def _trace(
     knob: str | None = "place.target_density",
     requested: float | None = 0.55,
     actual: float | None = None,
-    status: str = "effective",
+    status: str = "applied",
     feasible: bool = False,
     promoted: bool = False,
     utility: float | None = None,
@@ -35,8 +35,8 @@ def _trace(
         terminal_utility=utility,
         requested_value=requested,
         requested_knob=knob,
-        actual_value=actual if actual is not None else requested,
-        parameter_status=status,  # type: ignore[arg-type]
+        consumed_value=actual if actual is not None else requested,
+        application_status=status,  # type: ignore[arg-type]
         feasible=feasible,
         promoted=promoted,
     )
@@ -205,12 +205,12 @@ def test_offline_summary_splits_claim_bound_and_unbound() -> None:
 
 def test_misleading_steps_count_probes_until_next_promotion() -> None:
     traces = [
-        _trace("c1", promoted=True, status="effective"),
+        _trace("c1", promoted=True, status="applied"),
         # mispromotion #1: two probes run against the wrong incumbent
         _trace("c2", promoted=True, status="inactive"),
         _trace("c3"),
         _trace("c4"),
-        _trace("c5", promoted=True, status="effective"),
+        _trace("c5", promoted=True, status="applied"),
         # mispromotion #2: runs until the episode ends
         _trace("c6", promoted=True, status="unknown"),
         _trace("c7"),

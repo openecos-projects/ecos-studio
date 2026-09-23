@@ -35,7 +35,10 @@ from ecos_agent.optimization.controller import (
 from ecos_agent.optimization.ledger import OptimizationOutcomeKind
 from ecos_agent.optimization.parameters.contracts import (
     MaterializationRef,
+    ParameterApplication,
     ParameterApplicationReceipt,
+    ParameterEvidence,
+    ParameterValueEvidence,
 )
 from ecos_agent.optimization.parameters.semantics import load_parameter_cards
 
@@ -80,8 +83,8 @@ def test_prompt_compacts_empirical_cases_without_mutating_audit_payload() -> Non
         "binding_id": "binding-1",
         "toolchain_ref": HASH,
         "requested_value": 0.2,
-        "actual_value": 0.8,
-        "parameter_status": "effective",
+        "consumed_value": 0.8,
+        "application_status": "applied",
         "proposal_sha256": HASH,
         "effective_domain_sha256": HASH,
         "parameter_card_sha256": HASH,
@@ -117,8 +120,8 @@ def test_prompt_compacts_empirical_cases_without_mutating_audit_payload() -> Non
                 "toolchain_ref": HASH,
                 "evidence_status": "current",
                 "requested_value": 0.2,
-                "actual_value": 0.8,
-                "parameter_status": "effective",
+                "consumed_value": 0.8,
+                "application_status": "applied",
                 "guardrail_status": "pass",
                 "outcome_class": "supported",
             }
@@ -135,7 +138,15 @@ def _context() -> OptimizationPlanningContext:
         "receipt_id": "parameter-receipt-density",
         "tool": card.tool,
         "context": {"stage": "place"},
-        "requested": {"knob_id": "place.target_density", "value": 0.2, "unit": "ratio"},
+        "parameter": ParameterEvidence(
+            knob_id="place.target_density",
+            requested=ParameterValueEvidence(value=0.2, unit="ratio"),
+            written=ParameterValueEvidence(value=0.2, unit="ratio"),
+            consumed=ParameterValueEvidence(
+                value=0.8, unit="ratio", source="test.native_consumer"
+            ),
+            realized=None,
+        ),
         "materialization": MaterializationRef(
             receipt_ref="analysis/candidate_materialization.v1.json",
             receipt_sha256=HASH,
@@ -148,9 +159,9 @@ def _context() -> OptimizationPlanningContext:
             written_value=0.2,
             unit="ratio",
         ),
-        "actual_value": 0.8,
-        "status": "effective",
-        "reason": None,
+        "application": ParameterApplication(
+            status="applied", relation="floored", reason=None
+        ),
         "observation": {
             "target_density": 0.8,
             "density_tensor_value": 0.8,
@@ -271,7 +282,14 @@ def test_planner_exposes_parameter_knowledge_and_unfiltered_trajectories(
     context = _context()
     first = context.history[0]
     uncertain = first.parameter_application_receipt.model_copy(
-        update={"status": "unknown", "reason": "consumer evidence unavailable"}
+        update={
+            "application": first.parameter_application_receipt.application.model_copy(
+                update={"status": "unknown", "reason": "consumer evidence unavailable"}
+            ),
+            "parameter": first.parameter_application_receipt.parameter.model_copy(
+                update={"consumed": None}
+            ),
+        }
     )
     context = replace(context,
         parameter_trajectories=(
@@ -297,9 +315,9 @@ def test_planner_exposes_parameter_knowledge_and_unfiltered_trajectories(
     assert len(trajectories) == 2
     assert trajectories[0]["requested"]["value"] == 0.2
     receipt = trajectories[0]["parameter_application_receipt"]
-    assert receipt["actual_value"] == 0.8
+    assert receipt["parameter"]["consumed"]["value"] == 0.8
     assert receipt["observation"]["utilization_floor"] == 0.8
-    assert trajectories[1]["parameter_application_receipt"]["status"] == "unknown"
+    assert trajectories[1]["parameter_application_receipt"]["application"]["status"] == "unknown"
     assert "excluded_surface_values" not in payload
     assert "runtime_semantics" in captured["system"]
     assert "source spans" in captured["system"]

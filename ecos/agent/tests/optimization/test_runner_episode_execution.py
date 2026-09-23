@@ -198,7 +198,7 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(
     assert controller.incumbent_candidate_root_ref == ".agent/candidates/execution-2"
     assert runner._current_values["place.target_density"] == 0.15
     assert second.execution.requested is None
-    assert controller.ledger.replay().terminal_outcomes[-1].parameter_application_receipt.actual_value == 0.8
+    assert controller.ledger.replay().terminal_outcomes[-1].parameter_application_receipt.parameter.consumed.value == 0.8
     assert [item.reason_code for item in controller._case_audit.verify().diagnostics] == [
         "unclaimed_probe",
         "unclaimed_probe",

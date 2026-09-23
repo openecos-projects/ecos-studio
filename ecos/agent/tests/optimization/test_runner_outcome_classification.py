@@ -396,7 +396,7 @@ def test_runner_promotes_progressive_recovery_and_switches_to_original_objective
         ".agent/candidates/execution-1"
     )
     assert planner.contexts[1].current_values["place.target_density"] == 0.19
-    assert planner.contexts[1].parameter_trajectories[0].parameter_application_receipt.actual_value == 0.8
+    assert planner.contexts[1].parameter_trajectories[0].parameter_application_receipt.parameter.consumed.value == 0.8
     assert controller.incumbent == turns[-1].terminal_observation
     assert runner.recovery_incomplete is False
     outcomes = controller.ledger.replay().terminal_outcomes

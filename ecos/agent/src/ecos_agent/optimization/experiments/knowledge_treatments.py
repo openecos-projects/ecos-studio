@@ -559,11 +559,11 @@ def _rule_guided_scores(
 def _diagnostics(traces: Sequence[CandidateTrace]) -> dict[str, float | int]:
     started = tuple(item for item in traces if item.started)
     effective = sum(
-        item.parameter_status == "effective"
+        item.application_status == "applied"
         for item in started
     )
-    inactive = sum(item.parameter_status == "inactive" for item in started)
-    unknown = sum(item.parameter_status == "unknown" for item in started)
+    inactive = sum(item.application_status == "inactive" for item in started)
+    unknown = sum(item.application_status == "unknown" for item in started)
     count = len(started)
     return {
         "started_candidates": count,

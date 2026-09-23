@@ -311,7 +311,7 @@ class OptimizationTerminalOutcome(_LedgerModel):
             raise ValueError("incumbent decision does not match outcome")
         if self.parameter_application_receipt is not None:
             receipt = self.parameter_application_receipt
-            requested = receipt.requested.get("knob_id")
+            requested = receipt.parameter.knob_id.value
             if requested is None:
                 raise ValueError("terminal parameter receipt knob is missing")
             if self.receipt_sha256 != receipt.evidence_sha256:

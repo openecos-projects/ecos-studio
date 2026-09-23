@@ -146,7 +146,7 @@ def _native_receipt_payload(
     snapshot = materialization["snapshots"][0]
     card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
     payload = {
-        "schema_version": "tool.parameter_application_receipt.v2",
+        "schema_version": "tool.parameter_application_receipt.v3",
         "receipt_id": "parameter-receipt-native-1",
         "tool": {
             "name": card.tool.name,
@@ -162,10 +162,12 @@ def _native_receipt_payload(
             "seed": 17,
             "ecc_revision": "ecc-test-revision",
         },
-        "requested": {
+        "parameter": {
             "knob_id": "place.target_density",
-            "value": 0.65,
-            "unit": "ratio",
+            "requested": {"value": 0.65, "unit": "ratio"},
+            "written": {"value": 0.65, "unit": "ratio"},
+            "consumed": {"value": 0.65, "unit": "ratio", "source": "DREAMPlace.params.target_density"},
+            "realized": None,
         },
         "materialization": {
             "receipt_ref": "analysis/candidate_materialization.v1.json",
@@ -189,9 +191,7 @@ def _native_receipt_payload(
             "parent_manifest_sha256": None,
             "parent_state_sha256": HASH,
         },
-        "actual_value": 0.65,
-        "status": "effective",
-        "reason": None,
+        "application": {"status": "applied", "relation": "exact", "reason": None},
         "observation": {
             "target_density": 0.65,
             "density_tensor_value": 0.65,
@@ -287,7 +287,7 @@ def _write_candidate_evidence(
     native["evidence_sha256"] = canonical_sha256(
         {key: value for key, value in native.items() if key != "evidence_sha256"}
     )
-    receipt_path = analysis / "parameter_application_receipt.v2.json"
+    receipt_path = analysis / "parameter_application_receipt.v3.json"
     receipt_path.write_text(json.dumps(native), encoding="utf-8")
     manifest = analysis / "candidate_workspace.v1.json"
     manifest_payload = {

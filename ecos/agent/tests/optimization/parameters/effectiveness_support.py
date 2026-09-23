@@ -4,7 +4,10 @@ from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import OptimizationKnob
 from ecos_agent.optimization.parameters.contracts import (
     MaterializationRef,
+    ParameterApplication,
     ParameterApplicationReceipt,
+    ParameterEvidence,
+    ParameterValueEvidence,
     ToolRef,
 )
 from ecos_agent.optimization.parameters.effective_domain import build_context_fingerprint
@@ -79,7 +82,14 @@ def density_receipt(
             source_sha256=str(context["tool_source_sha256"]),
         ),
         context=receipt_context,
-        requested={"knob_id": "place.target_density", "value": 0.2, "unit": "ratio"},
+        parameter=ParameterEvidence(
+            knob_id=OptimizationKnob.TARGET_DENSITY,
+            requested=ParameterValueEvidence(value=0.2, unit="ratio"),
+            written=ParameterValueEvidence(value=0.2, unit="ratio"),
+            consumed=ParameterValueEvidence(
+                value=0.8, unit="ratio", source="DREAMPlace.params.target_density"
+            ),
+        ),
         materialization=MaterializationRef(
             receipt_ref="analysis/materialization.json",
             receipt_sha256=HASH,
@@ -92,9 +102,7 @@ def density_receipt(
             written_value=0.2,
             unit="ratio",
         ),
-        actual_value=0.8,
-        status="effective",
-        reason=None,
+        application=ParameterApplication(status="applied", relation="floored"),
         observation=observation,
     )
     draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=HASH)
@@ -122,11 +130,14 @@ def routability_false_receipt() -> ParameterApplicationReceipt:
             source_sha256=card.tool.source_sha256,
         ),
         context={"stage": "place", "lattice_version": "ecos.optimization_lattice.v1"},
-        requested={
-            "knob_id": "place.routability_opt",
-            "value": False,
-            "unit": "boolean",
-        },
+        parameter=ParameterEvidence(
+            knob_id=OptimizationKnob.ROUTABILITY_OPT,
+            requested=ParameterValueEvidence(value=False, unit="boolean"),
+            written=ParameterValueEvidence(value=False, unit="boolean"),
+            consumed=ParameterValueEvidence(
+                value=False, unit="boolean", source="DREAMPlace.params.routability_opt_flag"
+            ),
+        ),
         materialization=MaterializationRef(
             receipt_ref="analysis/candidate_materialization.v1.json",
             receipt_sha256=HASH,
@@ -139,9 +150,7 @@ def routability_false_receipt() -> ParameterApplicationReceipt:
             written_value=False,
             unit="boolean",
         ),
-        actual_value=False,
-        status="effective",
-        reason=None,
+        application=ParameterApplication(status="applied", relation="exact"),
         observation=observation,
     )
     draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=HASH)

@@ -49,8 +49,9 @@ def test_acceptance_allows_different_actual_target_density(
     assert report["classification"] == "Engineering Complete"
     assert report["entries"][0]["issues"] == []
     assert report["entries"][0]["requested"] == 0.2
-    assert report["entries"][0]["actual_value"] == 0.8
-    assert report["entries"][0]["status"] == "effective"
+    assert report["entries"][0]["consumed"] == 0.8
+    assert report["entries"][0]["application_status"] == "applied"
+    assert report["entries"][0]["value_relation"] == "transformed"
     assert report["entries"][0]["reason"] is None
     assert "activation_status" not in report["entries"][0]
     assert report["terminal_closed_knobs"] == ["place.target_density"]

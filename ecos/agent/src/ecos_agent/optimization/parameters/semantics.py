@@ -241,7 +241,7 @@ def validate_application_receipt(
     """Validate parameter observations against the reviewed tool and card binding."""
     if not isinstance(receipt, ParameterApplicationReceipt):
         raise ParameterSemanticsError("application receipt type is invalid")
-    knob = OptimizationKnob(receipt.requested["knob_id"])
+    knob = OptimizationKnob(receipt.parameter.knob_id.value)
     card = cards.get(knob)
     if (
         card is None
@@ -251,7 +251,7 @@ def validate_application_receipt(
         raise ParameterSemanticsError(
             "application receipt tool/card binding is invalid"
         )
-    if receipt.requested.get("unit") != card.surface.unit:
+    if receipt.parameter.requested.model_dump(mode="json").get("unit") != card.surface.unit:
         raise ParameterSemanticsError("application receipt unit does not match card")
     if not _receipt_stage_matches(receipt.context.get("stage"), card.stage):
         raise ParameterSemanticsError("application receipt stage does not match card")
@@ -294,79 +294,112 @@ def _same_number(left: object, right: object) -> bool:
 
 def _validate_parameter_observation(receipt: ParameterApplicationReceipt) -> None:
     observation = receipt.observation
-    requested = receipt.requested["value"]
-    knob = OptimizationKnob(receipt.requested["knob_id"])
-    status, actual = "unknown", None
+    parameter = receipt.parameter
+    requested = parameter.requested.value
+    consumed = parameter.consumed.value if parameter.consumed is not None else None
+    status = receipt.application.status
+    relation = receipt.application.relation
+    knob = OptimizationKnob(parameter.knob_id.value)
+
+    if status == "applied" and consumed is None:
+        raise ParameterSemanticsError("applied parameter has no consumed evidence")
+    if consumed is not None and isinstance(consumed, float) and not math.isfinite(consumed):
+        raise ParameterSemanticsError("consumed parameter value is not finite")
     if knob == OptimizationKnob.TARGET_DENSITY:
         value = observation.get("target_density")
-        # The live density tensor ramps adaptively toward the configured
-        # target, so only the configured value reaching the density operator
-        # decides effectiveness.
-        if (
-            _finite_number(value) and 0 < value <= 1
-            and _positive_count(observation.get("density_operator_call_count"))
-        ):
-            status, actual = "effective", value
+        if not _finite_number(value) or not 0 < value <= 1 or not _positive_count(observation.get("density_operator_call_count")):
+            if status == "unknown" and consumed is None:
+                return
+            raise ParameterSemanticsError("parameter observation target-density consumed evidence is invalid")
+        if consumed is None or not _same_number(value, consumed):
+            raise ParameterSemanticsError("parameter observation target-density consumed evidence is invalid")
         floor = observation.get("utilization_floor")
         if floor is not None and (
             not _finite_number(floor) or not 0 < floor <= 1
-            or (actual is not None and floor > requested and not _same_number(floor, actual))
         ):
-            raise ParameterSemanticsError("parameter observation utilization floor does not match")
+            raise ParameterSemanticsError("parameter observation target-density floor evidence is invalid")
+        expected_relation = (
+            "exact" if _same_number(consumed, requested)
+            else "floored" if floor is not None and _same_number(consumed, floor)
+            else "transformed"
+        )
+        if status != "applied" or relation != expected_relation:
+            raise ParameterSemanticsError("parameter observation target-density relation contradicts observation")
     elif knob == OptimizationKnob.TARGET_OVERFLOW:
-        value = observation.get("stop_overflow")
+        threshold = observation.get("stop_overflow")
         final = observation.get("final_overflow")
-        if _finite_number(value) and 0 <= value <= 1 and _finite_number(final) and final >= 0:
-            status, actual = ("effective", value) if final < value else ("inactive", None)
+        if not _finite_number(threshold) or not 0 <= threshold <= 1:
+            if status == "unknown" and consumed is None:
+                return
+            raise ParameterSemanticsError("parameter observation overflow threshold evidence is invalid")
+        if not _finite_number(final) or final < 0:
+            if status == "unknown" and consumed is None:
+                return
+            raise ParameterSemanticsError("parameter observation overflow application evidence is invalid")
+        expected_status = "applied" if final < threshold else "inactive"
+        if consumed is None or not _same_number(consumed, threshold) or status != expected_status:
+            raise ParameterSemanticsError("parameter observation overflow application evidence is invalid")
     elif knob == OptimizationKnob.CELL_PADDING_X:
         value = observation.get("padding_sites")
-        if _finite_number(value) and value >= 0 and _positive_count(observation.get("geometry_apply_count")):
-            actual = value
-            status = "inactive" if value == 0 and requested > 0 else "effective"
+        if not _finite_number(value) or value < 0 or not _positive_count(observation.get("geometry_apply_count")):
+            if status == "unknown" and consumed is None:
+                return
+            raise ParameterSemanticsError("parameter observation padding consumed evidence is invalid")
+        if consumed is None or not _same_number(consumed, value):
+            raise ParameterSemanticsError("parameter observation padding consumed evidence is invalid")
+        expected_status = "inactive" if value == 0 and requested > 0 else "applied"
+        if status != expected_status or relation != "converted":
+            raise ParameterSemanticsError("parameter observation padding relation contradicts observation")
     elif knob == OptimizationKnob.ROUTABILITY_OPT:
         value = observation.get("configured_routability_opt")
         rounds = observation.get("branch_round_count")
-        if type(value) is bool and type(rounds) is int and rounds >= 0 and _positive_count(
-            observation.get("place_object_count")
-        ):
-            if value is True and requested is True and rounds > 0:
-                status, actual = "effective", True
-            elif observation.get("placement_completed") is True:
-                status, actual = (
-                    ("effective", False)
-                    if value is False and requested is False and rounds == 0
-                    else ("inactive", None)
-                )
+        if type(value) is not bool or type(rounds) is not int or rounds < 0:
+            if status == "unknown" and consumed is None:
+                return
+            raise ParameterSemanticsError("parameter observation routability consumed evidence is invalid")
+        expected_status = (
+            "applied"
+            if (value is True and requested is True and rounds > 0)
+            or (value is False and requested is False and rounds == 0 and observation.get("placement_completed") is True)
+            else "inactive"
+            if observation.get("placement_completed") is True
+            else "unknown"
+        )
+        if consumed is not value or status != expected_status:
+            raise ParameterSemanticsError("parameter observation routability application evidence is invalid")
     elif knob == OptimizationKnob.DENSITY_WEIGHT:
         value = observation.get("configured_density_weight")
-        if _finite_number(value) and value > 0 and _positive_count(observation.get("initialization_count")):
-            status, actual = "effective", value
+        if not _finite_number(value) or value <= 0 or not _positive_count(observation.get("initialization_count")):
+            if status == "unknown" and consumed is None:
+                return
+            raise ParameterSemanticsError("parameter observation density-weight consumed evidence is invalid")
+        if consumed is None or not _same_number(consumed, value) or status != "applied":
+            raise ParameterSemanticsError("parameter observation density-weight consumed evidence is invalid")
     else:
-        value = observation.get("configured_value")
+        value = observation.get("input_configured_value")
         boundary_observed = (
-            type(observation.get("init_fp_call_count")) is int
-            and observation["init_fp_call_count"] == 1
-            and type(observation.get("run_fp_call_count")) is int
-            and observation["run_fp_call_count"] == 1
-        )
-        if boundary_observed and observation.get("mode") == "die_size":
-            # The report does not expose run completion separately from geometry.
-            if observation.get("geometry_constructed") is True or receipt.status == "inactive":
-                status = "inactive"
-        elif (
-            boundary_observed and observation.get("mode") == "die_util"
+            observation.get("init_fp_call_count") == 1
+            and observation.get("run_fp_call_count") == 1
             and observation.get("geometry_constructed") is True
-            and _finite_number(value) and value > 0
+        )
+        if observation.get("mode") == "die_size":
+            expected_status = "inactive"
+        elif (
+            observation.get("mode") == "die_util"
+            and boundary_observed
+            and _finite_number(value)
+            and value > 0
             and (knob != OptimizationKnob.FLOORPLAN_CORE_UTIL or value <= 1)
         ):
-            status, actual = "effective", value
-    values_match = (
-        receipt.actual_value is actual
-        if actual is None or type(actual) is bool
-        else _same_number(receipt.actual_value, actual)
-    )
-    if receipt.status != status or not values_match:
-        raise ParameterSemanticsError("parameter status or actual value contradicts observation")
+            expected_status = "applied"
+        else:
+            expected_status = "unknown"
+        if expected_status == "applied" and (consumed is None or not _same_number(consumed, value)):
+            raise ParameterSemanticsError("parameter observation floorplan consumed evidence is invalid")
+        if status != expected_status:
+            raise ParameterSemanticsError("parameter observation floorplan application status is invalid")
+        if expected_status == "applied" and relation != ("exact" if _same_number(consumed, requested) else "transformed"):
+            raise ParameterSemanticsError("parameter observation floorplan relation contradicts observation")
 
 
 def _finite_number(value: object) -> bool:

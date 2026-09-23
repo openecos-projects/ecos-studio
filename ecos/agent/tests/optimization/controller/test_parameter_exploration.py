@@ -49,8 +49,8 @@ def test_trajectory_driven_probe_preserves_uncertainty_and_exact_model_value(tmp
     def next_probe(context):
         trajectory = context.parameter_trajectories[0]
         receipt = trajectory.parameter_application_receipt
-        assert receipt.status == status
-        assert receipt.requested["value"] == 0.1
+        assert receipt.application.status == ("applied" if status == "effective" else status)
+        assert receipt.parameter.requested.value == 0.1
         assert receipt.observation["utilization_floor"] == 0.6678301093355762
         assert trajectory.terminal_observation is None
         assert trajectory.planning_values == CURRENT_VALUES
@@ -70,7 +70,15 @@ def test_trajectory_driven_probe_preserves_uncertainty_and_exact_model_value(tmp
     payload = _native_receipt(planned.requested, effective_value=0.6678301093355762).model_dump(
         mode="json", exclude={"evidence_sha256"}
     )
-    payload.update(status=status, actual_value=0.6678301093355762 if status == "effective" else None)
+    payload["application"] = {
+        "status": "applied" if status == "effective" else status,
+        "relation": "exact" if status == "effective" else "unknown",
+        "reason": None if status == "effective" else "No parameter use observed.",
+    }
+    payload["parameter"]["consumed"] = (
+        {"value": 0.6678301093355762, "unit": "ratio", "source": "test.native_consumer"}
+        if status == "effective" else None
+    )
     if status != "effective":
         payload["observation"]["density_operator_call_count"] = 0
     receipt = ParameterApplicationReceipt(**payload, evidence_sha256=canonical_sha256(payload))
@@ -89,7 +97,7 @@ def test_other_parameter_clamp_is_evidence_not_a_programmed_search_limit(tmp_pat
     def next_probe(context):
         trajectory = context.parameter_trajectories[0]
         assert trajectory.requested.value == 16
-        assert trajectory.parameter_application_receipt.actual_value == 5
+        assert trajectory.parameter_application_receipt.parameter.consumed.value == 5
         domain = next(d for d in context.effective_domains if d.knob_id == "place.cell_padding_x")
         assert domain.accepts(15)
         return _proposal(context, requested_value=7,
@@ -133,4 +141,4 @@ def test_full_parameter_trajectory_survives_recent_history_window_and_recovery(t
     assert len(context.parameter_trajectories) == 7
     payload = planning_context_payload(context)
     assert payload["parameter_trajectories"][0]["requested"]["value"] == 3
-    assert payload["parameter_trajectories"][0]["parameter_application_receipt"]["actual_value"] == 3
+    assert payload["parameter_trajectories"][0]["parameter_application_receipt"]["parameter"]["consumed"]["value"] == 3

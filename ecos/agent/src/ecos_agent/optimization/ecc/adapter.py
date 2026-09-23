@@ -414,15 +414,15 @@ class EccCandidateRerunAdapter:
             if (
                 not isinstance(raw, Mapping)
                 or raw.get("schema_version")
-                != "tool.parameter_application_receipt.v2"
+                != "tool.parameter_application_receipt.v3"
             ):
                 raise ValueError("application receipt schema is invalid")
             receipt = ParameterApplicationReceipt.model_validate(raw)
         except (TypeError, ValueError) as exc:
             raise OptimizationEccAdapterError("application receipt is invalid") from exc
         if (
-            receipt.requested.get("knob_id") != requested.knob_id.value
-            or receipt.requested.get("value") != requested.value
+            receipt.parameter.knob_id.value != requested.knob_id.value
+            or receipt.parameter.requested.value != requested.value
         ):
             raise OptimizationEccAdapterError(
                 "application receipt written value does not match"
@@ -497,7 +497,7 @@ class EccCandidateRerunAdapter:
             )
         if (
             candidate_ref is None
-            or ref != f"{candidate_ref}/analysis/parameter_application_receipt.v2.json"
+            or ref != f"{candidate_ref}/analysis/parameter_application_receipt.v3.json"
         ):
             raise OptimizationEccAdapterError(
                 "application receipt reference does not match"

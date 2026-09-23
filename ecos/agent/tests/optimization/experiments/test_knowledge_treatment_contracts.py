@@ -36,7 +36,7 @@ def _trace(
         terminal_utility=utility,
         reference_utility=10.0,
         requested_value=0.7,
-        parameter_status="effective" if effective else "inactive",
+        application_status="applied" if effective else "inactive",
         receipt_status="ok",
     )
 
@@ -68,7 +68,7 @@ def test_frozen_knowledge_treatments_map_to_bounded_runtime_modes() -> None:
 
 def test_unknown_parameter_is_not_counted_as_inactive() -> None:
     trace = _trace(KnowledgeTreatment.LLM_NO_KNOWLEDGE, "d0", 10.0, effective=False)
-    diagnostics = _diagnostics((replace(trace, parameter_status="unknown"),))
+    diagnostics = _diagnostics((replace(trace, application_status="unknown"),))
     assert diagnostics["inactive_candidates"] == 0
     assert diagnostics["effective_interventions"] == 0
     assert diagnostics["unknown_candidates"] == 1

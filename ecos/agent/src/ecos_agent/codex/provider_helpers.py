@@ -84,8 +84,8 @@ _MODEL_EMPIRICAL_CASE_KEYS = (
     "toolchain_ref",
     "evidence_status",
     "requested_value",
-    "actual_value",
-    "parameter_status",
+    "consumed_value",
+    "application_status",
     "guardrail_status",
     "outcome_class",
 )

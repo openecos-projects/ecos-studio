@@ -106,8 +106,8 @@ _MODEL_EMPIRICAL_CASE_KEYS = (
     "toolchain_ref",
     "evidence_status",
     "requested_value",
-    "actual_value",
-    "parameter_status",
+    "consumed_value",
+    "application_status",
     "guardrail_status",
     "outcome_class",
 )
@@ -270,7 +270,7 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
             "supported_action_view pass action on density_weight is the explicit support that "
             "permits probing it, and without that support never enable it. "
             "Use parameter_knowledge, including runtime_semantics and source spans, together with "
-            "parameter_trajectories: requested and written values, actual values, status, projected "
+            "parameter_trajectories: requested and written values, consumed values, application status, projected "
             "terminal observations, mechanism reasons, execution context, and terminal outcomes or "
             "failures. Terminal observations are decisive projections: frozen objective metrics with "
             "deltas versus the incumbent, timing guardrails, signoff gates, eligibility counts, and the "

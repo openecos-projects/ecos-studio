@@ -566,10 +566,11 @@ class ControllerExecutionMixin:
     ) -> OptimizationControlResult:
         requested = record.requested
         if receipt.parameter_application_receipt is not None:
-            native_requested = receipt.parameter_application_receipt.requested
+            native_receipt = receipt.parameter_application_receipt
+            native_requested = native_receipt.parameter.requested
             if (
-                native_requested.get("knob_id") != requested.knob_id.value
-                or native_requested.get("value") != requested.value
+                native_receipt.parameter.knob_id.value != requested.knob_id.value
+                or native_requested.value != requested.value
             ):
                 raise OptimizationEpisodeControllerError(
                     "terminal parameter receipt does not match requested value"

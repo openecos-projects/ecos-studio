@@ -6,7 +6,7 @@ contract to the native ECC candidate-rerun chain — the same adapter, receipt,
 and terminal-observation machinery the closed-loop runner uses — so one
 activation row executes as a single probe candidate from the parent checkpoint
 (never promoted into an episode incumbent) and returns the evidence links the
-mediation row requires: actual_value, receipt_status,
+mediation row requires: consumed_value, application_status,
 terminal_observation_hash, terminal_delta, promotion_decision.
 """
 
@@ -154,8 +154,12 @@ def evaluate_activation_outcome(
     non-regressing improvement beyond epsilon on some routability objective;
     otherwise the comparison label is recorded verbatim.
     """
-    actual_value = getattr(native_receipt, "actual_value", None)
-    receipt_status = getattr(native_receipt, "status", None)
+    consumed_value = (
+        native_receipt.parameter.consumed.value
+        if native_receipt and native_receipt.parameter.consumed
+        else None
+    )
+    application_status = native_receipt.application.status if native_receipt else None
     terminal_delta = None
     terminal_hash = None
     promotion_decision = None
@@ -170,13 +174,13 @@ def evaluate_activation_outcome(
             candidate_observation,
             {key: float(noise_epsilon[key]) for key in reference},
         )
-        if comparison == "better" and receipt_status == "effective":
+        if comparison == "better" and application_status == "applied":
             promotion_decision = "promote"
         elif comparison in _PROMOTION_COMPARISON_LABELS:
             promotion_decision = comparison
     return {
-        "actual_value": actual_value,
-        "receipt_status": receipt_status,
+        "consumed_value": consumed_value,
+        "application_status": application_status,
         "terminal_observation_hash": terminal_hash,
         "terminal_delta": terminal_delta,
         "promotion_decision": promotion_decision,

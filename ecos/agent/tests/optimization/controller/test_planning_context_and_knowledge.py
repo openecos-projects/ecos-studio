@@ -350,7 +350,7 @@ def test_requested_only_planning_does_not_expose_receipts_or_task_memory(
     )
     observation = _observation().model_copy(update={"state_evidence": (StageEvidenceFeature(
         feature_id="place_final_density_overflow", value=0.05,
-        evidence_ref="analysis/parameter_runtime_report.v2.json", evidence_sha256=HASH,
+        evidence_ref="analysis/parameter_runtime_report.v3.json", evidence_sha256=HASH,
     ),)})
     controller.plan(observation, _retrieval(), CURRENT_VALUES)
 
@@ -662,7 +662,7 @@ def test_external_case_pool_requires_explicit_training_split(tmp_path: Path) -> 
             binding_id="binding.one",
             toolchain_ref=HASH,
             requested_value=0.7,
-            parameter_status="effective",
+            application_status="applied",
             proposal_sha256=HASH,
             effective_domain_sha256=HASH,
             parameter_card_sha256=HASH,

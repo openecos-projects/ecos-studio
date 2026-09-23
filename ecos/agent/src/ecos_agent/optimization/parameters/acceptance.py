@@ -56,7 +56,7 @@ _SUCCESSFUL_TRACE_OUTCOMES = frozenset(
 
 
 def _receipt_is_effective(receipt: dict) -> bool:
-    return receipt.get("status") == "effective"
+    return receipt.get("application", {}).get("status") == "applied"
 
 
 def _validate_native_receipt(
@@ -76,17 +76,17 @@ def _validate_native_receipt(
         validate_application_receipt(receipt, cards)
     except ValueError:
         issues.append("native receipt semantics validation failed")
-    if receipt.requested["knob_id"] != knob_id:
+    if receipt.parameter.knob_id.value != knob_id:
         issues.append("native receipt knob does not match acceptance entry")
     if not receipt.tool.source_sha256:
         issues.append("native receipt tool source is missing")
     if runtime_payload.get("tool") != receipt.tool.model_dump(mode="json"):
         issues.append("runtime report tool binding mismatch")
+    runtime_parameter = runtime_payload.get("parameter")
     if (
-        runtime_payload.get("knob_id") != knob_id
-        or runtime_payload.get("written_value") != receipt.materialization.written_value
-        or isinstance(runtime_payload.get("written_value"), bool)
-        != isinstance(receipt.materialization.written_value, bool)
+        not isinstance(runtime_parameter, dict)
+        or runtime_parameter.get("knob_id") != knob_id
+        or runtime_parameter.get("written") != receipt.parameter.written.model_dump(mode="json")
     ):
         issues.append("runtime report materialization binding mismatch")
     expected_materialization_sha256 = canonical_sha256(
@@ -107,8 +107,15 @@ def _validate_native_receipt(
     ):
         issues.append("native receipt candidate binding mismatch")
     dumped = receipt.model_dump(mode="json", by_alias=True)
-    runtime_fields = ("status", "actual_value", "reason", "observation")
-    if any(runtime_payload.get(field) != dumped.get(field) for field in runtime_fields):
+    expected_parameter = {
+        key: dumped["parameter"][key]
+        for key in ("knob_id", "written", "consumed", "realized")
+    }
+    if (
+        runtime_parameter != expected_parameter
+        or runtime_payload.get("application") != dumped.get("application")
+        or runtime_payload.get("observation") != dumped.get("observation")
+    ):
         issues.append("native receipt does not match runtime report")
     return receipt, issues
 
@@ -130,8 +137,8 @@ def _validate_candidate_artifact_binding(
             site_width_dbu=site_width_dbu,
             receipt=receipt,
             requested=RequestedKnobValue(
-                knob_id=OptimizationKnob(receipt.requested["knob_id"]),
-                value=receipt.requested["value"],
+                knob_id=OptimizationKnob(receipt.parameter.knob_id.value),
+                value=receipt.parameter.requested.value,
             ),
             evidence=evidence,
             candidate_ref=payload["candidate_root_ref"],

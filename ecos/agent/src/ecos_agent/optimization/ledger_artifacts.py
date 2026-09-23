@@ -132,11 +132,12 @@ def _replay_entries(
                 )
             start = starts[payload.intervention_id]
             if payload.parameter_application_receipt is not None:
-                requested = payload.parameter_application_receipt.requested
+                receipt = payload.parameter_application_receipt
+                requested = receipt.parameter.requested
                 if (
                     start.requested is None
-                    or requested.get("knob_id") != start.requested.knob_id.value
-                    or requested.get("value") != start.requested.value
+                    or receipt.parameter.knob_id.value != start.requested.knob_id.value
+                    or requested.value != start.requested.value
                 ):
                     raise OptimizationLedgerIntegrityError(
                         "terminal parameter receipt does not match intervention request"

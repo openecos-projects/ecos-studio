@@ -66,8 +66,8 @@ def test_activation_requires_passing_offline_gate():
 
 def _full_runner(**kwargs):
     return {
-        "actual_value": kwargs["row"]["requested_value"],
-        "receipt_status": "effective",
+        "consumed_value": kwargs["row"]["requested_value"],
+        "application_status": "applied",
         "terminal_observation_hash": "sha256:" + "d" * 64,
         "terminal_delta": -2.0,
         "promotion_decision": "promote",
@@ -85,7 +85,7 @@ def test_activation_mediation_row_is_complete_and_epsilon_compared():
     for key in (
         "protocol_hash", "design_id", "context_fingerprint", "parent_checkpoint",
         "proposal_hash", "support_status", "claim_bound", "requested_value",
-        "actual_value", "receipt_status", "terminal_observation_hash",
+        "consumed_value", "application_status", "terminal_observation_hash",
         "terminal_delta", "epsilon_comparison", "promotion_decision",
         "failure_or_timeout_reason",
     ):
@@ -134,10 +134,10 @@ def test_missing_execution_link_blocks_utility_analysis():
     row = run_activation(
         row=_row(), protocol=_protocol(), design_id="gcd",
         parent_checkpoint="cp",
-        candidate_runner=lambda **kwargs: {"receipt_status": "effective"},
+        candidate_runner=lambda **kwargs: {"application_status": "applied"},
         epsilon=0.5, offline_gate=PASSING_GATE,
     )
     assert row["row_status"] == "incomplete"
     assert set(row["missing_evidence"]) == {
-        "actual_value", "terminal_observation_hash", "terminal_delta", "promotion_decision",
+        "consumed_value", "terminal_observation_hash", "terminal_delta", "promotion_decision",
     }
