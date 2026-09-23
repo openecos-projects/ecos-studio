@@ -375,6 +375,23 @@ Summary                  16.882        0.0       0     321MHz      0.256        
       expect(result.execution.stages).toEqual([])
     })
 
+    it('uses explicit project metadata only for PDK provenance', () => {
+      const result = extractDesignReportData({
+        workspaceName: 'fallback_design',
+        projectMetadata: {
+          design: 'legacy_home_design',
+          die_area: 1234,
+          pdk_version: 'v2.1.0',
+          commit: 'abcdef1234567890',
+        },
+      })
+
+      expect(result.design.designName).toBe('fallback_design')
+      expect(result.design.pdkVersion).toBe('v2.1.0')
+      expect(result.design.pdkCommit).toBe('abcdef1234567890')
+      expect(result.physical.dieAreaUm2).toBeNull()
+    })
+
     it('flags warnings on abnormal values like out of range utilization', () => {
       const result = extractDesignReportData({
         workspacePath: '/projects/bad_util',
