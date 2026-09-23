@@ -20,7 +20,7 @@
           :aria-selected="tab.corner === cornerFilter"
           :class="{ 'is-active': tab.corner === cornerFilter }"
           :title="tab.label"
-          @click="cornerFilter = tab.corner"
+          @click="emit('select-corner', tab.corner)"
         >
           {{ tab.label }}
         </button>
@@ -38,7 +38,16 @@
 
       <TimingWnsChart :rows="sortedRows" />
 
+      <div v-if="cornerFilter && detailLoading" class="timing-detail-state">
+        <i class="ri-loader-4-line spin" aria-hidden="true" />
+        <span>Loading timing paths</span>
+      </div>
+      <div v-else-if="cornerFilter && detailError" class="timing-detail-state is-error">
+        <i class="ri-error-warning-line" aria-hidden="true" />
+        <span>{{ detailError }}</span>
+      </div>
       <TimingCriticalPaths
+        v-else-if="showCriticalPaths"
         :critical-paths="criticalPathsModel"
         :setup-corner="setupCornerTitle"
         :hold-corner="holdCornerTitle"
@@ -72,15 +81,24 @@ const props = defineProps<{
   /** Per-corner paths; enables the corner scope tabs in the panel. */
   pathsByCorner?: Array<{ corner: string; paths: StaCriticalPath[] }> | null
   runInfo?: Array<{ id: string; label: string; value: string }>
-  initialCorner?: string | null
+  selectedCorner?: string | null
+  detailLoading?: boolean
+  detailError?: string | null
   emptyHint?: string
+}>()
+
+const emit = defineEmits<{
+  'select-corner': [corner: string | null]
 }>()
 
 const negativeFirst = ref(false)
 const selectedPathGroup = ref('summary')
-const cornerFilter = ref<string | null>(null)
+const cornerFilter = computed(() => props.selectedCorner ?? null)
 
 const pathGroupOptions = computed(() => props.overview?.pathGroups ?? [])
+const lazyCornerDetails = computed(
+  () => props.pathsByCorner !== undefined && props.pathsByCorner !== null,
+)
 
 watch(pathGroupOptions, (groups) => {
   if (
@@ -92,26 +110,18 @@ watch(pathGroupOptions, (groups) => {
 })
 
 const cornerTabs = computed(() => {
-  const groups = props.pathsByCorner ?? []
-  if (groups.length < 2) return []
+  if (!lazyCornerDetails.value) return []
+  const corners = props.overview?.corners.map((corner) => corner.corner) ?? []
+  if (!corners.length) return []
   return [
-    { id: 'timing-scope-all', label: 'All corners', corner: null as string | null },
-    ...groups.map(({ corner }) => ({
+    { id: 'timing-scope-summary', label: 'Summary', corner: null as string | null },
+    ...corners.map((corner) => ({
       id: `timing-scope-${corner}`,
       label: corner,
       corner,
     })),
   ]
 })
-
-watch(
-  () => props.initialCorner,
-  (corner) => {
-    const known = (props.pathsByCorner ?? []).some(({ corner: name }) => name === corner)
-    cornerFilter.value = known ? (corner as string) : null
-  },
-  { immediate: true },
-)
 
 const displayed = computed(() => {
   if (!props.overview) {
@@ -125,12 +135,22 @@ const sortedRows = computed(() =>
 )
 
 const criticalPathsModel = computed(() => {
+  if (!lazyCornerDetails.value) return props.criticalPaths ?? null
+  if (!cornerFilter.value) return null
   const groups = props.pathsByCorner
   if (groups && groups.length) {
     return selectStaCriticalPaths(groups, cornerFilter.value)
   }
   return props.criticalPaths ?? null
 })
+const selectedPathsLoaded = computed(() =>
+  (props.pathsByCorner ?? []).some(({ corner }) => corner === cornerFilter.value),
+)
+const showCriticalPaths = computed(() =>
+  lazyCornerDetails.value
+    ? Boolean(cornerFilter.value && selectedPathsLoaded.value)
+    : criticalPathsModel.value !== null,
+)
 
 /** Corner attribution is redundant when the summary covers a single corner. */
 const attributesCorner = computed(() => displayed.value.corners.length > 1)
@@ -177,6 +197,22 @@ function emptyStaOverview(): StaOverviewModel {
   font-size: 12px;
   justify-content: center;
   min-height: 160px;
+}
+
+.timing-detail-state {
+  align-items: center;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  display: flex;
+  font-size: 11px;
+  gap: 6px;
+  justify-content: center;
+  min-height: 96px;
+}
+
+.timing-detail-state.is-error {
+  color: var(--danger-color);
 }
 
 .timing-corner-tabs {

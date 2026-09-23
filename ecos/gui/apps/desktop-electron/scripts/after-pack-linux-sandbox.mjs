@@ -30,13 +30,29 @@ exec "$BINARY" "$@"
 `
 }
 
-export async function validatePackagedAgent(appOutDir) {
-  const agentDirectory = join(appOutDir, 'resources', 'agent')
-  const agentPath = join(agentDirectory, 'ecos-agent')
+export function packagedAgentBinaryName(electronPlatformName) {
+  return electronPlatformName === 'win32' ? 'ecos-agent.exe' : 'ecos-agent'
+}
+
+export async function validatePackagedAgent(
+  appOutDir,
+  electronPlatformName,
+  productFilename,
+) {
+  const agentDirectory =
+    electronPlatformName === 'darwin' || electronPlatformName === 'mas'
+      ? join(appOutDir, `${productFilename}.app`, 'Contents', 'Resources', 'agent')
+      : join(appOutDir, 'resources', 'agent')
+  const isWindows = electronPlatformName === 'win32'
+  const agentBinaryName = packagedAgentBinaryName(electronPlatformName)
+  const agentPath = join(agentDirectory, agentBinaryName)
   const manifestPath = join(agentDirectory, 'agent-provider.json')
   try {
     const agent = await stat(agentPath)
-    if (!agent.isFile() || (agent.mode & 0o111) === 0) {
+    if (!agent.isFile()) {
+      throw new Error('not a regular file')
+    }
+    if (!isWindows && (agent.mode & 0o111) === 0) {
       throw new Error('not an executable file')
     }
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
@@ -65,6 +81,15 @@ function resolveExecutableName(packager) {
 }
 
 export default async function afterPackLinuxSandbox(context) {
+  // ECC is deliberately not packaged (slim build): it is acquired from the
+  // registry on first run, so only the bundled Agent is validated here.
+  const productFilename = context.packager.appInfo.productFilename
+  await validatePackagedAgent(
+    context.appOutDir,
+    context.electronPlatformName,
+    productFilename,
+  )
+
   if (context.electronPlatformName !== 'linux') {
     return
   }
@@ -82,8 +107,4 @@ export default async function afterPackLinuxSandbox(context) {
     await writeFile(executablePath, createLinuxSandboxWrapper(wrappedBinaryName), 'utf8')
     await chmod(executablePath, 0o755)
   }
-
-  // ECC is deliberately not packaged (slim build): it is acquired from the
-  // registry on first run, so only the bundled Agent is validated here.
-  await validatePackagedAgent(context.appOutDir)
 }

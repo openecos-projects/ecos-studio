@@ -49,6 +49,7 @@ function installationToPdk(installation: PdkInstallationSnapshot): ImportedPdk {
     version: installation.version ?? '',
     readiness: installation.readiness,
     supportsEccDefaults: installation.supportsEccDefaults,
+    defaultResources: installation.defaultResources,
   }
 }
 

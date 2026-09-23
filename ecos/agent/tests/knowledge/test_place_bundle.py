@@ -243,5 +243,9 @@ def test_packaged_agent_build_includes_the_external_knowledge_bundle() -> None:
     build_script = (ECOS_ROOT / ".github" / "scripts" / "build-binaries.sh").read_text(
         encoding="utf-8"
     )
+    agent_build_script = (ECOS_ROOT / ".github" / "scripts" / "build-agent.sh").read_text(
+        encoding="utf-8"
+    )
 
-    assert '--add-data "$PWD/knowledge:knowledge"' in build_script
+    assert "build-agent.sh" in build_script
+    assert '--add-data "$KNOWLEDGE_SRC:knowledge"' in agent_build_script

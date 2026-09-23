@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  persistEccPdkConfigFromCreate,
   prepareWorkspaceCreateBinding,
   prepareWorkspaceOpenBinding,
 } from './workspacePdkBindings'
@@ -215,5 +216,121 @@ describe('prepareWorkspaceCreateBinding', () => {
         },
       }),
     ).rejects.toThrow('Project MPC Requirement is unbound')
+  })
+})
+
+describe('manual external PDK resources', () => {
+  const manualSpec = (paths: string[]) => ({
+    pdk: {
+      familyId: 'ics55',
+      mode: 'manual',
+      files: [
+        { fileId: 'tech', role: 'tech' },
+        ...paths.map((_, index) => ({ fileId: `lef-${index + 1}`, role: 'lef' })),
+        { fileId: 'liberty-1', role: 'liberty' },
+      ],
+    },
+  })
+
+  it('binds mixed relative and absolute manual cell LEF entries', async () => {
+    const { dependencies } = createDependencies()
+    dependencies.pdkInventoryService.resolveBinding.mockResolvedValue({})
+    const requirement = {
+      familyId: 'ics55',
+      version: null,
+      manualConfig: {
+        techLef: 'prtech/tech.lef',
+        cellLefs: ['IP/STD_cell/lef/std.lef', '/macros/sram/sram.lef'],
+        liberty: ['IP/STD_cell/lib/std.lib'],
+      },
+    }
+
+    const prepared = await prepareWorkspaceCreateBinding(dependencies, {
+      commandId: 'create-mixed',
+      projectId: 'proj_demo',
+      projectRoot: '/projects/demo',
+      targetDirectory: '/projects/demo/runs/workspace',
+      pdkRequirement: requirement,
+      workspaceBindings: { inputs: {}, pdk: {} },
+      workspaceSpec: manualSpec(requirement.manualConfig.cellLefs),
+    })
+
+    // Node resolve() passes absolute entries through untouched, so external
+    // macro LEFs bind to their own absolute path.
+    expect(prepared.workspaceBindings.pdk).toMatchObject({
+      files: {
+        tech: '/pdks/ics55/prtech/tech.lef',
+        'lef-1': '/pdks/ics55/IP/STD_cell/lef/std.lef',
+        'lef-2': '/macros/sram/sram.lef',
+        'liberty-1': '/pdks/ics55/IP/STD_cell/lib/std.lib',
+      },
+      root: '/pdks/ics55',
+    })
+  })
+})
+
+describe('persistEccPdkConfigFromCreate', () => {
+  it('writes external paths and overrides with binding-derived PDK context', async () => {
+    const write = vi.fn()
+    const runtimeRequest = {
+      commandId: 'create-1',
+      projectRoot: '/projects/demo',
+      targetDirectory: '/projects/demo/runs/workspace',
+      workspaceBindings: { pdk: { root: '/pdks/ics55' } },
+      workspaceSpec: { pdk: { familyId: 'ics55' } },
+    }
+
+    await persistEccPdkConfigFromCreate(
+      { ...createDependencies().dependencies, projectEccConfigService: { write } },
+      runtimeRequest,
+      {
+        externalPaths: ['/macros/sram'],
+        overrides: { lefs: ['/pdks/ics55/IP/lef/std.lef', '/macros/sram/sram.lef'] },
+      },
+    )
+
+    expect(write).toHaveBeenCalledWith({
+      projectRoot: '/projects/demo',
+      pdkRoot: '/pdks/ics55',
+      pdkName: 'ics55',
+      externalPaths: ['/macros/sram'],
+      overrides: { lefs: ['/pdks/ics55/IP/lef/std.lef', '/macros/sram/sram.lef'] },
+    })
+  })
+
+  it('derives the project root from the target directory and skips empty payloads', async () => {
+    const write = vi.fn()
+    const dependencies = {
+      ...createDependencies().dependencies,
+      projectEccConfigService: { write },
+    }
+    const runtimeRequest = {
+      commandId: 'create-2',
+      projectRoot: '/projects/demo',
+      targetDirectory: '/projects/demo/runs/workspace',
+      workspaceBindings: {},
+      workspaceSpec: {},
+    }
+
+    await persistEccPdkConfigFromCreate(dependencies, runtimeRequest, undefined)
+    await persistEccPdkConfigFromCreate(dependencies, runtimeRequest, {
+      externalPaths: [],
+    })
+    expect(write).not.toHaveBeenCalled()
+
+    await persistEccPdkConfigFromCreate(dependencies, runtimeRequest, {
+      externalPaths: ['/macros/sram'],
+    })
+    expect(write).toHaveBeenCalledWith(
+      expect.objectContaining({ projectRoot: '/projects/demo' }),
+    )
+
+    await expect(
+      persistEccPdkConfigFromCreate(
+        dependencies,
+        { ...runtimeRequest, projectRoot: undefined },
+        { externalPaths: ['/macros/sram'] },
+      ),
+    ).rejects.toThrow('requires a project root')
   })
 })

@@ -36,6 +36,7 @@ export function representativeProjectComparisonFixture(
   const workspaceIds = ['ws_0001', 'ws_0002'] as const
   const manifest: ProjectManifest = {
     schema_version: 1,
+    project_type: 'backend',
     project_id: 'proj_gcd',
     name: 'gcd',
     design_name: 'gcd',

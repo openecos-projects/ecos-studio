@@ -4,6 +4,8 @@ import {
   type BackendProjectComparison,
   type ProjectAnalysisSnapshot,
   type ProjectManifest,
+  type ProjectManifestStage,
+  type ProjectManifestType,
   type ProjectManifestFlowStep,
   type ProjectManifestWorkspace,
   type ProjectManifestWorkspaceStatus,
@@ -38,7 +40,9 @@ export type ProjectMetricId =
   | 'die_area'
   | 'core_util'
   | 'frequency'
-export type ProjectWorkspaceFlowStateMap = Partial<Record<FlowStep, ProjectStepStatus>>
+export type ProjectWorkspaceFlowStateMap = Partial<
+  Record<ProjectManifestStage, ProjectStepStatus>
+>
 export type ProjectWorkspaceFlowStatesById = Record<string, ProjectWorkspaceFlowStateMap>
 export type { ProjectManifestMpc } from '@ecos-studio/shared'
 
@@ -225,6 +229,7 @@ export interface ProjectDashboardSummary {
 
 export interface ProjectManagementProject {
   id: string
+  projectType: ProjectManifestType
   name: string
   designName: string
   path: string
@@ -241,6 +246,8 @@ export interface ProjectManagementProject {
   branchLinks: ProjectBranchLink[]
   comparisonSummary: ProjectComparisonSummary
 }
+
+export type BackendProjectManagementProject = ProjectManagementProject
 
 export interface ProjectSelectionState {
   selectedWorkspaceId: string
@@ -358,6 +365,7 @@ export function buildProjectManagementProject(
 
   return {
     id: path,
+    projectType: manifest?.project_type ?? project?.projectType ?? 'backend',
     name,
     designName,
     path,
@@ -386,7 +394,7 @@ function sectionData<T>(section: ReadSection<T> | null | undefined): T | null {
 }
 
 function buildV3WorkspaceSummaries(
-  manifestWorkspaces: ProjectWorkspaceManifest[],
+  manifestWorkspaces: ProjectManifestWorkspace[],
   workspaces: ProjectWorkspace[],
   snapshots: Map<string, ProjectAnalysisSnapshot>,
   qorTrendSummary: ProjectQorTrendSummary,
@@ -675,7 +683,7 @@ function buildV3MetricRows(summaries: ProjectWorkspaceSummary[]): ProjectMetricR
 
 function buildV3ComparisonSummary(
   manifest: ProjectManifest | null | undefined,
-  workspaces: ProjectWorkspaceManifest[],
+  workspaces: ProjectManifestWorkspace[],
   qorTrendSummary: ProjectQorTrendSummary,
   recommendation: ProjectRecommendation | null,
 ): ProjectComparisonSummary {
@@ -772,7 +780,7 @@ export function projectMpcOptionFromResource(
 }
 
 export function nextWorkspaceId(
-  project: ProjectManagementProject,
+  project: { workspaces: ReadonlyArray<{ id: string }> },
   occupiedWorkspaceIds: string[] = [],
 ): string {
   const numbers = project.workspaces
@@ -786,7 +794,10 @@ export function nextWorkspaceId(
 }
 
 export function createWorkspaceBranchDraft(
-  project: ProjectManagementProject,
+  project: {
+    path: string
+    workspaces: ReadonlyArray<{ id: string; workspacePath: string }>
+  },
   sourceWorkspaceId: string,
   source: WorkspaceBranchSourceStep,
   targetWorkspaceId = nextWorkspaceId(project),
@@ -829,7 +840,7 @@ function buildObjective(
 }
 
 function buildProjectWorkspace(
-  workspace: ProjectWorkspaceManifest,
+  workspace: ProjectManifestWorkspace,
   flowStateMap: ProjectWorkspaceFlowStateMap,
   depth = 0,
 ): ProjectWorkspace {
@@ -876,19 +887,19 @@ export function workspaceStatusFromFlow(
   return manifestStatus
 }
 
-function workspaceDisplayName(workspace: ProjectWorkspaceManifest): string {
+function workspaceDisplayName(workspace: ProjectManifestWorkspace): string {
   return (
     basenamePath(workspace.workspace_path) || workspace.name || workspace.workspace_id
   )
 }
 
-function sortWorkspacesByLineage(workspaces: ProjectWorkspaceManifest[]): Array<{
-  workspace: ProjectWorkspaceManifest
+function sortWorkspacesByLineage(workspaces: ProjectManifestWorkspace[]): Array<{
+  workspace: ProjectManifestWorkspace
   depth: number
 }> {
   const byId = new Map(workspaces.map((workspace) => [workspace.workspace_id, workspace]))
-  const childrenBySource = new Map<string, ProjectWorkspaceManifest[]>()
-  const roots: ProjectWorkspaceManifest[] = []
+  const childrenBySource = new Map<string, ProjectManifestWorkspace[]>()
+  const roots: ProjectManifestWorkspace[] = []
 
   for (const workspace of workspaces) {
     const sourceWorkspaceId =
@@ -903,8 +914,8 @@ function sortWorkspacesByLineage(workspaces: ProjectWorkspaceManifest[]): Array<
   }
 
   const sortByCreatedAt = (
-    left: ProjectWorkspaceManifest,
-    right: ProjectWorkspaceManifest,
+    left: ProjectManifestWorkspace,
+    right: ProjectManifestWorkspace,
   ) =>
     new Date(left.created_at).getTime() - new Date(right.created_at).getTime() ||
     left.workspace_id.localeCompare(right.workspace_id)
@@ -913,8 +924,8 @@ function sortWorkspacesByLineage(workspaces: ProjectWorkspaceManifest[]): Array<
   for (const children of childrenBySource.values()) children.sort(sortByCreatedAt)
 
   const visited = new Set<string>()
-  const sorted: Array<{ workspace: ProjectWorkspaceManifest; depth: number }> = []
-  const visit = (workspace: ProjectWorkspaceManifest, depth: number) => {
+  const sorted: Array<{ workspace: ProjectManifestWorkspace; depth: number }> = []
+  const visit = (workspace: ProjectManifestWorkspace, depth: number) => {
     if (visited.has(workspace.workspace_id)) return
     visited.add(workspace.workspace_id)
     sorted.push({ workspace, depth })
@@ -979,7 +990,7 @@ function flowHintStatusLabel(status: ProjectStepStatus): string {
 }
 
 function buildStepCell(
-  workspace: ProjectWorkspaceManifest,
+  workspace: ProjectManifestWorkspace,
   step: FlowStep,
   startStep: FlowStep,
   endStep: FlowStep,
@@ -1006,6 +1017,8 @@ function buildStepCell(
   } else if (isAfterEnd) {
     status = 'skipped'
   } else if (Object.keys(flowStateMap).length > 0) {
+    // A partially written flow.json is authoritative for execution state.
+    // Steps absent from it have not run in this workspace yet.
     status = 'skipped'
   } else if (workspace.status === 'running') {
     status = 'running'
@@ -1229,7 +1242,7 @@ function detailHintForStep(step: FlowStep): string {
 }
 
 function buildParameterDiffs(
-  workspaces: ProjectWorkspaceManifest[],
+  workspaces: ProjectManifestWorkspace[],
 ): ProjectComparisonParameterDiff[] {
   return workspaces.flatMap((workspace) =>
     Object.entries(workspace.parameter_patch ?? {}).map(([name, patch]) => {

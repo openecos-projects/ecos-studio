@@ -380,7 +380,9 @@ export interface DesktopAgentWorkspaceSetupParameters {
   clock: string
   design: string
   description: string
-  die_area_mode: 'utilitization_margin' | 'width_height'
+  // 'utilitization' / 'utilitization_margin' are the legacy misspelled forms;
+  // keep reading them for at least one release cycle.
+  die_area_mode: 'utilization_margin' | 'utilitization_margin' | 'width_height'
   die_height?: number
   die_width?: number
   frequency_max: number
@@ -389,6 +391,7 @@ export interface DesktopAgentWorkspaceSetupParameters {
   target_density: number
   target_overflow: number
   top_module: string
+  utilization?: number
   utilitization?: number
 }
 

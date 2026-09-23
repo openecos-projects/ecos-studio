@@ -52,6 +52,7 @@ interface ProjectComparisonReader {
     projectRoot: string
     workspacePath: string
     artifacts: Array<{ reference: string; sha256: string; sizeBytes: number }>
+    allowExternallyModified?: boolean
   }): Promise<VerifiedProjectArtifactsReadResult>
 }
 
@@ -121,9 +122,9 @@ export class BackendProjectComparisonService {
     }
     let watcher: ProjectComparisonFileWatcher | null = null
     try {
-      const projectRoot = await (this.reader.resolveProjectRoot ?? realpath)(
-        request.projectRootLocator,
-      )
+      const projectRoot = this.reader.resolveProjectRoot
+        ? await this.reader.resolveProjectRoot(request.projectRootLocator)
+        : await realpath(request.projectRootLocator)
       let context: ProjectComparisonContext | null = null
       let manifestChangedBeforeRead = false
       let watcherIssue: ReadIssue | null = null
@@ -328,6 +329,7 @@ export class BackendProjectComparisonService {
         this.handleSnapshotChanged(context, workspaceRoot),
       ),
     )
+    this.findings.refreshArtifacts(context.id)
   }
 
   private context(windowId: number, id: string): ProjectComparisonContext | null {

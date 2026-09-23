@@ -94,6 +94,7 @@ import {
   type PdkInstallationSnapshot,
   type PdkLocateRequest,
   type PdkResolveBindingRequest,
+  type ProjectEccPdkConfigWriteRequest,
   type DesktopShellDataEvent,
   type DesktopShellExitEvent,
   type DesktopShellSession,
@@ -115,6 +116,7 @@ import {
   readAgentWorkspaceParameterValues,
 } from '../services/agent/agentWorkspaceParameterUpdates'
 import { recordAgentOperationAssociation } from '../services/agent/agentOperationAssociations'
+import type { ChipViewerWorkspaceRevisionNotification } from '../services/chipViewerService'
 import {
   closeWindow,
   isWindowMaximized,
@@ -136,7 +138,9 @@ import {
 } from '../services/eccRpc/workspaceRerun'
 import { executeProductCommand } from '../services/productCommandService'
 import { buildWorkspaceCreationModel } from '../services/workspaceCreationModel'
+import { rememberWorkspaceParameterCatalog } from '../services/workspaceParameterCatalogCache'
 import {
+  persistEccPdkConfigFromCreate,
   prepareWorkspaceCreateBinding,
   prepareWorkspaceOpenBinding,
 } from '../services/workspacePdkBindings'
@@ -286,6 +290,9 @@ export interface DesktopBridgeServices {
   projectManagementReadService?: {
     discoverProject(directory: string): Promise<ProjectManifest | null>
     readManifest(projectRoot: string): Promise<ProjectManifest | null>
+    readFrontendWorkspaceTexts?(
+      request: import('@ecos-studio/shared').DesktopFrontendWorkspaceTextsRequest,
+    ): Promise<import('@ecos-studio/shared').DesktopFrontendWorkspaceTextsResult>
     listProjectEntries(projectRoot: string): Promise<string[]>
     readWorkspaceStepConfiguration(
       request: DesktopProjectManagementWorkspaceStepConfigurationRequest,
@@ -419,6 +426,10 @@ export interface DesktopBridgeServices {
   chipViewerService: {
     open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult>
     isOpen(request: ChipViewerOpenRequest): Promise<{ open: boolean }>
+    isWorkspaceMutationBusy?(workspaceHandle: string): boolean
+    onWorkspaceRevisionChanged?: (
+      notification: ChipViewerWorkspaceRevisionNotification,
+    ) => void
   }
   workspaceResourceService: {
     getIndex(): Promise<WorkspaceResourceIndex>
@@ -463,6 +474,14 @@ export interface DesktopBridgeServices {
     validateWorkspace(
       request: import('@ecos-studio/shared').PdkWorkspaceValidationRequest,
     ): Promise<PdkInstallationSnapshot>
+  }
+  projectEccConfigService: {
+    read(
+      projectRoot: string,
+    ): Promise<import('@ecos-studio/shared').ProjectEccPdkConfigReadResult>
+    write(
+      request: import('@ecos-studio/shared').ProjectEccPdkConfigWriteRequest,
+    ): Promise<import('@ecos-studio/shared').ProjectEccPdkConfigReadResult>
   }
   frontendRpcRuntimeService: {
     cancelOperationLegacy(
@@ -1384,7 +1403,7 @@ export function registerIpc(
     }
 
     const deliveredSenders = new Set<IpcMainInvokeEvent['sender']>()
-    for (const subscription of workspaceHandleSubscriptions.values()) {
+    for (const [subscribedHandle, subscription] of workspaceHandleSubscriptions) {
       if (subscription.designTool !== designTool) continue
       if (!subscription.directories.has(normalizedDirectory)) continue
       if (deliveredSenders.has(subscription.sender)) continue
@@ -1392,6 +1411,12 @@ export function registerIpc(
       const scopedPayload = {
         ...payload,
         workspaceDirectory: normalizedDirectory,
+        // Directory fallback is used when a sidecar event carries an
+        // unattached or stale GUI handle. Route it under the handle that the
+        // target renderer actually owns so its workspace filter accepts it.
+        ...(readWorkspaceHandleFromEvent(payload)
+          ? { workspaceHandle: subscribedHandle }
+          : {}),
       }
       if (designTool === 'backend' && runtimeEventCommitsWorkspaceFacts(payload)) {
         invalidateBackendWorkspaceForSender(subscription.sender)
@@ -1448,6 +1473,30 @@ export function registerIpc(
   services.frontendRpcRuntimeService.onEvent((payload) =>
     deliverRuntimeEvent('frontend', payload),
   )
+
+  // Layout edit saves advance the Workspace revision inside ECC without
+  // emitting a runtime protocol event. Republish the adopted revision as a
+  // synthetic workspace.committed event so the window refreshes the revision
+  // it sends with the next step run (ECC rejects stale expected revisions
+  // with revision_conflict) and invalidates its workspace caches.
+  services.chipViewerService.onWorkspaceRevisionChanged = (notification) => {
+    deliverRuntimeEvent('backend', {
+      type: 'runtime.protocol',
+      workspaceHandle: notification.workspaceHandle,
+      workspaceDirectory: notification.projectPath,
+      event: {
+        type: 'workspace.committed',
+        eventId: `layout-edit-save:${notification.workspaceHandle}:${notification.workspaceRevision}:${randomUUID()}`,
+        operationId: `layout-edit-save:${notification.workspaceHandle}`,
+        origin: 'gui',
+        payload: { source: 'layout.edit.save' },
+        sequence: 0,
+        timestamp: Date.now(),
+        workspaceId: notification.workspaceHandle,
+        workspaceRevision: notification.workspaceRevision,
+      },
+    })
+  }
 
   services.agentRuntimeService?.onEvent((payload) => {
     if (!payload.providerId || !payload.sessionId) return
@@ -1968,10 +2017,13 @@ export function registerIpc(
       if (!isRecord(request) || typeof request.projectRootLocator !== 'string') {
         throw new Error('Backend project comparison selection is invalid.')
       }
+      const projectRoot = await services.workspaceService.registerProjectRoot(
+        request.projectRootLocator,
+      )
       return await services.backendProjectComparisonService.selectProject(
         event.sender.id,
         {
-          projectRootLocator: request.projectRootLocator,
+          projectRootLocator: projectRoot,
         },
       )
     },
@@ -2095,6 +2147,26 @@ export function registerIpc(
   )
 
   handle(
+    desktopApiIpcChannels.projectManagementReadFrontendWorkspaceTexts,
+    async (_event, request) => {
+      if (!services.projectManagementReadService?.readFrontendWorkspaceTexts) {
+        throw new Error('Project management reads are unavailable.')
+      }
+      if (
+        !isRecord(request) ||
+        typeof request.projectRoot !== 'string' ||
+        typeof request.workspacePath !== 'string' ||
+        !Array.isArray(request.paths) ||
+        request.paths.some((path) => typeof path !== 'string')
+      )
+        throw new Error('Frontend workspace report request is invalid.')
+      return await services.projectManagementReadService.readFrontendWorkspaceTexts(
+        request as unknown as import('@ecos-studio/shared').DesktopFrontendWorkspaceTextsRequest,
+      )
+    },
+  )
+
+  handle(
     desktopApiIpcChannels.projectManagementListEntries,
     async (_event, projectRoot) => {
       if (!services.projectManagementReadService) {
@@ -2121,9 +2193,13 @@ export function registerIpc(
       ) {
         throw new Error('Project management Step Configuration request is invalid.')
       }
-      return await services.projectManagementReadService.readWorkspaceStepConfiguration(
-        request as unknown as DesktopProjectManagementWorkspaceStepConfigurationRequest,
+      const projectRoot = await services.workspaceService.requestProjectPathAccess(
+        request.projectRoot,
       )
+      return await services.projectManagementReadService.readWorkspaceStepConfiguration({
+        ...(request as unknown as DesktopProjectManagementWorkspaceStepConfigurationRequest),
+        projectRoot,
+      })
     },
   )
 
@@ -2617,6 +2693,17 @@ export function registerIpc(
       request as PdkResolveBindingRequest,
     )
   })
+  // ecc.toml is a project declaration rather than a backend-workspace
+  // artifact, so writes skip backend workspace invalidation.
+  handle(desktopApiIpcChannels.projectEccConfigRead, async (_event, projectRoot) => {
+    return await services.projectEccConfigService.read(String(projectRoot ?? ''))
+  })
+  handle(desktopApiIpcChannels.projectEccConfigWrite, async (event, request) => {
+    requireBackendMutationAllowed(event)
+    return await services.projectEccConfigService.write(
+      request as ProjectEccPdkConfigWriteRequest,
+    )
+  })
 
   handle(desktopApiIpcChannels.designRuntimeCancel, async (_event, request) => {
     const runtimeRequest = request as DesignRuntimeCancelRequest
@@ -2642,6 +2729,7 @@ export function registerIpc(
       services.eccRuntimeService.describeWorkspaceSpec(),
       services.pdkInventoryService.listInstallations(),
     ])
+    rememberWorkspaceParameterCatalog(discovery)
     return buildWorkspaceCreationModel(
       discovery as Record<string, unknown>,
       pdkInstallations,
@@ -2725,8 +2813,14 @@ export function registerIpc(
         : undefined,
       ownsWorkspaceHandle: (workspaceHandle) =>
         workspaceHandleSubscriptions.get(workspaceHandle)?.sender === event.sender,
-      prepareCreate: async (createRequest) =>
-        await prepareWorkspaceCreateBinding(services, createRequest),
+      isWorkspaceMutationBusy: (workspaceHandle) =>
+        services.chipViewerService.isWorkspaceMutationBusy?.(workspaceHandle) ?? false,
+      prepareCreate: async (createRequest) => {
+        const prepared = await prepareWorkspaceCreateBinding(services, createRequest)
+        const { eccPdkConfig: persistConfig, ...runtimeRequest } = prepared
+        await persistEccPdkConfigFromCreate(services, runtimeRequest, persistConfig)
+        return runtimeRequest
+      },
       runtime: services.eccRuntimeService,
       trackCreateResult: (result) => {
         const workspaceHandle = workspaceHandleFromResult(result)
@@ -2944,8 +3038,10 @@ export function registerIpc(
       if (!directory) {
         throw new Error('Workspace step outputs require a workspace directory.')
       }
+      const authorizedDirectory =
+        await services.workspaceService.requestProjectPathAccess(directory)
       return await services.eccRuntimeService.workspaceStepOutputs(
-        directory,
+        authorizedDirectory,
         runtimeRequest.step,
       )
     },

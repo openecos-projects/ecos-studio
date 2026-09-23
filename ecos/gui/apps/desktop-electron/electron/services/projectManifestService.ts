@@ -10,6 +10,7 @@ import type {
 } from '@ecos-studio/shared'
 import { isPathWithinRoot } from './pathScope'
 import { validateProjectManifestMutation } from './projectManifestMutationValidation'
+import type { FrontendProjectManifestService } from './frontendProjectManifestService'
 
 export interface ProjectManifestScopeProvider {
   resolveProjectRoot(path: string): Promise<string>
@@ -57,6 +58,7 @@ export class ProjectManifestService {
     private readonly projectScopeProvider: ProjectManifestScopeProvider,
     private readonly replacementProvider: ProjectManifestReplacementProvider | undefined,
     private readonly runtime: ProjectManifestRuntime,
+    private readonly frontend?: FrontendProjectManifestService,
   ) {}
 
   async mutate(
@@ -69,21 +71,46 @@ export class ProjectManifestService {
     const projectRoot = await this.projectScopeProvider.resolveProjectRoot(
       request.projectRoot,
     )
-    return await this.enqueue(projectRoot, () =>
-      this.mutateThroughRuntime(projectRoot, request.mutation),
-    )
+    return await this.enqueue(projectRoot, async () => {
+      if (
+        (request.mutation.type === 'create' &&
+          request.mutation.projectType === 'frontend') ||
+        (await this.frontend?.load(projectRoot))
+      ) {
+        if (!this.frontend) throw new Error('Frontend project management is unavailable.')
+        return await this.frontend.mutate(projectRoot, request.mutation)
+      }
+      return await this.mutateThroughRuntime(projectRoot, request.mutation)
+    })
   }
 
   async load(requestedProjectRoot: string): Promise<ProjectManifest> {
     const projectRoot =
       await this.projectScopeProvider.resolveProjectRoot(requestedProjectRoot)
+    const frontendManifest = await this.frontend?.load(projectRoot)
+    if (frontendManifest) return frontendManifest
     return projectManifestForPresentation(
       await this.loadManifest(projectRoot),
       projectRoot,
     )
   }
 
+  async importFrontendWorkspace(
+    requestedProjectRoot: string,
+    workspacePath: string,
+    workspaceId: string,
+  ): Promise<ProjectManifest> {
+    const projectRoot =
+      await this.projectScopeProvider.resolveProjectRoot(requestedProjectRoot)
+    if (!this.frontend) throw new Error('Frontend project management is unavailable.')
+    return await this.enqueue(projectRoot, () =>
+      this.frontend!.importWorkspace(projectRoot, workspacePath, workspaceId),
+    )
+  }
+
   async discover(directory: string): Promise<ProjectManifest | null> {
+    const frontendManifest = await this.frontend?.discover(directory)
+    if (frontendManifest) return frontendManifest
     const discovered = await this.runtime.callRuntime<{
       projectId: string
       projectRoot: string
@@ -107,7 +134,8 @@ export class ProjectManifestService {
     const projectRoot =
       await this.projectScopeProvider.resolveProjectRoot(requestedProjectRoot)
     return await this.enqueue(projectRoot, async () => {
-      const manifest = await this.loadManifest(projectRoot)
+      const manifest =
+        (await this.frontend?.load(projectRoot)) ?? (await this.loadManifest(projectRoot))
       requireProjectIdentity(manifest, expectedProjectId)
       return workspaceRegistrationEvidence(manifest, workspacePath, projectRoot)
     })
@@ -121,14 +149,19 @@ export class ProjectManifestService {
     const projectRoot =
       await this.projectScopeProvider.resolveProjectRoot(requestedProjectRoot)
     return await this.enqueue(projectRoot, async () => {
-      const manifest = await this.loadManifest(projectRoot)
+      const manifest =
+        (await this.frontend?.load(projectRoot)) ?? (await this.loadManifest(projectRoot))
       requireProjectIdentity(manifest, expectedProjectId)
       const existing = workspaceRegistrationEvidence(manifest, workspacePath, projectRoot)
       if (existing) return existing
-      const updated = await this.mutateManifest(projectRoot, {
-        type: 'register-workspace',
+      const mutation = {
+        type: 'register-workspace' as const,
         input: { projectRoot, workspacePath },
-      })
+      }
+      const updated =
+        manifest.project_type === 'frontend'
+          ? (await this.frontend!.mutate(projectRoot, mutation)).manifest
+          : await this.mutateManifest(projectRoot, mutation)
       return workspaceRegistrationEvidence(updated, workspacePath, projectRoot)!
     })
   }
@@ -140,7 +173,8 @@ export class ProjectManifestService {
     const projectRoot =
       await this.projectScopeProvider.resolveProjectRoot(requestedProjectRoot)
     await this.enqueue(projectRoot, async () => {
-      const manifest = await this.loadManifest(projectRoot)
+      const manifest =
+        (await this.frontend?.load(projectRoot)) ?? (await this.loadManifest(projectRoot))
       const current = workspaceRegistrationEvidence(
         manifest,
         evidence.workspacePath,
@@ -151,10 +185,15 @@ export class ProjectManifestService {
           'Project manifest registration changed after Workspace creation; registration was preserved.',
         )
       }
-      await this.mutateManifest(projectRoot, {
-        type: 'delete-workspace',
+      const mutation = {
+        type: 'delete-workspace' as const,
         workspaceId: evidence.workspaceId,
-      })
+      }
+      if (manifest.project_type === 'frontend') {
+        await this.frontend!.mutate(projectRoot, mutation)
+      } else {
+        await this.mutateManifest(projectRoot, mutation)
+      }
     })
   }
 

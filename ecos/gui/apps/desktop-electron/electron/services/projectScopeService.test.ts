@@ -40,6 +40,7 @@ function projectScopeWithManifest(): ProjectScopeService {
       ) as { design_name: string; workspaces: ProjectManifest['workspaces'] }
       return {
         schema_version: 1,
+        project_type: 'backend',
         project_id: 'proj_gcd',
         name: 'gcd',
         design_name: source.design_name,

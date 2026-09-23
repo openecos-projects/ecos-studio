@@ -16,7 +16,13 @@ export async function assertManualPdkConfiguration(
   }
   for (const path of paths) {
     if (isAbsolute(path) || /^[A-Za-z]:[\\/]/.test(path)) {
-      throw new Error(`Manual PDK resource path must be relative: ${path}`)
+      // Absolute entries declare external resources (for example macro LEF
+      // files recorded as `[pdk] external_paths`); they only need to exist.
+      const candidate = await realpath(requiredText(path, 'PDK resource'))
+      if (!(await stat(candidate)).isFile()) {
+        throw new Error(`Manual PDK resource is not a file: ${path}`)
+      }
+      continue
     }
     const candidate = await realpath(resolve(root, requiredText(path, 'PDK resource')))
     const relativePath = relative(root, candidate)

@@ -12,6 +12,7 @@ export function useStepReportDialog(
     label: '',
     content: '',
     error: '',
+    warning: '',
     loading: false,
     visible: false,
   })
@@ -30,6 +31,7 @@ export function useStepReportDialog(
       label: report.label,
       content: '',
       error: '',
+      warning: '',
       loading: true,
       visible: true,
     }
@@ -42,6 +44,7 @@ export function useStepReportDialog(
       ) {
         throw new Error('Committed Workspace revision is unavailable.')
       }
+      const generation = session.generation
       const result = await getDesktopApi().backendWorkspace.getArtifact({
         artifactId: report.artifactId,
         workspaceContextId: contextId,
@@ -52,6 +55,7 @@ export function useStepReportDialog(
         version !== requestVersion ||
         currentStep.value !== step ||
         session.workspaceContextId !== contextId ||
+        session.generation !== generation ||
         !currentRevision ||
         (currentRevision.status !== 'ready' && currentRevision.status !== 'partial') ||
         currentRevision.data.workspaceRevision !== revision.data.workspaceRevision ||
@@ -68,6 +72,10 @@ export function useStepReportDialog(
         throw new Error(result.artifact.issues[0]?.code ?? 'Report is unavailable.')
       }
       reportDialog.value.content = result.artifact.data.text
+      reportDialog.value.warning =
+        result.artifact.data.integrity === 'externally-modified'
+          ? 'This report changed since the committed snapshot and is not trusted signoff evidence.'
+          : ''
     } catch (cause) {
       if (version !== requestVersion) return
       reportDialog.value.error = cause instanceof Error ? cause.message : String(cause)

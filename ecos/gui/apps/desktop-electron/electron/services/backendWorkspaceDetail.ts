@@ -233,6 +233,10 @@ export function artifactDescriptor(
   artifact: EccEngineeringAnalysisArtifactRef,
   sourceRevision?: number,
 ): WorkspaceArtifactDescriptor {
+  const timingCorner =
+    artifact.kind === 'timing_paths' || artifact.kind === 'timing_summary'
+      ? artifact.name.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
+      : ''
   return {
     artifactId: artifact.artifactId,
     availability: artifact.availability,
@@ -241,6 +245,7 @@ export function artifactDescriptor(
     ...(sourceRevision === undefined ? {} : { sourceRevision }),
     ...(artifact.sizeBytes === undefined ? {} : { sizeBytes: artifact.sizeBytes }),
     ...(artifact.stepId ? { stepId: artifact.stepId } : {}),
+    ...(timingCorner ? { timingCorner } : {}),
   }
 }
 

@@ -37,12 +37,21 @@ export interface ManagedPdkInstallationRequest extends PdkImportRequest {
   version: string
 }
 
+const ICS55_DEFAULT_RESOURCES = {
+  techLef: 'prtech/techLEF/N551P6M_ecos.lef',
+  cellLefs: [
+    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/lef/ics55_LLSC_H7CR_ecos.lef',
+    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/lef/ics55_LLSC_H7CL_ecos.lef',
+  ],
+  liberty: [
+    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/liberty/ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
+    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/liberty/ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
+  ],
+}
 const ICS55_MARKERS = [
-  'prtech/techLEF/N551P6M_ecos.lef',
-  'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/lef/ics55_LLSC_H7CR_ecos.lef',
-  'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/lef/ics55_LLSC_H7CL_ecos.lef',
-  'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/liberty/ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
-  'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/liberty/ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
+  ICS55_DEFAULT_RESOURCES.techLef,
+  ...ICS55_DEFAULT_RESOURCES.cellLefs,
+  ...ICS55_DEFAULT_RESOURCES.liberty,
 ]
 
 export class PdkInventoryService {
@@ -418,6 +427,15 @@ export class PdkInventoryService {
         readiness: 'ready',
         reason: null,
         supportsEccDefaults: true,
+        defaultResources: {
+          techLef: resolve(installation.root, ICS55_DEFAULT_RESOURCES.techLef),
+          cellLefs: ICS55_DEFAULT_RESOURCES.cellLefs.map((file) =>
+            resolve(installation.root, file),
+          ),
+          liberty: ICS55_DEFAULT_RESOURCES.liberty.map((file) =>
+            resolve(installation.root, file),
+          ),
+        },
       }
     } catch {
       return {

@@ -2622,6 +2622,7 @@ describe('useWorkspace openProject', () => {
     expect(createRuntimeEventClientMock).toHaveBeenCalledWith('workspace-frontend', {
       workspaceDirectory: '/work/frontend-project',
     })
+    expect(desktopApi.ecc.runtime?.snapshot).not.toHaveBeenCalled()
 
     await workspace.closeProject()
     expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-frontend', 'frontend')
@@ -3139,6 +3140,7 @@ describe('useWorkspace openProject', () => {
     vi.mocked(desktopApi.projectManifest.mutate).mockResolvedValueOnce({
       manifest: {
         schema_version: 1,
+        project_type: 'backend',
         project_id: 'proj_work',
         name: 'work',
         design_name: 'demo',

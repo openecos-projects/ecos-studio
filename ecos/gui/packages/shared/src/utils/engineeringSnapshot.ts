@@ -514,7 +514,7 @@ function validLecResultFile(value: unknown): boolean {
   return (
     record(value) &&
     nonEmptyString(value.artifactId) &&
-    ['available', 'missing', 'invalid', 'unsupported', 'unsafe'].includes(
+    ['available', 'missing', 'invalid', 'unsupported', 'unsafe', 'oversized'].includes(
       String(value.status),
     ) &&
     (value.data === null || record(value.data))
@@ -579,7 +579,7 @@ function validAnalysisFile(
 ): value is EccEngineeringAnalysisFile {
   if (!record(value) || !nonEmptyString(value.artifactId)) return false
   if (
-    !['available', 'missing', 'invalid', 'unsupported', 'unsafe'].includes(
+    !['available', 'missing', 'invalid', 'unsupported', 'unsafe', 'oversized'].includes(
       String(value.status),
     )
   ) {

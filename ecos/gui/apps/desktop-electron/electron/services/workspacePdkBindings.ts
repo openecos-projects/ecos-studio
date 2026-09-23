@@ -2,6 +2,7 @@ import { resolve } from 'node:path'
 import {
   type EccWorkspaceCreateRequest,
   type EccWorkspaceOpenRequest,
+  type EccWorkspacePdkConfigPersist,
   type MpcSpecReadResult,
   type PdkBindRequest,
   type PdkBinding,
@@ -30,6 +31,15 @@ export interface WorkspacePdkBindingDependencies {
   resourceManagerService?: {
     getResource(resourceId: string): Promise<unknown>
     readMpcSpec(resourceId: string): Promise<MpcSpecReadResult>
+  }
+  projectEccConfigService?: {
+    write(request: {
+      projectRoot: string
+      pdkRoot?: string
+      pdkName?: string
+      externalPaths?: string[]
+      overrides?: EccWorkspacePdkConfigPersist['overrides']
+    }): Promise<unknown>
   }
 }
 
@@ -252,4 +262,48 @@ function manualPdkFiles(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Persist the wizard's ecc.toml PDK declarations (`[pdk] external_paths`
+ * and `[pdk.overrides]`) when a workspace create/update carries them. Runs
+ * inside the prepare step so a write failure aborts the create cleanly,
+ * and the persistence payload never leaks into the ECC runtime request.
+ */
+export async function persistEccPdkConfigFromCreate(
+  dependencies: WorkspacePdkBindingDependencies,
+  runtimeRequest: Omit<EccWorkspaceCreateRequest, 'eccPdkConfig'>,
+  persistConfig: EccWorkspacePdkConfigPersist | undefined,
+): Promise<void> {
+  if (!persistConfig) return
+  const hasExternalPaths = (persistConfig.externalPaths?.length ?? 0) > 0
+  const hasOverrides = persistConfig.overrides !== undefined
+  if (!hasExternalPaths && !hasOverrides) return
+  if (!dependencies.projectEccConfigService) {
+    throw new Error('Project ecc.toml persistence is unavailable')
+  }
+  if (!runtimeRequest.projectRoot) {
+    // ecc.toml is a project declaration; without a project root there is
+    // nothing sensible to persist against (renderer requests always carry
+    // one — standalone workspaces use the target directory itself).
+    throw new Error('ecc.toml persistence requires a project root')
+  }
+
+  const projectRoot = runtimeRequest.projectRoot
+  const bindingPdk = isRecord(runtimeRequest.workspaceBindings.pdk)
+    ? runtimeRequest.workspaceBindings.pdk
+    : {}
+  const specPdk = isRecord(runtimeRequest.workspaceSpec.pdk)
+    ? runtimeRequest.workspaceSpec.pdk
+    : {}
+  await dependencies.projectEccConfigService.write({
+    projectRoot,
+    ...(typeof bindingPdk.root === 'string' && bindingPdk.root
+      ? { pdkRoot: bindingPdk.root }
+      : {}),
+    ...(typeof specPdk.familyId === 'string' && specPdk.familyId
+      ? { pdkName: specPdk.familyId }
+      : {}),
+    ...persistConfig,
+  })
 }

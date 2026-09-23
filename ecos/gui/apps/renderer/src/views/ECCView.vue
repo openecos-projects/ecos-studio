@@ -250,6 +250,7 @@ const showAllProjects = ref(false)
 type ProjectWorkspaceInitialConfig = Partial<WorkspaceConfig> & {
   managedWorkspaceRoot?: string
   deriveDirectoryFromDesign?: boolean
+  lockProjectContext?: boolean
 }
 
 const initialWizardConfig = ref<ProjectWorkspaceInitialConfig | undefined>(undefined)
@@ -393,6 +394,7 @@ function projectManagedWizardInitialConfig(): ProjectWorkspaceInitialConfig | un
   return {
     managedWorkspaceRoot: normalizePath(projectRoot),
     deriveDirectoryFromDesign: true,
+    lockProjectContext: true,
     parameters: {
       description: 'Created from Project Management',
       design: queryString(route.query.designName),

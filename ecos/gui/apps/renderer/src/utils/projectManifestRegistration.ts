@@ -1,13 +1,20 @@
-import { parseProjectManifestFlowStep } from '@ecos-studio/shared'
+import {
+  parseProjectManifestFlowStep,
+  projectManifestFrontendFlowSteps,
+} from '@ecos-studio/shared'
 import type { WorkspaceConfig } from '@/types'
 import { getDesktopApi } from '@/platform/desktop'
 import { mutateProjectManifest } from '@/api/projectManifest'
 import { discoverProjectForWorkspace } from '@/utils/projectManagementRead'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import { readProjectManagementManifest } from '@/utils/projectManagementRead'
+import { rememberProjectHistoryEntry } from '@/utils/projectHistory'
 
 export interface ProjectRouteContext {
   projectRoot: string
   projectName?: string
+  mode?: 'select' | 'create'
+  projectId?: string
 }
 
 export interface ProjectManagedWorkspaceRegistrationInput {
@@ -35,6 +42,14 @@ export function projectContextFromWorkspaceConfig(
     projectName:
       typeof projectContext.project_name === 'string'
         ? projectContext.project_name
+        : undefined,
+    mode:
+      projectContext.mode === 'select' || projectContext.mode === 'create'
+        ? projectContext.mode
+        : undefined,
+    projectId:
+      typeof projectContext.project_id === 'string'
+        ? projectContext.project_id
         : undefined,
   }
 }
@@ -110,8 +125,11 @@ export async function resolveManagedProjectContext(options: {
 export async function registerProjectManagedWorkspace(
   input: ProjectManagedWorkspaceRegistrationInput,
 ): Promise<void> {
+  const projectContext =
+    input.projectContext ??
+    (input.config ? projectContextFromWorkspaceConfig(input.config) : null)
   const projectRoot =
-    input.projectContext?.projectRoot || queryString(input.routeQuery?.projectRoot)
+    projectContext?.projectRoot || queryString(input.routeQuery?.projectRoot)
   const workspacePath = normalizePath(input.workspacePath)
   if (!projectRoot || !workspacePath) return
 
@@ -129,11 +147,22 @@ export async function registerProjectManagedWorkspace(
     }
 
     const projectName =
-      input.projectContext?.projectName ||
+      projectContext?.projectName ||
       queryString(input.routeQuery?.projectName) ||
       basenamePath(registeredProjectRoot) ||
       'project'
-    if (input.config?.project_context?.mode === 'create') {
+    const isFrontend = input.config?.designTool === 'frontend'
+    if (isFrontend && projectContext?.mode === 'create') {
+      if (await readProjectManagementManifest(registeredProjectRoot)) {
+        throw new Error(`A project.json already exists at ${registeredProjectRoot}.`)
+      }
+      await mutateProjectManifest(registeredProjectRoot, {
+        type: 'create',
+        name: projectName,
+        designName: String(input.config?.parameters.design || projectName),
+        projectType: 'frontend',
+      })
+    } else if (!isFrontend && input.config?.project_context?.mode === 'create') {
       const manifest = await readOptionalProjectTextFile('project.json', {
         projectPath: registeredProjectRoot,
       })
@@ -146,7 +175,7 @@ export async function registerProjectManagedWorkspace(
       }
     }
     const sourceContext = input.config?.source_context
-    await mutateProjectManifest(registeredProjectRoot, {
+    const manifest = await mutateProjectManifest(registeredProjectRoot, {
       type: 'register-workspace',
       input: {
         projectRoot: registeredProjectRoot,
@@ -159,6 +188,7 @@ export async function registerProjectManagedWorkspace(
         sourceStep: canonicalManifestStep(
           optionalString(sourceContext?.step) ||
             queryString(input.routeQuery?.sourceStep),
+          isFrontend,
         ),
         sourceOutputPath:
           optionalString(sourceContext?.outputPath) ||
@@ -171,14 +201,30 @@ export async function registerProjectManagedWorkspace(
         startStep: canonicalManifestStep(
           queryString(input.routeQuery?.startStep) ||
             optionalString(input.config?.flow_config?.start_step),
+          isFrontend,
         ),
         endStep: canonicalManifestStep(
           queryString(input.routeQuery?.endStep) ||
             optionalString(input.config?.flow_config?.end_step),
+          isFrontend,
         ),
         config: input.config,
       },
     })
+    if (input.config?.designTool === 'frontend') {
+      try {
+        await rememberProjectHistoryEntry({
+          id: manifest.root_path,
+          name: manifest.name,
+          path: manifest.root_path,
+          lastOpened: new Date(),
+          projectType: 'frontend',
+          topModule: manifest.base_design.top_module,
+        })
+      } catch (error) {
+        console.warn('Failed to remember frontend project history entry.', error)
+      }
+    }
   } catch (error) {
     console.warn('Failed to update project manifest after workspace creation.', error)
     warn('Project manifest not updated', projectManifestUpdateFailureDetail(error))
@@ -206,8 +252,15 @@ async function registerLocalProjectRoot(rootPath: string): Promise<string | null
   }
 }
 
-function canonicalManifestStep(value: string): string | undefined {
+function canonicalManifestStep(value: string, frontend = false): string | undefined {
   if (!value) return undefined
+  if (frontend) {
+    const normalized = value.trim().toLowerCase()
+    if ((projectManifestFrontendFlowSteps as readonly string[]).includes(normalized)) {
+      return normalized
+    }
+    throw new Error(`Unknown frontend flow step: ${value}`)
+  }
   const canonical = parseProjectManifestFlowStep(value)
   if (!canonical) {
     throw new Error(

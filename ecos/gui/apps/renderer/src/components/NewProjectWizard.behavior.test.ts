@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils'
-import type { ProjectManifest } from '@ecos-studio/shared'
+import type { ProjectEccPdkConfigReadResult, ProjectManifest } from '@ecos-studio/shared'
 import { describe, expect, it, vi } from 'vitest'
 import NewProjectWizard from './NewProjectWizard.vue'
+import PdkResourcePickerDialog from './PdkResourcePickerDialog.vue'
 
 const wizardMocks = vi.hoisted(() => ({
   importedPdks: { value: [] as Array<Record<string, unknown>> },
@@ -17,6 +18,16 @@ const wizardMocks = vi.hoisted(() => ({
     async () => null,
   ),
   resolveBinding: vi.fn(),
+  readProjectEccPdkConfig: vi.fn<() => Promise<ProjectEccPdkConfigReadResult>>(
+    async () => ({
+      exists: false,
+      pdkName: '',
+      pdkRoot: '',
+      externalPaths: [],
+      overrides: {},
+    }),
+  ),
+  writeProjectEccPdkConfig: vi.fn(),
   scanPdkDirectory: vi.fn(),
   pickFiles: vi.fn(),
   discoverHdlModules: vi.fn(async (request: { rtlPaths?: string[] }) => {
@@ -53,6 +64,10 @@ vi.mock('../composables/useWorkspace', () => ({
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => ({
     pdkInventory: { resolveBinding: wizardMocks.resolveBinding },
+    projectEccConfig: {
+      read: wizardMocks.readProjectEccPdkConfig,
+      write: wizardMocks.writeProjectEccPdkConfig,
+    },
     dialog: { pickFiles: wizardMocks.pickFiles },
     workspaceCreationModel: { get: wizardMocks.getWorkspaceCreationModel },
     workspace: {
@@ -132,6 +147,401 @@ describe('NewProjectWizard behavior', () => {
       .find((button) => button.text() === 'Continue')
     expect(continueButton?.attributes('disabled')).toBeUndefined()
     quickStartWizard.unmount()
+  })
+
+  it('maximizes and restores the wizard without losing its current step', async () => {
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { standaloneWorkspace: true } },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    const wizard = wrapper.vm as unknown as { currentStep: number }
+    wizard.currentStep = 5
+    await flushPromises()
+    await wrapper.find('button[aria-label="Maximize window"]').trigger('click')
+    expect(wrapper.find('.new-workspace-wizard-panel').classes()).toContain('max-w-none')
+    expect(wrapper.find('.new-workspace-wizard-overlay').classes()).toContain('p-0')
+    expect(wizard.currentStep).toBe(5)
+    await wrapper.find('button[aria-label="Restore window"]').trigger('click')
+    expect(wrapper.find('.new-workspace-wizard-panel').classes()).not.toContain(
+      'max-w-none',
+    )
+    expect(wizard.currentStep).toBe(5)
+    wrapper.unmount()
+  })
+
+  it('offers ecc.toml external paths and their files in the Manual resource picker', async () => {
+    wizardMocks.importedPdks.value = [
+      {
+        id: 'pdk:ics55:ready',
+        name: 'ICS55',
+        path: '/pdks/ics55',
+        pdkId: 'ics55',
+        readiness: 'ready',
+        supportsEccDefaults: true,
+        defaultResources: {
+          techLef: '/pdks/ics55/tech.lef',
+          cellLefs: ['/pdks/ics55/cell.lef'],
+          liberty: ['/pdks/ics55/cell.lib'],
+        },
+      },
+    ]
+    wizardMocks.readProjectEccPdkConfig.mockResolvedValueOnce({
+      exists: true,
+      pdkName: 'ics55',
+      pdkRoot: '/pdks/ics55',
+      externalPaths: ['/macros/sram'],
+      overrides: {},
+    })
+    wizardMocks.scanPdkDirectory.mockReset()
+    wizardMocks.scanPdkDirectory.mockImplementation(async (path: string) => ({
+      canonicalPath: path,
+      detectedFiles: {
+        directories: [],
+        files: path === '/macros/sram' ? ['sram.lib'] : ['cell.lib'],
+      },
+    }))
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { directory: '/projects/demo/ws_0001' } },
+      global: { stubs: { DesignFileTransfer: true, ...primevueStubs } },
+    })
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      pdkConfigMode: 'default' | 'manual'
+      activePdkWizardStep: 'tech_lef' | 'cell_lef' | 'liberty'
+      pdkSelections: Record<'tech_lef' | 'cell_lef' | 'liberty', string[]>
+    }
+    wizard.currentStep = 5
+    await flushPromises()
+    wizard.pdkConfigMode = 'manual'
+    wizard.activePdkWizardStep = 'liberty'
+    await flushPromises()
+    await wrapper.find('button[title="Update selection"]').trigger('click')
+    await flushPromises()
+    const picker = wrapper.findComponent(PdkResourcePickerDialog)
+    expect(picker.exists()).toBe(true)
+    await picker.find('button[title="/macros/sram"]').trigger('click')
+    expect(picker.text()).toContain('/macros/sram')
+    expect(picker.text()).toContain('sram.lib')
+    await picker.find('button[title*="sram.lib"]').trigger('click')
+    await picker.find('button[title="Add to selection"]').trigger('click')
+    await picker
+      .findAll('button')
+      .find((button) => button.text() === 'Save')!
+      .trigger('click')
+    expect(wizard.pdkSelections.liberty).toContain('/macros/sram/sram.lib')
+    wrapper.unmount()
+  })
+
+  it('ignores an older project ecc.toml read after switching projects', async () => {
+    wizardMocks.importedPdks.value = [
+      {
+        id: 'pdk:ics55:ready',
+        name: 'ICS55',
+        path: '/pdks/ics55',
+        pdkId: 'ics55',
+        readiness: 'ready',
+        supportsEccDefaults: true,
+        defaultResources: {
+          techLef: '/pdks/ics55/tech.lef',
+          cellLefs: ['/pdks/ics55/cell.lef'],
+          liberty: ['/pdks/ics55/cell.lib'],
+        },
+      },
+    ]
+    let resolveOld!: (result: ProjectEccPdkConfigReadResult) => void
+    wizardMocks.readProjectEccPdkConfig.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveOld = resolve
+        }),
+    )
+    wizardMocks.readProjectEccPdkConfig.mockResolvedValueOnce({
+      exists: true,
+      pdkName: 'ics55',
+      pdkRoot: '/pdks/ics55',
+      externalPaths: [],
+      overrides: { tech: 'new/tech.lef' },
+    })
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { directory: '/projects/old/ws_0001' } },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      projectContext: { project_root: string; project_name: string }
+    }
+    wizard.currentStep = 5
+    await flushPromises()
+    expect(wizardMocks.readProjectEccPdkConfig).toHaveBeenCalledWith('/projects/old')
+    wizard.projectContext.project_root = '/projects/new'
+    wizard.projectContext.project_name = 'new'
+    await flushPromises()
+    expect(wrapper.text()).toContain('/pdks/ics55/new/tech.lef')
+    resolveOld({
+      exists: true,
+      pdkName: 'ics55',
+      pdkRoot: '/pdks/ics55',
+      externalPaths: [],
+      overrides: { tech: 'old/tech.lef' },
+    })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('/pdks/ics55/old/tech.lef')
+    expect(wrapper.text()).toContain('/pdks/ics55/new/tech.lef')
+    wrapper.unmount()
+  })
+
+  it('shows the selected PDK root and ECC default files without a project override', async () => {
+    wizardMocks.importedPdks.value = [
+      {
+        id: 'pdk:ics55:default',
+        name: 'ICS55',
+        path: '/pdks/ics55',
+        pdkId: 'ics55',
+        readiness: 'ready',
+        supportsEccDefaults: true,
+        defaultResources: {
+          techLef: '/pdks/ics55/prtech/tech.lef',
+          cellLefs: ['/pdks/ics55/lef/cell.lef'],
+          liberty: ['/pdks/ics55/lib/cell.lib'],
+        },
+      },
+    ]
+    const wrapper = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          standaloneWorkspace: true,
+          pdk_installation_id: 'pdk:ics55:default',
+        },
+      },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      ensurePdksLoaded(): Promise<void>
+      canProceed: boolean
+      config: { pdk_effective_resources?: unknown }
+    }
+    await wizard.ensurePdksLoaded()
+    wizard.currentStep = 5
+    await flushPromises()
+    expect(wrapper.text()).toContain('/pdks/ics55')
+    expect(wrapper.text()).toContain('/pdks/ics55/prtech/tech.lef')
+    expect(wrapper.text()).toContain('No external PDK paths declared.')
+    expect(wizard.canProceed).toBe(true)
+    expect(wizard.config.pdk_effective_resources).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('matches a declared PDK root symlink to the installed canonical root', async () => {
+    wizardMocks.importedPdks.value = [
+      {
+        id: 'pdk:ics55:canonical',
+        name: 'ICS55',
+        path: '/pdks/ics55',
+        pdkId: 'ics55',
+        readiness: 'ready',
+        supportsEccDefaults: true,
+        defaultResources: {
+          techLef: '/pdks/ics55/tech.lef',
+          cellLefs: ['/pdks/ics55/cell.lef'],
+          liberty: ['/pdks/ics55/cell.lib'],
+        },
+      },
+    ]
+    wizardMocks.readProjectEccPdkConfig.mockResolvedValueOnce({
+      exists: true,
+      pdkName: 'ics55',
+      pdkRoot: '/link/pdk',
+      externalPaths: [],
+      overrides: {},
+    })
+    wizardMocks.scanPdkDirectory.mockResolvedValueOnce({ canonicalPath: '/pdks/ics55' })
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { directory: '/projects/demo/ws_0001' } },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      selectedPdkId: string
+      canProceed: boolean
+    }
+    wizard.currentStep = 5
+    await flushPromises()
+    expect(wizard.selectedPdkId).toBe('pdk:ics55:canonical')
+    expect(wrapper.text()).toContain('/link/pdk')
+    expect(wizard.canProceed).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('shows effective defaults and project paths across configuration modes', async () => {
+    wizardMocks.importedPdks.value = [
+      {
+        id: 'pdk:ics55:local',
+        name: 'ICS55',
+        path: '/pdks/ics55',
+        pdkId: 'ics55',
+        readiness: 'ready',
+        supportsEccDefaults: true,
+        defaultResources: {
+          techLef: '/pdks/ics55/default/tech.lef',
+          cellLefs: ['/pdks/ics55/default/cell.lef'],
+          liberty: ['/pdks/ics55/default/cell.lib'],
+        },
+      },
+    ]
+    wizardMocks.readProjectEccPdkConfig.mockResolvedValueOnce({
+      exists: true,
+      pdkName: 'ics55',
+      pdkRoot: '/pdks/ics55',
+      externalPaths: ['/macros/sram'],
+      overrides: { tech: 'custom/tech.lef', libs: ['/macros/sram/sram.lib'] },
+    })
+    wizardMocks.scanPdkDirectory.mockResolvedValueOnce({
+      canonicalPath: '/macros/sram',
+      detectedFiles: { directories: [], files: [] },
+    })
+    const wrapper = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          directory: '/projects/demo/ws_0001',
+          pdk_external_paths: ['/macros/stale'],
+          project_context: {
+            mode: 'select',
+            project_id: 'proj_demo',
+            project_name: 'demo',
+            project_root: '/projects/demo',
+            project_json_path: '/projects/demo/project.json',
+          },
+        },
+      },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      pdkConfigMode: 'default' | 'manual'
+      selectedPdkId: string
+      config: {
+        pdk_effective_resources?: {
+          tech_lef: string[]
+          cell_lef: string[]
+          liberty: string[]
+        }
+      }
+      updatePdkResourceSelection(files: string[]): void
+    }
+    wizard.currentStep = 5
+    await flushPromises()
+    expect(wizard.selectedPdkId).toBe('pdk:ics55:local')
+    expect(wrapper.text()).toContain('/pdks/ics55')
+    expect(wrapper.text()).toContain('/macros/sram')
+    expect(wrapper.text()).not.toContain('/macros/stale')
+    expect(wrapper.text()).toContain('/pdks/ics55/custom/tech.lef')
+    expect(wizard.config.pdk_effective_resources).toEqual({
+      tech_lef: ['/pdks/ics55/custom/tech.lef'],
+      cell_lef: ['/pdks/ics55/default/cell.lef'],
+      liberty: ['/macros/sram/sram.lib'],
+    })
+
+    wizard.pdkConfigMode = 'manual'
+    await flushPromises()
+    expect(wrapper.text()).toContain('/pdks/ics55/custom/tech.lef')
+    wizard.updatePdkResourceSelection(['/pdks/ics55/user/tech.lef'])
+    wizard.pdkConfigMode = 'default'
+    await flushPromises()
+    expect(wrapper.text()).toContain('/pdks/ics55/custom/tech.lef')
+    wizard.pdkConfigMode = 'manual'
+    await flushPromises()
+    expect(wrapper.text()).toContain('/pdks/ics55/user/tech.lef')
+    wrapper.unmount()
+  })
+
+  it('shows ECC defaults without ecc.toml overrides and blocks a mismatched project PDK', async () => {
+    wizardMocks.importedPdks.value = [
+      {
+        id: 'pdk:ics55:local',
+        name: 'ICS55',
+        path: '/pdks/ics55',
+        pdkId: 'ics55',
+        readiness: 'ready',
+        supportsEccDefaults: true,
+        defaultResources: {
+          techLef: '/pdks/ics55/default/tech.lef',
+          cellLefs: ['/pdks/ics55/default/cell.lef'],
+          liberty: ['/pdks/ics55/default/cell.lib'],
+        },
+      },
+    ]
+    wizardMocks.readProjectEccPdkConfig.mockResolvedValueOnce({
+      exists: true,
+      pdkName: 'ics55',
+      pdkRoot: '/pdks/other',
+      externalPaths: ['/macros/memory'],
+      overrides: {},
+    })
+    wizardMocks.scanPdkDirectory.mockResolvedValueOnce({
+      canonicalPath: '/macros/memory',
+      detectedFiles: { directories: [], files: [] },
+    })
+    const wrapper = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          directory: '/projects/demo/ws_0001',
+          project_context: {
+            mode: 'select',
+            project_id: 'proj_demo',
+            project_name: 'demo',
+            project_root: '/projects/demo',
+            project_json_path: '/projects/demo/project.json',
+          },
+          pdk_installation_id: 'pdk:ics55:local',
+        },
+      },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    const wizard = wrapper.vm as unknown as { currentStep: number; canProceed: boolean }
+    wizard.currentStep = 5
+    await flushPromises()
+    expect(wrapper.text()).toContain('/pdks/other')
+    expect(wrapper.text()).toContain('/macros/memory')
+    expect(wizard.canProceed).toBe(false)
+    expect(wrapper.text()).toContain('does not match an available installation')
+    wrapper.unmount()
   })
 
   it('loads the ECC-backed Workspace Creation Model', async () => {
@@ -401,6 +811,7 @@ describe('NewProjectWizard behavior', () => {
   it('reuses design files and chip identity from the selected Project', async () => {
     wizardMocks.readProjectManagementManifest.mockResolvedValueOnce({
       schema_version: 1,
+      project_type: 'backend',
       project_id: 'proj_gcd',
       name: 'gcd',
       design_name: 'gcd',
@@ -466,6 +877,7 @@ describe('NewProjectWizard behavior', () => {
   it('prefills filelist only when the Project Manifest has both RTL and filelist', async () => {
     wizardMocks.readProjectManagementManifest.mockResolvedValueOnce({
       schema_version: 1,
+      project_type: 'backend',
       project_id: 'proj_gcd',
       name: 'gcd',
       design_name: 'gcd',

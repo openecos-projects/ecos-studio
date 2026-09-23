@@ -8,6 +8,8 @@ import type {
   DesktopAgentKnownProject,
   DesktopAgentStartSessionRequest,
   DesktopSaveFileDialogOptions,
+  EccWorkspacePdkConfigPersist,
+  ProjectEccPdkConfigWriteRequest,
 } from './index.ts'
 
 describe('shared public contracts', () => {
@@ -90,5 +92,25 @@ describe('shared public contracts', () => {
       text: 'Start creating a workspace',
     } satisfies DesktopAgentInteractionAnswerRequest
     expect(typedAnswer.text).toBe('Start creating a workspace')
+  })
+
+  it('exports project ecc.toml PDK config contracts', () => {
+    const writeRequest = {
+      externalPaths: ['/pdk/macros/sram'],
+      overrides: {
+        lefs: ['/pdk/IP/STD_cell/lef/std.lef', '/pdk/macros/sram/sram.lef'],
+        tech: '/pdk/prtech/tech.lef',
+      },
+      pdkName: 'ics55',
+      pdkRoot: '/pdk',
+      projectRoot: '/projects/gcd',
+    } satisfies ProjectEccPdkConfigWriteRequest
+    expect(writeRequest.projectRoot).toBe('/projects/gcd')
+    expect(writeRequest.overrides.lefs).toHaveLength(2)
+
+    const persist = {
+      externalPaths: ['/pdk/macros/sram'],
+    } satisfies EccWorkspacePdkConfigPersist
+    expect(persist.externalPaths?.[0]).toBe('/pdk/macros/sram')
   })
 })

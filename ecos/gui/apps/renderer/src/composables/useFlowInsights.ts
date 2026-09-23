@@ -47,6 +47,7 @@ export function useFlowInsights() {
           result.workspaceContextId !== contextId ||
           result.workspaceRevision !== artifactRevision ||
           result.artifact.status !== 'ready' ||
+          !result.artifact.data.bytes ||
           result.artifact.data.artifactId !== tile.pngPath
         ) {
           return

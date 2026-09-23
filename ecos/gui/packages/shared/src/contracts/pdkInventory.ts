@@ -15,6 +15,8 @@ export interface PdkInstallationSnapshot extends PdkInstallationRecord {
   readiness: PdkReadiness
   reason: string | null
   supportsEccDefaults: boolean
+  /** Present only when ECC's built-in resource files have passed validation. */
+  defaultResources?: ManualPdkConfiguration
 }
 
 export interface ManualPdkConfiguration {

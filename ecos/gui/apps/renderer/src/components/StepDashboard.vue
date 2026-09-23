@@ -272,6 +272,22 @@
             <div class="header-actions">
               <span v-if="data.hasGeometry" class="dashboard-muted">Geometry ready</span>
               <button
+                v-if="macroPlacementAvailable"
+                type="button"
+                class="dashboard-icon-button"
+                :disabled="!chipViewerAvailable || chipViewerEditBusy"
+                title="Place Macros"
+                aria-label="Place Macros"
+                @click="void openChipViewer('edit')"
+              >
+                <i
+                  :class="
+                    chipViewerEditBusy ? 'ri-loader-4-line spin' : 'ri-drag-move-2-line'
+                  "
+                  aria-hidden="true"
+                />
+              </button>
+              <button
                 type="button"
                 class="dashboard-icon-button"
                 :disabled="!chipViewerAvailable || chipViewerBusy"
@@ -1091,7 +1107,11 @@
     :overview="data?.timingAnalysis?.overview ?? null"
     :paths-by-corner="data?.timingAnalysis?.pathsByCorner ?? null"
     :run-info="data?.timingAnalysis?.runInfo ?? []"
+    :selected-corner="selectedTimingCorner"
+    :detail-loading="selectedTimingDetailLoading"
+    :detail-error="selectedTimingDetailError"
     empty-hint="No timing summary is available for this step."
+    @select-corner="selectTimingCorner"
     @update:visible="showTimingAnalysis = $event"
   />
 
@@ -1145,7 +1165,12 @@
       <span>Loading report</span>
     </div>
     <p v-else-if="reportDialog.error" class="dialog-error">{{ reportDialog.error }}</p>
-    <pre v-else class="report-code">{{ reportDialog.content }}</pre>
+    <div v-else>
+      <p v-if="reportDialog.warning" class="dialog-warning">
+        {{ reportDialog.warning }}
+      </p>
+      <pre class="report-code">{{ reportDialog.content }}</pre>
+    </div>
   </Dialog>
 </template>
 
@@ -1188,7 +1213,16 @@ import {
   type StepDashboardStaCorner,
 } from './step-dashboard/stepDashboardData'
 
-const { currentStep, data, error, loading, refresh } = useStepDashboardData()
+const {
+  currentStep,
+  data,
+  error,
+  loadTimingCorner,
+  loading,
+  refresh,
+  timingDetailErrors,
+  timingDetailLoading,
+} = useStepDashboardData()
 const { openReport, reportDialog } = useStepReportDialog(
   currentStep,
   computed(() => data.value?.step),
@@ -1202,10 +1236,12 @@ const {
   stepConfigPathResolved,
 } = useStepConfigInfo()
 const chipViewerBusy = ref(false)
+const chipViewerEditBusy = ref(false)
 const dataChartIndex = ref(0)
 const showChecklistDetails = ref(false)
 const showQorDetails = ref(false)
 const showTimingAnalysis = ref(false)
+const selectedTimingCorner = ref<string | null>(null)
 const showStaCornerDetails = ref(false)
 const showDataSummary = ref(false)
 const showCongestionDialog = ref(false)
@@ -1221,11 +1257,19 @@ const chipViewerStep = computed(() =>
 const chipViewerAvailable = computed(() =>
   canOpenChipViewer({
     chipViewerBusy: chipViewerBusy.value,
-    chipViewerEditBusy: false,
+    chipViewerEditBusy: chipViewerEditBusy.value,
     isDesktopRuntime: true,
     projectPath: currentProject.value?.path,
     step: chipViewerStep.value,
   }),
+)
+// Manual macro placement enters the layout edit session on the
+// preFloorplan result, before macroPlacement/postFloorplan run.
+const macroPlacementAvailable = computed(
+  () =>
+    chipViewerStep.value === StepEnum.PRE_FLOORPLAN &&
+    data.value?.hasGeometry === true &&
+    chipViewerAvailable.value,
 )
 const currentFlowStage = computed(() => {
   const step = (data.value?.step ?? currentStep.value).trim().toLowerCase()
@@ -1320,6 +1364,16 @@ const timingDialogTitle = computed(() => {
   const stepName = data.value?.step ?? currentStep.value
   return `Timing Analysis · ${stepName}`
 })
+const selectedTimingDetailLoading = computed(
+  () =>
+    !!selectedTimingCorner.value &&
+    timingDetailLoading.value.includes(selectedTimingCorner.value),
+)
+const selectedTimingDetailError = computed(() =>
+  selectedTimingCorner.value
+    ? (timingDetailErrors.value[selectedTimingCorner.value] ?? null)
+    : null,
+)
 const staCornerDialogTitle = computed(() => {
   const stepName = data.value?.step ?? currentStep.value
   return `STA Corners · ${stepName}`
@@ -1395,6 +1449,13 @@ function staCornerDetailSubtitle(corner: StepDashboardStaCorner): string {
 
 function openTimingAnalysis(): void {
   showTimingAnalysis.value = true
+  const overview = data.value?.timingAnalysis?.overview
+  selectTimingCorner(overview?.worstSetup?.corner ?? overview?.corners[0]?.corner ?? null)
+}
+
+function selectTimingCorner(corner: string | null): void {
+  selectedTimingCorner.value = corner
+  if (corner) void loadTimingCorner(corner)
 }
 
 function metricTone(metric: StepDashboardMetric): string {
@@ -1532,20 +1593,21 @@ function onSnapshotAction(actionId: string): void {
   else if (actionId === 'congestion') showCongestionDialog.value = true
 }
 
-async function openChipViewer(): Promise<void> {
+async function openChipViewer(mode: 'view' | 'edit' = 'view'): Promise<void> {
   const projectPath = currentProject.value?.path
   const step = chipViewerStep.value
   if (!projectPath || !step || !chipViewerAvailable.value) return
 
-  chipViewerBusy.value = true
+  const busy = mode === 'edit' ? chipViewerEditBusy : chipViewerBusy
+  busy.value = true
   try {
     await getDesktopApi().chipViewer.open(
-      buildChipViewerOpenRequest(projectPath, step, 'view'),
+      buildChipViewerOpenRequest(projectPath, step, mode),
     )
   } catch (cause) {
     console.error('Failed to open Chip Viewer from step dashboard:', cause)
   } finally {
-    chipViewerBusy.value = false
+    busy.value = false
   }
 }
 
@@ -2842,6 +2904,11 @@ function fileName(path: string): string {
   color: var(--danger-color);
   font-size: 12px;
   margin: 0;
+}
+.dialog-warning {
+  color: var(--warning-color, #b7791f);
+  font-size: 12px;
+  margin: 0 0 8px;
 }
 .report-code {
   background: var(--bg-secondary);

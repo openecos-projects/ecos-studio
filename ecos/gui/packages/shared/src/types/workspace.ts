@@ -1,4 +1,4 @@
-import type { ProjectManifestMpc } from '../utils/projectManifest'
+import type { ProjectManifestMpc, ProjectManifestType } from '../utils/projectManifest'
 import type { PdkRequirement } from '../contracts/pdkInventory'
 
 export type WorkspaceStatus =
@@ -9,7 +9,7 @@ export type WorkspaceStatus =
   | 'in_progress'
   | 'not_started'
 
-export type DesignTool = 'backend' | 'frontend'
+export type DesignTool = ProjectManifestType
 
 export interface WorkspaceSummary {
   id: string
@@ -44,9 +44,12 @@ export interface WorkspaceParameters {
   core_utilization: number
   target_density: number
   max_fanout: number
-  die_area_mode?: 'width_height' | 'utilitization_margin'
+  // 'utilitization' / 'utilitization_margin' are the legacy misspelled forms;
+  // keep reading them for at least one release cycle.
+  die_area_mode?: 'width_height' | 'utilization_margin' | 'utilitization_margin'
   die_width?: number
   die_height?: number
+  utilization?: number
   utilitization?: number
   margin?: number
 }
@@ -67,6 +70,8 @@ export interface WorkspaceConfig {
   design_input_mode?: 'rtl' | 'post_synthesis'
   sdc?: string
   pdk_config_mode?: 'default' | 'manual'
+  /** External PDK directories (macro LEF/lib pools) declared in ecc.toml. */
+  pdk_external_paths?: string[]
   flow_config?: {
     start_step: string
     end_step: string
@@ -74,6 +79,12 @@ export interface WorkspaceConfig {
   }
   pdk_config?: {
     mode?: 'default' | 'manual'
+    tech_lef: string[]
+    cell_lef: string[]
+    liberty: string[]
+  }
+  /** Transient complete file set for a Default UI backed by ecc.toml overrides. */
+  pdk_effective_resources?: {
     tech_lef: string[]
     cell_lef: string[]
     liberty: string[]

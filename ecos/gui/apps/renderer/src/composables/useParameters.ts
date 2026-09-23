@@ -214,7 +214,9 @@ function normalizeCore(c: unknown): ParametersData['Core'] {
     Size: arr,
     Area: Number(o.Area ?? o.area ?? 0),
     'Bounding box': String(o['Bounding box'] ?? o.bounding_box ?? ''),
-    Utilitization: Number(o.Utilitization ?? o.utilitization ?? 0.4),
+    Utilitization: Number(
+      o.Utilization ?? o.utilization ?? o.Utilitization ?? o.utilitization ?? 0.4,
+    ),
     Margin: m,
     'Aspect ratio': Number(o['Aspect ratio'] ?? o.aspect_ratio ?? 1),
   }

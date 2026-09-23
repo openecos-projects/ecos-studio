@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   projectManifestForPresentation,
+  createProjectManifestDraft,
+  registerWorkspaceInManifest,
   type BackendProjectComparison,
   type ReadSection,
   type ResourceInfo,
@@ -11,6 +13,7 @@ import {
   createWorkspaceBranchDraft,
   projectMpcOptionFromResource,
   resolveProjectQorBaselineWorkspace,
+  resolveProjectSelectionUpdate,
 } from './projectManagement'
 import type { Project } from '@/types'
 import {
@@ -150,9 +153,122 @@ describe('project management V3 model', () => {
 
   it('builds an empty model without manufacturing metric rows', () => {
     const model = buildProjectManagementProject(project, null)
+    expect(model.projectType).toBe('backend')
     expect(model.workspaces).toEqual([])
     expect(model.metricsRows).toEqual([])
     expect(createSelectionState(model).selectedWorkspaceId).toBe('')
+    expect(createSelectionState(model).selectedStep).toBe('DRC')
+  })
+
+  it('uses the frontend profile for workspace steps and analysis', () => {
+    const manifest = registerWorkspaceInManifest(
+      createProjectManifestDraft({
+        rootPath: '/projects/cpu',
+        name: 'cpu',
+        designName: 'cpu',
+        projectType: 'frontend',
+      }),
+      {
+        projectRoot: '/projects/cpu',
+        workspacePath: '/projects/cpu/ws_0001',
+      },
+    )
+    const flow = {
+      prepare: 'success',
+      review: 'success',
+      elab: 'success',
+      lint: 'success',
+      sim: 'success',
+    } as const
+    const model = buildProjectManagementProject(
+      { ...project, projectType: 'frontend' },
+      manifest,
+      { ws_0001: flow },
+      null,
+      {
+        ws_0001: {
+          frontendDetailTexts: {
+            sim: JSON.stringify({
+              summary: { total_cases: 2, passed_cases: 2, failed_cases: 0 },
+              cases: [],
+            }),
+          },
+        },
+      },
+    )
+
+    expect(model.flowSteps).toEqual(['prepare', 'review', 'elab', 'lint', 'sim'])
+    expect(model.workspaces[0]).toMatchObject({
+      startStep: 'prepare',
+      endStep: 'sim',
+      status: 'success',
+      flowStatusHint: { state: 'success', label: 'Success' },
+    })
+    expect(model.workspaces[0]?.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          step: 'prepare',
+          status: 'success',
+          canCreateWorkspace: false,
+        }),
+        expect.objectContaining({
+          step: 'sim',
+          status: 'success',
+          canCreateWorkspace: false,
+        }),
+      ]),
+    )
+    expect(model.workspaceSummaries).toEqual([])
+    expect(model.stepCompareSummaries).toEqual([])
+    expect(model.frontendAnalysis).toMatchObject({ totalCases: 2, passedCases: 2 })
+    expect(createSelectionState(model).selectedStep).toBe('sim')
+  })
+
+  it('keeps frontend descendants adjacent to their parent workspace', () => {
+    const firstRoot = registerWorkspaceInManifest(
+      createProjectManifestDraft({
+        rootPath: '/projects/cpu',
+        name: 'cpu',
+        designName: 'cpu',
+        projectType: 'frontend',
+        now: '2026-08-20T00:00:00.000Z',
+      }),
+      {
+        projectRoot: '/projects/cpu',
+        workspacePath: '/projects/cpu/ws_0001',
+        now: '2026-08-20T00:00:00.000Z',
+      },
+    )
+    const secondRoot = registerWorkspaceInManifest(firstRoot, {
+      projectRoot: '/projects/cpu',
+      workspacePath: '/projects/cpu/ws_0002',
+      now: '2026-08-20T00:01:00.000Z',
+    })
+    const manifest = registerWorkspaceInManifest(secondRoot, {
+      projectRoot: '/projects/cpu',
+      workspacePath: '/projects/cpu/ws_0003',
+      sourceWorkspaceId: 'ws_0001',
+      sourceStep: 'review',
+      now: '2026-08-20T00:02:00.000Z',
+    })
+
+    const model = buildProjectManagementProject(
+      { ...project, projectType: 'frontend' },
+      manifest,
+    )
+
+    expect(model.workspaces.map((workspace) => [workspace.id, workspace.depth])).toEqual([
+      ['ws_0001', 0],
+      ['ws_0003', 1],
+      ['ws_0002', 0],
+    ])
+
+    expect(
+      resolveProjectSelectionUpdate('/projects/other', model, 'ws_0001', 'ws_0002'),
+    ).toMatchObject({
+      mode: 'reset',
+      selection: { selectedWorkspaceId: 'ws_0002' },
+    })
   })
 
   it('keeps backend comparison steps that are not part of the built-in flow', () => {

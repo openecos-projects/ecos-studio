@@ -522,6 +522,63 @@ describe('BackendWorkspaceService', () => {
     expect(getProjectRoot).toHaveBeenCalledTimes(2)
   })
 
+  it('refreshes artifact generation on focus without rebuilding the committed overview', async () => {
+    const readService = persistedReadService(
+      engineeringSnapshot(),
+      manifestWithBaseline(),
+    )
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: readService,
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+    const initial = await runWithWindowScope(62, () => service.getOverview())
+    const listener = vi.fn()
+    service.onInvalidated(listener)
+
+    await service.checkForUpdates(62)
+
+    expect(listener).toHaveBeenCalledWith({
+      generation: initial.generation + 1,
+      windowId: 62,
+      workspaceContextId: initial.workspaceContextId,
+    })
+    const refreshed = await runWithWindowScope(62, () => service.getOverview())
+    expect(refreshed.generation).toBe(initial.generation + 1)
+    expect(refreshed.overview).toEqual(initial.overview)
+    expect(readService.readManifest).toHaveBeenCalledOnce()
+    expect(readService.readEngineeringSnapshot).toHaveBeenCalledTimes(3)
+  })
+
+  it('publishes a same-revision overview that was already in flight during focus refresh', async () => {
+    const snapshot = engineeringSnapshot()
+    const readService = persistedReadService(snapshot)
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: readService,
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+    await runWithWindowScope(64, () => service.getOverview())
+    service.invalidateWindow(64, false)
+
+    let resolveOverview!: (value: ProjectEngineeringSnapshotReadResult) => void
+    const overviewRead = new Promise<ProjectEngineeringSnapshotReadResult>((resolve) => {
+      resolveOverview = resolve
+    })
+    readService.readEngineeringSnapshot
+      .mockImplementationOnce(() => overviewRead)
+      .mockResolvedValueOnce(persistedSnapshotResult(snapshot))
+    const pendingOverview = runWithWindowScope(64, () => service.getOverview())
+    await vi.waitFor(() =>
+      expect(readService.readEngineeringSnapshot).toHaveBeenCalledTimes(2),
+    )
+
+    await service.checkForUpdates(64)
+    resolveOverview(persistedSnapshotResult(snapshot))
+
+    await expect(pendingOverview).resolves.toMatchObject({ generation: 2 })
+    await runWithWindowScope(64, () => service.getOverview())
+    expect(readService.readEngineeringSnapshot).toHaveBeenCalledTimes(3)
+  })
+
   it('records a bounded Snapshot-only Overview query', async () => {
     const readService = persistedReadService(
       engineeringSnapshot(),
@@ -1604,6 +1661,7 @@ describe('BackendWorkspaceService', () => {
 
   it('reads a declared layout Artifact by identity and Snapshot revision', async () => {
     const snapshot = engineeringSnapshot()
+    snapshot.workspaceRevision = 2
     snapshot.artifacts = [
       {
         artifactId: 'layout-place',
@@ -1616,9 +1674,19 @@ describe('BackendWorkspaceService', () => {
         stepId: 'Place',
       },
     ] as never
+    const stale = structuredClone(snapshot)
+    stale.workspaceRevision = 1
+    snapshot.stalePredecessor = {
+      workspaceRevision: 1,
+      invalidatedStepIds: ['Place'],
+    }
     const expectedBytes = new Uint8Array([1, 2, 3])
     const projectManagementReadService = {
       ...persistedReadService(snapshot),
+      readEngineeringSnapshot: vi.fn().mockResolvedValue({
+        ...persistedSnapshotResult(snapshot),
+        staleSnapshot: persistedSnapshotResult(stale),
+      }),
       expectedBytes,
       readVerifiedArtifact: vi.fn(function (this: { expectedBytes?: Uint8Array }) {
         if (!this.expectedBytes) throw new Error('reader lost its receiver')
@@ -1635,7 +1703,7 @@ describe('BackendWorkspaceService', () => {
       service.getArtifact({
         artifactId: 'layout-place',
         workspaceContextId: overview.workspaceContextId,
-        workspaceRevision: 1,
+        workspaceRevision: 2,
       }),
     )
 
@@ -1646,6 +1714,7 @@ describe('BackendWorkspaceService', () => {
         sizeBytes: 3,
       },
       projectRoot: '/project',
+      verifyFingerprint: false,
       workspacePath: '/project/ws-a',
     })
     expect(result).toMatchObject({
@@ -1657,9 +1726,73 @@ describe('BackendWorkspaceService', () => {
           mimeType: 'image/png',
         },
       },
-      workspaceRevision: 1,
+      workspaceRevision: 2,
+    })
+    await runWithWindowScope(50, () =>
+      service.getArtifact({
+        artifactId: 'layout-place',
+        workspaceContextId: overview.workspaceContextId,
+        workspaceRevision: 1,
+      }),
+    )
+    expect(projectManagementReadService.readVerifiedArtifact).toHaveBeenLastCalledWith({
+      artifact: {
+        reference: 'Place_ecc/output/gcd_Place.png',
+        sha256: 'a'.repeat(64),
+        sizeBytes: 3,
+      },
+      projectRoot: '/project',
+      verifyFingerprint: true,
+      workspacePath: '/project/ws-a',
     })
     expect(JSON.stringify(result)).not.toContain('Place_ecc/')
+  })
+
+  it('discards an artifact result when the workspace generation changes while reading', async () => {
+    const snapshot = engineeringSnapshot()
+    snapshot.artifacts = [
+      {
+        artifactId: 'layout-place',
+        availability: 'available',
+        kind: 'layout_image',
+        name: 'gcd_Place.png',
+        reference: 'Place_ecc/output/gcd_Place.png',
+        sha256: 'a'.repeat(64),
+        sizeBytes: 3,
+        stepId: 'Place',
+      },
+    ] as never
+    let resolveRead!: (value: { ok: true; bytes: Uint8Array }) => void
+    const read = new Promise<{ ok: true; bytes: Uint8Array }>((resolve) => {
+      resolveRead = resolve
+    })
+    const readVerifiedArtifact = vi.fn().mockReturnValue(read)
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: {
+        ...persistedReadService(snapshot),
+        readVerifiedArtifact,
+      },
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+    const overview = await runWithWindowScope(63, () => service.getOverview())
+    const pending = runWithWindowScope(63, () =>
+      service.getArtifact({
+        artifactId: 'layout-place',
+        workspaceContextId: overview.workspaceContextId,
+        workspaceRevision: 1,
+      }),
+    )
+
+    await vi.waitFor(() => expect(readVerifiedArtifact).toHaveBeenCalledOnce())
+    service.invalidateWindow(63)
+    resolveRead({ ok: true, bytes: new Uint8Array([1, 2, 3]) })
+
+    await expect(pending).resolves.toMatchObject({
+      artifact: {
+        status: 'unavailable',
+        issues: [{ code: 'BACKEND_WORKSPACE_REVISION_CHANGED' }],
+      },
+    })
   })
 
   it('parses timing Artifacts only for the current Snapshot revision', async () => {
@@ -1678,7 +1811,12 @@ describe('BackendWorkspaceService', () => {
             start_point: 'u0/Q',
             end_point: 'u1/D',
             slack_ns: -0.1,
-            stages: [],
+            stages: Array.from({ length: 675 }, (_, index) => ({
+              pin: `u${index}/A`,
+              cell: 'BUF_X1',
+              arrival_ns: index / 100,
+              incremental_delay_ns: 0.01,
+            })),
           },
         ],
       }),
@@ -1688,7 +1826,7 @@ describe('BackendWorkspaceService', () => {
         artifactId: 'timing-paths-sta',
         availability: 'available',
         kind: 'timing_paths',
-        name: 'timing_paths.json',
+        name: 'MAX_125/RCworst/timing_paths.json',
         reference: 'STA_ecc/feature/MAX_125/RCworst/timing_paths.json',
         sha256: 'b'.repeat(64),
         sizeBytes: validBytes.byteLength,
@@ -1723,10 +1861,13 @@ describe('BackendWorkspaceService', () => {
         timingPaths: {
           corner: 'MAX_125/RCworst',
           pathLimit: 10,
-          paths: [{ pathId: 'setup-1', slackNs: -0.1 }],
+          paths: [{ pathId: 'setup-1', slackNs: -0.1, stages: { length: 675 } }],
         },
       },
     })
+    expect(result.artifact.status === 'ready' && result.artifact.data).not.toHaveProperty(
+      'bytes',
+    )
 
     await expect(
       runWithWindowScope(58, () =>

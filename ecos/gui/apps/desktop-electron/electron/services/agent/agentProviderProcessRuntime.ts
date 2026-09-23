@@ -1,5 +1,8 @@
 import { spawn as spawnChild } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import { platform } from 'node:os'
+import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import type {
   DesktopAgentEventType,
@@ -104,6 +107,7 @@ interface AgentProviderProcessRuntimeOptions {
   env?: NodeJS.ProcessEnv
   host?: AgentProviderHost
   manifest: ResolvedAgentProviderManifest
+  platform?: NodeJS.Platform
   spawn?: SpawnLike
 }
 
@@ -145,6 +149,7 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
   >()
   private readonly workspaceRevisions = new Map<string, number>()
   private readonly spawnImpl: SpawnLike
+  private readonly runtimePlatform: NodeJS.Platform
   private child: ReturnType<SpawnLike> | null = null
   private stderrTail = ''
   private stdoutBuffer = ''
@@ -154,6 +159,7 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     this.env = { ...this.baseEnv, ...options.manifest.environment }
     this.host = options.host
     this.manifest = options.manifest
+    this.runtimePlatform = options.platform ?? platform()
     this.spawnImpl = options.spawn ?? spawnChild
   }
 
@@ -367,12 +373,22 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     })
   }
 
+  private resolveCommand(): string {
+    const { command } = this.manifest
+    if (this.runtimePlatform !== 'win32') return command
+    const resolved = join(this.manifest.pluginRoot, command)
+    if (existsSync(resolved)) return command
+    if (existsSync(`${resolved}.exe`)) return `${command}.exe`
+    return command
+  }
+
   private ensureChild(): ReturnType<SpawnLike> {
     if (this.child) return this.child
 
     this.stderrTail = ''
     this.stdoutBuffer = ''
-    const child = this.spawnImpl(this.manifest.command, this.manifest.args ?? [], {
+    const command = this.resolveCommand()
+    const child = this.spawnImpl(command, this.manifest.args ?? [], {
       cwd: this.manifest.pluginRoot,
       env: this.env,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -1735,18 +1751,26 @@ function readWorkspaceSetupParameters(
   const topModule = readWorkspaceSetupText(record.top_module)
   const clock = readWorkspaceSetupText(record.clock)
   const description = readWorkspaceSetupDescription(record.description)
-  const dieAreaMode = record.die_area_mode
   const frequency = readFiniteNumber(record.frequency_max, 1, 10_000)
   const margin = readFiniteNumber(record.margin, 0, 1_000_000)
   const maxFanout = readFiniteNumber(record.max_fanout, 1, 1_000_000)
   const density = readFiniteNumber(record.target_density, 0.01, 1)
   const overflow = readFiniteNumber(record.target_overflow, 0, 1)
+  // Accept the legacy misspelled forms ('utilitization', 'utilitization_margin')
+  // for at least one release cycle; normalize to the canonical spelling.
+  const dieAreaMode =
+    record.die_area_mode === 'width_height'
+      ? 'width_height'
+      : record.die_area_mode === 'utilitization_margin' ||
+          record.die_area_mode === 'utilization_margin'
+        ? 'utilization_margin'
+        : null
   if (
     design === null ||
     topModule === null ||
     clock === null ||
     description === null ||
-    (dieAreaMode !== 'utilitization_margin' && dieAreaMode !== 'width_height') ||
+    dieAreaMode === null ||
     frequency === null ||
     margin === null ||
     maxFanout === null ||
@@ -1775,7 +1799,9 @@ function readWorkspaceSetupParameters(
           top_module: topModule,
         }
   }
-  const utilization = readFiniteNumber(record.utilitization, 0.01, 1)
+  const utilizationValue =
+    record.utilization !== undefined ? record.utilization : record.utilitization
+  const utilization = readFiniteNumber(utilizationValue, 0.01, 1)
   return utilization === null
     ? null
     : {
@@ -1789,7 +1815,7 @@ function readWorkspaceSetupParameters(
         target_density: density,
         target_overflow: overflow,
         top_module: topModule,
-        utilitization: utilization,
+        utilization,
       }
 }
 

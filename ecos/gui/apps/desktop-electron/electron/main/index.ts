@@ -47,6 +47,7 @@ import {
 import { ProjectScopeService } from '../services/projectScopeService'
 import { ProjectReadGrantStore } from '../services/projectReadGrantStore'
 import { ProjectManifestService } from '../services/projectManifestService'
+import { FrontendProjectManifestService } from '../services/frontendProjectManifestService'
 import {
   ProjectManagementReadService,
   type ProjectWorkspaceConfiguration,
@@ -54,6 +55,7 @@ import {
 import { ProjectWorkspaceImportService } from '../services/projectWorkspaceImportService'
 import { ResourceManagerService } from '../services/resourceManagerService'
 import type { PdkInventoryService } from '../services/pdkInventoryService'
+import { ProjectEccConfigService } from '../services/projectEccConfigService'
 import { SettingsStore } from '../services/settingsStore'
 import { ShellPtyService } from '../services/shellPtyService'
 import {
@@ -105,6 +107,7 @@ let services: {
   settingsStore: SettingsStore
   resourceManagerService: ResourceManagerService
   pdkInventoryService: PdkInventoryService
+  projectEccConfigService: ProjectEccConfigService
   chipViewerService: ChipViewerService
   shellService: ShellPtyService
   surferProtocolService: SurferProtocolService
@@ -185,6 +188,7 @@ function getDesktopServices() {
   })
   const resourceManagerService = new ResourceManagerService()
   const pdkInventoryService = resourceManagerService.getPdkInventoryService()
+  const projectEccConfigService = new ProjectEccConfigService()
   const cliInstallerService = new CliInstallerService({
     resourceManager: resourceManagerService,
     env: process.env,
@@ -286,6 +290,7 @@ function getDesktopServices() {
     projectScopeService,
     workspaceService,
     eccRuntimeService,
+    new FrontendProjectManifestService(projectScopeService, workspaceService),
   )
   const creationProjectScope = projectScopeService
   const workspaceCreationJournal = new WorkspaceCreationJournal({
@@ -315,6 +320,7 @@ function getDesktopServices() {
         'workspace.configuration.read',
         { directory },
       ),
+    (path) => projectScopeService!.requestProjectPathAccess(path),
   )
   const backendProjectComparisonService = new BackendProjectComparisonService(
     projectManagementReadService,
@@ -384,6 +390,7 @@ function getDesktopServices() {
     projectManifestService,
     quickStartResourceService,
     pdkInventoryService,
+    projectEccConfigService,
     resourceManagerService,
     settingsStore,
     shellService,
@@ -484,6 +491,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       quickStartResourceService: desktopServices.quickStartResourceService,
       resourceManagerService: desktopServices.resourceManagerService,
       pdkInventoryService: desktopServices.pdkInventoryService,
+      projectEccConfigService: desktopServices.projectEccConfigService,
       chipViewerService: desktopServices.chipViewerService,
       settingsStore: desktopServices.settingsStore,
       shellService: desktopServices.shellService,

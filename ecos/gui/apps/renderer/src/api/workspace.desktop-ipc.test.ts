@@ -133,6 +133,75 @@ describe('workspace desktop bridge', () => {
     )
   })
 
+  it('maps wizard display keys onto spec keys through the parameter catalog index', async () => {
+    const { backendWorkspaceOptions } = await import('./workspace')
+    const options = backendWorkspaceOptions(
+      {
+        directory: '/workspace/catalog',
+        origin_def: '',
+        origin_verilog: '/rtl/top.v',
+        parameters: {
+          design: 'demo',
+          top_module: 'top',
+          frequency_max: 200,
+          utilization: 0.7,
+          max_fanout: 20,
+          margin: 2,
+          target_density: 0.4,
+        },
+        pdk: 'ics55',
+        pdk_root: '/pdks/ics55',
+        rtl_list: ['/rtl/top.v'],
+      },
+      '/workspace/catalog',
+      {
+        frequency_max: 'design.frequency_mhz',
+        utilization: 'floorplan.core_util',
+        die_area_mode: 'floorplan.die_builder.mode',
+        margin: 'floorplan.core_margin',
+        max_fanout: 'cts.max_fanout',
+        target_density: 'place.target_density',
+      },
+    )
+
+    expect(options.workspaceSpec.parameters).toEqual({
+      'design.frequency_mhz': 200,
+      'floorplan.core_util': 0.7,
+      'floorplan.die_builder.mode': 'die_util',
+      'floorplan.core_margin': [2, 2],
+      'cts.max_fanout': 20,
+      'place.target_density': 0.4,
+      'place.target_overflow': 0.1,
+    })
+  })
+
+  it('falls back to built-in spec keys and reads the legacy utilization alias', async () => {
+    const { backendWorkspaceOptions } = await import('./workspace')
+    const options = backendWorkspaceOptions(
+      {
+        directory: '/workspace/legacy',
+        origin_def: '',
+        origin_verilog: '/rtl/top.v',
+        parameters: {
+          design: 'demo',
+          top_module: 'top',
+          utilitization: 0.45,
+          die_area_mode: 'utilitization_margin',
+        },
+        pdk: 'ics55',
+        pdk_root: '/pdks/ics55',
+        rtl_list: ['/rtl/top.v'],
+      },
+      '/workspace/legacy',
+      null,
+    )
+
+    expect(options.workspaceSpec.parameters).toMatchObject({
+      'floorplan.core_util': 0.45,
+      'floorplan.die_builder.mode': 'die_util',
+    })
+  })
+
   it('omits RTL inputs when a filelist is present', async () => {
     const { backendWorkspaceOptions } = await import('./workspace')
     const options = backendWorkspaceOptions(

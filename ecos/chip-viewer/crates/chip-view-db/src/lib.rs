@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::mem::size_of;
 use std::path::Path;
 
@@ -167,7 +167,7 @@ pub struct LayerShapeIndex {
 
 #[derive(Clone, Debug, Default)]
 pub struct ShapeIdIndex {
-    by_id: BTreeMap<ShapeId, usize>,
+    by_id: HashMap<ShapeId, usize>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -178,8 +178,8 @@ pub struct ViewTileIndex {
 #[derive(Clone, Debug, Default)]
 pub struct OwnerNameIndex {
     by_name: BTreeMap<String, Vec<ShapeId>>,
-    name_by_owner: BTreeMap<(u8, u64), String>,
-    shapes_by_owner: BTreeMap<(u8, u64), Vec<ShapeId>>,
+    name_by_owner: HashMap<(u8, u64), String>,
+    shapes_by_owner: HashMap<(u8, u64), Vec<ShapeId>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -476,7 +476,7 @@ impl LayerShapeIndex {
 
 impl ShapeIdIndex {
     pub fn from_shapes(shapes: &[ShapeRecord]) -> Self {
-        let mut by_id = BTreeMap::<ShapeId, usize>::new();
+        let mut by_id = HashMap::<ShapeId, usize>::with_capacity(shapes.len());
         for (index, shape) in shapes.iter().enumerate() {
             by_id.entry(shape.id).or_insert(index);
         }
@@ -484,7 +484,7 @@ impl ShapeIdIndex {
     }
 
     pub fn estimated_heap_bytes(&self) -> usize {
-        size_of::<Self>() + self.by_id.len() * size_of::<(ShapeId, usize)>()
+        size_of::<Self>() + self.by_id.capacity() * (size_of::<(ShapeId, usize)>() + 1)
     }
 
     pub fn find<'a>(
@@ -560,7 +560,7 @@ impl OwnerNameIndex {
         owners: &[OwnerRef],
         owner_names: impl IntoIterator<Item = (u8, u64, String)>,
     ) -> Self {
-        let mut shapes_by_owner = BTreeMap::<(u8, u64), Vec<ShapeId>>::new();
+        let mut shapes_by_owner = HashMap::<(u8, u64), Vec<ShapeId>>::new();
         for shape in shapes {
             if shape.state != ShapeState::Alive as u8 {
                 continue;
@@ -579,7 +579,7 @@ impl OwnerNameIndex {
         }
 
         let mut by_name = BTreeMap::<String, Vec<ShapeId>>::new();
-        let mut name_by_owner = BTreeMap::<(u8, u64), String>::new();
+        let mut name_by_owner = HashMap::<(u8, u64), String>::new();
         for (owner_type, owner_id, name) in owner_names {
             name_by_owner
                 .entry((owner_type, owner_id))
@@ -770,12 +770,25 @@ impl EndpointPinLookup {
             let Some(owner) = owners.get(shape.owner_index as usize) else {
                 continue;
             };
+            let owner_type = OwnerType::from_raw(owner.owner_type);
+            if !matches!(
+                owner_type,
+                Some(
+                    OwnerType::InstanceBBox
+                        | OwnerType::InstanceHalo
+                        | OwnerType::InstancePinPortShape
+                        | OwnerType::IoPinPortShape
+                        | OwnerType::PinPortShape
+                )
+            ) {
+                continue;
+            }
             let Some(owner_name) = name_index.name_for_owner(owner.owner_type, owner.owner_id)
             else {
                 continue;
             };
 
-            match OwnerType::from_raw(owner.owner_type) {
+            match owner_type {
                 Some(OwnerType::InstanceBBox | OwnerType::InstanceHalo) => {
                     for name in lookup_name_variants(owner_name) {
                         lookup
@@ -1009,11 +1022,20 @@ pub fn layer_catalog_from_metadata_and_shapes(
         *counts.entry(shape.layer_id).or_insert(0) += 1;
     }
 
+    layer_catalog_from_counts(metadata, |layer_id| {
+        counts.get(&layer_id).copied().unwrap_or(0)
+    })
+}
+
+fn layer_catalog_from_counts(
+    metadata: &[LayerMetadata],
+    count: impl Fn(u16) -> usize,
+) -> Vec<LayerSummary> {
     let mut catalog = metadata
         .iter()
         .map(|metadata| LayerSummary {
             layer_id: metadata.layer_id,
-            shape_count: counts.get(&metadata.layer_id).copied().unwrap_or(0),
+            shape_count: count(metadata.layer_id),
             order: metadata.order,
             name: metadata.name.clone(),
             layer_type: metadata.layer_type.clone(),
@@ -1328,11 +1350,14 @@ fn routed_net_names(
     name_index: &OwnerNameIndex,
 ) -> BTreeSet<String> {
     let mut routed = BTreeSet::new();
+    let mut seen_owners = HashSet::new();
     for shape in shapes {
         let Some(owner) = owners.get(shape.owner_index as usize) else {
             continue;
         };
-        if owner.owner_type != OwnerType::NetWireSegment as u8 {
+        if owner.owner_type != OwnerType::NetWireSegment as u8
+            || !seen_owners.insert(owner.owner_id)
+        {
             continue;
         }
         if let Some(name) = name_index.name_for_owner(owner.owner_type, owner.owner_id) {
@@ -1455,9 +1480,27 @@ impl ChipViewDb {
         let snapshot = GeometrySnapshot::open(manifest_path)?;
         let connectivity_index =
             ConnectivityIndex::from_endpoints(snapshot.connectivity_metadata());
-        let layer_index = LayerShapeIndex::from_shapes(snapshot.shapes());
-        let name_index = OwnerNameIndex::from_snapshot(&snapshot);
         let net_index = NetMetadataIndex::from_nets(snapshot.net_metadata());
+        let view_index = ViewTileIndex::from_tiles(snapshot.view_tile_records());
+        let (layer_index, name_index, shape_index) = match std::thread::available_parallelism() {
+            Ok(threads) if threads.get() >= 3 => std::thread::scope(|scope| {
+                let layers = scope.spawn(|| LayerShapeIndex::from_shapes(snapshot.shapes()));
+                let shapes = scope.spawn(|| ShapeIdIndex::from_shapes(snapshot.shapes()));
+                let names = OwnerNameIndex::from_snapshot(&snapshot);
+                (layers.join().unwrap(), names, shapes.join().unwrap())
+            }),
+            Ok(threads) if threads.get() >= 2 => std::thread::scope(|scope| {
+                let layers = scope.spawn(|| LayerShapeIndex::from_shapes(snapshot.shapes()));
+                let names = OwnerNameIndex::from_snapshot(&snapshot);
+                let shapes = ShapeIdIndex::from_shapes(snapshot.shapes());
+                (layers.join().unwrap(), names, shapes)
+            }),
+            _ => (
+                LayerShapeIndex::from_shapes(snapshot.shapes()),
+                OwnerNameIndex::from_snapshot(&snapshot),
+                ShapeIdIndex::from_shapes(snapshot.shapes()),
+            ),
+        };
         let net_guides = unrouted_net_guides_from_parts(
             snapshot.shapes(),
             snapshot.owners(),
@@ -1465,8 +1508,6 @@ impl ChipViewDb {
             &net_index,
             snapshot.connectivity_metadata(),
         );
-        let shape_index = ShapeIdIndex::from_shapes(snapshot.shapes());
-        let view_index = ViewTileIndex::from_tiles(snapshot.view_tile_records());
         Ok(Self {
             connectivity_index,
             layer_index,
@@ -1551,10 +1592,9 @@ impl ChipViewDb {
     /// metadata side file.  Empty or unknown geometry layers are deliberately
     /// excluded so UI controls cannot infer technology from rendered shapes.
     pub fn layer_catalog(&self) -> Vec<LayerSummary> {
-        layer_catalog_from_metadata_and_shapes(
-            self.snapshot.layer_metadata(),
-            self.snapshot.shapes(),
-        )
+        layer_catalog_from_counts(self.snapshot.layer_metadata(), |layer_id| {
+            self.layer_index.candidate_count(layer_id)
+        })
     }
 
     pub fn site_metadata(&self) -> &[SiteMetadata] {
@@ -1968,6 +2008,30 @@ mod tests {
         assert_eq!(catalog[1].layer_id, 7);
         assert_eq!(catalog[1].shape_count, 0);
         assert!(catalog.iter().all(|layer| layer.layer_id != 1));
+    }
+
+    #[test]
+    fn indexed_layer_catalog_matches_shape_scan() {
+        let metadata = [chipgeom_reader::LayerMetadata {
+            layer_id: 3,
+            name: "M3".to_string(),
+            ..chipgeom_reader::LayerMetadata::default()
+        }];
+        let shapes = [
+            shape(1, 3),
+            shape(2, 3),
+            ShapeRecord {
+                state: ShapeState::Deleted as u8,
+                ..shape(3, 3)
+            },
+            shape(4, 8),
+        ];
+        let index = LayerShapeIndex::from_shapes(&shapes);
+
+        assert_eq!(
+            layer_catalog_from_counts(&metadata, |layer_id| index.candidate_count(layer_id)),
+            layer_catalog_from_metadata_and_shapes(&metadata, &shapes),
+        );
     }
 
     #[test]
