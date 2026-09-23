@@ -26,6 +26,9 @@ pub struct ViewTileIndex {
 struct ViewTileGroup {
     /// Record indices in original file order; drives result ordering.
     indices: Vec<usize>,
+    /// Staging area for tree entries during `from_tiles`; emptied once the
+    /// group's R-Tree is bulk-loaded.
+    entries: Vec<ViewTileEntry>,
     tree: RTree<ViewTileEntry>,
 }
 
@@ -54,10 +57,16 @@ impl ViewTileIndex {
                 .entry((tile.lod_level, tile.layer_id))
                 .or_default();
             group.indices.push(index);
-            group.tree.insert(ViewTileEntry {
+            group.entries.push(ViewTileEntry {
                 index,
                 envelope: rect_envelope(tile.bbox),
             });
+        }
+        for group in by_lod_layer.values_mut() {
+            // Bulk-load instead of inserting one by one: inserts route through
+            // `Envelope::area`, whose i32 product overflows for die-sized
+            // bounding boxes in debug builds (and wraps in release).
+            group.tree = RTree::bulk_load(std::mem::take(&mut group.entries));
         }
         Self { by_lod_layer }
     }
@@ -375,6 +384,52 @@ mod tests {
             },
         );
         assert_eq!(hits.len(), 1);
+    }
+
+    #[test]
+    fn die_sized_tile_bounding_boxes_do_not_overflow_i32_area() {
+        // A die-sized bounding box has an area far above i32::MAX. Inserting
+        // such envelopes one by one panics in debug builds inside rstar's
+        // subtree selection; bulk loading must stay overflow-free.
+        let tiles = vec![
+            tile(
+                3,
+                8,
+                0,
+                0,
+                Rect32 {
+                    lx: 0,
+                    ly: 0,
+                    hx: 754_401,
+                    hy: 755_801,
+                },
+            ),
+            tile(
+                3,
+                8,
+                1,
+                0,
+                Rect32 {
+                    lx: 754_401,
+                    ly: 0,
+                    hx: 1_508_802,
+                    hy: 755_801,
+                },
+            ),
+        ];
+        let index = ViewTileIndex::from_tiles(&tiles);
+        let hits = index.query_tiles(
+            &tiles,
+            3,
+            8,
+            Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 754_401,
+                hy: 755_801,
+            },
+        );
+        assert_eq!(hits.len(), 2);
     }
 
     #[test]
