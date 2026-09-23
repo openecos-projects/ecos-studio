@@ -535,6 +535,13 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
         default=3,
         help="default replay count for calibration; 1 skips the noise-epsilon artifact",
     )
+    parser.add_argument(
+        "--max-in-flight-candidates",
+        type=int,
+        default=4,
+        help="episode-internal candidate dispatch depth (1-8); >1 overlaps "
+        "LLM planning with in-flight EDA evaluations",
+    )
     parser.add_argument("--episode-id", default=None)  # 同 id 重启 = resume
     args = parser.parse_args(argv)
     if not _RUN_ID.fullmatch(args.design):
@@ -688,6 +695,7 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
             "agent_mode": args.agent_mode,
             "knowledge_case_shots": 0,
             "planner_reasoning_effort": args.reasoning_effort,
+            "max_in_flight_candidates": args.max_in_flight_candidates,
         }
         runner = create_optimization_runner(runtime_context, provider)
         try:

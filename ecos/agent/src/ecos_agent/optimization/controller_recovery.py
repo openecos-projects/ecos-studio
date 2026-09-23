@@ -75,7 +75,7 @@ class ControllerRecoveryMixin:
         receipt_aware_planning: bool = True,
         knowledge_case_shots: Literal[0, 3] = 0,
         knowledge_case_pool_root: Path | None = None,
-        max_in_flight_candidates: Literal[1, 2] = 1,
+        max_in_flight_candidates: int = 1,
         design_id: str | None = None,
         trend_noise_epsilon: Mapping[str, float] | None = None,
         toolchain_sha256: str | None = None,

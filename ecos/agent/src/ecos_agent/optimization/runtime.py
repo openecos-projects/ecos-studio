@@ -15,6 +15,7 @@ from typing import Any, Literal, Mapping
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
     StrictBool,
     StrictInt,
     ValidationError,
@@ -135,7 +136,7 @@ class OptimizationRuntimeContext(BaseModel):
     knowledge_case_pool_root: str | None = None
     receipt_aware_planning: StrictBool = True
     seed: StrictInt = 0
-    max_in_flight_candidates: Literal[1, 2] = 2
+    max_in_flight_candidates: int = Field(default=4, ge=1, le=8)
     trend_noise_epsilon: dict[str, float] | None = None
     toolchain_sha256: str | None = None
     planner_reasoning_effort: Literal["low", "medium", "high"] | None = None

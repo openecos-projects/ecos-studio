@@ -185,7 +185,7 @@ class OptimizationEpisodeController(
         receipt_aware_planning: bool = True,
         knowledge_case_shots: Literal[0, 3] = 0,
         knowledge_case_pool_root: Path | None = None,
-        max_in_flight_candidates: Literal[1, 2] = 1,
+        max_in_flight_candidates: int = 1,
         design_id: str | None = None,
         trend_noise_epsilon: Mapping[str, float] | None = None,
         toolchain_sha256: str | None = None,
@@ -205,11 +205,12 @@ class OptimizationEpisodeController(
         )
         self._toolchain_sha256 = self._validated_toolchain_sha256(toolchain_sha256)
         self._episode_design_id = self._manifest_scope_check(design_id)
-        if type(max_in_flight_candidates) is not int or max_in_flight_candidates not in {
-            1, 2,
-        }:
+        if (
+            type(max_in_flight_candidates) is not int
+            or not 1 <= max_in_flight_candidates <= 8
+        ):
             raise OptimizationEpisodeControllerError(
-                "max in-flight candidates must be one or two"
+                "max in-flight candidates must be between one and eight"
             )
         self.max_in_flight_candidates = max_in_flight_candidates
         if type(knowledge_case_shots) is not int or knowledge_case_shots not in {0, 3}:

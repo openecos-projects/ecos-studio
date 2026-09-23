@@ -225,8 +225,8 @@ class _PersistedEpisodeState(BaseModel):
     knowledge_case_shots: Literal[0, 3] = Field(
         default=0, exclude_if=lambda value: value == 0
     )
-    max_in_flight_candidates: Literal[1, 2] = Field(
-        default=1, exclude_if=lambda value: value == 1
+    max_in_flight_candidates: int = Field(
+        default=1, ge=1, le=8, exclude_if=lambda value: value == 1
     )
     state: OptimizationEpisodeState
     budget: BudgetSnapshot
