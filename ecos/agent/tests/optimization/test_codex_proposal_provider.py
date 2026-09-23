@@ -751,12 +751,13 @@ def test_planner_prompt_claim_contract_is_consistent(
     assert "set all four to null" in system
     assert "never invent claim or binding values" in system
 
-    # Knowledge-conditioned abstention is mandatory, not a preference, and the
-    # prompt no longer grades softer than the offline gate labels.
+    # Knowledge-conditioned abstention is mandatory when no eligible compiled
+    # action is exposed; blocked/unknown reasons remain audit-only.
     assert "prefer decision continue" not in system
-    assert system.count("decision continue is mandatory") == 2
-    assert "name that reason code in rationale_summary" in system
-    assert "assess other pass actions before continuing" in system
+    assert system.count("decision continue is mandatory") == 1
+    assert "blocked or unknown matches remain audit-only" in system
+    assert "name that reason code in rationale_summary" not in system
+    assert "Assess other pass actions before continuing" in system
 
     # A supported_action_view pass action is explicit density_weight support.
     assert "must never be enabled implicitly: a supplied" in system

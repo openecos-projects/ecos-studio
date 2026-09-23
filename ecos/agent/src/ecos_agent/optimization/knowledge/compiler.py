@@ -555,17 +555,27 @@ class SupportedActionView(_Model):
     def view_sha256(self) -> str:
         return canonical_sha256(self.model_dump(mode="json"))
 
+    def _planner_state_payload(self) -> dict[str, object]:
+        return {
+            "schema_version": "ecos.supported_action_state.planner.v1",
+            "current_stage": self.state.current_stage.value,
+            "evidence_stages": list(self.state.evidence_stages),
+            "primary_metric": (
+                self.state.primary_metric.value
+                if self.state.primary_metric is not None
+                else None
+            ),
+            "preserve_metrics": [item.value for item in self.state.preserve_metrics],
+            "features": {
+                item.feature_id: item.value for item in self.state.features
+            },
+        }
+
     def planner_payload(self) -> dict[str, object]:
         exposed = _reference_keys(self.exposed_claim_refs)
-        truncated = _reference_keys(self.truncated_claim_refs)
-        # Blocked/unknown matches must reach the planner or abstention on a
-        # knowledge rejection is inexpressible; truncated refs stay ledger-bound.
-        inactionable = frozenset(
-            {KnowledgeApplicability.BLOCKED, KnowledgeApplicability.UNKNOWN}
-        )
         return {
-            "schema_version": "ecos.supported_action_view.planner.v1",
-            "state": self.state.model_dump(mode="json"),
+            "schema_version": "ecos.supported_action_view.planner.v2",
+            "state": self._planner_state_payload(),
             "catalog_sha256": self.catalog_sha256,
             "candidate_count": self.candidate_count,
             "exposed_count": len(self.exposed_claim_refs),
@@ -577,12 +587,6 @@ class SupportedActionView(_Model):
                 item.model_dump(mode="json")
                 for item in self.matches
                 if _reference_key(item.claim_ref) in exposed
-            ],
-            "inactionable_matches": [
-                item.model_dump(mode="json")
-                for item in self.matches
-                if item.applicability in inactionable
-                and _reference_key(item.claim_ref) not in truncated
             ],
             "actions": [item.model_dump(mode="json") for item in self.actions],
             "audit_sha256": self.view_sha256,

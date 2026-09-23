@@ -304,16 +304,14 @@ def test_compiler_fails_closed_on_missing_and_anti_condition_evidence() -> None:
     assert blocked.matches[0].applicability == KnowledgeApplicability.BLOCKED
     assert "anti_condition" in blocked.matches[0].reason_codes
     blocked_payload = blocked.planner_payload()
-    assert [
-        (item["applicability"], list(item["reason_codes"]))
-        for item in blocked_payload["inactionable_matches"]
-    ] == [("blocked", ["anti_condition"])]
+    assert blocked_payload["actions"] == []
+    assert "inactionable_matches" not in blocked_payload
     missing_payload = missing.planner_payload()
-    assert missing_payload["inactionable_matches"][0]["applicability"] == "unknown"
-    assert (
-        "missing_observation"
-        in missing_payload["inactionable_matches"][0]["reason_codes"]
-    )
+    assert missing_payload["actions"] == []
+    assert "inactionable_matches" not in missing_payload
+    # The full compiler view remains the audit source for blocked/unknown reasons.
+    assert missing.matches[0].applicability == KnowledgeApplicability.UNKNOWN
+    assert "missing_observation" in missing.matches[0].reason_codes
 
 
 def test_compiler_rejects_stale_binding_and_unsupported_legal_action() -> None:
@@ -409,8 +407,39 @@ def test_compiler_exposes_only_seven_state_matched_claims_with_audit() -> None:
     assert all(ref.entity_id not in planner_json for ref in view.truncated_claim_refs)
     assert planner_payload["candidate_count"] == 9
     assert planner_payload["audit_sha256"] == view.view_sha256
+    assert planner_payload["schema_version"] == "ecos.supported_action_view.planner.v2"
+    assert "inactionable_matches" not in planner_payload
     assert "candidate_refs" not in planner_payload
     assert "truncated_claim_refs" not in planner_payload
+
+
+def test_planner_state_keeps_values_without_compiler_provenance() -> None:
+    view = _compile(
+        StateEvidenceFeature(
+            feature_id="local_cell_density_hotspot",
+            value=True,
+            evidence_ref="place/analysis/hotspots.json",
+            evidence_sha256="sha256:" + "f" * 64,
+        ),
+        StateEvidenceFeature(
+            feature_id="long_net_pressure_dominant",
+            value=False,
+            evidence_ref="place/analysis/nets.json",
+            evidence_sha256="sha256:" + "1" * 64,
+        ),
+    )
+
+    state = view.planner_payload()["state"]
+
+    assert state["schema_version"] == "ecos.supported_action_state.planner.v1"
+    assert state["current_stage"] == "place"
+    assert state["features"]["local_cell_density_hotspot"] is True
+    assert state["features"]["long_net_pressure_dominant"] is False
+    serialized = json.dumps(state, sort_keys=True)
+    assert "evidence_ref" not in serialized
+    assert "evidence_sha256" not in serialized
+    assert "retrieval_request_sha256" not in serialized
+    assert "history_sha256" not in serialized
 
 
 def test_state_evidence_derives_reference_delta_and_history_trend() -> None:
