@@ -42,18 +42,21 @@ def test_sent_prompt_equals_audit_envelope_and_telemetry_does_not_change_busines
     expected = planning_context_payload(context)
     expected["effective_domain"] = domain.model_dump(mode="json")
     sent = []
+    thread_starts = 0
 
     class Client:
         def request(self, method, params):
+            nonlocal thread_starts
             if method == "thread/start":
-                return {"thread": {"id": "thread-1"}}
+                thread_starts += 1
+                return {"thread": {"id": f"thread-{thread_starts}"}}
             sent.append(copy.deepcopy(params))
             assert provider._planning_envelope.prompt == params["input"][0]["text"]
             return {"turn": {"id": f"turn-{len(sent)}"}}
 
         def wait_for_turn_details(self, *args, **kwargs):
             # Late telemetry must not rewrite the frozen request or its envelope.
-            provider._runtime_status.last_turn = {"thread_id": "thread-1", "usage": {"input_tokens": 999}}
+            provider._runtime_status.last_turn = {"thread_id": provider.thread_id, "usage": {"input_tokens": 999}}
             response = _proposal_v2(context, domain)
             return json.dumps(response), {"input_tokens": 5}
 
@@ -61,8 +64,10 @@ def test_sent_prompt_equals_audit_envelope_and_telemetry_does_not_change_busines
             pass
 
     provider._client = Client()
+    thread_ids = []
     for index in range(2):
         provider.propose_v2(context, domain)
+        thread_ids.append(provider.thread_id)
         evidence = provider.consume_planning_evidence()
         assert evidence.envelope.prompt == sent[-1]["input"][0]["text"]
         assert evidence.envelope.output_schema == sent[-1]["outputSchema"]
@@ -74,7 +79,55 @@ def test_sent_prompt_equals_audit_envelope_and_telemetry_does_not_change_busines
         assert status["runtime"]["requests_started"] == index
         assert status["snapshot_seq"] == index + 1
         assert "999" not in json.dumps(status)
+        metrics = provider.last_planning_metrics
+        assert metrics is not None
+        assert metrics["thread_policy"] == "reuse"
+        assert metrics["planning_latency_ms"] >= 0
+        assert metrics["proposal_valid"] is True
+        assert metrics["turn_usage"] == {"input_tokens": 5}
+        if index == 0:
+            assert metrics["thread_start_latency_ms"] >= 0
+        else:
+            assert metrics["thread_start_latency_ms"] is None
+    assert thread_ids == ["thread-1", "thread-1"]
     assert planning_context_payload(context).get("agent_status") is None
+
+
+def test_planning_metrics_expose_fresh_thread_overhead(tmp_path):
+    provider = _provider(tmp_path)
+    provider.planning_thread_policy = "fresh"
+    context = _context()
+    domain = _domain()
+    thread_starts = 0
+
+    class Client:
+        def request(self, method, params):
+            nonlocal thread_starts
+            if method == "thread/start":
+                thread_starts += 1
+                return {"thread": {"id": f"thread-{thread_starts}"}}
+            return {"turn": {"id": "turn-1"}}
+
+        def wait_for_turn_details(self, *args, **kwargs):
+            return json.dumps(_proposal_v2(context, domain)), {"input_tokens": 5}
+
+        def record_turn_completion(self, **kwargs):
+            pass
+
+    provider._client = Client()
+    provider.propose_v2(context, domain)
+    first = provider.last_planning_metrics
+    provider.propose_v2(context, domain)
+    second = provider.last_planning_metrics
+
+    assert first is not None and second is not None
+    assert first["thread_id"] == "thread-1"
+    assert second["thread_id"] == "thread-2"
+    assert first["thread_policy"] == second["thread_policy"] == "fresh"
+    assert first["thread_start_latency_ms"] >= 0
+    assert second["thread_start_latency_ms"] >= 0
+    assert first["turn_usage"] == second["turn_usage"] == {"input_tokens": 5}
+    assert first["proposal_valid"] is second["proposal_valid"] is True
 
 
 def test_status_and_external_text_never_override_control_fields():

@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal, Mapping, Sequence
 
@@ -145,6 +146,7 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
         progress_callback: Callable[[str | dict[str, Any]], None] | None = None,
         diagnostics_path: Path | None = None,
         ephemeral: bool = True,
+        planning_thread_policy: Literal["reuse", "fresh"] = "reuse",
     ) -> None:
         self.cwd = Path(cwd or Path.cwd())
         self.env = dict(env or os.environ)
@@ -156,6 +158,9 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
             runtime_workspace_roots or (self.cwd,)
         )
         self.diagnostics_path = diagnostics_path or _diagnostics_path_from_env(self.env)
+        if planning_thread_policy not in {"reuse", "fresh"}:
+            raise ValueError("planning_thread_policy must be 'reuse' or 'fresh'")
+        self.planning_thread_policy = planning_thread_policy
         self.ephemeral = ephemeral
         self.progress_callback = progress_callback
         self._client: _JsonLineRpcProcessClient | None = None
@@ -173,6 +178,8 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
         self._last_turn_usage: dict[str, int] | None = None
         self._last_response_text: str | None = None
         self._parse_failure_excerpt: str | None = None
+        self._last_thread_start_latency_ms: float | None = None
+        self._last_planning_metrics: dict[str, Any] | None = None
 
     def propose_v2(
         self,
@@ -188,6 +195,12 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
             raise CodexProviderError(
                 "optimization proposal v3 domain is invalid", failure_class="missing_input"
             ) from exc
+        if self.planning_thread_policy == "fresh":
+            self.new_ephemeral_thread()
+        self._last_thread_start_latency_ms = None
+        self._last_turn_usage = None
+        planning_started = time.perf_counter()
+        proposal_valid = False
         payload = _optimization_planning_payload(context)
         if len(domains) == 1:
             payload["effective_domain"] = domains[0].model_dump(mode="json")
@@ -362,8 +375,24 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
                 envelope_sha256=canonical_sha256(envelope_payload),
             )
         try:
-            return self._proposal(payload, system, output_schema, OptimizationProposalV2)
+            result = self._proposal(payload, system, output_schema, OptimizationProposalV2)
+            proposal_valid = True
+            return result
         finally:
+            self._last_planning_metrics = {
+                "thread_policy": self.planning_thread_policy,
+                "thread_id": self.thread_id,
+                "planning_latency_ms": round(
+                    (time.perf_counter() - planning_started) * 1000, 3
+                ),
+                "thread_start_latency_ms": self._last_thread_start_latency_ms,
+                "turn_usage": (
+                    dict(self._last_turn_usage)
+                    if self._last_turn_usage is not None
+                    else None
+                ),
+                "proposal_valid": proposal_valid,
+            }
             self._capture_planning_evidence()
 
     def propose_optimization_objective(self, natural_language_goal: str) -> dict[str, Any]:
@@ -422,6 +451,13 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
                 failure_class="parse_error",
             )
         return proposal
+
+    @property
+    def last_planning_metrics(self) -> dict[str, Any] | None:
+        """Return non-authoritative timing/quality metrics for thread-policy comparison."""
+
+        with self._state_lock:
+            return copy.deepcopy(self._last_planning_metrics)
 
     def consume_planning_evidence(self) -> PlanningProviderEvidence | None:
         """Return the evidence for the most recent optimization planner turn once."""
@@ -837,30 +873,36 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
 
     def _ensure_thread(self, client: _JsonLineRpcProcessClient) -> str:
         if self._thread_id is None:
-            response = client.request(
-                "thread/start",
-                {
-                    "model": self._model,
-                    "modelProvider": None,
-                    "serviceTier": None,
-                    "cwd": str(self.cwd),
-                    "runtimeWorkspaceRoots": list(self.runtime_workspace_roots),
-                    **_read_only_thread_config(),
-                    "approvalsReviewer": None,
-                    "permissions": None,
-                    "config": None,
-                    "serviceName": "ecos-agent",
-                    "baseInstructions": None,
-                    "developerInstructions": None,
-                    "personality": None,
-                    "ephemeral": self.ephemeral,
-                    "sessionStartSource": None,
-                    "threadSource": None,
-                    "environments": [],
-                    "dynamicTools": None,
-                    "experimentalRawEvents": False,
-                },
-            )
+            started = time.perf_counter()
+            try:
+                response = client.request(
+                    "thread/start",
+                    {
+                        "model": self._model,
+                        "modelProvider": None,
+                        "serviceTier": None,
+                        "cwd": str(self.cwd),
+                        "runtimeWorkspaceRoots": list(self.runtime_workspace_roots),
+                        **_read_only_thread_config(),
+                        "approvalsReviewer": None,
+                        "permissions": None,
+                        "config": None,
+                        "serviceName": "ecos-agent",
+                        "baseInstructions": None,
+                        "developerInstructions": None,
+                        "personality": None,
+                        "ephemeral": self.ephemeral,
+                        "sessionStartSource": None,
+                        "threadSource": None,
+                        "environments": [],
+                        "dynamicTools": None,
+                        "experimentalRawEvents": False,
+                    },
+                )
+            finally:
+                self._last_thread_start_latency_ms = round(
+                    (time.perf_counter() - started) * 1000, 3
+                )
             self._thread_id = _read_nested_string(
                 response, (("thread", "id"), ("threadId",), ("id",))
             )
@@ -883,6 +925,7 @@ def create_required_codex_provider(
     progress_callback: Callable[[str | dict[str, Any]], None] | None = None,
     diagnostics_path: Path | None = None,
     ephemeral: bool = True,
+    planning_thread_policy: Literal["reuse", "fresh"] = "reuse",
 ) -> CodexAppServerProposalProvider:
     return CodexAppServerProposalProvider(
         cwd=cwd,
@@ -890,6 +933,7 @@ def create_required_codex_provider(
         progress_callback=progress_callback,
         diagnostics_path=diagnostics_path,
         ephemeral=ephemeral,
+        planning_thread_policy=planning_thread_policy,
     )
 
 
