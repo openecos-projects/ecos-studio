@@ -9992,6 +9992,15 @@ fn paint_parameterized_grid_overlay(
     drawn
 }
 
+/// Flylines collapse into visual noise below this on-screen span, so they
+/// are skipped entirely (most valuable at extreme zoom-out).
+const FLYLINE_MIN_SCREEN_SPAN_PX: f32 = 6.0;
+/// Per-frame caps for flyline painting. Without them, a full-chip view of a
+/// multi-million-pin design pushes hundreds of thousands of dashed segments
+/// into the painter every frame, which exhausts memory while zooming.
+const FLYLINE_MAX_LINES_PER_FRAME: usize = 48_000;
+const FLYLINE_MAX_SEGMENTS_PER_FRAME: usize = 128_000;
+
 fn paint_unrouted_net_guides(
     painter: &egui::Painter,
     guides: &[UnroutedNetGuide],
@@ -10002,28 +10011,121 @@ fn paint_unrouted_net_guides(
     zoom: f32,
     pan: egui::Vec2,
 ) -> usize {
+    let selected =
+        select_unrouted_net_guide_lines(guides, visibility, viewport, world, canvas, zoom, pan);
     let mut drawn = 0usize;
-    for guide in guides {
-        if !unrouted_net_guide_is_visible(guide, visibility, viewport) {
-            continue;
-        }
+    let mut painted_hub_for: Option<usize> = None;
+    for (guide_index, pin_index) in selected {
+        let guide = &guides[guide_index];
         let category = net_kind_drawing_category(Some(&guide.net_kind));
         let stroke = unrouted_net_guide_stroke(category);
         let hub = world_to_screen_point(guide.hub, world, canvas, zoom, pan);
-        if canvas.contains(hub) {
-            painter.circle_filled(hub, 2.5, stroke.color);
+        if painted_hub_for != Some(guide_index) {
+            painted_hub_for = Some(guide_index);
+            if canvas.contains(hub) {
+                painter.circle_filled(hub, 2.5, stroke.color);
+            }
         }
-        for pin_center in &guide.pin_centers {
-            let endpoint = world_to_screen_point(*pin_center, world, canvas, zoom, pan);
-            if !screen_line_bounds(hub, endpoint).intersects(canvas) {
-                continue;
-            }
-            if paint_dashed_line(painter, hub, endpoint, stroke, 8.0, 5.0) {
-                drawn += 1;
-            }
+        let endpoint =
+            world_to_screen_point(guide.pin_centers[pin_index], world, canvas, zoom, pan);
+        if paint_dashed_line(painter, hub, endpoint, stroke, 8.0, 5.0) {
+            drawn += 1;
         }
     }
     drawn
+}
+
+/// Selects the `(guide_index, pin_index)` flylines to paint this frame.
+///
+/// Selection is deterministic for a stable viewport: a screen-size filter
+/// drops guides that are invisible small, then a stride keeps the line count
+/// within `FLYLINE_MAX_LINES_PER_FRAME` and a segment budget within
+/// `FLYLINE_MAX_SEGMENTS_PER_FRAME`, so panning and zooming paint a bounded
+/// amount of work instead of every flyline in the design.
+fn select_unrouted_net_guide_lines(
+    guides: &[UnroutedNetGuide],
+    visibility: ObjectVisibility,
+    viewport: Rect32,
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+) -> Vec<(usize, usize)> {
+    let mut total_lines = 0usize;
+    let mut visible_guides = Vec::new();
+    for (guide_index, guide) in guides.iter().enumerate() {
+        if !unrouted_net_guide_is_visible(guide, visibility, viewport) {
+            continue;
+        }
+        if flyline_screen_span_px(guide.bbox, world, canvas, zoom, pan) < FLYLINE_MIN_SCREEN_SPAN_PX
+        {
+            continue;
+        }
+        let hub = world_to_screen_point(guide.hub, world, canvas, zoom, pan);
+        let pin_hits: Vec<usize> = guide
+            .pin_centers
+            .iter()
+            .enumerate()
+            .filter(|(_, pin)| {
+                screen_line_bounds(hub, world_to_screen_point(**pin, world, canvas, zoom, pan))
+                    .intersects(canvas)
+            })
+            .map(|(pin_index, _)| pin_index)
+            .collect();
+        total_lines += pin_hits.len();
+        visible_guides.push((guide_index, guide, hub, pin_hits));
+    }
+    if total_lines == 0 {
+        return Vec::new();
+    }
+    let stride = total_lines.div_ceil(FLYLINE_MAX_LINES_PER_FRAME);
+    let mut selected = Vec::new();
+    let mut line_no = 0usize;
+    let mut segments_left = FLYLINE_MAX_SEGMENTS_PER_FRAME;
+    for (guide_index, guide, hub, pin_hits) in visible_guides {
+        for pin_index in pin_hits {
+            if line_no % stride != 0 {
+                line_no += 1;
+                continue;
+            }
+            line_no += 1;
+            let end = world_to_screen_point(guide.pin_centers[pin_index], world, canvas, zoom, pan);
+            let segment_count = dashed_line_segment_count(hub, end, 8.0, 5.0);
+            if segment_count > segments_left {
+                continue;
+            }
+            segments_left -= segment_count;
+            selected.push((guide_index, pin_index));
+        }
+    }
+    selected
+}
+
+fn flyline_screen_span_px(
+    bbox: Rect32,
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+) -> f32 {
+    let screen = world_to_screen_rect(bbox, world, canvas, zoom, pan);
+    screen.width().hypot(screen.height())
+}
+
+/// Segment count of [`dashed_line_segments`] without allocating.
+fn dashed_line_segment_count(
+    begin: egui::Pos2,
+    end: egui::Pos2,
+    dash_length: f32,
+    gap_length: f32,
+) -> usize {
+    let length = (end - begin).length();
+    if length <= 0.5 {
+        return 0;
+    }
+    let dash_length = dash_length.max(1.0);
+    let step = (dash_length + gap_length.max(1.0)).max(2.0);
+    (length / step).ceil().min(256.0) as usize
 }
 
 fn unrouted_net_guide_is_visible(
@@ -14642,6 +14744,165 @@ mod tests {
         visibility.set_category_visible(DrawingCategory::NetClock, true);
 
         assert!(unrouted_net_guide_is_visible(&guide, visibility, viewport));
+    }
+
+    #[test]
+    fn dashed_line_segment_count_matches_segment_iterator() {
+        for length in [
+            0.0, 0.4, 0.5, 0.6, 1.0, 7.0, 8.0, 13.0, 13.1, 100.0, 10_000.0,
+        ] {
+            let begin = egui::pos2(10.0, 20.0);
+            let end = egui::pos2(10.0 + length, 20.0);
+            assert_eq!(
+                dashed_line_segment_count(begin, end, 8.0, 5.0),
+                dashed_line_segments(begin, end, 8.0, 5.0).len(),
+                "length {length}"
+            );
+        }
+    }
+
+    fn flyline_test_guide(hub: Point32, pin_offsets: &[Point32], bbox: Rect32) -> UnroutedNetGuide {
+        UnroutedNetGuide {
+            net_name: "n".to_string(),
+            net_kind: "signal".to_string(),
+            hub,
+            pin_centers: pin_offsets
+                .iter()
+                .map(|offset| Point32 {
+                    x: hub.x + offset.x,
+                    y: hub.y + offset.y,
+                })
+                .collect(),
+            bbox,
+        }
+    }
+
+    fn flyline_test_world() -> (Rect32, egui::Rect) {
+        (
+            Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 1_000_000,
+                hy: 1_000_000,
+            },
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1000.0, 800.0)),
+        )
+    }
+
+    fn flyline_selection(
+        guides: &[UnroutedNetGuide],
+        viewport: Rect32,
+        world: Rect32,
+        canvas: egui::Rect,
+    ) -> Vec<(usize, usize)> {
+        let mut visibility = ObjectVisibility::default();
+        visibility.net_signal = true;
+        select_unrouted_net_guide_lines(
+            guides,
+            visibility,
+            viewport,
+            world,
+            canvas,
+            1.0,
+            egui::Vec2::ZERO,
+        )
+    }
+
+    #[test]
+    fn flyline_selection_skips_guides_below_min_screen_span() {
+        let (world, canvas) = flyline_test_world();
+        let viewport = world;
+        let hub = Point32 {
+            x: 500_000,
+            y: 500_000,
+        };
+        // A 200 dbu bounding box is far below 6 px on a 1000 px canvas.
+        let tiny = flyline_test_guide(
+            hub,
+            &[Point32 { x: 100, y: 100 }],
+            Rect32 {
+                lx: hub.x - 100,
+                ly: hub.y - 100,
+                hx: hub.x + 100,
+                hy: hub.y + 100,
+            },
+        );
+        assert!(flyline_selection(&[tiny], viewport, world, canvas).is_empty());
+    }
+
+    #[test]
+    fn flyline_selection_strides_lines_over_budget() {
+        let (world, canvas) = flyline_test_world();
+        let viewport = world;
+        let mut guides = Vec::new();
+        for g in 0..60 {
+            let hub = Point32 {
+                x: 50_000 + g * 10_000,
+                y: 500_000,
+            };
+            // Pins a few dbu from the hub: lines are visible on canvas but
+            // produce zero-length segments, keeping the segment budget out of
+            // play so the line stride is what gets exercised.
+            let offsets: Vec<Point32> = (0..1000).map(|i| Point32 { x: i % 7, y: i % 5 }).collect();
+            guides.push(flyline_test_guide(
+                hub,
+                &offsets,
+                Rect32 {
+                    lx: hub.x - 5_000,
+                    ly: hub.y - 5_000,
+                    hx: hub.x + 5_000,
+                    hy: hub.y + 5_000,
+                },
+            ));
+        }
+        let selected = flyline_selection(&guides, viewport, world, canvas);
+        assert_eq!(selected.len(), 30_000);
+        assert!(selected.len() <= FLYLINE_MAX_LINES_PER_FRAME);
+    }
+
+    #[test]
+    fn flyline_selection_caps_total_segments() {
+        let (world, canvas) = flyline_test_world();
+        let viewport = world;
+        let hub = Point32 {
+            x: 500_000,
+            y: 500_000,
+        };
+        // 10000 pins spread across the full die: lines average hundreds of
+        // screen pixels (~25+ segments each, ~250K total), so the segment
+        // budget binds even though the line count is far below the line cap.
+        let offsets: Vec<Point32> = (0..10_000)
+            .map(|i| Point32 {
+                x: -500_000 + i * 100,
+                y: -500_000 + i * 100,
+            })
+            .collect();
+        let guides = [flyline_test_guide(
+            hub,
+            &offsets,
+            Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 1_000_000,
+                hy: 1_000_000,
+            },
+        )];
+        let selected = flyline_selection(&guides, viewport, world, canvas);
+        assert!(selected.len() < 10_000);
+        let mut segment_total = 0usize;
+        for (guide_index, pin_index) in &selected {
+            let guide = &guides[*guide_index];
+            let begin = world_to_screen_point(guide.hub, world, canvas, 1.0, egui::Vec2::ZERO);
+            let end = world_to_screen_point(
+                guide.pin_centers[*pin_index],
+                world,
+                canvas,
+                1.0,
+                egui::Vec2::ZERO,
+            );
+            segment_total += dashed_line_segment_count(begin, end, 8.0, 5.0);
+        }
+        assert!(segment_total <= FLYLINE_MAX_SEGMENTS_PER_FRAME);
     }
 
     #[test]
