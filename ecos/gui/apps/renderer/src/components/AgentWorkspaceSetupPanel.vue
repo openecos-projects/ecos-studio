@@ -78,7 +78,7 @@ const specRows = computed<[string, string][]>(() => {
     ['Frequency Max (MHz)', String(parameters.frequency_max)],
     ['Max Fanout', String(parameters.max_fanout)],
     ['Die Area Mode', parameters.die_area_mode],
-    ['Utilization', optionalValue(parameters.utilitization)],
+    ['Utilization', optionalValue(parameters.utilization ?? parameters.utilitization)],
     ['Margin', String(parameters.margin)],
     ['Target Density', String(parameters.target_density)],
     ['Target Overflow', String(parameters.target_overflow)],

@@ -36,6 +36,10 @@ import type {
   PdkResolveBindingRequest,
 } from './pdkInventory.ts'
 import type {
+  ProjectEccPdkConfigReadResult,
+  ProjectEccPdkConfigWriteRequest,
+} from './projectEccConfig.ts'
+import type {
   ProjectManifest,
   ProjectManifestMutationRequest,
   ProjectManifestMutationResult,
@@ -190,6 +194,17 @@ export interface DesktopProjectTextFileTail {
   sizeBytes: number
 }
 
+export interface DesktopFrontendWorkspaceTextsRequest {
+  projectRoot: string
+  workspacePath: string
+  paths: string[]
+}
+
+export interface DesktopFrontendWorkspaceTextsResult {
+  texts: Record<string, string | null>
+  unavailablePaths: string[]
+}
+
 /** A bounded sequential chunk from a project-scoped UTF-8 text file. */
 export interface DesktopProjectTextFileChunk {
   content: string
@@ -249,6 +264,7 @@ export interface ChipViewerOpenResult {
 
 export interface ChipViewerOpenStatus {
   open: boolean
+  saving?: boolean
 }
 
 export interface WorkspaceDirectoryReplacement {
@@ -311,6 +327,9 @@ export interface DesktopApi {
   projectManagement?: {
     discoverProject(directory: string): Promise<ProjectManifest | null>
     readManifest(projectRoot: string): Promise<ProjectManifest | null>
+    readFrontendWorkspaceTexts(
+      request: DesktopFrontendWorkspaceTextsRequest,
+    ): Promise<DesktopFrontendWorkspaceTextsResult>
     listProjectEntries(projectRoot: string): Promise<string[]>
     readWorkspaceStepConfiguration(
       request: DesktopProjectManagementWorkspaceStepConfigurationRequest,
@@ -415,6 +434,12 @@ export interface DesktopApi {
     locate(request: PdkLocateRequest): Promise<PdkInstallationSnapshot>
     remove(installationId: string): Promise<{ unboundProjectIds: string[] }>
     resolveBinding(request: PdkResolveBindingRequest): Promise<PdkBinding | null>
+  }
+  projectEccConfig: {
+    read(projectRoot: string): Promise<ProjectEccPdkConfigReadResult>
+    write(
+      request: ProjectEccPdkConfigWriteRequest,
+    ): Promise<ProjectEccPdkConfigReadResult>
   }
   runtime: DesignRuntimeApi
   ecc: EccRuntimeApi

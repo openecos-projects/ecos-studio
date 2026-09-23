@@ -1,6 +1,7 @@
 import { buildStepIssues, countStepIssues } from '@/components/projectStepAnalysis'
 import { stepAnalysisAvailability } from '@/utils/projectAnalysisAvailability'
 import { projectResultStatusLabel } from '@/utils/projectResultPresentation'
+import { FLOW_STEPS, type FlowStep } from '@/utils/projectManagement'
 import type {
   EccQorSnapshotExtension,
   ProjectQorTrendSummary,
@@ -516,7 +517,11 @@ function workspaceAnalysisState(
   if (completedSteps.length === 0) return 'unavailable'
 
   const availability = completedSteps.map((step) =>
-    stepAnalysisAvailability(summary?.analysis.steps[step.step]),
+    stepAnalysisAvailability(
+      FLOW_STEPS.includes(step.step as FlowStep)
+        ? summary?.analysis.steps[step.step as FlowStep]
+        : undefined,
+    ),
   )
   if (availability.every((status) => status === 'available')) return 'clean'
   if (availability.some((status) => status !== 'unavailable')) return 'incomplete'

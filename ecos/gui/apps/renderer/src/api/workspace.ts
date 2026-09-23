@@ -4,6 +4,7 @@ import { getDesktopApi } from '@/platform/desktop'
 import {
   projectIdFromName,
   type DesignTool,
+  type EccPdkOverrides,
   type EccWorkspaceConfigurationUpdateRequest,
   type EccWorkspaceCreateRequest,
   type EccWorkspaceStepConfigurationReadRequest,
@@ -80,8 +81,17 @@ interface FrontendWorkspaceCreateOptions {
 export function backendWorkspaceOptions(
   config: WorkspaceConfig,
   targetDirectory: string,
+  parameterDisplayIndex?: Record<string, string> | null,
 ): BackendWorkspaceCreateOptions {
   const parameters = config.parameters ?? {}
+  // Display keys come from the ECC parameter catalog when it carries
+  // display_key fields; each maps to its ECC spec key. Old ECC (or an
+  // unavailable catalog) yields a null/empty index, in which case the
+  // built-in fallback spec keys below are used unchanged.
+  const specKey = (displayKey: string, fallback: string): string => {
+    const mapped = parameterDisplayIndex?.[displayKey]
+    return mapped && mapped.trim() ? mapped : fallback
+  }
   const inputs: Array<{ inputId: string; role: string }> = []
   const inputBindings: Record<string, string> = {}
   const addInput = (inputId: string, role: string, path: string) => {
@@ -101,7 +111,19 @@ export function backendWorkspaceOptions(
   addInput('def', 'def', config.origin_def)
   addInput('sdc', 'sdc', config.sdc ?? '')
 
-  const pdkMode = config.pdk_config_mode === 'manual' ? 'manual' : 'default'
+  const effectiveResources =
+    config.pdk_config_mode === 'default' ? config.pdk_effective_resources : undefined
+  if (
+    effectiveResources &&
+    (!effectiveResources.tech_lef.length ||
+      !effectiveResources.cell_lef.length ||
+      !effectiveResources.liberty.length)
+  ) {
+    throw new Error('Effective PDK resources are incomplete')
+  }
+  const pdkMode =
+    config.pdk_config_mode === 'manual' || effectiveResources ? 'manual' : 'default'
+  const pdkResources = effectiveResources ?? config.pdk_config
   const pdkFiles: Array<{ fileId: string; role: string }> = []
   const pdkFileBindings: Record<string, string> = {}
   const addPdkFiles = (role: string, paths: string[]) => {
@@ -112,10 +134,33 @@ export function backendWorkspaceOptions(
     })
   }
   if (pdkMode === 'manual') {
-    addPdkFiles('tech', config.pdk_config?.tech_lef ?? [])
-    addPdkFiles('lef', config.pdk_config?.cell_lef ?? [])
-    addPdkFiles('liberty', config.pdk_config?.liberty ?? [])
+    addPdkFiles('tech', pdkResources?.tech_lef ?? [])
+    addPdkFiles('lef', pdkResources?.cell_lef ?? [])
+    addPdkFiles('liberty', pdkResources?.liberty ?? [])
   }
+
+  // Project ecc.toml persistence intent: external PDK directories and the
+  // manual resource selection are recorded by the Electron bridge so ECC
+  // CLI fresh runs and future wizard sessions see the same declaration.
+  const externalPaths = config.pdk_external_paths ?? []
+  const manualOverrides: EccPdkOverrides | undefined =
+    config.pdk_config_mode === 'manual' &&
+    (config.pdk_config?.tech_lef.length ||
+      config.pdk_config?.cell_lef.length ||
+      config.pdk_config?.liberty.length)
+      ? {
+          tech: config.pdk_config?.tech_lef[0] ?? '',
+          lefs: [...(config.pdk_config?.cell_lef ?? [])],
+          libs: [...(config.pdk_config?.liberty ?? [])],
+        }
+      : undefined
+  const eccPdkConfig =
+    externalPaths.length || manualOverrides
+      ? {
+          externalPaths,
+          ...(manualOverrides ? { overrides: manualOverrides } : {}),
+        }
+      : undefined
 
   const numberValue = (value: unknown, fallback: number) => {
     const number = Number(value)
@@ -148,7 +193,18 @@ export function backendWorkspaceOptions(
     designTool: 'backend',
     targetDirectory,
     pdkInstallationId: config.pdk_installation_id,
-    pdkRequirement: config.pdk_requirement,
+    pdkRequirement: effectiveResources
+      ? {
+          familyId: config.pdk || 'ics55',
+          version: config.pdk_requirement?.version ?? null,
+          manualConfig: {
+            techLef: effectiveResources.tech_lef[0],
+            cellLefs: [...effectiveResources.cell_lef],
+            liberty: [...effectiveResources.liberty],
+          },
+        }
+      : config.pdk_requirement,
+    ...(eccPdkConfig ? { eccPdkConfig } : {}),
     projectId:
       projectContext?.project_id ??
       projectIdFromName(
@@ -192,28 +248,35 @@ export function backendWorkspaceOptions(
         : {}),
       parameters: {
         ...(synthesisApplies
-          ? { 'design.frequency_mhz': numberValue(parameters.frequency_max, 100) }
+          ? {
+              [specKey('frequency_max', 'design.frequency_mhz')]: numberValue(
+                parameters.frequency_max,
+                100,
+              ),
+            }
           : {}),
         ...(floorplanApplies
           ? {
-              'floorplan.core_util': numberValue(
-                parameters.utilitization ?? parameters.core_utilization,
+              [specKey('utilization', 'floorplan.core_util')]: numberValue(
+                parameters.utilization ??
+                  parameters.utilitization ??
+                  parameters.core_utilization,
                 fixedDie ? 0.5 : 0.6,
               ),
-              'floorplan.die_builder.mode': fixedDie ? 'die_size' : 'die_util',
+              [specKey('die_area_mode', 'floorplan.die_builder.mode')]: fixedDie
+                ? 'die_size'
+                : 'die_util',
               ...(fixedDie
                 ? {
-                    'floorplan.die_builder.die_size.width_micron': numberValue(
-                      parameters.die_width,
-                      100,
-                    ),
-                    'floorplan.die_builder.die_size.height_micron': numberValue(
-                      parameters.die_height,
-                      100,
-                    ),
+                    [specKey('die_width', 'floorplan.die_builder.die_size.width_micron')]:
+                      numberValue(parameters.die_width, 100),
+                    [specKey(
+                      'die_height',
+                      'floorplan.die_builder.die_size.height_micron',
+                    )]: numberValue(parameters.die_height, 100),
                   }
                 : {
-                    'floorplan.core_margin': [
+                    [specKey('margin', 'floorplan.core_margin')]: [
                       numberValue(parameters.margin, 0),
                       numberValue(parameters.margin, 0),
                     ],
@@ -221,12 +284,23 @@ export function backendWorkspaceOptions(
             }
           : {}),
         ...(ctsApplies
-          ? { 'cts.max_fanout': numberValue(parameters.max_fanout, 20) }
+          ? {
+              [specKey('max_fanout', 'cts.max_fanout')]: numberValue(
+                parameters.max_fanout,
+                20,
+              ),
+            }
           : {}),
         ...(placementApplies
           ? {
-              'place.target_density': numberValue(parameters.target_density, 0.2),
-              'place.target_overflow': numberValue(parameters.target_overflow, 0.1),
+              [specKey('target_density', 'place.target_density')]: numberValue(
+                parameters.target_density,
+                0.2,
+              ),
+              [specKey('target_overflow', 'place.target_overflow')]: numberValue(
+                parameters.target_overflow,
+                0.1,
+              ),
             }
           : {}),
       },

@@ -1,4 +1,7 @@
 import { EventEmitter } from 'node:events'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { spawn as spawnChild } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentRuntimeManager } from './agentRuntimeManager'
@@ -46,6 +49,35 @@ function readProtocolRequest(
 }
 
 describe('AgentProviderProcessRuntime', () => {
+  it('resolves the Windows executable suffix from the runtime platform', async () => {
+    const pluginRoot = await mkdtemp(join(tmpdir(), 'ecos-agent-runtime-'))
+    try {
+      await writeFile(join(pluginRoot, 'ecos-agent.exe'), '')
+      const harness = createSpawnHarness()
+      const runtime = new AgentProviderProcessRuntime({
+        manifest: {
+          command: './ecos-agent',
+          manifestPath: join(pluginRoot, 'agent-provider.json'),
+          pluginRoot,
+          providerId: 'ecos_agent',
+          protocolVersion: supportedAgentProviderProtocolVersion,
+        },
+        platform: 'win32',
+        spawn: harness.spawn,
+      })
+
+      void runtime.getStatus({ providerId: 'ecos_agent' })
+
+      expect(harness.spawn).toHaveBeenCalledWith('./ecos-agent.exe', [], {
+        cwd: pluginRoot,
+        env: process.env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+    } finally {
+      await rm(pluginRoot, { force: true, recursive: true })
+    }
+  })
+
   it('uses stdio JSON-RPC requests and resolves provider responses', async () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({

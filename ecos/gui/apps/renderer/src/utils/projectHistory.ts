@@ -1,4 +1,9 @@
-import type { DesktopSettingsValue, ProjectManifest } from '@ecos-studio/shared'
+import {
+  isProjectManifestType,
+  type DesktopSettingsValue,
+  type ProjectManifest,
+  type ProjectManifestType,
+} from '@ecos-studio/shared'
 import { getDesktopApi } from '@/platform/desktop'
 import type { Project, ProjectStatus } from '@/types'
 import { readProjectManagementManifest } from './projectManagementRead'
@@ -12,6 +17,7 @@ interface SerializedProjectHistoryEntry {
   name: string
   path: string
   lastOpened: string
+  projectType?: ProjectManifestType
   pdk?: string
   topModule?: string
   status?: ProjectStatus
@@ -175,6 +181,7 @@ function projectFromLegacyWorkspace(
     lastOpened: workspace.lastOpened,
     pdk: manifest.base_design.pdk,
     topModule: manifest.base_design.top_module,
+    projectType: manifest.project_type,
     status: workspace.status,
   }
 }
@@ -208,6 +215,7 @@ function normalizeProjectHistoryEntry(project: Project): Project {
     id: path,
     path,
     lastOpened: new Date(project.lastOpened),
+    projectType: project.projectType ?? 'backend',
   }
 }
 
@@ -217,6 +225,7 @@ function serializeProjectHistoryEntry(project: Project): SerializedProjectHistor
     name: project.name,
     path: normalizePath(project.path),
     lastOpened: new Date(project.lastOpened).toISOString(),
+    projectType: project.projectType ?? 'backend',
     pdk: project.pdk,
     topModule: project.topModule,
     status: project.status,
@@ -236,6 +245,7 @@ function deserializeProjectHistoryEntry(value: unknown): Project | null {
     name,
     path: normalizedPath,
     lastOpened: new Date(lastOpened),
+    projectType: isProjectManifestType(value.projectType) ? value.projectType : 'backend',
     pdk: asString(value.pdk),
     topModule: asString(value.topModule),
     status: asProjectStatus(value.status),

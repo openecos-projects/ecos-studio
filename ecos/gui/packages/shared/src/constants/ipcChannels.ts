@@ -27,6 +27,8 @@ export const desktopApiIpcChannels = {
   projectManifestMutate: 'project-manifest:mutate',
   projectManagementDiscoverProject: 'project-management:discover-project',
   projectManagementReadManifest: 'project-management:read-manifest',
+  projectManagementReadFrontendWorkspaceTexts:
+    'project-management:read-frontend-workspace-texts',
   projectManagementListEntries: 'project-management:list-entries',
   projectManagementReadWorkspaceStepConfiguration:
     'project-management:read-workspace-step-configuration',
@@ -103,6 +105,8 @@ export const desktopApiIpcChannels = {
   pdkInventoryLocate: 'pdk-inventory:locate',
   pdkInventoryRemove: 'pdk-inventory:remove',
   pdkInventoryResolveBinding: 'pdk-inventory:resolve-binding',
+  projectEccConfigRead: 'project-ecc-config:read',
+  projectEccConfigWrite: 'project-ecc-config:write',
   cliInstallerGetStatus: 'cli-installer:get-status',
   cliInstallerInstall: 'cli-installer:install',
   cliInstallerUninstall: 'cli-installer:uninstall',

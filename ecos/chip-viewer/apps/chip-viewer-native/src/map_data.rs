@@ -575,7 +575,6 @@ fn read_layout(path: &Path) -> Result<BTreeMap<(usize, usize), Rect32>, String> 
     let mut reader = csv::Reader::from_path(path)
         .map_err(|err| format!("failed to open map layout {}: {err}", path.display()))?;
     let mut layout = BTreeMap::new();
-    let is_egr = path.to_string_lossy().to_lowercase().contains("egr");
 
     for record in reader.deserialize::<LayoutRecord>() {
         let record =
@@ -588,13 +587,8 @@ fn read_layout(path: &Path) -> Result<BTreeMap<(usize, usize), Rect32>, String> 
                 record.pixel_col
             ));
         }
-        let key = if is_egr {
-            (record.pixel_col, record.pixel_row)
-        } else {
-            (record.pixel_row, record.pixel_col)
-        };
         layout.insert(
-            key,
+            (record.pixel_row, record.pixel_col),
             Rect32 {
                 lx: record.lx,
                 ly: record.ly,
@@ -691,6 +685,46 @@ mod tests {
                 ly: 100,
                 hx: 20,
                 hy: 110,
+            })
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn egr_uses_the_same_rectangular_map_coordinates() {
+        let root = temp_directory("egr-map-data");
+        let values = root.join("egr_overflow.csv");
+        let layout = root.join("egr_layout.csv");
+        fs::write(&values, "1,2,3\n4,5,6\n").unwrap();
+        fs::write(
+            &layout,
+            "pixel_row,pixel_col,grid_x,grid_y,lx,ly,ux,uy\n\
+             0,0,0,1,0,10,10,20\n\
+             0,1,1,1,10,10,20,20\n\
+             0,2,2,1,20,10,30,20\n\
+             1,0,0,0,0,0,10,10\n\
+             1,1,1,0,10,0,20,10\n\
+             1,2,2,0,20,0,30,10\n",
+        )
+        .unwrap();
+
+        let heatmap = HeatmapData::load(&values, &layout).unwrap();
+        assert_eq!(
+            heatmap.bbox(0, 2),
+            Some(Rect32 {
+                lx: 20,
+                ly: 10,
+                hx: 30,
+                hy: 20
+            })
+        );
+        assert_eq!(
+            heatmap.bbox(1, 0),
+            Some(Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 10,
+                hy: 10
             })
         );
         fs::remove_dir_all(root).unwrap();

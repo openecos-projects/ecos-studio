@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type {
   EccFlowRunRequest,
   EccFlowRunResult,
@@ -52,7 +52,7 @@ import type {
 } from '@ecos-studio/shared'
 import { validateEngineeringSnapshot } from '@ecos-studio/shared'
 
-import { normalizeRuntimeError } from './errors'
+import { EccRuntimeServiceError, normalizeRuntimeError } from './errors'
 import { electronLogger } from '../logger'
 import type { JsonRpcNotificationPayload } from './jsonRpcClient'
 import {
@@ -74,7 +74,10 @@ import {
 } from './workspaceRuntimeCommands'
 import { WorkspaceSessionRegistry } from './workspaceSessions'
 import { WorkspaceStepConfigurationCache } from './workspaceStepConfigurationCache'
-import { readPersistedEngineeringSnapshot } from './engineeringSnapshotReader'
+import {
+  findPersistedArtifactDrift,
+  readPersistedEngineeringSnapshot,
+} from './engineeringSnapshotReader'
 
 export type { EccRpcRuntimeClient, EccRpcRuntimeSidecar } from './runtimeClient'
 
@@ -531,7 +534,22 @@ export class EccWorkspaceRuntime {
   exportSignoff(
     request: EccWorkspaceExportSignoffRequest,
   ): Promise<EccWorkspaceExportSignoffResult> {
-    return this.commands.exportSignoff(request)
+    return this.commands.exportSignoff(request, async () => {
+      const session = this.sessions.require(request.workspaceHandle)
+      const snapshotPath = join(session.directory, 'home', 'engineering-snapshot.json')
+      if (!existsSync(snapshotPath)) return
+      const snapshot = await readPersistedEngineeringSnapshot(
+        session.directory,
+        session.eccWorkspaceId ?? undefined,
+      )
+      const drifted = await findPersistedArtifactDrift(session.directory, snapshot)
+      if (drifted.length === 0) return
+      throw new EccRuntimeServiceError({
+        code: 'SIGNOFF_ARTIFACT_REVISION_MISMATCH',
+        details: { references: drifted },
+        message: `Signoff export blocked: committed artifact files changed (${drifted.join(', ')})`,
+      })
+    })
   }
 
   layoutEditBegin(request: EccLayoutEditBeginRequest): Promise<EccLayoutEditBeginResult> {

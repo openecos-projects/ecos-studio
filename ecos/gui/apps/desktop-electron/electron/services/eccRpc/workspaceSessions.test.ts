@@ -114,4 +114,18 @@ describe('WorkspaceSessionRegistry', () => {
       registry.hasOtherEccWorkspaceReference(first.workspaceHandle, 'workspace-shared'),
     ).toBe(false)
   })
+
+  it('keeps revisions synchronized across handles for the same ECC workspace', () => {
+    const handles = ['workspace-handle-1', 'workspace-handle-2']
+    const registry = new WorkspaceSessionRegistry({
+      idProvider: () => handles.shift()!,
+    })
+    const first = registry.activate('/work/demo', 'workspace-shared', 3)
+    const second = registry.activate('/work/demo', 'workspace-shared', 3)
+
+    registry.updateRevision(second.workspaceHandle, 5)
+
+    expect(registry.require(first.workspaceHandle).workspaceRevision).toBe(5)
+    expect(registry.require(second.workspaceHandle).workspaceRevision).toBe(5)
+  })
 })

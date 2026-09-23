@@ -3,7 +3,9 @@ import type {
   DesktopAgentActivity,
   DesktopAgentInteractionRequest,
   DesktopAgentOptimizationPayload,
+  ManualPdkConfiguration,
   PdkReadiness,
+  ProjectManifestType,
   WorkspaceConfig as SharedWorkspaceConfig,
   WorkspaceParameters as SharedWorkspaceParameters,
   WorkspaceStatus as SharedWorkspaceStatus,
@@ -101,6 +103,7 @@ export type { DesignTool }
 
 export interface Project extends Omit<WorkspaceSummary, 'lastOpened'> {
   lastOpened: Date
+  projectType?: ProjectManifestType
 }
 
 // New Project Wizard Types
@@ -126,6 +129,7 @@ export interface ImportedPdk {
   version?: string
   readiness: PdkReadiness
   supportsEccDefaults: boolean
+  defaultResources?: ManualPdkConfiguration
 }
 
 export interface DesignFile {

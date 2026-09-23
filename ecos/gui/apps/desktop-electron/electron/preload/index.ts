@@ -216,6 +216,11 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.projectManagementDiscoverProject, directory),
     readManifest: (projectRoot) =>
       invokeDesktop(desktopApiIpcChannels.projectManagementReadManifest, projectRoot),
+    readFrontendWorkspaceTexts: (request) =>
+      invokeDesktop(
+        desktopApiIpcChannels.projectManagementReadFrontendWorkspaceTexts,
+        request,
+      ),
     listProjectEntries: (projectRoot) =>
       invokeDesktop(desktopApiIpcChannels.projectManagementListEntries, projectRoot),
     readWorkspaceStepConfiguration: (request) =>
@@ -379,6 +384,12 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.pdkInventoryRemove, installationId),
     resolveBinding: (request) =>
       invokeDesktop(desktopApiIpcChannels.pdkInventoryResolveBinding, request),
+  },
+  projectEccConfig: {
+    read: (projectRoot) =>
+      invokeDesktop(desktopApiIpcChannels.projectEccConfigRead, projectRoot),
+    write: (request) =>
+      invokeDesktop(desktopApiIpcChannels.projectEccConfigWrite, request),
   },
   runtime: {
     cancel: (request) =>

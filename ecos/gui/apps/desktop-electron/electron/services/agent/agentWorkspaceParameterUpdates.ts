@@ -1,4 +1,9 @@
-import type { DesktopAgentWorkspaceRerunParameterPatch } from '@ecos-studio/shared'
+import {
+  buildWorkspaceKnobIndex,
+  type DesktopAgentWorkspaceRerunParameterPatch,
+  type WorkspaceParameterCatalogEntry,
+} from '@ecos-studio/shared'
+import { workspaceParameterCatalogSnapshot } from '../workspaceParameterCatalogCache'
 
 type ParameterValue = DesktopAgentWorkspaceRerunParameterPatch['value']
 type ValueKind =
@@ -35,8 +40,13 @@ const numericString = (
   transform: (value) => String(value),
 })
 
-const knobs: Record<string, Knob> = {
+// Built-in fallback table, used when the ECC parameter catalog carries no
+// knob_id fields (old ECC). Keys are Agent knob ids; `parameter` is the ECC
+// spec key the value is written to. 'floorplan.utilitization' is the legacy
+// misspelled knob id kept as a read alias for at least one release cycle.
+const builtinKnobs: Record<string, Knob> = {
   'design.frequency_max': workspace('design.frequency_mhz', 'positive'),
+  'floorplan.utilization': workspace('floorplan.core_util', 'number', [0.01, 1]),
   'floorplan.utilitization': workspace('floorplan.core_util', 'number', [0.01, 1]),
   'floorplan.aspect_ratio': workspace('floorplan.aspect_ratio', 'positive'),
   'floorplan.die_width': workspace(
@@ -93,6 +103,84 @@ export const AGENT_STEP_OPTION_STEPS: readonly string[] = [
   'route',
 ]
 
+function catalogValueKind(type: unknown): ValueKind | null {
+  if (typeof type !== 'string') return null
+  switch (type.trim().toLowerCase()) {
+    case 'boolean':
+    case 'bool':
+      return 'boolean'
+    case 'integer':
+    case 'int':
+      return 'integer'
+    case 'positive':
+      return 'positive'
+    case 'number':
+    case 'float':
+      return 'number'
+    case 'string':
+    case 'str':
+    case 'enum':
+      return 'string'
+    case 'int-list':
+    case 'list[int]':
+      return 'int-list'
+    case 'str-list':
+    case 'list[str]':
+      return 'str-list'
+    default:
+      return null
+  }
+}
+
+function catalogRange(
+  entry: WorkspaceParameterCatalogEntry,
+): [number, number] | undefined {
+  if (!Array.isArray(entry.range) || entry.range.length < 2) return undefined
+  const [min, max] = entry.range
+  if (typeof min !== 'number' || !Number.isFinite(min)) return undefined
+  if (typeof max !== 'number' || !Number.isFinite(max)) return undefined
+  return [min, max]
+}
+
+function knobFromCatalogEntry(
+  knobId: string,
+  entry: WorkspaceParameterCatalogEntry,
+): Knob | null {
+  const specKey = typeof entry.id === 'string' ? entry.id : ''
+  if (!specKey) return null
+  // Known knobs keep their GUI-side value shaping (ranges, transforms).
+  const builtin = builtinKnobs[knobId]
+  if (builtin) return { ...builtin, parameter: specKey }
+  const kind = catalogValueKind(entry.type)
+  if (!kind) return null
+  const knob = workspace(specKey, kind, catalogRange(entry))
+  if (kind === 'boolean') {
+    return { ...knob, transform: (value) => (value ? 1 : 0) }
+  }
+  return knob
+}
+
+/**
+ * Resolve the Agent knob table. When the cached ECC parameter catalog
+ * carries knob_id fields, the catalog is authoritative for the whitelist and
+ * the knob -> spec-key mapping; known knobs keep their built-in value
+ * shaping, and catalog-only knobs are validated from the catalog type/range.
+ * When the catalog has no knob_id fields (old ECC) or the cache is cold,
+ * fall back to the built-in table.
+ */
+export function resolveAgentWorkspaceKnobs(): Record<string, Knob> {
+  const entries = workspaceParameterCatalogSnapshot()
+  const index = buildWorkspaceKnobIndex(entries)
+  if (Object.keys(index).length === 0) return builtinKnobs
+  const knobs: Record<string, Knob> = {}
+  for (const entry of entries) {
+    if (typeof entry.knob_id !== 'string' || !entry.knob_id) continue
+    const knob = knobFromCatalogEntry(entry.knob_id, entry)
+    if (knob) knobs[entry.knob_id] = knob
+  }
+  return knobs
+}
+
 function validString(value: unknown): value is string {
   return (
     typeof value === 'string' &&
@@ -143,6 +231,7 @@ export function readAgentWorkspaceParameterValues(
     }
   }
   const result: Record<string, ParameterValue> = {}
+  const knobs = resolveAgentWorkspaceKnobs()
   for (const [knobId, knob] of Object.entries(knobs)) {
     const value = stepValues[knob.parameter] ?? parameters[knob.parameter]
     let normalized = value
@@ -183,6 +272,7 @@ export function deriveAgentWorkspaceParameterUpdates(
   step_configurations: []
 } | null {
   const workspaceParameters: Record<string, unknown> = {}
+  const knobs = resolveAgentWorkspaceKnobs()
   for (const item of patch) {
     const knob = knobs[item.knob_id]
     if (!knob || !validValue(item.value, knob)) return null

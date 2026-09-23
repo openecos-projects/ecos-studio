@@ -17,6 +17,7 @@ describe('mutateProjectManifest', () => {
     mutate.mockResolvedValue({
       manifest: {
         schema_version: 1,
+        project_type: 'backend',
         project_id: 'proj_demo',
         name: 'demo',
         design_name: 'demo',
@@ -26,6 +27,7 @@ describe('mutateProjectManifest', () => {
         base_design: { rtl_list: [], parameters: {} },
         objectives: { primary: 'timing', directions: {} },
         workspaces: [],
+        mpc: null,
         best_workspace: null,
       },
     })
@@ -59,7 +61,7 @@ describe('mutateProjectManifest', () => {
 
     expect(() => structuredClone(mutation)).toThrow('could not be cloned')
 
-    await mutateProjectManifest('/projects/demo', mutation)
+    const manifest = await mutateProjectManifest('/projects/demo', mutation)
 
     expect(mutate).toHaveBeenCalledWith({
       projectRoot: '/projects/demo',
@@ -74,5 +76,6 @@ describe('mutateProjectManifest', () => {
       },
     })
     expect(() => structuredClone(mutate.mock.calls[0]?.[0])).not.toThrow()
+    expect(manifest.project_type).toBe('backend')
   })
 })

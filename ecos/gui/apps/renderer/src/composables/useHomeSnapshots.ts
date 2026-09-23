@@ -13,10 +13,17 @@ export interface HomeLayoutThumbnail {
   url: string | null
   hasGeometry: boolean
   availability: WorkspaceArtifactDescriptor['availability']
+  integrity?: 'verified' | 'externally-modified'
+  recordedSizeBytes?: number
+  actualSizeBytes?: number
   reason: string | null
 }
 
 const layoutUrls = new Map<string, string>()
+const layoutMetadata = new Map<
+  string,
+  Pick<HomeLayoutThumbnail, 'integrity' | 'recordedSizeBytes' | 'actualSizeBytes'>
+>()
 const layoutSteps = new Set([
   'floorplan',
   'prefloorplan',
@@ -42,6 +49,7 @@ function revoke(url: string): void {
 export function clearHomeSnapshotCache(): void {
   for (const url of layoutUrls.values()) revoke(url)
   layoutUrls.clear()
+  layoutMetadata.clear()
 }
 
 function availableArtifacts(
@@ -129,6 +137,9 @@ export function useHomeSnapshots() {
             url: string | null,
             availability: WorkspaceArtifactDescriptor['availability'] = artifact.availability,
             reason: string | null = null,
+            integrity: HomeLayoutThumbnail['integrity'] = undefined,
+            recordedSizeBytes: number | undefined = undefined,
+            actualSizeBytes: number | undefined = undefined,
           ): HomeLayoutThumbnail => ({
             id: artifact.artifactId,
             kind: 'layout',
@@ -138,11 +149,18 @@ export function useHomeSnapshots() {
             hasGeometry: geometrySteps.has(step.trim().toLowerCase()),
             availability,
             reason,
+            ...(integrity ? { integrity } : {}),
+            ...(recordedSizeBytes === undefined ? {} : { recordedSizeBytes }),
+            ...(actualSizeBytes === undefined ? {} : { actualSizeBytes }),
           })
           if (artifact.availability !== 'available') return thumbnail(null)
           const artifactRevision = artifact.sourceRevision ?? revision
-          const cacheId = `${contextId}:${artifactRevision}:${artifact.artifactId}`
+          const cacheId = `${contextId}:${session.generation}:${artifactRevision}:${artifact.artifactId}`
           let url = layoutUrls.get(cacheId)
+          const metadata = layoutMetadata.get(cacheId)
+          let integrity = metadata?.integrity
+          let recordedSizeBytes = metadata?.recordedSizeBytes
+          let actualSizeBytes = metadata?.actualSizeBytes
           if (!url) {
             const result = await getDesktopApi().backendWorkspace.getArtifact({
               artifactId: artifact.artifactId,
@@ -163,18 +181,42 @@ export function useHomeSnapshots() {
                 result.artifact.issues[0]?.code ?? 'ARTIFACT_READ_FAILED',
               )
             }
-            if (result.artifact.data.artifactId !== artifact.artifactId) return null
+            if (
+              result.artifact.data.artifactId !== artifact.artifactId ||
+              !result.artifact.data.bytes
+            ) {
+              return null
+            }
             const content = result.artifact.data
+            integrity = content.integrity
+            recordedSizeBytes = content.recordedSizeBytes
+            actualSizeBytes = content.actualSizeBytes
+            const bytes = content.bytes
+            if (!bytes) return null
             url = URL.createObjectURL(
-              new Blob([content.bytes.slice()], { type: content.mimeType }),
+              new Blob([bytes.slice()], { type: content.mimeType }),
             )
             if (version !== requestVersion) {
               revoke(url)
               return null
             }
             layoutUrls.set(cacheId, url)
+            layoutMetadata.set(cacheId, {
+              ...(integrity ? { integrity } : {}),
+              ...(recordedSizeBytes === undefined ? {} : { recordedSizeBytes }),
+              ...(actualSizeBytes === undefined ? {} : { actualSizeBytes }),
+            })
           }
-          return thumbnail(url)
+          return thumbnail(
+            url,
+            artifact.availability,
+            integrity === 'externally-modified'
+              ? 'Artifact file changed since the committed snapshot.'
+              : null,
+            integrity,
+            recordedSizeBytes,
+            actualSizeBytes,
+          )
         }),
       )
       if (version !== requestVersion) return
@@ -188,6 +230,7 @@ export function useHomeSnapshots() {
         if (!retained.has(url)) {
           revoke(url)
           layoutUrls.delete(key)
+          layoutMetadata.delete(key)
         }
       }
       layoutThumbnails.value = next

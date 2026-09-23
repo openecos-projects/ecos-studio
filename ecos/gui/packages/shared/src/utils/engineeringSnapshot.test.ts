@@ -471,6 +471,23 @@ describe('Engineering Snapshot validation', () => {
     })
   })
 
+  it('accepts oversized analysis references without embedded detail data', () => {
+    const current = snapshot()
+    current.analysis.steps[0]!.timingIssues = {
+      artifactId: 'artifact-timing',
+      status: 'oversized',
+      reasonCode: 'ANALYSIS_FILE_OVERSIZED',
+      data: null,
+    } as never
+
+    const validated = validateEngineeringSnapshot(current)
+
+    expect(validated.ok).toBe(true)
+    if (!validated.ok) return
+    expect(validated.sections.flow.status).toBe('ready')
+    expect(validated.sections.qor.status).toBe('ready')
+  })
+
   it('rejects oversized persisted input before JSON parsing with stable sizes', () => {
     expect(
       parseEngineeringSnapshotJson(new Uint8Array(ENGINEERING_SNAPSHOT_MAX_BYTES + 1)),

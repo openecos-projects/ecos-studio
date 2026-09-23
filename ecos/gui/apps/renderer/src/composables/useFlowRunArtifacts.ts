@@ -85,14 +85,15 @@ async function readBackendLayoutBlobUrl(stepName: string): Promise<string | null
     result.workspaceContextId !== overview.workspaceContextId ||
     result.workspaceRevision !== workspaceRevision ||
     result.artifact.status !== 'ready' ||
+    !result.artifact.data.bytes ||
     result.artifact.data.artifactId !== layout.artifactId
   ) {
     return null
   }
   const content = result.artifact.data
-  return URL.createObjectURL(
-    new Blob([content.bytes.slice()], { type: content.mimeType }),
-  )
+  const bytes = content.bytes
+  if (!bytes) return null
+  return URL.createObjectURL(new Blob([bytes.slice()], { type: content.mimeType }))
 }
 
 /**

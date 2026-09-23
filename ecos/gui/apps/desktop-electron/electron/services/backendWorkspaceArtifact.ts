@@ -18,6 +18,8 @@ export type WorkspaceArtifactReader = (request: {
   projectRoot: string
   workspacePath: string
   artifact: { reference: string; sha256: string; sizeBytes: number }
+  verifyFingerprint?: boolean
+  includeIntegrity?: boolean
 }) => Promise<VerifiedProjectArtifactReadResult>
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -81,7 +83,7 @@ function timingPaths(bytes: Uint8Array): WorkspaceTimingPathsDetail | null {
       !endPoint ||
       slackNs === null ||
       !Array.isArray(path?.stages) ||
-      path.stages.length > 512
+      path.stages.length > 2048
     ) {
       return null
     }
@@ -190,6 +192,7 @@ export async function readWorkspaceArtifact(
     },
     projectRoot: dirname(workspaceRoot),
     workspacePath: workspaceRoot,
+    verifyFingerprint: false,
   })
   electronLogger.debug('[backend-workspace] artifact query metrics', {
     artifactBytes: read.ok ? read.bytes.byteLength : 0,
@@ -229,7 +232,6 @@ export async function readWorkspaceArtifact(
     status: 'ready',
     data: {
       artifactId: artifact.artifactId,
-      bytes: read.bytes,
       kind: artifact.kind,
       mimeType: artifact.name.toLowerCase().endsWith('.png')
         ? 'image/png'
@@ -237,6 +239,16 @@ export async function readWorkspaceArtifact(
           ? 'text/plain'
           : 'application/json',
       name: artifact.name,
+      ...(read.integrity
+        ? {
+            integrity: read.integrity,
+            recordedSizeBytes: artifact.sizeBytes,
+            actualSizeBytes: read.actualSizeBytes ?? read.bytes.byteLength,
+          }
+        : {}),
+      ...(['layout_image', 'congestion_image'].includes(artifact.kind)
+        ? { bytes: read.bytes }
+        : {}),
       ...(text === undefined ? {} : { text }),
       ...(parsedTimingPaths ? { timingPaths: parsedTimingPaths } : {}),
       ...(parsedTimingSummary ? { timingSummary: parsedTimingSummary } : {}),
