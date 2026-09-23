@@ -38,6 +38,9 @@ from ecos_agent.optimization.parameters.contracts import (
     ParameterApplicationReceipt,
 )
 from ecos_agent.optimization.parameters.semantics import load_parameter_cards
+from ecos_agent.optimization.parameter_projection import (
+    planner_parameter_knowledge_payload,
+)
 
 HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64
@@ -307,8 +310,11 @@ def test_planner_exposes_parameter_knowledge_and_compact_trajectories(
     assert result["action"]["requested_value"] == 0.8137
     payload = captured["user"]
     assert payload["parameter_knowledge"] == [
-        card.model_dump(mode="json") for card in context.parameter_knowledge
+        planner_parameter_knowledge_payload(card)
+        for card in context.parameter_knowledge
     ]
+    assert "source_spans" not in json.dumps(payload["parameter_knowledge"])
+    assert "runtime_probe_ids" not in json.dumps(payload["parameter_knowledge"])
     trajectories = payload["parameter_trajectories"]
     assert len(trajectories) == 2
     assert trajectories[0]["requested_value"] == 0.2

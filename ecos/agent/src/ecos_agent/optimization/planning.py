@@ -53,6 +53,7 @@ from ecos_agent.optimization.parameters.contracts import (
     ParameterApplicationReceipt,
     ParameterSemanticsCard,
 )
+from ecos_agent.optimization.parameter_projection import planner_parameter_knowledge_payload
 from ecos_agent.optimization.trajectory_projection import planner_trajectory_payload, trajectory_objective
 
 
@@ -515,9 +516,7 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
     payload["legal_actions"] = [
         item.model_dump(mode="json") for item in context.legal_actions
     ]
-    payload["parameter_knowledge"] = [
-        card.model_dump(mode="json") for card in context.parameter_knowledge
-    ]
+    payload["parameter_knowledge"] = [planner_parameter_knowledge_payload(card) for card in context.parameter_knowledge]
     primary_metric, preserve_metrics = trajectory_objective(context)
     payload["parameter_trajectories"] = [
         planner_trajectory_payload(
