@@ -14,6 +14,7 @@ from ecos_agent.optimization.contracts import (
     ObjectiveMetric,
     ObservationReference,
     OptimizationKnob,
+    OptimizationObjectiveContract,
     OptimizationOutcomeKind,
     ProposalAction,
     ProposalContextRef,
@@ -273,9 +274,57 @@ def test_planning_payload_renders_one_trajectory_list_only():
     )
     assert "delta_vs_incumbent" not in payload["incumbent"]
     trajectory = payload["parameter_trajectories"][0]
-    assert trajectory["terminal_observation"]["delta_vs_incumbent"][
-        "timing_guardrail"
-    ] == {metric.value: 0.0 for metric in TIMING_GUARDRAIL_ORDER}
+    assert trajectory == {
+        "schema_version": "ecos.planner_trajectory.v1",
+        "reference": {
+            "intervention_id": "intervention-1",
+            "outcome_sha256": HASH,
+        },
+        "outcome": OptimizationOutcomeKind.DEGRADED.value,
+        "knob_id": "place.target_density",
+        "requested_value": 0.8,
+        "actual_value": None,
+        "receipt_status": None,
+        "primary_metric": None,
+        "preserve_metrics": [],
+        "incumbent_decision": "incumbent_retained",
+    }
+    assert "terminal_observation" not in trajectory
+
+
+def test_compact_trajectory_keeps_only_objective_metric_deltas():
+    incumbent = _terminal_observation("terminal-incumbent")
+    metrics = dict(incumbent.metrics)
+    metrics[ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW] = 90.0
+    metrics[ObjectiveMetric.ROUTE_WIRELENGTH] = 110.0
+    candidate = incumbent.model_copy(
+        update={"observation_id": "terminal-candidate", "metrics": metrics}
+    )
+    objective = OptimizationObjectiveContract.model_construct(
+        primary_metric=ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
+        preserve_metrics=(ObjectiveMetric.ROUTE_WIRELENGTH,),
+    )
+    context = replace(
+        _context(
+            incumbent=incumbent,
+            trajectories=(_history_item("intervention-1", candidate),),
+        ),
+        objective=objective,
+    )
+
+    trajectory = planning_context_payload(context)["parameter_trajectories"][0]
+
+    assert trajectory["primary_metric"] == {
+        "metric_id": "route_la_total_overflow",
+        "value": 90.0,
+        "delta_vs_incumbent": -10.0,
+    }
+    assert trajectory["preserve_metrics"] == [{
+        "metric_id": "route_wirelength",
+        "value": 110.0,
+        "delta_vs_incumbent": 10.0,
+    }]
+    assert "terminal_observation" not in trajectory
 
 
 def _qphys_observation(score: float, *, with_qphys: bool = True):
@@ -361,18 +410,19 @@ def test_planning_payload_stays_within_budget_for_a_full_episode():
         json.dumps(smaller, separators=(",", ":"), ensure_ascii=False).encode()
     )
 
-    # The full 20-candidate budget must stay well inside a 256KB prompt, each
-    # recorded outcome must add a bounded projected entry, not a full 44KB
-    # terminal observation, and the out-of-window tail must collapse to
-    # one-line summaries instead of growing the payload linearly.
-    assert payload["parameter_trajectories_omitted"] == (
-        CANDIDATE_EXECUTION_LIMIT - 8
-    )
-    assert size < 256 * 1024
-    assert size - smaller_size < 8192
+    # All candidates remain available as comparable compact rows. Full
+    # terminal observations stay ledger-bound and never enter the model payload.
+    trajectories_size = len(json.dumps(
+        payload["parameter_trajectories"], separators=(",", ":")
+    ).encode())
+    assert "parameter_trajectories_omitted" not in payload
+    assert len(payload["parameter_trajectories"]) == CANDIDATE_EXECUTION_LIMIT
+    assert trajectories_size < 16 * 1024
+    assert size < 128 * 1024
+    assert size - smaller_size < 1024
 
 
-def test_planning_payload_windows_out_of_range_trajectories():
+def test_planning_payload_compacts_all_trajectories():
     trajectories = tuple(
         _history_item(
             f"intervention-{index}", _terminal_observation(f"terminal-{index}")
@@ -385,19 +435,17 @@ def test_planning_payload_windows_out_of_range_trajectories():
     )
 
     listed = payload["parameter_trajectories"]
-    assert payload["parameter_trajectories_omitted"] == 2
-    assert [item["intervention_id"] for item in listed[:2]] == [
+    assert len(listed) == 10
+    assert [item["reference"]["intervention_id"] for item in listed[:2]] == [
         "intervention-0",
         "intervention-1",
     ]
-    assert all(item["summary_only"] for item in listed[:2])
+    assert all(
+        item["schema_version"] == "ecos.planner_trajectory.v1" for item in listed
+    )
     assert listed[0]["outcome"] == OptimizationOutcomeKind.DEGRADED.value
     assert listed[0]["requested_value"] == 0.8
-    assert all("summary_only" not in item for item in listed[2:])
-    # The in-window tail keeps the full projection and evidence binding.
-    assert listed[-1]["terminal_observation"]["schema_version"] == (
-        "ecos.terminal_observation.projection.v1"
-    )
+    assert all("terminal_observation" not in item for item in listed)
 
 
 def test_planning_payload_windows_task_memory_summaries():

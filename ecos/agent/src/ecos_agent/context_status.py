@@ -215,8 +215,8 @@ class StatusSnapshots:
                 "remaining_wall_time_seconds": snapshot.remaining_wall_time_seconds,
                 "exhausted": snapshot.exhausted,
             }
-        # The planner payload renders the full trajectory once; the recent
-        # window and the latest action are its tail.
+        # The planner payload renders each recorded outcome once as a compact
+        # trajectory row; the recent window and latest action are its tail.
         trajectories = payload.get("parameter_trajectories") if planning else None
         history = trajectories if isinstance(trajectories, list) else []
         last = _mapping(history[-1]) if history else {}

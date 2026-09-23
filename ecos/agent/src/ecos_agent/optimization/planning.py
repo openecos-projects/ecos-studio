@@ -53,6 +53,7 @@ from ecos_agent.optimization.parameters.contracts import (
     ParameterApplicationReceipt,
     ParameterSemanticsCard,
 )
+from ecos_agent.optimization.trajectory_projection import planner_trajectory_payload, trajectory_objective
 
 
 @dataclass(frozen=True)
@@ -431,37 +432,7 @@ def projected_parameter_receipt(
     }
 
 
-# Planner-facing payload windows: trajectories and task-memory summaries grow
-# one entry per candidate and dominated the late-episode prompt size in the
-# 20260916 gcd pilot (96KB of 208KB).  Older entries collapse to one-line
-# summaries; the ledger-bound history references keep the full evidence
-# replayable, and the planner-dedup/strategy checks run on the audit chains,
-# never on this payload.
-_TRAJECTORY_WINDOW = 8
 _TASK_MEMORY_SUMMARY_WINDOW = 6
-
-
-def _primary_metric(context: OptimizationPlanningContext) -> object | None:
-    return context.objective.primary_metric if context.objective is not None else None
-
-
-def _trajectory_summary(
-    item: OptimizationHistory,
-    primary_metric: object | None,
-) -> dict[str, object]:
-    value = None
-    if item.terminal_observation is not None and primary_metric is not None:
-        value = item.terminal_observation.metrics.get(primary_metric)
-    return {
-        "summary_only": True,
-        "intervention_id": item.reference.intervention_id,
-        "outcome": item.outcome.value,
-        "knob_id": item.action.knob_id.value,
-        "requested_value": item.requested.value,
-        "incumbent_decision": item.incumbent_decision,
-        "primary_metric_value": value,
-    }
-
 
 def optimization_history_payload(
     item: OptimizationHistory,
@@ -547,19 +518,14 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
     payload["parameter_knowledge"] = [
         card.model_dump(mode="json") for card in context.parameter_knowledge
     ]
+    primary_metric, preserve_metrics = trajectory_objective(context)
     payload["parameter_trajectories"] = [
-        *(
-            _trajectory_summary(item, _primary_metric(context))
-            for item in context.parameter_trajectories[:-_TRAJECTORY_WINDOW]
-        ),
-        *(
-            optimization_history_payload(item, incumbent=context.incumbent)
-            for item in context.parameter_trajectories[-_TRAJECTORY_WINDOW:]
-        ),
+        planner_trajectory_payload(
+            item, incumbent=context.incumbent, primary_metric=primary_metric,
+            preserve_metrics=preserve_metrics,
+        )
+        for item in context.parameter_trajectories
     ]
-    omitted = len(context.parameter_trajectories) - _TRAJECTORY_WINDOW
-    if omitted > 0:
-        payload["parameter_trajectories_omitted"] = omitted
     payload["planning_feedback"] = [
         entry.model_dump(mode="json") for entry in context.planning_feedback
     ]

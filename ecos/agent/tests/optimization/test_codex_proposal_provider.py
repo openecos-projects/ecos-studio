@@ -280,7 +280,7 @@ def _proposal_v2(
     }
 
 
-def test_planner_exposes_parameter_knowledge_and_unfiltered_trajectories(
+def test_planner_exposes_parameter_knowledge_and_compact_trajectories(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     provider = _provider(tmp_path)
@@ -311,11 +311,15 @@ def test_planner_exposes_parameter_knowledge_and_unfiltered_trajectories(
     ]
     trajectories = payload["parameter_trajectories"]
     assert len(trajectories) == 2
-    assert trajectories[0]["requested"]["value"] == 0.2
-    receipt = trajectories[0]["parameter_application_receipt"]
-    assert receipt["actual_value"] == 0.8
-    assert receipt["observation"]["utilization_floor"] == 0.8
-    assert trajectories[1]["parameter_application_receipt"]["status"] == "unknown"
+    assert trajectories[0]["requested_value"] == 0.2
+    assert trajectories[0]["written_value"] == 0.2
+    assert trajectories[0]["actual_value"] == 0.8
+    assert trajectories[0]["receipt_observation"]["utilization_floor"] == 0.8
+    assert trajectories[1]["receipt_status"] == "unknown"
+    assert "parameter_application_receipt" not in trajectories[0]
+    assert "terminal_observation" not in trajectories[0]
+    assert "receipt_id" not in json.dumps(trajectories)
+    assert "evidence_sha256" not in json.dumps(trajectories)
     assert "excluded_surface_values" not in payload
     assert "runtime_semantics" in captured["system"]
     assert "source spans" in captured["system"]
@@ -785,4 +789,3 @@ def test_planner_prompt_claim_contract_is_consistent(
     ]
     for field in claim_fields:
         assert field in system
-

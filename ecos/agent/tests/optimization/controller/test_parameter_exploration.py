@@ -106,7 +106,7 @@ def test_other_parameter_clamp_is_evidence_not_a_programmed_search_limit(tmp_pat
     assert controller.plan(_observation(), _retrieval(), CURRENT_VALUES).requested.value == 7
 
 
-def test_full_parameter_trajectory_survives_recent_history_window_and_recovery(tmp_path):
+def test_full_parameter_trajectory_survives_recovery_and_compact_projection(tmp_path):
     responses = [
         lambda context, value=value: _proposal(context, requested_value=value)
         for value in range(3, 10)
@@ -132,5 +132,5 @@ def test_full_parameter_trajectory_survives_recent_history_window_and_recovery(t
     assert len(context.history) == 6
     assert len(context.parameter_trajectories) == 7
     payload = planning_context_payload(context)
-    assert payload["parameter_trajectories"][0]["requested"]["value"] == 3
-    assert payload["parameter_trajectories"][0]["parameter_application_receipt"]["actual_value"] == 3
+    assert payload["parameter_trajectories"][0]["requested_value"] == 3
+    assert payload["parameter_trajectories"][0]["actual_value"] == 3
