@@ -16,7 +16,6 @@ function readResult(
     qorAssessment: {
       status: 'ready',
       metrics: [],
-      score: { gate: 'incomplete', threshold: 60, value: null },
       steps:
         revision === 1
           ? [

@@ -180,14 +180,12 @@ describe('ProjectAnalysisPanel baseline controls', () => {
 })
 
 describe('ProjectAnalysisPanel recommendation', () => {
-  it('names the QoR best workspace with its score and threshold standing', () => {
+  it('names the QoR best workspace with its score and qor-v3 band standing', () => {
     const wrapper = mountPanel()
 
     expect(wrapper.find('.dash-recommend-id').text()).toBe('ws_b')
     expect(wrapper.find('.dash-recommend-headline strong').text()).toContain('74.2')
-    expect(wrapper.find('.dash-recommend-note').text()).toBe(
-      'Meets the 60 analysis threshold',
-    )
+    expect(wrapper.find('.dash-recommend-note').text()).toBe('QoR v3 YELLOW band')
   })
 
   it('hides the reason line when it only restates the score', () => {

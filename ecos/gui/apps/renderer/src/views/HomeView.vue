@@ -194,21 +194,21 @@
                   class="qor-score-hero is-baseline"
                   :class="`is-${qorBaselineScoreTone}`"
                 >
-                  <span>Baseline QoR score</span>
+                  <span>Baseline QoR v3 score</span>
                   <small :title="qorComparisonState.baselineWorkspaceName ?? undefined">
                     {{ qorComparisonState.baselineWorkspaceName ?? 'Baseline workspace' }}
                   </small>
                   <div>
                     <strong>{{ qorBaselineScoreValue }}</strong>
-                    <small v-if="qorBaselineScoreValue !== 'N/A'">/ 100</small>
+                    <small v-if="qorBaselineScoreValue !== 'NR'">/ 100</small>
                   </div>
                 </div>
                 <span class="qor-score-versus" aria-hidden="true">VS</span>
                 <div class="qor-score-hero" :class="`is-${qorScoreTone}`">
-                  <span>QoR score</span>
+                  <span>QoR v3 score</span>
                   <div>
                     <strong>{{ qorScoreValue }}</strong>
-                    <small v-if="qorScoreValue !== 'N/A'">/ 100</small>
+                    <small v-if="qorScoreValue !== 'NR'">/ 100</small>
                   </div>
                   <em>{{ qorScoreStatusLabel }}</em>
                 </div>
@@ -516,6 +516,7 @@ import {
   buildChipViewerOpenRequest,
   canOpenChipViewer,
 } from '@/components/drawingAreaChipViewer'
+import { qorScalarStatusLabel } from '@ecos-studio/shared'
 
 const router = useRouter()
 const route = useRoute()
@@ -715,19 +716,18 @@ const qorScoreValue = computed(() => {
 const qorBaselineScoreValue = computed(() =>
   formatQorScore(qorComparisonState.value.comparison?.baselineScore),
 )
-const qorScoreTone = computed<'pass' | 'fail' | 'unrated'>(() => {
+const qorScoreTone = computed<'green' | 'yellow' | 'orange' | 'red' | 'unrated'>(() => {
   const comparison = qorComparisonState.value.comparison
-  return getQorScoreTone(comparison?.score, comparison?.scoreThreshold)
+  return getQorScoreTone(comparison?.scalarStatus)
 })
-const qorBaselineScoreTone = computed<'pass' | 'fail' | 'unrated'>(() => {
-  const comparison = qorComparisonState.value.comparison
-  return getQorScoreTone(comparison?.baselineScore, comparison?.scoreThreshold)
-})
+const qorBaselineScoreTone = computed<'green' | 'yellow' | 'orange' | 'red' | 'unrated'>(
+  () => {
+    const comparison = qorComparisonState.value.comparison
+    return getQorScoreTone(comparison?.baselineScalarStatus)
+  },
+)
 const qorScoreStatusLabel = computed(() => {
-  if (qorScoreTone.value === 'unrated') return 'Not rated'
-  const threshold = qorComparisonState.value.comparison?.scoreThreshold
-  if (threshold === undefined) return 'Not rated'
-  return qorScoreTone.value === 'pass' ? `PASS >= ${threshold}` : `FAIL < ${threshold}`
+  return qorScalarStatusLabel(qorComparisonState.value.comparison?.scalarStatus)
 })
 const qorSummaryLabel = computed(() => {
   const state = qorComparisonState.value
@@ -1423,13 +1423,23 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   font-size: 11px;
 }
 
-.qor-score-hero.is-pass strong,
-.qor-score-hero.is-pass em {
+.qor-score-hero.is-green strong,
+.qor-score-hero.is-green em {
   color: var(--success-color);
 }
 
-.qor-score-hero.is-fail strong,
-.qor-score-hero.is-fail em {
+.qor-score-hero.is-yellow strong,
+.qor-score-hero.is-yellow em {
+  color: var(--warn-color);
+}
+
+.qor-score-hero.is-orange strong,
+.qor-score-hero.is-orange em {
+  color: color-mix(in srgb, var(--warn-color) 50%, var(--danger-color));
+}
+
+.qor-score-hero.is-red strong,
+.qor-score-hero.is-red em {
   color: var(--danger-color);
 }
 

@@ -54,7 +54,7 @@ function qorSnapshotExtension(): EccQorSnapshotExtension {
     scoringEngine: 'qor-v3',
     status: 'available',
     score: 73.5,
-    scalarStatus: 'GREEN',
+    scalarStatus: 'ORANGE',
     profile: 'balanced',
     qphys: {
       timing: { value: 73.5, state: 'PASS', featureIds: ['timing.setup'] },
@@ -91,10 +91,7 @@ function engineeringSnapshot(metricValue: number): EccEngineeringSnapshot {
     parameters: {},
     qorAssessment: {
       status: 'ready',
-      areaScoringStep: 'Route',
-      dimensionScores: { routability_physical: 73.5 },
       metrics: [metric],
-      score: { gate: 'pass', threshold: 60, value: 73.5 },
       steps: [
         {
           name: 'Route',
@@ -105,6 +102,7 @@ function engineeringSnapshot(metricValue: number): EccEngineeringSnapshot {
         },
       ],
     },
+    qorSnapshotExtension: qorSnapshotExtension(),
     schemaVersion: 1,
     signoffAssessment: { groups: [], risks: [], status: 'ready' },
     workspaceId: 'ecc-workspace',
@@ -220,10 +218,8 @@ describe('analyzeWorkspaceQor', () => {
       engineeringSnapshot(5000),
     )
     expect(buildProjectQorTrendSummary([projectInput!]).workspaces[0]).toMatchObject({
-      areaScoringStep: 'Route',
-      dimensionScores: { routability_physical: 73.5 },
       overallScore: result.qor.status === 'ready' ? result.qor.data.score.value : null,
-      scoreThreshold: 60,
+      scalarStatus: 'ORANGE',
     })
   })
 
@@ -285,10 +281,7 @@ describe('analyzeWorkspaceQor', () => {
       parameters: {},
       qorAssessment: {
         status: 'ready',
-        areaScoringStep: null,
-        dimensionScores: { routability_physical: 73.5 },
         metrics: [metric],
-        score: { gate: 'pass', threshold: 60, value: 73.5 },
         steps: [
           {
             name: 'CustomSignoff',
@@ -299,6 +292,7 @@ describe('analyzeWorkspaceQor', () => {
           },
         ],
       },
+      qorSnapshotExtension: qorSnapshotExtension(),
       schemaVersion: 1,
       signoffAssessment: { groups: [], risks: [], status: 'ready' },
       workspaceId: 'ecc-current',

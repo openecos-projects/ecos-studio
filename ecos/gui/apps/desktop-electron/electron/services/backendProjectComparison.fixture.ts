@@ -2,6 +2,7 @@ import {
   projectManagementStaTimingIssuesPath,
   projectManagementWorkspaceStepAnalysisSpecs,
   projectManifestFlowSteps,
+  qorScalarStatusForScore,
   type EccEngineeringMetric,
   type EccPersistedEngineeringSnapshot,
   type ProjectManifest,
@@ -139,7 +140,6 @@ function engineeringSnapshot(
     qorAssessment: {
       status: 'ready',
       metrics,
-      score: { gate: 'pass', threshold: 60, value: score },
       steps: projectManifestFlowSteps.map((stepId, order) => {
         const summaryMetricCount = metricCount(order)
         return { name: stepId, order, status: 'pass', stepId, summaryMetricCount }
@@ -150,7 +150,7 @@ function engineeringSnapshot(
       scoringEngine: 'qor-v3',
       status: 'available',
       score,
-      scalarStatus: score >= 60 ? 'GREEN' : 'RED',
+      scalarStatus: qorScalarStatusForScore(score),
       profile: 'balanced',
       qphys: {
         timing: { value: score, state: score >= 60 ? 'PASS' : 'FAIL', featureIds: [] },

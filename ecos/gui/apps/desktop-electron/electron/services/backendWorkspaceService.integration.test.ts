@@ -105,7 +105,6 @@ function snapshot(workspaceId: string, revision: number, value: number) {
     qorAssessment: {
       status: 'ready',
       metrics,
-      score: { value: 70, threshold: 60, gate: 'pass' },
       steps: [
         {
           stepId: 'Place',

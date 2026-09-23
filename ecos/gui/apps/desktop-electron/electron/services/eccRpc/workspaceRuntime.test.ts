@@ -1229,7 +1229,6 @@ describe('EccWorkspaceRuntime', () => {
       parameters: {},
       qorAssessment: {
         metrics: [],
-        score: { gate: 'pass', threshold: 60, value: 73.5 },
         status: 'ready',
         steps: [],
       },

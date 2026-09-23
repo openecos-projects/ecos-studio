@@ -124,8 +124,8 @@ export type {
   ProjectStepComparison,
   ProjectStepWorkspaceResult,
   ProjectStepStatus,
-  QorDimension,
   QorGateStatus,
+  QorMetricCategory,
   QorPolarity,
   QorStatus,
 } from './contracts/backendProjectComparison.ts'
@@ -270,6 +270,14 @@ export {
   type EngineeringSnapshotSections,
   type EngineeringSnapshotValidationResult,
 } from './utils/engineeringSnapshot.ts'
+export {
+  QOR_SCORE_BAND_GREEN_MIN,
+  QOR_SCORE_BAND_ORANGE_MIN,
+  QOR_SCORE_BAND_YELLOW_MIN,
+  qorScalarStatusForScore,
+  qorScalarStatusLabel,
+  type QorScalarStatus,
+} from './utils/qorScoreBands.ts'
 export type {
   ResourceAction,
   ResourceImportLocalRequest,

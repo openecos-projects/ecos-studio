@@ -103,10 +103,10 @@ describe('ProjectQorScoreChart', () => {
     const wrapper = mountChart()
 
     expect(wrapper.findAll('.qor-lollipop')[0].attributes('aria-label')).toBe(
-      'ws_a: 58.4 (baseline, below the 60 analysis threshold)',
+      'ws_a: 58.4 (baseline, QoR v3 RED band)',
     )
     expect(wrapper.findAll('.qor-lollipop')[1].attributes('aria-label')).toBe(
-      'ws_b: 74.2 (selected, meets the 60 analysis threshold)',
+      'ws_b: 74.2 (selected, QoR v3 ORANGE band)',
     )
   })
 
@@ -178,7 +178,7 @@ describe('ProjectQorScoreChart', () => {
 
     expect(wrapper.findAll('.qor-lollipop')).toHaveLength(50)
     expect(wrapper.findAll('.qor-lollipop')[7].attributes('aria-label')).toBe(
-      'ws_007: 57.0 (below the 60 analysis threshold)',
+      'ws_007: 57.0 (QoR v3 RED band)',
     )
   })
 

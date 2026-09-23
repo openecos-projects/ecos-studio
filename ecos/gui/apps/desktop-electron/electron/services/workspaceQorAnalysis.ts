@@ -15,7 +15,6 @@ import {
   normalizeQorMetricRecords,
   type ProjectQorMetricRecord,
   type ProjectQorWorkspaceInput,
-  type QorDimension,
 } from './qorAnalysis'
 
 const FLOW_STEP_ALIASES: Record<string, ProjectManifestFlowStep> = {
@@ -132,39 +131,19 @@ function snapshotQorProjection(
   if (!snapshot) return empty
   const extension = snapshot.qorSnapshotExtension ?? null
   const qor = record(snapshot.qorAssessment)
-  const score = record(qor?.score)
-  const gate = score?.gate
-  const value = score?.value
-  const threshold = score?.threshold
-  if (
-    !['pass', 'blocked', 'incomplete', 'unavailable'].includes(String(gate)) ||
-    !(value === null || (typeof value === 'number' && Number.isFinite(value))) ||
-    typeof threshold !== 'number' ||
-    !Number.isFinite(threshold)
-  ) {
-    return empty
+  // The qor-v3 Snapshot extension is the only score source; an unavailable or
+  // missing extension leaves the workspace unrated rather than reusing old facts.
+  const rated = extension?.status === 'available' ? extension : null
+  const score: WorkspaceQorSummary['score'] = {
+    value: rated?.score ?? null,
+    scalarStatus: rated?.scalarStatus ?? 'NOT_RATED',
   }
   const signoffStatus = snapshot.signoffAssessment?.status
-  const rawDimensions = record(qor?.dimensionScores)
-  const dimensionScores: Partial<Record<QorDimension, number>> = {}
-  for (const [dimension, dimensionScore] of Object.entries(rawDimensions ?? {})) {
-    if (!isQorDimension(dimension) || !finiteNumber(dimensionScore)) return empty
-    dimensionScores[dimension] = dimensionScore
-  }
-  const rawAreaStep = qor?.areaScoringStep
-  const areaScoringStep =
-    typeof rawAreaStep === 'string' ? parseProjectManifestFlowStep(rawAreaStep) : null
-  if (rawAreaStep !== undefined && rawAreaStep !== null && !areaScoringStep) return empty
   const assessment = ['ready', 'attention', 'blocked'].includes(String(signoffStatus))
     ? {
-        gateStatus: gate as NonNullable<
-          ProjectQorWorkspaceInput['authoritativeAssessment']
-        >['gateStatus'],
-        score: value as number | null,
-        scoreThreshold: threshold,
-        areaScoringStep,
-        dimensionScores,
-        signoffStatus: signoffStatus!,
+        score: score.value,
+        scalarStatus: score.scalarStatus,
+        signoffStatus: signoffStatus as 'ready' | 'attention' | 'blocked',
       }
     : null
   const rawMetrics = Array.isArray(qor?.metrics) ? qor.metrics : snapshot.metrics
@@ -223,31 +202,12 @@ function snapshotQorProjection(
     assessment,
     qorSnapshotExtension: extension,
     qor: {
-      score: {
-        value: value as number | null,
-        gate: gate as WorkspaceQorSummary['score']['gate'],
-        threshold,
-      },
+      score,
       metrics,
       steps,
       ...(extension ? { qorSnapshotExtension: extension } : {}),
     },
   }
-}
-
-function isQorDimension(value: string): value is QorDimension {
-  return [
-    'timing',
-    'power_integrity',
-    'routability_physical',
-    'area_cost',
-    'clock_robustness_dfm',
-    'runtime',
-  ].includes(value)
-}
-
-function finiteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value)
 }
 
 function flowState(value: unknown): ProjectStepStatus | undefined {

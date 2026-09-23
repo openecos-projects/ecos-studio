@@ -35,7 +35,6 @@ function engineeringSnapshot(): EccPersistedEngineeringSnapshot {
     qorAssessment: {
       status: 'unavailable',
       metrics: [],
-      score: { value: null, threshold: 60, gate: 'unavailable' },
       steps: [],
     },
     schemaVersion: 1,

@@ -187,13 +187,10 @@ function validQor(
   if (!assessment.metrics.every(validMetric) || !Array.isArray(assessment.steps)) {
     return false
   }
-  const score = assessment.score
+  // Snapshots written before qor-v3 still carry an assessment score block; it is
+  // ignored here and stays valid, scores come only from the Snapshot extension.
   return (
     (assessment.status === 'ready' || assessment.status === 'unavailable') &&
-    record(score) &&
-    (score.value === null || finiteNumber(score.value)) &&
-    finiteNumber(score.threshold) &&
-    ['pass', 'blocked', 'incomplete', 'unavailable'].includes(String(score.gate)) &&
     assessment.steps.every(
       (step) =>
         record(step) &&

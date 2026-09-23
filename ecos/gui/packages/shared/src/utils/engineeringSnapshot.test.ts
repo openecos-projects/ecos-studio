@@ -123,7 +123,6 @@ function snapshot() {
     metrics: [metric],
     qorAssessment: {
       status: 'ready',
-      score: { value: 84, threshold: 60, gate: 'pass' },
       metrics: [metric],
       steps: [
         {
@@ -223,6 +222,19 @@ function invalidQorExtensionResult(current: ReturnType<typeof snapshot>) {
 }
 
 describe('Engineering Snapshot validation', () => {
+  it('keeps a pre-qor-v3 assessment score block valid but unused', () => {
+    const legacy = snapshot()
+    legacy.qorAssessment = {
+      ...legacy.qorAssessment,
+      score: { value: 84, threshold: 60, gate: 'pass' },
+    } as unknown as typeof legacy.qorAssessment
+
+    const valid = validateEngineeringSnapshot(legacy)
+
+    expect(valid.ok).toBe(true)
+    expect(valid.ok && valid.sections.qor.status).toBe('ready')
+  })
+
   it('exposes a valid QoR Snapshot extension independently from legacy QoR facts', () => {
     const current = snapshot()
     current.schemaVersion = 3

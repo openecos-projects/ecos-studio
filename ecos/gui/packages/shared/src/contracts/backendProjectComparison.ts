@@ -15,7 +15,12 @@ export type ProjectStepStatus =
   | 'running'
   | 'failed'
 
-export type QorDimension =
+/**
+ * Metric-level grouping reported by per-step analysis artifacts. Distinct from the
+ * qor-v3 scalar dimensions (timing/interconnect/area/power/robustness), which live
+ * only inside the Snapshot extension's qphys.
+ */
+export type QorMetricCategory =
   | 'timing'
   | 'power_integrity'
   | 'routability_physical'
@@ -29,7 +34,7 @@ export type QorPolarity =
   | 'target_range'
   | 'trend_only'
 
-export type QorStatus = 'Green' | 'Yellow' | 'Orange' | 'Red' | 'Blocked'
+export type QorStatus = 'Green' | 'Yellow' | 'Orange' | 'Red' | 'Blocked' | 'NotRated'
 export type QorGateStatus = 'pass' | 'blocked' | 'incomplete' | 'unavailable'
 
 export interface ProjectQorWorkspaceInput {
@@ -64,7 +69,7 @@ export interface ProjectQorMetricRecord {
   displayName: string
   value: number | null
   unit?: string
-  dimension: QorDimension
+  dimension: QorMetricCategory
   polarity: QorPolarity
   scope: string
   corner: string | null
@@ -210,11 +215,10 @@ export interface ProjectQorTrendWorkspaceSummary {
   workspaceName: string
   status: QorStatus
   overallScore: number | null
-  gateStatus: QorGateStatus
+  /** qor-v3 scalar status from the Snapshot extension; NOT_RATED when no score exists. */
+  scalarStatus: EccQorSnapshotExtension['scalarStatus']
   signoffReadiness: ProjectQorSignoffReadiness
   signoffComparison: ProjectQorSignoffComparisonContext
-  areaScoringStep: FlowStep | null
-  dimensionScores: Partial<Record<QorDimension, number>>
   records: ProjectQorMetricRecord[]
   /** Full per-step records used for baseline comparison counts in Home. */
   comparisonRecords?: ProjectQorMetricRecord[]
@@ -233,7 +237,6 @@ export interface ProjectQorTrendSummary {
   trendPoints: ProjectQorTrendPoint[]
   baselineWorkspaceId: string | null
   baselineLabel: string
-  scoreThreshold: number
   regressions: ProjectQorRegression[]
   improvements: ProjectQorDelta[]
   risks: ProjectQorRisk[]

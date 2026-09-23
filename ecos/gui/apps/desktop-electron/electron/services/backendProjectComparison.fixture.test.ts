@@ -40,7 +40,13 @@ describe('representativeProjectComparisonFixture', () => {
       expect(snapshot.artifacts).toHaveLength(37)
       expect(snapshot.signoffAssessment.status).toBe('ready')
       expect(snapshot.qorAssessment).toMatchObject({
-        score: { gate: 'pass', threshold: 60, value: expect.any(Number) },
+        status: 'ready',
+      })
+      expect(snapshot.qorAssessment).not.toHaveProperty('score')
+      expect(snapshot.qorSnapshotExtension).toMatchObject({
+        scoringEngine: 'qor-v3',
+        score: expect.any(Number),
+        scalarStatus: expect.stringMatching(/^(GREEN|YELLOW|ORANGE|RED)$/),
       })
     }
   })

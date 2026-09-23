@@ -40,7 +40,6 @@ function invalidated(
   )
   snapshot.qorAssessment = {
     status: 'ready',
-    score: { gate: 'incomplete', threshold: 60, value: null },
     metrics: snapshot.metrics,
     steps: snapshot.analysis.steps.map((step) => ({
       stepId: step.stepId,

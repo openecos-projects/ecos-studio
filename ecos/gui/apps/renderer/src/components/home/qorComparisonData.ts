@@ -1,6 +1,7 @@
 import {
   projectManifestFlowSteps as FLOW_STEPS,
   type ProjectManifestFlowStep as FlowStep,
+  type QorScalarStatus,
 } from '@ecos-studio/shared'
 import type { BackendWorkspaceQorComparison } from '@/composables/useBackendWorkspaceQor'
 
@@ -208,25 +209,26 @@ export function formatQorValue(value: number | null | undefined, unit?: string):
 }
 
 export function formatQorScore(score: number | null | undefined): string {
-  if (score === null || score === undefined) return 'N/A'
+  if (score === null || score === undefined) return 'NR'
   return Number.isInteger(score) ? String(score) : score.toFixed(1)
 }
 
 export function qorScoreTone(
-  score: number | null | undefined,
-  threshold: number | null | undefined,
-): 'pass' | 'fail' | 'unrated' {
-  if (
-    score === null ||
-    score === undefined ||
-    threshold === null ||
-    threshold === undefined ||
-    !Number.isFinite(score) ||
-    !Number.isFinite(threshold)
-  ) {
-    return 'unrated'
+  scalarStatus: QorScalarStatus | null | undefined,
+): 'green' | 'yellow' | 'orange' | 'red' | 'unrated' {
+  switch (scalarStatus) {
+    case 'GREEN':
+      return 'green'
+    case 'YELLOW':
+      return 'yellow'
+    case 'ORANGE':
+      return 'orange'
+    case 'RED':
+    case 'FAIL':
+      return 'red'
+    default:
+      return 'unrated'
   }
-  return score >= threshold ? 'pass' : 'fail'
 }
 
 export function qorDeltaLabel(delta: {
@@ -266,7 +268,7 @@ export function qorScoreComparisonLabel(
   currentScore: number | null,
   baselineScore: number | null,
 ): string {
-  if (currentScore === null || baselineScore === null) return 'Unavailable'
+  if (currentScore === null || baselineScore === null) return 'NR'
   const delta = currentScore - baselineScore
   if (delta === 0) return 'Unchanged'
   const direction = delta > 0 ? 'Improved' : 'Regressed'

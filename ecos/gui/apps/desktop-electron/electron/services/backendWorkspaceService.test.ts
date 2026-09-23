@@ -69,8 +69,34 @@ function engineeringSnapshot(index = resourceIndex()): EccEngineeringSnapshot {
     qorAssessment: {
       status: 'ready',
       metrics: [],
-      score: { gate: 'pass', threshold: 60, value: 73.5 },
       steps: [],
+    },
+    qorSnapshotExtension: {
+      schemaVersion: 1,
+      scoringEngine: 'qor-v3',
+      status: 'available',
+      score: 73.5,
+      scalarStatus: 'ORANGE',
+      profile: 'balanced',
+      qphys: {},
+      feasibility: { status: 'PASS', gates: [] },
+      evidence: {
+        index: null,
+        state: 'NOT_VERIFIED',
+        integrity: null,
+        coverage: null,
+        consistency: null,
+      },
+      diagnoses: [],
+      inflation: {
+        iPlace: null,
+        iRoute: null,
+        iTotal: null,
+        congestionSeverity: null,
+        compatibilityStatus: 'UNAVAILABLE',
+      },
+      power: { totalUw: null, budgetUw: null, sourceKind: null, corner: null },
+      artifactIds: [],
     },
     schemaVersion: 1,
     signoffAssessment: { groups: [], risks: [], status: 'ready' },
@@ -650,7 +676,7 @@ describe('BackendWorkspaceService', () => {
         { name: 'Place', tool: 'dreamplace', state: 'Success' },
       ],
     }
-    ;(second.qorAssessment.score as { value: number }).value = 80
+    second.qorSnapshotExtension!.score = 80
     const readEngineeringSnapshot = vi
       .fn()
       .mockResolvedValueOnce(persistedSnapshotResult(first))
@@ -729,7 +755,7 @@ describe('BackendWorkspaceService', () => {
     const baseline = structuredClone(current)
     baseline.workspaceId = 'engineering-baseline'
     baseline.workspaceRevision = 3
-    ;(baseline.qorAssessment.score as { value: number }).value = 61
+    baseline.qorSnapshotExtension!.score = 61
     const readEngineeringSnapshot = vi.fn(async ({ workspacePath }) =>
       persistedSnapshotResult(workspacePath === '/project/ws-base' ? baseline : current),
     )
@@ -816,7 +842,6 @@ describe('BackendWorkspaceService', () => {
     snapshot.metrics = metrics
     snapshot.qorAssessment = {
       status: 'ready',
-      score: { gate: 'blocked', threshold: 60, value: 70 },
       metrics,
       steps: [
         {
@@ -1213,7 +1238,6 @@ describe('BackendWorkspaceService', () => {
     stale.metrics = [metric]
     stale.qorAssessment = {
       status: 'ready',
-      score: { gate: 'pass', threshold: 60, value: 73.5 },
       metrics: [metric],
       steps: [
         {
@@ -1238,7 +1262,6 @@ describe('BackendWorkspaceService', () => {
     current.metrics = []
     current.qorAssessment = {
       status: 'ready',
-      score: { gate: 'incomplete', threshold: 60, value: null },
       metrics: [],
       steps: [],
     }
@@ -1270,7 +1293,8 @@ describe('BackendWorkspaceService', () => {
     })
     expect(result.overview.qor).toMatchObject({
       data: {
-        score: { value: 73.5 },
+        // The extension is marked stale with the merged steps, so no score survives.
+        score: { value: null, scalarStatus: 'NOT_RATED' },
         metrics: [{ id: 'instance_count', value: 298 }],
       },
     })
@@ -1333,7 +1357,6 @@ describe('BackendWorkspaceService', () => {
     ]
     stale.qorAssessment = {
       status: 'ready',
-      score: { gate: 'pass', threshold: 60, value: 73.5 },
       metrics: [
         staleSynthesisMetric,
         staleSynthesisUtilization,
@@ -1387,7 +1410,6 @@ describe('BackendWorkspaceService', () => {
     current.metrics = [currentSynthesisMetric, currentSynthesisUtilization]
     current.qorAssessment = {
       status: 'ready',
-      score: { gate: 'incomplete', threshold: 60, value: null },
       metrics: [currentSynthesisMetric, currentSynthesisUtilization],
       steps: [
         {
@@ -1477,7 +1499,6 @@ describe('BackendWorkspaceService', () => {
     stale.metrics = [metric]
     stale.qorAssessment = {
       status: 'ready',
-      score: { gate: 'pass', threshold: 60, value: 73.5 },
       metrics: [metric],
       steps: [
         {
@@ -1495,7 +1516,7 @@ describe('BackendWorkspaceService', () => {
       workspaceRevision: 1,
       invalidatedStepIds: ['Floorplan'],
     }
-    ;(current.qorAssessment.score as { value: number }).value = 80
+    current.qorSnapshotExtension!.score = 80
     const service = new BackendWorkspaceService({
       projectManagementReadService: {
         readEngineeringSnapshot: vi.fn().mockResolvedValue({
@@ -1572,7 +1593,6 @@ describe('BackendWorkspaceService', () => {
     snapshot.metrics = [lvsMetric]
     snapshot.qorAssessment = {
       status: 'ready',
-      score: { gate: 'blocked', threshold: 60, value: 60 },
       metrics: [lvsMetric],
       steps: [
         {

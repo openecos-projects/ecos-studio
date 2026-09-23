@@ -319,10 +319,10 @@ export interface WorkspaceChecklistSummary {
   findings: ChecklistFinding[]
 }
 
+/** qor-v3 scalar score from the Snapshot extension; the only score source. */
 export interface QorScore {
   value: number | null
-  gate: 'pass' | 'blocked' | 'incomplete' | 'unavailable'
-  threshold: number
+  scalarStatus: EccQorSnapshotExtension['scalarStatus']
 }
 
 export interface MetricValue {
@@ -341,7 +341,7 @@ export interface QorStepSummary {
   order: number
   name: string
   metrics: MetricValue[]
-  status: QorScore['gate']
+  status: 'pass' | 'blocked' | 'incomplete' | 'unavailable'
   summaryMetricCount: number
 }
 

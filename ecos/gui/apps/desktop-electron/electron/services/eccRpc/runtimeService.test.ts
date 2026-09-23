@@ -41,7 +41,6 @@ function engineeringSnapshot(workspaceId: string, workspaceRevision = 1) {
     parameters: {},
     qorAssessment: {
       metrics: [],
-      score: { gate: 'unavailable', threshold: 60, value: null },
       status: 'unavailable',
       steps: [],
     },

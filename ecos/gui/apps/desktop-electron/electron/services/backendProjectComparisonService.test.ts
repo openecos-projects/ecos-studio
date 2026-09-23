@@ -121,7 +121,6 @@ function engineeringSnapshot(
     qorAssessment: {
       status: 'ready',
       metrics: [metric],
-      score: { gate: 'pass', threshold: 60, value: 80 - value / 10 },
       steps: [
         {
           name: 'Route',
@@ -400,8 +399,8 @@ describe('BackendProjectComparisonService', () => {
         signoff: workspace.signoffReadiness.status,
       })),
     ).toEqual([
-      { id: 'ws_0001', score: 72, status: 'Green', metrics: 168, signoff: 'pass' },
-      { id: 'ws_0002', score: 84, status: 'Green', metrics: 168, signoff: 'pass' },
+      { id: 'ws_0001', score: 72, status: 'Orange', metrics: 168, signoff: 'pass' },
+      { id: 'ws_0002', score: 84, status: 'Yellow', metrics: 168, signoff: 'pass' },
     ])
     expect(first.data.trend.data.workspaces[1]?.qorSnapshotExtension).toMatchObject({
       scoringEngine: 'qor-v3',

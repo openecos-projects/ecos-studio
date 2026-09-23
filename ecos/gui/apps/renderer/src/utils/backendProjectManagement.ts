@@ -487,7 +487,6 @@ function emptyProjectQorTrendSummary(): ProjectQorTrendSummary {
     trendPoints: [],
     baselineWorkspaceId: null,
     baselineLabel: 'No baseline',
-    scoreThreshold: 0,
     regressions: [],
     improvements: [],
     risks: [],

@@ -719,7 +719,9 @@ function engineeringFacts(
     ...result.sections.qor.data,
     ...(flow.status === 'ready' ? { flow: flow.data } : {}),
     ...(signoff.status === 'ready' ? { signoffAssessment: signoff.data } : {}),
-    ...(!result.snapshot.stalePredecessor && qorSnapshotExtension.status === 'ready'
+    // The result projection already marks the extension stale when any step fell
+    // back to a predecessor revision; a ready section is safe to score from.
+    ...(qorSnapshotExtension.status === 'ready'
       ? { qorSnapshotExtension: qorSnapshotExtension.data }
       : {}),
   }
