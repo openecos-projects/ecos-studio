@@ -900,6 +900,7 @@ struct ObjectVisibility {
     boundaries: bool,
     fill: bool,
     regions: bool,
+    halo: bool,
 }
 
 impl ObjectVisibility {
@@ -961,6 +962,9 @@ impl ObjectVisibility {
         if self.regions {
             b |= 1 << 13;
         }
+        if self.halo {
+            b |= 1 << 18;
+        }
         b
     }
 }
@@ -983,6 +987,7 @@ impl Default for ObjectVisibility {
             boundaries: true,
             fill: true,
             regions: false,
+            halo: true,
         }
     }
 }
@@ -993,6 +998,7 @@ enum DrawingCategory {
     InstanceMacro,
     InstanceStdCell,
     InstanceFiller,
+    Halo,
     NetSignal,
     NetClock,
     NetOther,
@@ -1025,10 +1031,11 @@ impl DrawingCategory {
         Self::Regions,
     ];
 
-    const ALL: [Self; 17] = [
+    const ALL: [Self; 18] = [
         Self::InstanceMacro,
         Self::InstanceStdCell,
         Self::InstanceFiller,
+        Self::Halo,
         Self::NetSignal,
         Self::NetClock,
         Self::NetOther,
@@ -1059,6 +1066,7 @@ impl DrawingCategory {
             Self::InstanceMacro => "Macro",
             Self::InstanceStdCell => "StdCell",
             Self::InstanceFiller => "Filler",
+            Self::Halo => "Halo",
             Self::NetSignal => "Signal Nets",
             Self::NetClock => "Clock Nets",
             Self::NetOther => "Other Nets",
@@ -1081,6 +1089,7 @@ impl DrawingCategory {
             Self::InstanceMacro | Self::InstanceStdCell | Self::InstanceFiller => {
                 "Toggle this instance class in the layout canvas."
             }
+            Self::Halo => "Instance halo keep-out rectangles.",
             Self::NetSignal => "Regular signal net wire segments.",
             Self::NetClock => "Clock net wire segments from DEF net connect type.",
             Self::NetOther => "Non-signal and non-clock regular net wire segments.",
@@ -1097,11 +1106,9 @@ impl DrawingCategory {
     fn includes_owner_type(self, owner_type: OwnerType) -> bool {
         match self {
             Self::InstanceMacro | Self::InstanceStdCell | Self::InstanceFiller => {
-                matches!(
-                    owner_type,
-                    OwnerType::InstanceBBox | OwnerType::InstanceHalo
-                )
+                owner_type == OwnerType::InstanceBBox
             }
+            Self::Halo => owner_type == OwnerType::InstanceHalo,
             Self::NetSignal | Self::NetClock | Self::NetOther => {
                 owner_type == OwnerType::NetWireSegment
             }
@@ -1135,10 +1142,7 @@ impl ObjectVisibility {
         if OwnerType::from_raw(owner_type) == Some(OwnerType::NetWireSegment) {
             return self.net_signal || self.net_clock || self.net_other;
         }
-        if matches!(
-            OwnerType::from_raw(owner_type),
-            Some(OwnerType::InstanceBBox | OwnerType::InstanceHalo)
-        ) {
+        if OwnerType::from_raw(owner_type) == Some(OwnerType::InstanceBBox) {
             return self.instances.any_visible();
         }
         OwnerType::from_raw(owner_type)
@@ -1175,6 +1179,7 @@ impl ObjectVisibility {
             DrawingCategory::Boundaries => self.boundaries,
             DrawingCategory::Fill => self.fill,
             DrawingCategory::Regions => self.regions,
+            DrawingCategory::Halo => self.halo,
             _ => unreachable!("instance categories handled above"),
         }
     }
@@ -1199,6 +1204,7 @@ impl ObjectVisibility {
             DrawingCategory::Boundaries => self.boundaries = visible,
             DrawingCategory::Fill => self.fill = visible,
             DrawingCategory::Regions => self.regions = visible,
+            DrawingCategory::Halo => self.halo = visible,
             _ => unreachable!("instance categories handled above"),
         }
     }
@@ -1234,17 +1240,12 @@ fn drawing_category_for_shape(db: &ChipViewDb, shape: &ShapeRecord) -> Option<Dr
 fn drawing_category_for_owner(db: &ChipViewDb, owner: &OwnerRef) -> Option<DrawingCategory> {
     let owner_type = OwnerType::from_raw(owner.owner_type)?;
     Some(match owner_type {
-        OwnerType::InstanceBBox | OwnerType::InstanceHalo => {
-            match crate::instance_visibility::classify_instance(db, owner) {
-                crate::instance_visibility::InstanceClass::Macro => DrawingCategory::InstanceMacro,
-                crate::instance_visibility::InstanceClass::StdCell => {
-                    DrawingCategory::InstanceStdCell
-                }
-                crate::instance_visibility::InstanceClass::Filler => {
-                    DrawingCategory::InstanceFiller
-                }
-            }
-        }
+        OwnerType::InstanceHalo => DrawingCategory::Halo,
+        OwnerType::InstanceBBox => match crate::instance_visibility::classify_instance(db, owner) {
+            crate::instance_visibility::InstanceClass::Macro => DrawingCategory::InstanceMacro,
+            crate::instance_visibility::InstanceClass::StdCell => DrawingCategory::InstanceStdCell,
+            crate::instance_visibility::InstanceClass::Filler => DrawingCategory::InstanceFiller,
+        },
         OwnerType::NetWireSegment => net_kind_drawing_category(
             db.owner_name(owner)
                 .and_then(|net_name| db.net_kind_for_name(net_name)),
@@ -3306,22 +3307,40 @@ impl LoadedViewer {
         use crate::instance_visibility::{InstanceClass, SidebarGroupAction, SidebarGroupChild};
 
         let mut changed = false;
-        let children = InstanceClass::ALL
-            .into_iter()
-            .map(|class| {
-                let category = match class {
-                    InstanceClass::Macro => DrawingCategory::InstanceMacro,
-                    InstanceClass::StdCell => DrawingCategory::InstanceStdCell,
-                    InstanceClass::Filler => DrawingCategory::InstanceFiller,
-                };
-                SidebarGroupChild {
-                    label: class.label(),
-                    tooltip: class.tooltip(),
-                    count: self.drawing_category_shape_count(category),
-                    visible: self.object_visibility.instances.is_visible(class),
-                }
-            })
-            .collect::<Vec<_>>();
+        let children = [
+            (
+                "Macro",
+                InstanceClass::Macro.tooltip(),
+                self.drawing_category_shape_count(DrawingCategory::InstanceMacro),
+                self.object_visibility.instances.macro_,
+            ),
+            (
+                "Halo",
+                DrawingCategory::Halo.tooltip(),
+                self.drawing_category_shape_count(DrawingCategory::Halo),
+                self.object_visibility.halo,
+            ),
+            (
+                "StdCell",
+                InstanceClass::StdCell.tooltip(),
+                self.drawing_category_shape_count(DrawingCategory::InstanceStdCell),
+                self.object_visibility.instances.stdcell,
+            ),
+            (
+                "Filler",
+                InstanceClass::Filler.tooltip(),
+                self.drawing_category_shape_count(DrawingCategory::InstanceFiller),
+                self.object_visibility.instances.filler,
+            ),
+        ]
+        .into_iter()
+        .map(|(label, tooltip, count, visible)| SidebarGroupChild {
+            label,
+            tooltip,
+            count,
+            visible,
+        })
+        .collect::<Vec<_>>();
         if let Some(action) = crate::instance_visibility::sidebar_tristate_tree(
             ui,
             "drawing_data_instances_tree",
@@ -3332,12 +3351,20 @@ impl LoadedViewer {
             match action {
                 SidebarGroupAction::SetAll(visible) => {
                     self.object_visibility.instances.set_all(visible);
+                    self.object_visibility.halo = visible;
                 }
-                SidebarGroupAction::SetChild { index, visible } => {
-                    self.object_visibility
+                SidebarGroupAction::SetChild { index, visible } => match index {
+                    0 => self.object_visibility.instances.set_visible(InstanceClass::Macro, visible),
+                    1 => self.object_visibility.halo = visible,
+                    2 => self
+                        .object_visibility
                         .instances
-                        .set_visible(InstanceClass::ALL[index], visible);
-                }
+                        .set_visible(InstanceClass::StdCell, visible),
+                    _ => self
+                        .object_visibility
+                        .instances
+                        .set_visible(InstanceClass::Filler, visible),
+                },
             }
             changed = true;
         }
@@ -13978,6 +14005,7 @@ mod tests {
                 DrawingCategory::InstanceMacro,
                 DrawingCategory::InstanceStdCell,
                 DrawingCategory::InstanceFiller,
+                DrawingCategory::Halo,
                 DrawingCategory::Placement,
                 DrawingCategory::Boundaries,
                 DrawingCategory::Fill,
@@ -14002,6 +14030,7 @@ mod tests {
             pdn_power: true,
             pdn_ground: true,
             tracks: true,
+            halo: false,
             ..ObjectVisibility::default()
         };
 
@@ -14014,6 +14043,21 @@ mod tests {
         assert!(visibility.includes_owner_type(OwnerType::IoPinPortShape as u8));
         assert!(visibility.includes_owner_type(OwnerType::TrackGrid as u8));
         assert!(!visibility.is_all_visible());
+    }
+
+    #[test]
+    fn halo_category_toggles_independently_of_instance_classes() {
+        let mut visibility = ObjectVisibility::default();
+        assert!(visibility.is_category_visible(DrawingCategory::Halo));
+        assert!(visibility.includes_owner_type(OwnerType::InstanceHalo as u8));
+
+        visibility.set_category_visible(DrawingCategory::Halo, false);
+        assert!(!visibility.is_category_visible(DrawingCategory::Halo));
+        assert!(!visibility.includes_owner_type(OwnerType::InstanceHalo as u8));
+        assert!(visibility.includes_owner_type(OwnerType::InstanceBBox as u8));
+
+        visibility.set_category_visible(DrawingCategory::Halo, true);
+        assert!(visibility.includes_owner_type(OwnerType::InstanceHalo as u8));
     }
 
     #[test]
