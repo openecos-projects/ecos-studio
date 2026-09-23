@@ -54,7 +54,11 @@ from ecos_agent.optimization.parameters.contracts import (
     ParameterSemanticsCard,
 )
 from ecos_agent.optimization.parameter_projection import planner_parameter_knowledge_payload
-from ecos_agent.optimization.trajectory_projection import planner_trajectory_payload, trajectory_objective
+from ecos_agent.optimization.trajectory_projection import (
+    planner_terminal_observation_payload,
+    planner_trajectory_payload,
+    trajectory_objective,
+)
 
 
 @dataclass(frozen=True)
@@ -474,7 +478,7 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
         "context_ref": context.context_ref.model_dump(mode="json"),
         "observation_ref": context.observation_ref.model_dump(mode="json"),
         "incumbent": (
-            projected_terminal_observation(context.incumbent)
+            planner_terminal_observation_payload(context.incumbent)
             if context.incumbent is not None
             else None
         ),

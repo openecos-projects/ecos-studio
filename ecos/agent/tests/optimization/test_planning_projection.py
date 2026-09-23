@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from types import SimpleNamespace
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
@@ -41,7 +42,10 @@ from ecos_agent.optimization.observation_contracts import (
 from ecos_agent.optimization.parameters.contracts import (
     NumericProposalActionV2,
     OptimizationProposalV2,
+    ParameterApplication,
+    ParameterEvidence,
     ParameterApplicationReceipt,
+    ParameterValueEvidence,
 )
 from ecos_agent.optimization.planning import (
     OptimizationHistory,
@@ -273,18 +277,22 @@ def test_planning_payload_renders_one_trajectory_list_only():
         "ecos.terminal_observation.projection.v1"
     )
     assert "delta_vs_incumbent" not in payload["incumbent"]
+    for audit_key in (
+        "observation_id",
+        "sta_corner_set_sha256",
+        "evidence_manifest_sha256",
+    ):
+        assert audit_key not in payload["incumbent"]
     trajectory = payload["parameter_trajectories"][0]
     assert trajectory == {
-        "schema_version": "ecos.planner_trajectory.v1",
+        "schema_version": "ecos.planner_trajectory.v2",
         "reference": {
             "intervention_id": "intervention-1",
-            "outcome_sha256": HASH,
         },
         "outcome": OptimizationOutcomeKind.DEGRADED.value,
         "knob_id": "place.target_density",
-        "requested_value": 0.8,
-        "actual_value": None,
-        "receipt_status": None,
+        "requested": {"knob_id": "place.target_density", "value": 0.8},
+        "parameter_application_receipt": None,
         "primary_metric": None,
         "preserve_metrics": [],
         "incumbent_decision": "incumbent_retained",
@@ -441,11 +449,67 @@ def test_planning_payload_compacts_all_trajectories():
         "intervention-1",
     ]
     assert all(
-        item["schema_version"] == "ecos.planner_trajectory.v1" for item in listed
+        item["schema_version"] == "ecos.planner_trajectory.v2" for item in listed
     )
     assert listed[0]["outcome"] == OptimizationOutcomeKind.DEGRADED.value
-    assert listed[0]["requested_value"] == 0.8
+    assert listed[0]["requested"] == {
+        "knob_id": "place.target_density",
+        "value": 0.8,
+    }
     assert all("terminal_observation" not in item for item in listed)
+
+
+def test_planner_receipt_keeps_parameter_semantics_without_provenance():
+    receipt = ParameterApplicationReceipt.model_construct(
+        receipt_id="receipt-1",
+        tool=SimpleNamespace(name="ecc", revision="v3"),
+        context={"context_sha256": HASH},
+        parameter=ParameterEvidence(
+            knob_id="place.target_density",
+            requested=ParameterValueEvidence(value=0.4, unit="ratio"),
+            written=ParameterValueEvidence(value=0.4, unit="ratio"),
+            consumed=ParameterValueEvidence(
+                value=0.47, unit="ratio", source="native"
+            ),
+            realized=None,
+        ),
+        application=ParameterApplication(status="applied", relation="transformed"),
+        observation={"utilization_floor": 0.46},
+        evidence_sha256=HASH,
+    )
+    item = replace(
+        _history_item("intervention-1", _terminal_observation()),
+        parameter_application_receipt=receipt,
+    )
+    payload = planning_context_payload(_context(incumbent=None, trajectories=(item,)))
+
+    projected = payload["parameter_trajectories"][0][
+        "parameter_application_receipt"
+    ]
+    assert projected == {
+        "parameter": {
+            "knob_id": "place.target_density",
+            "requested": {"value": 0.4, "unit": "ratio"},
+            "written": {"value": 0.4, "unit": "ratio"},
+            "consumed": {"value": 0.47, "unit": "ratio", "source": "native"},
+            "realized": None,
+        },
+        "application": {
+            "status": "applied",
+            "relation": "transformed",
+            "reason": None,
+        },
+        "observation": {"utilization_floor": 0.46},
+    }
+    encoded = json.dumps(payload, sort_keys=True)
+    for audit_key in (
+        "receipt_id",
+        "context_sha256",
+        "evidence_sha256",
+        "sta_corner_set_sha256",
+        "evidence_manifest_sha256",
+    ):
+        assert audit_key not in encoded
 
 
 def test_planning_payload_windows_task_memory_summaries():

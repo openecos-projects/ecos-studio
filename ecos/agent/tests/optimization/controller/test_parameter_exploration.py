@@ -141,4 +141,9 @@ def test_full_parameter_trajectory_survives_recovery_and_compact_projection(tmp_
     assert len(context.parameter_trajectories) == 7
     payload = planning_context_payload(context)
     assert payload["parameter_trajectories"][0]["requested"]["value"] == 3
-    assert payload["parameter_trajectories"][0]["parameter_application_receipt"]["parameter"]["consumed"]["value"] == 3
+    receipt = payload["parameter_trajectories"][0]["parameter_application_receipt"]
+    assert receipt["parameter"]["requested"]["value"] == 3
+    assert receipt["parameter"]["written"]["value"] == 600
+    assert receipt["parameter"]["consumed"]["value"] == 3
+    assert receipt["parameter"]["realized"] is None
+    assert receipt["application"]["status"] == "applied"

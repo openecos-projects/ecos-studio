@@ -45,17 +45,31 @@ def _metric(
     return payload
 
 
-def _receipt_payload(receipt: ParameterApplicationReceipt) -> dict[str, object]:
-    """Expose v3 semantic layers without reintroducing an ambiguous alias."""
+def planner_terminal_observation_payload(
+    observation: TerminalObservation,
+    *,
+    incumbent: TerminalObservation | None = None,
+) -> dict[str, object]:
+    """Remove audit-only terminal references from the planner projection."""
+    # Deferred import avoids the planning <-> trajectory projection cycle.
+    from ecos_agent.optimization.planning import projected_terminal_observation
+
+    payload = projected_terminal_observation(observation, incumbent=incumbent)
+    for key in (
+        "observation_id",
+        "sta_corner_set_sha256",
+        "evidence_manifest_sha256",
+    ):
+        payload.pop(key, None)
+    return payload
+
+
+def planner_receipt_payload(receipt: ParameterApplicationReceipt) -> dict[str, object]:
+    """Expose parameter semantics while omitting receipt provenance."""
     return {
-        "schema_version": receipt.schema_version,
-        "receipt_id": receipt.receipt_id,
-        "tool": {"name": receipt.tool.name, "revision": receipt.tool.revision},
-        "context_sha256": receipt.context.get("context_sha256"),
         "parameter": receipt.parameter.model_dump(mode="json"),
         "application": receipt.application.model_dump(mode="json"),
         "observation": receipt.observation,
-        "evidence_sha256": receipt.evidence_sha256,
     }
 
 
@@ -69,13 +83,13 @@ def planner_trajectory_payload(
     """Keep v3 decision evidence model-visible and full evidence ledger-bound."""
     receipt = item.parameter_application_receipt
     payload: dict[str, object] = {
-        "schema_version": "ecos.planner_trajectory.v1",
-        "reference": item.reference.model_dump(mode="json"),
+        "schema_version": "ecos.planner_trajectory.v2",
+        "reference": {"intervention_id": item.reference.intervention_id},
         "outcome": item.outcome.value,
         "knob_id": item.action.knob_id.value,
         "requested": item.requested.model_dump(mode="json"),
         "parameter_application_receipt": (
-            _receipt_payload(receipt) if receipt is not None else None
+            planner_receipt_payload(receipt) if receipt is not None else None
         ),
         "primary_metric": (
             _metric(primary_metric, item.terminal_observation, incumbent)

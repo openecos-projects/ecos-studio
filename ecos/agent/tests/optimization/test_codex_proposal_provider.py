@@ -339,7 +339,11 @@ def test_planner_exposes_parameter_knowledge_and_compact_trajectories(
     assert len(trajectories) == 2
     assert trajectories[0]["requested"]["value"] == 0.2
     receipt = trajectories[0]["parameter_application_receipt"]
+    assert receipt["parameter"]["requested"]["value"] == 0.2
+    assert receipt["parameter"]["written"]["value"] == 0.2
     assert receipt["parameter"]["consumed"]["value"] == 0.8
+    assert receipt["parameter"]["realized"] is None
+    assert receipt["application"]["status"] == "applied"
     assert receipt["observation"]["utilization_floor"] == 0.8
     assert trajectories[1]["parameter_application_receipt"]["application"]["status"] == "unknown"
     assert "excluded_surface_values" not in payload
