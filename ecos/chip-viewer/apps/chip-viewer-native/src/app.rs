@@ -34,7 +34,9 @@ use crate::macro_staging::{
 use crate::map_data::{ColormapMode, HeatmapData, MapCatalog, MapItem};
 
 mod gpu_tile_worker;
+mod snapshot_reload;
 use gpu_tile_worker::GpuTileWorker;
+use snapshot_reload::{PendingReload, ReloadCompletion};
 
 const SNAPSHOT_REFRESH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 const FOCUS_VIEWPORT_FILL: f32 = 0.45;
@@ -160,9 +162,24 @@ struct PreparedViewer {
 
 impl From<ChipViewDb> for PreparedViewer {
     fn from(db: ChipViewDb) -> Self {
-        let stats = db.stats();
-        let grid_bounds = grid_reference_bounds(&db).or(stats.bbox);
-        let drawing_category_counts = drawing_category_counts(&db);
+        // The three full-dataset scans are independent read-only passes over
+        // the snapshot; run them in parallel so large designs prepare in
+        // roughly one scan instead of three sequential ones.
+        let (stats, grid_bounds, drawing_category_counts) = thread::scope(|scope| {
+            let db = &db;
+            let stats_job = scope.spawn(|| db.stats());
+            let bounds_job = scope.spawn(|| grid_reference_bounds(db));
+            let counts_job = scope.spawn(|| drawing_category_counts(db));
+            let stats = stats_job.join().expect("snapshot stats scan panicked");
+            let grid_bounds = bounds_job
+                .join()
+                .expect("grid reference bounds scan panicked")
+                .or(stats.bbox);
+            let drawing_category_counts = counts_job
+                .join()
+                .expect("drawing category count scan panicked");
+            (stats, grid_bounds, drawing_category_counts)
+        });
         let snapshot_signature = snapshot_signature_for_db(&db);
         let layer_catalog = db.layer_catalog();
         Self {
@@ -200,6 +217,7 @@ struct LoadedViewer {
     draft: Option<EditDraft>,
     pending_edit: Option<PendingEdit>,
     pending_session_action: Option<PendingSessionAction>,
+    pending_reload: Option<PendingReload>,
     session_action_progress: Option<SessionActionProgress>,
     last_edit_result: Option<String>,
     session_dirty: bool,
@@ -2289,6 +2307,7 @@ impl LoadedViewer {
             draft: None,
             pending_edit: None,
             pending_session_action: None,
+            pending_reload: None,
             session_action_progress: None,
             last_edit_result: None,
             session_dirty: initial_session_dirty,
@@ -2904,15 +2923,20 @@ impl LoadedViewer {
                     self.pan = egui::Vec2::ZERO;
                 }
             }
-            let can_reload = self.pending_edit.is_none() && self.draft.is_none();
+            let can_reload = self.pending_edit.is_none()
+                && self.draft.is_none()
+                && self.pending_reload.is_none();
             if ui
                 .add_enabled(can_reload, egui::Button::new("↻"))
                 .on_hover_text("Reload geometry snapshot")
                 .clicked()
             {
-                match self.reload_snapshot() {
+                match self.reload_snapshot(ReloadCompletion::notify(
+                    "geometry snapshot reloaded",
+                    "failed to reload geometry",
+                )) {
                     Ok(()) => {
-                        self.last_edit_result = Some("geometry snapshot reloaded".to_string());
+                        self.last_edit_result = Some("reloading geometry snapshot...".to_string());
                     }
                     Err(err) => {
                         self.last_edit_result = Some(format!("failed to reload geometry: {err}"));
@@ -4120,16 +4144,18 @@ impl LoadedViewer {
             }
             let layer_index = &self.visibility_rules_cache.layer_index;
             let zoom_rules = &self.visibility_rules_cache.zoom_rules;
-            let mut visible_ids = Vec::new();
-            if !self.is_gpu_active() {
+            let visible_ids: std::sync::Arc<[ShapeId]> = if !self.is_gpu_active() {
                 let query_start = Instant::now();
-                visible_ids = self.render_cache.visible_shape_ids_for_layers(
+                let ids = self.render_cache.visible_shape_ids_for_layers(
                     &self.db,
                     &query_layer_ids,
                     viewport,
                 );
                 query_duration += query_start.elapsed();
-            }
+                ids
+            } else {
+                std::sync::Arc::from(Vec::new())
+            };
 
             self.paint_gpu_heatmap_overlay(ui, canvas, world);
 
@@ -4307,7 +4333,7 @@ impl LoadedViewer {
 
                 paint_duration += gpu_start.elapsed();
             } else {
-                for shape_id in visible_ids {
+                for shape_id in visible_ids.iter().copied() {
                     let filter_start = collect_stats.then(Instant::now);
                     let Some(shape) = self.db.find_shape(shape_id) else {
                         if let Some(start) = filter_start {
@@ -4598,6 +4624,7 @@ impl LoadedViewer {
             egui::FontId::proportional(13.0),
             ecos_text_secondary(),
         );
+        self.paint_reload_indicator(ui, &painter, canvas);
 
         if env_flag_requested(std::env::var(RENDER_STATS_ENV).ok().as_deref()) {
             let stats = CanvasRenderStats {
@@ -5311,6 +5338,7 @@ impl LoadedViewer {
             egui::FontId::proportional(13.0),
             ecos_text_secondary(),
         );
+        self.paint_reload_indicator(ui, painter, canvas);
 
         if let Some(pos) = ui
             .ctx()
@@ -7184,6 +7212,11 @@ impl LoadedViewer {
         if self.pending_edit.is_none() && self.macro_queue_busy() {
             self.pump_macro_queue();
         }
+        if self.pending_reload.is_some() {
+            // An earlier edit result is still reloading its snapshot; wait for
+            // it instead of re-reading the same result file every frame.
+            return;
+        }
         let Some(pending) = &self.pending_edit else {
             return;
         };
@@ -7208,8 +7241,12 @@ impl LoadedViewer {
         // it never identifies a real snapshot shape.
         self.selected = action.selected_shape_id.filter(|shape_id| *shape_id != 0);
         if action.reload_snapshot {
-            match self.reload_snapshot_at(result.geometry_manifest_path.as_deref()) {
-                Ok(()) => {}
+            let completion = ReloadCompletion::EditResult {
+                result: result.clone(),
+                message: action.message,
+            };
+            match self.reload_snapshot_at(result.geometry_manifest_path.as_deref(), completion) {
+                Ok(()) => return,
                 Err(err) => {
                     self.last_edit_result = Some(format!("failed to reload geometry: {err}"));
                     self.pending_edit = None;
@@ -7334,6 +7371,10 @@ impl LoadedViewer {
     /// Returns true when a successful Save or Discard was requested by the
     /// close confirmation and the native window may now exit.
     fn poll_session_action_result(&mut self) -> bool {
+        if self.pending_reload.is_some() {
+            // A reload started by an earlier result is still in flight.
+            return false;
+        }
         let Some(pending) = &self.pending_session_action else {
             return false;
         };
@@ -7405,21 +7446,14 @@ impl LoadedViewer {
             95,
             "Reloading published geometry",
         ));
-        match self.reload_snapshot_at(result.geometry_manifest_path.as_deref()) {
-            Ok(()) => {
-                self.session_dirty = false;
-                self.close_confirmation_visible = false;
-                let message = session_action_result_message(&result);
-                self.last_edit_result = Some(message.clone());
-                self.session_action_progress = Some(SessionActionProgress::new(
-                    expected_action,
-                    expected_command_id,
-                    SessionActionProgressPhase::Completed,
-                    100,
-                    message,
-                ));
-                close_after
-            }
+        let completion = ReloadCompletion::SessionAction {
+            result: result.clone(),
+            expected_action,
+            expected_command_id,
+            close_after,
+        };
+        match self.reload_snapshot_at(result.geometry_manifest_path.as_deref(), completion) {
+            Ok(()) => false,
             Err(err) => {
                 let message = format!(
                     "{} completed but geometry reload failed: {err}",
@@ -7625,6 +7659,7 @@ impl LoadedViewer {
     fn poll_external_snapshot_refresh(&mut self) {
         if self.pending_edit.is_some()
             || self.pending_session_action.is_some()
+            || self.pending_reload.is_some()
             || self.draft.is_some()
         {
             return;
@@ -7641,49 +7676,68 @@ impl LoadedViewer {
             return;
         }
 
-        match self.reload_snapshot() {
-            Ok(()) => {
-                self.last_edit_result = Some("geometry snapshot refreshed".to_string());
-            }
+        match self.reload_snapshot(ReloadCompletion::notify(
+            "geometry snapshot refreshed",
+            "failed to refresh geometry",
+        )) {
+            Ok(()) => {}
             Err(err) => {
                 self.last_edit_result = Some(format!("failed to refresh geometry: {err}"));
             }
         }
     }
 
-    fn reload_snapshot(&mut self) -> Result<(), String> {
+    fn reload_snapshot(&mut self, completion: ReloadCompletion) -> Result<(), String> {
         let manifest_path = self.db.snapshot().manifest().path.clone();
-        self.reload_snapshot_from(&manifest_path)
+        self.reload_snapshot_from(&manifest_path, completion)
     }
 
-    fn reload_snapshot_at(&mut self, manifest_path: Option<&str>) -> Result<(), String> {
+    fn reload_snapshot_at(
+        &mut self,
+        manifest_path: Option<&str>,
+        completion: ReloadCompletion,
+    ) -> Result<(), String> {
         let manifest_path = manifest_path
             .filter(|path| !path.trim().is_empty())
             .map(PathBuf::from)
             .unwrap_or_else(|| self.db.snapshot().manifest().path.clone());
-        self.reload_snapshot_from(&manifest_path)
+        self.reload_snapshot_from(&manifest_path, completion)
     }
 
-    fn reload_snapshot_from(&mut self, manifest_path: &Path) -> Result<(), String> {
-        let db = ChipViewDb::open(manifest_path).map_err(|err| err.to_string())?;
-        let snapshot_signature = snapshot_signature_for_db(&db);
-        self.replace_db(db);
-        self.snapshot_signature = snapshot_signature;
+    fn reload_snapshot_from(
+        &mut self,
+        manifest_path: &Path,
+        completion: ReloadCompletion,
+    ) -> Result<(), String> {
+        if self.pending_reload.is_some() {
+            return Err("geometry reload already in progress".to_string());
+        }
+        self.pending_reload = Some(PendingReload::start(
+            manifest_path.to_path_buf(),
+            completion,
+        ));
         Ok(())
     }
 
-    fn replace_db(&mut self, db: ChipViewDb) {
+    fn replace_db(&mut self, prepared: PreparedViewer) {
+        let PreparedViewer {
+            db,
+            stats,
+            grid_bounds,
+            drawing_category_counts,
+            snapshot_signature,
+            layer_catalog,
+        } = prepared;
         let visibility: BTreeMap<LayerId, bool> = self
             .layers
             .iter()
             .map(|layer| (layer.layer_id, layer.visible))
             .collect();
-        let stats = db.stats();
-        self.grid_bounds = grid_reference_bounds(&db).or(stats.bbox);
+        self.grid_bounds = grid_bounds;
         self.stats = stats;
-        self.drawing_category_counts = drawing_category_counts(&db);
-        self.layers = layer_ui_states(&db, &visibility, self.color_theme);
-        self.db = std::sync::Arc::new(db);
+        self.drawing_category_counts = drawing_category_counts;
+        self.layers = layer_ui_states_from_summaries(layer_catalog, &visibility, self.color_theme);
+        self.db = db;
         self.gpu_tile_worker = GpuTileWorker::new(std::sync::Arc::clone(&self.db));
         if let Some(staging) = self.macro_staging.as_mut() {
             staging.reconcile(&self.db);
@@ -7701,6 +7755,7 @@ impl LoadedViewer {
         });
         self.rebuild_layer_stack();
         self.view3d_fitted = false;
+        self.snapshot_signature = snapshot_signature;
     }
 
     fn allocate_command_id(&mut self) -> u64 {
@@ -8155,13 +8210,18 @@ impl eframe::App for ChipViewerApp {
             loaded.poll_edit_result();
             loaded.poll_session_action_progress();
             close_after_session_action = loaded.poll_session_action_result();
+            if loaded.poll_reload() {
+                close_after_session_action = true;
+            }
             loaded.poll_external_snapshot_refresh();
             if close_requested && loaded.session_dirty {
                 loaded.close_confirmation_visible = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             }
             if let Some(interval) = edit_poll_repaint_interval(
-                loaded.pending_edit.is_some() || loaded.pending_session_action.is_some(),
+                loaded.pending_edit.is_some()
+                    || loaded.pending_session_action.is_some()
+                    || loaded.pending_reload.is_some(),
             ) {
                 ctx.request_repaint_after(interval);
             } else {
@@ -15054,9 +15114,97 @@ mod tests {
         loaded.next_snapshot_refresh_check = Instant::now() - Duration::from_secs(1);
 
         loaded.poll_external_snapshot_refresh();
+        assert!(loaded.pending_reload.is_some());
+        while loaded.pending_reload.is_some() {
+            loaded.poll_reload();
+            std::thread::sleep(Duration::from_millis(10));
+        }
 
         assert!(loaded.db.snapshot().manifest().delta.is_some());
         assert!(loaded.snapshot_signature.files.contains_key(&delta_path));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reload_while_reload_in_flight_is_rejected() {
+        let dir = temp_snapshot_dir("reload-in-flight-rejected");
+        write_empty_snapshot(&dir, false);
+        let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
+        let mut loaded = LoadedViewer::new(
+            chip_display::ColorTheme::Vivid,
+            db,
+            false,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            wgpu::TextureFormat::Bgra8Unorm,
+            crate::RenderMode::Gpu,
+        );
+
+        let first = loaded.reload_snapshot(ReloadCompletion::notify("reloaded", "failed"));
+        assert!(first.is_ok());
+        let second = loaded.reload_snapshot(ReloadCompletion::notify("reloaded", "failed"));
+        assert!(second.is_err());
+        assert_eq!(
+            second.unwrap_err(),
+            "geometry reload already in progress".to_string()
+        );
+        while loaded.pending_reload.is_some() {
+            loaded.poll_reload();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn failed_reload_keeps_existing_database() {
+        let dir = temp_snapshot_dir("failed-reload-keeps-db");
+        write_empty_snapshot(&dir, false);
+        let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
+        let mut loaded = LoadedViewer::new(
+            chip_display::ColorTheme::Vivid,
+            db,
+            false,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            wgpu::TextureFormat::Bgra8Unorm,
+            crate::RenderMode::Gpu,
+        );
+        let original_manifest = loaded.db.snapshot().manifest().path.clone();
+        fs::remove_file(&original_manifest).unwrap();
+
+        loaded
+            .reload_snapshot(ReloadCompletion::notify(
+                "geometry snapshot reloaded",
+                "failed to reload geometry",
+            ))
+            .unwrap();
+        while loaded.pending_reload.is_some() {
+            loaded.poll_reload();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        assert!(loaded.pending_reload.is_none());
+        assert!(loaded
+            .last_edit_result
+            .as_deref()
+            .is_some_and(|message| message.starts_with("failed to reload geometry")));
+        assert_eq!(loaded.db.snapshot().manifest().path, original_manifest);
 
         let _ = fs::remove_dir_all(&dir);
     }

@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, VecDeque};
+use std::sync::Arc;
 
 use chip_view_db::ChipViewDb;
 use chipgeom_format::{GeometryViewTileRecord, Rect32, ShapeId};
@@ -80,7 +81,7 @@ pub struct RenderCacheStats {
 }
 
 pub struct RenderPlanCache {
-    entries: BTreeMap<RenderPlanCacheKey, Vec<ShapeId>>,
+    entries: BTreeMap<RenderPlanCacheKey, Arc<[ShapeId]>>,
     hits: usize,
     max_entries: usize,
     misses: usize,
@@ -142,7 +143,7 @@ impl RenderPlanCache {
         db: &ChipViewDb,
         layer_id: u16,
         viewport: Rect32,
-    ) -> Vec<ShapeId> {
+    ) -> Arc<[ShapeId]> {
         let key = RenderPlanKey::new(layer_id, viewport);
         self.get_or_insert_with(key, || {
             RenderPlanner::visible_shape_ids(db, layer_id, viewport)
@@ -154,7 +155,7 @@ impl RenderPlanCache {
         db: &ChipViewDb,
         layer_ids: &[u16],
         viewport: Rect32,
-    ) -> Vec<ShapeId> {
+    ) -> Arc<[ShapeId]> {
         let key = RenderLayersPlanKey::new(layer_ids, viewport);
         self.get_or_insert_layers_with(key, || {
             RenderPlanner::visible_shape_ids_for_layers(db, layer_ids, viewport)
@@ -165,7 +166,7 @@ impl RenderPlanCache {
         &mut self,
         key: RenderPlanKey,
         build: impl FnOnce() -> Vec<ShapeId>,
-    ) -> Vec<ShapeId> {
+    ) -> Arc<[ShapeId]> {
         self.get_or_insert_cache_key_with(RenderPlanCacheKey::Layer(key), build)
     }
 
@@ -173,7 +174,7 @@ impl RenderPlanCache {
         &mut self,
         key: RenderLayersPlanKey,
         build: impl FnOnce() -> Vec<ShapeId>,
-    ) -> Vec<ShapeId> {
+    ) -> Arc<[ShapeId]> {
         self.get_or_insert_cache_key_with(RenderPlanCacheKey::Layers(key), build)
     }
 
@@ -181,15 +182,15 @@ impl RenderPlanCache {
         &mut self,
         key: RenderPlanCacheKey,
         build: impl FnOnce() -> Vec<ShapeId>,
-    ) -> Vec<ShapeId> {
+    ) -> Arc<[ShapeId]> {
         if let Some(shape_ids) = self.entries.get(&key) {
             self.hits += 1;
-            return shape_ids.clone();
+            return Arc::clone(shape_ids);
         }
 
         self.misses += 1;
-        let shape_ids = build();
-        self.insert_cache_key(key, shape_ids.clone());
+        let shape_ids: Arc<[ShapeId]> = build().into();
+        self.insert_cache_key(key, Arc::clone(&shape_ids));
         shape_ids
     }
 
@@ -201,7 +202,7 @@ impl RenderPlanCache {
         }
     }
 
-    fn insert_cache_key(&mut self, key: RenderPlanCacheKey, shape_ids: Vec<ShapeId>) {
+    fn insert_cache_key(&mut self, key: RenderPlanCacheKey, shape_ids: Arc<[ShapeId]>) {
         if !self.entries.contains_key(&key) {
             self.order.push_back(key.clone());
         }
@@ -328,20 +329,16 @@ mod tests {
         );
         let mut calls = 0;
 
-        assert_eq!(
-            cache.get_or_insert_with(key, || {
-                calls += 1;
-                vec![10, 20]
-            }),
+        let first = cache.get_or_insert_with(key, || {
+            calls += 1;
             vec![10, 20]
-        );
-        assert_eq!(
-            cache.get_or_insert_with(key, || {
-                calls += 1;
-                vec![30]
-            }),
-            vec![10, 20]
-        );
+        });
+        assert_eq!(&*first, [10, 20]);
+        let second = cache.get_or_insert_with(key, || {
+            calls += 1;
+            vec![30]
+        });
+        assert_eq!(&*second, [10, 20]);
 
         assert_eq!(calls, 1);
         assert_eq!(cache.stats().hits, 1);
@@ -370,9 +367,9 @@ mod tests {
             },
         );
 
-        assert_eq!(cache.get_or_insert_with(first, || vec![1]), vec![1]);
-        assert_eq!(cache.get_or_insert_with(second, || vec![2]), vec![2]);
-        assert_eq!(cache.get_or_insert_with(first, || vec![3]), vec![3]);
+        assert_eq!(&*cache.get_or_insert_with(first, || vec![1]), [1]);
+        assert_eq!(&*cache.get_or_insert_with(second, || vec![2]), [2]);
+        assert_eq!(&*cache.get_or_insert_with(first, || vec![3]), [3]);
 
         assert_eq!(cache.stats().entries, 1);
         assert_eq!(cache.stats().misses, 3);
@@ -401,20 +398,16 @@ mod tests {
         );
         let mut calls = 0;
 
-        assert_eq!(
-            cache.get_or_insert_layers_with(key, || {
-                calls += 1;
-                vec![10, 20, 30]
-            }),
+        let first = cache.get_or_insert_layers_with(key, || {
+            calls += 1;
             vec![10, 20, 30]
-        );
-        assert_eq!(
-            cache.get_or_insert_layers_with(same_key, || {
-                calls += 1;
-                vec![40]
-            }),
-            vec![10, 20, 30]
-        );
+        });
+        assert_eq!(&*first, [10, 20, 30]);
+        let second = cache.get_or_insert_layers_with(same_key, || {
+            calls += 1;
+            vec![40]
+        });
+        assert_eq!(&*second, [10, 20, 30]);
 
         assert_eq!(calls, 1);
         assert_eq!(cache.stats().entries, 1);
@@ -444,12 +437,12 @@ mod tests {
             },
         );
 
-        assert_eq!(cache.get_or_insert_with(single_key, || vec![1]), vec![1]);
+        assert_eq!(&*cache.get_or_insert_with(single_key, || vec![1]), [1]);
         assert_eq!(
-            cache.get_or_insert_layers_with(layer_set_key, || vec![2]),
-            vec![2]
+            &*cache.get_or_insert_layers_with(layer_set_key, || vec![2]),
+            [2]
         );
-        assert_eq!(cache.get_or_insert_with(single_key, || vec![3]), vec![3]);
+        assert_eq!(&*cache.get_or_insert_with(single_key, || vec![3]), [3]);
 
         assert_eq!(cache.stats().entries, 1);
         assert_eq!(cache.stats().misses, 3);
