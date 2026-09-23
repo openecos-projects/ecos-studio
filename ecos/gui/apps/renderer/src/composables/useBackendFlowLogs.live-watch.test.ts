@@ -8,13 +8,6 @@ const testState = vi.hoisted(() => ({
   getWorkspaceResourceIndexApi: vi.fn<() => Promise<any>>(async () => ({
     flow: { steps: [] },
   })),
-  readWorkspaceHomeResourceApi: vi.fn(async () => ({
-    flow: '',
-    layout: '',
-    parameters: '',
-    checklist: '',
-    metrics: {},
-  })),
   runtimeEvents: null as Ref<DesignRuntimeEvent[]> | null,
   readOptionalProjectTextFileChunk: vi.fn(),
   readOptionalProjectTextFileTail: vi.fn(),
@@ -29,7 +22,7 @@ vi.mock('./useWorkspace', () => ({
   useWorkspace: () => ({
     currentProject: testState.currentProject,
     workspaceSession: testState.workspaceSession,
-    resourceVersions: ref({ all: 0, flow: 0, home: 0, logs: 0 }),
+    resourceVersions: ref({ all: 0, flow: 0, logs: 0 }),
     backendRuntimeEvents: testState.runtimeEvents,
   }),
 }))
@@ -44,7 +37,6 @@ vi.mock('./useFlowRunner', () => ({
 vi.mock('@/api/workspaceResources', () => ({
   getWorkspaceResourceIndexApi: testState.getWorkspaceResourceIndexApi,
   getWorkspaceRuntimeSnapshotApi: vi.fn(),
-  readWorkspaceHomeResourceApi: testState.readWorkspaceHomeResourceApi,
 }))
 
 vi.mock('@/utils/projectFiles', () => ({

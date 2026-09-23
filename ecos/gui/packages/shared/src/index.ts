@@ -242,7 +242,6 @@ export type {
   SignoffAdditionalFile,
   EccWorkspaceHandleRequest,
   EccWorkspaceRefreshConfigRequest,
-  EccWorkspaceHomeResult,
   EccWorkspaceInspectSignoffResult,
   EccWorkspaceInfoRequest,
   EccWorkspaceInfoResult,

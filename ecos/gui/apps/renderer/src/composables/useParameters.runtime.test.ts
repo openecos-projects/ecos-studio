@@ -4,7 +4,6 @@ import { effectScope } from 'vue'
 const {
   currentProject,
   executeProductCommand,
-  fetchSharedHomeData,
   getWorkspaceRuntimeSnapshotApi,
   invalidateWorkspaceResources,
   readProjectTextFile,
@@ -27,7 +26,6 @@ const {
     value: null as { workspaceId: string } | null,
   },
   getWorkspaceRuntimeSnapshotApi: vi.fn(),
-  fetchSharedHomeData: vi.fn(),
   invalidateWorkspaceResources: vi.fn(
     (scopes: string | string[], options?: { sessionId?: string }) => {
       const lifecycle = useWorkspaceLifecycle()
@@ -43,7 +41,6 @@ const {
   resourceVersions: {
     __v_isRef: true,
     value: {
-      home: 0,
       flow: 0,
       parameters: 0,
       step: 0,
@@ -66,11 +63,6 @@ vi.mock('./useWorkspace', () => ({
     showToast,
     workspaceSession,
   }),
-}))
-
-vi.mock('./useBackendFlowLogs', () => ({
-  fetchSharedHomeData,
-  convertRemoteToLocalPath: (path: string) => path,
 }))
 
 vi.mock('@/utils/projectFiles', () => ({
@@ -177,7 +169,6 @@ describe('useParameters desktop bridge integration', () => {
     const lifecycle = useWorkspaceLifecycle()
     lifecycle.closeSession()
     lifecycle.resourceVersions.value = {
-      home: 0,
       flow: 0,
       parameters: 0,
       step: 0,
@@ -194,7 +185,6 @@ describe('useParameters desktop bridge integration', () => {
     currentProject.value = { path: '/workspace/demo' }
     runtimeEvents.value = []
     resourceVersions.value = {
-      home: 0,
       flow: 0,
       parameters: 0,
       step: 0,
@@ -208,7 +198,6 @@ describe('useParameters desktop bridge integration', () => {
     executeProductCommand.mockReset()
     executeProductCommand.mockResolvedValue({ workspaceRevision: 2 })
     showToast.mockReset()
-    fetchSharedHomeData.mockReset()
     invalidateWorkspaceResources.mockClear()
     readProjectTextFile.mockReset()
     refreshConfigApi.mockReset()
@@ -229,9 +218,6 @@ describe('useParameters desktop bridge integration', () => {
   })
 
   it('exposes the ics55 routing layers supported by the route config', () => {
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile.mockResolvedValue(parametersJson())
 
     const parameters = useParameters()
@@ -245,9 +231,6 @@ describe('useParameters desktop bridge integration', () => {
   })
 
   it('loads and saves parameters through the bridge-backed file helpers', async () => {
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile.mockResolvedValue(
       parametersJson({
         'Bottom layer': 'MET3',
@@ -291,9 +274,6 @@ describe('useParameters desktop bridge integration', () => {
   })
 
   it('asks before forcing a refresh over modified derived configs', async () => {
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile.mockResolvedValue(parametersJson())
     refreshConfigApi
       .mockRejectedValueOnce(
@@ -342,9 +322,6 @@ describe('useParameters desktop bridge integration', () => {
   })
 
   it('does not force a refresh when modified derived configs are rejected', async () => {
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile.mockResolvedValue(parametersJson())
     refreshConfigApi.mockRejectedValueOnce(
       Object.assign(new Error('config files changed'), {
@@ -373,15 +350,11 @@ describe('useParameters desktop bridge integration', () => {
   })
 
   it('updates a managed backend Workspace through ECC without writing derived parameters', async () => {
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile.mockResolvedValue(parametersJson())
     currentProject.value = { path: '/workspace/demo', designTool: 'backend' }
     workspaceSession.value = { workspaceId: 'workspace-demo' }
     getWorkspaceRuntimeSnapshotApi.mockResolvedValue({
       parameters: workspaceSnapshotParameters(),
-      home: {},
     })
     const lifecycle = useWorkspaceLifecycle()
     lifecycle.activateSession(lifecycle.currentSessionId.value, {
@@ -414,9 +387,6 @@ describe('useParameters desktop bridge integration', () => {
   })
 
   it('keeps displayed parameters unchanged when rerun reset is requested before parameters.json changes', async () => {
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile
       .mockResolvedValueOnce(
         JSON.stringify({
@@ -508,17 +478,7 @@ describe('useParameters desktop bridge integration', () => {
     expect(parameters.hasChanges.value).toBe(false)
   })
 
-  it('keeps the last valid parameters during transient rerun home reloads without a parameters path', async () => {
-    fetchSharedHomeData
-      .mockResolvedValueOnce({
-        parameters: '/workspace/demo/home/parameters.json',
-      })
-      .mockResolvedValueOnce({
-        parameters: '',
-      })
-      .mockResolvedValueOnce({
-        parameters: '/workspace/demo/home/parameters.json',
-      })
+  it('keeps the last valid parameters during a transient rerun reload', async () => {
     readProjectTextFile
       .mockResolvedValueOnce(
         JSON.stringify({
@@ -603,10 +563,7 @@ describe('useParameters desktop bridge integration', () => {
     clearFlowExecutionActiveForWorkspace('/workspace/demo')
   })
 
-  it('loads chip identity from parameters.json when post-rerun home.json omits the path', async () => {
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '',
-    })
+  it('loads chip identity from the canonical parameters path after rerun', async () => {
     readProjectTextFile.mockResolvedValue(parametersJson())
 
     const parameters = useParameters()
@@ -628,7 +585,6 @@ describe('useParameters desktop bridge integration', () => {
     workspaceSession.value = { workspaceId: 'workspace-demo' }
     getWorkspaceRuntimeSnapshotApi.mockResolvedValue({
       parameters: workspaceSnapshotParameters(),
-      home: {},
     })
 
     const parameters = useParameters()
@@ -653,7 +609,6 @@ describe('useParameters desktop bridge integration', () => {
     workspaceSession.value = { workspaceId: 'workspace-demo' }
     const snapshot = createDeferred<{
       parameters: ReturnType<typeof workspaceSnapshotParameters>
-      home: Record<string, unknown>
     }>()
     getWorkspaceRuntimeSnapshotApi.mockReturnValue(snapshot.promise)
 
@@ -668,7 +623,6 @@ describe('useParameters desktop bridge integration', () => {
       parameters: workspaceSnapshotParameters({
         core: { ...workspaceSnapshotParameters().core, utilitization: 0.67 },
       }),
-      home: {},
     })
 
     await vi.waitFor(() => expect(parameters.isLoaded.value).toBe(true))
@@ -680,7 +634,6 @@ describe('useParameters desktop bridge integration', () => {
     workspaceSession.value = { workspaceId: 'workspace-demo' }
     const snapshot = createDeferred<{
       parameters: ReturnType<typeof workspaceSnapshotParameters>
-      home: Record<string, unknown>
     }>()
     getWorkspaceRuntimeSnapshotApi.mockReturnValue(snapshot.promise)
 
@@ -695,7 +648,7 @@ describe('useParameters desktop bridge integration', () => {
     await parameters.loadParameters()
 
     expect(parameters.isLoading.value).toBe(false)
-    snapshot.resolve({ parameters: workspaceSnapshotParameters(), home: {} })
+    snapshot.resolve({ parameters: workspaceSnapshotParameters() })
   })
 
   it('clears loading when the same path is replaced by a new Workspace Session', async () => {
@@ -703,13 +656,11 @@ describe('useParameters desktop bridge integration', () => {
     workspaceSession.value = { workspaceId: 'workspace-demo' }
     const oldSnapshot = createDeferred<{
       parameters: ReturnType<typeof workspaceSnapshotParameters>
-      home: Record<string, unknown>
     }>()
     getWorkspaceRuntimeSnapshotApi
       .mockReturnValueOnce(oldSnapshot.promise)
       .mockResolvedValueOnce({
         parameters: workspaceSnapshotParameters({ design: 'replacement-demo' }),
-        home: {},
       })
 
     const parameters = useParameters()
@@ -728,13 +679,13 @@ describe('useParameters desktop bridge integration', () => {
     void parameters.loadParameters()
 
     await vi.waitFor(() => expect(parameters.config.design).toBe('replacement-demo'))
-    oldSnapshot.resolve({ parameters: workspaceSnapshotParameters(), home: {} })
+    oldSnapshot.resolve({ parameters: workspaceSnapshotParameters() })
   })
 
   it('does not fall back to derived JSON when ECC parameters are unavailable', async () => {
     currentProject.value = { path: '/workspace/demo', designTool: 'backend' }
     workspaceSession.value = { workspaceId: 'workspace-demo' }
-    getWorkspaceRuntimeSnapshotApi.mockResolvedValue({ parameters: {}, home: {} })
+    getWorkspaceRuntimeSnapshotApi.mockResolvedValue({ parameters: {} })
     readProjectTextFile.mockResolvedValue(parametersJson())
 
     const parameters = useParameters()
@@ -746,9 +697,6 @@ describe('useParameters desktop bridge integration', () => {
   })
 
   it('keeps the last parameters snapshot while a flow is running', async () => {
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile.mockResolvedValueOnce(parametersJson()).mockResolvedValueOnce(
       parametersJson({
         Die: { Size: [], Area: 0 },
@@ -784,9 +732,6 @@ describe('useParameters desktop bridge integration', () => {
   })
 
   it('does not replace config objects when a direct running-flow refresh reads unchanged parameters', async () => {
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile.mockResolvedValue(parametersJson())
 
     const parameters = useParameters()
@@ -809,9 +754,6 @@ describe('useParameters desktop bridge integration', () => {
 
   it('does not poll the parameters file while a flow is running', async () => {
     vi.useFakeTimers()
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile.mockResolvedValueOnce(parametersJson()).mockResolvedValueOnce(
       parametersJson({
         Die: { Size: [], Area: 0 },
@@ -850,9 +792,6 @@ describe('useParameters desktop bridge integration', () => {
   })
 
   it('rejects parameter saves while the workspace flow is running', async () => {
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile.mockResolvedValue(
       JSON.stringify({
         PDK: 'ics55',
@@ -905,9 +844,6 @@ describe('useParameters desktop bridge integration', () => {
   })
 
   it('increments dependent resource versions only after a successful save', async () => {
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile.mockResolvedValue(
       JSON.stringify({
         PDK: 'ics55',
@@ -951,16 +887,12 @@ describe('useParameters desktop bridge integration', () => {
     await expect(parameters.saveParameters()).resolves.toBe(true)
 
     expect(resourceVersions.value.parameters).toBe(initialVersions.parameters + 1)
-    expect(resourceVersions.value.home).toBe(initialVersions.home + 1)
     expect(resourceVersions.value['step-config']).toBe(initialVersions['step-config'] + 1)
     expect(resourceVersions.value.flow).toBe(initialVersions.flow + 1)
     expect(resourceVersions.value.all).toBe(initialVersions.all)
   })
 
   it('refreshes workspace config after saving a max fanout parameter change', async () => {
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile.mockResolvedValue(
       JSON.stringify({
         PDK: 'ics55',
@@ -1014,10 +946,7 @@ describe('useParameters desktop bridge integration', () => {
     })
   })
 
-  it('does not increment home or parameters resource versions when save fails', async () => {
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
+  it('does not increment parameter resource versions when save fails', async () => {
     readProjectTextFile.mockResolvedValue(
       JSON.stringify({
         PDK: 'ics55',
@@ -1071,15 +1000,11 @@ describe('useParameters desktop bridge integration', () => {
   })
 
   it('toasts an ECC range error without writing derived parameters', async () => {
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile.mockResolvedValue(parametersJson())
     currentProject.value = { path: '/workspace/demo', designTool: 'backend' }
     workspaceSession.value = { workspaceId: 'workspace-demo' }
     getWorkspaceRuntimeSnapshotApi.mockResolvedValue({
       parameters: workspaceSnapshotParameters(),
-      home: {},
     })
     executeProductCommand.mockRejectedValue(
       new Error('value 1.3 out of range [0.01, 1.0] for floorplan.core_util'),
@@ -1113,9 +1038,6 @@ describe('useParameters desktop bridge integration', () => {
   })
 
   it('keeps written parameters as the baseline when refresh config fails after save', async () => {
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile.mockResolvedValue(
       JSON.stringify({
         PDK: 'ics55',
@@ -1170,9 +1092,6 @@ describe('useParameters desktop bridge integration', () => {
   it('does not invalidate the new workspace when an old save resolves after a session switch', async () => {
     let resolveWrite: (() => void) | undefined
 
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile.mockResolvedValue(
       JSON.stringify({
         PDK: 'ics55',
@@ -1230,7 +1149,6 @@ describe('useParameters desktop bridge integration', () => {
     lifecycle.activateSession(nextSession.sessionId)
     currentProject.value = { path: '/workspace/other' }
     resourceVersions.value = {
-      home: 10,
       flow: 0,
       parameters: 20,
       step: 0,
@@ -1243,16 +1161,12 @@ describe('useParameters desktop bridge integration', () => {
     resolveWrite?.()
     await expect(savePromise).resolves.toBe(true)
 
-    expect(resourceVersions.value.home).toBe(10)
     expect(resourceVersions.value.parameters).toBe(20)
   })
 
   it('does not invalidate the newly selected project when currentProject changes before the reload watcher advances save guards', async () => {
     let resolveWrite: (() => void) | undefined
 
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile.mockResolvedValue(
       JSON.stringify({
         PDK: 'ics55',
@@ -1301,7 +1215,6 @@ describe('useParameters desktop bridge integration', () => {
 
     currentProject.value = { path: '/workspace/other' }
     resourceVersions.value = {
-      home: 10,
       flow: 0,
       parameters: 20,
       step: 0,
@@ -1314,20 +1227,12 @@ describe('useParameters desktop bridge integration', () => {
     resolveWrite?.()
     await expect(savePromise).resolves.toBe(true)
 
-    expect(resourceVersions.value.home).toBe(10)
     expect(resourceVersions.value.parameters).toBe(20)
   })
 
   it('does not clear the new workspace dirty state when an old save resolves after a session switch', async () => {
     let resolveWrite: (() => void) | undefined
 
-    fetchSharedHomeData
-      .mockResolvedValueOnce({
-        parameters: '/workspace/demo/home/parameters.json',
-      })
-      .mockResolvedValueOnce({
-        parameters: '/workspace/other/home/parameters.json',
-      })
     readProjectTextFile
       .mockResolvedValueOnce(
         JSON.stringify({
@@ -1441,9 +1346,6 @@ describe('useParameters desktop bridge integration', () => {
     let resolveFirstWrite: (() => void) | undefined
     let resolveSecondWrite: (() => void) | undefined
 
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile.mockResolvedValue(
       JSON.stringify({
         PDK: 'ics55',
@@ -1525,7 +1427,6 @@ describe('useParameters desktop bridge integration', () => {
     expect(parameters.isSaving.value).toBe(false)
     expect(parameters.error.value).toBeNull()
     expect(resourceVersions.value.parameters).toBe(initialVersions.parameters + 1)
-    expect(resourceVersions.value.home).toBe(initialVersions.home + 1)
   })
 
   it('serializes overlapping saves so the latest snapshot wins on disk', async () => {
@@ -1533,9 +1434,6 @@ describe('useParameters desktop bridge integration', () => {
     let persistedContent = ''
     let inFlightWrites = 0
 
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile.mockResolvedValue(
       JSON.stringify({
         PDK: 'ics55',
@@ -1617,9 +1515,6 @@ describe('useParameters desktop bridge integration', () => {
     const resolveFirstPath = createDeferred<string>()
     let persistedContent = ''
 
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile.mockResolvedValue(
       JSON.stringify({
         PDK: 'ics55',
@@ -1693,9 +1588,6 @@ describe('useParameters desktop bridge integration', () => {
   it('keeps newer edits dirty when a single in-flight save resolves with an older snapshot', async () => {
     let resolveWrite: (() => void) | undefined
 
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile.mockResolvedValue(
       JSON.stringify({
         PDK: 'ics55',
@@ -1758,13 +1650,6 @@ describe('useParameters desktop bridge integration', () => {
 
   it('ignores stale parameter reads after the workspace session changes', async () => {
     let resolveOldRead: ((content: string) => void) | undefined
-    fetchSharedHomeData
-      .mockResolvedValueOnce({
-        parameters: '/workspace/demo/home/parameters.json',
-      })
-      .mockResolvedValueOnce({
-        parameters: '/workspace/other/home/parameters.json',
-      })
     readProjectTextFile
       .mockReturnValueOnce(
         new Promise((resolve) => {
@@ -1858,13 +1743,6 @@ describe('useParameters desktop bridge integration', () => {
   it('does not let an old save mutate or invalidate a new project loaded in the same session', async () => {
     const firstWrite = createDeferred<void>()
 
-    fetchSharedHomeData
-      .mockResolvedValueOnce({
-        parameters: '/workspace/demo/home/parameters.json',
-      })
-      .mockResolvedValueOnce({
-        parameters: '/workspace/other/home/parameters.json',
-      })
     readProjectTextFile
       .mockResolvedValueOnce(
         JSON.stringify({
@@ -1966,13 +1844,6 @@ describe('useParameters desktop bridge integration', () => {
     const firstWrite = createDeferred<void>()
     const secondWrite = createDeferred<void>()
 
-    fetchSharedHomeData
-      .mockResolvedValueOnce({
-        parameters: '/workspace/demo/home/parameters.json',
-      })
-      .mockResolvedValueOnce({
-        parameters: '/workspace/demo/home/parameters.json',
-      })
     readProjectTextFile.mockResolvedValue(
       JSON.stringify({
         PDK: 'ics55',
@@ -2055,9 +1926,6 @@ describe('useParameters desktop bridge integration', () => {
   it('skips a stale queued save before path resolution and disk write after project reset', async () => {
     const firstWrite = createDeferred<void>()
 
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     readProjectTextFile.mockResolvedValue(
       JSON.stringify({
         PDK: 'ics55',

@@ -916,7 +916,7 @@ export function useParameters() {
           updatedWorkspaceRevision,
           saveSessionId,
         )
-        invalidateWorkspaceResources(['parameters', 'home', 'step-config', 'flow'], {
+        invalidateWorkspaceResources(['parameters', 'step-config', 'flow'], {
           sessionId: saveSessionId,
         })
         console.log('Workspace configuration updated successfully')
@@ -945,7 +945,7 @@ export function useParameters() {
         return refreshResult?.response === ResponseEnum.success
       }
 
-      invalidateWorkspaceResources(['parameters', 'home', 'step-config', 'flow'], {
+      invalidateWorkspaceResources(['parameters', 'step-config', 'flow'], {
         sessionId: saveSessionId,
       })
 
@@ -1051,11 +1051,7 @@ export function useParameters() {
   )
 
   watch(
-    () => [
-      resourceVersions.value.parameters,
-      resourceVersions.value.home,
-      resourceVersions.value.all,
-    ],
+    () => [resourceVersions.value.parameters, resourceVersions.value.all],
     async () => {
       await reloadParametersIfClean()
     },

@@ -8,7 +8,6 @@ export enum CMDEnum {
   rtl2gds = 'rtl2gds',
   run_step = 'run_step',
   get_info = 'get_info',
-  home_page = 'home_page',
   refresh_config = 'refresh_config',
   reset_flow = 'reset_flow',
 }

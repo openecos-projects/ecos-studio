@@ -27,7 +27,6 @@ import type {
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceExportSignoffResult,
   EccWorkspaceHandleRequest,
-  EccWorkspaceHomeResult,
   EccWorkspaceInfoRequest,
   EccWorkspaceInfoResult,
   EccWorkspaceOpenRequest,
@@ -406,12 +405,6 @@ export class EccRpcRuntimeService {
       return { ok: true, retained: true }
     }
     return await this.closeWorkspace(request)
-  }
-
-  async workspaceHome(
-    request: EccWorkspaceHandleRequest,
-  ): Promise<EccWorkspaceHomeResult> {
-    return this.runtimeForHandle(request.workspaceHandle).workspaceHome(request)
   }
 
   async workspaceInfo(request: EccWorkspaceInfoRequest): Promise<EccWorkspaceInfoResult> {

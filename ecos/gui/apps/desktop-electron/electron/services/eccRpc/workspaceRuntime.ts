@@ -27,7 +27,6 @@ import type {
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceExportSignoffResult,
   EccWorkspaceHandleRequest,
-  EccWorkspaceHomeResult,
   EccWorkspaceInfoRequest,
   EccWorkspaceInfoResult,
   EccWorkspaceOpenRequest,
@@ -429,10 +428,6 @@ export class EccWorkspaceRuntime {
     } finally {
       this.stepConfigurationCache.clear()
     }
-  }
-
-  workspaceHome(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceHomeResult> {
-    return this.commands.workspaceHome(request)
   }
 
   workspaceInfo(request: EccWorkspaceInfoRequest): Promise<EccWorkspaceInfoResult> {

@@ -193,7 +193,7 @@ describe('useDesignReportExport', () => {
     expect(composable.generatedContent.value).toContain('ECOS STUDIO — DESIGN SUMMARY')
   })
 
-  it('loads PDK metadata explicitly without reading home.json', async () => {
+  it('loads PDK metadata from its explicit project file', async () => {
     currentProject.value = {
       path: '/projects/gcd/ws_001',
       name: 'gcd_run',

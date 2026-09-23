@@ -209,10 +209,6 @@ export interface EccWorkspaceCloseResult {
   ok: boolean
 }
 
-export interface EccWorkspaceHomeResult {
-  path: string
-}
-
 export interface EccWorkspaceInfoResult {
   id: string
   info: unknown
@@ -447,7 +443,6 @@ export interface EccWorkspaceRuntimeSnapshot extends EccWorkspaceHandleRequest {
   directory: string
   engineeringSnapshot?: EccPersistedEngineeringSnapshot
   flow: { steps: EccRuntimeStepSnapshot[] }
-  home: Record<string, unknown>
   lastEventId: string
   operations: EccRuntimeOperation[]
   parameters: Record<string, unknown>

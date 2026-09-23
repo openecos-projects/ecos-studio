@@ -256,25 +256,3 @@ export function resetFlowApi(request: RequestData<ResetFlowRequest>) {
     success(CMDEnum.reset_flow, result as ResetFlowResponse),
   ) as Promise<ResponseData<ResetFlowResponse>>
 }
-
-// ============ Home Page API ============
-
-export interface HomePageResponse {
-  path: string
-}
-
-/**
- * 调用 home_page runtime command 获取 home.json 的路径
- */
-export function getHomePageApi(
-  workspaceHandle = '',
-  designTool: DesignTool = 'backend',
-  directory = '',
-) {
-  void directory
-  return getDesktopApi()
-    .runtime.workspace.home({ designTool, workspaceHandle })
-    .then((result) => success(CMDEnum.home_page, result as HomePageResponse)) as Promise<
-    ResponseData<HomePageResponse>
-  >
-}

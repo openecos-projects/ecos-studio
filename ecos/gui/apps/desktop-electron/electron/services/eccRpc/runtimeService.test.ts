@@ -472,20 +472,6 @@ describe('EccRpcRuntimeService pool', () => {
     expect(client.calls.filter((call) => call.method === 'flow.run')).toHaveLength(2)
   })
 
-  it('routes handle methods to the owning runtime and rejects unknown handles', async () => {
-    const pool = createPool()
-    const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
-    pool.clientFor('/work/demo').responses.push({ path: '/work/demo' })
-
-    await expect(
-      pool.service.workspaceHome({ workspaceHandle: workspace.workspaceHandle }),
-    ).resolves.toEqual({ path: '/work/demo' })
-
-    await expect(
-      pool.service.workspaceHome({ workspaceHandle: 'missing-handle' }),
-    ).rejects.toThrow(WorkspaceSessionNotFoundError)
-  })
-
   it('treats releasing an already-gone Workspace Session as a no-op', async () => {
     const pool = createPool()
 
@@ -725,7 +711,6 @@ describe('EccRpcRuntimeService pool', () => {
     pool.clientFor('/work/demo').responses.push({
       directory: '/work/demo',
       flow: { steps: [] },
-      home: {},
       lastEventId: 'terminal-release',
       operations: [],
       parameters: {},
@@ -985,7 +970,6 @@ describe('EccRpcRuntimeService pool', () => {
       {
         directory: '/work/demo',
         flow: { steps: [] },
-        home: {},
         lastEventId: 'terminal-reconciled',
         operations: [],
         parameters: {},
@@ -1040,7 +1024,6 @@ describe('EccRpcRuntimeService pool', () => {
     pool.clientFor('/work/demo').responses.push({
       directory: '/work/demo',
       flow: { steps: [] },
-      home: {},
       lastEventId: 'terminal-failed',
       operations: [],
       parameters: {},
@@ -1086,11 +1069,6 @@ describe('EccRpcRuntimeService pool', () => {
 
     const opened = await service.openWorkspace({ directory: '/work/link' })
     expect(opened.directory).toBe('/work/real')
-
-    clients.get('/work/link')!.responses.push({ path: '/work/home' })
-    await expect(
-      service.workspaceHome({ workspaceHandle: opened.workspaceHandle }),
-    ).resolves.toEqual({ path: '/work/home' })
 
     // Canonical path should reuse the aliased sidecar instead of spawning another.
     const createCountBefore = sidecars.size
@@ -1268,7 +1246,6 @@ describe('EccRpcRuntimeService pool', () => {
       {
         directory: '/work/a',
         flow: { steps: [] },
-        home: {},
         lastEventId: 'id-/work/a:2',
         operations: [],
         parameters: {},

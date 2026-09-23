@@ -18,7 +18,6 @@ import type {
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceExportSignoffResult,
   EccWorkspaceHandleRequest,
-  EccWorkspaceHomeResult,
   EccWorkspaceInfoRequest,
   EccWorkspaceInfoResult,
   EccWorkspaceOpenRequest,
@@ -279,12 +278,6 @@ export class WorkspaceRuntimeCommands {
         this.context.sessions.close(request.workspaceHandle)
       }
     })
-  }
-
-  workspaceHome(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceHomeResult> {
-    return this.workspaceCall('workspace.home', request, (workspaceId) => ({
-      workspaceId,
-    }))
   }
 
   workspaceInfo(request: EccWorkspaceInfoRequest): Promise<EccWorkspaceInfoResult> {

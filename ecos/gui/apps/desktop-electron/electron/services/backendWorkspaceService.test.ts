@@ -16,7 +16,7 @@ import type { ProjectEngineeringSnapshotReadResult } from './projectManagementRe
 import { runWithWindowScope } from './windowScopeContext'
 
 function resourceIndex(): WorkspaceResourceIndex {
-  const file = (kind: 'checklist' | 'flow' | 'home' | 'parameters') => ({
+  const file = (kind: 'checklist' | 'flow' | 'parameters') => ({
     exists: true,
     kind,
     path: `/project/ws-a/home/${kind}.json`,
@@ -27,10 +27,8 @@ function resourceIndex(): WorkspaceResourceIndex {
     home: {
       checklistJson: file('checklist'),
       flowJson: file('flow'),
-      homeJson: file('home'),
       parametersJson: file('parameters'),
     },
-    homeData: {},
     messages: [],
     parameters: {
       clock: 'clk',

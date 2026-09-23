@@ -22,7 +22,6 @@ function createRuntime() {
     shutdown: vi.fn().mockResolvedValue({ ok: true }),
     runFlow: vi.fn().mockResolvedValue({ rerun: false }),
     runStepPayload: vi.fn().mockResolvedValue({ state: 'Success', step: 'sim' }),
-    workspaceHome: vi.fn().mockResolvedValue({ path: '/work/frontend/home/home.json' }),
     workspaceInfo: vi.fn().mockResolvedValue({ id: 'subflow', info: {}, step: 'sim' }),
   }
 }

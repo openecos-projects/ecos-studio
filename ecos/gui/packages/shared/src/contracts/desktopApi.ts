@@ -377,7 +377,6 @@ export interface DesktopApi {
   }
   workspaceResources: {
     getIndex(): Promise<WorkspaceResourceIndex>
-    readHome(): Promise<Record<string, unknown> | null>
     readFlow(): Promise<Record<string, unknown> | null>
     readParameters(): Promise<Record<string, unknown> | null>
     resolveStepInfo(request: WorkspaceStepInfoRequest): Promise<WorkspaceStepInfoResult>
