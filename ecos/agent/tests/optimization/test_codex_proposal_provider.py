@@ -359,6 +359,7 @@ def test_planner_exposes_parameter_knowledge_and_compact_trajectories(
         "knowledge_refs, task_memory_refs, action" in captured["system"]
     )
     assert '"ecos.optimization_proposal.v3"' in captured["system"]
+    assert "Target at most 320 characters" in captured["system"]
     assert '"effective_domain_sha256"' in captured["system"]
     prompt_evidence = json.loads(
         _build_prompt(captured["system"], payload).split(
@@ -436,6 +437,35 @@ def test_planner_keeps_response_excerpt_on_invalid_json(
     evidence = provider.consume_planning_evidence()
     assert evidence is not None
     assert evidence.response_excerpt == raw
+
+
+def test_planner_bounds_oversized_rationale_without_model_repair(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    provider = _provider(tmp_path)
+    proposal = _proposal_v2(_context(), _domain())
+    oversized = "x" * 700
+    proposal["rationale_summary"] = oversized
+    calls = 0
+
+    def run_turn(*_args: object, **_kwargs: object) -> str:
+        nonlocal calls
+        calls += 1
+        provider._completed_turn = (f"thread-{tmp_path.name}", "turn", HASH)
+        return json.dumps(proposal)
+
+    monkeypatch.setattr(provider, "_run_turn", run_turn)
+    monkeypatch.setattr(provider, "_ensure_client", lambda: None)
+    monkeypatch.setattr(
+        provider, "_ensure_thread", lambda _client: f"thread-{tmp_path.name}"
+    )
+
+    result = provider.propose_v2(_context(), _domain())
+
+    assert calls == 1
+    assert result["rationale_summary"] == oversized[:512]
+    assert provider._last_response_text is not None
+    assert oversized in provider._last_response_text
 
 
 def test_planner_evidence_has_no_excerpt_on_accepted_proposal(

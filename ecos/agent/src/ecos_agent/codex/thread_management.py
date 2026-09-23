@@ -77,6 +77,20 @@ class CodexThreadManagementMixin:
                 payload = json.loads(text)
                 if not isinstance(payload, dict):
                     raise ValueError("assistant JSON must be an object")
+                rationale = payload.get("rationale_summary")
+                rationale_schema = output_schema.get("properties", {}).get(
+                    "rationale_summary", {}
+                )
+                max_length = rationale_schema.get("maxLength")
+                if (
+                    isinstance(rationale, str)
+                    and type(max_length) is int
+                    and max_length > 0
+                    and len(rationale) > max_length
+                ):
+                    # Keep the raw model text in _last_response_text for audit;
+                    # only bound the non-authoritative model-facing summary.
+                    payload["rationale_summary"] = rationale[:max_length]
                 if model is not None:
                     model.model_validate(payload)
             except (json.JSONDecodeError, ValueError) as exc:
