@@ -576,7 +576,6 @@ class SupportedActionView(_Model):
         return {
             "schema_version": "ecos.supported_action_view.planner.v2",
             "state": self._planner_state_payload(),
-            "catalog_sha256": self.catalog_sha256,
             "candidate_count": self.candidate_count,
             "exposed_count": len(self.exposed_claim_refs),
             "exposed_claim_refs": [
@@ -589,7 +588,6 @@ class SupportedActionView(_Model):
                 if _reference_key(item.claim_ref) in exposed
             ],
             "actions": [item.model_dump(mode="json") for item in self.actions],
-            "audit_sha256": self.view_sha256,
         }
 
 

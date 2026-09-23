@@ -146,10 +146,10 @@ def test_p2_cross_stage_actions_need_their_own_stage_evidence(tmp_path):
     assert any(
         a.knob_id.value == "floorplan.core_util" for a in context.legal_actions
     )
-    assert [
-        entry["stage"]
-        for entry in controller_stage_entries(context)
-    ] == ["place", "Floorplan"]
+    stage_entries = controller_stage_entries(context)
+    assert [entry["stage"] for entry in stage_entries] == ["place", "Floorplan"]
+    assert "observation_ref" in stage_entries[0]
+    assert "observation_ref" not in stage_entries[1]
 
 
 def controller_stage_entries(context):

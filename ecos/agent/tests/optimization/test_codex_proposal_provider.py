@@ -513,7 +513,11 @@ def test_planner_binds_domain_and_consumable_evidence(
     monkeypatch.setattr(provider, "_request_json", request)
     provider.propose_v2(context, domain)
 
-    assert captured["user"]["effective_domain"] == domain.model_dump(mode="json")
+    assert captured["user"]["effective_domain"] == {
+        key: value
+        for key, value in domain.model_dump(mode="json").items()
+        if key != "context_sha256"
+    }
     evidence = provider.consume_planning_evidence()
     assert evidence is not None
     assert evidence.thread_id == "thread-1"

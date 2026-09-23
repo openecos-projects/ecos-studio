@@ -32,6 +32,7 @@ from ecos_agent.optimization.metrics.contracts import (
 )
 from ecos_agent.optimization.memory import (
     OptimizationTaskMemoryScope,
+    OptimizationTaskMemoryReference,
     OptimizationTaskMemorySnapshot,
     OptimizationTaskMemorySummary,
 )
@@ -527,7 +528,17 @@ def test_planning_payload_windows_task_memory_summaries():
         source_event_count=10,
         source_evidence_sha256=HASH,
         summaries=tuple(
-            OptimizationTaskMemorySummary.model_construct() for _ in range(10)
+            OptimizationTaskMemorySummary.model_construct(
+                reference=OptimizationTaskMemoryReference(summary_sha256=HASH),
+                knob_id=OptimizationKnob.TARGET_DENSITY,
+                direction=StrategyDirection.INCREASE,
+                requested_values=(),
+                outcome_counts=(),
+                metric_ranges=(),
+                evidence_refs=(),
+                parameter_application_receipts=(),
+            )
+            for _ in range(10)
         ),
         snapshot_sha256=HASH,
     )

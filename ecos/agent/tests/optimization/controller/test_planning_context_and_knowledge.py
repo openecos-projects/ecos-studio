@@ -313,6 +313,13 @@ def test_planning_context_compiles_hash_bound_domain_for_active_knobs(
         payload["effective_domains"][0]["snapshot_sha256"]
         == context.effective_domains[0].snapshot_sha256
     )
+    assert "context_sha256" not in payload["effective_domains"][0]
+    assert "observation_id" not in payload["observation"]
+    assert "evidence_manifest_sha256" not in payload["observation"]
+    assert all(
+        set(feature) == {"feature_id", "value"}
+        for feature in payload["observation"]["state_evidence"]
+    )
     audit = OptimizationPlanningAudit(tmp_path / "episode").replay()
     assert tuple(
         item.snapshot_sha256 for item in audit.entries[0].effective_domains
@@ -362,6 +369,33 @@ def test_requested_only_planning_does_not_expose_receipts_or_task_memory(
     assert context.parameter_trajectories[0].parameter_application_receipt is None
     state = json.loads(controller.state_path.read_text(encoding="utf-8"))
     assert state["receipt_aware_planning"] is False
+
+
+def test_receipt_aware_task_memory_projection_moves_chain_provenance_audit_only(
+    tmp_path: Path,
+) -> None:
+    task_memory = _task_memory_snapshot(tmp_path)
+    planner = _FakeCodex(_proposal)
+    controller = _controller(
+        tmp_path,
+        planner,
+        _FakeEcc(_started()),
+        objective=_objective(),
+        incumbent=_eligible_terminal(),
+        task_memory=task_memory,
+    )
+
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    memory = planning_context_payload(planner.contexts[0])["task_memory"]
+
+    assert memory["schema_version"] == "ecos.optimization_task_memory.planner.v1"
+    assert "scope" not in memory
+    assert "snapshot_sha256" not in memory
+    assert "source_evidence_sha256" not in memory
+    assert memory["summaries"] == []
+    encoded = json.dumps(memory, sort_keys=True)
+    assert "workspace_manifest_sha256" not in encoded
+    assert "terminal_observation_sha256" not in encoded
 
 
 def test_recovery_rejects_planning_mode_drift(tmp_path: Path) -> None:

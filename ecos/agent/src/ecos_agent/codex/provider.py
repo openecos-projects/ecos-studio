@@ -39,6 +39,7 @@ from ecos_agent.optimization.contracts import (
 )
 from ecos_agent.optimization.planning import (
     OptimizationPlanningContext,
+    planner_effective_domain_payload,
     planning_context_payload,
 )
 from ecos_agent.optimization.rules import ACTIVE_OPTIMIZATION_KNOBS
@@ -217,9 +218,11 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
         proposal_valid = False
         payload = _optimization_planning_payload(context)
         if len(domains) == 1:
-            payload["effective_domain"] = domains[0].model_dump(mode="json")
+            payload["effective_domain"] = planner_effective_domain_payload(domains[0])
         else:
-            payload["effective_domains"] = [item.model_dump(mode="json") for item in domains]
+            payload["effective_domains"] = [
+                planner_effective_domain_payload(item) for item in domains
+            ]
         system = (
             "Output exactly one JSON object with exactly these top-level fields: schema_version, "
             "context_ref, decision, reason_code, rationale_summary, observation_refs, history_refs, "

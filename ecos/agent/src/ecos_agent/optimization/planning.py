@@ -57,6 +57,7 @@ from ecos_agent.optimization.parameter_projection import planner_parameter_knowl
 from ecos_agent.optimization.trajectory_projection import (
     planner_terminal_observation_payload,
     planner_trajectory_payload,
+    planner_receipt_payload,
     trajectory_objective,
 )
 
@@ -102,17 +103,74 @@ def stage_evidence_payload(
         {"stage": primary_stage, "observation_ref": primary_ref.model_dump(mode="json")}
     ]
     entries.extend(
-        {
-            "stage": stage,
-            "observation_ref": {
-                "observation_id": observation.observation_id,
-                "sha256": canonical_sha256(observation.model_dump(mode="json")),
-            },
-        }
-        for stage, observation in sorted(stage_observations.items())
+        {"stage": stage}
+        for stage, _observation in sorted(stage_observations.items())
         if stage != primary_stage
     )
     return entries
+
+
+def planner_stage_observation_payload(observation: StageObservation) -> dict[str, object]:
+    """Keep stage decision evidence without duplicate audit references."""
+    payload = observation.model_dump(mode="json")
+    payload.pop("observation_id", None)
+    payload.pop("evidence_manifest_sha256", None)
+    payload["state_evidence"] = [
+        {"feature_id": item.feature_id, "value": item.value}
+        for item in observation.state_evidence
+    ]
+    return payload
+
+
+def planner_effective_domain_payload(
+    domain: EffectiveDomainSnapshot,
+) -> dict[str, object]:
+    """Keep the snapshot binding but omit its duplicated context fingerprint."""
+    payload = domain.model_dump(mode="json")
+    payload.pop("context_sha256", None)
+    return payload
+
+
+def planner_task_memory_payload(
+    snapshot: OptimizationTaskMemorySnapshot,
+) -> dict[str, object]:
+    """Expose summary evidence while moving memory-chain provenance audit-only."""
+    summaries = []
+    for summary in snapshot.summaries:
+        summaries.append(
+            {
+                "reference": {
+                    "summary_sha256": summary.reference.summary_sha256,
+                },
+                "knob_id": summary.knob_id.value,
+                "direction": summary.direction.value,
+                "requested_values": list(summary.requested_values),
+                "outcome_counts": [
+                    {"outcome": item.outcome.value, "count": item.count}
+                    for item in summary.outcome_counts
+                ],
+                "metric_ranges": [
+                    {
+                        "metric_id": item.metric_id,
+                        "minimum": item.minimum,
+                        "maximum": item.maximum,
+                    }
+                    for item in summary.metric_ranges
+                ],
+                "parameter_application_receipts": [
+                    planner_receipt_payload(receipt)
+                    for receipt in summary.parameter_application_receipts
+                ],
+            }
+        )
+    return {
+        "schema_version": "ecos.optimization_task_memory.planner.v1",
+        "design_id": snapshot.scope.design_id,
+        "checkpoint_id": snapshot.scope.checkpoint_id,
+        "episode_id": snapshot.scope.episode_id,
+        "source_event_count": snapshot.source_event_count,
+        "summaries": summaries,
+    }
 
 
 @dataclass(frozen=True)
@@ -508,7 +566,7 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
         ),
     }
     if context.observation is not None:
-        payload["observation"] = context.observation.model_dump(mode="json")
+        payload["observation"] = planner_stage_observation_payload(context.observation)
     if context.budget is not None:
         payload["budget"] = context.budget.model_dump(mode="json")
     if context.current_values is not None:
@@ -544,10 +602,10 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
         payload["parameter_policy"] = dict(context.parameter_policy)
     if context.effective_domains:
         payload["effective_domains"] = [
-            item.model_dump(mode="json") for item in context.effective_domains
+            planner_effective_domain_payload(item) for item in context.effective_domains
         ]
     if context.task_memory is not None:
-        memory_payload = context.task_memory.model_dump(mode="json")
+        memory_payload = planner_task_memory_payload(context.task_memory)
         summaries = memory_payload.get("summaries")
         if isinstance(summaries, list) and (
             len(summaries) > _TASK_MEMORY_SUMMARY_WINDOW

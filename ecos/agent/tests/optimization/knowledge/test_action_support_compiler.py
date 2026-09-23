@@ -406,8 +406,9 @@ def test_compiler_exposes_only_seven_state_matched_claims_with_audit() -> None:
     assert all(ref.entity_id in planner_json for ref in view.exposed_claim_refs)
     assert all(ref.entity_id not in planner_json for ref in view.truncated_claim_refs)
     assert planner_payload["candidate_count"] == 9
-    assert planner_payload["audit_sha256"] == view.view_sha256
     assert planner_payload["schema_version"] == "ecos.supported_action_view.planner.v2"
+    assert "catalog_sha256" not in planner_payload
+    assert "audit_sha256" not in planner_payload
     assert "inactionable_matches" not in planner_payload
     assert "candidate_refs" not in planner_payload
     assert "truncated_claim_refs" not in planner_payload

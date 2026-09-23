@@ -4,7 +4,10 @@ import json
 from ecos_agent.context_status import MAX_STATUS_BYTES, StatusSnapshots, bounded_status
 from ecos_agent.codex.provider_helpers import _build_prompt
 from ecos_agent.hashing import canonical_sha256
-from ecos_agent.optimization.planning import planning_context_payload
+from ecos_agent.optimization.planning import (
+    planner_effective_domain_payload,
+    planning_context_payload,
+)
 from tests.optimization.test_codex_proposal_provider import (
     _context, _domain, _proposal_v2, _provider,
 )
@@ -40,7 +43,7 @@ def test_sent_prompt_equals_audit_envelope_and_telemetry_does_not_change_busines
     context = _context()
     domain = _domain()
     expected = planning_context_payload(context)
-    expected["effective_domain"] = domain.model_dump(mode="json")
+    expected["effective_domain"] = planner_effective_domain_payload(domain)
     sent = []
     thread_starts = 0
 
