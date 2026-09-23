@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -39,6 +40,7 @@ from ecos_agent.optimization.parameters.contracts import (
     ParameterApplicationReceipt,
     ParameterEvidence,
     ParameterValueEvidence,
+    OptimizationProposalV2,
 )
 from ecos_agent.optimization.parameters.semantics import load_parameter_cards
 from ecos_agent.optimization.parameter_projection import (
@@ -361,6 +363,27 @@ def test_planner_exposes_parameter_knowledge_and_compact_trajectories(
     )
     assert prompt_evidence["parameter_trajectories"] == trajectories
     assert prompt_evidence["parameter_knowledge"] == payload["parameter_knowledge"]
+
+
+def test_planner_fails_closed_when_no_supported_action_is_exposed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    provider = _provider(tmp_path)
+    context = replace(
+        _context(),
+        supported_action_view=SimpleNamespace(actions=()),
+    )
+
+    def request(**kwargs: object) -> dict[str, object]:
+        pytest.fail("planner must not call the model without a supported action")
+
+    monkeypatch.setattr(provider, "_request_json", request)
+    result = provider.propose_v2(context, _domain())
+
+    assert result["decision"] == "continue"
+    assert result["reason_code"] == "no_supported_action"
+    assert result["action"] is None
+    OptimizationProposalV2.model_validate(result)
 
 
 def test_planner_fails_closed_on_invalid_proposal(

@@ -195,6 +195,20 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
             raise CodexProviderError(
                 "optimization proposal v3 domain is invalid", failure_class="missing_input"
             ) from exc
+        if context.supported_action_view is not None and not context.supported_action_view.actions:
+            return {
+                "schema_version": "ecos.optimization_proposal.v3",
+                "context_ref": context.context_ref.model_dump(mode="json"),
+                "decision": "continue",
+                "reason_code": "no_supported_action",
+                "rationale_summary": "No eligible knowledge-supported action is exposed.",
+                "observation_refs": [context.observation_ref.model_dump(mode="json")],
+                "history_refs": [],
+                "knowledge_refs": [],
+                "task_memory_refs": [],
+                "action": None,
+                "strategy": None,
+            }
         if self.planning_thread_policy == "fresh":
             self.new_ephemeral_thread()
         self._last_thread_start_latency_ms = None
