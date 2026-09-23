@@ -17,6 +17,7 @@ const testState = vi.hoisted(() => ({
   })),
   runtimeEvents: null as Ref<DesignRuntimeEvent[]> | null,
   readOptionalProjectTextFileChunk: vi.fn(),
+  readOptionalProjectTextFileTail: vi.fn(),
 }))
 
 vi.mock('vue', async () => {
@@ -49,7 +50,7 @@ vi.mock('@/api/workspaceResources', () => ({
 vi.mock('@/utils/projectFiles', () => ({
   readOptionalProjectTextFile: vi.fn(),
   readOptionalProjectTextFileChunk: testState.readOptionalProjectTextFileChunk,
-  readOptionalProjectTextFileTail: vi.fn(),
+  readOptionalProjectTextFileTail: testState.readOptionalProjectTextFileTail,
   readProjectBlobUrl: vi.fn(),
   readProjectTextFile: vi.fn(),
 }))
@@ -118,6 +119,7 @@ describe('useBackendFlowLogs runtime updates', () => {
     })
     testState.getWorkspaceResourceIndexApi.mockReset()
     testState.getWorkspaceResourceIndexApi.mockResolvedValue({ flow: { steps: [] } })
+    testState.readOptionalProjectTextFileTail.mockReset()
   })
 
   it('uses ECC log cursors for live output without replacing prior step logs', async () => {
@@ -479,23 +481,6 @@ describe('useBackendFlowLogs runtime updates', () => {
   it('ignores obsolete FixFanout logs from snapshots and runtime events', async () => {
     testState.currentProject = ref({ path: '/workspace/demo' })
     testState.runtimeEvents = ref([])
-    testState.readOptionalProjectTextFileChunk.mockReset()
-    testState.readOptionalProjectTextFileChunk.mockImplementation(
-      async (_path: string, offsetBytes: number) =>
-        offsetBytes === 0
-          ? {
-              content: 'complete ',
-              eof: false,
-              nextOffsetBytes: 9,
-              sizeBytes: 12,
-            }
-          : {
-              content: 'log',
-              eof: true,
-              nextOffsetBytes: 12,
-              sizeBytes: 12,
-            },
-    )
     testState.getWorkspaceResourceIndexApi.mockResolvedValue({
       flow: {
         steps: [
@@ -535,9 +520,112 @@ describe('useBackendFlowLogs runtime updates', () => {
       (item) => item.stepName === 'fixFanout',
     )
     expect(segment).toBeUndefined()
-    expect(testState.readOptionalProjectTextFileChunk).not.toHaveBeenCalled()
+    expect(testState.readOptionalProjectTextFileTail).not.toHaveBeenCalled()
     scope.stop()
     resetSharedHomeDataProjectState()
+  })
+
+  it('loads only the truncated tail of a completed step log', async () => {
+    testState.currentProject = ref({ path: '/workspace/demo' })
+    testState.runtimeEvents = ref([])
+    testState.readOptionalProjectTextFileTail.mockResolvedValue({
+      content: 'partial-first-line\ntail line one\ntail line two\n',
+      truncated: true,
+      sizeBytes: 349 * 1024 * 1024,
+    })
+    testState.getWorkspaceResourceIndexApi.mockResolvedValue({
+      flow: {
+        steps: [
+          {
+            info: {},
+            name: 'postRouteLec',
+            resources: {
+              log: {
+                file: {
+                  path: '/workspace/demo/postRouteLec_yosys_lec/log/postRouteLec.log',
+                },
+              },
+            },
+            runtime: '00:01:00',
+            state: 'Success',
+            tool: 'yosys',
+          },
+        ],
+      },
+    })
+    const { useBackendFlowLogs } = await import('./useBackendFlowLogs')
+    const scope = effectScope()
+    const home = scope.run(() => useBackendFlowLogs())!
+    await waitForLiveLogFrame()
+
+    const segment = home.flowLogSegments.value.find(
+      (item) => item.stepName === 'postRouteLec',
+    )
+    expect(segment).toMatchObject({ logPath: expect.any(String) })
+
+    const loaded = await home.expandFlowLogSegment(segment!)
+    expect(loaded).toBe(true)
+    expect(testState.readOptionalProjectTextFileTail).toHaveBeenCalledWith(
+      '/workspace/demo/postRouteLec_yosys_lec/log/postRouteLec.log',
+      expect.any(Number),
+    )
+
+    const content = Object.values(home.flowLogContentByKey.value)[0] ?? ''
+    expect(content).toContain('Log truncated')
+    expect(content).toContain('tail line one')
+    expect(content).not.toContain('partial-first-line')
+
+    const updated = home.flowLogSegments.value.find(
+      (item) => item.stepName === 'postRouteLec',
+    )
+    expect(updated).toMatchObject({
+      contentComplete: true,
+      contentLoading: false,
+      missing: false,
+      totalSize: 349 * 1024 * 1024,
+      truncated: true,
+    })
+    scope.stop()
+  })
+
+  it('marks a completed step as missing when its log file cannot be read', async () => {
+    testState.currentProject = ref({ path: '/workspace/demo' })
+    testState.runtimeEvents = ref([])
+    testState.readOptionalProjectTextFileTail.mockResolvedValue(null)
+    testState.getWorkspaceResourceIndexApi.mockResolvedValue({
+      flow: {
+        steps: [
+          {
+            info: {},
+            name: 'Synthesis',
+            resources: {
+              log: {
+                file: { path: '/workspace/demo/synthesis_yosys/log/synthesis.log' },
+              },
+            },
+            runtime: '00:00:07',
+            state: 'Success',
+            tool: 'yosys',
+          },
+        ],
+      },
+    })
+    const { useBackendFlowLogs } = await import('./useBackendFlowLogs')
+    const scope = effectScope()
+    const home = scope.run(() => useBackendFlowLogs())!
+    await waitForLiveLogFrame()
+
+    const segment = home.flowLogSegments.value.find(
+      (item) => item.stepName === 'Synthesis',
+    )
+    const loaded = await home.expandFlowLogSegment(segment!)
+    expect(loaded).toBe(false)
+
+    const updated = home.flowLogSegments.value.find(
+      (item) => item.stepName === 'Synthesis',
+    )
+    expect(updated).toMatchObject({ contentLoading: false, missing: true })
+    scope.stop()
   })
 
   it('keeps upstream logs but clears affected segments after a GUI single-step rerun', async () => {

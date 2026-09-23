@@ -8,7 +8,7 @@ import {
   backendRuntimeEventStep,
   backendRuntimeEventTerminalState,
 } from '@/api/backendRuntimeEvents'
-import { readOptionalProjectTextFileChunk } from '@/utils/projectFiles'
+import { readOptionalProjectTextFileTail } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
 import { useWorkspace } from './useWorkspace'
@@ -41,7 +41,7 @@ const flowLogLoadingState = ref(false)
 const flowLogCursorByKey = new Map<string, number>()
 const fullContentLoads = new Map<string, Promise<boolean>>()
 const MAX_RUNTIME_LOG_CHARS = 128 * 1024
-const LOG_CHUNK_BYTES = 256 * 1024
+const MAX_FILE_LOG_CHARS = 512 * 1024
 let activeWorkspacePath = ''
 let activeWorkspaceSessionId = ''
 let loadGeneration = 0
@@ -53,6 +53,28 @@ function segmentKey(segment: Pick<FlowLogSegment, 'stepName' | 'tool'>): string 
 function normalizedPath(path: unknown): string {
   if (typeof path !== 'string') return ''
   return path.trim().replace(/\\/g, '/').replace(/\/$/, '').toLowerCase()
+}
+
+function formatLogSize(sizeBytes: number): string {
+  if (!Number.isFinite(sizeBytes) || sizeBytes < 0) return '0 B'
+  if (sizeBytes < 1024) return `${sizeBytes} B`
+  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+interface LogTail {
+  content: string
+  truncated: boolean
+  sizeBytes: number
+}
+
+function presentableLogTail(tail: LogTail): string {
+  if (!tail.truncated) return tail.content
+  // The tail window can start mid-line; drop the partial first line.
+  const firstNewline = tail.content.indexOf('\n')
+  const body = firstNewline >= 0 ? tail.content.slice(firstNewline + 1) : tail.content
+  const banner = `… Log truncated — showing the last ${formatLogSize(body.length)} of a ${formatLogSize(tail.sizeBytes)} file. Open the log on disk for the full output. …`
+  return `${banner}\n\n${body}`
 }
 
 function setContent(key: string, content: string): void {
@@ -426,39 +448,22 @@ export function useBackendFlowLogs() {
         }
       }
       mark({ contentLoading: true })
-      const chunks: string[] = []
-      let offset = 0
       try {
-        while (true) {
-          const chunk = await readOptionalProjectTextFileChunk(
-            logPath,
-            offset,
-            LOG_CHUNK_BYTES,
-          )
-          if (!chunk) {
-            mark({ contentLoading: false, missing: true })
-            return false
-          }
-          if (chunk.nextOffsetBytes < offset) {
-            throw new Error('Log chunk reader returned a backwards byte offset.')
-          }
-          if (!chunk.eof && chunk.nextOffsetBytes === offset) {
-            throw new Error('Log chunk reader made no byte-offset progress.')
-          }
-          chunks.push(chunk.content)
-          offset = chunk.nextOffsetBytes
-          if (!chunk.eof) continue
-          setContent(key, chunks.join(''))
-          mark({
-            contentComplete: true,
-            contentLoading: false,
-            lastReadOffsetBytes: offset,
-            missing: false,
-            totalSize: chunk.sizeBytes,
-            truncated: false,
-          })
-          return true
+        const tail = await readOptionalProjectTextFileTail(logPath, MAX_FILE_LOG_CHARS)
+        if (!tail) {
+          mark({ contentLoading: false, missing: true })
+          return false
         }
+        setContent(key, presentableLogTail(tail))
+        mark({
+          contentComplete: true,
+          contentLoading: false,
+          lastReadOffsetBytes: tail.sizeBytes,
+          missing: false,
+          totalSize: tail.sizeBytes,
+          truncated: tail.truncated,
+        })
+        return true
       } catch (error) {
         flowLogErrorState.value = error instanceof Error ? error.message : String(error)
         mark({ contentLoading: false })
