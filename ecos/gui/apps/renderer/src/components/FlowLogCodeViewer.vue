@@ -231,10 +231,8 @@ function syncActiveModel(): void {
     activeChannelKey = channelKey
     if (record.viewState) {
       editor.restoreViewState(record.viewState)
-    } else if (props.live) {
-      scheduleScrollViewerToTail()
     } else {
-      editor.setScrollPosition({ scrollTop: 0, scrollLeft: 0 })
+      scheduleScrollViewerToTail()
     }
   } else if (shouldFollowTail && update.kind !== 'none') {
     scheduleScrollViewerToTail()
