@@ -390,9 +390,9 @@ export class BackendProjectComparisonService {
   private async readManifest(projectRoot: string): Promise<ProjectManifest> {
     const manifest = await this.reader.readManifest(projectRoot)
     if (!manifest) throw new Error('Project manifest does not exist.')
-    const manifestRoot = await (this.reader.resolveProjectRoot ?? realpath)(
-      manifest.root_path,
-    )
+    const manifestRoot = this.reader.resolveProjectRoot
+      ? await this.reader.resolveProjectRoot(manifest.root_path)
+      : await realpath(manifest.root_path)
     if (manifestRoot !== projectRoot) {
       throw new Error('Project manifest root_path does not match the selected project.')
     }
