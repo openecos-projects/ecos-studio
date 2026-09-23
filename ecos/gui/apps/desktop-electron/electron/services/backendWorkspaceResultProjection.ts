@@ -41,7 +41,9 @@ function readyData<T>(section: { status: string; data?: T }): T | null {
 
 function isCommittedFlowState(value: unknown): boolean {
   return ['success', 'succeeded', 'completed', 'skipped'].includes(
-    String(value ?? '').trim().toLowerCase(),
+    String(value ?? '')
+      .trim()
+      .toLowerCase(),
   )
 }
 
@@ -65,12 +67,13 @@ function analysisSteps(
     const step = record(value)
     const stepId = typeof step?.stepId === 'string' ? step.stepId : ''
     const order = step?.order
-    if (!step || !stepId || !Number.isInteger(order))
-      return null
+    if (!step || !stepId || !Number.isInteger(order)) return null
     if (!isCommittedFlowState(step.flowState) || seenStepIds.has(stepId)) continue
     seenStepIds.add(stepId)
     result.push({
-      metrics: metrics.filter((metric) => record(metric)?.stepId === stepId) as EccEngineeringMetric[],
+      metrics: metrics.filter(
+        (metric) => record(metric)?.stepId === stepId,
+      ) as EccEngineeringMetric[],
       order: order as number,
       raw: step as unknown as EccEngineeringAnalysisStep,
       stepId,

@@ -14,6 +14,7 @@ import {
   workspaceSummaryFixture,
 } from '@/components/projectStepAnalysis.fixture'
 import type { ProjectManagementProject } from '@/utils/projectManagement'
+import { buildFrontendProjectAnalysis } from './frontendProjectAnalysis'
 
 function mountPanel(project: ProjectManagementProject = projectFixture()) {
   return mount(ProjectAnalysisPanel, {
@@ -39,6 +40,46 @@ function rowFor(wrapper: ReturnType<typeof mountPanel>, workspaceId: string) {
 }
 
 describe('ProjectAnalysisPanel dashboard health', () => {
+  it('dispatches frontend projects to verification analysis', () => {
+    const frontendAnalysis = buildFrontendProjectAnalysis([
+      {
+        workspaceId: 'ws_b',
+        workspaceName: 'cpu',
+        workspacePath: '/projects/cpu/ws_b',
+        status: 'success',
+        steps: [
+          { stage: 'prepare', status: 'success' },
+          { stage: 'review', status: 'success' },
+          { stage: 'elab', status: 'success' },
+          { stage: 'lint', status: 'success' },
+          { stage: 'sim', status: 'success' },
+        ],
+        detailTexts: {
+          sim: JSON.stringify({
+            summary: { total_cases: 1, passed_cases: 1, failed_cases: 0 },
+            cases: [],
+          }),
+        },
+      },
+    ])
+    const wrapper = mountPanel(
+      projectFixture({
+        projectType: 'frontend',
+        flowSteps: ['prepare', 'review', 'elab', 'lint', 'sim'],
+        frontendAnalysis,
+      }),
+    )
+
+    expect(wrapper.find('.analysis-panel').exists()).toBe(true)
+    expect(wrapper.find('.frontend-analysis-content').exists()).toBe(true)
+    expect(wrapper.find('.fe-flow-progress').text()).toContain('5/5 steps complete')
+    expect(wrapper.find('.analysis-dashboard').exists()).toBe(true)
+    expect(wrapper.find('.dash-health').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Quality of Results')
+    expect(wrapper.text()).toContain('Unavailable')
+    expect(wrapper.text()).not.toContain('Signoff')
+  })
+
   it('renders flow progress as workspaces complete, with the steps left as detail', () => {
     const wrapper = mountPanel()
 
@@ -144,9 +185,7 @@ describe('ProjectAnalysisPanel recommendation', () => {
 
     expect(wrapper.find('.dash-recommend-id').text()).toBe('ws_b')
     expect(wrapper.find('.dash-recommend-headline strong').text()).toContain('74.2')
-    expect(wrapper.find('.dash-recommend-note').text()).toBe(
-      'QoR status: ORANGE',
-    )
+    expect(wrapper.find('.dash-recommend-note').text()).toBe('QoR status: ORANGE')
   })
 
   it('hides the reason line when it only restates the score', () => {

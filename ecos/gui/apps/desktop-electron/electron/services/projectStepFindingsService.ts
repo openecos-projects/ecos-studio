@@ -16,6 +16,7 @@ interface FindingsArtifactReader {
     projectRoot: string
     workspacePath: string
     artifacts: Array<{ reference: string; sha256: string; sizeBytes: number }>
+    allowExternallyModified?: boolean
   }): Promise<VerifiedProjectArtifactsReadResult>
 }
 
@@ -70,6 +71,10 @@ export class ProjectStepFindingsService {
     if (!context) return
     context.generation = generation
     context.ready = false
+    this.clearContextCache(contextId)
+  }
+
+  refreshArtifacts(contextId: string): void {
     this.clearContextCache(contextId)
   }
 
@@ -159,6 +164,7 @@ export class ProjectStepFindingsService {
       artifacts: artifacts.data,
       projectRoot: context.projectRoot,
       workspacePath: workspace.workspacePath,
+      allowExternallyModified: source === workspace,
     })
     if (
       this.contexts.get(request.projectComparisonContextId) !== context ||
@@ -169,7 +175,24 @@ export class ProjectStepFindingsService {
     }
     if (!read.ok) return this.readFailure(read, key, context, request)
 
-    this.cache.set(key, data)
+    const externallyModified = Object.values(read.integrity ?? {}).some(
+      (value) => value === 'externally-modified',
+    )
+    const resultData = {
+      ...data,
+      ...(externallyModified
+        ? { artifactIntegrity: 'externally-modified' as const }
+        : {}),
+      ...(read.issues && read.issues.length > 0
+        ? {
+            artifactIssues: read.issues.map((issue) => ({
+              code: issue.code,
+              reference: issue.reference,
+            })),
+          }
+        : {}),
+    }
+    this.cache.set(key, resultData)
     if (this.cache.size > MAX_VERIFIED_FINDINGS_CACHE_ENTRIES) {
       this.cache.delete(this.cache.keys().next().value!)
     }
@@ -178,7 +201,7 @@ export class ProjectStepFindingsService {
       projectComparisonContextId: request.projectComparisonContextId,
       generation,
       freshness: 'current',
-      data,
+      data: resultData,
     }
   }
 

@@ -12,14 +12,26 @@
         aria-label="Workspace dashboard"
       >
         <div
-          v-if="staleResultNotice"
+          v-if="staleResultNotice || externallyModifiedLayoutCount > 0"
           class="home-dashboard-stale"
           role="status"
-          :title="staleResultNotice.detail"
-          :aria-description="staleResultNotice.detail"
+          :title="artifactDriftNoticeDetail"
+          :aria-description="artifactDriftNoticeDetail"
         >
-          <i class="ri-history-line" aria-hidden="true" />
-          {{ staleResultNotice.message }}
+          <i
+            :class="
+              externallyModifiedLayoutCount > 0 ? 'ri-alert-line' : 'ri-history-line'
+            "
+            aria-hidden="true"
+          />
+          <span v-if="staleResultNotice">{{ staleResultNotice.message }}</span>
+          <span v-if="externallyModifiedLayoutCount > 0">
+            {{ externallyModifiedLayoutCount }} layout artifact{{
+              externallyModifiedLayoutCount === 1 ? '' : 's'
+            }}
+            changed since the committed snapshot. They remain viewable, but are not
+            trusted signoff evidence.
+          </span>
         </div>
         <div class="home-dashboard-row home-dashboard-top">
           <section class="dashboard-section chip-card">
@@ -332,9 +344,7 @@
                   <img v-if="thumbnail.url" :src="thumbnail.url" :alt="thumbnail.label" />
                   <div v-else class="layout-thumbnail-placeholder">
                     <i class="ri-image-2-line" aria-hidden="true" />
-                    <small>{{
-                      thumbnail.availability === 'stale' ? 'Stale' : 'Missing'
-                    }}</small>
+                    <small>{{ homeArtifactPlaceholderLabel(thumbnail) }}</small>
                   </div>
                   <i
                     v-if="thumbnail.step === openingLayoutStep"
@@ -576,6 +586,20 @@ const checklistItems = computed(() => {
     : []
 })
 const { layoutThumbnails } = useHomeSnapshots()
+const externallyModifiedLayoutCount = computed(
+  () =>
+    layoutThumbnails.value.filter(
+      (thumbnail) => thumbnail.integrity === 'externally-modified',
+    ).length,
+)
+const artifactDriftNoticeDetail = computed(() => {
+  const stale = staleResultNotice.value?.detail ?? ''
+  const drift =
+    externallyModifiedLayoutCount.value > 0
+      ? `${externallyModifiedLayoutCount.value} layout artifact(s) changed since the committed snapshot.`
+      : ''
+  return [stale, drift].filter(Boolean).join(' ')
+})
 const {
   stepResources: flowInsightResources,
   dbTrends: flowInsightDbTrends,
@@ -894,7 +918,28 @@ function layoutThumbnailTitle(thumbnail: HomeLayoutThumbnail): string {
   if (!thumbnail.hasGeometry) {
     return `${thumbnail.label}: saved layout data is unavailable.`
   }
+  if (thumbnail.integrity === 'externally-modified') {
+    const sizeDetail =
+      thumbnail.recordedSizeBytes !== undefined && thumbnail.actualSizeBytes !== undefined
+        ? ` Recorded ${formatArtifactSize(thumbnail.recordedSizeBytes)}; current ${formatArtifactSize(thumbnail.actualSizeBytes)}.`
+        : ''
+    return `${thumbnail.label}: the preview file changed since the committed snapshot.${sizeDetail} Open in Chip Viewer to inspect the current file.`
+  }
   return `Open ${thumbnail.label} in Chip Viewer`
+}
+
+function formatArtifactSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
+}
+
+function homeArtifactPlaceholderLabel(thumbnail: HomeLayoutThumbnail): string {
+  const reason = thumbnail.reason?.toUpperCase() ?? ''
+  if (reason.includes('TOO_LARGE')) return 'Too large'
+  if (reason.includes('INVALID')) return 'Invalid'
+  if (reason.includes('MODIFIED') || reason.includes('MISMATCH')) return 'Changed'
+  return thumbnail.availability === 'stale' ? 'Stale' : 'Missing'
 }
 
 async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void> {

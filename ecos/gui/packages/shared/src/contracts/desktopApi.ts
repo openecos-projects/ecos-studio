@@ -168,6 +168,17 @@ export interface DesktopProjectTextFileTail {
   sizeBytes: number
 }
 
+export interface DesktopFrontendWorkspaceTextsRequest {
+  projectRoot: string
+  workspacePath: string
+  paths: string[]
+}
+
+export interface DesktopFrontendWorkspaceTextsResult {
+  texts: Record<string, string | null>
+  unavailablePaths: string[]
+}
+
 /** A bounded sequential chunk from a project-scoped UTF-8 text file. */
 export interface DesktopProjectTextFileChunk {
   content: string
@@ -227,6 +238,7 @@ export interface ChipViewerOpenResult {
 
 export interface ChipViewerOpenStatus {
   open: boolean
+  saving?: boolean
 }
 
 export interface WorkspaceDirectoryReplacement {
@@ -286,6 +298,9 @@ export interface DesktopApi {
   projectManagement?: {
     discoverProject(directory: string): Promise<ProjectManifest | null>
     readManifest(projectRoot: string): Promise<ProjectManifest | null>
+    readFrontendWorkspaceTexts(
+      request: DesktopFrontendWorkspaceTextsRequest,
+    ): Promise<DesktopFrontendWorkspaceTextsResult>
     listProjectEntries(projectRoot: string): Promise<string[]>
     readWorkspaceStepConfiguration(
       request: DesktopProjectManagementWorkspaceStepConfigurationRequest,

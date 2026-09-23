@@ -664,7 +664,9 @@ function buildWorkspaceSummary(
   const signoffReadiness = resolveWorkspaceSignoffReadiness(workspace)
   const signoffComparison = resolveWorkspaceSignoffComparisonContext(workspace)
   const effectiveGateStatus = snapshotAssessment
-    ? (snapshotAssessment.feasibilityStatus === 'PHYSICAL_FAIL' ? 'blocked' : 'pass')
+    ? snapshotAssessment.feasibilityStatus === 'PHYSICAL_FAIL'
+      ? 'blocked'
+      : 'pass'
     : combineGateStatus(gateStatus, signoffReadiness.status)
   const overallScore = snapshotAssessment?.score ?? null
   const dimensionScores = extension

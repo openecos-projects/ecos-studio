@@ -20,6 +20,56 @@ export const projectManifestFlowSteps = [
 
 export type ProjectManifestFlowStep = (typeof projectManifestFlowSteps)[number]
 
+export const projectManifestFrontendFlowSteps = [
+  'prepare',
+  'review',
+  'elab',
+  'lint',
+  'sim',
+] as const
+
+export type ProjectManifestFrontendFlowStep =
+  (typeof projectManifestFrontendFlowSteps)[number]
+
+export const projectManifestTypes = ['backend', 'frontend'] as const
+
+export type ProjectManifestType = (typeof projectManifestTypes)[number]
+
+export function isProjectManifestType(value: unknown): value is ProjectManifestType {
+  return value === 'backend' || value === 'frontend'
+}
+export type ProjectManifestStage =
+  | ProjectManifestFlowStep
+  | ProjectManifestFrontendFlowStep
+
+export interface ProjectManifestProfile {
+  projectType: ProjectManifestType
+  flowSteps: readonly ProjectManifestStage[]
+  defaultStartStep: ProjectManifestStage
+  defaultEndStep: ProjectManifestStage
+}
+
+const PROJECT_MANIFEST_PROFILES: Record<ProjectManifestType, ProjectManifestProfile> = {
+  backend: {
+    projectType: 'backend',
+    flowSteps: projectManifestFlowSteps,
+    defaultStartStep: 'Synth',
+    defaultEndStep: 'Harden',
+  },
+  frontend: {
+    projectType: 'frontend',
+    flowSteps: projectManifestFrontendFlowSteps,
+    defaultStartStep: 'prepare',
+    defaultEndStep: 'sim',
+  },
+}
+
+export function projectManifestProfileFor(
+  projectType: ProjectManifestType,
+): ProjectManifestProfile {
+  return PROJECT_MANIFEST_PROFILES[projectType]
+}
+
 export type ProjectManifestWorkspaceStatus =
   | 'success'
   | 'warning'
@@ -60,18 +110,18 @@ export interface ProjectManifestWorkspace {
   source_workspace_id: string | null
   branch_from: {
     source_workspace_id: string
-    source_step: ProjectManifestFlowStep | string
+    source_step: ProjectManifestStage | string
     source_output_type?: string
     source_output_path?: string
   } | null
-  start_step: ProjectManifestFlowStep | string
-  end_step: ProjectManifestFlowStep | string
+  start_step: ProjectManifestStage | string
+  end_step: ProjectManifestStage | string
   status: ProjectManifestWorkspaceStatus
   created_at: string
   updated_at: string
   parameter_patch: Record<string, unknown>
-  metrics_summary: ProjectManifestMetricSummary
-  step_metrics: Record<string, Record<string, unknown>>
+  metrics_summary?: ProjectManifestMetricSummary
+  step_metrics?: Record<string, Record<string, unknown>>
 }
 
 export interface ProjectManifestMpc {
@@ -92,6 +142,7 @@ export interface ProjectManifestMpcDesign {
 
 export interface ProjectManifest {
   schema_version: 1
+  project_type: ProjectManifestType
   project_id: string
   name: string
   design_name: string
@@ -117,18 +168,20 @@ export interface ProjectManifest {
 }
 
 export type EccProjectManifestWorkspace = ProjectManifestWorkspace
-export type EccProjectManifest = ProjectManifest
+export type EccProjectManifest = Omit<ProjectManifest, 'project_type'> & {
+  project_type?: ProjectManifestType
+}
 
 export interface ProjectManifestWorkspaceRegistrationInput {
   projectRoot: string
   projectName?: string
   workspacePath: string
   sourceWorkspaceId?: string
-  sourceStep?: ProjectManifestFlowStep | string
+  sourceStep?: ProjectManifestStage | string
   sourceOutputPath?: string
   sourceOutputType?: string
-  startStep?: ProjectManifestFlowStep | string
-  endStep?: ProjectManifestFlowStep | string
+  startStep?: ProjectManifestStage | string
+  endStep?: ProjectManifestStage | string
   now?: string
   config?: {
     pdk?: string
@@ -142,8 +195,8 @@ export interface ProjectManifestWorkspaceRegistrationInput {
 }
 
 export interface ProjectManifestReplacementBackupInput {
-  fallbackEndStep?: ProjectManifestFlowStep | string
-  fallbackStartStep?: ProjectManifestFlowStep | string
+  fallbackEndStep?: ProjectManifestStage | string
+  fallbackStartStep?: ProjectManifestStage | string
   replacementId: string
 }
 
@@ -158,6 +211,7 @@ export type ProjectManifestMutation =
       type: 'create'
       name: string
       designName: string
+      projectType?: ProjectManifestType
       mpc?: ProjectManifestMpc | null
     }
   | { input: ProjectManifestWorkspaceRegistrationInput; type: 'register-workspace' }
@@ -226,6 +280,7 @@ export function projectManifestForPresentation(
   if (!rootPath) throw new Error('Project root is required.')
   return {
     ...source,
+    project_type: source.project_type ?? 'backend',
     root_path: normalizeProjectManifestPath(rootPath),
     workspaces: source.workspaces.map((workspace) => ({
       ...workspace,
@@ -241,6 +296,17 @@ export function normalizeProjectManifestFlowStep(
   step: ProjectManifestFlowStep | string,
 ): ProjectManifestFlowStep {
   return parseProjectManifestFlowStep(step) ?? 'Synth'
+}
+
+export function normalizeProjectManifestStage(
+  projectType: ProjectManifestType,
+  step: ProjectManifestStage | string,
+): ProjectManifestStage {
+  if (projectType === 'backend') return normalizeProjectManifestFlowStep(step)
+  const normalized = String(step).trim().toLowerCase()
+  return (projectManifestFrontendFlowSteps as readonly string[]).includes(normalized)
+    ? (normalized as ProjectManifestFrontendFlowStep)
+    : 'prepare'
 }
 
 export function parseProjectManifestFlowStep(

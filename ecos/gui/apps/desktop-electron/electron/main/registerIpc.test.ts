@@ -159,7 +159,7 @@ function registerHandlers(
       listProjectDirectory: vi.fn(),
       pathExists: vi.fn(),
       discardFailedWorkspaceCreate: vi.fn(),
-      requestProjectPathAccess: vi.fn(),
+      requestProjectPathAccess: vi.fn(async (path: string) => path),
       scanPdkDirectory: vi.fn(),
       scanRtlDirectory: vi.fn(),
       discoverHdlModules: vi.fn(),
@@ -583,6 +583,34 @@ describe('registerIpc', () => {
     expect(services.backendProjectComparisonService.closeProject).toHaveBeenCalledWith(
       7,
       'context-1',
+    )
+  })
+
+  it('authorizes a Project Comparison root before selecting it', async () => {
+    const { handlers, services } = registerHandlers()
+    services.workspaceService.registerProjectRoot.mockResolvedValue('/projects/canonical')
+    services.backendProjectComparisonService.selectProject.mockResolvedValue({
+      generation: 0,
+      ok: true,
+      projectComparisonContextId: 'context-1',
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.backendProjectComparisonSelectProject)?.(
+        { sender: { id: 7 } },
+        { projectRootLocator: '/projects/requested' },
+      ),
+    ).resolves.toEqual({
+      generation: 0,
+      ok: true,
+      projectComparisonContextId: 'context-1',
+    })
+    expect(services.workspaceService.registerProjectRoot).toHaveBeenCalledWith(
+      '/projects/requested',
+    )
+    expect(services.backendProjectComparisonService.selectProject).toHaveBeenCalledWith(
+      7,
+      { projectRootLocator: '/projects/canonical' },
     )
   })
 
@@ -2548,6 +2576,43 @@ describe('registerIpc', () => {
       '/project/ws_0001',
       undefined,
     )
+    expect(services.workspaceService.requestProjectPathAccess).toHaveBeenCalledWith(
+      '/project/ws_0001',
+    )
+  })
+
+  it('authorizes Project Management Step Configuration reads', async () => {
+    const { handlers, services } = registerHandlers()
+    services.workspaceService.requestProjectPathAccess.mockResolvedValue(
+      '/projects/canonical',
+    )
+    const result = { status: 'available', step: 'CTS' }
+    services.projectManagementReadService.readWorkspaceStepConfiguration.mockResolvedValue(
+      result,
+    )
+
+    await expect(
+      handlers.get(
+        desktopApiIpcChannels.projectManagementReadWorkspaceStepConfiguration,
+      )?.(
+        { sender: { id: 7 } },
+        {
+          projectRoot: '/projects/requested',
+          step: 'CTS',
+          workspacePath: '/projects/requested/ws_0001',
+        },
+      ),
+    ).resolves.toEqual(result)
+    expect(services.workspaceService.requestProjectPathAccess).toHaveBeenCalledWith(
+      '/projects/requested',
+    )
+    expect(
+      services.projectManagementReadService.readWorkspaceStepConfiguration,
+    ).toHaveBeenCalledWith({
+      projectRoot: '/projects/canonical',
+      step: 'CTS',
+      workspacePath: '/projects/requested/ws_0001',
+    })
   })
 
   it('rejects Workspace step outputs without the backend runtime or a directory', async () => {

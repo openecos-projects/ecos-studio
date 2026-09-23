@@ -1,4 +1,8 @@
-import type { EccRuntimeEvent } from '@ecos-studio/shared'
+import { createHash } from 'node:crypto'
+import type {
+  EccPersistedEngineeringSnapshot,
+  EccRuntimeEvent,
+} from '@ecos-studio/shared'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -1196,6 +1200,85 @@ describe('EccWorkspaceRuntime', () => {
         workspaceId: 'workspace-1',
       },
     })
+  })
+
+  it('blocks signoff export when a committed artifact fingerprint has drifted', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'ecc-runtime-signoff-'))
+    mkdirSync(join(directory, 'home'), { recursive: true })
+    const reference = 'reports/qor.json'
+    const committed = '{"status":"ready"}'
+    mkdirSync(join(directory, 'reports'), { recursive: true })
+    writeFileSync(join(directory, reference), committed)
+    const snapshot: EccPersistedEngineeringSnapshot = {
+      analysis: { steps: [] },
+      artifacts: [
+        {
+          artifactId: 'artifact-qor',
+          availability: 'available',
+          kind: 'report_text',
+          name: 'qor.json',
+          reference,
+          sha256: createHash('sha256').update(committed).digest('hex'),
+          sizeBytes: Buffer.byteLength(committed),
+          stepId: 'STA',
+        },
+      ],
+      checklist: { checklist: [] },
+      flow: { steps: [] },
+      metrics: [],
+      parameters: {},
+      qorSnapshotExtension: {
+        schemaVersion: 1,
+        scoringEngine: 'qor-v3',
+        status: 'available',
+        score: 73.5,
+        scalarStatus: 'YELLOW',
+        profile: 'balanced',
+        qphys: {},
+        feasibility: { status: 'PASS', gates: [] },
+        evidence: {
+          index: 100,
+          state: 'HIGH',
+          integrity: 1,
+          coverage: 1,
+          consistency: 1,
+        },
+        diagnoses: [],
+        inflation: {
+          iPlace: null,
+          iRoute: null,
+          iTotal: null,
+          congestionSeverity: null,
+          compatibilityStatus: 'UNAVAILABLE',
+        },
+        power: { totalUw: null, budgetUw: null, sourceKind: null, corner: null },
+        artifactIds: [],
+      },
+      schemaVersion: 5,
+      signoffAssessment: { groups: [], risks: [], status: 'ready' },
+      workspaceId: 'workspace-1',
+      workspaceRevision: 1,
+    }
+    writeFileSync(
+      join(directory, 'home', 'engineering-snapshot.json'),
+      JSON.stringify(snapshot),
+    )
+    writeFileSync(join(directory, reference), '{"status":"changed"}')
+    const { client, service } = createService(directory)
+    client.responses.push({ directory, workspaceId: 'workspace-1', workspaceRevision: 1 })
+    const workspace = await service.openWorkspace({ directory })
+
+    await expect(
+      service.exportSignoff({
+        outputPath: '/exports/custom package.tar.gz',
+        workspaceHandle: workspace.workspaceHandle,
+      }),
+    ).rejects.toMatchObject({
+      code: 'SIGNOFF_ARTIFACT_REVISION_MISMATCH',
+      details: { references: [reference] },
+    })
+    expect(client.calls).toHaveLength(1)
+    rmSync(directory, { force: true, recursive: true })
   })
 
   it('emits rerun metadata when a full flow rerun starts', async () => {

@@ -13,6 +13,7 @@ import type {
   ProjectStepStatus,
   ProjectWorkspace,
 } from '@/utils/projectManagement'
+import { FLOW_STEPS } from '@/utils/projectManagement'
 import type { ProjectQorTrendSummary } from '@ecos-studio/shared'
 
 export function metricPointFixture(
@@ -192,6 +193,7 @@ export function projectFixture(
 
   return {
     id: 'demo',
+    projectType: 'backend',
     name: 'demo',
     path: '/projects/demo',
     pdk: 'sky130A',
@@ -247,5 +249,7 @@ export function projectFixture(
     },
     ...overrides,
     designName: overrides.designName ?? 'demo',
+    flowSteps: overrides.flowSteps ?? FLOW_STEPS,
+    frontendAnalysis: overrides.frontendAnalysis ?? null,
   }
 }

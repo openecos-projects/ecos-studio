@@ -222,6 +222,9 @@ export interface DesktopBridgeServices {
   projectManagementReadService?: {
     discoverProject(directory: string): Promise<ProjectManifest | null>
     readManifest(projectRoot: string): Promise<ProjectManifest | null>
+    readFrontendWorkspaceTexts?(
+      request: import('@ecos-studio/shared').DesktopFrontendWorkspaceTextsRequest,
+    ): Promise<import('@ecos-studio/shared').DesktopFrontendWorkspaceTextsResult>
     listProjectEntries(projectRoot: string): Promise<string[]>
     readWorkspaceStepConfiguration(
       request: DesktopProjectManagementWorkspaceStepConfigurationRequest,
@@ -355,6 +358,7 @@ export interface DesktopBridgeServices {
   chipViewerService: {
     open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult>
     isOpen(request: ChipViewerOpenRequest): Promise<{ open: boolean }>
+    isWorkspaceMutationBusy?(workspaceHandle: string): boolean
     onWorkspaceRevisionChanged?: (
       notification: ChipViewerWorkspaceRevisionNotification,
     ) => void
@@ -1613,10 +1617,13 @@ export function registerIpc(
       if (!isRecord(request) || typeof request.projectRootLocator !== 'string') {
         throw new Error('Backend project comparison selection is invalid.')
       }
+      const projectRoot = await services.workspaceService.registerProjectRoot(
+        request.projectRootLocator,
+      )
       return await services.backendProjectComparisonService.selectProject(
         event.sender.id,
         {
-          projectRootLocator: request.projectRootLocator,
+          projectRootLocator: projectRoot,
         },
       )
     },
@@ -1740,6 +1747,26 @@ export function registerIpc(
   )
 
   handle(
+    desktopApiIpcChannels.projectManagementReadFrontendWorkspaceTexts,
+    async (_event, request) => {
+      if (!services.projectManagementReadService?.readFrontendWorkspaceTexts) {
+        throw new Error('Project management reads are unavailable.')
+      }
+      if (
+        !isRecord(request) ||
+        typeof request.projectRoot !== 'string' ||
+        typeof request.workspacePath !== 'string' ||
+        !Array.isArray(request.paths) ||
+        request.paths.some((path) => typeof path !== 'string')
+      )
+        throw new Error('Frontend workspace report request is invalid.')
+      return await services.projectManagementReadService.readFrontendWorkspaceTexts(
+        request as unknown as import('@ecos-studio/shared').DesktopFrontendWorkspaceTextsRequest,
+      )
+    },
+  )
+
+  handle(
     desktopApiIpcChannels.projectManagementListEntries,
     async (_event, projectRoot) => {
       if (!services.projectManagementReadService) {
@@ -1766,9 +1793,13 @@ export function registerIpc(
       ) {
         throw new Error('Project management Step Configuration request is invalid.')
       }
-      return await services.projectManagementReadService.readWorkspaceStepConfiguration(
-        request as unknown as DesktopProjectManagementWorkspaceStepConfigurationRequest,
+      const projectRoot = await services.workspaceService.requestProjectPathAccess(
+        request.projectRoot,
       )
+      return await services.projectManagementReadService.readWorkspaceStepConfiguration({
+        ...(request as unknown as DesktopProjectManagementWorkspaceStepConfigurationRequest),
+        projectRoot,
+      })
     },
   )
 
@@ -2355,6 +2386,8 @@ export function registerIpc(
         : undefined,
       ownsWorkspaceHandle: (workspaceHandle) =>
         workspaceHandleSubscriptions.get(workspaceHandle)?.sender === event.sender,
+      isWorkspaceMutationBusy: (workspaceHandle) =>
+        services.chipViewerService.isWorkspaceMutationBusy?.(workspaceHandle) ?? false,
       prepareCreate: async (createRequest) => {
         const prepared = await prepareWorkspaceCreateBinding(services, createRequest)
         const { eccPdkConfig: persistConfig, ...runtimeRequest } = prepared
@@ -2578,8 +2611,10 @@ export function registerIpc(
       if (!directory) {
         throw new Error('Workspace step outputs require a workspace directory.')
       }
+      const authorizedDirectory =
+        await services.workspaceService.requestProjectPathAccess(directory)
       return await services.eccRuntimeService.workspaceStepOutputs(
-        directory,
+        authorizedDirectory,
         runtimeRequest.step,
       )
     },

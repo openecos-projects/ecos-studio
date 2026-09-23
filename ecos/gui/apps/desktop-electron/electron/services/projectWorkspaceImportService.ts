@@ -22,6 +22,11 @@ export class ProjectWorkspaceImportError extends Error {
 export interface ProjectWorkspaceManifestGateway {
   load(projectRoot: string): Promise<ProjectManifest>
   mutate(request: ProjectManifestMutationRequest): Promise<{ manifest: ProjectManifest }>
+  importFrontendWorkspace?(
+    projectRoot: string,
+    workspacePath: string,
+    workspaceId: string,
+  ): Promise<ProjectManifest>
 }
 
 export type ProjectWorkspaceImportSuccess = Extract<
@@ -69,11 +74,16 @@ export class ProjectWorkspaceImportService {
         'The selected workspace directory does not have a valid basename.',
       )
     }
-    const result = await this.mutateThroughManifestService(
-      projectRoot,
-      workspacePath,
-      workspaceId,
-    )
+    const result =
+      manifest.project_type === 'frontend'
+        ? {
+            manifest: await this.importFrontendWorkspace(
+              projectRoot,
+              workspacePath,
+              workspaceId,
+            ),
+          }
+        : await this.mutateThroughManifestService(projectRoot, workspacePath, workspaceId)
     return {
       status: 'imported',
       manifest: result.manifest,
@@ -92,6 +102,28 @@ export class ProjectWorkspaceImportService {
           error instanceof Error ? error.message : String(error)
         }`,
       )
+    }
+  }
+
+  private async importFrontendWorkspace(
+    projectRoot: string,
+    workspacePath: string,
+    workspaceId: string,
+  ): Promise<ProjectManifest> {
+    if (!this.manifestGateway.importFrontendWorkspace) {
+      throw new ProjectWorkspaceImportError(
+        'project_invalid',
+        'Frontend workspace import is unavailable.',
+      )
+    }
+    try {
+      return await this.manifestGateway.importFrontendWorkspace(
+        projectRoot,
+        workspacePath,
+        workspaceId,
+      )
+    } catch (error) {
+      throw translateManifestMutationError(error)
     }
   }
 

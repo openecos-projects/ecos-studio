@@ -21,6 +21,7 @@ export type WorkspaceArtifactReader = (request: {
   artifact: { reference: string; sha256?: string; sizeBytes?: number }
   maxBytes?: number
   verifyFingerprint?: boolean
+  includeIntegrity?: boolean
 }) => Promise<VerifiedProjectArtifactReadResult>
 
 const JSON_ARTIFACT_KINDS = new Set([
@@ -257,6 +258,13 @@ export async function readWorkspaceArtifact(
           : 'application/json',
       name: artifact.name,
       ...(parsedJson ? { json: parsedJson } : {}),
+      ...(read.integrity
+        ? {
+            integrity: read.integrity,
+            recordedSizeBytes: artifact.sizeBytes,
+            actualSizeBytes: read.actualSizeBytes ?? read.bytes.byteLength,
+          }
+        : {}),
       ...(['layout_image', 'congestion_image'].includes(artifact.kind)
         ? { bytes: read.bytes }
         : {}),

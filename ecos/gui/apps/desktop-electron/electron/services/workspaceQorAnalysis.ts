@@ -58,7 +58,9 @@ export type WorkspaceEngineeringFacts = Pick<
   EccEngineeringSnapshot,
   'analysis' | 'metrics'
 > &
-  Partial<Pick<EccEngineeringSnapshot, 'flow' | 'signoffAssessment' | 'qorSnapshotExtension'>>
+  Partial<
+    Pick<EccEngineeringSnapshot, 'flow' | 'signoffAssessment' | 'qorSnapshotExtension'>
+  >
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -180,10 +182,6 @@ function snapshotQorProjection(
       ...(extension ? { qorSnapshotExtension: extension } : {}),
     },
   }
-}
-
-function finiteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value)
 }
 
 function flowState(value: unknown): ProjectStepStatus | undefined {

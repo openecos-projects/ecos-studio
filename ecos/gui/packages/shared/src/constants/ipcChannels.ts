@@ -24,6 +24,8 @@ export const desktopApiIpcChannels = {
   projectManifestMutate: 'project-manifest:mutate',
   projectManagementDiscoverProject: 'project-management:discover-project',
   projectManagementReadManifest: 'project-management:read-manifest',
+  projectManagementReadFrontendWorkspaceTexts:
+    'project-management:read-frontend-workspace-texts',
   projectManagementListEntries: 'project-management:list-entries',
   projectManagementReadWorkspaceStepConfiguration:
     'project-management:read-workspace-step-configuration',

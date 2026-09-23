@@ -524,6 +524,11 @@ export interface BackendProjectStepFindings {
   workspaceRevision: number
   currentWorkspaceRevision?: number
   resultState?: 'current' | 'stale' | 'not-started' | 'pending-rerun'
+  artifactIntegrity?: 'verified' | 'externally-modified'
+  artifactIssues?: Array<{
+    code: BackendProjectFindingsIssueCode
+    reference: string
+  }>
   details: ProjectAnalysisStepSnapshot
 }
 

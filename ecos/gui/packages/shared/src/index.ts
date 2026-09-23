@@ -11,6 +11,10 @@ export type {
   DesktopShutdownStatus,
 } from './contracts/shutdown.ts'
 export type {
+  DesktopFrontendWorkspaceTextsRequest,
+  DesktopFrontendWorkspaceTextsResult,
+} from './contracts/desktopApi.ts'
+export type {
   ProductCommandApi,
   ProductCommandRequest,
   ProductCommandResult,
@@ -413,22 +417,32 @@ export {
 export { isHdlFilePath } from './utils/hdlPath.ts'
 export { isVerilogIdentifier } from './utils/verilogIdentifier.ts'
 export {
+  projectManagementFrontendWorkspaceStepAnalysisSpecs,
+  projectManagementFrontendWorkspaceSummaryPaths,
   projectManagementStaTimingIssuesPath,
   projectManagementWorkspaceStepAnalysisSpecs,
   projectManagementWorkspaceSummaryPaths,
+  projectManagementWorkspaceSummaryPathsFor,
 } from './utils/projectManagementSummary.ts'
 export { validateMpcSpec } from './utils/mpcSpec.ts'
 export type { ValidatedMpcSpec, ValidatedMpcSpecDesign } from './utils/mpcSpec.ts'
 export {
   normalizeProjectManifestFlowStep,
+  normalizeProjectManifestStage,
   parseProjectManifestFlowStep,
   projectManifestForPresentation,
   projectIdFromName,
   projectManifestFlowSteps,
+  projectManifestFrontendFlowSteps,
+  isProjectManifestType,
+  projectManifestProfileFor,
   sameProjectManifestFlowStep,
 } from './utils/projectManifest.ts'
 export type {
   EccProjectManifest,
+  ProjectManifestType,
+  ProjectManifestStage,
+  ProjectManifestFrontendFlowStep,
   EccProjectManifestWorkspace,
   ProjectManifest,
   ProjectManifestBaseDesign,
@@ -439,12 +453,22 @@ export type {
   ProjectManifestMutation,
   ProjectManifestMutationRequest,
   ProjectManifestMutationResult,
+  ProjectManifestProfile,
   ProjectManifestReplacementBackupInput,
   ProjectManifestWorkspace,
   ProjectManifestWorkspaceImportInput,
   ProjectManifestWorkspaceRegistrationInput,
   ProjectManifestWorkspaceStatus,
 } from './utils/projectManifest.ts'
+export {
+  applyProjectManifestMutation as applyFrontendProjectManifestMutation,
+  createProjectManifestDraft,
+  parseProjectManifest,
+  recordReplacementBackupInManifest,
+  registerWorkspaceInManifest,
+  serializeProjectManifest,
+  setQorBaselineInManifest,
+} from './utils/frontendProjectManifest.ts'
 export type {
   ClockMetrics,
   CongestionMetrics,

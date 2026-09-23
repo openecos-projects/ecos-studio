@@ -34,10 +34,7 @@ export type EngineeringSnapshotEnvelope = Pick<
   | 'workspaceRevision'
 >
 
-type EngineeringSnapshotQor = Pick<
-  EccEngineeringSnapshot,
-  'analysis' | 'metrics'
->
+type EngineeringSnapshotQor = Pick<EccEngineeringSnapshot, 'analysis' | 'metrics'>
 
 export type EngineeringSnapshotValidationResult =
   | {
@@ -142,8 +139,7 @@ export function validateEngineeringSnapshot(
             metrics: value.metrics,
           })
         : unavailable('ENGINEERING_QOR_INVALID'),
-      qorSnapshotExtension:
-        ready(value.qorSnapshotExtension),
+      qorSnapshotExtension: ready(value.qorSnapshotExtension),
       signoff: validSignoff(value.signoffAssessment)
         ? ready(value.signoffAssessment)
         : unavailable('ENGINEERING_SIGNOFF_INVALID'),
@@ -180,7 +176,8 @@ function validQor(
   }
   if (
     !snapshot.metrics.every(
-      (metric) => validMetric(metric) && nonEmptyString((metric as Record<string, unknown>).stepId),
+      (metric) =>
+        validMetric(metric) && nonEmptyString((metric as Record<string, unknown>).stepId),
     )
   ) {
     return false

@@ -1,5 +1,8 @@
 import { spawn as spawnChild } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import { platform } from 'node:os'
+import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import type {
   DesktopAgentEventType,
@@ -55,6 +58,7 @@ interface AgentProviderProtocolResponse {
 interface AgentProviderProcessRuntimeOptions {
   env?: NodeJS.ProcessEnv
   manifest: ResolvedAgentProviderManifest
+  platform?: NodeJS.Platform
   spawn?: SpawnLike
 }
 
@@ -91,6 +95,7 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
   >()
   private readonly workspaceRevisions = new Map<string, number>()
   private readonly spawnImpl: SpawnLike
+  private readonly runtimePlatform: NodeJS.Platform
   private child: ReturnType<SpawnLike> | null = null
   private stderrTail = ''
   private stdoutBuffer = ''
@@ -99,6 +104,7 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     this.baseEnv = { ...(options.env ?? process.env) }
     this.env = { ...this.baseEnv, ...options.manifest.environment }
     this.manifest = options.manifest
+    this.runtimePlatform = options.platform ?? platform()
     this.spawnImpl = options.spawn ?? spawnChild
   }
 
@@ -253,12 +259,22 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     })
   }
 
+  private resolveCommand(): string {
+    const { command } = this.manifest
+    if (this.runtimePlatform !== 'win32') return command
+    const resolved = join(this.manifest.pluginRoot, command)
+    if (existsSync(resolved)) return command
+    if (existsSync(`${resolved}.exe`)) return `${command}.exe`
+    return command
+  }
+
   private ensureChild(): ReturnType<SpawnLike> {
     if (this.child) return this.child
 
     this.stderrTail = ''
     this.stdoutBuffer = ''
-    const child = this.spawnImpl(this.manifest.command, this.manifest.args ?? [], {
+    const command = this.resolveCommand()
+    const child = this.spawnImpl(command, this.manifest.args ?? [], {
       cwd: this.manifest.pluginRoot,
       env: this.env,
       stdio: ['pipe', 'pipe', 'pipe'],

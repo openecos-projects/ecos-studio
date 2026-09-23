@@ -1,6 +1,7 @@
 import { buildStepIssues, countStepIssues } from '@/components/projectStepAnalysis'
 import { stepAnalysisAvailability } from '@/utils/projectAnalysisAvailability'
 import { projectResultStatusLabel } from '@/utils/projectResultPresentation'
+import { FLOW_STEPS, type FlowStep } from '@/utils/projectManagement'
 import type {
   EccQorSnapshotExtension,
   ProjectQorTrendSummary,
@@ -362,7 +363,8 @@ function buildScoreNote(
   scalarStatus: 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED' | 'FAIL' | 'NOT_RATED',
   signoff: QorGateStatus,
 ): string {
-  if (scalarStatus === 'NOT_RATED') return 'Not rated: the QoR score needs a complete analysis run'
+  if (scalarStatus === 'NOT_RATED')
+    return 'Not rated: the QoR score needs a complete analysis run'
   if (scalarStatus === 'FAIL' || scalarStatus === 'RED') {
     return signoff === 'pass'
       ? 'Quality failure does not gate signoff readiness'
@@ -509,7 +511,11 @@ function workspaceAnalysisState(
   if (completedSteps.length === 0) return 'unavailable'
 
   const availability = completedSteps.map((step) =>
-    stepAnalysisAvailability(summary?.analysis.steps[step.step]),
+    stepAnalysisAvailability(
+      FLOW_STEPS.includes(step.step as FlowStep)
+        ? summary?.analysis.steps[step.step as FlowStep]
+        : undefined,
+    ),
   )
   if (availability.every((status) => status === 'available')) return 'clean'
   if (availability.some((status) => status !== 'unavailable')) return 'incomplete'

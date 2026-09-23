@@ -1797,6 +1797,11 @@ describe('ChipViewerService', () => {
             workspaceHandle: 'workspace-handle-1',
             workspaceRevision: 1,
           })),
+          workspaceSession: vi.fn(async () => ({
+            directory: PROJECT_ROOT,
+            workspaceHandle: 'workspace-handle-1',
+            workspaceRevision: 5,
+          })),
           updateWorkspaceStepConfiguration,
         },
       })
@@ -1844,17 +1849,17 @@ describe('ChipViewerService', () => {
     expect(saveResultText).toContain(
       'macro_location.tcl exported and macro.placements recorded (1 macros)',
     )
-    expect(onWorkspaceRevisionChanged).toHaveBeenCalledTimes(2)
-    expect(onWorkspaceRevisionChanged).toHaveBeenNthCalledWith(1, {
-      projectPath: PROJECT_ROOT,
-      workspaceHandle: 'workspace-handle-1',
-      workspaceRevision: 4,
-    })
-    expect(onWorkspaceRevisionChanged).toHaveBeenNthCalledWith(2, {
+    expect(onWorkspaceRevisionChanged).toHaveBeenCalledTimes(1)
+    expect(onWorkspaceRevisionChanged).toHaveBeenCalledWith({
       projectPath: PROJECT_ROOT,
       workspaceHandle: 'workspace-handle-1',
       workspaceRevision: 5,
     })
+    expect(
+      'workspaceSession' in layoutEditRuntime
+        ? layoutEditRuntime.workspaceSession
+        : undefined,
+    ).toHaveBeenCalledWith('workspace-handle-1')
   })
 
   it('keeps the save successful when the macro.placements writeback fails', async () => {

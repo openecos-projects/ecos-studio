@@ -617,6 +617,63 @@ describe('BackendWorkspaceService', () => {
     expect(getProjectRoot).toHaveBeenCalledTimes(2)
   })
 
+  it('refreshes artifact generation on focus without rebuilding the committed overview', async () => {
+    const readService = persistedReadService(
+      engineeringSnapshot(),
+      manifestWithBaseline(),
+    )
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: readService,
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+    const initial = await runWithWindowScope(62, () => service.getOverview())
+    const listener = vi.fn()
+    service.onInvalidated(listener)
+
+    await service.checkForUpdates(62)
+
+    expect(listener).toHaveBeenCalledWith({
+      generation: initial.generation + 1,
+      windowId: 62,
+      workspaceContextId: initial.workspaceContextId,
+    })
+    const refreshed = await runWithWindowScope(62, () => service.getOverview())
+    expect(refreshed.generation).toBe(initial.generation + 1)
+    expect(refreshed.overview).toEqual(initial.overview)
+    expect(readService.readManifest).toHaveBeenCalledOnce()
+    expect(readService.readEngineeringSnapshot).toHaveBeenCalledTimes(3)
+  })
+
+  it('publishes a same-revision overview that was already in flight during focus refresh', async () => {
+    const snapshot = engineeringSnapshot()
+    const readService = persistedReadService(snapshot)
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: readService,
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+    await runWithWindowScope(64, () => service.getOverview())
+    service.invalidateWindow(64, false)
+
+    let resolveOverview!: (value: ProjectEngineeringSnapshotReadResult) => void
+    const overviewRead = new Promise<ProjectEngineeringSnapshotReadResult>((resolve) => {
+      resolveOverview = resolve
+    })
+    readService.readEngineeringSnapshot
+      .mockImplementationOnce(() => overviewRead)
+      .mockResolvedValueOnce(persistedSnapshotResult(snapshot))
+    const pendingOverview = runWithWindowScope(64, () => service.getOverview())
+    await vi.waitFor(() =>
+      expect(readService.readEngineeringSnapshot).toHaveBeenCalledTimes(2),
+    )
+
+    await service.checkForUpdates(64)
+    resolveOverview(persistedSnapshotResult(snapshot))
+
+    await expect(pendingOverview).resolves.toMatchObject({ generation: 2 })
+    await runWithWindowScope(64, () => service.getOverview())
+    expect(readService.readEngineeringSnapshot).toHaveBeenCalledTimes(3)
+  })
+
   it('records a bounded Snapshot-only Overview query', async () => {
     const readService = persistedReadService(
       engineeringSnapshot(),
@@ -1806,6 +1863,53 @@ describe('BackendWorkspaceService', () => {
       workspacePath: '/project/ws-a',
     })
     expect(JSON.stringify(result)).not.toContain('Place_ecc/')
+  })
+
+  it('discards an artifact result when the workspace generation changes while reading', async () => {
+    const snapshot = engineeringSnapshot()
+    snapshot.artifacts = [
+      {
+        artifactId: 'layout-place',
+        availability: 'available',
+        kind: 'layout_image',
+        name: 'gcd_Place.png',
+        reference: 'Place_ecc/output/gcd_Place.png',
+        sha256: 'a'.repeat(64),
+        sizeBytes: 3,
+        stepId: 'Place',
+      },
+    ] as never
+    let resolveRead!: (value: { ok: true; bytes: Uint8Array }) => void
+    const read = new Promise<{ ok: true; bytes: Uint8Array }>((resolve) => {
+      resolveRead = resolve
+    })
+    const readVerifiedArtifact = vi.fn().mockReturnValue(read)
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: {
+        ...persistedReadService(snapshot),
+        readVerifiedArtifact,
+      },
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+    const overview = await runWithWindowScope(63, () => service.getOverview())
+    const pending = runWithWindowScope(63, () =>
+      service.getArtifact({
+        artifactId: 'layout-place',
+        workspaceContextId: overview.workspaceContextId,
+        workspaceRevision: 1,
+      }),
+    )
+
+    await vi.waitFor(() => expect(readVerifiedArtifact).toHaveBeenCalledOnce())
+    service.invalidateWindow(63)
+    resolveRead({ ok: true, bytes: new Uint8Array([1, 2, 3]) })
+
+    await expect(pending).resolves.toMatchObject({
+      artifact: {
+        status: 'unavailable',
+        issues: [{ code: 'BACKEND_WORKSPACE_REVISION_CHANGED' }],
+      },
+    })
   })
 
   it('parses timing Artifacts only for the current Snapshot revision', async () => {
