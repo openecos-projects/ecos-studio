@@ -88,6 +88,8 @@ def test_request_binds_parent_checkpoint_and_proposal_content() -> None:
         ecc_revision="ecc-test",
     )
     assert request.episode_id == "activation-1"
+    assert request.intervention_id.startswith("activation-")
+    assert ":" not in request.intervention_id
     assert request.requested.knob_id.value == "place.target_density"
     assert request.requested.value == 0.4
     assert request.seed == 7
@@ -120,6 +122,21 @@ def test_effective_improving_probe_maps_to_promote() -> None:
     assert outcome["terminal_delta"] == pytest.approx(-100.0)
     assert outcome["promotion_decision"] == "promote"
     assert outcome["terminal_observation_hash"] == HASH
+
+
+def test_activation_ignores_unrelated_calibration_metrics() -> None:
+    class _Receipt:
+        status = "effective"
+        actual_value = 0.4
+
+    outcome = evaluate_activation_outcome(
+        parent_observation=_observation(1000.0),
+        candidate_observation=_observation(900.0),
+        native_receipt=_Receipt(),
+        objective_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+        noise_epsilon={**NOISE_EPSILON, "unrelated_metric": 1.0},
+    )
+    assert outcome["promotion_decision"] == "promote"
 
 
 def test_ineffective_receipt_blocks_promotion_despite_gain() -> None:

@@ -736,6 +736,7 @@ def test_planner_prompt_claim_contract_is_consistent(
     assert "prefer decision continue" not in system
     assert system.count("decision continue is mandatory") == 2
     assert "name that reason code in rationale_summary" in system
+    assert "assess other pass actions before continuing" in system
 
     # A supported_action_view pass action is explicit density_weight support.
     assert "must never be enabled implicitly: a supplied" in system

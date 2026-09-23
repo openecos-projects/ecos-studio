@@ -3,21 +3,23 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** A placement overflow hotspot is visible, but it is not yet known whether the demand is produced by cells inside the hotspot or by nets that only cross it.
+**Condition:** Routed overflow is positive, but scalar metrics cannot establish whether the cause is local cell demand or through-traffic demand. Do not claim a spatial diagnosis.
 
-**Diagnosis:** crude congestion model.
+**Diagnosis:** unresolved scalar congestion diagnosis.
 
-**Required evidence:** overflow_map, cell_density_map, net_density_map.
+**Required evidence:** route_la_total_overflow.
 
 **Action intent:** recheck congestion model (`recheck_congestion_model`).
 
-**Effects:** congestion unchanged.
+**Effects:** route_la_total_overflow unchanged.
 
-**Anti-conditions:** same_relief_applied_to_every_hotspot.
+**Anti-conditions:** .
 
 **ECOS analog:** No authorized knob. Do not invent one.
 
@@ -34,21 +36,23 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** Overflow is concentrated in a region whose cells or local nets also sit in that region.
+**Condition:** Routed overflow and routed wirelength are both positive. Use the coarse legal spreading analog only as a bounded trial; scalar evidence does not identify a particular local cell cluster.
 
-**Diagnosis:** local cell or pin density.
+**Diagnosis:** coarse placement spreading under route overflow.
 
-**Required evidence:** overflow_map, cell_density_map, net_density_map.
+**Required evidence:** route_la_total_overflow, route_wirelength.
 
 **Action intent:** spread local movable cells (`spread_local_movable_cells`).
 
-**Effects:** congestion decrease; wirelength may_increase.
+**Effects:** route_la_total_overflow decrease; route_wirelength may_increase.
 
-**Anti-conditions:** external_long_nets_dominate.
+**Anti-conditions:** .
 
 **ECOS analog:** increase `place.cell_padding_x`; decrease `place.target_density`; enable `place.routability_opt` (coarse analog)
 
@@ -65,21 +69,23 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** An overflow hotspot remains after local cells are thinned, and many nets cross the region without connecting cells inside it.
+**Condition:** Routed overflow remains positive and its delta versus the reference is positive after a prior candidate, indicating scalar persistence. Use broader whitespace/routability actions as a coarse alternative; the agent cannot prove through-traffic spatially. The source example describes many nets cross the region without connecting cells inside it; this spatial interpretation is not directly exposed to the agent.
 
-**Diagnosis:** global long net crossing.
+**Diagnosis:** persistent route overflow after prior trial.
 
-**Required evidence:** overflow_map, net_density_map, cell_density_map.
+**Required evidence:** route_la_total_overflow, delta.route_la_total_overflow.
 
 **Action intent:** redistribute global routing demand (`redistribute_global_routing_demand`).
 
-**Effects:** congestion decrease; wirelength may_increase.
+**Effects:** route_la_total_overflow decrease; route_wirelength may_increase.
 
-**Anti-conditions:** through_traffic_diagnosis_not_confirmed.
+**Anti-conditions:** .
 
 **ECOS analog:** enable `place.routability_opt`; decrease `place.target_density` (coarse analog)
 
@@ -96,21 +102,23 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** Local overflow coincides with a high-occupancy bin, so more movable area must be reserved in that neighborhood.
+**Condition:** Routed overflow and detailed-route violations are positive while place.routability_opt is false. Enable the legal area-adjust/padding analog as a bounded trial; scalar evidence does not identify a local hotspot.
 
-**Diagnosis:** local cell or pin density.
+**Diagnosis:** coarse area adjust under route overflow.
 
-**Required evidence:** overflow_map, cell_density_map.
+**Required evidence:** route_la_total_overflow, route_dr_total_violation_count.
 
 **Action intent:** inflate cells in hotspot (`inflate_cells_in_hotspot`).
 
-**Effects:** congestion decrease; cell_density decrease; wirelength may_increase.
+**Effects:** route_la_total_overflow decrease; route_wirelength may_increase.
 
-**Anti-conditions:** external_long_nets_dominate, inflation_already_saturated.
+**Anti-conditions:** .
 
 **ECOS analog:** enable `place.routability_opt`; increase `place.cell_padding_x` (coarse analog)
 
@@ -127,21 +135,23 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** A hotspot has high pin density, not only high cell density or overflow.
+**Condition:** Routed overflow and detailed-route violations are positive. Treat this as aggregate routability pressure and use padding only as a bounded trial; do not infer a spatial cause.
 
-**Diagnosis:** pin accessibility.
+**Diagnosis:** aggregate routability pressure.
 
-**Required evidence:** overflow_map, pin_density_map, cell_density_map.
+**Required evidence:** route_la_total_overflow, route_dr_total_violation_count.
 
 **Action intent:** increase cell padding (`increase_cell_padding`).
 
-**Effects:** pin_density decrease; congestion decrease; wirelength may_increase.
+**Effects:** route_la_total_overflow decrease; route_wirelength may_increase.
 
-**Anti-conditions:** pin_density_already_low.
+**Anti-conditions:** .
 
 **ECOS analog:** increase `place.cell_padding_x` (coarse analog)
 
@@ -158,21 +168,23 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** A coarse or early congestion map is being used to decide aggressive local spreading or inflation.
+**Condition:** Scalar placement and routed overflow disagree in severity or remain positive together. Map-file presence is evidence availability only; it is not a spatial diagnosis.
 
-**Diagnosis:** crude congestion model.
+**Diagnosis:** map presence without consumable bins.
 
-**Required evidence:** overflow_map, egr_or_rudy_map.
+**Required evidence:** route_la_total_overflow, place_hpwl.
 
 **Action intent:** recheck congestion model (`recheck_congestion_model`).
 
-**Effects:** congestion unchanged.
+**Effects:** route_la_total_overflow unchanged.
 
-**Anti-conditions:** map_already_refined_at_cell_level.
+**Anti-conditions:** .
 
 **ECOS analog:** No authorized knob. Do not invent one.
 
@@ -189,21 +201,23 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** A global-congestion fix tries to flatten wire density in every region, including chip boundaries that were not congested.
+**Condition:** Routed overflow is positive and a candidate has increased routed wirelength relative to its reference. Prefer targeted/coarse relief trials; do not treat a global wirelength change as proof that all regions should be equalized.
 
-**Diagnosis:** global long net crossing.
+**Diagnosis:** global relief wirelength tradeoff.
 
-**Required evidence:** overflow_map, net_density_map.
+**Required evidence:** route_la_total_overflow, route_wirelength, delta.route_wirelength.
 
 **Action intent:** redistribute global routing demand (`redistribute_global_routing_demand`).
 
-**Effects:** congestion decrease; wirelength may_increase.
+**Effects:** route_la_total_overflow decrease; route_wirelength may_increase.
 
-**Anti-conditions:** uncongested_regions_forced_to_absorb_wires.
+**Anti-conditions:** .
 
 **ECOS analog:** enable `place.routability_opt`; decrease `place.target_density` (coarse analog)
 
@@ -220,21 +234,23 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** Local overflow remains after ordinary density spreading, and movable cells in the hotspot can still accept extra site spacing.
+**Condition:** Routed overflow is positive and a legal global padding value is configured. Increasing place.cell_padding_x is only a coarse spreading analog.
 
-**Diagnosis:** local cell or pin density.
+**Diagnosis:** global padding as congestion relief.
 
-**Required evidence:** overflow_map, cell_density_map.
+**Required evidence:** route_la_total_overflow, place.cell_padding_x.
 
 **Action intent:** increase cell padding (`increase_cell_padding`).
 
-**Effects:** congestion decrease; cell_density decrease; wirelength may_increase.
+**Effects:** route_la_total_overflow decrease; route_wirelength may_increase.
 
-**Anti-conditions:** cells_already_left_the_hotspot, utilization_has_no_slack.
+**Anti-conditions:** .
 
 **ECOS analog:** increase `place.cell_padding_x` (coarse analog)
 
@@ -251,21 +267,23 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** Cells in the same cluster share similar local overflow, so a cell-only hotspot score cannot tell which cells should be padded.
+**Condition:** Routed overflow and detailed-route violations are positive. Use the available aggregate scalar evidence to constrain a padding trial; do not claim that unavailable spatial features selected a hotspot.
 
-**Diagnosis:** local cell or pin density.
+**Diagnosis:** aggregate features for padding trial.
 
-**Required evidence:** overflow_map, pin_density_map, egr_or_rudy_map.
+**Required evidence:** route_la_total_overflow, route_dr_total_violation_count.
 
 **Action intent:** increase cell padding (`increase_cell_padding`).
 
-**Effects:** congestion decrease.
+**Effects:** route_la_total_overflow decrease.
 
-**Anti-conditions:** only_cell_local_overflow_was_used.
+**Anti-conditions:** .
 
 **ECOS analog:** increase `place.cell_padding_x` (coarse analog)
 
@@ -282,21 +300,23 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** Cells that were padded for an old hotspot have already left the congested region, but the extra spacing remains.
+**Condition:** Routed overflow is clean while positive global padding remains configured. Reduce padding only as a controlled wirelength trial; no spatial claim is available.
 
-**Diagnosis:** local cell or pin density.
+**Diagnosis:** padding reduction after clean route.
 
-**Required evidence:** overflow_map, cell_density_map.
+**Required evidence:** route_la_total_overflow, place.cell_padding_x.
 
 **Action intent:** recycle padding outside hotspot (`recycle_padding_outside_hotspot`).
 
-**Effects:** wirelength may_decrease; congestion unchanged.
+**Effects:** route_wirelength may_decrease; route_la_total_overflow unchanged.
 
-**Anti-conditions:** cell_still_inside_hotspot.
+**Anti-conditions:** .
 
 **ECOS analog:** decrease `place.cell_padding_x` (coarse analog)
 
@@ -313,21 +333,23 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** Routability relief is applied in early placement iterations when the congestion map is still unstable.
+**Condition:** Routed overflow is clean while padding is configured. Keep this no-action guard to prevent escalating over-padding without terminal route evidence of a need for more relief.
 
-**Diagnosis:** crude congestion model.
+**Diagnosis:** coarse relief without routed overflow.
 
-**Required evidence:** overflow_map, cell_density_map.
+**Required evidence:** route_la_total_overflow, place.cell_padding_x.
 
 **Action intent:** cap inflation aggressiveness (`cap_inflation_aggressiveness`).
 
-**Effects:** wirelength may_decrease; congestion may_increase.
+**Effects:** route_wirelength may_decrease; route_la_total_overflow may_increase.
 
-**Anti-conditions:** late_stable_map_with_remaining_hotspots.
+**Anti-conditions:** .
 
 **ECOS analog:** No authorized knob. Do not invent one.
 
@@ -344,21 +366,23 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** Global-placement padding improved a hotspot, but legalization packs the same cells back together.
+**Condition:** Routed overflow and detailed-route violations are positive while padding is configured. Treat legalization preservation as an evidence requirement, not as a capability claim, because no per-cell legalization-padding metric is exposed.
 
-**Diagnosis:** local cell or pin density.
+**Diagnosis:** relief not yet terminally validated.
 
-**Required evidence:** overflow_map, cell_density_map.
+**Required evidence:** route_la_total_overflow, route_dr_total_violation_count, place.cell_padding_x.
 
 **Action intent:** preserve padding through legalization (`preserve_padding_through_legalization`).
 
-**Effects:** congestion decrease.
+**Effects:** route_la_total_overflow decrease.
 
-**Anti-conditions:** legalization_already_honors_the_same_spacing.
+**Anti-conditions:** .
 
 **ECOS analog:** No authorized knob. Do not invent one.
 
@@ -375,21 +399,23 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** A routing-utilization or RUDY-style map shows congested tiles while ordinary density spreading has already finished.
+**Condition:** Routed overflow is positive while place.routability_opt is false. Enable congestion-guided area adjustment as a bounded legal trial and validate route-level overflow afterward.
 
-**Diagnosis:** local cell or pin density.
+**Diagnosis:** routability area adjust under route overflow.
 
-**Required evidence:** egr_or_rudy_map, overflow_map.
+**Required evidence:** route_la_total_overflow, place.routability_opt.
 
 **Action intent:** enable routability adjustment (`enable_routability_adjustment`).
 
-**Effects:** congestion decrease; wirelength may_increase.
+**Effects:** route_la_total_overflow decrease; route_wirelength may_increase.
 
-**Anti-conditions:** relief_not_reducing_routing_congestion.
+**Anti-conditions:** .
 
 **ECOS analog:** enable `place.routability_opt` (exact analog)
 
@@ -406,21 +432,23 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** Overflow is being reduced, but the same region also contains timing-critical nets that would be hurt by further spreading.
+**Condition:** Routed overflow is positive and setup WNS is negative. Further spreading may trade routability for timing; preserve timing as a terminal guardrail rather than inferring a local timing hotspot.
 
-**Diagnosis:** timing routability conflict.
+**Diagnosis:** route overflow timing tradeoff.
 
-**Required evidence:** overflow_map, timing_report.
+**Required evidence:** route_la_total_overflow, sta_setup_wns.
 
 **Action intent:** preserve timing on critical cells (`preserve_timing_on_critical_cells`).
 
-**Effects:** timing unchanged; congestion may_increase.
+**Effects:** route_la_total_overflow may_increase.
 
-**Anti-conditions:** no_negative_slack_in_the_hotspot.
+**Anti-conditions:** .
 
 **ECOS analog:** No authorized knob. Do not invent one.
 
@@ -437,21 +465,23 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** A fast congestion estimate disagrees with a more topology-aware routing demand map, or the hotspot looks like an artifact of the estimator.
+**Condition:** Routed overflow and routed wirelength are positive. Compare terminal scalar outcomes instead of claiming unobserved spatial demand models.
 
-**Diagnosis:** crude congestion model.
+**Diagnosis:** placement proxy vs route scalar gap.
 
-**Required evidence:** egr_or_rudy_map, overflow_map.
+**Required evidence:** route_la_total_overflow, route_wirelength.
 
 **Action intent:** recheck congestion model (`recheck_congestion_model`).
 
-**Effects:** congestion unchanged.
+**Effects:** route_la_total_overflow unchanged.
 
-**Anti-conditions:** both_estimators_agree_on_the_same_hotspot.
+**Anti-conditions:** .
 
 **ECOS analog:** No authorized knob. Do not invent one.
 
@@ -468,21 +498,23 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place, floorplan.
 
-**Condition:** Overflow sits on macro edges or in a narrow channel between fixed macros, not in an open standard-cell sea.
+**Condition:** Routed overflow and detailed-route violations are positive. Use area/padding relief only as a coarse trial; scalar metrics do not localize the cause.
 
-**Diagnosis:** macro or narrow channel.
+**Diagnosis:** aggregate area pressure without spatial localization.
 
-**Required evidence:** overflow_map, macro_density_map, cell_density_map.
+**Required evidence:** route_la_total_overflow, route_dr_total_violation_count.
 
 **Action intent:** inflate cells in hotspot (`inflate_cells_in_hotspot`).
 
-**Effects:** congestion decrease; cell_density decrease; wirelength may_increase.
+**Effects:** route_la_total_overflow decrease; route_wirelength may_increase.
 
-**Anti-conditions:** hotspot_is_open_stdcell_sea, only_local_cell_density_was_inspected.
+**Anti-conditions:** .
 
 **ECOS analog:** enable `place.routability_opt`; increase `place.cell_padding_x` (coarse analog)
 
@@ -499,21 +531,23 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** Routability relief is about to destroy a still-reasonable wirelength-driven seed in order to flatten congestion.
+**Condition:** Routed overflow and routed wirelength are both available. Preserve the incumbent route-level wirelength as a guardrail while testing congestion relief; placement proxies cannot certify a good routed seed.
 
-**Diagnosis:** global long net crossing.
+**Diagnosis:** route wirelength guardrail during relief.
 
-**Required evidence:** overflow_map, net_density_map.
+**Required evidence:** route_la_total_overflow, route_wirelength.
 
 **Action intent:** keep good wirelength seed (`keep_good_wirelength_seed`).
 
-**Effects:** wirelength unchanged; congestion may_decrease.
+**Effects:** route_wirelength unchanged; route_la_total_overflow may_decrease.
 
-**Anti-conditions:** seed_already_unroutable_from_local_packing.
+**Anti-conditions:** .
 
 **ECOS analog:** No authorized knob. Do not invent one.
 
@@ -530,21 +564,23 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** Local padding or inflation has already been applied, but overflow remains and the design is packed tightly.
+**Condition:** Routed overflow is positive while a legal target density is configured. Decrease target density as a coarse packing-relief trial and validate route-level overflow.
 
-**Diagnosis:** local cell or pin density.
+**Diagnosis:** lower packing under route overflow.
 
-**Required evidence:** overflow_map, cell_density_map.
+**Required evidence:** route_la_total_overflow, place.target_density.
 
 **Action intent:** decrease packing density (`decrease_packing_density`).
 
-**Effects:** congestion decrease; wirelength may_increase.
+**Effects:** route_la_total_overflow decrease; route_wirelength may_increase.
 
-**Anti-conditions:** utilization_already_has_slack, overflow_is_through_traffic_only.
+**Anti-conditions:** .
 
 **ECOS analog:** decrease `place.target_density` (coarse analog)
 
@@ -561,19 +597,21 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Change one legal parameter at a time; retain terminal routing, timing, DRC and budget guards. Measured EGR routing overflow is positive; it is not native placement density overflow and does not prove a density-convergence failure. Decreasing place.target_overflow tightens one DREAMPlace convergence predicate, but other stopping predicates can still terminate placement; density overflow is not routing overflow.
+**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. The only metric trigger is positive routed overflow; decreasing place.target_overflow tightens one placement convergence threshold and is not a route-overflow guarantee. Retain terminal routing, timing, DRC and budget guards. It is not native placement density overflow.
 
-**Diagnosis:** routing pressure parameter exploration.
+**Diagnosis:** placement convergence threshold exploration.
 
-**Required evidence:** place_congestion_egr_overflow_total, place.target_overflow.
+**Required evidence:** route_la_total_overflow, place.target_overflow.
 
 **Action intent:** tighten density overflow trial (`tighten_density_overflow_trial`).
 
-**Effects:** placement_density_overflow may_decrease; placement_runtime may_increase; wirelength may_increase.
+**Effects:** route_wirelength may_increase.
 
 **Anti-conditions:** .
 
@@ -592,19 +630,21 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Change one legal parameter at a time; retain terminal routing, timing, DRC and budget guards. Measured EGR routing overflow is positive; it is not native placement density overflow and does not prove a density-convergence failure. Increasing place.density_weight changes the initial gradient-balanced density penalty and is a trial of stronger initial spreading, not a fixed multiplier on final density or routing congestion.
+**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Positive routed overflow motivates a trial of the initial density penalty; place.density_weight is not a fixed multiplier on final density or routing congestion. It is not native placement density overflow. Retain terminal routing, timing, DRC and budget guards.
 
-**Diagnosis:** routing pressure parameter exploration.
+**Diagnosis:** initial density penalty exploration.
 
-**Required evidence:** place_congestion_egr_overflow_total, place.density_weight.
+**Required evidence:** route_la_total_overflow, place.density_weight.
 
 **Action intent:** increase initial density penalty trial (`increase_initial_density_penalty_trial`).
 
-**Effects:** placement_density_overflow may_decrease; wirelength may_increase; placement_runtime may_increase.
+**Effects:** route_wirelength may_increase.
 
 **Anti-conditions:** .
 
@@ -623,19 +663,21 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** floorplan.
 
-**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Change one legal parameter at a time; retain terminal routing, timing, DRC and budget guards. In die-util mode, decrease positive floorplan.core_util to explore more core area and whitespace at fixed aspect ratio. The source proves the area mechanism, not that congestion is currently local or that extra whitespace improves QoR.
+**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. In die-util mode, positive routed overflow motivates decreasing floorplan.core_util to explore more whitespace. The source proves the area mechanism, not a QoR outcome. Retain terminal routing, timing, DRC and budget guards.
 
-**Diagnosis:** core area whitespace tradeoff.
+**Diagnosis:** core whitespace exploration under route overflow.
 
-**Required evidence:** floorplan_die_util_mode, floorplan.core_util.
+**Required evidence:** route_la_total_overflow, floorplan_die_util_mode, floorplan.core_util.
 
 **Action intent:** increase core whitespace trial (`increase_core_whitespace_trial`).
 
-**Effects:** congestion may_decrease; core_area may_increase; wirelength may_increase.
+**Effects:** route_la_total_overflow may_decrease; core_area may_increase; route_wirelength may_increase.
 
 **Anti-conditions:** .
 
@@ -654,19 +696,21 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Change one legal parameter at a time; retain terminal routing, timing, DRC and budget guards. Die utilization and DRC/timing violation counters show a clean, non-saturated placement while the configured target density is positive; raising place.target_density packs cells toward a denser density target inside the placement density objective. This is a wirelength trial on the configured knob, not a fixed multiplier on final density or routing congestion.
+**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Routed overflow and DRC are clean while target density and routed wirelength are available; increasing place.target_density is a wirelength trial, not proof that placement density or routed overflow will improve. Retain timing and route guardrails.
 
-**Diagnosis:** placement wirelength parameter exploration.
+**Diagnosis:** target density wirelength exploration.
 
-**Required evidence:** place.target_density, drc_count, sta_setup_violation_count, sta_hold_violation_count.
+**Required evidence:** route_la_total_overflow, drc_count, route_wirelength, place.target_density.
 
 **Action intent:** tighten target density trial (`tighten_target_density_trial`).
 
-**Effects:** wirelength may_decrease; placement_density_overflow may_increase; congestion may_increase.
+**Effects:** route_wirelength may_decrease; route_la_total_overflow may_increase.
 
 **Anti-conditions:** .
 
@@ -685,19 +729,21 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Change one legal parameter at a time; retain terminal routing, timing, DRC and budget guards. Routed local overflow and DRC are clean while a positive global placement padding is configured; reducing place.cell_padding_x removes reserved inter-cell spacing from the placement geometry. This is a wirelength trial that may re-introduce local congestion, not a guaranteed gain.
+**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Routed overflow and DRC are clean while positive global padding remains configured; decreasing place.cell_padding_x is a wirelength trial that may re-introduce routed overflow. Retain terminal routing, timing, DRC and budget guards.
 
-**Diagnosis:** padding parameter exploration.
+**Diagnosis:** placement padding wirelength exploration.
 
-**Required evidence:** place.cell_padding_x, route_la_total_overflow, drc_count.
+**Required evidence:** route_la_total_overflow, drc_count, route_wirelength, place.cell_padding_x.
 
 **Action intent:** reduce placement padding trial (`reduce_placement_padding_trial`).
 
-**Effects:** wirelength may_decrease; congestion may_increase; placement_density_overflow may_increase.
+**Effects:** route_wirelength may_decrease; route_la_total_overflow may_increase.
 
 **Anti-conditions:** .
 
@@ -716,19 +762,21 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** place.
 
-**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Change one legal parameter at a time; retain terminal routing, timing, DRC and budget guards. Routability relief is configured while routed local overflow and DRC are clean; disabling place.routability_opt stops the relief-driven node-size inflation so the placement can pack toward the configured density target. This is a wirelength trial that may re-introduce congestion, not a guaranteed gain.
+**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Routability relief is configured while routed overflow and DRC are clean; disabling place.routability_opt is a wirelength trial that may re-introduce routed overflow. Retain terminal routing, timing, DRC and budget guards.
 
-**Diagnosis:** routability relief parameter exploration.
+**Diagnosis:** routability relief wirelength exploration.
 
-**Required evidence:** place.routability_opt, routability_relief_configured, route_la_total_overflow, drc_count.
+**Required evidence:** route_la_total_overflow, drc_count, route_wirelength, place.routability_opt.
 
 **Action intent:** disable routability relief trial (`disable_routability_relief_trial`).
 
-**Effects:** wirelength may_decrease; congestion may_increase; placement_runtime may_decrease.
+**Effects:** route_wirelength may_decrease; route_la_total_overflow may_increase.
 
 **Anti-conditions:** .
 
@@ -747,19 +795,21 @@
 
 **Topic:** congestion strategy.
 
-**Metric:** congestion.
+**Objective metric:** route_la_total_overflow.
+
+**Proxy scope:** congestion corpus labels are not substitutes for the route-level objective.
 
 **Applies to steps:** floorplan, place.
 
-**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Change one legal parameter at a time; retain terminal routing, timing, DRC and budget guards. The configured core utilization is positive and measured die utilization is positive, so the die retains utilization slack; decreasing floorplan.core_util re-derives the core with more whitespace in variable-geometry mode. This is a whitespace and congestion trial from a stage where the geometry stays re-derivable, not a die-size change and not a wirelength guarantee.
+**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Positive routed overflow and positive core area motivate decreasing floorplan.core_util in variable-geometry mode; this is not a die-size or QoR guarantee. Retain terminal routing, timing, DRC and budget guards.
 
-**Diagnosis:** core geometry parameter exploration.
+**Diagnosis:** variable geometry core whitespace exploration.
 
-**Required evidence:** floorplan.core_util, die_utilization.
+**Required evidence:** route_la_total_overflow, core_area, floorplan.core_util.
 
 **Action intent:** increase core whitespace trial (`increase_core_whitespace_trial`).
 
-**Effects:** congestion may_decrease; placement_density_overflow may_decrease; wirelength may_increase.
+**Effects:** route_la_total_overflow may_decrease; route_wirelength may_increase.
 
 **Anti-conditions:** .
 

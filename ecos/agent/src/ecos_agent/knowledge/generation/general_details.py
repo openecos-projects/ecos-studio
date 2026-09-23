@@ -153,7 +153,8 @@ def _strategy_entries(metric: str) -> tuple[
         body = "\n\n".join(
             [
                 f"**Topic:** {statement_metric} strategy.",
-                f"**Metric:** {statement_metric}.",
+                f"**Objective metric:** {_METRIC_OBJECTIVES[metric].value}.",
+                f"**Proxy scope:** {statement_metric} corpus labels are not substitutes for the route-level objective.",
                 f"**Applies to steps:** {', '.join(stages)}.",
                 f"**Condition:** {statement['condition']}",
                 f"**Diagnosis:** {str(diagnosis['cause']).replace('_', ' ')}.",
@@ -330,9 +331,10 @@ CONGESTION_REGRESSION_CASES = (
         "required_text": "increase_cell_padding",
     },
     {
-        "id": "strategy-narrow-channel",
+        "id": "strategy-coarse-area-relief",
+        "question": "Routed overflow and detailed-route violations are positive. What bounded area or padding action is available without claiming a spatial cause?",
         "entity_id": "strategy.congestion.macro_or_narrow_channel.v1",
-        "required_text": "macro or narrow channel",
+        "required_text": "inflate_cells_in_hotspot",
     },
     {
         "id": "strategy-unbound-timing",
@@ -349,12 +351,6 @@ WIRELENGTH_REGRESSION_CASES = (
         "required_text": "validate_routed_wirelength_after_proxy_gain",
     },
     {
-        "id": "wirelength-hpwl-flute-disagreement",
-        "question": "Placement HPWL cannot distinguish candidate topology, or HPWL and FLUTE rank candidates differently. Which place-stage proxy should be checked?",
-        "entity_id": "strategy.wirelength.use_flute_when_hpwl_is_ambiguous.v1",
-        "required_text": "use_flute_as_secondary_wirelength_proxy",
-    },
-    {
         "id": "wirelength-clean-congestion-reduce-spreading",
         "question": "Congestion and DRC are clean, timing is within tolerance, but routed wirelength is high while routability relief remains active.",
         "entity_id": "strategy.wirelength.reduce_excessive_place_spreading.v1",
@@ -362,7 +358,7 @@ WIRELENGTH_REGRESSION_CASES = (
     },
     {
         "id": "wirelength-timing-veto",
-        "question": "Wirelength improves but WNS and TNS materially worsen beyond replay noise. Should the placement candidate be accepted?",
+        "question": "Wirelength improves but WNS and TNS materially worsen beyond replay noise: should the terminal guardrail regression reject the candidate?",
         "entity_id": "strategy.wirelength.reject_guardrail_regression.v1",
         "required_text": "reject_wirelength_guardrail_regression",
     },

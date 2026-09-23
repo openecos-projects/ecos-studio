@@ -449,6 +449,60 @@ def test_offline_pilot_trips_breaker_and_keeps_denominator() -> None:
     assert payload["summary"]["rows"] == 9
 
 
+def test_offline_gate_rejects_claim_free_repeat_despite_action_divergence() -> None:
+    from ecos_agent.optimization.experiments.knowledge_metrics import (
+        offline_gate,
+        summarize_offline_rows,
+    )
+
+    dual = "state-conditioned-dual-layer-zero-shot"
+    contexts = [
+        {"design_id": "gcd", "stratum": "knowledge_opportunity"},
+        {"design_id": "gcd", "stratum": "stale_binding"},
+    ]
+    rows = [
+        {"treatment": dual, "stratum": "knowledge_opportunity", "repeat": 1,
+         "expected_behavior": "action", "decision": "continue", "correct": False,
+         "claim_bound": False, "support_status": "no_action"},
+        {"treatment": dual, "stratum": "knowledge_opportunity", "repeat": 2,
+         "expected_behavior": "action", "decision": "propose", "correct": True,
+         "claim_bound": True, "support_status": "pass", "knob": "place.target_density",
+         "direction": "increase", "requested_value": 0.4},
+        {"treatment": dual, "stratum": "stale_binding", "repeat": 1,
+         "expected_behavior": "block_reject", "decision": "continue", "correct": True},
+        {"treatment": dual, "stratum": "stale_binding", "repeat": 2,
+         "expected_behavior": "block_reject", "decision": "continue", "correct": True},
+    ]
+    gate = offline_gate(summarize_offline_rows(rows), rows, contexts)
+    assert gate["knowledge_opportunities_claim_bound"] is False
+    assert gate["offline_gate_pass"] is False
+
+
+def test_offline_gate_rejects_errors_in_comparator_treatment() -> None:
+    from ecos_agent.optimization.experiments.knowledge_metrics import (
+        offline_gate,
+        summarize_offline_rows,
+    )
+
+    dual = "state-conditioned-dual-layer-zero-shot"
+    contexts = [
+        {"design_id": "gcd", "stratum": "knowledge_opportunity"},
+        {"design_id": "gcd", "stratum": "stale_binding"},
+    ]
+    rows = [
+        {"treatment": dual, "stratum": "knowledge_opportunity", "decision": "propose",
+         "expected_behavior": "action", "claim_bound": True, "support_status": "pass",
+         "knob": "place.target_density", "direction": "increase",
+         "requested_value": 0.4, "correct": True},
+        {"treatment": dual, "stratum": "stale_binding", "decision": "continue",
+         "expected_behavior": "block_reject", "correct": True},
+        {"treatment": "llm-no-knowledge", "decision": "schema_error"},
+    ]
+    gate = offline_gate(summarize_offline_rows(rows), rows, contexts)
+    assert gate["divergence_without_repair"] is False
+    assert gate["offline_gate_pass"] is False
+
+
 def test_offline_gate_opportunity_floor_is_configurable() -> None:
     from ecos_agent.optimization.experiments.knowledge_metrics import offline_gate
 
@@ -463,11 +517,10 @@ def test_offline_gate_opportunity_floor_is_configurable() -> None:
         }
     }
     rows = [
-        {
-            "treatment": dual,
-            "expected_behavior": "block_reject",
-            "correct": True,
-        }
+        {"treatment": dual, "expected_behavior": "block_reject", "correct": True},
+        {"treatment": dual, "stratum": "knowledge_opportunity",
+         "expected_behavior": "action", "decision": "propose", "claim_bound": True,
+         "support_status": "pass", "correct": True},
     ]
     contexts = [{"stratum": "knowledge_opportunity", "design_id": "gcd"}]
     assert offline_gate(summary, rows, contexts)["offline_gate_pass"] is True

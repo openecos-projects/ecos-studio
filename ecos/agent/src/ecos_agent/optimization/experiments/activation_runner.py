@@ -76,7 +76,7 @@ def build_activation_request(
     knob, direction, value = parse_activation_action(row)
     proposal_key = {"knob": knob.value, "direction": direction.value, "value": value}
     return CandidateExecutionRequest(
-        intervention_id=f"activation-{canonical_sha256(proposal_key)[:12]}",
+        intervention_id=f"activation-{canonical_sha256(proposal_key).removeprefix('sha256:')[:12]}",
         episode_id=episode_id,
         checkpoint_id=checkpoint_id,
         proposal=OptimizationProposal(
@@ -164,10 +164,11 @@ def evaluate_activation_outcome(
         parent_value = float(parent_observation.metrics[objective_metric])
         candidate_value = float(candidate_observation.metrics[objective_metric])
         terminal_delta = candidate_value - parent_value
+        reference = _parent_reference_metrics(parent_observation)
         comparison = compare_observations(
-            _parent_reference_metrics(parent_observation),
+            reference,
             candidate_observation,
-            dict(noise_epsilon),
+            {key: float(noise_epsilon[key]) for key in reference},
         )
         if comparison == "better" and receipt_status == "effective":
             promotion_decision = "promote"
