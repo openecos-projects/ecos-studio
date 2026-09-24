@@ -70,10 +70,10 @@ Normal desktop workspace and flow actions run through the ECC CLI managed by the
 Electron desktop bridge.
 
 The renderer calls the Electron desktop bridge for workspace and flow commands.
-Read-only commands such as `get_info` and `home_page` return their data through
-the CLI command response. Runtime events are reserved for flow lifecycle changes
-from `run_step` and `rtl2gds`; stdout and stderr log streams are shown as logs
-and do not trigger workspace data reloads.
+Read-only workspace queries such as `get_info` and runtime snapshots return their
+data through the CLI response. Runtime events are reserved for flow lifecycle
+changes from `run_step` and `rtl2gds`; stdout and stderr log streams are shown as
+logs and do not trigger workspace data reloads.
 
 ### Release Build
 

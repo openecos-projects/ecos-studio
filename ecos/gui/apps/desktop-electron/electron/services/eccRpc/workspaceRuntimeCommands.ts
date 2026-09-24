@@ -18,11 +18,11 @@ import type {
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceExportSignoffResult,
   EccWorkspaceHandleRequest,
-  EccWorkspaceHomeResult,
   EccWorkspaceInfoRequest,
   EccWorkspaceInfoResult,
   EccWorkspaceOpenRequest,
   EccWorkspaceOpenResult,
+  EccWorkspaceRefreshConfigRequest,
   EccWorkspaceRefreshConfigResult,
   EccWorkspaceResetFlowResult,
   EccWorkspaceStepConfigurationUpdateRequest,
@@ -280,12 +280,6 @@ export class WorkspaceRuntimeCommands {
     })
   }
 
-  workspaceHome(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceHomeResult> {
-    return this.workspaceCall('workspace.home', request, (workspaceId) => ({
-      workspaceId,
-    }))
-  }
-
   workspaceInfo(request: EccWorkspaceInfoRequest): Promise<EccWorkspaceInfoResult> {
     return this.workspaceCall('workspace.info', request, (workspaceId) => ({
       id: request.id,
@@ -313,10 +307,11 @@ export class WorkspaceRuntimeCommands {
   }
 
   refreshConfig(
-    request: EccWorkspaceHandleRequest,
+    request: EccWorkspaceRefreshConfigRequest,
   ): Promise<EccWorkspaceRefreshConfigResult> {
     return this.workspaceCall('workspace.refresh_config', request, (workspaceId) => ({
       workspaceId,
+      ...(request.force === true ? { force: true } : {}),
     }))
   }
 

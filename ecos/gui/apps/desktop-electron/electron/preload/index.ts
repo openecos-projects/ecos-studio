@@ -327,7 +327,6 @@ const desktopApi: DesktopApi = {
   },
   workspaceResources: {
     getIndex: () => invokeDesktop(desktopApiIpcChannels.workspaceResourcesGetIndex),
-    readHome: () => invokeDesktop(desktopApiIpcChannels.workspaceResourcesReadHome),
     readFlow: () => invokeDesktop(desktopApiIpcChannels.workspaceResourcesReadFlow),
     readParameters: () =>
       invokeDesktop(desktopApiIpcChannels.workspaceResourcesReadParameters),
@@ -417,8 +416,6 @@ const desktopApi: DesktopApi = {
         invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceClose, request),
       create: (request) =>
         invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceCreate, request),
-      home: (request) =>
-        invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceHome, request),
       info: (request) =>
         invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceInfo, request),
       stepConfiguration: (request) =>

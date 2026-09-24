@@ -1,7 +1,6 @@
 import { computed, ref } from 'vue'
 
 export const WORKSPACE_INVALIDATION_SCOPES = [
-  'home',
   'flow',
   'parameters',
   'step',
@@ -14,7 +13,6 @@ export const WORKSPACE_INVALIDATION_SCOPES = [
 export type WorkspaceInvalidationScope = (typeof WORKSPACE_INVALIDATION_SCOPES)[number]
 
 export const WORKSPACE_RESULT_INVALIDATION_SCOPES: WorkspaceInvalidationScope[] = [
-  'home',
   'flow',
   'step',
   'maps',
@@ -82,7 +80,6 @@ function nextSessionId(): string {
 
 function createResourceVersions(): WorkspaceResourceVersions {
   return {
-    home: 0,
     flow: 0,
     parameters: 0,
     step: 0,

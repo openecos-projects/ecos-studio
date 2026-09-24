@@ -257,6 +257,52 @@ describe('useStepDashboardData', () => {
     expect(dashboard.data.value?.layoutUrl).toBeNull()
   })
 
+  it('surfaces externally modified artifact integrity with recorded sizes', async () => {
+    const result = detailResult()
+    if (result.detail.status !== 'ready') throw new Error('expected fixture detail')
+    result.detail.data.artifacts = [
+      {
+        artifactId: 'layout-place',
+        availability: 'available',
+        kind: 'layout_image',
+        name: 'gcd_Place.png',
+        stepId: 'Place',
+      },
+    ]
+    testState.getStepDetail.mockResolvedValue(result)
+    testState.getArtifact.mockResolvedValue({
+      artifact: {
+        status: 'ready',
+        issues: [],
+        data: {
+          artifactId: 'layout-place',
+          bytes: new Uint8Array([1, 2, 3]),
+          integrity: 'externally-modified',
+          recordedSizeBytes: 3,
+          actualSizeBytes: 7,
+          kind: 'layout_image',
+          mimeType: 'image/png',
+          name: 'gcd_Place.png',
+        },
+      },
+      workspaceContextId: 'context-a',
+      workspaceRevision: 9,
+    })
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:layout-modified')
+    const dashboard = scope.run(() => useStepDashboardData())!
+
+    await vi.waitFor(() => expect(dashboard.loading.value).toBe(false))
+
+    expect(dashboard.data.value?.layoutUrl).toBe('blob:layout-modified')
+    expect(dashboard.data.value?.artifactIntegrityWarnings).toEqual([
+      {
+        actualSizeBytes: 7,
+        name: 'gcd_Place.png',
+        recordedSizeBytes: 3,
+      },
+    ])
+  })
+
   it('loads and coalesces a timing-path Artifact only when its corner is requested', async () => {
     const result = detailResult()
     if (result.detail.status !== 'ready') throw new Error('expected fixture detail')

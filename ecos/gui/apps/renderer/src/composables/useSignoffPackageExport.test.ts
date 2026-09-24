@@ -131,14 +131,12 @@ async function openReviewAndConfirm(
 function createApi() {
   const readFlow = vi.fn().mockResolvedValue({ steps: [] })
   const readParameters = vi.fn().mockResolvedValue({ Design: 'chip_top' })
-  const readHome = vi.fn().mockResolvedValue({})
   const getVersions = vi.fn().mockResolvedValue({})
   const writeProjectTextFile = vi.fn().mockResolvedValue(undefined)
   const readEngineeringSnapshot = vi.fn().mockResolvedValue(engineeringSnapshot())
   const runtimeSnapshot = vi.fn(async () => ({
     parameters: await readParameters(),
     flow: await readFlow(),
-    home: await readHome(),
   }))
   const saveFile = vi.fn().mockResolvedValue('/exports/chip_top_signoff_package.tar.gz')
   const exportSignoff = vi.fn(async (request: { outputPath: string }) => ({
@@ -147,7 +145,7 @@ function createApi() {
   testState.api = {
     app: { getVersions },
     workspace: { writeProjectTextFile },
-    workspaceResources: { readFlow, readParameters, readHome },
+    workspaceResources: { readFlow, readParameters },
     dialog: { saveFile },
     ecc: {
       runtime: {
@@ -166,7 +164,6 @@ function createApi() {
     getVersions,
     readEngineeringSnapshot,
     readFlow,
-    readHome,
     readParameters,
     runtimeSnapshot,
     saveFile,

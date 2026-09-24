@@ -856,6 +856,29 @@ mod tests {
     }
 
     #[test]
+    fn abort_clears_an_active_command_and_pending_work() {
+        let mut queue = MacroOpQueue::default();
+        queue.enqueue(vec![PlannedMacroMove {
+            name: "u_a".to_string(),
+            orient: MacroOrientation::R0,
+            rect: rect(0, 0, 10, 10),
+            staged: false,
+        }]);
+        queue.active = Some(ActiveMacroCommand {
+            command_id: 7,
+            name: "u_a".to_string(),
+            orient: MacroOrientation::R0,
+        });
+
+        queue.abort("result reload failed");
+
+        assert!(!queue.is_busy());
+        assert!(queue.active.is_none());
+        assert!(queue.pending.is_empty());
+        assert_eq!(queue.status(), "macro ops: result reload failed");
+    }
+
+    #[test]
     fn final_plan_overlap_reports_the_conflicting_pair() {
         let moves = vec![
             PlannedMacroMove {

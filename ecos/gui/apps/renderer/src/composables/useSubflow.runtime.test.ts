@@ -31,7 +31,6 @@ const testState = vi.hoisted(() => ({
   runtimeEvents: null as import('vue').Ref<unknown[]> | null,
   resourceVersions: null as
     | import('vue').Ref<{
-        home: number
         flow: number
         parameters: number
         step: number
@@ -126,7 +125,6 @@ describe('useSubflow runtime refresh', () => {
     testState.runtimeEvents = ref([])
     testState.backendRuntimeEvents = ref([])
     testState.resourceVersions = ref({
-      home: 0,
       flow: 0,
       parameters: 0,
       step: 0,

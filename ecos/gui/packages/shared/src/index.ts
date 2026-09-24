@@ -144,6 +144,7 @@ export type {
   DesignRuntimeWorkspaceHandleRequest,
   DesignRuntimeWorkspaceInfoRequest,
   DesignRuntimeWorkspaceOpenRequest,
+  DesignRuntimeWorkspaceRefreshConfigRequest,
   DesignRuntimeWorkspaceStepOutputsRequest,
 } from './contracts/designRuntime.ts'
 export type {
@@ -240,7 +241,7 @@ export type {
   EccWorkspaceExportSignoffResult,
   SignoffAdditionalFile,
   EccWorkspaceHandleRequest,
-  EccWorkspaceHomeResult,
+  EccWorkspaceRefreshConfigRequest,
   EccWorkspaceInspectSignoffResult,
   EccWorkspaceInfoRequest,
   EccWorkspaceInfoResult,

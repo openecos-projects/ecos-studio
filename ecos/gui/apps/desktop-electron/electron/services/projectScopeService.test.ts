@@ -71,7 +71,7 @@ describe('ProjectScopeService', () => {
   it('allows the active project root and descendants, then rejects access after clearing it', async () => {
     const root = await createTempDir('ecos-project-root-')
     const nested = join(root, 'home', 'flow')
-    const file = join(nested, 'home.json')
+    const file = join(nested, 'config.json')
     await mkdir(nested, { recursive: true })
     await writeFile(file, '{}')
 
@@ -254,10 +254,10 @@ describe('ProjectScopeService', () => {
   it('rejects paths that escape the active project root via symlinks', async () => {
     const root = await createTempDir('ecos-project-root-')
     const outside = await createTempDir('ecos-project-outside-')
-    const outsideFile = join(outside, 'home.json')
+    const outsideFile = join(outside, 'config.json')
     await writeFile(outsideFile, '{}')
 
-    const linkedPath = join(root, 'linked-home.json')
+    const linkedPath = join(root, 'linked-config.json')
     await symlink(outsideFile, linkedPath)
 
     const service = new ProjectScopeService()

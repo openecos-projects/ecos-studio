@@ -8,13 +8,6 @@ const testState = vi.hoisted(() => ({
   getWorkspaceResourceIndexApi: vi.fn<() => Promise<any>>(async () => ({
     flow: { steps: [] },
   })),
-  readWorkspaceHomeResourceApi: vi.fn(async () => ({
-    flow: '',
-    layout: '',
-    parameters: '',
-    checklist: '',
-    metrics: {},
-  })),
   runtimeEvents: null as Ref<DesignRuntimeEvent[]> | null,
   readOptionalProjectTextFileChunk: vi.fn(),
   readOptionalProjectTextFileTail: vi.fn(),
@@ -29,7 +22,7 @@ vi.mock('./useWorkspace', () => ({
   useWorkspace: () => ({
     currentProject: testState.currentProject,
     workspaceSession: testState.workspaceSession,
-    resourceVersions: ref({ all: 0, flow: 0, home: 0, logs: 0 }),
+    resourceVersions: ref({ all: 0, flow: 0, logs: 0 }),
     backendRuntimeEvents: testState.runtimeEvents,
   }),
 }))
@@ -44,7 +37,6 @@ vi.mock('./useFlowRunner', () => ({
 vi.mock('@/api/workspaceResources', () => ({
   getWorkspaceResourceIndexApi: testState.getWorkspaceResourceIndexApi,
   getWorkspaceRuntimeSnapshotApi: vi.fn(),
-  readWorkspaceHomeResourceApi: testState.readWorkspaceHomeResourceApi,
 }))
 
 vi.mock('@/utils/projectFiles', () => ({
@@ -110,8 +102,8 @@ function runtimeEvent(data: Record<string, unknown>): DesignRuntimeEvent {
 
 describe('useBackendFlowLogs runtime updates', () => {
   beforeEach(async () => {
-    const { resetSharedHomeDataProjectState } = await import('./useBackendFlowLogs')
-    resetSharedHomeDataProjectState()
+    const { resetSharedFlowLogWorkspaceState } = await import('./useBackendFlowLogs')
+    resetSharedFlowLogWorkspaceState()
     eventSequence = 0
     testState.workspaceSession = ref({
       sessionId: 'session-1',
@@ -501,7 +493,7 @@ describe('useBackendFlowLogs runtime updates', () => {
         ],
       },
     })
-    const { resetSharedHomeDataProjectState, useBackendFlowLogs } =
+    const { resetSharedFlowLogWorkspaceState, useBackendFlowLogs } =
       await import('./useBackendFlowLogs')
     const scope = effectScope()
     const home = scope.run(() => useBackendFlowLogs())!
@@ -522,7 +514,7 @@ describe('useBackendFlowLogs runtime updates', () => {
     expect(segment).toBeUndefined()
     expect(testState.readOptionalProjectTextFileTail).not.toHaveBeenCalled()
     scope.stop()
-    resetSharedHomeDataProjectState()
+    resetSharedFlowLogWorkspaceState()
   })
 
   it('loads only the truncated tail of a completed step log', async () => {

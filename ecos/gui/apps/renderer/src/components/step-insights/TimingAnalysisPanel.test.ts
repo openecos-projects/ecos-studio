@@ -93,4 +93,29 @@ describe('TimingAnalysisPanel', () => {
     expect(wrapper.find('[role="tablist"]').exists()).toBe(false)
     expect(wrapper.find('timing-critical-paths-stub').exists()).toBe(true)
   })
+
+  it('maps timing artifact errors to readable copy while retaining the code', () => {
+    const wrapper = mount(TimingAnalysisPanel, {
+      props: {
+        overview,
+        pathsByCorner: [],
+        selectedCorner: 'MAX_125/RCworst',
+        detailError: 'ARTIFACT_TOO_LARGE',
+      },
+      global: {
+        stubs: {
+          TimingCornerTable: true,
+          TimingCriticalPaths: true,
+          TimingKpis: true,
+          TimingRunInfo: true,
+          TimingWnsChart: true,
+        },
+      },
+    })
+
+    const error = wrapper.find('.timing-detail-state.is-error span')
+    expect(error.text()).toBe('Timing path data is too large to display.')
+    expect(error.attributes('data-error-code')).toBe('ARTIFACT_TOO_LARGE')
+    expect(error.attributes('title')).toBe('Timing detail error: ARTIFACT_TOO_LARGE')
+  })
 })

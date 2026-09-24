@@ -1563,11 +1563,11 @@ async function executeWorkspaceRerun(
       },
     })
     await nextTick()
-    invalidateWorkspaceResources(['home', 'flow', 'step', 'maps', 'logs', 'parameters'])
+    invalidateWorkspaceResources(['flow', 'step', 'maps', 'logs', 'parameters'])
     await agentFlowProgress.start(prepared.directory)
     messageStore.appendToolProgress('Starting rerun execution.', ownerSessionId)
     await executeRerun({ token: prepared.executionToken })
-    invalidateWorkspaceResources(['home', 'flow', 'step', 'maps', 'logs', 'parameters'])
+    invalidateWorkspaceResources(['flow', 'step', 'maps', 'logs', 'parameters'])
     messageStore.appendToolProgress(
       `Rerun ${contract.rerun_id} completed.`,
       ownerSessionId,
@@ -1603,14 +1603,7 @@ async function executeWorkspaceRerun(
           query: route.query,
         })
         await nextTick()
-        invalidateWorkspaceResources([
-          'home',
-          'flow',
-          'step',
-          'maps',
-          'logs',
-          'parameters',
-        ])
+        invalidateWorkspaceResources(['flow', 'step', 'maps', 'logs', 'parameters'])
         messageStore.appendToolProgress(
           'Restored the source workspace after the rerun failed.',
           ownerSessionId,
@@ -1769,7 +1762,7 @@ async function executeWorkspaceParameterUpdate(
       errorMessage: agentErrorMessage,
       initialRevision: contract.workspace_revision,
       invalidate: () =>
-        invalidateWorkspaceResources(['parameters', 'home', 'step-config', 'flow']),
+        invalidateWorkspaceResources(['parameters', 'step-config', 'flow']),
       onFailure: (reason) =>
         messageStore.addAssistantMessage(
           `Parameter update failed: ${reason}`,
