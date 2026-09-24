@@ -347,6 +347,7 @@ async function openDocs(): Promise<void> {
   grid-template-columns: minmax(170px, 200px) minmax(0, 1fr);
   gap: 12px;
   min-height: 0;
+  margin-top: 14px;
   overflow: hidden;
   flex: 1 1 auto;
 }

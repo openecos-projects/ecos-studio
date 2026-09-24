@@ -34,44 +34,46 @@
         >
           <span>{{ row.statusText }}</span>
         </b>
-        <span
-          v-if="row.progressPercent !== null"
-          class="mini-progress"
-          role="progressbar"
-          :style="{ '--progress': row.progressPercent / 100 }"
-          :aria-valuenow="row.progressPercent"
-          aria-valuemin="0"
-          aria-valuemax="100"
-          :aria-label="`${row.name} installation progress`"
-        >
-          <span></span>
-        </span>
-        <span class="plugin-card-actions">
-          <button
-            v-if="homepageUrl"
-            type="button"
-            class="row-action-btn icon-only info"
-            data-title="Homepage"
-            aria-label="Open homepage"
-            @click.stop="emit('homepage')"
+        <div class="plugin-card-side-bottom">
+          <span
+            v-if="row.progressPercent !== null"
+            class="mini-progress"
+            role="progressbar"
+            :style="{ '--progress': row.progressPercent / 100 }"
+            :aria-valuenow="row.progressPercent"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            :aria-label="`${row.name} installation progress`"
           >
-            <i class="ri-external-link-line" aria-hidden="true"></i>
-          </button>
-          <button
-            v-for="action in actions"
-            :key="action.id"
-            type="button"
-            class="row-action-btn"
-            :class="[action.tone, { 'icon-only': action.iconOnly }]"
-            :data-title="action.iconOnly ? action.label : undefined"
-            :aria-label="action.iconOnly ? action.label : undefined"
-            :disabled="action.disabled"
-            @click.stop="emit('action', action.id)"
-          >
-            <i :class="action.icon" aria-hidden="true"></i>
-            <span v-if="!action.iconOnly">{{ action.label }}</span>
-          </button>
-        </span>
+            <span></span>
+          </span>
+          <span class="plugin-card-actions">
+            <button
+              v-if="homepageUrl"
+              type="button"
+              class="row-action-btn icon-only info"
+              data-title="Homepage"
+              aria-label="Open homepage"
+              @click.stop="emit('homepage')"
+            >
+              <i class="ri-external-link-line" aria-hidden="true"></i>
+            </button>
+            <button
+              v-for="action in actions"
+              :key="action.id"
+              type="button"
+              class="row-action-btn"
+              :class="[action.tone, { 'icon-only': action.iconOnly }]"
+              :data-title="action.iconOnly ? action.label : undefined"
+              :aria-label="action.iconOnly ? action.label : undefined"
+              :disabled="action.disabled"
+              @click.stop="emit('action', action.id)"
+            >
+              <i :class="action.icon" aria-hidden="true"></i>
+              <span v-if="!action.iconOnly">{{ action.label }}</span>
+            </button>
+          </span>
+        </div>
       </div>
     </div>
 
@@ -203,7 +205,7 @@ const homepageUrl = computed(() => homepageUrlFor(props.row))
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 10px;
-  margin-top: 7px;
+  margin-top: 11px;
 }
 
 .resource-flow-tags {
@@ -249,9 +251,18 @@ const homepageUrl = computed(() => homepageUrlFor(props.row))
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+  justify-content: space-between;
   gap: 8px;
   flex: 0 0 auto;
+  align-self: stretch;
   padding-top: 2px;
+}
+
+.plugin-card-side-bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
 }
 
 /* ---- Pills ---- */
