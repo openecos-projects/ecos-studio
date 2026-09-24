@@ -33,8 +33,11 @@ use crate::macro_staging::{
 };
 use crate::map_data::{ColormapMode, HeatmapData, MapCatalog, MapItem};
 
+mod gpu_overview;
 mod gpu_tile_worker;
+mod snapshot_reload;
 use gpu_tile_worker::GpuTileWorker;
+use snapshot_reload::{PendingReload, ReloadCompletion};
 
 const SNAPSHOT_REFRESH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 const FOCUS_VIEWPORT_FILL: f32 = 0.45;
@@ -47,6 +50,10 @@ const PATTERN_MIN_SIZE_PX: f32 = 20.0;
 const MAX_PATTERN_OPS_PER_SHAPE: usize = 96;
 const MAX_SELECTION_ENDPOINT_LINES: usize = 6;
 const HOVER_NEAREST_RADIUS_PX: f32 = 8.0;
+/// Screen-space slop allowed when clicking an editable instance bbox. At fit
+/// zoom one pixel spans many DBU, so a zero-tolerance point-in-rect hit test
+/// makes small or far-outside-die macros unselectable until zoomed in.
+const EDIT_PICK_TOLERANCE_PX: f32 = 6.0;
 const MAX_PARAMETERIZED_GRID_LINES_PER_GRID: usize = 4096;
 const MAX_JAVASCRIPT_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const SIDEBAR_SECTION_RESERVE_HEIGHT: f32 = 34.0;
@@ -160,9 +167,24 @@ struct PreparedViewer {
 
 impl From<ChipViewDb> for PreparedViewer {
     fn from(db: ChipViewDb) -> Self {
-        let stats = db.stats();
-        let grid_bounds = grid_reference_bounds(&db).or(stats.bbox);
-        let drawing_category_counts = drawing_category_counts(&db);
+        // The three full-dataset scans are independent read-only passes over
+        // the snapshot; run them in parallel so large designs prepare in
+        // roughly one scan instead of three sequential ones.
+        let (stats, grid_bounds, drawing_category_counts) = thread::scope(|scope| {
+            let db = &db;
+            let stats_job = scope.spawn(|| db.stats());
+            let bounds_job = scope.spawn(|| grid_reference_bounds(db));
+            let counts_job = scope.spawn(|| drawing_category_counts(db));
+            let stats = stats_job.join().expect("snapshot stats scan panicked");
+            let grid_bounds = bounds_job
+                .join()
+                .expect("grid reference bounds scan panicked")
+                .or(stats.bbox);
+            let drawing_category_counts = counts_job
+                .join()
+                .expect("drawing category count scan panicked");
+            (stats, grid_bounds, drawing_category_counts)
+        });
         let snapshot_signature = snapshot_signature_for_db(&db);
         let layer_catalog = db.layer_catalog();
         Self {
@@ -200,6 +222,7 @@ struct LoadedViewer {
     draft: Option<EditDraft>,
     pending_edit: Option<PendingEdit>,
     pending_session_action: Option<PendingSessionAction>,
+    pending_reload: Option<PendingReload>,
     session_action_progress: Option<SessionActionProgress>,
     last_edit_result: Option<String>,
     session_dirty: bool,
@@ -209,6 +232,7 @@ struct LoadedViewer {
     next_snapshot_refresh_check: Instant,
     render_cache: RenderPlanCache,
     view_tile_cache: ViewTilePlaneCache,
+    view_tiles_latch: gpu_overview::ViewTileOverviewLatch,
     next_command_counter: u32,
     drc_overlay: Option<DrcOverlay>,
     selected_drc: Option<usize>,
@@ -880,6 +904,7 @@ struct ObjectVisibility {
     boundaries: bool,
     fill: bool,
     regions: bool,
+    halo: bool,
 }
 
 impl ObjectVisibility {
@@ -941,6 +966,9 @@ impl ObjectVisibility {
         if self.regions {
             b |= 1 << 13;
         }
+        if self.halo {
+            b |= 1 << 18;
+        }
         b
     }
 }
@@ -963,6 +991,7 @@ impl Default for ObjectVisibility {
             boundaries: true,
             fill: true,
             regions: false,
+            halo: true,
         }
     }
 }
@@ -973,6 +1002,7 @@ enum DrawingCategory {
     InstanceMacro,
     InstanceStdCell,
     InstanceFiller,
+    Halo,
     NetSignal,
     NetClock,
     NetOther,
@@ -1005,10 +1035,11 @@ impl DrawingCategory {
         Self::Regions,
     ];
 
-    const ALL: [Self; 17] = [
+    const ALL: [Self; 18] = [
         Self::InstanceMacro,
         Self::InstanceStdCell,
         Self::InstanceFiller,
+        Self::Halo,
         Self::NetSignal,
         Self::NetClock,
         Self::NetOther,
@@ -1039,6 +1070,7 @@ impl DrawingCategory {
             Self::InstanceMacro => "Macro",
             Self::InstanceStdCell => "StdCell",
             Self::InstanceFiller => "Filler",
+            Self::Halo => "Halo",
             Self::NetSignal => "Signal Nets",
             Self::NetClock => "Clock Nets",
             Self::NetOther => "Other Nets",
@@ -1061,6 +1093,7 @@ impl DrawingCategory {
             Self::InstanceMacro | Self::InstanceStdCell | Self::InstanceFiller => {
                 "Toggle this instance class in the layout canvas."
             }
+            Self::Halo => "Instance halo keep-out rectangles.",
             Self::NetSignal => "Regular signal net wire segments.",
             Self::NetClock => "Clock net wire segments from DEF net connect type.",
             Self::NetOther => "Non-signal and non-clock regular net wire segments.",
@@ -1077,11 +1110,9 @@ impl DrawingCategory {
     fn includes_owner_type(self, owner_type: OwnerType) -> bool {
         match self {
             Self::InstanceMacro | Self::InstanceStdCell | Self::InstanceFiller => {
-                matches!(
-                    owner_type,
-                    OwnerType::InstanceBBox | OwnerType::InstanceHalo
-                )
+                owner_type == OwnerType::InstanceBBox
             }
+            Self::Halo => owner_type == OwnerType::InstanceHalo,
             Self::NetSignal | Self::NetClock | Self::NetOther => {
                 owner_type == OwnerType::NetWireSegment
             }
@@ -1115,10 +1146,7 @@ impl ObjectVisibility {
         if OwnerType::from_raw(owner_type) == Some(OwnerType::NetWireSegment) {
             return self.net_signal || self.net_clock || self.net_other;
         }
-        if matches!(
-            OwnerType::from_raw(owner_type),
-            Some(OwnerType::InstanceBBox | OwnerType::InstanceHalo)
-        ) {
+        if OwnerType::from_raw(owner_type) == Some(OwnerType::InstanceBBox) {
             return self.instances.any_visible();
         }
         OwnerType::from_raw(owner_type)
@@ -1155,6 +1183,7 @@ impl ObjectVisibility {
             DrawingCategory::Boundaries => self.boundaries,
             DrawingCategory::Fill => self.fill,
             DrawingCategory::Regions => self.regions,
+            DrawingCategory::Halo => self.halo,
             _ => unreachable!("instance categories handled above"),
         }
     }
@@ -1179,6 +1208,7 @@ impl ObjectVisibility {
             DrawingCategory::Boundaries => self.boundaries = visible,
             DrawingCategory::Fill => self.fill = visible,
             DrawingCategory::Regions => self.regions = visible,
+            DrawingCategory::Halo => self.halo = visible,
             _ => unreachable!("instance categories handled above"),
         }
     }
@@ -1214,17 +1244,12 @@ fn drawing_category_for_shape(db: &ChipViewDb, shape: &ShapeRecord) -> Option<Dr
 fn drawing_category_for_owner(db: &ChipViewDb, owner: &OwnerRef) -> Option<DrawingCategory> {
     let owner_type = OwnerType::from_raw(owner.owner_type)?;
     Some(match owner_type {
-        OwnerType::InstanceBBox | OwnerType::InstanceHalo => {
-            match crate::instance_visibility::classify_instance(db, owner) {
-                crate::instance_visibility::InstanceClass::Macro => DrawingCategory::InstanceMacro,
-                crate::instance_visibility::InstanceClass::StdCell => {
-                    DrawingCategory::InstanceStdCell
-                }
-                crate::instance_visibility::InstanceClass::Filler => {
-                    DrawingCategory::InstanceFiller
-                }
-            }
-        }
+        OwnerType::InstanceHalo => DrawingCategory::Halo,
+        OwnerType::InstanceBBox => match crate::instance_visibility::classify_instance(db, owner) {
+            crate::instance_visibility::InstanceClass::Macro => DrawingCategory::InstanceMacro,
+            crate::instance_visibility::InstanceClass::StdCell => DrawingCategory::InstanceStdCell,
+            crate::instance_visibility::InstanceClass::Filler => DrawingCategory::InstanceFiller,
+        },
         OwnerType::NetWireSegment => net_kind_drawing_category(
             db.owner_name(owner)
                 .and_then(|net_name| db.net_kind_for_name(net_name)),
@@ -2289,6 +2314,7 @@ impl LoadedViewer {
             draft: None,
             pending_edit: None,
             pending_session_action: None,
+            pending_reload: None,
             session_action_progress: None,
             last_edit_result: None,
             session_dirty: initial_session_dirty,
@@ -2298,6 +2324,7 @@ impl LoadedViewer {
             next_snapshot_refresh_check: Instant::now() + SNAPSHOT_REFRESH_CHECK_INTERVAL,
             render_cache: RenderPlanCache::default(),
             view_tile_cache: ViewTilePlaneCache::default(),
+            view_tiles_latch: gpu_overview::ViewTileOverviewLatch::default(),
             next_command_counter: 1,
             drc_overlay,
             selected_drc: None,
@@ -2904,15 +2931,20 @@ impl LoadedViewer {
                     self.pan = egui::Vec2::ZERO;
                 }
             }
-            let can_reload = self.pending_edit.is_none() && self.draft.is_none();
+            let can_reload = self.pending_edit.is_none()
+                && self.draft.is_none()
+                && self.pending_reload.is_none();
             if ui
                 .add_enabled(can_reload, egui::Button::new("↻"))
                 .on_hover_text("Reload geometry snapshot")
                 .clicked()
             {
-                match self.reload_snapshot() {
+                match self.reload_snapshot(ReloadCompletion::notify(
+                    "geometry snapshot reloaded",
+                    "failed to reload geometry",
+                )) {
                     Ok(()) => {
-                        self.last_edit_result = Some("geometry snapshot reloaded".to_string());
+                        self.last_edit_result = Some("reloading geometry snapshot...".to_string());
                     }
                     Err(err) => {
                         self.last_edit_result = Some(format!("failed to reload geometry: {err}"));
@@ -3279,22 +3311,40 @@ impl LoadedViewer {
         use crate::instance_visibility::{InstanceClass, SidebarGroupAction, SidebarGroupChild};
 
         let mut changed = false;
-        let children = InstanceClass::ALL
-            .into_iter()
-            .map(|class| {
-                let category = match class {
-                    InstanceClass::Macro => DrawingCategory::InstanceMacro,
-                    InstanceClass::StdCell => DrawingCategory::InstanceStdCell,
-                    InstanceClass::Filler => DrawingCategory::InstanceFiller,
-                };
-                SidebarGroupChild {
-                    label: class.label(),
-                    tooltip: class.tooltip(),
-                    count: self.drawing_category_shape_count(category),
-                    visible: self.object_visibility.instances.is_visible(class),
-                }
-            })
-            .collect::<Vec<_>>();
+        let children = [
+            (
+                "Macro",
+                InstanceClass::Macro.tooltip(),
+                self.drawing_category_shape_count(DrawingCategory::InstanceMacro),
+                self.object_visibility.instances.macro_,
+            ),
+            (
+                "Halo",
+                DrawingCategory::Halo.tooltip(),
+                self.drawing_category_shape_count(DrawingCategory::Halo),
+                self.object_visibility.halo,
+            ),
+            (
+                "StdCell",
+                InstanceClass::StdCell.tooltip(),
+                self.drawing_category_shape_count(DrawingCategory::InstanceStdCell),
+                self.object_visibility.instances.stdcell,
+            ),
+            (
+                "Filler",
+                InstanceClass::Filler.tooltip(),
+                self.drawing_category_shape_count(DrawingCategory::InstanceFiller),
+                self.object_visibility.instances.filler,
+            ),
+        ]
+        .into_iter()
+        .map(|(label, tooltip, count, visible)| SidebarGroupChild {
+            label,
+            tooltip,
+            count,
+            visible,
+        })
+        .collect::<Vec<_>>();
         if let Some(action) = crate::instance_visibility::sidebar_tristate_tree(
             ui,
             "drawing_data_instances_tree",
@@ -3305,12 +3355,20 @@ impl LoadedViewer {
             match action {
                 SidebarGroupAction::SetAll(visible) => {
                     self.object_visibility.instances.set_all(visible);
+                    self.object_visibility.halo = visible;
                 }
-                SidebarGroupAction::SetChild { index, visible } => {
-                    self.object_visibility
+                SidebarGroupAction::SetChild { index, visible } => match index {
+                    0 => self.object_visibility.instances.set_visible(InstanceClass::Macro, visible),
+                    1 => self.object_visibility.halo = visible,
+                    2 => self
+                        .object_visibility
                         .instances
-                        .set_visible(InstanceClass::ALL[index], visible);
-                }
+                        .set_visible(InstanceClass::StdCell, visible),
+                    _ => self
+                        .object_visibility
+                        .instances
+                        .set_visible(InstanceClass::Filler, visible),
+                },
             }
             changed = true;
         }
@@ -3909,7 +3967,7 @@ impl LoadedViewer {
             .collect();
         let query_layer_ids = render_query_layer_ids(&self.layers, self.object_visibility);
         let viewport = screen_to_world_rect(canvas, world, canvas, self.zoom, self.pan);
-        let use_view_tiles = self.should_use_view_tiles(viewport, world);
+        let use_view_tiles = self.should_use_view_tiles(viewport, world, canvas);
         let hover_world_point = ui
             .ctx()
             .input(|input| input.pointer.hover_pos())
@@ -3939,6 +3997,7 @@ impl LoadedViewer {
                             point,
                             modifiers.shift,
                             modifiers.command || modifiers.ctrl,
+                            edit_pick_tolerance_dbu(world, canvas, self.zoom),
                         )
                     });
                     macro_mode.or_else(|| {
@@ -4035,8 +4094,13 @@ impl LoadedViewer {
                 let modifiers = ui.ctx().input(|input| input.modifiers);
                 let mode =
                     SelectionMode::for_click(modifiers.shift, modifiers.command || modifiers.ctrl);
-                let handled =
-                    interaction_point.is_some_and(|point| self.select_macro_at(point, mode));
+                let handled = interaction_point.is_some_and(|point| {
+                    self.select_macro_at(
+                        point,
+                        mode,
+                        edit_pick_tolerance_dbu(world, canvas, self.zoom),
+                    )
+                });
                 if !handled {
                     self.selected = response
                         .interact_pointer_pos()
@@ -4064,7 +4128,7 @@ impl LoadedViewer {
             }
         }
         let mut drawn = 0usize;
-        let use_view_tiles = self.should_use_view_tiles(viewport, world);
+        let use_view_tiles = self.should_use_view_tiles(viewport, world, canvas);
         let view_lod = self.view_lod_level();
         let hover_nearest = if use_view_tiles {
             None
@@ -4091,19 +4155,31 @@ impl LoadedViewer {
             && !pointer_over_heatmap;
 
         if use_view_tiles {
-            for (layer_id, style) in &visible_layers {
-                for tile in self
-                    .view_tile_cache
-                    .visible_tiles(&self.db, view_lod, *layer_id, viewport)
-                {
-                    let screen =
-                        world_to_screen_rect(tile.bbox, world, canvas, self.zoom, self.pan);
-                    if !screen.is_positive() || !screen.intersects(canvas) {
-                        continue;
+            if self.is_gpu_active() {
+                drawn += self.paint_gpu_2d_overview(
+                    ui,
+                    canvas,
+                    world,
+                    view_lod,
+                    &visible_layers,
+                    is_interacting,
+                );
+            } else {
+                for (layer_id, style) in &visible_layers {
+                    for tile in self
+                        .view_tile_cache
+                        .visible_tiles(&self.db, view_lod, *layer_id, viewport)
+                        .iter()
+                    {
+                        let screen =
+                            world_to_screen_rect(tile.bbox, world, canvas, self.zoom, self.pan);
+                        if !screen.is_positive() || !screen.intersects(canvas) {
+                            continue;
+                        }
+                        let color = overview_tile_color(*style, tile.shape_count);
+                        painter.rect_filled(screen, 0.0, color);
+                        drawn += 1;
                     }
-                    let color = overview_tile_color(*style, tile.shape_count);
-                    painter.rect_filled(screen, 0.0, color);
-                    drawn += 1;
                 }
             }
         } else {
@@ -4120,18 +4196,18 @@ impl LoadedViewer {
             }
             let layer_index = &self.visibility_rules_cache.layer_index;
             let zoom_rules = &self.visibility_rules_cache.zoom_rules;
-            let mut visible_ids = Vec::new();
-            if !self.is_gpu_active() {
+            let visible_ids: std::sync::Arc<[ShapeId]> = if !self.is_gpu_active() {
                 let query_start = Instant::now();
-                visible_ids = self.render_cache.visible_shape_ids_for_layers(
+                let ids = self.render_cache.visible_shape_ids_for_layers(
                     &self.db,
                     &query_layer_ids,
                     viewport,
                 );
                 query_duration += query_start.elapsed();
-            }
-
-            self.paint_gpu_heatmap_overlay(ui, canvas, world);
+                ids
+            } else {
+                std::sync::Arc::from(Vec::new())
+            };
 
             if self.is_gpu_active() {
                 let gpu_start = Instant::now();
@@ -4155,28 +4231,14 @@ impl LoadedViewer {
                             == self.visibility_rules_cache.layer_visibility_hash
                 });
 
-                let gpu_scale = world_to_screen_scale(world, canvas, self.zoom);
-                let world_cx = (world.lx + world.hx) as f32 * 0.5;
-                let world_cy = (world.ly + world.hy) as f32 * 0.5;
                 let _gpu_canvas_center = canvas.center() + self.pan;
 
-                let uniform = crate::canvas_gpu::CanvasUniform {
-                    world_center_dbu: [world_cx, world_cy],
-                    canvas_center_px: [
-                        canvas.width() * 0.5 + self.pan.x,
-                        canvas.height() * 0.5 + self.pan.y,
-                    ],
-                    scale_px_per_dbu: gpu_scale,
-                    pixels_per_point: ui.ctx().pixels_per_point(),
-                    pattern_min_size_px: crate::canvas_gpu::PATTERN_MIN_SIZE_PX,
-                    min_shape_screen_size: crate::canvas_gpu::MIN_SHAPE_SCREEN_SIZE,
-                    screen_size_px: [canvas.width(), canvas.height()],
-                    is_interacting: if is_interacting { 1.0 } else { 0.0 },
-                    global_alpha: 1.0,
-                    visibility_mask: self.object_visibility.gpu_visibility_mask(),
-                    show_context: u32::from(self.zoom > 1.25),
-                    reserved: [0; 2],
-                };
+                let uniform = self.gpu_canvas_uniform(
+                    world,
+                    canvas,
+                    ui.ctx().pixels_per_point(),
+                    is_interacting,
+                );
 
                 let tiles = crate::canvas_gpu::tile_coords_for_bbox(
                     viewport,
@@ -4232,11 +4294,18 @@ impl LoadedViewer {
                         hx: (tx + 1) * crate::canvas_gpu::GPU_TILE_SIZE_DBU,
                         hy: (ty + 1) * crate::canvas_gpu::GPU_TILE_SIZE_DBU,
                     };
+                    // Labels are only painted on non-interacting frames, so
+                    // the worker skips the owner-name/label allocations
+                    // while interacting. The tier keeps label-less and
+                    // label-carrying buffers from sharing a cache key; the
+                    // 16ms repaint catch-up rebuilds labels when a pan or
+                    // zoom ends.
+                    let build_labels = !is_interacting;
                     let buffer_key = crate::canvas_gpu::GpuBufferKey {
                         geometry_epoch: self.geometry_epoch,
                         tile_x: tx,
                         tile_y: ty,
-                        zoom_tier: 0,
+                        zoom_tier: u8::from(build_labels),
                         layer_visibility_hash: self.visibility_rules_cache.layer_visibility_hash,
                         object_visibility_bits: 0,
                     };
@@ -4247,6 +4316,7 @@ impl LoadedViewer {
                             tile_bbox,
                             &query_layer_ids,
                             layer_index,
+                            build_labels,
                         ) {
                             log::error!("{err}");
                             if let Some(gpu_canvas) = self.gpu_canvas.as_mut() {
@@ -4307,7 +4377,7 @@ impl LoadedViewer {
 
                 paint_duration += gpu_start.elapsed();
             } else {
-                for shape_id in visible_ids {
+                for shape_id in visible_ids.iter().copied() {
                     let filter_start = collect_stats.then(Instant::now);
                     let Some(shape) = self.db.find_shape(shape_id) else {
                         if let Some(start) = filter_start {
@@ -4388,6 +4458,13 @@ impl LoadedViewer {
                 }
             }
         }
+        // The heatmap is an overlay: paint it after the geometry (and after
+        // the view-tile overview branch) so rows / obstructions / instances
+        // stacked over the whole die do not hide the density map. Skipping it
+        // in the overview branch used to make the EGR maps do nothing at the
+        // fit-to-die zoom where they matter most.
+        self.paint_gpu_heatmap_overlay(ui, canvas, world);
+
         drawn += paint_parameterized_grid_overlay(
             &painter,
             self.db.grid_metadata(),
@@ -4598,6 +4675,7 @@ impl LoadedViewer {
             egui::FontId::proportional(13.0),
             ecos_text_secondary(),
         );
+        self.paint_reload_indicator(ui, &painter, canvas);
 
         if env_flag_requested(std::env::var(RENDER_STATS_ENV).ok().as_deref()) {
             let stats = CanvasRenderStats {
@@ -5123,8 +5201,17 @@ impl LoadedViewer {
         };
 
         let visibility_hash = layers_visibility_hash(&self.layers);
-        let using_overview_tiles = false;
-        let overview_lod = 0;
+        // Overview slabs replace per-shape instances once the camera is far
+        // enough out that shapes are meaningless; the lod rides in the
+        // cache key so a lod switch rebuilds the buffer.
+        let using_overview_tiles = self.is_gpu_active()
+            && self.db.view_tile_count() > 0
+            && crate::canvas_gpu3d::use_overview_slabs(current_camera, world);
+        let overview_lod = if using_overview_tiles {
+            crate::canvas_gpu3d::overview_lod_level(current_camera, world)
+        } else {
+            0
+        };
         let pixels_per_point = ui.ctx().pixels_per_point();
 
         // Base key for cached 3D instance buffer (state that invalidates the whole cache)
@@ -5311,6 +5398,7 @@ impl LoadedViewer {
             egui::FontId::proportional(13.0),
             ecos_text_secondary(),
         );
+        self.paint_reload_indicator(ui, painter, canvas);
 
         if let Some(pos) = ui
             .ctx()
@@ -6352,20 +6440,25 @@ impl LoadedViewer {
         best.map(|(_, shape_id)| shape_id)
     }
 
-    fn should_use_view_tiles(&self, viewport: Rect32, world: Rect32) -> bool {
-        if self.is_gpu_active() {
+    fn should_use_view_tiles(
+        &mut self,
+        viewport: Rect32,
+        world: Rect32,
+        canvas: egui::Rect,
+    ) -> bool {
+        if !self.object_visibility.is_all_visible() {
+            self.view_tiles_latch.reset();
             return false;
         }
-        should_use_view_tiles_for_state(
+        self.view_tiles_latch.update(
             self.db.view_tile_count(),
-            !self.highlighted.is_empty(),
-            self.selected.is_some(),
             self.draft.is_some(),
             self.edit_enabled,
             self.zoom,
             viewport,
             world,
-        ) && self.object_visibility.is_all_visible()
+            canvas,
+        )
     }
 
     fn view_lod_level(&self) -> u8 {
@@ -6489,11 +6582,12 @@ impl LoadedViewer {
         canvas: egui::Rect,
     ) -> bool {
         let point = screen_to_world_point(pos, world, canvas, self.zoom, self.pan);
-        if let Some(draft) = self.begin_macro_staged_drag(point) {
+        let tolerance = edit_pick_tolerance_dbu(world, canvas, self.zoom);
+        if let Some(draft) = self.begin_macro_staged_drag(point, tolerance) {
             self.draft = Some(draft);
             return true;
         }
-        if let Some(shape_id) = self.pick_editable_instance_bbox_at(point) {
+        if let Some(shape_id) = self.pick_editable_instance_bbox_at(point, tolerance) {
             self.selected = Some(shape_id);
         }
         self.begin_edit_drag(pos, world, canvas)
@@ -6572,7 +6666,7 @@ impl LoadedViewer {
     /// Starts dragging an unplaced macro from its staging slot. The draft
     /// uses `shape_id 0` because the instance has no snapshot shape until
     /// the placement command is accepted.
-    fn begin_macro_staged_drag(&mut self, point: Point32) -> Option<EditDraft> {
+    fn begin_macro_staged_drag(&mut self, point: Point32, tolerance_dbu: i32) -> Option<EditDraft> {
         if !can_start_edit_command(
             self.draft.is_some(),
             self.pending_edit.is_some(),
@@ -6587,7 +6681,7 @@ impl LoadedViewer {
         }
         let (name, rect, orient) = {
             let staging = self.macro_staging.as_ref()?;
-            let index = staging.staged_index_at(point)?;
+            let index = staging.staged_index_at(point, tolerance_dbu)?;
             let staged = &staging.staged[index];
             (staged.name.clone(), staged.rect, staged.orient)
         };
@@ -6665,16 +6759,20 @@ impl LoadedViewer {
         staging.is_macro_instance(&self.db, name)
     }
 
-    fn macro_hit_at(&self, point: Point32) -> Option<(MacroTarget, Option<ShapeId>)> {
+    fn macro_hit_at(
+        &self,
+        point: Point32,
+        tolerance_dbu: i32,
+    ) -> Option<(MacroTarget, Option<ShapeId>)> {
         if let Some(target) = self
             .macro_staging
             .as_ref()
-            .and_then(|staging| staging.staged_target_at(point))
+            .and_then(|staging| staging.staged_target_at(point, tolerance_dbu))
         {
             return Some((target, None));
         }
         let shape_id = self
-            .pick_editable_instance_bbox_at(point)
+            .pick_editable_instance_bbox_at(point, tolerance_dbu)
             .filter(|shape_id| self.placed_shape_is_macro(*shape_id))?;
         let shape = self.db.find_shape(shape_id)?;
         let name = crate::macro_staging::shape_instance_name(&self.db, shape)?;
@@ -6684,8 +6782,8 @@ impl LoadedViewer {
     /// Handles a primary click in macro placement mode. A replace click on
     /// empty space clears the macro selection before ordinary shape picking
     /// continues.
-    fn select_macro_at(&mut self, point: Point32, mode: SelectionMode) -> bool {
-        let hit = self.macro_hit_at(point);
+    fn select_macro_at(&mut self, point: Point32, mode: SelectionMode, tolerance_dbu: i32) -> bool {
+        let hit = self.macro_hit_at(point, tolerance_dbu);
         let target = hit.as_ref().map(|(target, _)| target.clone());
         let preferred_shape = hit.as_ref().and_then(|(_, shape_id)| *shape_id);
         let Some(staging) = self.macro_staging.as_mut() else {
@@ -6731,9 +6829,10 @@ impl LoadedViewer {
         point: Point32,
         shift: bool,
         command_or_ctrl: bool,
+        tolerance_dbu: i32,
     ) -> Option<CanvasDragMode> {
         self.macro_staging.as_ref()?;
-        if let Some((target, preferred_shape)) = self.macro_hit_at(point) {
+        if let Some((target, preferred_shape)) = self.macro_hit_at(point, tolerance_dbu) {
             let already_selected = self
                 .macro_staging
                 .as_ref()
@@ -7062,6 +7161,14 @@ impl LoadedViewer {
         staging.queue.finish_if_idle();
     }
 
+    fn abort_macro_queue(&mut self, reason: impl Into<String>) {
+        if let Some(staging) = self.macro_staging.as_mut() {
+            if staging.queue.is_busy() {
+                staging.queue.abort(reason);
+            }
+        }
+    }
+
     fn paint_macro_staging(&self, painter: &egui::Painter, world: Rect32, canvas: egui::Rect) {
         let Some(staging) = self.macro_staging.as_ref() else {
             return;
@@ -7184,6 +7291,11 @@ impl LoadedViewer {
         if self.pending_edit.is_none() && self.macro_queue_busy() {
             self.pump_macro_queue();
         }
+        if self.pending_reload.is_some() {
+            // An earlier edit result is still reloading its snapshot; wait for
+            // it instead of re-reading the same result file every frame.
+            return;
+        }
         let Some(pending) = &self.pending_edit else {
             return;
         };
@@ -7197,22 +7309,47 @@ impl LoadedViewer {
         {
             Some(result) => result,
             None => {
-                self.last_edit_result = Some("failed to read edit result".to_string());
+                let message = "failed to read edit result".to_string();
+                self.last_edit_result = Some(message.clone());
                 self.pending_edit = None;
+                self.abort_macro_queue(message);
                 return;
             }
         };
+
+        if let Some(active) = self
+            .macro_staging
+            .as_ref()
+            .and_then(|staging| staging.queue.active.as_ref())
+        {
+            if active.command_id != result.command_id {
+                let message = format!(
+                    "macro edit result command {} does not match active command {}",
+                    result.command_id, active.command_id
+                );
+                self.last_edit_result = Some(message.clone());
+                self.pending_edit = None;
+                self.abort_macro_queue(message);
+                return;
+            }
+        }
 
         let action = edit_result_action(&result);
         // Shape id 0 is the placeholder used for staged macro placements;
         // it never identifies a real snapshot shape.
         self.selected = action.selected_shape_id.filter(|shape_id| *shape_id != 0);
         if action.reload_snapshot {
-            match self.reload_snapshot_at(result.geometry_manifest_path.as_deref()) {
-                Ok(()) => {}
+            let completion = ReloadCompletion::EditResult {
+                result: result.clone(),
+                message: action.message,
+            };
+            match self.reload_snapshot_at(result.geometry_manifest_path.as_deref(), completion) {
+                Ok(()) => return,
                 Err(err) => {
-                    self.last_edit_result = Some(format!("failed to reload geometry: {err}"));
+                    let message = format!("failed to reload geometry: {err}");
+                    self.last_edit_result = Some(message.clone());
                     self.pending_edit = None;
+                    self.abort_macro_queue(message);
                     return;
                 }
             }
@@ -7334,6 +7471,10 @@ impl LoadedViewer {
     /// Returns true when a successful Save or Discard was requested by the
     /// close confirmation and the native window may now exit.
     fn poll_session_action_result(&mut self) -> bool {
+        if self.pending_reload.is_some() {
+            // A reload started by an earlier result is still in flight.
+            return false;
+        }
         let Some(pending) = &self.pending_session_action else {
             return false;
         };
@@ -7405,21 +7546,14 @@ impl LoadedViewer {
             95,
             "Reloading published geometry",
         ));
-        match self.reload_snapshot_at(result.geometry_manifest_path.as_deref()) {
-            Ok(()) => {
-                self.session_dirty = false;
-                self.close_confirmation_visible = false;
-                let message = session_action_result_message(&result);
-                self.last_edit_result = Some(message.clone());
-                self.session_action_progress = Some(SessionActionProgress::new(
-                    expected_action,
-                    expected_command_id,
-                    SessionActionProgressPhase::Completed,
-                    100,
-                    message,
-                ));
-                close_after
-            }
+        let completion = ReloadCompletion::SessionAction {
+            result: result.clone(),
+            expected_action,
+            expected_command_id,
+            close_after,
+        };
+        match self.reload_snapshot_at(result.geometry_manifest_path.as_deref(), completion) {
+            Ok(()) => false,
             Err(err) => {
                 let message = format!(
                     "{} completed but geometry reload failed: {err}",
@@ -7625,6 +7759,7 @@ impl LoadedViewer {
     fn poll_external_snapshot_refresh(&mut self) {
         if self.pending_edit.is_some()
             || self.pending_session_action.is_some()
+            || self.pending_reload.is_some()
             || self.draft.is_some()
         {
             return;
@@ -7641,49 +7776,68 @@ impl LoadedViewer {
             return;
         }
 
-        match self.reload_snapshot() {
-            Ok(()) => {
-                self.last_edit_result = Some("geometry snapshot refreshed".to_string());
-            }
+        match self.reload_snapshot(ReloadCompletion::notify(
+            "geometry snapshot refreshed",
+            "failed to refresh geometry",
+        )) {
+            Ok(()) => {}
             Err(err) => {
                 self.last_edit_result = Some(format!("failed to refresh geometry: {err}"));
             }
         }
     }
 
-    fn reload_snapshot(&mut self) -> Result<(), String> {
+    fn reload_snapshot(&mut self, completion: ReloadCompletion) -> Result<(), String> {
         let manifest_path = self.db.snapshot().manifest().path.clone();
-        self.reload_snapshot_from(&manifest_path)
+        self.reload_snapshot_from(&manifest_path, completion)
     }
 
-    fn reload_snapshot_at(&mut self, manifest_path: Option<&str>) -> Result<(), String> {
+    fn reload_snapshot_at(
+        &mut self,
+        manifest_path: Option<&str>,
+        completion: ReloadCompletion,
+    ) -> Result<(), String> {
         let manifest_path = manifest_path
             .filter(|path| !path.trim().is_empty())
             .map(PathBuf::from)
             .unwrap_or_else(|| self.db.snapshot().manifest().path.clone());
-        self.reload_snapshot_from(&manifest_path)
+        self.reload_snapshot_from(&manifest_path, completion)
     }
 
-    fn reload_snapshot_from(&mut self, manifest_path: &Path) -> Result<(), String> {
-        let db = ChipViewDb::open(manifest_path).map_err(|err| err.to_string())?;
-        let snapshot_signature = snapshot_signature_for_db(&db);
-        self.replace_db(db);
-        self.snapshot_signature = snapshot_signature;
+    fn reload_snapshot_from(
+        &mut self,
+        manifest_path: &Path,
+        completion: ReloadCompletion,
+    ) -> Result<(), String> {
+        if self.pending_reload.is_some() {
+            return Err("geometry reload already in progress".to_string());
+        }
+        self.pending_reload = Some(PendingReload::start(
+            manifest_path.to_path_buf(),
+            completion,
+        ));
         Ok(())
     }
 
-    fn replace_db(&mut self, db: ChipViewDb) {
+    fn replace_db(&mut self, prepared: PreparedViewer) {
+        let PreparedViewer {
+            db,
+            stats,
+            grid_bounds,
+            drawing_category_counts,
+            snapshot_signature,
+            layer_catalog,
+        } = prepared;
         let visibility: BTreeMap<LayerId, bool> = self
             .layers
             .iter()
             .map(|layer| (layer.layer_id, layer.visible))
             .collect();
-        let stats = db.stats();
-        self.grid_bounds = grid_reference_bounds(&db).or(stats.bbox);
+        self.grid_bounds = grid_bounds;
         self.stats = stats;
-        self.drawing_category_counts = drawing_category_counts(&db);
-        self.layers = layer_ui_states(&db, &visibility, self.color_theme);
-        self.db = std::sync::Arc::new(db);
+        self.drawing_category_counts = drawing_category_counts;
+        self.layers = layer_ui_states_from_summaries(layer_catalog, &visibility, self.color_theme);
+        self.db = db;
         self.gpu_tile_worker = GpuTileWorker::new(std::sync::Arc::clone(&self.db));
         if let Some(staging) = self.macro_staging.as_mut() {
             staging.reconcile(&self.db);
@@ -7701,6 +7855,7 @@ impl LoadedViewer {
         });
         self.rebuild_layer_stack();
         self.view3d_fitted = false;
+        self.snapshot_signature = snapshot_signature;
     }
 
     fn allocate_command_id(&mut self) -> u64 {
@@ -7910,7 +8065,8 @@ impl LoadedViewer {
             y: hit.ly,
         };
         if self.edit_enabled {
-            if let Some(shape_id) = self.pick_editable_instance_bbox_at(point) {
+            let tolerance = edit_pick_tolerance_dbu(world, canvas, self.zoom);
+            if let Some(shape_id) = self.pick_editable_instance_bbox_at(point, tolerance) {
                 return Some(shape_id);
             }
         }
@@ -7923,12 +8079,16 @@ impl LoadedViewer {
             })
     }
 
-    fn pick_editable_instance_bbox_at(&self, point: Point32) -> Option<ShapeId> {
+    fn pick_editable_instance_bbox_at(
+        &self,
+        point: Point32,
+        tolerance_dbu: i32,
+    ) -> Option<ShapeId> {
         let point_bbox = Rect32 {
-            lx: point.x,
-            ly: point.y,
-            hx: point.x,
-            hy: point.y,
+            lx: point.x.saturating_sub(tolerance_dbu),
+            ly: point.y.saturating_sub(tolerance_dbu),
+            hx: point.x.saturating_add(tolerance_dbu),
+            hy: point.y.saturating_add(tolerance_dbu),
         };
         pick_top_editable_instance_bbox(
             self.db
@@ -7940,6 +8100,7 @@ impl LoadedViewer {
                         .then_some((shape, owner))
                 }),
             point,
+            tolerance_dbu,
         )
     }
 
@@ -8155,13 +8316,18 @@ impl eframe::App for ChipViewerApp {
             loaded.poll_edit_result();
             loaded.poll_session_action_progress();
             close_after_session_action = loaded.poll_session_action_result();
+            if loaded.poll_reload() {
+                close_after_session_action = true;
+            }
             loaded.poll_external_snapshot_refresh();
             if close_requested && loaded.session_dirty {
                 loaded.close_confirmation_visible = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             }
             if let Some(interval) = edit_poll_repaint_interval(
-                loaded.pending_edit.is_some() || loaded.pending_session_action.is_some(),
+                loaded.pending_edit.is_some()
+                    || loaded.pending_session_action.is_some()
+                    || loaded.pending_reload.is_some(),
             ) {
                 ctx.request_repaint_after(interval);
             } else {
@@ -8834,13 +9000,13 @@ fn single_line_query_text(text: &str) -> String {
 }
 
 fn overview_tile_color(style: LayerStyle, shape_count: u32) -> egui::Color32 {
-    let occupancy_alpha = 16.0 + (shape_count.max(1) as f32).sqrt() * 4.0;
-    let alpha = occupancy_alpha.round().clamp(16.0, 52.0) as u8;
-    egui::Color32::from_rgba_unmultiplied(style.rgba[0], style.rgba[1], style.rgba[2], alpha)
+    let [r, g, b, a] = gpu_overview::overview_tile_rgba(style, shape_count);
+    egui::Color32::from_rgba_unmultiplied(r, g, b, a)
 }
 
 fn style_for_shape(style: LayerStyle, owner: Option<&OwnerRef>) -> LayerStyle {
-    let style = match owner.and_then(|owner| OwnerType::from_raw(owner.owner_type)) {
+    let owner_type = owner.and_then(|owner| OwnerType::from_raw(owner.owner_type));
+    let style = match owner_type {
         Some(OwnerType::Die | OwnerType::Core) => context_style(style, 170, 2),
         Some(OwnerType::Row) => context_style(style, 46, 1),
         Some(OwnerType::TrackGrid) => context_style(style, 82, 1),
@@ -8867,9 +9033,6 @@ fn style_for_shape(style: LayerStyle, owner: Option<&OwnerRef>) -> LayerStyle {
             owner_texture_style(style, 76, 235, FillPattern::Grid, 2)
         }
         Some(OwnerType::InstanceBBox) => solid_owner_texture_style(style, 64, 172, 1),
-        Some(OwnerType::InstanceHalo) => {
-            owner_texture_style(style, 38, 156, FillPattern::HorizontalHatch, 1)
-        }
         Some(OwnerType::Blockage) => {
             owner_texture_style(style, 66, 220, FillPattern::CrossHatch, 1)
         }
@@ -8883,8 +9046,17 @@ fn style_for_shape(style: LayerStyle, owner: Option<&OwnerRef>) -> LayerStyle {
         _ => style,
     };
 
-    if style.layer_id == LAYOUT_GEOMETRY_LAYER {
+    let style = if style.layer_id == LAYOUT_GEOMETRY_LAYER {
         transparent_gray_layout_style(style)
+    } else {
+        style
+    };
+
+    // Halo carries its own fixed color; applying it last keeps the orange even
+    // on the layout-geometry layer, where the transparent-gray conversion
+    // above would otherwise mute it to dark gray.
+    if owner_type == Some(OwnerType::InstanceHalo) {
+        halo_texture_style(style)
     } else {
         style
     }
@@ -8938,6 +9110,18 @@ fn io_pin_texture_style(mut style: LayerStyle) -> LayerStyle {
     style.frame_alpha = style.frame_rgba[3];
     style.fill_pattern = FillPattern::CrossHatch;
     style.line_width_px = 2;
+    style
+}
+
+/// Halo keeps a fixed orange regardless of the owning layer's color so it
+/// reads as placement keep-out context instead of layer geometry.
+fn halo_texture_style(mut style: LayerStyle) -> LayerStyle {
+    style.rgba = [255, 140, 0, 38];
+    style.frame_rgba = [255, 140, 0, 156];
+    style.fill_alpha = style.rgba[3];
+    style.frame_alpha = style.frame_rgba[3];
+    style.fill_pattern = FillPattern::HorizontalHatch;
+    style.line_width_px = 1;
     style
 }
 
@@ -9910,6 +10094,15 @@ fn paint_parameterized_grid_overlay(
     drawn
 }
 
+/// Flylines collapse into visual noise below this on-screen span, so they
+/// are skipped entirely (most valuable at extreme zoom-out).
+const FLYLINE_MIN_SCREEN_SPAN_PX: f32 = 6.0;
+/// Per-frame caps for flyline painting. Without them, a full-chip view of a
+/// multi-million-pin design pushes hundreds of thousands of dashed segments
+/// into the painter every frame, which exhausts memory while zooming.
+const FLYLINE_MAX_LINES_PER_FRAME: usize = 48_000;
+const FLYLINE_MAX_SEGMENTS_PER_FRAME: usize = 128_000;
+
 fn paint_unrouted_net_guides(
     painter: &egui::Painter,
     guides: &[UnroutedNetGuide],
@@ -9920,28 +10113,121 @@ fn paint_unrouted_net_guides(
     zoom: f32,
     pan: egui::Vec2,
 ) -> usize {
+    let selected =
+        select_unrouted_net_guide_lines(guides, visibility, viewport, world, canvas, zoom, pan);
     let mut drawn = 0usize;
-    for guide in guides {
-        if !unrouted_net_guide_is_visible(guide, visibility, viewport) {
-            continue;
-        }
+    let mut painted_hub_for: Option<usize> = None;
+    for (guide_index, pin_index) in selected {
+        let guide = &guides[guide_index];
         let category = net_kind_drawing_category(Some(&guide.net_kind));
         let stroke = unrouted_net_guide_stroke(category);
         let hub = world_to_screen_point(guide.hub, world, canvas, zoom, pan);
-        if canvas.contains(hub) {
-            painter.circle_filled(hub, 2.5, stroke.color);
+        if painted_hub_for != Some(guide_index) {
+            painted_hub_for = Some(guide_index);
+            if canvas.contains(hub) {
+                painter.circle_filled(hub, 2.5, stroke.color);
+            }
         }
-        for pin_center in &guide.pin_centers {
-            let endpoint = world_to_screen_point(*pin_center, world, canvas, zoom, pan);
-            if !screen_line_bounds(hub, endpoint).intersects(canvas) {
-                continue;
-            }
-            if paint_dashed_line(painter, hub, endpoint, stroke, 8.0, 5.0) {
-                drawn += 1;
-            }
+        let endpoint =
+            world_to_screen_point(guide.pin_centers[pin_index], world, canvas, zoom, pan);
+        if paint_dashed_line(painter, hub, endpoint, stroke, 8.0, 5.0) {
+            drawn += 1;
         }
     }
     drawn
+}
+
+/// Selects the `(guide_index, pin_index)` flylines to paint this frame.
+///
+/// Selection is deterministic for a stable viewport: a screen-size filter
+/// drops guides that are invisible small, then a stride keeps the line count
+/// within `FLYLINE_MAX_LINES_PER_FRAME` and a segment budget within
+/// `FLYLINE_MAX_SEGMENTS_PER_FRAME`, so panning and zooming paint a bounded
+/// amount of work instead of every flyline in the design.
+fn select_unrouted_net_guide_lines(
+    guides: &[UnroutedNetGuide],
+    visibility: ObjectVisibility,
+    viewport: Rect32,
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+) -> Vec<(usize, usize)> {
+    let mut total_lines = 0usize;
+    let mut visible_guides = Vec::new();
+    for (guide_index, guide) in guides.iter().enumerate() {
+        if !unrouted_net_guide_is_visible(guide, visibility, viewport) {
+            continue;
+        }
+        if flyline_screen_span_px(guide.bbox, world, canvas, zoom, pan) < FLYLINE_MIN_SCREEN_SPAN_PX
+        {
+            continue;
+        }
+        let hub = world_to_screen_point(guide.hub, world, canvas, zoom, pan);
+        let pin_hits: Vec<usize> = guide
+            .pin_centers
+            .iter()
+            .enumerate()
+            .filter(|(_, pin)| {
+                screen_line_bounds(hub, world_to_screen_point(**pin, world, canvas, zoom, pan))
+                    .intersects(canvas)
+            })
+            .map(|(pin_index, _)| pin_index)
+            .collect();
+        total_lines += pin_hits.len();
+        visible_guides.push((guide_index, guide, hub, pin_hits));
+    }
+    if total_lines == 0 {
+        return Vec::new();
+    }
+    let stride = total_lines.div_ceil(FLYLINE_MAX_LINES_PER_FRAME);
+    let mut selected = Vec::new();
+    let mut line_no = 0usize;
+    let mut segments_left = FLYLINE_MAX_SEGMENTS_PER_FRAME;
+    for (guide_index, guide, hub, pin_hits) in visible_guides {
+        for pin_index in pin_hits {
+            if line_no % stride != 0 {
+                line_no += 1;
+                continue;
+            }
+            line_no += 1;
+            let end = world_to_screen_point(guide.pin_centers[pin_index], world, canvas, zoom, pan);
+            let segment_count = dashed_line_segment_count(hub, end, 8.0, 5.0);
+            if segment_count > segments_left {
+                continue;
+            }
+            segments_left -= segment_count;
+            selected.push((guide_index, pin_index));
+        }
+    }
+    selected
+}
+
+fn flyline_screen_span_px(
+    bbox: Rect32,
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+) -> f32 {
+    let screen = world_to_screen_rect(bbox, world, canvas, zoom, pan);
+    screen.width().hypot(screen.height())
+}
+
+/// Segment count of [`dashed_line_segments`] without allocating.
+fn dashed_line_segment_count(
+    begin: egui::Pos2,
+    end: egui::Pos2,
+    dash_length: f32,
+    gap_length: f32,
+) -> usize {
+    let length = (end - begin).length();
+    if length <= 0.5 {
+        return 0;
+    }
+    let dash_length = dash_length.max(1.0);
+    let step = (dash_length + gap_length.max(1.0)).max(2.0);
+    (length / step).ceil().min(256.0) as usize
 }
 
 fn unrouted_net_guide_is_visible(
@@ -10885,6 +11171,26 @@ fn hover_nearest_radius_dbu(world: Rect32, canvas: egui::Rect, zoom: f32) -> i32
     (HOVER_NEAREST_RADIUS_PX / scale).ceil().max(1.0) as i32
 }
 
+/// Click slop for editable-instance picking, in DBU, derived from the current
+/// viewport so the tolerable screen distance stays constant across zooms.
+fn edit_pick_tolerance_dbu(world: Rect32, canvas: egui::Rect, zoom: f32) -> i32 {
+    let scale = world_to_screen_scale(world, canvas, zoom);
+    if !scale.is_finite() || scale <= 0.0 {
+        return 0;
+    }
+    (EDIT_PICK_TOLERANCE_PX / scale).ceil().max(0.0) as i32
+}
+
+/// Chebyshev distance from a point to a rectangle: 0 while inside, otherwise
+/// the gap to the nearest horizontal or vertical edge.
+fn rect_edge_distance_dbu(rect: Rect32, point: Point32) -> i32 {
+    rect.lx
+        .saturating_sub(point.x)
+        .max(point.x.saturating_sub(rect.hx))
+        .max(rect.ly.saturating_sub(point.y))
+        .max(point.y.saturating_sub(rect.hy))
+}
+
 fn ruler_edge_snap_radius_dbu(world: Rect32, canvas: egui::Rect, zoom: f32) -> i32 {
     let scale = world_to_screen_scale(world, canvas, zoom);
     if !scale.is_finite() || scale <= 0.0 {
@@ -11078,35 +11384,6 @@ fn overview_tiles_for_layer<'a>(
         }
     }
     Vec::new()
-}
-
-fn should_use_view_tiles_for_state(
-    view_tile_count: usize,
-    _has_highlight: bool,
-    _has_selection: bool,
-    has_draft: bool,
-    edit_enabled: bool,
-    zoom: f32,
-    viewport: Rect32,
-    world: Rect32,
-) -> bool {
-    if view_tile_count == 0 {
-        return false;
-    }
-    if has_draft || edit_enabled {
-        return false;
-    }
-
-    let viewport_width = (viewport.hx - viewport.lx).max(1) as i64;
-    let viewport_height = (viewport.hy - viewport.ly).max(1) as i64;
-    let world_width = (world.hx - world.lx).max(1) as i64;
-    let world_height = (world.hy - world.ly).max(1) as i64;
-    let viewport_area = viewport_width.saturating_mul(viewport_height);
-    let world_area = world_width.saturating_mul(world_height).max(1);
-
-    // Highlights and selection are rendered as exact overlays on top of the
-    // tile summary. Draft/edit mode still needs the exact base geometry.
-    zoom <= 0.35 && viewport_area >= world_area.saturating_mul(6)
 }
 
 fn can_start_edit_command(
@@ -11404,23 +11681,36 @@ fn instance_move_is_allowed(owner_type: u8) -> bool {
     OwnerType::from_raw(owner_type) == Some(OwnerType::InstanceBBox)
 }
 
+/// Picks the editable instance bbox under (or within `tolerance_dbu` of) the
+/// point. Exact containment wins over near-misses; within each group the
+/// later candidate in iteration order wins, preserving the previous
+/// topmost-shape behavior. `tolerance_dbu` is 0 for an exact hit test.
 fn pick_top_editable_instance_bbox<'a>(
     candidates: impl IntoIterator<Item = (&'a ShapeRecord, &'a OwnerRef)>,
     point: Point32,
+    tolerance_dbu: i32,
 ) -> Option<ShapeId> {
-    candidates
-        .into_iter()
-        .filter(|(shape, owner)| {
-            shape.state == ShapeState::Alive as u8
-                && shape.kind == ShapeKind::Rect as u8
-                && OwnerType::from_raw(owner.owner_type) == Some(OwnerType::InstanceBBox)
-                && point.x >= shape.bbox.lx
-                && point.x <= shape.bbox.hx
-                && point.y >= shape.bbox.ly
-                && point.y <= shape.bbox.hy
-        })
-        .last()
-        .map(|(shape, _)| shape.id)
+    let mut best: Option<(i64, std::cmp::Reverse<usize>, ShapeId)> = None;
+    for (index, (shape, owner)) in candidates.into_iter().enumerate() {
+        if !(shape.state == ShapeState::Alive as u8
+            && shape.kind == ShapeKind::Rect as u8
+            && OwnerType::from_raw(owner.owner_type) == Some(OwnerType::InstanceBBox))
+        {
+            continue;
+        }
+        let distance = i64::from(rect_edge_distance_dbu(shape.bbox, point));
+        if distance > i64::from(tolerance_dbu) {
+            continue;
+        }
+        let key = (distance, std::cmp::Reverse(index));
+        if best
+            .as_ref()
+            .is_none_or(|(best_distance, best_index, _)| key < (*best_distance, *best_index))
+        {
+            best = Some((distance, std::cmp::Reverse(index), shape.id));
+        }
+    }
+    best.map(|(_, _, shape_id)| shape_id)
 }
 
 fn edit_capability_lines(
@@ -12239,6 +12529,7 @@ mod tests {
                 },
                 &[],
                 &LayerRenderIndex::default(),
+                true,
             )
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -12707,9 +12998,10 @@ mod tests {
             hx: 1000,
             hy: 1000,
         };
+        let canvas = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1000.0, 800.0));
 
-        assert!(!should_use_view_tiles_for_state(
-            16, false, false, false, false, 1.0, world, world,
+        assert!(!gpu_overview::should_use_view_tiles_for_state(
+            16, false, false, 1.0, world, world, canvas,
         ));
     }
 
@@ -12801,26 +13093,25 @@ mod tests {
             hx: 2000,
             hy: 2000,
         };
+        let canvas = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1000.0, 800.0));
 
-        assert!(!should_use_view_tiles_for_state(
+        assert!(!gpu_overview::should_use_view_tiles_for_state(
             16,
-            false,
-            false,
             false,
             true,
             0.25,
             overview_viewport,
             world,
+            canvas,
         ));
-        assert!(!should_use_view_tiles_for_state(
+        assert!(!gpu_overview::should_use_view_tiles_for_state(
             16,
-            false,
-            false,
             true,
             false,
             0.25,
             overview_viewport,
             world,
+            canvas,
         ));
     }
 
@@ -12838,36 +13129,18 @@ mod tests {
             hx: 2000,
             hy: 2000,
         };
+        let canvas = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1000.0, 800.0));
 
-        assert!(should_use_view_tiles_for_state(
+        // Highlights and selection render as exact overlays on top of the
+        // tile summary, so they never block the overview path.
+        assert!(gpu_overview::should_use_view_tiles_for_state(
             16,
-            false,
-            false,
             false,
             false,
             0.25,
             overview_viewport,
             world,
-        ));
-        assert!(should_use_view_tiles_for_state(
-            16,
-            true,
-            false,
-            false,
-            false,
-            0.25,
-            overview_viewport,
-            world,
-        ));
-        assert!(should_use_view_tiles_for_state(
-            16,
-            false,
-            true,
-            false,
-            false,
-            0.25,
-            overview_viewport,
-            world,
+            canvas,
         ));
     }
 
@@ -13830,6 +14103,7 @@ mod tests {
                 DrawingCategory::InstanceMacro,
                 DrawingCategory::InstanceStdCell,
                 DrawingCategory::InstanceFiller,
+                DrawingCategory::Halo,
                 DrawingCategory::Placement,
                 DrawingCategory::Boundaries,
                 DrawingCategory::Fill,
@@ -13854,6 +14128,7 @@ mod tests {
             pdn_power: true,
             pdn_ground: true,
             tracks: true,
+            halo: false,
             ..ObjectVisibility::default()
         };
 
@@ -13866,6 +14141,21 @@ mod tests {
         assert!(visibility.includes_owner_type(OwnerType::IoPinPortShape as u8));
         assert!(visibility.includes_owner_type(OwnerType::TrackGrid as u8));
         assert!(!visibility.is_all_visible());
+    }
+
+    #[test]
+    fn halo_category_toggles_independently_of_instance_classes() {
+        let mut visibility = ObjectVisibility::default();
+        assert!(visibility.is_category_visible(DrawingCategory::Halo));
+        assert!(visibility.includes_owner_type(OwnerType::InstanceHalo as u8));
+
+        visibility.set_category_visible(DrawingCategory::Halo, false);
+        assert!(!visibility.is_category_visible(DrawingCategory::Halo));
+        assert!(!visibility.includes_owner_type(OwnerType::InstanceHalo as u8));
+        assert!(visibility.includes_owner_type(OwnerType::InstanceBBox as u8));
+
+        visibility.set_category_visible(DrawingCategory::Halo, true);
+        assert!(visibility.includes_owner_type(OwnerType::InstanceHalo as u8));
     }
 
     #[test]
@@ -14066,6 +14356,27 @@ mod tests {
         assert_eq!(&io_pin_style.frame_rgba[..3], &[255, 222, 89]);
         assert_eq!(io_pin_style.fill_pattern, FillPattern::CrossHatch);
         assert_eq!(io_pin_style.line_width_px, 2);
+
+        let halo = OwnerRef {
+            owner_type: OwnerType::InstanceHalo as u8,
+            ..OwnerRef::default()
+        };
+        let halo_style = style_for_shape(base, Some(&halo));
+        assert_eq!(&halo_style.rgba[..3], &[255, 140, 0]);
+        assert_eq!(&halo_style.frame_rgba[..3], &[255, 140, 0]);
+        assert_eq!(halo_style.fill_pattern, FillPattern::HorizontalHatch);
+        assert_eq!(halo_style.line_width_px, 1);
+        // The fixed orange must not follow the owning layer's color.
+        let other_base =
+            LayerStyle::default_for_metadata(9, "MET3", 0, chip_display::ColorTheme::Vivid);
+        let other_halo_style = style_for_shape(other_base, Some(&halo));
+        assert_eq!(&other_halo_style.rgba[..3], &[255, 140, 0]);
+        assert_eq!(&other_halo_style.frame_rgba[..3], &[255, 140, 0]);
+        // Real halo shapes live on the layout-geometry layer; the fixed orange
+        // must survive that layer's transparent-gray conversion.
+        let layout_halo_style = style_for_shape(layout_geometry_layer_style(), Some(&halo));
+        assert_eq!(&layout_halo_style.rgba, &[255, 140, 0, 38]);
+        assert_eq!(&layout_halo_style.frame_rgba, &[255, 140, 0, 156]);
 
         let via = OwnerRef {
             owner_type: OwnerType::Via as u8,
@@ -14609,6 +14920,165 @@ mod tests {
     }
 
     #[test]
+    fn dashed_line_segment_count_matches_segment_iterator() {
+        for length in [
+            0.0, 0.4, 0.5, 0.6, 1.0, 7.0, 8.0, 13.0, 13.1, 100.0, 10_000.0,
+        ] {
+            let begin = egui::pos2(10.0, 20.0);
+            let end = egui::pos2(10.0 + length, 20.0);
+            assert_eq!(
+                dashed_line_segment_count(begin, end, 8.0, 5.0),
+                dashed_line_segments(begin, end, 8.0, 5.0).len(),
+                "length {length}"
+            );
+        }
+    }
+
+    fn flyline_test_guide(hub: Point32, pin_offsets: &[Point32], bbox: Rect32) -> UnroutedNetGuide {
+        UnroutedNetGuide {
+            net_name: "n".to_string(),
+            net_kind: "signal".to_string(),
+            hub,
+            pin_centers: pin_offsets
+                .iter()
+                .map(|offset| Point32 {
+                    x: hub.x + offset.x,
+                    y: hub.y + offset.y,
+                })
+                .collect(),
+            bbox,
+        }
+    }
+
+    fn flyline_test_world() -> (Rect32, egui::Rect) {
+        (
+            Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 1_000_000,
+                hy: 1_000_000,
+            },
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1000.0, 800.0)),
+        )
+    }
+
+    fn flyline_selection(
+        guides: &[UnroutedNetGuide],
+        viewport: Rect32,
+        world: Rect32,
+        canvas: egui::Rect,
+    ) -> Vec<(usize, usize)> {
+        let mut visibility = ObjectVisibility::default();
+        visibility.net_signal = true;
+        select_unrouted_net_guide_lines(
+            guides,
+            visibility,
+            viewport,
+            world,
+            canvas,
+            1.0,
+            egui::Vec2::ZERO,
+        )
+    }
+
+    #[test]
+    fn flyline_selection_skips_guides_below_min_screen_span() {
+        let (world, canvas) = flyline_test_world();
+        let viewport = world;
+        let hub = Point32 {
+            x: 500_000,
+            y: 500_000,
+        };
+        // A 200 dbu bounding box is far below 6 px on a 1000 px canvas.
+        let tiny = flyline_test_guide(
+            hub,
+            &[Point32 { x: 100, y: 100 }],
+            Rect32 {
+                lx: hub.x - 100,
+                ly: hub.y - 100,
+                hx: hub.x + 100,
+                hy: hub.y + 100,
+            },
+        );
+        assert!(flyline_selection(&[tiny], viewport, world, canvas).is_empty());
+    }
+
+    #[test]
+    fn flyline_selection_strides_lines_over_budget() {
+        let (world, canvas) = flyline_test_world();
+        let viewport = world;
+        let mut guides = Vec::new();
+        for g in 0..60 {
+            let hub = Point32 {
+                x: 50_000 + g * 10_000,
+                y: 500_000,
+            };
+            // Pins a few dbu from the hub: lines are visible on canvas but
+            // produce zero-length segments, keeping the segment budget out of
+            // play so the line stride is what gets exercised.
+            let offsets: Vec<Point32> = (0..1000).map(|i| Point32 { x: i % 7, y: i % 5 }).collect();
+            guides.push(flyline_test_guide(
+                hub,
+                &offsets,
+                Rect32 {
+                    lx: hub.x - 5_000,
+                    ly: hub.y - 5_000,
+                    hx: hub.x + 5_000,
+                    hy: hub.y + 5_000,
+                },
+            ));
+        }
+        let selected = flyline_selection(&guides, viewport, world, canvas);
+        assert_eq!(selected.len(), 30_000);
+        assert!(selected.len() <= FLYLINE_MAX_LINES_PER_FRAME);
+    }
+
+    #[test]
+    fn flyline_selection_caps_total_segments() {
+        let (world, canvas) = flyline_test_world();
+        let viewport = world;
+        let hub = Point32 {
+            x: 500_000,
+            y: 500_000,
+        };
+        // 10000 pins spread across the full die: lines average hundreds of
+        // screen pixels (~25+ segments each, ~250K total), so the segment
+        // budget binds even though the line count is far below the line cap.
+        let offsets: Vec<Point32> = (0..10_000)
+            .map(|i| Point32 {
+                x: -500_000 + i * 100,
+                y: -500_000 + i * 100,
+            })
+            .collect();
+        let guides = [flyline_test_guide(
+            hub,
+            &offsets,
+            Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 1_000_000,
+                hy: 1_000_000,
+            },
+        )];
+        let selected = flyline_selection(&guides, viewport, world, canvas);
+        assert!(selected.len() < 10_000);
+        let mut segment_total = 0usize;
+        for (guide_index, pin_index) in &selected {
+            let guide = &guides[*guide_index];
+            let begin = world_to_screen_point(guide.hub, world, canvas, 1.0, egui::Vec2::ZERO);
+            let end = world_to_screen_point(
+                guide.pin_centers[*pin_index],
+                world,
+                canvas,
+                1.0,
+                egui::Vec2::ZERO,
+            );
+            segment_total += dashed_line_segment_count(begin, end, 8.0, 5.0);
+        }
+        assert!(segment_total <= FLYLINE_MAX_SEGMENTS_PER_FRAME);
+    }
+
+    #[test]
     fn drawing_category_counts_includes_unrouted_net_guides() {
         let dir = temp_snapshot_dir("drawing-counts-unrouted");
         write_empty_snapshot(&dir, false);
@@ -15054,9 +15524,97 @@ mod tests {
         loaded.next_snapshot_refresh_check = Instant::now() - Duration::from_secs(1);
 
         loaded.poll_external_snapshot_refresh();
+        assert!(loaded.pending_reload.is_some());
+        while loaded.pending_reload.is_some() {
+            loaded.poll_reload();
+            std::thread::sleep(Duration::from_millis(10));
+        }
 
         assert!(loaded.db.snapshot().manifest().delta.is_some());
         assert!(loaded.snapshot_signature.files.contains_key(&delta_path));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reload_while_reload_in_flight_is_rejected() {
+        let dir = temp_snapshot_dir("reload-in-flight-rejected");
+        write_empty_snapshot(&dir, false);
+        let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
+        let mut loaded = LoadedViewer::new(
+            chip_display::ColorTheme::Vivid,
+            db,
+            false,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            wgpu::TextureFormat::Bgra8Unorm,
+            crate::RenderMode::Gpu,
+        );
+
+        let first = loaded.reload_snapshot(ReloadCompletion::notify("reloaded", "failed"));
+        assert!(first.is_ok());
+        let second = loaded.reload_snapshot(ReloadCompletion::notify("reloaded", "failed"));
+        assert!(second.is_err());
+        assert_eq!(
+            second.unwrap_err(),
+            "geometry reload already in progress".to_string()
+        );
+        while loaded.pending_reload.is_some() {
+            loaded.poll_reload();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn failed_reload_keeps_existing_database() {
+        let dir = temp_snapshot_dir("failed-reload-keeps-db");
+        write_empty_snapshot(&dir, false);
+        let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
+        let mut loaded = LoadedViewer::new(
+            chip_display::ColorTheme::Vivid,
+            db,
+            false,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            wgpu::TextureFormat::Bgra8Unorm,
+            crate::RenderMode::Gpu,
+        );
+        let original_manifest = loaded.db.snapshot().manifest().path.clone();
+        fs::remove_file(&original_manifest).unwrap();
+
+        loaded
+            .reload_snapshot(ReloadCompletion::notify(
+                "geometry snapshot reloaded",
+                "failed to reload geometry",
+            ))
+            .unwrap();
+        while loaded.pending_reload.is_some() {
+            loaded.poll_reload();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        assert!(loaded.pending_reload.is_none());
+        assert!(loaded
+            .last_edit_result
+            .as_deref()
+            .is_some_and(|message| message.starts_with("failed to reload geometry")));
+        assert_eq!(loaded.db.snapshot().manifest().path, original_manifest);
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -15164,6 +15722,7 @@ mod tests {
             pick_top_editable_instance_bbox(
                 [(&instance, &instance_owner), (&wire, &wire_owner)],
                 point,
+                0,
             ),
             Some(instance.id)
         );
@@ -15201,8 +15760,60 @@ mod tests {
                     (&upper_instance, &instance_owner)
                 ],
                 point,
+                0,
             ),
             Some(upper_instance.id)
+        );
+    }
+
+    #[test]
+    fn editable_instance_hit_accepts_near_miss_within_tolerance() {
+        let instance = ShapeRecord {
+            id: 7,
+            kind: ShapeKind::Rect as u8,
+            state: ShapeState::Alive as u8,
+            bbox: Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 30,
+                hy: 30,
+            },
+            ..ShapeRecord::default()
+        };
+        let instance_owner = OwnerRef {
+            owner_type: OwnerType::InstanceBBox as u8,
+            ..OwnerRef::default()
+        };
+        // A click just outside the bbox selects the macro only when the
+        // zoom-derived tolerance reaches it, and stays a miss otherwise.
+        let near_point = Point32 { x: 35, y: 15 };
+        assert_eq!(
+            pick_top_editable_instance_bbox([(&instance, &instance_owner)], near_point, 4),
+            None
+        );
+        assert_eq!(
+            pick_top_editable_instance_bbox([(&instance, &instance_owner)], near_point, 5),
+            Some(instance.id)
+        );
+        // Exact containment still wins over a nearer near-miss.
+        let other = ShapeRecord {
+            id: 8,
+            bbox: Rect32 {
+                lx: 32,
+                ly: 0,
+                hx: 60,
+                hy: 30,
+            },
+            ..instance
+        };
+        let inside_point = Point32 { x: 15, y: 15 };
+        assert_eq!(
+            pick_top_editable_instance_bbox(
+                [(&other, &instance_owner), (&instance, &instance_owner)],
+                inside_point,
+                20,
+            ),
+            Some(instance.id)
         );
     }
 

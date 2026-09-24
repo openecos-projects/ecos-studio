@@ -184,7 +184,6 @@ function registerHandlers(
     workspaceResourceService: {
       getIndex: vi.fn(),
       readFlow: vi.fn(),
-      readHome: vi.fn(),
       readParameters: vi.fn(),
       resolveStepInfo: vi.fn(),
     },
@@ -272,7 +271,6 @@ function registerHandlers(
       updateWorkspaceStepConfiguration: vi.fn(),
       updateWorkspace: vi.fn(),
       validateWorkspaceSpec: vi.fn(),
-      workspaceHome: vi.fn(),
       workspaceInfo: vi.fn(),
       workspaceSnapshot: vi.fn(),
       workspaceSession: vi.fn(),
@@ -332,7 +330,6 @@ function registerHandlers(
       runFlow: vi.fn(),
       runStep: vi.fn(),
       validateConfig: vi.fn(),
-      workspaceHome: vi.fn(),
       workspaceInfo: vi.fn(),
     },
     shellService: {
@@ -2395,6 +2392,29 @@ describe('registerIpc', () => {
     expect(openExternal).toHaveBeenCalledWith('https://openecos.org')
   })
 
+  it('rejects non-web external URLs', async () => {
+    const { handlers } = registerHandlers()
+    const handler = handlers.get(desktopApiIpcChannels.systemOpenExternal)
+    const event = { sender: { id: 'web-contents' } }
+
+    const expectRejected = async (url: unknown, messagePart: string) => {
+      const result = (await handler?.(event, url)) as {
+        ok: boolean
+        error?: { message: string }
+      }
+      expect(result.ok).toBe(false)
+      expect(result.error?.message).toContain(messagePart)
+    }
+
+    await expectRejected('file:///etc/passwd', "scheme 'file:'")
+    await expectRejected('javascript:alert(1)', "scheme 'javascript:'")
+    await expectRejected('ecos-internal://open', "scheme 'ecos-internal:'")
+    await expectRejected('not a url', 'absolute URL')
+    await expectRejected(42, 'URL string')
+
+    expect(openExternal).not.toHaveBeenCalled()
+  })
+
   it('opens validated waveform paths without converting Windows paths to URLs', async () => {
     const { handlers, services } = registerHandlers()
     const requestedPath = String.raw`C:\work\cpu\trace.vcd`
@@ -2553,7 +2573,7 @@ describe('registerIpc', () => {
       'ws_0001',
     ])
     services.workspaceService.requestProjectPathAccess.mockResolvedValue(
-      '/tmp/project/home.json',
+      '/tmp/project/config.json',
     )
     services.workspaceService.prepareProjectDirectoryReplacement.mockResolvedValue({
       id: 'replacement-ws-0001',
@@ -2646,9 +2666,9 @@ describe('registerIpc', () => {
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceRequestProjectPathAccess)?.(
         event,
-        '/tmp/project/home.json',
+        '/tmp/project/config.json',
       ),
-    ).resolves.toBe('/tmp/project/home.json')
+    ).resolves.toBe('/tmp/project/config.json')
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceReadProjectTextFile)?.(
         event,
@@ -2967,14 +2987,12 @@ describe('registerIpc', () => {
           path: '/tmp/project/home/checklist.json',
         },
         flowJson: { exists: true, kind: 'flow', path: '/tmp/project/home/flow.json' },
-        homeJson: { exists: true, kind: 'home', path: '/tmp/project/home/home.json' },
         parametersJson: {
           exists: true,
           kind: 'parameters',
           path: '/tmp/project/home/parameters.json',
         },
       },
-      homeData: {},
       messages: [],
       parameters: {},
       pdk: 'ics55',
@@ -2983,9 +3001,6 @@ describe('registerIpc', () => {
       topModule: 'gcd',
     }
     services.workspaceResourceService.getIndex.mockResolvedValue(index)
-    services.workspaceResourceService.readHome.mockResolvedValue({
-      flow: '/tmp/project/home/flow.json',
-    })
     services.workspaceResourceService.readFlow.mockResolvedValue({ steps: [] })
     services.workspaceResourceService.readParameters.mockResolvedValue({ Design: 'gcd' })
     services.workspaceResourceService.resolveStepInfo.mockResolvedValue({
@@ -3000,9 +3015,6 @@ describe('registerIpc', () => {
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceResourcesGetIndex)?.(event),
     ).resolves.toEqual(index)
-    await expect(
-      handlers.get(desktopApiIpcChannels.workspaceResourcesReadHome)?.(event),
-    ).resolves.toEqual({ flow: '/tmp/project/home/flow.json' })
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceResourcesReadFlow)?.(event),
     ).resolves.toEqual({ steps: [] })
@@ -3021,7 +3033,6 @@ describe('registerIpc', () => {
     })
 
     expect(services.workspaceResourceService.getIndex).toHaveBeenCalledTimes(1)
-    expect(services.workspaceResourceService.readHome).toHaveBeenCalledTimes(1)
     expect(services.workspaceResourceService.readFlow).toHaveBeenCalledTimes(1)
     expect(services.workspaceResourceService.readParameters).toHaveBeenCalledTimes(1)
     expect(services.workspaceResourceService.resolveStepInfo).toHaveBeenCalledWith({

@@ -335,7 +335,6 @@ export function useSignoffPackageExport({
       }
 
       const flow = runtimeSnapshot.flow
-      const home = runtimeSnapshot.home
       const versions = await api.app
         .getVersions()
         .catch(() => ({ gui: '', ecc: '', eccTools: '' }))
@@ -343,7 +342,6 @@ export function useSignoffPackageExport({
         workspacePath: workspace.workspacePath,
         parameters: isRecord(parameters) ? parameters : undefined,
         flow,
-        homeData: isRecord(home) ? home : undefined,
         versionInfo: isRecord(versions)
           ? {
               gui: typeof versions.gui === 'string' ? versions.gui : undefined,

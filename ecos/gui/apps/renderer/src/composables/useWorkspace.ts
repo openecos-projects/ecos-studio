@@ -1393,7 +1393,7 @@ export function useWorkspace() {
           workspaceRevision: response.data.workspaceRevision,
         })
         candidateWorkspaceCommitted = true
-        workspaceLifecycle.invalidate(['home', 'flow', 'parameters'], {
+        workspaceLifecycle.invalidate(['flow', 'parameters'], {
           sessionId: createdSession.sessionId,
           reason: 'workspace-created',
         })
@@ -1985,7 +1985,7 @@ export function useWorkspace() {
       return null
     }
 
-    // A direct step run can update every Home data source. Backend full-flow
+    // A direct step run can update all workspace resources. Backend full-flow
     // steps retain their incremental resource refresh; frontend full-flow
     // steps returned above and reconcile once the task reaches its terminal event.
     const isIntermediateFullFlowStep = cmd === 'rtl2gds' && eventType === 'step_complete'
@@ -1996,10 +1996,6 @@ export function useWorkspace() {
     const info = event.info
     if (info && typeof info === 'object') {
       const payload = info as Record<string, unknown>
-      if (typeof payload.home_page === 'string') {
-        scopes.add('home')
-        scopes.add('parameters')
-      }
       if (typeof payload.log_file === 'string') scopes.add('logs')
       if (
         typeof payload.subflow_path === 'string' ||
@@ -2010,10 +2006,6 @@ export function useWorkspace() {
       }
     }
 
-    if (typeof event.home_page === 'string') {
-      scopes.add('home')
-      scopes.add('parameters')
-    }
     if (typeof event.log_file === 'string') scopes.add('logs')
     if (typeof event.subflow_path === 'string' || typeof event.step_path === 'string') {
       scopes.add('step')

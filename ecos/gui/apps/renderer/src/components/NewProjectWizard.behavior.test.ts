@@ -302,6 +302,69 @@ describe('NewProjectWizard behavior', () => {
     wrapper.unmount()
   })
 
+  it('clears external PDK paths when switching to another project', async () => {
+    wizardMocks.readProjectEccPdkConfig.mockResolvedValue({
+      exists: false,
+      pdkName: '',
+      pdkRoot: '',
+      externalPaths: [],
+      overrides: {},
+    })
+    const wrapper = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          directory: '/projects/old/ws_0001',
+          pdk_external_paths: ['/old/macros'],
+          project_context: {
+            mode: 'select',
+            project_name: 'old',
+            project_root: '/projects/old',
+            project_json_path: '/projects/old/project.json',
+          },
+        },
+      },
+      global: { stubs: { DesignFileTransfer: true, ...primevueStubs } },
+    })
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      externalPdkPaths: string[]
+      projectContext: { project_root: string }
+    }
+    wizard.currentStep = 5
+    await flushPromises()
+    expect(wizard.externalPdkPaths).toEqual(['/old/macros'])
+
+    wizard.projectContext.project_root = '/projects/new'
+    await flushPromises()
+    expect(wizard.externalPdkPaths).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('reports external PDK persistence failures except for missing new project roots', async () => {
+    wizardMocks.writeProjectEccPdkConfig.mockRejectedValueOnce(
+      new Error('external PDK path does not exist: /missing/macros'),
+    )
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { standaloneWorkspace: true } },
+      global: { stubs: { DesignFileTransfer: true, ...primevueStubs } },
+    })
+    const wizard = wrapper.vm as unknown as {
+      persistExternalPdkPaths(
+        projectRoot: string,
+        externalPaths: string[],
+        pdkRoot: string,
+      ): Promise<void>
+    }
+    await wizard.persistExternalPdkPaths('/projects/demo', ['/missing/macros'], '')
+    expect(wizardMocks.showToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'error',
+        summary: 'External PDK Update Failed',
+      }),
+    )
+    wrapper.unmount()
+  })
+
   it('shows the selected PDK root and ECC default files without a project override', async () => {
     wizardMocks.importedPdks.value = [
       {
@@ -393,6 +456,59 @@ describe('NewProjectWizard behavior', () => {
     await flushPromises()
     expect(wizard.selectedPdkId).toBe('pdk:ics55:canonical')
     expect(wrapper.text()).toContain('/link/pdk')
+    expect(wizard.canProceed).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('resolves a relative declared PDK root against the project root', async () => {
+    wizardMocks.importedPdks.value = [
+      {
+        id: 'pdk:ics55:relative',
+        name: 'ICS55',
+        path: '/pdks/ics55',
+        pdkId: 'ics55',
+        readiness: 'ready',
+        supportsEccDefaults: true,
+        defaultResources: {
+          techLef: '/pdks/ics55/tech.lef',
+          cellLefs: ['/pdks/ics55/cell.lef'],
+          liberty: ['/pdks/ics55/cell.lib'],
+        },
+      },
+    ]
+    wizardMocks.readProjectEccPdkConfig.mockResolvedValueOnce({
+      exists: true,
+      pdkName: 'ics55',
+      pdkRoot: '../pdks/ics55',
+      externalPaths: [],
+      overrides: {},
+    })
+    wizardMocks.scanPdkDirectory.mockImplementationOnce(async (path: string) => {
+      expect(path).toBe('/projects/pdks/ics55')
+      return { canonicalPath: '/pdks/ics55' }
+    })
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { directory: '/projects/demo/ws_0001' } },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      pdkOptions: Array<{ id: string; path: string }>
+      selectedPdkId: string
+      canProceed: boolean
+    }
+    wizard.currentStep = 5
+    await flushPromises()
+    expect(wizardMocks.readProjectEccPdkConfig).toHaveBeenCalled()
+    expect(wizardMocks.scanPdkDirectory).toHaveBeenCalled()
+    expect(wizard.pdkOptions).toHaveLength(1)
+    expect(wizard.selectedPdkId).toBe('pdk:ics55:relative')
     expect(wizard.canProceed).toBe(true)
     wrapper.unmount()
   })

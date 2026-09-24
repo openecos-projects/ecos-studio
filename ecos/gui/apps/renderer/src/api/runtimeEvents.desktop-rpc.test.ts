@@ -339,7 +339,6 @@ describe('createFrontendRuntimeEventClient desktop design runtime events', () =>
       asDesignEvent(
         {
           data: {
-            home_page: '/work/demo/home/home.json',
             log_file: '/work/demo/prepare/log.txt',
             state: 'Success',
             subflow_path: '/work/demo/prepare/subflow.json',
@@ -359,7 +358,6 @@ describe('createFrontendRuntimeEventClient desktop design runtime events', () =>
       expect.objectContaining({
         data: expect.objectContaining({
           designTool: 'frontend',
-          home_page: '/work/demo/home/home.json',
           state: 'Success',
           step: 'prepare',
           type: 'step_complete',
@@ -389,7 +387,6 @@ describe('createFrontendRuntimeEventClient desktop design runtime events', () =>
             operationId: 'frontend-operation-1',
             origin: 'gui',
             payload: {
-              home_page: '/work/frontend/home/home.json',
               log_file: '/work/frontend/prepare/log.txt',
               sourceType: type,
               ...(state ? { state } : {}),
@@ -421,7 +418,6 @@ describe('createFrontendRuntimeEventClient desktop design runtime events', () =>
       expect.objectContaining({
         data: expect.objectContaining({
           designTool: 'frontend',
-          home_page: '/work/frontend/home/home.json',
           info: expect.objectContaining({
             log_file: '/work/frontend/prepare/log.txt',
             subflow_path: '/work/frontend/prepare/subflow.json',

@@ -7,7 +7,6 @@ import type {
   EccRuntimeEvent,
   EccWorkspaceCloseResult,
   EccWorkspaceCreateResult,
-  EccWorkspaceHomeResult,
   EccWorkspaceInfoResult,
   EccWorkspaceOpenResult,
 } from '@ecos-studio/shared'
@@ -77,10 +76,6 @@ export class FrontendRpcRuntimeService {
 
   closeWorkspace(workspaceHandle: string): Promise<EccWorkspaceCloseResult> {
     return this.runtime.closeWorkspace({ workspaceHandle })
-  }
-
-  workspaceHome(workspaceHandle: string): Promise<EccWorkspaceHomeResult> {
-    return this.runtime.workspaceHome({ workspaceHandle })
   }
 
   workspaceInfo(

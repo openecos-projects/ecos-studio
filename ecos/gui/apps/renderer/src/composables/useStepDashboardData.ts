@@ -13,6 +13,7 @@ import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 import {
   snapshotStepDashboardData,
   applyTimingArtifacts,
+  type StepDashboardArtifactIntegrityWarning,
   type StepDashboardData,
 } from './stepDashboardSnapshot'
 
@@ -192,6 +193,7 @@ export function useStepDashboardData() {
           setTimingError(corner, 'TIMING_ARTIFACT_INVALID')
           return
         }
+        recordArtifactIntegrity(data.value, result.artifact.data)
         applyTimingArtifacts(data.value, [], [detail])
         loadedTimingCorners.add(corner)
       } catch {
@@ -276,6 +278,7 @@ export function useStepDashboardData() {
         ) {
           return null
         }
+        recordArtifactIntegrity(next, artifact.artifact.data)
         return artifact.artifact.data
       }
       const readImage = async (artifactId: string): Promise<string | null> => {
@@ -340,6 +343,21 @@ export function useStepDashboardData() {
       if (!cached && viewChanged) data.value = null
     } finally {
       if (version === requestVersion) loading.value = false
+    }
+  }
+
+  function recordArtifactIntegrity(
+    target: StepDashboardData,
+    artifact: BackendWorkspaceArtifactContent,
+  ): void {
+    if (artifact.integrity !== 'externally-modified') return
+    const warning: StepDashboardArtifactIntegrityWarning = {
+      actualSizeBytes: artifact.actualSizeBytes ?? null,
+      name: artifact.name,
+      recordedSizeBytes: artifact.recordedSizeBytes ?? null,
+    }
+    if (!target.artifactIntegrityWarnings.some((item) => item.name === warning.name)) {
+      target.artifactIntegrityWarnings.push(warning)
     }
   }
 

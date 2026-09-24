@@ -200,6 +200,7 @@ export type { EccRuntimeOperation }
 export interface RefreshConfigRequest {
   designTool?: DesignTool
   directory: string
+  force?: boolean
   workspaceHandle?: string
   workspace_handle?: string
 }
@@ -214,6 +215,7 @@ export function refreshConfigApi(request: RequestData<RefreshConfigRequest>) {
   return getDesktopApi()
     .runtime.workspace.refreshConfig({
       designTool: designToolFromData(data),
+      ...(data.force === true ? { force: true } : {}),
       workspaceHandle: workspaceHandleFromData(data),
     })
     .then((result) =>
@@ -253,26 +255,4 @@ export function resetFlowApi(request: RequestData<ResetFlowRequest>) {
   return result.then((result) =>
     success(CMDEnum.reset_flow, result as ResetFlowResponse),
   ) as Promise<ResponseData<ResetFlowResponse>>
-}
-
-// ============ Home Page API ============
-
-export interface HomePageResponse {
-  path: string
-}
-
-/**
- * 调用 home_page runtime command 获取 home.json 的路径
- */
-export function getHomePageApi(
-  workspaceHandle = '',
-  designTool: DesignTool = 'backend',
-  directory = '',
-) {
-  void directory
-  return getDesktopApi()
-    .runtime.workspace.home({ designTool, workspaceHandle })
-    .then((result) => success(CMDEnum.home_page, result as HomePageResponse)) as Promise<
-    ResponseData<HomePageResponse>
-  >
 }

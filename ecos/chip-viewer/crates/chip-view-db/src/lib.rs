@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::mem::size_of;
 use std::path::Path;
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use bytemuck::Pod;
@@ -16,11 +18,14 @@ use chipgeom_reader::{GeometrySnapshot, LayerMetadata};
 use regex::Regex;
 use rstar::{RTree, RTreeObject, AABB};
 
+mod view_tiles;
+pub use view_tiles::ViewTileIndex;
+
 pub struct ChipViewDb {
     connectivity_index: ConnectivityIndex,
     layer_index: LayerShapeIndex,
     name_index: OwnerNameIndex,
-    net_guides: Vec<UnroutedNetGuide>,
+    net_guides: OnceLock<Vec<UnroutedNetGuide>>,
     net_index: NetMetadataIndex,
     shape_index: ShapeIdIndex,
     snapshot: GeometrySnapshot,
@@ -60,6 +65,24 @@ pub struct ChipViewMemoryStats {
     pub mapped_bytes: GeometryMappedBytes,
     pub index_bytes: ChipViewIndexMemoryStats,
     pub mapped_plus_index_bytes: usize,
+}
+
+/// Per-phase wall-clock timings collected while opening a [`ChipViewDb`].
+/// All fields are elapsed microseconds measured with [`Instant`]; index
+/// phases are built in parallel, so their individual durations overlap.
+/// `net_guides` is always zero: unrouted net guides are built lazily on
+/// first access instead of during `open`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OpenTimings {
+    pub snapshot_open: u128,
+    pub connectivity_index: u128,
+    pub net_index: u128,
+    pub view_index: u128,
+    pub layer_index: u128,
+    pub shape_index: u128,
+    pub name_index: u128,
+    pub net_guides: u128,
+    pub total: u128,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -171,14 +194,10 @@ pub struct ShapeIdIndex {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ViewTileIndex {
-    by_lod_layer: BTreeMap<(u8, u16), Vec<usize>>,
-}
-
-#[derive(Clone, Debug, Default)]
 pub struct OwnerNameIndex {
-    by_name: BTreeMap<String, Vec<ShapeId>>,
-    name_by_owner: HashMap<(u8, u64), String>,
+    by_name: BTreeMap<Arc<str>, Vec<ShapeId>>,
+    names: Vec<Arc<str>>,
+    name_by_owner: HashMap<(u8, u64), u32>,
     shapes_by_owner: HashMap<(u8, u64), Vec<ShapeId>>,
 }
 
@@ -233,45 +252,163 @@ impl RTreeObject for LayerBBoxEntry {
     }
 }
 
+/// Number of worker threads for index construction. Capped so machines with
+/// very high core counts do not spawn more threads than index phases.
+fn index_worker_count() -> usize {
+    std::thread::available_parallelism()
+        .map(|threads| threads.get())
+        .unwrap_or(1)
+        .min(32)
+}
+
+/// Number of shapes below which a single-threaded layer scan is cheaper than
+/// spawning workers and merging partial results.
+const PARALLEL_SCAN_MIN_SHAPES: usize = 16 * 1024;
+
+/// Endpoint count below which the sort-and-group connectivity index build
+/// runs on the calling thread instead of spawning one worker per map.
+const CONNECTIVITY_PARALLEL_MIN_ENDPOINTS: usize = 4096;
+
+/// Result of scanning one chunk of shapes for the layer index. Each worker
+/// produces one of these and they are merged in chunk order.
+#[derive(Default)]
+struct LayerScan {
+    by_layer: BTreeMap<u16, Vec<usize>>,
+    spatial_entries_by_layer: BTreeMap<u16, Vec<LayerSpatialEntry>>,
+    layer_bbox_map: BTreeMap<u16, [i32; 4]>,
+}
+
+fn scan_layer_chunk(shapes: &[ShapeRecord], index_offset: usize) -> LayerScan {
+    let mut scan = LayerScan::default();
+    for (local_index, shape) in shapes.iter().enumerate() {
+        if shape.state != ShapeState::Alive as u8 {
+            continue;
+        }
+        let index = index_offset + local_index;
+        scan.by_layer.entry(shape.layer_id).or_default().push(index);
+        scan.spatial_entries_by_layer
+            .entry(shape.layer_id)
+            .or_default()
+            .push(LayerSpatialEntry {
+                index,
+                envelope: rect_envelope(shape.bbox),
+            });
+        // Merge this shape's bbox into the per-layer AABB.
+        let b = shape.bbox;
+        let lx = b.lx.min(b.hx);
+        let ly = b.ly.min(b.hy);
+        let hx = b.lx.max(b.hx);
+        let hy = b.ly.max(b.hy);
+        scan.layer_bbox_map
+            .entry(shape.layer_id)
+            .and_modify(|acc| {
+                acc[0] = acc[0].min(lx);
+                acc[1] = acc[1].min(ly);
+                acc[2] = acc[2].max(hx);
+                acc[3] = acc[3].max(hy);
+            })
+            .or_insert([lx, ly, hx, hy]);
+    }
+    scan
+}
+
+fn parallel_layer_scans(shapes: &[ShapeRecord], workers: usize) -> Vec<LayerScan> {
+    let chunk_len = shapes.len().div_ceil(workers);
+    std::thread::scope(|scope| {
+        shapes
+            .chunks(chunk_len)
+            .enumerate()
+            .map(|(chunk_index, chunk)| {
+                let index_offset = chunk_index * chunk_len;
+                scope.spawn(move || scan_layer_chunk(chunk, index_offset))
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|handle| handle.join().expect("layer scan worker panicked"))
+            .collect()
+    })
+}
+
+/// Bulk-loads one spatial R-Tree per layer, loading layers in parallel when
+/// there are enough layers to amortize the worker spawns.
+fn bulk_load_layer_trees(
+    spatial_entries_by_layer: BTreeMap<u16, Vec<LayerSpatialEntry>>,
+    workers: usize,
+) -> BTreeMap<u16, RTree<LayerSpatialEntry>> {
+    let mut layers: Vec<(u16, Vec<LayerSpatialEntry>)> =
+        spatial_entries_by_layer.into_iter().collect();
+    if workers > 1 && layers.len() > 1 {
+        let group_len = layers.len().div_ceil(workers);
+        let loaded: Vec<(u16, RTree<LayerSpatialEntry>)> = std::thread::scope(|scope| {
+            layers
+                .chunks_mut(group_len)
+                .map(|group| {
+                    scope.spawn(move || {
+                        group
+                            .iter_mut()
+                            .map(|(layer_id, entries)| {
+                                (*layer_id, RTree::bulk_load(std::mem::take(entries)))
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .flat_map(|handle| handle.join().expect("layer tree worker panicked"))
+                .collect()
+        });
+        return loaded.into_iter().collect();
+    }
+    layers
+        .into_iter()
+        .map(|(layer_id, entries)| (layer_id, RTree::bulk_load(entries)))
+        .collect()
+}
+
+/// Runs a build phase and reports how long it took, so `open` can report
+/// per-index timings even when phases run concurrently.
+fn timed<T>(phase: impl FnOnce() -> T) -> (T, Duration) {
+    let start = Instant::now();
+    let value = phase();
+    (value, start.elapsed())
+}
+
 impl LayerShapeIndex {
     pub fn from_shapes(shapes: &[ShapeRecord]) -> Self {
-        let mut by_layer = BTreeMap::<u16, Vec<usize>>::new();
-        let mut spatial_entries_by_layer = BTreeMap::<u16, Vec<LayerSpatialEntry>>::new();
-        // Track the merged bounding box for each layer so we can build the
-        // top-level layer-bbox R-Tree in a single bulk-load pass.
+        let workers = index_worker_count();
+        let scans = if workers > 1 && shapes.len() >= PARALLEL_SCAN_MIN_SHAPES {
+            parallel_layer_scans(shapes, workers)
+        } else {
+            vec![scan_layer_chunk(shapes, 0)]
+        };
+        let mut by_layer: BTreeMap<u16, Vec<usize>> = BTreeMap::new();
+        let mut spatial_entries_by_layer: BTreeMap<u16, Vec<LayerSpatialEntry>> = BTreeMap::new();
         let mut layer_bbox_map: BTreeMap<u16, [i32; 4]> = BTreeMap::new();
-        for (index, shape) in shapes.iter().enumerate() {
-            if shape.state != ShapeState::Alive as u8 {
-                continue;
+        // Merge chunk scans in chunk order so per-layer index and entry
+        // vectors keep their original ascending-by-shape-index ordering.
+        for scan in scans {
+            for (layer_id, indices) in scan.by_layer {
+                by_layer.entry(layer_id).or_default().extend(indices);
             }
-            by_layer.entry(shape.layer_id).or_default().push(index);
-            spatial_entries_by_layer
-                .entry(shape.layer_id)
-                .or_default()
-                .push(LayerSpatialEntry {
-                    index,
-                    envelope: rect_envelope(shape.bbox),
-                });
-            // Merge this shape's bbox into the per-layer AABB.
-            let b = shape.bbox;
-            let lx = b.lx.min(b.hx);
-            let ly = b.ly.min(b.hy);
-            let hx = b.lx.max(b.hx);
-            let hy = b.ly.max(b.hy);
-            layer_bbox_map
-                .entry(shape.layer_id)
-                .and_modify(|acc| {
-                    acc[0] = acc[0].min(lx);
-                    acc[1] = acc[1].min(ly);
-                    acc[2] = acc[2].max(hx);
-                    acc[3] = acc[3].max(hy);
-                })
-                .or_insert([lx, ly, hx, hy]);
+            for (layer_id, entries) in scan.spatial_entries_by_layer {
+                spatial_entries_by_layer
+                    .entry(layer_id)
+                    .or_default()
+                    .extend(entries);
+            }
+            for (layer_id, bbox) in scan.layer_bbox_map {
+                layer_bbox_map
+                    .entry(layer_id)
+                    .and_modify(|acc| {
+                        acc[0] = acc[0].min(bbox[0]);
+                        acc[1] = acc[1].min(bbox[1]);
+                        acc[2] = acc[2].max(bbox[2]);
+                        acc[3] = acc[3].max(bbox[3]);
+                    })
+                    .or_insert(bbox);
+            }
         }
-        let spatial_by_layer: BTreeMap<u16, RTree<LayerSpatialEntry>> = spatial_entries_by_layer
-            .into_iter()
-            .map(|(layer_id, entries)| (layer_id, RTree::bulk_load(entries)))
-            .collect();
+        let spatial_by_layer = bulk_load_layer_trees(spatial_entries_by_layer, workers);
         // Build the top-level layer bounding-box R-Tree.
         let layer_bbox_entries: Vec<LayerBBoxEntry> = layer_bbox_map
             .into_iter()
@@ -498,69 +635,26 @@ impl ShapeIdIndex {
     }
 }
 
-impl ViewTileIndex {
-    pub fn from_tiles(tiles: &[GeometryViewTileRecord]) -> Self {
-        let mut by_lod_layer = BTreeMap::<(u8, u16), Vec<usize>>::new();
-        for (index, tile) in tiles.iter().enumerate() {
-            if tile.shape_count == 0 {
-                continue;
-            }
-            by_lod_layer
-                .entry((tile.lod_level, tile.layer_id))
-                .or_default()
-                .push(index);
-        }
-        Self { by_lod_layer }
-    }
-
-    pub fn estimated_heap_bytes(&self) -> usize {
-        size_of::<Self>()
-            + self
-                .by_lod_layer
-                .values()
-                .map(|indices| {
-                    size_of::<(u8, u16)>()
-                        + size_of::<Vec<usize>>()
-                        + indices.capacity() * size_of::<usize>()
-                })
-                .sum::<usize>()
-    }
-
-    pub fn query_tiles<'a>(
-        &self,
-        tiles: &'a [GeometryViewTileRecord],
-        lod_level: u8,
-        layer_id: u16,
-        bbox: Rect32,
-    ) -> Vec<&'a GeometryViewTileRecord> {
-        self.by_lod_layer
-            .get(&(lod_level, layer_id))
-            .into_iter()
-            .flat_map(|indices| indices.iter().copied())
-            .filter_map(|index| tiles.get(index))
-            .filter(|tile| tile.bbox.intersects(bbox))
-            .collect()
-    }
-}
-
 impl OwnerNameIndex {
     fn from_snapshot(snapshot: &GeometrySnapshot) -> Self {
         let owner_names = snapshot.name_records().iter().filter_map(|record| {
             Some((
                 record.owner_type,
                 record.owner_id,
-                snapshot.owner_name(record)?.to_string(),
+                snapshot.owner_name(record)?,
             ))
         });
         Self::from_shapes_and_names(snapshot.shapes(), snapshot.owners(), owner_names)
     }
 
-    fn from_shapes_and_names(
+    fn from_shapes_and_names<S: AsRef<str>>(
         shapes: &[ShapeRecord],
         owners: &[OwnerRef],
-        owner_names: impl IntoIterator<Item = (u8, u64, String)>,
+        owner_names: impl IntoIterator<Item = (u8, u64, S)>,
     ) -> Self {
-        let mut shapes_by_owner = HashMap::<(u8, u64), Vec<ShapeId>>::new();
+        // Group alive shapes by owner key with a single sort instead of
+        // growing one small Vec per owner through repeated map inserts.
+        let mut owner_shape_pairs = Vec::with_capacity(shapes.len());
         for shape in shapes {
             if shape.state != ShapeState::Alive as u8 {
                 continue;
@@ -568,26 +662,62 @@ impl OwnerNameIndex {
             let Some(owner) = owners.get(shape.owner_index as usize) else {
                 continue;
             };
-            shapes_by_owner
-                .entry((owner.owner_type, owner.owner_id))
-                .or_default()
-                .push(shape.id);
+            owner_shape_pairs.push(((owner.owner_type, owner.owner_id), shape.id));
         }
-        for shape_ids in shapes_by_owner.values_mut() {
-            shape_ids.sort_unstable();
+        owner_shape_pairs.sort_unstable();
+        let mut shapes_by_owner = HashMap::<(u8, u64), Vec<ShapeId>>::new();
+        let mut group_start = 0;
+        while group_start < owner_shape_pairs.len() {
+            let mut group_end = group_start + 1;
+            while group_end < owner_shape_pairs.len()
+                && owner_shape_pairs[group_end].0 == owner_shape_pairs[group_start].0
+            {
+                group_end += 1;
+            }
+            // Sorting the full pair makes each group's ids ascending; distinct
+            // shape records can still share one id, so dedup once per group.
+            let mut shape_ids: Vec<ShapeId> = owner_shape_pairs[group_start..group_end]
+                .iter()
+                .map(|pair| pair.1)
+                .collect();
             shape_ids.dedup();
+            shapes_by_owner.insert(owner_shape_pairs[group_start].0, shape_ids);
+            group_start = group_end;
         }
 
-        let mut by_name = BTreeMap::<String, Vec<ShapeId>>::new();
-        let mut name_by_owner = HashMap::<(u8, u64), String>::new();
+        // Intern names once so each unique name is allocated a single time
+        // and shared between by_name, name_by_owner, and the names table.
+        let mut names = Vec::<Arc<str>>::new();
+        let mut name_ids = HashMap::<Arc<str>, u32>::new();
+        let mut records = Vec::new();
         for (owner_type, owner_id, name) in owner_names {
+            let name = name.as_ref();
+            let name_id = match name_ids.get(name) {
+                Some(&name_id) => name_id,
+                None => {
+                    let interned: Arc<str> = Arc::from(name);
+                    let name_id = names.len() as u32;
+                    names.push(interned.clone());
+                    name_ids.insert(interned, name_id);
+                    name_id
+                }
+            };
+            records.push((owner_type, owner_id, name_id));
+        }
+
+        let mut by_name = BTreeMap::<Arc<str>, Vec<ShapeId>>::new();
+        let mut name_by_owner = HashMap::<(u8, u64), u32>::new();
+        for (owner_type, owner_id, name_id) in records {
             name_by_owner
                 .entry((owner_type, owner_id))
-                .or_insert_with(|| name.clone());
+                .or_insert(name_id);
             let Some(shape_ids) = shapes_by_owner.get(&(owner_type, owner_id)) else {
                 continue;
             };
-            by_name.entry(name).or_default().extend(shape_ids);
+            by_name
+                .entry(names[name_id as usize].clone())
+                .or_default()
+                .extend_from_slice(shape_ids);
         }
         for shape_ids in by_name.values_mut() {
             shape_ids.sort_unstable();
@@ -595,6 +725,7 @@ impl OwnerNameIndex {
         }
         Self {
             by_name,
+            names,
             name_by_owner,
             shapes_by_owner,
         }
@@ -607,7 +738,7 @@ impl OwnerNameIndex {
     pub fn query_pattern(&self, pattern: &Regex) -> Vec<ShapeId> {
         self.by_name
             .iter()
-            .filter(|(name, _)| pattern.is_match(name))
+            .filter(|(name, _)| pattern.is_match(name.as_ref()))
             .flat_map(|(_, shape_ids)| shape_ids.iter().copied())
             .collect()
     }
@@ -620,21 +751,21 @@ impl OwnerNameIndex {
     }
 
     pub fn estimated_heap_bytes(&self) -> usize {
-        let by_name_bytes = self
-            .by_name
+        let name_bytes = self
+            .names
             .iter()
-            .map(|(name, shape_ids)| {
-                size_of::<String>()
-                    + name.capacity()
-                    + size_of::<Vec<ShapeId>>()
-                    + shape_ids.capacity() * size_of::<ShapeId>()
-            })
+            .map(|name| size_of::<Arc<str>>() + name.len())
             .sum::<usize>();
-        let name_by_owner_bytes = self
-            .name_by_owner
-            .values()
-            .map(|name| size_of::<(u8, u64)>() + size_of::<String>() + name.capacity())
-            .sum::<usize>();
+        let by_name_bytes = self.by_name.len() * size_of::<Arc<str>>()
+            + self
+                .by_name
+                .values()
+                .map(|shape_ids| {
+                    size_of::<Vec<ShapeId>>() + shape_ids.capacity() * size_of::<ShapeId>()
+                })
+                .sum::<usize>();
+        let name_by_owner_bytes =
+            self.name_by_owner.len() * (size_of::<(u8, u64)>() + size_of::<u32>());
         let shapes_by_owner_bytes = self
             .shapes_by_owner
             .values()
@@ -644,13 +775,13 @@ impl OwnerNameIndex {
                     + shape_ids.capacity() * size_of::<ShapeId>()
             })
             .sum::<usize>();
-        size_of::<Self>() + by_name_bytes + name_by_owner_bytes + shapes_by_owner_bytes
+        size_of::<Self>() + name_bytes + by_name_bytes + name_by_owner_bytes + shapes_by_owner_bytes
     }
 
     pub fn name_for_owner(&self, owner_type: u8, owner_id: u64) -> Option<&str> {
         self.name_by_owner
             .get(&(owner_type, owner_id))
-            .map(String::as_str)
+            .map(|&name_id| self.names[name_id as usize].as_ref())
     }
 }
 
@@ -686,24 +817,69 @@ impl NetMetadataIndex {
 
 impl ConnectivityIndex {
     fn from_endpoints(endpoints: &[ConnectivityMetadata]) -> Self {
-        let mut index = Self::default();
-        for (endpoint_index, endpoint) in endpoints.iter().enumerate() {
-            push_connectivity_index(
-                &mut index.by_instance_name,
-                &endpoint.instance_name,
-                endpoint_index,
-            );
-            push_connectivity_index(&mut index.by_net_name, &endpoint.net_name, endpoint_index);
-            push_connectivity_index(&mut index.by_pin_name, &endpoint.pin_name, endpoint_index);
-            if !endpoint.instance_name.is_empty() && !endpoint.pin_name.is_empty() {
+        // Each map is built independently: collect (name, endpoint_index)
+        // pairs, sort, and group once. That replaces one String allocation
+        // plus a BTreeMap descent per endpoint with a single allocation per
+        // unique name and exact-size index vectors.
+        let workers = index_worker_count();
+        if workers > 1 && endpoints.len() >= CONNECTIVITY_PARALLEL_MIN_ENDPOINTS {
+            let mut by_instance_name = Vec::with_capacity(endpoints.len());
+            let mut by_net_name = Vec::with_capacity(endpoints.len());
+            let mut by_pin_name = Vec::with_capacity(endpoints.len());
+            let mut by_qualified = Vec::with_capacity(endpoints.len());
+            for (index, endpoint) in endpoints.iter().enumerate() {
+                if !endpoint.instance_name.is_empty() {
+                    by_instance_name.push((endpoint.instance_name.as_str(), index));
+                }
+                if !endpoint.net_name.is_empty() {
+                    by_net_name.push((endpoint.net_name.as_str(), index));
+                }
+                if !endpoint.pin_name.is_empty() {
+                    by_pin_name.push((endpoint.pin_name.as_str(), index));
+                }
+                if !endpoint.instance_name.is_empty() && !endpoint.pin_name.is_empty() {
+                    by_qualified.push((
+                        (endpoint.instance_name.as_str(), endpoint.pin_name.as_str()),
+                        index,
+                    ));
+                }
+            }
+            std::thread::scope(|scope| {
+                let instance = scope.spawn(move || grouped_connectivity_index(by_instance_name));
+                let net = scope.spawn(move || grouped_connectivity_index(by_net_name));
+                let pin = scope.spawn(move || grouped_connectivity_index(by_pin_name));
+                let qualified = scope.spawn(move || grouped_qualified_index(by_qualified));
+                Self {
+                    by_instance_name: instance
+                        .join()
+                        .expect("instance connectivity index worker panicked"),
+                    by_net_name: net.join().expect("net connectivity index worker panicked"),
+                    by_pin_name: pin.join().expect("pin connectivity index worker panicked"),
+                    by_qualified_pin_name: qualified
+                        .join()
+                        .expect("qualified connectivity index worker panicked"),
+                }
+            })
+        } else {
+            let mut index = Self::default();
+            for (endpoint_index, endpoint) in endpoints.iter().enumerate() {
                 push_connectivity_index(
-                    &mut index.by_qualified_pin_name,
-                    &format!("{}/{}", endpoint.instance_name, endpoint.pin_name),
+                    &mut index.by_instance_name,
+                    &endpoint.instance_name,
                     endpoint_index,
                 );
+                push_connectivity_index(&mut index.by_net_name, &endpoint.net_name, endpoint_index);
+                push_connectivity_index(&mut index.by_pin_name, &endpoint.pin_name, endpoint_index);
+                if !endpoint.instance_name.is_empty() && !endpoint.pin_name.is_empty() {
+                    push_connectivity_index(
+                        &mut index.by_qualified_pin_name,
+                        &format!("{}/{}", endpoint.instance_name, endpoint.pin_name),
+                        endpoint_index,
+                    );
+                }
             }
+            index
         }
-        index
     }
 
     fn endpoints_for_instance<'a>(
@@ -913,6 +1089,63 @@ fn push_connectivity_index(
     map.entry(name.to_string())
         .or_default()
         .push(endpoint_index);
+}
+
+/// Groups sorted (name, endpoint_index) pairs into an ordered name index.
+/// Sorting by (name, index) keeps each name's endpoint indices ascending in
+/// original record order, matching the incremental push-based builder.
+fn grouped_connectivity_index<K>(pairs: Vec<(K, usize)>) -> BTreeMap<String, Vec<usize>>
+where
+    K: Ord + AsRef<str> + Into<String>,
+{
+    let mut pairs = pairs;
+    pairs.sort_unstable();
+    // Group into sorted key-value pairs and bulk-collect: BTreeMap builds
+    // from a sorted iterator in linear time instead of rebalancing per key.
+    let mut grouped = Vec::with_capacity(pairs.len());
+    let mut group_start = 0;
+    while group_start < pairs.len() {
+        let mut group_end = group_start + 1;
+        while group_end < pairs.len() && pairs[group_end].0 == pairs[group_start].0 {
+            group_end += 1;
+        }
+        grouped.push((
+            pairs[group_start].0.as_ref().to_string(),
+            pairs[group_start..group_end]
+                .iter()
+                .map(|pair| pair.1)
+                .collect(),
+        ));
+        group_start = group_end;
+    }
+    grouped.into_iter().collect()
+}
+
+/// Groups qualified (instance, pin) pairs without formatting every endpoint:
+/// pairs are sorted as tuples and the "instance/pin" key is allocated once
+/// per unique pair. Pair grouping is equivalent to formatting first because
+/// the map is injective, and the BTreeMap keeps keys ordered regardless of
+/// insertion order, so the result matches the incremental builder exactly.
+fn grouped_qualified_index(pairs: Vec<((&str, &str), usize)>) -> BTreeMap<String, Vec<usize>> {
+    let mut pairs = pairs;
+    pairs.sort_unstable();
+    let mut grouped = Vec::with_capacity(pairs.len());
+    let mut group_start = 0;
+    while group_start < pairs.len() {
+        let mut group_end = group_start + 1;
+        while group_end < pairs.len() && pairs[group_end].0 == pairs[group_start].0 {
+            group_end += 1;
+        }
+        grouped.push((
+            format!("{}/{}", pairs[group_start].0 .0, pairs[group_start].0 .1),
+            pairs[group_start..group_end]
+                .iter()
+                .map(|pair| pair.1)
+                .collect(),
+        ));
+        group_start = group_end;
+    }
+    grouped.into_iter().collect()
 }
 
 fn connectivity_index_map_bytes(map: &BTreeMap<String, Vec<usize>>) -> usize {
@@ -1125,7 +1358,7 @@ fn is_pickable_shape_kind(kind: u8) -> bool {
     kind == ShapeKind::Rect as u8 || kind == ShapeKind::Line as u8 || kind == ShapeKind::Point as u8
 }
 
-fn rect_envelope(rect: Rect32) -> AABB<[i32; 2]> {
+pub(crate) fn rect_envelope(rect: Rect32) -> AABB<[i32; 2]> {
     AABB::from_corners(
         [rect.lx.min(rect.hx), rect.ly.min(rect.hy)],
         [rect.lx.max(rect.hx), rect.ly.max(rect.hy)],
@@ -1477,47 +1710,74 @@ fn filter_shape_ids_by_owner_types(
 
 impl ChipViewDb {
     pub fn open(manifest_path: impl AsRef<Path>) -> Result<Self> {
+        let (db, _timings) = Self::open_with_timings(manifest_path)?;
+        Ok(db)
+    }
+
+    /// Opens the database like [`ChipViewDb::open`] and additionally reports
+    /// per-phase timings. All six indexes are built concurrently from the
+    /// read-only snapshot; unrouted net guides are built lazily on first
+    /// access, so `OpenTimings::net_guides` is always zero here.
+    pub fn open_with_timings(manifest_path: impl AsRef<Path>) -> Result<(Self, OpenTimings)> {
+        let total_start = Instant::now();
+        let snapshot_start = Instant::now();
         let snapshot = GeometrySnapshot::open(manifest_path)?;
-        let connectivity_index =
-            ConnectivityIndex::from_endpoints(snapshot.connectivity_metadata());
-        let net_index = NetMetadataIndex::from_nets(snapshot.net_metadata());
-        let view_index = ViewTileIndex::from_tiles(snapshot.view_tile_records());
-        let (layer_index, name_index, shape_index) = match std::thread::available_parallelism() {
-            Ok(threads) if threads.get() >= 3 => std::thread::scope(|scope| {
-                let layers = scope.spawn(|| LayerShapeIndex::from_shapes(snapshot.shapes()));
-                let shapes = scope.spawn(|| ShapeIdIndex::from_shapes(snapshot.shapes()));
-                let names = OwnerNameIndex::from_snapshot(&snapshot);
-                (layers.join().unwrap(), names, shapes.join().unwrap())
-            }),
-            Ok(threads) if threads.get() >= 2 => std::thread::scope(|scope| {
-                let layers = scope.spawn(|| LayerShapeIndex::from_shapes(snapshot.shapes()));
-                let names = OwnerNameIndex::from_snapshot(&snapshot);
-                let shapes = ShapeIdIndex::from_shapes(snapshot.shapes());
-                (layers.join().unwrap(), names, shapes)
-            }),
-            _ => (
-                LayerShapeIndex::from_shapes(snapshot.shapes()),
-                OwnerNameIndex::from_snapshot(&snapshot),
-                ShapeIdIndex::from_shapes(snapshot.shapes()),
-            ),
+        let snapshot_open = snapshot_start.elapsed();
+
+        let (
+            (connectivity_index, connectivity_elapsed),
+            (net_index, net_elapsed),
+            (view_index, view_elapsed),
+            (layer_index, layer_elapsed),
+            (shape_index, shape_elapsed),
+            (name_index, name_elapsed),
+        ) = std::thread::scope(|scope| {
+            let connectivity = scope.spawn(|| {
+                timed(|| ConnectivityIndex::from_endpoints(snapshot.connectivity_metadata()))
+            });
+            let nets =
+                scope.spawn(|| timed(|| NetMetadataIndex::from_nets(snapshot.net_metadata())));
+            let views =
+                scope.spawn(|| timed(|| ViewTileIndex::from_tiles(snapshot.view_tile_records())));
+            let layers = scope.spawn(|| timed(|| LayerShapeIndex::from_shapes(snapshot.shapes())));
+            let shapes = scope.spawn(|| timed(|| ShapeIdIndex::from_shapes(snapshot.shapes())));
+            let names = timed(|| OwnerNameIndex::from_snapshot(&snapshot));
+            (
+                connectivity
+                    .join()
+                    .expect("connectivity index worker panicked"),
+                nets.join().expect("net index worker panicked"),
+                views.join().expect("view index worker panicked"),
+                layers.join().expect("layer index worker panicked"),
+                shapes.join().expect("shape index worker panicked"),
+                names,
+            )
+        });
+
+        let timings = OpenTimings {
+            snapshot_open: snapshot_open.as_micros(),
+            connectivity_index: connectivity_elapsed.as_micros(),
+            net_index: net_elapsed.as_micros(),
+            view_index: view_elapsed.as_micros(),
+            layer_index: layer_elapsed.as_micros(),
+            shape_index: shape_elapsed.as_micros(),
+            name_index: name_elapsed.as_micros(),
+            net_guides: 0,
+            total: total_start.elapsed().as_micros(),
         };
-        let net_guides = unrouted_net_guides_from_parts(
-            snapshot.shapes(),
-            snapshot.owners(),
-            &name_index,
-            &net_index,
-            snapshot.connectivity_metadata(),
-        );
-        Ok(Self {
-            connectivity_index,
-            layer_index,
-            name_index,
-            net_guides,
-            net_index,
-            shape_index,
-            snapshot,
-            view_index,
-        })
+        Ok((
+            Self {
+                connectivity_index,
+                layer_index,
+                name_index,
+                net_guides: OnceLock::new(),
+                net_index,
+                shape_index,
+                snapshot,
+                view_index,
+            },
+            timings,
+        ))
     }
 
     pub fn snapshot(&self) -> &GeometrySnapshot {
@@ -1625,8 +1885,20 @@ impl ChipViewDb {
         self.net_index.kind_for_name(net_name)
     }
 
+    /// Returns the unrouted-net guides, building them on first access so
+    /// `open` does not pay for a structure only some consumers need.
     pub fn unrouted_net_guides(&self) -> &[UnroutedNetGuide] {
-        &self.net_guides
+        self.net_guides
+            .get_or_init(|| {
+                unrouted_net_guides_from_parts(
+                    self.snapshot.shapes(),
+                    self.snapshot.owners(),
+                    &self.name_index,
+                    &self.net_index,
+                    self.snapshot.connectivity_metadata(),
+                )
+            })
+            .as_slice()
     }
 
     pub fn bus_metadata(&self) -> &[BusMetadata] {
@@ -2678,6 +2950,142 @@ mod tests {
     }
 
     #[test]
+    fn layer_shape_index_scan_matches_sequential_grouping_over_many_shapes() {
+        // Enough shapes, layers, and deleted records to exercise the chunked
+        // parallel scan and its per-layer merge.
+        let mut shapes = Vec::new();
+        for id in 1..=20_000u64 {
+            shapes.push(ShapeRecord {
+                layer_id: (id % 5) as u16,
+                state: if id % 7 == 0 {
+                    ShapeState::Deleted as u8
+                } else {
+                    ShapeState::Alive as u8
+                },
+                bbox: Rect32 {
+                    lx: (id * 37) as i32,
+                    ly: (id * 91) as i32,
+                    hx: (id * 37) as i32 + 20,
+                    hy: (id * 91) as i32 + 20,
+                },
+                ..shape(id, 0)
+            });
+        }
+        let index = LayerShapeIndex::from_shapes(&shapes);
+
+        for layer_id in 0..5u16 {
+            let expected_count = shapes
+                .iter()
+                .filter(|shape| {
+                    shape.layer_id == layer_id && shape.state == ShapeState::Alive as u8
+                })
+                .count();
+            assert_eq!(index.candidate_count(layer_id), expected_count);
+        }
+
+        let viewport = Rect32 {
+            lx: 1_000,
+            ly: 2_000,
+            hx: 20_000,
+            hy: 60_000,
+        };
+        for layer_id in [0u16, 3] {
+            let mut expected = shapes
+                .iter()
+                .filter(|shape| {
+                    shape.layer_id == layer_id
+                        && shape.state == ShapeState::Alive as u8
+                        && shape.bbox.intersects(viewport)
+                })
+                .map(|shape| shape.id)
+                .collect::<Vec<_>>();
+            expected.sort_unstable();
+            assert_eq!(
+                index.query_layer_intersect(&shapes, layer_id, viewport),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn owner_name_index_merges_same_name_owners_and_dedupes_shape_ids() {
+        let owners = [
+            OwnerRef {
+                owner_type: OwnerType::NetWireSegment as u8,
+                owner_id: 10,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::SpecialWireSegment as u8,
+                owner_id: 11,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::InstanceBBox as u8,
+                owner_id: 20,
+                ..OwnerRef::default()
+            },
+        ];
+        // Ids are deliberately unordered, id 5 appears twice under one owner,
+        // and owner 11 has no name record at all.
+        let shapes = [
+            ShapeRecord {
+                owner_index: 0,
+                ..shape(9, 1)
+            },
+            ShapeRecord {
+                owner_index: 1,
+                ..shape(4, 1)
+            },
+            ShapeRecord {
+                owner_index: 0,
+                ..shape(5, 1)
+            },
+            ShapeRecord {
+                owner_index: 0,
+                ..shape(5, 2)
+            },
+            ShapeRecord {
+                owner_index: 0,
+                state: ShapeState::Deleted as u8,
+                ..shape(2, 1)
+            },
+            ShapeRecord {
+                owner_index: 2,
+                ..shape(30, 1)
+            },
+        ];
+        let index = OwnerNameIndex::from_shapes_and_names(
+            &shapes,
+            &owners,
+            [
+                (OwnerType::NetWireSegment as u8, 10, "clk"),
+                (OwnerType::SpecialWireSegment as u8, 11, "clk"),
+                (OwnerType::InstanceBBox as u8, 20, "u0"),
+            ],
+        );
+
+        assert_eq!(index.query("clk"), vec![4, 5, 9]);
+        assert_eq!(
+            index.query_owner(OwnerType::NetWireSegment as u8, 10),
+            vec![5, 9]
+        );
+        assert_eq!(
+            index.query_owner(OwnerType::SpecialWireSegment as u8, 11),
+            vec![4]
+        );
+        assert_eq!(
+            index.name_for_owner(OwnerType::NetWireSegment as u8, 10),
+            Some("clk")
+        );
+        assert_eq!(
+            index.name_for_owner(OwnerType::SpecialWireSegment as u8, 11),
+            Some("clk")
+        );
+        assert_eq!(index.query("u0"), vec![30]);
+    }
+
+    #[test]
     fn shape_detail_includes_shape_owner_owner_name_and_owner_path() {
         let owners = [OwnerRef {
             owner_type: OwnerType::Region as u8,
@@ -3317,6 +3725,71 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["clk"]
         );
+    }
+
+    #[test]
+    fn connectivity_index_parallel_build_preserves_query_semantics() {
+        // Enough endpoints to exercise the sort-and-group parallel builder.
+        let mut endpoints = Vec::new();
+        for i in 0..5000usize {
+            endpoints.push(ConnectivityMetadata {
+                net_name: format!("net{}", i % 97),
+                endpoint_type: "instance".to_string(),
+                instance_name: if i % 13 == 0 {
+                    String::new()
+                } else {
+                    format!("inst{}", i % 61)
+                },
+                pin_name: format!("pin{}", i % 53),
+                master_name: format!("m{}", i % 7),
+                ..ConnectivityMetadata::default()
+            });
+        }
+        let index = ConnectivityIndex::from_endpoints(&endpoints);
+
+        let expected_net_indices = |name: &str| {
+            endpoints
+                .iter()
+                .enumerate()
+                .filter(|(_, endpoint)| endpoint.net_name == name)
+                .map(|(i, _)| i)
+                .collect::<Vec<_>>()
+        };
+        for name in ["net0", "net96", "net53"] {
+            let hits = index.endpoints_for_net(&endpoints, name);
+            assert_eq!(hits.len(), expected_net_indices(name).len());
+            assert!(hits
+                .iter()
+                .zip(expected_net_indices(name))
+                .all(|(endpoint, i)| std::ptr::eq(*endpoint, &endpoints[i])));
+        }
+
+        // Qualified pin lookup uses the "instance/pin" map and skips
+        // endpoints with an empty instance name.
+        let qualified_hits = index.endpoints_for_pin(&endpoints, "inst1/pin2");
+        let expected_qualified = endpoints
+            .iter()
+            .enumerate()
+            .filter(|(_, endpoint)| {
+                endpoint.instance_name == "inst1" && endpoint.pin_name == "pin2"
+            })
+            .map(|(i, _)| i)
+            .collect::<Vec<_>>();
+        assert_eq!(qualified_hits.len(), expected_qualified.len());
+        assert!(qualified_hits
+            .iter()
+            .zip(expected_qualified)
+            .all(|(endpoint, i)| std::ptr::eq(*endpoint, &endpoints[i])));
+
+        // Instance lookup skips empty instance names.
+        let instance_hits = index.endpoints_for_instance(&endpoints, "inst2");
+        let expected_instance = endpoints
+            .iter()
+            .enumerate()
+            .filter(|(_, endpoint)| endpoint.instance_name == "inst2")
+            .map(|(i, _)| i)
+            .collect::<Vec<_>>();
+        assert_eq!(instance_hits.len(), expected_instance.len());
     }
 
     #[test]

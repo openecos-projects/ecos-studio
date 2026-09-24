@@ -79,7 +79,6 @@ describe('frontendRuntimeEventFromNotification', () => {
         cmd: 'rtl2gds',
         data: {
           directory: '/work/frontend',
-          home_page: '/work/frontend/home/home.json',
           log_file: '/work/frontend/prepare/log.txt',
           state: 'Success',
           step: 'prepare',
@@ -93,7 +92,6 @@ describe('frontendRuntimeEventFromNotification', () => {
     ).toEqual({
       data: {
         directory: '/work/frontend',
-        home_page: '/work/frontend/home/home.json',
         log_file: '/work/frontend/prepare/log.txt',
         state: 'Success',
         step: 'prepare',

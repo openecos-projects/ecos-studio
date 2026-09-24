@@ -544,7 +544,6 @@ describe('EccWorkspaceRuntime', () => {
             { name: 'Floorplan', runtime: '0:0:05', state: 'Incomplete', tool: 'ecc' },
           ],
         },
-        home: {},
         lastEventId: 'workspace-1:failed',
         operations: [],
         parameters: {},
@@ -558,7 +557,6 @@ describe('EccWorkspaceRuntime', () => {
             { name: 'Floorplan', runtime: '0:0:05', state: 'Incomplete', tool: 'ecc' },
           ],
         },
-        home: {},
         lastEventId: 'workspace-1:refreshed',
         operations: [],
         parameters: {},
@@ -567,7 +565,10 @@ describe('EccWorkspaceRuntime', () => {
     const workspace = await service.openWorkspace({ directory: '/work/demo' })
     await service.workspaceSnapshot({ workspaceHandle: workspace.workspaceHandle })
 
-    await service.refreshConfig({ workspaceHandle: workspace.workspaceHandle })
+    await service.refreshConfig({
+      force: true,
+      workspaceHandle: workspace.workspaceHandle,
+    })
     const snapshot = await service.workspaceSnapshot({
       workspaceHandle: workspace.workspaceHandle,
     })
@@ -579,6 +580,12 @@ describe('EccWorkspaceRuntime', () => {
     expect(
       client.calls.filter((call) => call.method === 'workspace.snapshot'),
     ).toHaveLength(2)
+    expect(
+      client.calls.find((call) => call.method === 'workspace.refresh_config'),
+    ).toEqual({
+      method: 'workspace.refresh_config',
+      params: { force: true, workspaceId: 'workspace-1' },
+    })
   })
 
   it('maps protocol notifications to the matching GUI workspace handle', async () => {
@@ -1005,7 +1012,6 @@ describe('EccWorkspaceRuntime', () => {
     client.responses.push({
       directory: '/work/demo',
       flow: { steps: [] },
-      home: {},
       lastEventId: 'workspace-1:2',
       operations: [],
       parameters: {},
@@ -1052,7 +1058,6 @@ describe('EccWorkspaceRuntime', () => {
       flow: {
         steps: Array<{ name: string; runtime: string; state: string; tool: string }>
       }
-      home: Record<string, never>
       lastEventId: string
       operations: []
       parameters: Record<string, never>
@@ -1064,7 +1069,6 @@ describe('EccWorkspaceRuntime', () => {
         flow: {
           steps: [{ name: 'Harden', runtime: '', state: 'Ongoing', tool: 'ecc' }],
         },
-        home: {},
         lastEventId: 'workspace-1:ongoing',
         operations: [],
         parameters: {},
@@ -1129,7 +1133,6 @@ describe('EccWorkspaceRuntime', () => {
       flow: {
         steps: [{ name: 'Harden', runtime: '0:0:10', state: 'Success', tool: 'ecc' }],
       },
-      home: {},
       lastEventId: 'workspace-1:completed',
       operations: [],
       parameters: {},
@@ -1206,7 +1209,6 @@ describe('EccWorkspaceRuntime', () => {
     finalSnapshot.resolve({
       directory: '/work/demo',
       flow: { steps: [] },
-      home: {},
       lastEventId: 'workspace-1:2',
       operations: [],
       parameters: {},
@@ -1225,7 +1227,6 @@ describe('EccWorkspaceRuntime', () => {
     client.responses.push({
       directory: '/work/demo',
       flow: { steps: [] },
-      home: {},
       lastEventId: 'workspace-1:2',
       operations: [],
       parameters: {},
@@ -1607,7 +1608,6 @@ describe('EccWorkspaceRuntime', () => {
             },
           ],
         },
-        home: {},
         lastEventId: 'workspace-1:running',
         operations: [
           {
@@ -1652,7 +1652,6 @@ describe('EccWorkspaceRuntime', () => {
             },
           ],
         },
-        home: {},
         lastEventId: 'workspace-2:interrupted',
         operations: [],
         parameters: {},
@@ -1833,7 +1832,6 @@ describe('EccWorkspaceRuntime', () => {
       {
         directory: '/work/demo',
         flow: { steps: [{ name: 'place', state: 'Incomplete' }] },
-        home: {},
         lastEventId: 'workspace-2:2',
         operations: [],
         parameters: {},
@@ -1968,7 +1966,6 @@ describe('EccWorkspaceRuntime', () => {
       {
         directory: '/work/demo',
         flow: { steps: [] },
-        home: {},
         lastEventId: 'workspace-1:0',
         operations: [],
         parameters: {},
@@ -1998,7 +1995,6 @@ describe('EccWorkspaceRuntime', () => {
       {
         directory: '/work/demo',
         flow: { steps: [{ name: 'place', state: 'Ongoing' }] },
-        home: {},
         lastEventId: 'workspace-1:1',
         operations: [],
         parameters: {},
@@ -2016,7 +2012,6 @@ describe('EccWorkspaceRuntime', () => {
       {
         directory: '/work/demo',
         flow: { steps: [{ name: 'place', state: 'Incomplete' }] },
-        home: {},
         lastEventId: 'workspace-1:2',
         operations: [],
         parameters: {},

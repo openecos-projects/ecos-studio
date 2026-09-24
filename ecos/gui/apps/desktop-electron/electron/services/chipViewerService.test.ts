@@ -1426,7 +1426,7 @@ describe('ChipViewerService', () => {
       },
     })
 
-    await service.open({
+    const result = await service.open({
       mode: 'edit',
       projectPath: PROJECT_ROOT,
       step: 'preFloorplan',
@@ -1469,6 +1469,7 @@ describe('ChipViewerService', () => {
       expect.arrayContaining(['--macro-staging-file', stagingPath]),
       expect.any(Object),
     )
+    expect(result.macroStaging).toEqual({ enabled: true })
   })
 
   it('still opens the viewer without macro staging when the DEF is malformed', async () => {
@@ -1494,7 +1495,7 @@ describe('ChipViewerService', () => {
     })
 
     try {
-      await service.open({
+      const result = await service.open({
         mode: 'edit',
         projectPath: PROJECT_ROOT,
         step: 'preFloorplan',
@@ -1513,6 +1514,10 @@ describe('ChipViewerService', () => {
         expect.not.arrayContaining(['--macro-staging-file']),
         expect.any(Object),
       )
+      expect(result.macroStaging).toMatchObject({
+        enabled: false,
+        warning: expect.stringContaining('macro staging:'),
+      })
     } finally {
       warnSpy.mockRestore()
     }

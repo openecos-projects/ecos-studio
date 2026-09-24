@@ -63,7 +63,6 @@ async function writeWorkspace(
       info: step.info ?? {},
     })),
   })
-  await writeJson(join(root, 'home', 'home.json'), {})
 }
 
 describe('WorkspaceResourceService', () => {
@@ -89,9 +88,6 @@ describe('WorkspaceResourceService', () => {
       steps: [
         { name: 'place', tool: 'ecc', state: 'Success', runtime: '00:00:01', info: {} },
       ],
-    })
-    await writeJson(join(root, 'home', 'home.json'), {
-      flow: join(root, 'home', 'flow.json'),
     })
     await writeFile(join(root, 'place_ecc', 'output', 'gcd_place.json'), '{}', 'utf8')
     await writeFile(join(root, 'place_ecc', 'output', 'gcd_place.png'), 'png', 'utf8')
@@ -148,9 +144,6 @@ describe('WorkspaceResourceService', () => {
       steps: [
         { name: 'place', tool: 'ecc', state: 'Success', runtime: '00:00:01', info: {} },
       ],
-    })
-    await writeJson(join(root, 'home', 'home.json'), {
-      flow: join(root, 'home', 'flow.json'),
     })
     await writeFile(join(outputDirectory, 'gcd_place.def.gz'), 'def', 'utf8')
     await writeFile(join(outputDirectory, 'gcd_place.gds'), 'gds', 'utf8')
@@ -413,7 +406,6 @@ describe('WorkspaceResourceService', () => {
     await writeJson(join(root, 'home', 'flow.json'), {
       steps: [{ name: 'route', tool: 'ecc', state: 'Unstart', runtime: '', info: {} }],
     })
-    await writeJson(join(root, 'home', 'home.json'), {})
 
     const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
     const result = await service.resolveStepInfo({ step: 'ROUTE', id: 'layout' })
@@ -839,7 +831,6 @@ describe('WorkspaceResourceService', () => {
         { name: 'Synthesis', tool: 'yosys', state: 'Success', runtime: '', info: {} },
       ],
     })
-    await writeJson(join(root, 'home', 'home.json'), {})
 
     const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
     const index = await service.getIndex()
@@ -873,7 +864,6 @@ describe('WorkspaceResourceService', () => {
         { name: 'Synthesis', tool: 'yosys', state: 'Success', runtime: '', info: {} },
       ],
     })
-    await writeJson(join(root, 'home', 'home.json'), {})
     await writeFile(
       join(root, 'Synthesis_yosys', 'analysis', 'qor_metrics.json'),
       '{}',

@@ -25,7 +25,7 @@ export interface ExtractDesignReportInput {
   frequencyTarget?: number
   parameters?: Record<string, unknown> | null
   flow?: Record<string, unknown> | null
-  homeData?: Record<string, unknown> | null
+  projectMetadata?: Record<string, unknown> | null
   stepMetrics?: Record<string, unknown> | null
   stepSummaries?: Record<string, unknown> | null
   stepHotspots?: Record<string, unknown> | null
@@ -428,7 +428,7 @@ export function extractDesignReportData(
 
   const params = parseJsonSafely(input.parameters) || {}
   const flow = parseJsonSafely(input.flow) || {}
-  const home = parseJsonSafely(input.homeData) || {}
+  const projectMetadata = parseJsonSafely(input.projectMetadata) || {}
   const stepMetrics = input.stepMetrics || {}
   const stepSummaries = input.stepSummaries || {}
   const stepHotspots = input.stepHotspots || {}
@@ -444,7 +444,6 @@ export function extractDesignReportData(
     (typeof params.top_module === 'string' && params.top_module) ||
     (typeof params.TOP_MODULE === 'string' && params.TOP_MODULE) ||
     (typeof flow.design === 'string' && flow.design) ||
-    (typeof home.design === 'string' && home.design) ||
     input.workspaceName ||
     'Unknown_Design'
 
@@ -453,13 +452,15 @@ export function extractDesignReportData(
     (typeof params.PDK === 'string' && params.PDK) ||
     (typeof params.pdk === 'string' && params.pdk) ||
     (typeof flow.pdk === 'string' && flow.pdk) ||
-    (typeof home.pdk === 'string' && home.pdk) ||
     'sky130hd'
 
   const pdkVersion =
+    input.pdkVersion ||
     (typeof params.PDK_VERSION === 'string' && params.PDK_VERSION) ||
     (typeof params.pdk_version === 'string' && params.pdk_version) ||
-    (typeof home.pdk_version === 'string' && home.pdk_version) ||
+    (typeof projectMetadata.PDK_VERSION === 'string' && projectMetadata.PDK_VERSION) ||
+    (typeof projectMetadata.pdk_version === 'string' && projectMetadata.pdk_version) ||
+    (typeof projectMetadata.version === 'string' && projectMetadata.version) ||
     null
 
   const pdkCommit =
@@ -470,13 +471,16 @@ export function extractDesignReportData(
     (typeof params.PDK_COMMIT_ID === 'string' && params.PDK_COMMIT_ID) ||
     (typeof params.pdk_commit_id === 'string' && params.pdk_commit_id) ||
     (typeof params.pdkCommit === 'string' && params.pdkCommit) ||
-    (typeof home.pdk_commit === 'string' && home.pdk_commit) ||
-    (typeof home.pdk_commit_id === 'string' && home.pdk_commit_id) ||
-    (typeof home.pdkCommit === 'string' && home.pdkCommit) ||
-    (typeof home.pdk_git_commit === 'string' && home.pdk_git_commit) ||
-    (typeof home.commit === 'string' && home.commit) ||
-    (typeof home.commit_id === 'string' && home.commit_id) ||
-    (typeof home.git_commit === 'string' && home.git_commit) ||
+    (typeof projectMetadata.PDK_COMMIT === 'string' && projectMetadata.PDK_COMMIT) ||
+    (typeof projectMetadata.pdk_commit === 'string' && projectMetadata.pdk_commit) ||
+    (typeof projectMetadata.pdk_commit_id === 'string' &&
+      projectMetadata.pdk_commit_id) ||
+    (typeof projectMetadata.pdkCommit === 'string' && projectMetadata.pdkCommit) ||
+    (typeof projectMetadata.pdk_git_commit === 'string' &&
+      projectMetadata.pdk_git_commit) ||
+    (typeof projectMetadata.commit === 'string' && projectMetadata.commit) ||
+    (typeof projectMetadata.commit_id === 'string' && projectMetadata.commit_id) ||
+    (typeof projectMetadata.git_commit === 'string' && projectMetadata.git_commit) ||
     null
 
   let eccTool: string | null =
@@ -497,7 +501,6 @@ export function extractDesignReportData(
     input.versionInfo?.ecc ||
     (typeof params.ECC_VERSION === 'string' && params.ECC_VERSION) ||
     (typeof params.ecc_version === 'string' && params.ecc_version) ||
-    (typeof home.ecc_version === 'string' && home.ecc_version) ||
     null
 
   const eccVersion = rawEccVer === 'unknown' ? null : rawEccVer
@@ -579,17 +582,6 @@ export function extractDesignReportData(
     }
   }
 
-  if (home && Object.keys(home).length > 0) {
-    normalizedStepMetrics['Home'] = {
-      ...normalizedStepMetrics['Home'],
-      ...home,
-    }
-    normalizedStepMetrics['Parameters'] = {
-      ...normalizedStepMetrics['Parameters'],
-      ...home,
-    }
-  }
-
   // Multi-stage lookup helper with fallback priority
   function queryMetric(
     category: string,
@@ -643,12 +635,6 @@ export function extractDesignReportData(
             timestamp,
           })
           return { value: num, stage: 'Parameters', sourceKey: alias }
-        }
-      }
-      if (alias in home && home[alias] !== undefined && home[alias] !== null) {
-        const num = parseNumber(home[alias])
-        if (num !== null) {
-          return { value: num, stage: 'Home', sourceKey: alias }
         }
       }
     }
