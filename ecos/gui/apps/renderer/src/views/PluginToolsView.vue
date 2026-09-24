@@ -30,7 +30,7 @@
           @docs="openDocs"
         />
 
-        <main class="manager-table-panel">
+        <main class="manager-content-panel">
           <PluginManagerToolbar
             v-model:search="searchQuery"
             :tabs="tabItems"
@@ -54,218 +54,16 @@
             {{ managerErrorText }}
           </div>
 
-          <div class="resource-table-scroll">
-            <div class="resource-table">
-              <div class="resource-table-head">
-                <span></span>
-                <span>Name</span>
-                <span>Version</span>
-                <span>Size</span>
-                <span>Status</span>
-                <span></span>
-              </div>
-
-              <div v-if="pluginStore.loading" class="resource-loading">
-                <i class="ri-loader-4-line spin" aria-hidden="true"></i>
-                Loading resources...
-              </div>
-
-              <template v-else>
-                <div
-                  v-for="row in filteredRows"
-                  :key="row.id"
-                  class="resource-row"
-                  :class="{ selected: isSelected(row.id) }"
-                  :style="{ '--row-accent': row.accent }"
-                  role="button"
-                  tabindex="0"
-                  @keydown.enter.prevent="toggleResource(row.id)"
-                  @keydown.space.prevent="toggleResource(row.id)"
-                >
-                  <span
-                    class="resource-check"
-                    :class="{ checked: isSelected(row.id) }"
-                    @click.stop="toggleResource(row.id)"
-                  >
-                    <i
-                      v-if="isSelected(row.id)"
-                      class="ri-check-line"
-                      aria-hidden="true"
-                    ></i>
-                  </span>
-
-                  <span class="resource-name-cell">
-                    <span class="resource-avatar">{{ row.icon }}</span>
-                    <span class="resource-copy">
-                      <strong>{{ row.name }}</strong>
-                      <small :title="row.descriptionTitle || undefined">{{
-                        row.description
-                      }}</small>
-                      <span v-if="row.flowTags.length" class="resource-flow-tags">
-                        <b v-for="tag in row.flowTags.slice(0, 4)" :key="tag">{{
-                          tag
-                        }}</b>
-                      </span>
-                      <span v-if="row.dependencyLabel" class="resource-dependency">
-                        <i class="ri-node-tree" aria-hidden="true"></i>
-                        <span>{{ row.dependencyLabel }}</span>
-                      </span>
-                    </span>
-                  </span>
-
-                  <span class="resource-muted">{{ row.version }}</span>
-                  <span class="resource-muted">{{ row.sizeLabel }}</span>
-                  <span class="resource-status-cell">
-                    <b
-                      class="status-pill"
-                      :class="row.statusKind"
-                      :title="row.statusTitle || undefined"
-                    >
-                      <span>{{ row.statusText }}</span>
-                    </b>
-                    <span
-                      v-if="row.progressPercent !== null"
-                      class="mini-progress"
-                      role="progressbar"
-                      :style="{ '--progress': row.progressPercent / 100 }"
-                      :aria-valuenow="row.progressPercent"
-                      aria-valuemin="0"
-                      aria-valuemax="100"
-                      :aria-label="`${row.name} installation progress`"
-                    >
-                      <span></span>
-                    </span>
-                  </span>
-
-                  <span class="row-actions">
-                    <template
-                      v-if="
-                        rowActionForStatus(row.resource) !== 'none' ||
-                        removalActionForRow(row) !== null ||
-                        canImportLocalResource(row) ||
-                        (row.statusKind !== 'installing' &&
-                          row.actions.includes('validate'))
-                      "
-                    >
-                      <button
-                        v-if="canImportLocalResource(row)"
-                        type="button"
-                        class="row-action-btn icon-only info"
-                        data-title="Import Local"
-                        :disabled="importingResourceIds.has(row.id)"
-                        @click.stop="handleLocalImport(row)"
-                      >
-                        <i
-                          :class="
-                            importingResourceIds.has(row.id)
-                              ? 'ri-loader-4-line spin'
-                              : 'ri-folder-add-line'
-                          "
-                          aria-hidden="true"
-                        ></i>
-                      </button>
-                      <button
-                        v-if="
-                          rowActionForStatus(row.resource) === 'install' &&
-                          row.statusKind !== 'error'
-                        "
-                        type="button"
-                        class="row-action-btn icon-only primary"
-                        data-title="Install"
-                        @click.stop="handleRowInstall(row)"
-                      >
-                        <i class="ri-download-line" aria-hidden="true"></i>
-                      </button>
-                      <button
-                        v-else-if="
-                          rowActionForStatus(row.resource) === 'update' &&
-                          row.statusKind !== 'error'
-                        "
-                        type="button"
-                        class="row-action-btn icon-only info"
-                        data-title="Update"
-                        @click.stop="handleRowInstall(row)"
-                      >
-                        <i class="ri-refresh-line" aria-hidden="true"></i>
-                      </button>
-                      <button
-                        v-else-if="rowActionForStatus(row.resource) === 'replace'"
-                        type="button"
-                        class="row-action-btn icon-only info"
-                        data-title="Replace"
-                        @click.stop="handleRowInstall(row)"
-                      >
-                        <i class="ri-loop-left-line" aria-hidden="true"></i>
-                      </button>
-                      <button
-                        v-else-if="rowActionForStatus(row.resource) === 'cancel'"
-                        type="button"
-                        class="row-action-btn icon-only danger"
-                        data-title="Cancel"
-                        @click.stop="handleRowCancel(row)"
-                      >
-                        <i class="ri-close-line" aria-hidden="true"></i>
-                      </button>
-                      <button
-                        v-else-if="row.statusKind === 'error'"
-                        type="button"
-                        class="row-action-btn icon-only danger"
-                        data-title="Retry"
-                        @click.stop="handleRowInstall(row)"
-                      >
-                        <i class="ri-restart-line" aria-hidden="true"></i>
-                      </button>
-                      <button
-                        v-else-if="
-                          row.statusKind !== 'installing' &&
-                          row.actions.includes('validate')
-                        "
-                        type="button"
-                        class="row-action-btn icon-only info"
-                        data-title="Validate"
-                        @click.stop="handlePdkValidate(row)"
-                      >
-                        <i class="ri-shield-check-line" aria-hidden="true"></i>
-                      </button>
-                      <button
-                        v-if="removalActionForRow(row) !== null"
-                        type="button"
-                        class="row-action-btn icon-only danger-outlined"
-                        :data-title="
-                          removalActionForRow(row) === 'remove_reference'
-                            ? 'Remove'
-                            : 'Uninstall'
-                        "
-                        @click.stop="handleRowRemove(row)"
-                      >
-                        <i
-                          :class="
-                            removalActionForRow(row) === 'remove_reference'
-                              ? 'ri-link-unlink'
-                              : 'ri-delete-bin-line'
-                          "
-                          aria-hidden="true"
-                        ></i>
-                      </button>
-                    </template>
-                  </span>
-                </div>
-              </template>
-
-              <div
-                v-if="!pluginStore.loading && filteredRows.length === 0"
-                class="resource-empty"
-              >
-                <i class="ri-search-2-line" aria-hidden="true"></i>
-                <strong>No resources found</strong>
-                <p>Try adjusting your search or filters.</p>
-                <button type="button" class="clear-filters-btn" @click="clearFilters">
-                  <i class="ri-close-circle-line" aria-hidden="true"></i>
-                  Clear all filters
-                </button>
-              </div>
-            </div>
-          </div>
+          <PluginResourceCardGrid
+            :rows="filteredRows"
+            :loading="pluginStore.loading"
+            :selected-ids="selectedResourceIds"
+            :importing-ids="importingResourceIds"
+            @toggle="toggleResource"
+            @action="handleCardAction"
+            @homepage="handleHomepage"
+            @clear-filters="clearFilters"
+          />
         </main>
 
         <PluginSelectedPanel
@@ -288,22 +86,23 @@ import CliInstallerCard from '@/components/CliInstallerCard.vue'
 import PluginFrontendReadiness from '@/components/plugins/PluginFrontendReadiness.vue'
 import PluginManagerSidebar from '@/components/plugins/PluginManagerSidebar.vue'
 import PluginManagerToolbar from '@/components/plugins/PluginManagerToolbar.vue'
+import PluginResourceCardGrid from '@/components/plugins/PluginResourceCardGrid.vue'
 import PluginSelectedPanel from '@/components/plugins/PluginSelectedPanel.vue'
 import { usePluginStore } from '@/stores/pluginStore'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { usePluginSelection } from '@/composables/usePluginSelection'
 import { getDesktopApi } from '@/platform/desktop'
 import {
-  canImportLocalResource,
   compactResourceMessage,
   primaryActionForRow,
   resourceToRow,
   removalActionForRow,
-  rowActionForStatus,
   runBatchDownload,
   runPrimaryAction,
 } from './pluginToolsRows'
 import type { ResourceRow } from './pluginToolsRows'
+import { homepageUrlFor } from './pluginResourceCards'
+import type { PluginCardActionId } from './pluginResourceCards'
 import {
   buildSidebarItems,
   buildStatusTabs,
@@ -329,7 +128,6 @@ const resourceRows = computed<ResourceRow[]>(() => {
 
 const {
   selectedIds: selectedResourceIds,
-  isSelected,
   toggle: toggleResource,
   remove: removeSelected,
 } = usePluginSelection(resourceRows)
@@ -381,12 +179,35 @@ function clearFilters(): void {
   statusFilter.value = 'all'
 }
 
-async function handleRowInstall(row: ResourceRow): Promise<void> {
-  await runPrimaryAction(row, pluginStore)
+async function handleCardAction(
+  row: ResourceRow,
+  action: PluginCardActionId,
+): Promise<void> {
+  switch (action) {
+    case 'install':
+    case 'update':
+    case 'replace':
+    case 'retry':
+      await handleRowInstall(row)
+      return
+    case 'cancel':
+      await pluginStore.cancelResource(row.resource.id)
+      return
+    case 'validate':
+      await pluginStore.validatePdk(row.resource.id)
+      return
+    case 'import_local':
+      await handleLocalImport(row)
+      return
+    case 'uninstall':
+    case 'remove_reference':
+      await handleRowRemove(row)
+      return
+  }
 }
 
-async function handleRowCancel(row: ResourceRow): Promise<void> {
-  await pluginStore.cancelResource(row.resource.id)
+async function handleRowInstall(row: ResourceRow): Promise<void> {
+  await runPrimaryAction(row, pluginStore)
 }
 
 async function handleLocalImport(row: ResourceRow): Promise<void> {
@@ -421,12 +242,6 @@ async function handleLocalImport(row: ResourceRow): Promise<void> {
   }
 }
 
-async function handlePdkValidate(row: ResourceRow): Promise<void> {
-  if (row.resource) {
-    await pluginStore.validatePdk(row.resource.id)
-  }
-}
-
 async function handleRowRemove(row: ResourceRow): Promise<void> {
   const action = removalActionForRow(row)
   if (!action) return
@@ -449,6 +264,16 @@ async function handleRowRemove(row: ResourceRow): Promise<void> {
 
 async function downloadSelected(): Promise<void> {
   await runBatchDownload(downloadableSelectedResources.value, pluginStore)
+}
+
+async function handleHomepage(row: ResourceRow): Promise<void> {
+  const url = homepageUrlFor(row)
+  if (!url) return
+  try {
+    await getDesktopApi().system.openExternal(url)
+  } catch (error) {
+    console.error('Failed to open homepage:', error)
+  }
 }
 
 function formatSize(sizeMb: number): string {
@@ -576,7 +401,7 @@ async function openDocs(): Promise<void> {
   flex: 1 1 auto;
 }
 
-.manager-table-panel {
+.manager-content-panel {
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -596,490 +421,6 @@ async function openDocs(): Promise<void> {
   color: var(--danger-color);
   background: var(--danger-bg);
   font-size: 12px;
-}
-
-/* ---- Table ---- */
-.resource-table-scroll {
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  flex: 1;
-}
-
-.resource-table {
-  --resource-table-columns: 32px minmax(150px, 2fr) minmax(96px, 0.6fr)
-    minmax(68px, 0.5fr) minmax(112px, 0.7fr) 116px;
-  width: 100%;
-}
-
-.resource-table-head,
-.resource-row {
-  display: grid;
-  grid-template-columns: var(--resource-table-columns);
-  align-items: center;
-  gap: 0;
-}
-
-.resource-table-head > *,
-.resource-row > * {
-  min-width: 0;
-}
-
-.resource-table-head {
-  height: 36px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--border-color);
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-.resource-row {
-  --resource-row-primary-line: 22px;
-  width: 100%;
-  min-height: 56px;
-  padding: 8px 12px;
-  border: 0;
-  border-bottom: 1px solid var(--border-color);
-  color: var(--text-primary);
-  background: transparent;
-  cursor: pointer;
-  align-items: start;
-  text-align: left;
-  transition: background 0.15s ease;
-}
-
-.resource-row:hover {
-  background: color-mix(in srgb, var(--accent-color) 4%, transparent);
-}
-
-.resource-row:focus-visible {
-  outline: 2px solid var(--accent-color);
-  outline-offset: -2px;
-}
-
-.resource-row.selected {
-  background: color-mix(in srgb, var(--accent-color) 7%, transparent);
-}
-
-.resource-check {
-  display: grid;
-  width: 18px;
-  height: 18px;
-  margin-top: 7px;
-  place-items: center;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  color: var(--accent-text);
-  background: var(--bg-primary);
-  font-size: 12px;
-}
-
-.resource-check.checked {
-  border-color: var(--accent-color);
-  background: var(--accent-color);
-}
-
-.resource-name-cell {
-  display: flex;
-  align-items: flex-start;
-  min-width: 0;
-}
-
-.resource-avatar {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  flex: 0 0 auto;
-  place-items: center;
-  border-radius: 8px;
-  color: #fff;
-  background: linear-gradient(
-    145deg,
-    color-mix(in srgb, var(--row-accent) 92%, white),
-    color-mix(in srgb, var(--row-accent) 76%, black)
-  );
-  box-shadow:
-    inset 0 1px 1px rgba(255, 255, 255, 0.35),
-    0 6px 14px rgba(15, 23, 42, 0.12);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0;
-}
-
-.resource-copy {
-  min-width: 0;
-  margin-left: 12px;
-}
-
-.resource-copy strong {
-  display: block;
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 750;
-  line-height: var(--resource-row-primary-line);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.resource-copy small {
-  display: block;
-  overflow: hidden;
-  max-width: min(260px, 100%);
-  color: var(--text-secondary);
-  font-size: 11px;
-  line-height: 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.resource-flow-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 5px;
-}
-
-.resource-flow-tags b {
-  min-height: 18px;
-  padding: 2px 5px;
-  border-radius: 5px;
-  line-height: 1.2;
-  color: var(--accent-color);
-  background: color-mix(in srgb, var(--accent-color) 11%, transparent);
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.resource-dependency {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  margin-top: 4px;
-  color: var(--text-secondary);
-  font-size: 10px;
-  gap: 4px;
-}
-
-.resource-dependency i {
-  flex: 0 0 auto;
-  color: var(--accent-color);
-  font-size: 12px;
-}
-
-.resource-dependency span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.resource-row > .resource-muted,
-.resource-status-cell,
-.row-actions {
-  align-self: start;
-}
-
-.resource-muted {
-  display: inline-flex;
-  align-items: center;
-  min-height: var(--resource-row-primary-line);
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.2;
-}
-
-/* ---- Pills ---- */
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  max-width: 100%;
-  min-height: 22px;
-  padding: 0 8px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.status-pill span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.status-pill.installed {
-  color: var(--success-color);
-  background: var(--success-bg);
-}
-
-.status-pill.available {
-  color: var(--text-secondary);
-  background: var(--bg-secondary);
-}
-
-.status-pill.update {
-  color: var(--info-color);
-  background: var(--info-bg);
-}
-
-.status-pill.installing {
-  font-size: 10px;
-  font-weight: 700;
-  padding: 0 7px;
-  color: var(--info-color);
-  background: var(--info-bg);
-}
-
-.status-pill.error {
-  color: var(--danger-color);
-  background: var(--danger-bg);
-}
-
-.mini-progress {
-  --progress: 0;
-  display: block;
-  position: relative;
-  width: 62px;
-  height: 4px;
-  margin-top: 5px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--info-color) 16%, var(--bg-secondary));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--info-color) 10%, transparent);
-}
-
-.mini-progress span {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(
-    90deg,
-    var(--info-color),
-    color-mix(in srgb, var(--info-color) 70%, var(--accent-text))
-  );
-  box-shadow: 0 0 10px color-mix(in srgb, var(--info-color) 34%, transparent);
-  transform: scaleX(var(--progress, 0));
-  transform-origin: left center;
-  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: transform;
-}
-
-/* ---- Row actions ---- */
-.row-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.row-action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  height: 26px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 650;
-  cursor: pointer;
-  white-space: nowrap;
-  transition:
-    opacity 0.15s ease,
-    background 0.15s ease;
-}
-
-.row-action-btn.icon-only {
-  width: 26px;
-  padding: 0;
-  font-size: 13px;
-}
-
-/* ---- Custom tooltip ---- */
-.row-action-btn[data-title] {
-  position: relative;
-}
-
-.row-action-btn[data-title]::after {
-  content: attr(data-title);
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%) scale(0.96);
-  padding: 4px 8px;
-  border-radius: 6px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transition:
-    opacity 0.12s ease,
-    transform 0.12s ease;
-  z-index: 10;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.row-action-btn[data-title]::before {
-  content: '';
-  position: absolute;
-  bottom: calc(100% + 2px);
-  left: 50%;
-  transform: translateX(-50%) scale(0.96);
-  width: 0;
-  height: 0;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-top: 4px solid var(--border-color);
-  opacity: 0;
-  pointer-events: none;
-  transition:
-    opacity 0.12s ease,
-    transform 0.12s ease;
-  z-index: 10;
-}
-
-.row-action-btn[data-title]:not(:disabled):hover::after,
-.row-action-btn[data-title]:not(:disabled):hover::before {
-  opacity: 1;
-  transform: translateX(-50%) scale(1);
-}
-
-.row-action-btn.primary {
-  color: var(--accent-text);
-  background: var(--accent-color);
-}
-
-.row-action-btn.primary:not(:disabled):hover {
-  opacity: 0.9;
-}
-
-.row-action-btn.danger-outlined {
-  color: var(--danger-color);
-  background: transparent;
-  border: 1px solid var(--danger-color);
-}
-
-.row-action-btn.danger-outlined:not(:disabled):hover {
-  background: var(--danger-bg);
-}
-
-.row-action-btn.info {
-  color: var(--info-color);
-  background: var(--info-bg);
-}
-
-.row-action-btn.info:not(:disabled):hover {
-  opacity: 0.85;
-}
-
-.row-action-btn.warn {
-  color: var(--warn-color);
-  background: var(--warn-bg);
-}
-
-.row-action-btn.warn:disabled {
-  cursor: default;
-  opacity: 0.7;
-}
-
-.row-action-btn:disabled {
-  cursor: default;
-  opacity: 0.65;
-}
-
-.row-action-btn.danger {
-  color: var(--danger-color);
-  background: var(--danger-bg);
-}
-
-/* ---- Loading / Empty ---- */
-.resource-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 260px;
-  gap: 10px;
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
-.resource-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 260px;
-  gap: 8px;
-  color: var(--text-secondary);
-  font-size: 13px;
-  text-align: center;
-  padding: 24px;
-}
-
-.resource-empty i {
-  font-size: 28px;
-  opacity: 0.35;
-  margin-bottom: 4px;
-}
-
-.resource-empty strong {
-  color: var(--text-primary);
-  font-size: 14px;
-  font-weight: 650;
-}
-
-.resource-empty p {
-  margin: 0;
-  font-size: 12px;
-}
-
-.clear-filters-btn {
-  margin-top: 8px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  color: var(--accent-color);
-  background: transparent;
-  cursor: pointer;
-  font-size: 12px;
-  line-height: 1;
-  font-weight: 600;
-  transition: background 0.15s ease;
-}
-
-.clear-filters-btn i {
-  font-size: 15px;
-  line-height: 1;
-  position: relative;
-  top: 1px;
-}
-
-.clear-filters-btn:hover {
-  background: color-mix(in srgb, var(--accent-color) 8%, transparent);
-}
-
-/* ---- Animation ---- */
-.spin {
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 /* ---- Dark mode overrides ---- */
@@ -1108,7 +449,7 @@ async function openDocs(): Promise<void> {
     padding-right: 2px;
   }
 
-  .manager-table-panel {
+  .manager-content-panel {
     flex: 0 0 clamp(280px, 42vh, 420px);
     min-height: 280px;
   }
@@ -1124,18 +465,6 @@ async function openDocs(): Promise<void> {
     width: calc(100% - 24px);
     height: calc(100% - var(--dialog-block-gutter));
     padding: 24px 18px;
-  }
-
-  .resource-table-head,
-  .resource-row {
-    --resource-table-columns: 28px minmax(88px, 1fr) minmax(96px, auto) minmax(68px, auto);
-  }
-
-  .resource-table-head span:nth-child(3),
-  .resource-row > .resource-muted:nth-child(3),
-  .resource-table-head span:nth-child(4),
-  .resource-row > .resource-muted:nth-child(4) {
-    display: none;
   }
 
   .manager-close {
