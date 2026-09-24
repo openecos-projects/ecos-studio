@@ -17,6 +17,8 @@ const testState = vi.hoisted(() => ({
   route: { fullPath: '/workspace/projects', path: '/workspace/projects', query: {} },
   routerPush: vi.fn(),
   showToast: vi.fn(),
+  registerProjectRoot: vi.fn(async (path: string) => path),
+  registerProjectReadRoot: vi.fn(async (path: string) => path),
   comparisonProjection: { data: null as unknown, status: 'idle' },
   projectManifestOverride: null as unknown,
   selectProject: vi.fn(async (_projectRoot: string) => undefined),
@@ -133,6 +135,10 @@ vi.mock('@/platform/desktop', () => ({
         stepOutputs: (request: unknown) => testState.stepOutputs(request),
       },
     },
+    workspace: {
+      registerProjectRoot: (path: string) => testState.registerProjectRoot(path),
+      registerProjectReadRoot: (path: string) => testState.registerProjectReadRoot(path),
+    },
     shutdown: undefined,
   }),
 }))
@@ -166,6 +172,10 @@ describe('ProjectsView background lifecycle integration', () => {
     testState.route.query = {}
     testState.routerPush.mockReset()
     testState.showToast.mockReset()
+    testState.registerProjectRoot.mockReset()
+    testState.registerProjectRoot.mockImplementation(async (path: string) => path)
+    testState.registerProjectReadRoot.mockReset()
+    testState.registerProjectReadRoot.mockImplementation(async (path: string) => path)
     vi.mocked(loadProjectHistory).mockReset()
     vi.mocked(loadProjectHistory).mockResolvedValue([testState.project])
     vi.mocked(rememberProjectHistoryEntry).mockReset()
@@ -531,6 +541,8 @@ describe('ProjectsView background lifecycle integration', () => {
         designTool: 'backend',
         directory: '/projects/demo/ws_0001',
       })
+      expect(testState.registerProjectRoot).toHaveBeenCalledWith('/projects/demo/ws_0001')
+      expect(testState.registerProjectReadRoot).toHaveBeenCalledWith('/projects/demo')
       return wrapper
     }
 

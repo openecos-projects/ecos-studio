@@ -980,6 +980,7 @@ const popoverWorkspaceTarget = ref<WorkspaceTarget | null>(null)
 const workspaceStepOutputs = ref<Record<string, EccWorkspaceStepOutputsResult>>({})
 const workspaceStepOutputsFailed = ref<Record<string, boolean>>({})
 const workspacePopoverStyle = ref<Record<string, string>>({})
+let workspaceStepOutputRequestQueue = Promise.resolve()
 const projectActionMenuId = ref<string | null>(null)
 const workspaceActionMenuTarget = ref<WorkspaceTarget | null>(null)
 const pendingDeleteWorkspaceTarget = ref<WorkspaceTarget | null>(null)
@@ -1597,6 +1598,27 @@ function toggleDialogMaximized() {
 
 const workspaceStepOutputLoadGeneration: Record<string, number> = {}
 
+function readWorkspaceStepOutputsWithAccess(
+  projectRoot: string,
+  workspacePath: string,
+): Promise<EccWorkspaceStepOutputsResult> {
+  const request = workspaceStepOutputRequestQueue.then(async () => {
+    const desktopApi = getDesktopApi()
+    const normalizedProjectRoot = normalizePath(projectRoot)
+    const normalizedWorkspacePath = normalizePath(workspacePath)
+
+    await desktopApi.workspace.registerProjectRoot(normalizedWorkspacePath)
+    await desktopApi.workspace.registerProjectReadRoot(normalizedProjectRoot)
+    return await readWorkspaceStepOutputsApi(normalizedWorkspacePath)
+  })
+
+  workspaceStepOutputRequestQueue = request.then(
+    () => undefined,
+    () => undefined,
+  )
+  return request
+}
+
 async function loadWorkspaceStepOutputs(
   projectId: string,
   workspaceId: string,
@@ -1623,7 +1645,10 @@ async function loadWorkspaceStepOutputs(
     workspaceStepOutputsFailed.value = nextFailures
   }
   try {
-    const result = await readWorkspaceStepOutputsApi(workspace.workspacePath)
+    const result = await readWorkspaceStepOutputsWithAccess(
+      project.path,
+      workspace.workspacePath,
+    )
     if (workspaceStepOutputLoadGeneration[key] !== generation) return
     workspaceStepOutputs.value = { ...workspaceStepOutputs.value, [key]: result }
   } catch (error) {
