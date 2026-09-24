@@ -57,33 +57,108 @@ def build_case_matrix(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
             "expected": expected,
             "observed": observed,
             "pass": passed,
-            "mismatch_reason": None if passed else row.get("mismatch_reason", "expected and observed verdict differ"),
+            "mismatch_reason": None if passed else row.get(
+                "mismatch_reason", "expected and observed verdict differ"
+            ),
             "evidence_refs": list(row.get("evidence_refs", ())),
             "producer_coverage": row.get("producer_coverage", "fixture-only"),
+            "metrics": dict(row.get("metrics", {})),
         })
-    names = {row["case"] for row in cases}
+    names = [row["case"] for row in cases]
     missing = [name for name in TIER_A_CASE_NAMES if name not in names]
+    unexpected = [name for name in names if name not in TIER_A_CASE_NAMES]
+    duplicate = sorted({name for name in names if names.count(name) > 1})
+    metrics = [row["metrics"] for row in cases]
+    fail_closed = [
+        row for row in cases
+        if row["case"] in {
+            "missing receipt", "stale verifier evidence", "tampered hash",
+            "foreign candidate binding",
+        }
+    ]
+    summary = {
+        "registered": len(cases),
+        "passed": sum(item["pass"] for item in cases),
+        "failed": sum(not item["pass"] for item in cases),
+        "missing_tier_a_cases": missing,
+        "unexpected_tier_a_cases": unexpected,
+        "duplicate_tier_a_cases": duplicate,
+        "false_applied": sum(item.get("false_applied", 0) for item in metrics),
+        "false_inactive": sum(item.get("false_inactive", 0) for item in metrics),
+        "false_promotion": sum(item.get("false_promotion", 0) for item in metrics),
+        "promotion_invariant_violations": sum(
+            item.get("promotion_invariant_violations", 0) for item in metrics
+        ),
+        "fail_closed_passed": sum(
+            item["metrics"].get("fail_closed") == 1 for item in fail_closed
+        ),
+        "fail_closed_total": len(fail_closed),
+        "fail_closed_rate": (
+            sum(item["metrics"].get("fail_closed") == 1 for item in fail_closed)
+            / len(fail_closed)
+            if fail_closed else None
+        ),
+        "failure_accounting_conserved": all(
+            item.get("failure_accounting_conserved") is True for item in metrics
+        ),
+        "receipt_semantic_mismatch": sum(
+            item.get("receipt_semantic_mismatch", 0) for item in metrics
+        ),
+    }
+    summary["complete"] = (
+        not missing
+        and not unexpected
+        and not duplicate
+        and all(item["pass"] for item in cases)
+        and summary["false_applied"] == 0
+        and summary["false_inactive"] == 0
+        and summary["false_promotion"] == 0
+        and summary["promotion_invariant_violations"] == 0
+        and summary["fail_closed_rate"] == 1.0
+        and summary["failure_accounting_conserved"]
+        and summary["receipt_semantic_mismatch"] == 0
+    )
     return {
         "schema_version": CASE_SCHEMA,
         "cases": cases,
-        "summary": {
-            "registered": len(cases),
-            "passed": sum(item["pass"] for item in cases),
-            "failed": sum(not item["pass"] for item in cases),
-            "missing_tier_a_cases": missing,
-            "complete": not missing and all(item["pass"] for item in cases),
-        },
+        "summary": summary,
     }
 
 
 def render_case_matrix_markdown(matrix: Mapping[str, Any]) -> str:
-    lines = ["# RQ1 Tier-A Contract Case Matrix", "", "| Case | Pass | Producer coverage | Mismatch |", "|---|---:|---|---|"]
+    lines = [
+        "# RQ1 Tier-A Contract Case Matrix",
+        "",
+        "| Case | Pass | Producer coverage | Expected status/relation | "
+        "Observed status/relation | Promotion | Mismatch |",
+        "|---|---:|---|---|---|---:|---|",
+    ]
     for row in matrix.get("cases", ()):
-        lines.append(f"| {row.get('case', '')} | {'yes' if row.get('pass') else 'no'} | {row.get('producer_coverage', '')} | {row.get('mismatch_reason') or ''} |")
+        expected = row.get("expected", {})
+        observed = row.get("observed", {})
+        lines.append(
+            f"| {row.get('case', '')} | {'yes' if row.get('pass') else 'no'} | "
+            f"{row.get('producer_coverage', '')} | "
+            f"{expected.get('status', '')}/{expected.get('relation', '')} | "
+            f"{observed.get('status', '')}/{observed.get('relation', '')} | "
+            f"{observed.get('promotion', '')} | {row.get('mismatch_reason') or ''} |"
+        )
     summary = matrix.get("summary", {})
-    lines.extend(("", f"Registered: {summary.get('registered', 0)}", f"Passed: {summary.get('passed', 0)}", f"Failed: {summary.get('failed', 0)}", f"Complete: {summary.get('complete', False)}"))
+    lines.extend((
+        "",
+        f"Registered: {summary.get('registered', 0)}",
+        f"Passed: {summary.get('passed', 0)}",
+        f"Failed: {summary.get('failed', 0)}",
+        f"Fail-closed: {summary.get('fail_closed_passed', 0)}/"
+        f"{summary.get('fail_closed_total', 0)}",
+        f"False applied/inactive/promotion: {summary.get('false_applied', 0)}/"
+        f"{summary.get('false_inactive', 0)}/{summary.get('false_promotion', 0)}",
+        f"Invariant violations: {summary.get('promotion_invariant_violations', 0)}",
+        f"Failure accounting conserved: "
+        f"{summary.get('failure_accounting_conserved', False)}",
+        f"Complete: {summary.get('complete', False)}",
+    ))
     return "\n".join(lines) + "\n"
-
 
 def aggregate_reports(reports: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     rows = list(reports)

@@ -200,6 +200,15 @@ def _role_report(receipts: Sequence[ParameterApplicationReceipt], expected_reali
     }
 
 
+def _receipt_binding_matches(outcome: OptimizationTerminalOutcome, receipt: ParameterApplicationReceipt) -> bool:
+    """Accept a receipt only when every persisted binding agrees."""
+    return all((expected is None or expected == actual) for expected, actual in (
+        (outcome.receipt_sha256, receipt.evidence_sha256),
+        (outcome.parameter_application_receipt_id, receipt.receipt_id),
+        (outcome.materialization_receipt_sha256, receipt.materialization.receipt_sha256),
+    ))
+
+
 def _receipt_join(receipts: Sequence[ParameterApplicationReceipt], outcomes: Sequence[OptimizationTerminalOutcome]) -> dict[str, Any]:
     by_id: dict[str, list[ParameterApplicationReceipt]] = defaultdict(list)
     for item in receipts:
@@ -215,8 +224,11 @@ def _receipt_join(receipts: Sequence[ParameterApplicationReceipt], outcomes: Seq
             duplicate += 1
             continue
         matches = [outcome for outcome in outcomes if (
-            outcome.parameter_application_receipt_id == item.receipt_id
-            or bool(_receipt_keys(item) & _candidate_keys(outcome))
+            _receipt_binding_matches(outcome, item)
+            and (
+                outcome.parameter_application_receipt_id == item.receipt_id
+                or bool(_receipt_keys(item) & _candidate_keys(outcome))
+            )
         )]
         if len(matches) == 1:
             joined += 1
@@ -330,10 +342,28 @@ def analyze_records(
     applied = sum(item == "applied" for item in status_values)
     receipt_by_id = {item.receipt_id: item for item in valid_receipts}
     def outcome_receipt(item: OptimizationTerminalOutcome) -> ParameterApplicationReceipt | None:
-        return item.parameter_application_receipt or (
+        raw_receipt = item.parameter_application_receipt or (
             receipt_by_id.get(item.parameter_application_receipt_id)
             if item.parameter_application_receipt_id else None
         )
+        if raw_receipt is None:
+            return None
+        try:
+            receipt = _receipt(raw_receipt)
+        except (ValidationError, TypeError, ValueError):
+            return None
+        return receipt if _receipt_binding_matches(item, receipt) else None
+
+    def has_stale_receipt_binding(item: OptimizationTerminalOutcome) -> bool:
+        raw_receipt = item.parameter_application_receipt
+        if raw_receipt is None:
+            return False
+        if isinstance(raw_receipt, ParameterApplicationReceipt):
+            return not _receipt_binding_matches(item, raw_receipt)
+        try:
+            return not _receipt_binding_matches(item, _receipt(raw_receipt))
+        except (ValidationError, TypeError, ValueError):
+            return False
     expected_realized_set = set(expected_realized)
     joins = _receipt_join(valid_receipts, outcomes_v)
     promotions = [item for item in outcomes_v if item.incumbent_decision is not None]
@@ -385,7 +415,8 @@ def analyze_records(
     failure["failed"] = sum(_value(item.outcome) == "execution_failed" for item in outcomes_v)
     failure["timeout"] = sum(_value(item.outcome) == "timed_out_cancelled" for item in outcomes_v)
     failure["terminal_incomplete"] = sum(item.terminal_observation is None for item in outcomes_v)
-    failure["missing_receipt"] = sum(outcome_receipt(item) is None for item in outcomes_v)
+    failure["missing_receipt"] = sum(outcome_receipt(item) is None and not has_stale_receipt_binding(item) for item in outcomes_v)
+    failure["stale_receipt"] = sum(has_stale_receipt_binding(item) for item in outcomes_v)
     failure["provider_error"] = 0
     failure["schema_error"] = len(receipt_errors)
     failure["parser_producer_context_mismatch"] = sum(
@@ -415,7 +446,7 @@ def analyze_records(
         "P10": {"violations": invariant_violations, "count": len(invariant_violations), **_metric(len(invariant_violations), len(promoting))},
         "P11": _metric(sum(not bool(case.get("observed_promoted")) for case in blocked_cases), len(blocked_cases), "no registered fault cases"),
         "P12": {"false_applied": false_applied, "false_inactive": false_inactive, "false_promotion": false_promotion + len(invariant_violations), "denominator": len(cases), "exclusions": []},
-        "P13": {"unknown": status_values.count("unknown"), "missing_source": sum(item.parameter.consumed is not None and not _source_backed(item.parameter.consumed) for item in valid_receipts), "unjoined": joins["orphan"] + joins["foreign_candidate"], "denominator": valid, "exclusions": []},
+        "P13": {"unknown": status_values.count("unknown"), "missing_source": sum(item.parameter.consumed is not None and not _source_backed(item.parameter.consumed) for item in valid_receipts), "unjoined": joins["orphan"] + joins["foreign_candidate"], "stale_receipt": failure["stale_receipt"], "denominator": valid, "exclusions": []},
         "P14": {"duplicate_consumed": duplicate_count, "shadow_duplicates": shadow_duplicates, "observed": len(consumed_signatures), "denominator": len(consumed_signatures), "rate": duplicate_count / len(consumed_signatures) if consumed_signatures else None, "exclusions": []},
         "P15": _gap_distribution(consumed_rows),
         "P16": _gap_distribution(realized_rows),

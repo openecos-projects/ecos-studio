@@ -170,3 +170,11 @@ def test_analyze_episode_rejects_corrupt_ledger(tmp_path) -> None:
     with pytest.raises(ValueError):
         from ecos_agent.optimization.experiments.rq1_execution_evidence import analyze_episode
         analyze_episode(tmp_path)
+
+
+def test_analyzer_rejects_stale_embedded_receipt_binding() -> None:
+    receipt = _receipt()
+    outcome = _outcome(receipt).model_copy(update={"receipt_sha256": "sha256:" + "b" * 64})
+    report = analyze_records([_start()], [outcome])
+    assert report["primary"]["P13"]["stale_receipt"] == 1
+    assert report["primary"]["P19"]["counts"]["stale_receipt"] == 1
