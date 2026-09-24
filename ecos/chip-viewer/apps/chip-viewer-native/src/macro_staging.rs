@@ -251,14 +251,21 @@ impl MacroStagingState {
         world
     }
 
-    pub(crate) fn staged_index_at(&self, point: Point32) -> Option<usize> {
+    /// Index of the staged macro whose rectangle contains the point, allowing
+    /// `tolerance_dbu` of slop per side so far-out macros stay clickable at
+    /// fit zoom. `tolerance_dbu` is 0 for an exact hit test.
+    pub(crate) fn staged_index_at(&self, point: Point32, tolerance_dbu: i32) -> Option<usize> {
         self.staged
             .iter()
-            .position(|macro_entry| rect_contains(macro_entry.rect, point))
+            .position(|macro_entry| rect_contains_with_slop(macro_entry.rect, point, tolerance_dbu))
     }
 
-    pub(crate) fn staged_target_at(&self, point: Point32) -> Option<MacroTarget> {
-        self.staged_index_at(point)
+    pub(crate) fn staged_target_at(
+        &self,
+        point: Point32,
+        tolerance_dbu: i32,
+    ) -> Option<MacroTarget> {
+        self.staged_index_at(point, tolerance_dbu)
             .and_then(|index| self.staged.get(index))
             .map(|macro_entry| MacroTarget::Staged(macro_entry.name.clone()))
     }
@@ -527,8 +534,11 @@ fn boundary_rect(db: &ChipViewDb, expected: OwnerType) -> Option<Rect32> {
         .map(|shape| shape.bbox)
 }
 
-pub(crate) fn rect_contains(rect: Rect32, point: Point32) -> bool {
-    point.x >= rect.lx && point.x <= rect.hx && point.y >= rect.ly && point.y <= rect.hy
+pub(crate) fn rect_contains_with_slop(rect: Rect32, point: Point32, slop_dbu: i32) -> bool {
+    point.x >= rect.lx.saturating_sub(slop_dbu)
+        && point.x <= rect.hx.saturating_add(slop_dbu)
+        && point.y >= rect.ly.saturating_sub(slop_dbu)
+        && point.y <= rect.hy.saturating_add(slop_dbu)
 }
 
 /// Paints the unplaced-stdcell placeholder blob in screen space. The striped

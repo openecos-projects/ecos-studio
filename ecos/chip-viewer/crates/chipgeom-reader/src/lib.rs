@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::path::{Component, Path, PathBuf};
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use chipgeom_format::{
@@ -285,15 +286,56 @@ impl GeometrySnapshot {
             GeometryFileKind::View,
             core::mem::size_of::<GeometryViewTileRecord>() as u32,
         )?;
-        let layer_metadata = read_layer_metadata(manifest.layers.as_deref())?;
-        let site_metadata = read_site_metadata(manifest.sites.as_deref())?;
-        let master_metadata = read_master_metadata(manifest.masters.as_deref())?;
-        let via_metadata = read_via_metadata(manifest.vias.as_deref())?;
-        let grid_metadata = read_grid_metadata(manifest.grids.as_deref())?;
-        let connectivity_metadata = read_connectivity_metadata(manifest.connectivity.as_deref())?;
-        let net_metadata = read_net_metadata(manifest.nets.as_deref())?;
-        let bus_metadata = read_bus_metadata(manifest.buses.as_deref())?;
-        let group_metadata = read_group_metadata(manifest.groups.as_deref())?;
+        // Sidecar files are independent, so parse them concurrently. Results
+        // are checked in the same fixed order the sequential code used, so a
+        // failing file produces the same error as before.
+        let (
+            layer_metadata,
+            site_metadata,
+            master_metadata,
+            via_metadata,
+            grid_metadata,
+            connectivity_metadata,
+            net_metadata,
+            bus_metadata,
+            group_metadata,
+        ) = std::thread::scope(
+            |scope| -> Result<(
+                Vec<LayerMetadata>,
+                Vec<SiteMetadata>,
+                Vec<MasterMetadata>,
+                Vec<ViaMetadata>,
+                Vec<GridMetadata>,
+                Vec<ConnectivityMetadata>,
+                Vec<NetMetadata>,
+                Vec<BusMetadata>,
+                Vec<GroupMetadata>,
+            )> {
+                let layers = scope.spawn(|| read_layer_metadata(manifest.layers.as_deref()));
+                let sites = scope.spawn(|| read_site_metadata(manifest.sites.as_deref()));
+                let masters = scope.spawn(|| read_master_metadata(manifest.masters.as_deref()));
+                let vias = scope.spawn(|| read_via_metadata(manifest.vias.as_deref()));
+                let grids = scope.spawn(|| read_grid_metadata(manifest.grids.as_deref()));
+                let connectivity =
+                    scope.spawn(|| read_connectivity_metadata(manifest.connectivity.as_deref()));
+                let nets = scope.spawn(|| read_net_metadata(manifest.nets.as_deref()));
+                let buses = scope.spawn(|| read_bus_metadata(manifest.buses.as_deref()));
+                let groups = scope.spawn(|| read_group_metadata(manifest.groups.as_deref()));
+                Ok((
+                    layers.join().expect("layer metadata worker panicked")?,
+                    sites.join().expect("site metadata worker panicked")?,
+                    masters.join().expect("master metadata worker panicked")?,
+                    vias.join().expect("via metadata worker panicked")?,
+                    grids.join().expect("grid metadata worker panicked")?,
+                    connectivity
+                        .join()
+                        .expect("connectivity metadata worker panicked")?,
+                    nets.join().expect("net metadata worker panicked")?,
+                    buses.join().expect("bus metadata worker panicked")?,
+                    groups.join().expect("group metadata worker panicked")?,
+                ))
+            },
+        )?;
 
         let snapshot = Self {
             manifest,
@@ -554,6 +596,67 @@ fn read_manifest(path: &Path) -> Result<GeometryManifest> {
         buses: values.get("buses").map(|value| base.join(value)),
         groups: values.get("groups").map(|value| base.join(value)),
         drc,
+    })
+}
+
+/// Number of sidecar parse workers. Capped so machines with very high core
+/// counts do not spawn more threads than files or line chunks.
+fn sidecar_worker_count() -> usize {
+    static WORKERS: OnceLock<usize> = OnceLock::new();
+    *WORKERS.get_or_init(|| {
+        std::thread::available_parallelism()
+            .map(|threads| threads.get())
+            .unwrap_or(1)
+            .min(32)
+    })
+}
+
+/// Line count below which chunked parsing stays on the calling thread.
+const PARSE_LINES_MIN_PARALLEL: usize = 4096;
+
+/// Parses sidecar text lines with `parse_line`, chunking the line range
+/// across workers for large files. `parse_line` receives the global line
+/// index and returns `Ok(None)` for lines that produce no record. Chunk
+/// results are joined in order, so the first error returned is the one for
+/// the earliest line, exactly as a sequential scan would produce.
+fn parse_sidecar_lines<T: Send>(
+    content: &str,
+    parse_line: &(dyn Fn(&str, usize) -> Result<Option<T>> + Sync),
+) -> Result<Vec<T>> {
+    let lines: Vec<&str> = content.lines().collect();
+    let workers = sidecar_worker_count();
+    if workers <= 1 || lines.len() < PARSE_LINES_MIN_PARALLEL {
+        let mut records = Vec::with_capacity(lines.len());
+        for (line_index, line) in lines.iter().enumerate() {
+            if let Some(record) = parse_line(line, line_index)? {
+                records.push(record);
+            }
+        }
+        return Ok(records);
+    }
+    let chunk_len = lines.len().div_ceil(workers);
+    std::thread::scope(|scope| {
+        let handles = lines
+            .chunks(chunk_len)
+            .enumerate()
+            .map(|(chunk_index, chunk)| {
+                let line_offset = chunk_index * chunk_len;
+                scope.spawn(move || -> Result<Vec<T>> {
+                    let mut records = Vec::with_capacity(chunk.len());
+                    for (offset, line) in chunk.iter().enumerate() {
+                        if let Some(record) = parse_line(line, line_offset + offset)? {
+                            records.push(record);
+                        }
+                    }
+                    Ok(records)
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut records = Vec::with_capacity(lines.len());
+        for handle in handles {
+            records.extend(handle.join().expect("sidecar parse worker panicked")?);
+        }
+        Ok(records)
     })
 }
 
@@ -822,22 +925,34 @@ fn read_grid_metadata(path: Option<&Path>) -> Result<Vec<GridMetadata>> {
     Ok(grids)
 }
 
+/// Maps a sidecar text file into memory and validates its UTF-8 content.
+/// Mapping avoids the large intermediate heap buffer that `read_to_string`
+/// would allocate and page-fault for multi-megabyte sidecars. The content
+/// is validated here, so callers can decode with `str::from_utf8`
+/// infallibly while the returned mapping is alive.
+fn map_sidecar_text(path: &Path) -> Result<Mmap> {
+    let file = File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let mapped = unsafe { Mmap::map(&file) }
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    std::str::from_utf8(&mapped).with_context(|| format!("failed to read {}", path.display()))?;
+    Ok(mapped)
+}
+
 fn read_connectivity_metadata(path: Option<&Path>) -> Result<Vec<ConnectivityMetadata>> {
     let Some(path) = path else {
         return Ok(Vec::new());
     };
 
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
-    let mut connectivity = Vec::new();
-    for (line_index, line) in content.lines().enumerate() {
+    let mapped = map_sidecar_text(path)?;
+    let content = std::str::from_utf8(&mapped).expect("sidecar text validated by map_sidecar_text");
+    parse_sidecar_lines(content, &|line, line_index| {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
+            return Ok(None);
         }
         let fields: Vec<&str> = line.split('\t').collect();
         if fields.first() == Some(&"net") {
-            continue;
+            return Ok(None);
         }
         if fields.len() < 6 {
             anyhow::bail!(
@@ -846,16 +961,15 @@ fn read_connectivity_metadata(path: Option<&Path>) -> Result<Vec<ConnectivityMet
                 path.display()
             );
         }
-        connectivity.push(ConnectivityMetadata {
+        Ok(Some(ConnectivityMetadata {
             net_name: metadata_string(fields[0]),
             net_kind: metadata_string_with_fallback(fields[1], "other"),
             endpoint_type: metadata_string_with_fallback(fields[2], "unknown"),
             instance_name: metadata_string(fields[3]),
             pin_name: metadata_string(fields[4]),
             master_name: metadata_string(fields[5]),
-        });
-    }
-    Ok(connectivity)
+        }))
+    })
 }
 
 fn read_net_metadata(path: Option<&Path>) -> Result<Vec<NetMetadata>> {
@@ -863,17 +977,16 @@ fn read_net_metadata(path: Option<&Path>) -> Result<Vec<NetMetadata>> {
         return Ok(Vec::new());
     };
 
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
-    let mut nets = Vec::new();
-    for (line_index, line) in content.lines().enumerate() {
+    let mapped = map_sidecar_text(path)?;
+    let content = std::str::from_utf8(&mapped).expect("sidecar text validated by map_sidecar_text");
+    parse_sidecar_lines(content, &|line, line_index| {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
+            return Ok(None);
         }
         let fields: Vec<&str> = line.split('\t').collect();
         if fields.first() == Some(&"name") {
-            continue;
+            return Ok(None);
         }
         if fields.len() < 2 {
             anyhow::bail!(
@@ -882,12 +995,11 @@ fn read_net_metadata(path: Option<&Path>) -> Result<Vec<NetMetadata>> {
                 path.display()
             );
         }
-        nets.push(NetMetadata {
+        Ok(Some(NetMetadata {
             name: metadata_string(fields[0]),
             kind: metadata_string_with_fallback(fields[1], "other"),
-        });
-    }
-    Ok(nets)
+        }))
+    })
 }
 
 fn read_bus_metadata(path: Option<&Path>) -> Result<Vec<BusMetadata>> {
@@ -1723,6 +1835,30 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn parse_sidecar_lines_parallel_preserves_record_and_error_order() {
+        let content = (0..10_000)
+            .map(|index| format!("record{index}\n"))
+            .collect::<String>();
+        let parse = |line: &str, line_index: usize| -> Result<Option<(String, usize)>> {
+            Ok(Some((line.to_string(), line_index)))
+        };
+        let records = parse_sidecar_lines(&content, &parse).unwrap();
+        assert_eq!(records.len(), 10_000);
+        assert_eq!(records.first(), Some(&("record0".to_string(), 0)));
+        assert_eq!(records.last(), Some(&("record9999".to_string(), 9_999)));
+
+        // The earliest failing line wins, even when a later chunk also fails.
+        let parse_err = |_: &str, line_index: usize| -> Result<Option<()>> {
+            if line_index == 3 || line_index == 9_000 {
+                anyhow::bail!("invalid line {line_index}");
+            }
+            Ok(Some(()))
+        };
+        let error = parse_sidecar_lines(&content, &parse_err).unwrap_err();
+        assert_eq!(format!("{error:#}"), "invalid line 3");
     }
 
     #[test]
