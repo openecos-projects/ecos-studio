@@ -33,10 +33,10 @@ function resource(overrides: Partial<ResourceItem>): ResourceItem {
   }
 }
 
-function mountCard(overrides: Partial<ResourceItem> = {}, selected = false) {
+function mountCard(overrides: Partial<ResourceItem> = {}) {
   const row = resourceToRow(resource(overrides), undefined)
   return mount(PluginResourceCard, {
-    props: { row, selected, importing: false },
+    props: { row, importing: false },
   })
 }
 
@@ -75,16 +75,6 @@ describe('PluginResourceCard', () => {
     const error = mountCard({ status: 'error', error: 'boom' })
     expect(error.find('.status-pill').classes()).toContain('error')
     expect(error.find('.status-pill').attributes('title')).toBe('boom')
-  })
-
-  it('emits toggle from the checkbox and keyboard, not from the card body', async () => {
-    const wrapper = mountCard()
-
-    await wrapper.find('.resource-check').trigger('click')
-    expect(wrapper.emitted('toggle')).toHaveLength(1)
-
-    await wrapper.find('.plugin-card').trigger('keydown.enter')
-    expect(wrapper.emitted('toggle')).toHaveLength(2)
   })
 
   it('emits the primary action id when its labeled button is clicked', async () => {
