@@ -1,12 +1,14 @@
 import {
-  projectManagementWorkspaceStepAnalysisSpecs,
+  engineeringSnapshotMetricStep,
   parseProjectManifestFlowStep,
+  projectManifestFlowSteps,
   type EccEngineeringSnapshot,
   type EccQorSnapshotExtension,
   type MetricComparison,
   type MetricValue,
   type ProjectManifest,
   type ProjectManifestFlowStep,
+  type QorStepSummary,
   type ReadSection,
   type WorkspaceBaselineComparison,
   type WorkspaceQorSummary,
@@ -16,30 +18,6 @@ import {
   type ProjectQorMetricRecord,
   type ProjectQorWorkspaceInput,
 } from './qorAnalysis'
-
-const FLOW_STEP_ALIASES: Record<string, ProjectManifestFlowStep> = {
-  synthesis: 'Synth',
-  synth: 'Synth',
-  floorplan: 'Floor',
-  floor: 'Floor',
-  lec: 'LEC',
-  place: 'Place',
-  placement: 'Place',
-  cts: 'CTS',
-  legalization: 'Legal',
-  legal: 'Legal',
-  'timing optimization': 'Timing Opt',
-  timingoptimization: 'Timing Opt',
-  route: 'Route',
-  routing: 'Route',
-  drc: 'DRC',
-  lvs: 'LVS',
-  filler: 'Filler',
-  postroutelec: 'Post-route LEC',
-  rcx: 'RCX',
-  sta: 'STA',
-  harden: 'Harden',
-}
 
 type ProjectStepStatus = NonNullable<
   ProjectQorWorkspaceInput['stepStatuses'][ProjectManifestFlowStep]
@@ -57,7 +35,7 @@ interface SnapshotQorProjection {
 
 export type WorkspaceEngineeringFacts = Pick<
   EccEngineeringSnapshot,
-  'analysis' | 'metrics' | 'qorAssessment' | 'qorSnapshotExtension'
+  'metrics' | 'qorSnapshotExtension'
 > &
   Partial<Pick<EccEngineeringSnapshot, 'flow' | 'signoffAssessment'>>
 
@@ -67,22 +45,13 @@ function record(value: unknown): Record<string, unknown> | null {
     : null
 }
 
-// QoR projection groups metrics per distinct snapshot step, so it keeps the
-// raw step identity (collapsing floorplan sub-steps would trip the
-// duplicate-step guard). Flow-state cells use the shared coarse mapping.
-function flowStep(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  return (FLOW_STEP_ALIASES[trimmed.toLowerCase()] ?? trimmed) || null
-}
-
 function coarseFlowStep(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
   return (parseProjectManifestFlowStep(trimmed) ?? trimmed) || null
 }
 
-function snapshotMetric(value: unknown, stepId: string): MetricValue | null {
+function snapshotMetric(value: unknown): MetricValue | null {
   const metric = record(value)
   if (!metric) return null
   const id = typeof metric.id === 'string' ? metric.id : ''
@@ -104,6 +73,11 @@ function snapshotMetric(value: unknown, stepId: string): MetricValue | null {
   ) {
     return null
   }
+  // v6 flat records carry no dedicated step field; the owning step is derived
+  // from the producer-assigned scope/group/id (engineeringSnapshotMetricStep).
+  // Unattributable records keep an empty stepId: visible in the flat list,
+  // excluded from per-step comparison.
+  const stepId = engineeringSnapshotMetricStep(metric) ?? ''
   return {
     id,
     name,
@@ -120,17 +94,37 @@ function snapshotMetric(value: unknown, stepId: string): MetricValue | null {
   }
 }
 
+const QOR_STEP_ORDER = new Map(
+  projectManifestFlowSteps.map((step, order) => [step, order] as const),
+)
+
+// The producer only projects metrics from succeeded steps, so a step present
+// in the projection has a passing metrics state by construction.
+function snapshotQorSteps(metrics: MetricValue[]): QorStepSummary[] {
+  const metricsByStep = new Map<string, MetricValue[]>()
+  for (const metric of metrics) {
+    if (!metric.stepId) continue
+    const stepMetrics = metricsByStep.get(metric.stepId) ?? []
+    stepMetrics.push(metric)
+    metricsByStep.set(metric.stepId, stepMetrics)
+  }
+  return [...metricsByStep.entries()]
+    .map(([stepId, stepMetrics]) => ({
+      stepId,
+      order: QOR_STEP_ORDER.get(stepId as ProjectManifestFlowStep) ?? QOR_STEP_ORDER.size,
+      name: stepId,
+      metrics: stepMetrics,
+      status: 'pass' as const,
+      summaryMetricCount: stepMetrics.length,
+    }))
+    .sort((left, right) => left.order - right.order)
+}
+
 function snapshotQorProjection(
   snapshot: WorkspaceEngineeringFacts | null | undefined,
 ): SnapshotQorProjection {
-  const empty: SnapshotQorProjection = {
-    assessment: null,
-    qor: null,
-    qorSnapshotExtension: snapshot?.qorSnapshotExtension ?? null,
-  }
-  if (!snapshot) return empty
-  const extension = snapshot.qorSnapshotExtension ?? null
-  const qor = record(snapshot.qorAssessment)
+  const extension = snapshot?.qorSnapshotExtension ?? null
+  if (!snapshot) return { assessment: null, qor: null, qorSnapshotExtension: extension }
   // The qor-v3 Snapshot extension is the only score source; an unavailable or
   // missing extension leaves the workspace unrated rather than reusing old facts.
   const rated = extension?.status === 'available' ? extension : null
@@ -146,57 +140,14 @@ function snapshotQorProjection(
         signoffStatus: signoffStatus as 'ready' | 'attention' | 'blocked',
       }
     : null
-  const rawMetrics = Array.isArray(qor?.metrics) ? qor.metrics : snapshot.metrics
-  if (!Array.isArray(rawMetrics) || !Array.isArray(qor?.steps)) {
-    return { assessment, qor: null, qorSnapshotExtension: extension }
-  }
 
+  // v6 metrics are a single flat projection; per-step grouping is derived from
+  // the producer-assigned scope/group/id on each record.
   const metrics: MetricValue[] = []
-  const steps: WorkspaceQorSummary['steps'] = []
-  const seenSteps = new Set<string>()
-  let offset = 0
-  for (const rawStep of qor.steps) {
-    const stepRecord = record(rawStep)
-    const count = stepRecord?.summaryMetricCount
-    const order = stepRecord?.order
-    const stepId = flowStep(stepRecord?.stepId ?? stepRecord?.name)
-    const status = stepRecord?.status
-    if (
-      !stepRecord ||
-      !stepId ||
-      seenSteps.has(stepId) ||
-      !Number.isInteger(count) ||
-      (count as number) < 0 ||
-      !Number.isInteger(order) ||
-      (order as number) < 0 ||
-      !['pass', 'blocked', 'incomplete', 'unavailable'].includes(String(status))
-    ) {
-      return { assessment, qor: null, qorSnapshotExtension: extension }
-    }
-    const nextOffset = offset + (count as number)
-    if (nextOffset > rawMetrics.length) {
-      return { assessment, qor: null, qorSnapshotExtension: extension }
-    }
-    const stepMetrics = rawMetrics
-      .slice(offset, nextOffset)
-      .map((metric) => snapshotMetric(metric, stepId))
-    if (stepMetrics.some((metric) => metric === null)) {
-      return { assessment, qor: null, qorSnapshotExtension: extension }
-    }
-    seenSteps.add(stepId)
-    metrics.push(...(stepMetrics as MetricValue[]))
-    steps.push({
-      stepId,
-      order: order as number,
-      name: typeof stepRecord.name === 'string' ? stepRecord.name : stepId,
-      metrics: stepMetrics as MetricValue[],
-      status: status as WorkspaceQorSummary['steps'][number]['status'],
-      summaryMetricCount: count as number,
-    })
-    offset = nextOffset
-  }
-  if (offset !== rawMetrics.length) {
-    return { assessment, qor: null, qorSnapshotExtension: extension }
+  for (const rawMetric of snapshot.metrics) {
+    const metric = snapshotMetric(rawMetric)
+    if (!metric) return { assessment, qor: null, qorSnapshotExtension: extension }
+    metrics.push(metric)
   }
   return {
     assessment,
@@ -204,7 +155,7 @@ function snapshotQorProjection(
     qor: {
       score,
       metrics,
-      steps,
+      steps: snapshotQorSteps(metrics),
       ...(extension ? { qorSnapshotExtension: extension } : {}),
     },
   }
@@ -268,22 +219,25 @@ function workspaceStatus(
   return 'not_started'
 }
 
+// Cross-workspace comparison consumes only the bounded Snapshot projection:
+// the flat v6 metrics normalized per derived step. Per-step report texts stay
+// behind the lazy artifact channel.
 function snapshotComparisonMetrics(
   snapshot: WorkspaceEngineeringFacts | null | undefined,
   workspaceId: string,
 ): ProjectQorMetricRecord[] {
   if (!snapshot) return []
-  return snapshot.analysis.steps.flatMap((analysisStep) => {
-    const step = parseProjectManifestFlowStep(analysisStep.stepId)
-    const metrics = analysisStep.metrics.data?.metrics
-    if (analysisStep.metrics.status !== 'available' || !step || !Array.isArray(metrics)) {
-      return []
-    }
-    return normalizeQorMetricRecords(
-      { step, workspaceId, workspaceKey: workspaceId },
-      metrics,
-    )
-  })
+  const metricsByStep = new Map<ProjectManifestFlowStep, unknown[]>()
+  for (const metric of snapshot.metrics) {
+    const step = engineeringSnapshotMetricStep(metric)
+    if (!step) continue
+    const stepMetrics = metricsByStep.get(step) ?? []
+    stepMetrics.push(metric)
+    metricsByStep.set(step, stepMetrics)
+  }
+  return [...metricsByStep.entries()].flatMap(([step, metrics]) =>
+    normalizeQorMetricRecords({ step, workspaceId, workspaceKey: workspaceId }, metrics),
+  )
 }
 
 export function projectQorInputForWorkspace(
@@ -297,55 +251,51 @@ export function projectQorInputForWorkspace(
   if (!workspace) return null
   const statuses = workspaceFlowStates(engineeringSnapshot?.flow)
   const snapshot = snapshotQorProjection(engineeringSnapshot)
-  const analysisByStep = new Map(
-    (engineeringSnapshot?.analysis.steps ?? []).map((step) => [
-      parseProjectManifestFlowStep(step.stepId) ?? step.stepId,
-      step,
-    ]),
-  )
-  const analysisText = (
-    file: { status: string; data: Record<string, unknown> | null } | null | undefined,
-  ): string | null =>
-    file?.status === 'available' && file.data ? JSON.stringify(file.data) : null
+  // v6 snapshots carry no inlined analysis payloads; per-step report texts are
+  // lazy-loaded through the artifact channel instead of the snapshot.
   return {
     branchFrom: workspace.branch_from,
     createdAt: workspace.created_at,
-    staTimingIssuesText: analysisText(
-      engineeringSnapshot?.analysis.steps.find((step) => step.timingIssues)
-        ?.timingIssues ?? null,
-    ),
+    staTimingIssuesText: null,
     status: workspaceStatus(workspace.status, statuses),
     authoritativeAssessment: snapshot.assessment,
     normalizedMetrics: snapshotComparisonMetrics(engineeringSnapshot, workspaceId),
     snapshotQor: snapshot.qor,
     qorSnapshotExtension: snapshot.qorSnapshotExtension,
-    stepHotspotTexts: Object.fromEntries(
-      projectManagementWorkspaceStepAnalysisSpecs.map((spec) => [
-        spec.step,
-        analysisText(analysisByStep.get(spec.step)?.hotspots),
-      ]),
-    ),
-    stepMetricTexts: Object.fromEntries(
-      projectManagementWorkspaceStepAnalysisSpecs.map((spec) => [
-        spec.step,
-        analysisText(analysisByStep.get(spec.step)?.metrics),
-      ]),
-    ),
+    stepHotspotTexts: {},
+    stepMetricTexts: {},
     stepStatuses: statuses,
-    stepSummaryTexts: Object.fromEntries(
-      projectManagementWorkspaceStepAnalysisSpecs.map((spec) => [
-        spec.step,
-        analysisText(analysisByStep.get(spec.step)?.summary),
-      ]),
-    ),
+    stepSummaryTexts: {},
     workspaceId,
     workspaceName: workspace.name || workspaceId,
     workspaceKey: workspaceId,
   }
 }
 
+// Metrics only pair across workspaces under an identical measurement context:
+// step, id, unit, corner, and corner context. A metric whose context differs
+// (for example another STA corner or unit) never produces a ranked delta.
 function metricKey(metric: MetricValue): string {
-  return `${metric.stepId}:\0${metric.id}`
+  return [
+    metric.stepId,
+    metric.id,
+    metric.unit ?? '',
+    metric.corner ?? '',
+    cornerContextKey(metric.cornerContext),
+  ].join('\0')
+}
+
+function cornerContextKey(context: Record<string, unknown> | undefined): string {
+  if (!context) return ''
+  return [
+    context.configured_role,
+    context.process_corner,
+    context.voltage_v,
+    context.temperature_c,
+    context.rc_corner,
+  ]
+    .map((value) => String(value ?? ''))
+    .join('|')
 }
 
 function metricDelta(

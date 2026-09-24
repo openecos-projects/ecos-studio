@@ -120,6 +120,7 @@ function registerHandlers(
     backendWorkspaceService: {
       clearWindow: vi.fn(),
       getArtifact: vi.fn(),
+      getChecklistEvidence: vi.fn(),
       getOverview: vi.fn(),
       getStepDetail: vi.fn(),
       invalidateWindow: vi.fn(),
@@ -160,6 +161,7 @@ function registerHandlers(
       listProjectDirectory: vi.fn(),
       pathExists: vi.fn(),
       discardFailedWorkspaceCreate: vi.fn(),
+      deleteEngineeringSnapshot: vi.fn(),
       requestProjectPathAccess: vi.fn(async (path: string) => path),
       scanPdkDirectory: vi.fn(),
       scanRtlDirectory: vi.fn(),
@@ -508,6 +510,50 @@ describe('registerIpc', () => {
       ok: false,
     })
     expect(services.workspaceService.discardFailedWorkspaceCreate).not.toHaveBeenCalled()
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceDeleteEngineeringSnapshot)?.(
+        { sender: { id: 7 } },
+        '/projects/demo/ws_1',
+      ),
+    ).resolves.toMatchObject({
+      error: { code: 'SHUTDOWN_IN_PROGRESS' },
+      ok: false,
+    })
+    expect(services.workspaceService.deleteEngineeringSnapshot).not.toHaveBeenCalled()
+  })
+
+  it('delegates engineering snapshot deletion to the workspace service', async () => {
+    const { handlers, services } = registerHandlers()
+    services.workspaceService.deleteEngineeringSnapshot.mockResolvedValue(true)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceDeleteEngineeringSnapshot)?.(
+        { sender: { id: 7 } },
+        '/projects/demo/ws_1',
+      ),
+    ).resolves.toBe(true)
+    expect(services.workspaceService.deleteEngineeringSnapshot).toHaveBeenCalledWith(
+      '/projects/demo/ws_1',
+    )
+    expect(
+      services.backendProjectComparisonService.invalidateWorkspace,
+    ).toHaveBeenCalledWith('/projects/demo/ws_1')
+
+    services.workspaceService.deleteEngineeringSnapshot.mockResolvedValue(false)
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceDeleteEngineeringSnapshot)?.(
+        { sender: { id: 7 } },
+        '/projects/demo/ws_1',
+      ),
+    ).resolves.toBe(false)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceDeleteEngineeringSnapshot)?.(
+        { sender: { id: 7 } },
+        42,
+      ),
+    ).resolves.toMatchObject({ error: { message: 'Workspace path must be a string' } })
   })
 
   it('tracks an accepted mutating command until its handler settles', async () => {
@@ -2733,6 +2779,18 @@ describe('registerIpc', () => {
         workspaceRevision: 9,
       }),
     ).resolves.toEqual(detail)
+    const evidenceRequest = {
+      findingId: 'place.drc',
+      workspaceContextId: 'workspace-context-1',
+      workspaceRevision: 9,
+    }
+    services.backendWorkspaceService.getChecklistEvidence.mockResolvedValue(detail)
+    await expect(
+      handlers.get(desktopApiIpcChannels.backendWorkspaceGetChecklistEvidence)?.(
+        event,
+        evidenceRequest,
+      ),
+    ).resolves.toEqual(detail)
     await expect(
       handlers.get(desktopApiIpcChannels.backendWorkspaceRefreshOverview)?.(event),
     ).resolves.toEqual(result)
@@ -2746,6 +2804,9 @@ describe('registerIpc', () => {
       workspaceContextId: 'workspace-context-1',
       workspaceRevision: 9,
     })
+    expect(services.backendWorkspaceService.getChecklistEvidence).toHaveBeenCalledWith(
+      evidenceRequest,
+    )
     expect(services.backendWorkspaceService.refreshOverview).toHaveBeenCalledTimes(1)
   })
 

@@ -95,18 +95,13 @@ export function useProjectStepEvidence(
         tone: 'stale',
         label: `${previous ?? 'Last committed'} · ${findingsIssueLabel(value.issue.code)}`,
       }
-    const externallyModified = data.value?.artifactIntegrity === 'externally-modified'
     const artifactIssues = (data.value?.artifactIssues?.length ?? 0) > 0
-    if (externallyModified || artifactIssues) {
+    if (artifactIssues) {
       return {
         icon: 'ri-alert-line',
         tone: 'stale',
         label:
-          externallyModified && artifactIssues
-            ? 'Artifact files changed since the committed snapshot, and some could not be read. Results are incomplete and are not trusted signoff evidence.'
-            : externallyModified
-              ? 'Artifact files changed since the committed snapshot. Results are available for comparison but are not trusted signoff evidence.'
-              : 'Some artifact files could not be read. The remaining committed results are available for comparison but are not complete.',
+          'Some artifact files could not be read. The remaining committed results are available for comparison but are not complete.',
       }
     }
     if (previous) return { icon: 'ri-history-line', tone: 'stale', label: previous }
@@ -153,7 +148,6 @@ function findingsIssueLabel(code: string): string {
   if (code === 'FINDINGS_ARTIFACT_TOO_LARGE') return 'artifact too large'
   if (code === 'FINDINGS_ARTIFACT_INVALID_JSON') return 'invalid artifact JSON'
   if (code === 'FINDINGS_SNAPSHOT_REVISION_CHANGED') return 'snapshot changed'
-  if (code === 'ARTIFACT_REVISION_MISMATCH') return 'artifact changed'
   if (code === 'FINDINGS_STEP_UNAVAILABLE') return 'step results unavailable'
   if (code === 'FINDINGS_WORKSPACE_UNAVAILABLE') return 'workspace results unavailable'
   return 'read failed'

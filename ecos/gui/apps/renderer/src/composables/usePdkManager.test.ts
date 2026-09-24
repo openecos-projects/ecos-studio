@@ -180,6 +180,7 @@ const desktopBridge = {
     listProjectDirectory: async () => [],
     pathExists: async () => false,
     discardFailedWorkspaceCreate: async () => false,
+    deleteEngineeringSnapshot: async () => false,
     prepareProjectDirectoryReplacement: async () => null,
     restoreProjectDirectoryReplacement: async () => undefined,
     finalizeProjectDirectoryReplacement: async () => undefined,

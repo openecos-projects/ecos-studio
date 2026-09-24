@@ -5,6 +5,8 @@ import {
   type BackendWorkspaceOverviewResult,
   type BackendWorkspaceArtifactRequest,
   type BackendWorkspaceArtifactResult,
+  type BackendWorkspaceChecklistEvidenceRequest,
+  type BackendWorkspaceChecklistEvidenceResult,
   type BackendWorkspaceStepDetailRequest,
   type BackendWorkspaceStepDetailResult,
   type EngineeringSnapshotValidationResult,
@@ -29,6 +31,7 @@ import type { ProjectEngineeringSnapshotReadResult } from './projectManagementRe
 import { artifactDescriptor, workspaceStepDetail } from './backendWorkspaceDetail'
 import {
   readWorkspaceArtifact,
+  readWorkspaceChecklistEvidence,
   type WorkspaceArtifactReader,
 } from './backendWorkspaceArtifact'
 import type {
@@ -93,7 +96,7 @@ export interface BackendWorkspaceInvalidation {
 }
 
 const NOT_MIGRATED_ISSUE: ReadIssue = { code: 'BACKEND_SECTION_NOT_MIGRATED' }
-const SNAPSHOT_SECTIONS = ['artifacts', 'flow', 'qor', 'signoff'] as const
+const SNAPSHOT_SECTIONS = ['artifacts', 'flow', 'metrics', 'signoff'] as const
 type ValidEngineeringSnapshot = Extract<EngineeringSnapshotValidationResult, { ok: true }>
 
 function unavailable<T>(): ReadSection<T> {
@@ -110,11 +113,9 @@ function snapshotSectionItemCount(
     const steps = value.data.steps
     return Array.isArray(steps) ? steps.length : 0
   }
-  if (section === 'qor') {
-    const value = snapshot.sections.qor
-    return value.status === 'ready' || value.status === 'partial'
-      ? value.data.metrics.length
-      : 0
+  if (section === 'metrics') {
+    const value = snapshot.sections.metrics
+    return value.status === 'ready' || value.status === 'partial' ? value.data.length : 0
   }
   if (section === 'artifacts') {
     const value = snapshot.sections.artifacts
@@ -329,10 +330,9 @@ export class BackendWorkspaceService {
       request.artifactId,
       this.options.projectManagementReadService.readVerifiedArtifact
         ? (artifactRequest) =>
-            this.options.projectManagementReadService.readVerifiedArtifact!({
-              ...artifactRequest,
-              verifyFingerprint: !isCurrentSnapshot,
-            })
+            this.options.projectManagementReadService.readVerifiedArtifact!(
+              artifactRequest,
+            )
         : undefined,
     )
     if (
@@ -343,6 +343,76 @@ export class BackendWorkspaceService {
     }
     return {
       artifact,
+      generation: context.generation,
+      workspaceContextId: context.id,
+      workspaceId: snapshot.snapshot.workspaceId,
+      workspaceRevision: snapshot.snapshot.workspaceRevision,
+    }
+  }
+
+  async getChecklistEvidence(
+    request: BackendWorkspaceChecklistEvidenceRequest,
+  ): Promise<BackendWorkspaceChecklistEvidenceResult> {
+    const context = this.contextForWindow(requireWindowScopeId())
+    const unavailable = (code: string): BackendWorkspaceChecklistEvidenceResult => ({
+      evidence: { status: 'unavailable', issues: [{ code }] },
+      generation: context.generation,
+      workspaceContextId: context.id,
+      ...(context.snapshot?.ok
+        ? {
+            workspaceId: context.snapshot.snapshot.workspaceId,
+            workspaceRevision: context.snapshot.snapshot.workspaceRevision,
+          }
+        : {}),
+    })
+    if (
+      !request ||
+      typeof request.findingId !== 'string' ||
+      !request.findingId ||
+      typeof request.workspaceContextId !== 'string' ||
+      !Number.isSafeInteger(request.workspaceRevision) ||
+      request.workspaceRevision < 1
+    ) {
+      return unavailable('BACKEND_WORKSPACE_REQUEST_INVALID')
+    }
+    if (request.workspaceContextId !== context.id) {
+      return unavailable('BACKEND_WORKSPACE_CONTEXT_MISMATCH')
+    }
+    const currentSnapshot = context.snapshot
+    if (!currentSnapshot?.ok || !context.workspaceRoot) {
+      return unavailable('ENGINEERING_SNAPSHOT_READ_FAILED')
+    }
+    const isCurrentSnapshot =
+      currentSnapshot.snapshot.workspaceRevision === request.workspaceRevision
+    const snapshot = isCurrentSnapshot
+      ? currentSnapshot
+      : currentSnapshot.staleSnapshot?.snapshot.workspaceRevision ===
+          request.workspaceRevision
+        ? currentSnapshot.staleSnapshot
+        : null
+    if (!snapshot) {
+      return unavailable('ENGINEERING_SNAPSHOT_REVISION_MISMATCH')
+    }
+    const generation = context.generation
+    const evidence = await readWorkspaceChecklistEvidence(
+      snapshot,
+      context.workspaceRoot,
+      request.findingId,
+      this.options.projectManagementReadService.readVerifiedArtifact
+        ? (artifactRequest) =>
+            this.options.projectManagementReadService.readVerifiedArtifact!(
+              artifactRequest,
+            )
+        : undefined,
+    )
+    if (
+      this.contexts.get(context.windowId) !== context ||
+      context.generation !== generation
+    ) {
+      return unavailable('BACKEND_WORKSPACE_REVISION_CHANGED')
+    }
+    return {
+      evidence,
       generation: context.generation,
       workspaceContextId: context.id,
       workspaceId: snapshot.snapshot.workspaceId,
@@ -711,12 +781,12 @@ export class BackendWorkspaceService {
 function engineeringFacts(
   result: ProjectEngineeringSnapshotReadResult | null,
 ): WorkspaceEngineeringFacts | null {
-  if (!result?.ok || result.sections.qor.status !== 'ready') return null
+  if (!result?.ok || result.sections.metrics.status !== 'ready') return null
   const flow = result.sections.flow
   const signoff = result.sections.signoff
   const qorSnapshotExtension = result.sections.qorSnapshotExtension
   return {
-    ...result.sections.qor.data,
+    metrics: result.sections.metrics.data,
     ...(flow.status === 'ready' ? { flow: flow.data } : {}),
     ...(signoff.status === 'ready' ? { signoffAssessment: signoff.data } : {}),
     // The result projection already marks the extension stale when any step fell

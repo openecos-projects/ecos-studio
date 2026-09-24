@@ -106,15 +106,16 @@ describe('useDesignReportExport', () => {
     })
     mockRuntimeSnapshot.mockResolvedValue({
       engineeringSnapshot: {
-        analysis: { steps: [] },
         artifacts: [],
-        checklist: {},
+        cause: 'workspace.created',
+        checklist: { items: [] },
         flow: { steps: [] },
+        hotspotPreview: { hotspotCount: 0, hotspots: [], hotspotsTruncated: false },
         metrics: [],
         parameters: {},
-        qorAssessment: {},
-        schemaVersion: 1,
+        schemaVersion: 6,
         signoffAssessment: { groups: [], risks: [], status: 'ready' },
+        timingPreview: { issueCount: 0, issues: [], issuesTruncated: false },
         workspaceId: 'workspace-1',
         workspaceRevision: 1,
       },
@@ -158,8 +159,16 @@ describe('useDesignReportExport', () => {
     expect(mockReadFlow).not.toHaveBeenCalled()
     expect(mockReadParameters).not.toHaveBeenCalled()
     expect(mockReadHome).not.toHaveBeenCalled()
-    expect(mockReadOptionalProjectTextFile).not.toHaveBeenCalled()
-    expect(mockRequestProjectPathAccess).not.toHaveBeenCalled()
+    // v6 snapshots carry no inlined analysis payloads; backend workspaces scan
+    // the same bounded artifact paths inside the workspace instead.
+    expect(mockRequestProjectPathAccess).toHaveBeenCalled()
+    const requestedPaths = mockRequestProjectPathAccess.mock.calls.map(
+      ([path]) => path as string,
+    )
+    expect(requestedPaths.every((path) => path.startsWith('/projects/gcd/ws_001/'))).toBe(
+      true,
+    )
+    expect(composable.reportData.value?.design.designName).toBe('gcd_run')
   })
 
   it('loads workspace data and generates report content on openDesignReportExport', async () => {

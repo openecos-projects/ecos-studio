@@ -32,6 +32,7 @@ export const desktopApiIpcChannels = {
   projectManagementImportWorkspace: 'project-management:import-workspace',
   backendWorkspaceGetOverview: 'backend-workspace:get-overview',
   backendWorkspaceGetArtifact: 'backend-workspace:get-artifact',
+  backendWorkspaceGetChecklistEvidence: 'backend-workspace:get-checklist-evidence',
   backendWorkspaceGetStepDetail: 'backend-workspace:get-step-detail',
   backendWorkspaceRefreshOverview: 'backend-workspace:refresh-overview',
   backendProjectComparisonSelectProject: 'backend-project-comparison:select-project',
@@ -65,6 +66,7 @@ export const desktopApiIpcChannels = {
   workspaceListProjectDirectory: 'workspace:list-project-directory',
   workspacePathExists: 'workspace:path-exists',
   workspaceDiscardFailedWorkspaceCreate: 'workspace:discard-failed-workspace-create',
+  workspaceDeleteEngineeringSnapshot: 'workspace:delete-engineering-snapshot',
   workspacePrepareProjectDirectoryReplacement:
     'workspace:prepare-project-directory-replacement',
   workspaceRestoreProjectDirectoryReplacement:

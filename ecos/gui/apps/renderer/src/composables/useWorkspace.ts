@@ -64,6 +64,8 @@ import {
   type ProjectRouteContext,
 } from '@/utils/projectManifestRegistration'
 import { recentProjectFreshness, recentProjectSnapshot } from './recentProjectSnapshot'
+import { classifyWorkspaceOpenError } from '@ecos-studio/shared'
+import { useSnapshotOpenRecovery } from './useSnapshotOpenRecovery'
 
 interface SerializedProject {
   id: string
@@ -648,6 +650,16 @@ export function useWorkspace() {
       } catch (error) {
         workspaceLifecycle.failSession(session.sessionId)
         console.error('Failed to reload workspace after restore:', error)
+        const snapshotOpenError = classifyWorkspaceOpenError(error)
+        if (snapshotOpenError) {
+          const { requestSnapshotOpenRecovery } = useSnapshotOpenRecovery()
+          requestSnapshotOpenRecovery({
+            code: snapshotOpenError,
+            detail: error instanceof Error ? error.message : String(error),
+            directory: normalizedBoundPath,
+            retry: () => openProject(restored),
+          })
+        }
         await router.replace('/')
       }
     } catch (error) {
@@ -706,6 +718,7 @@ export function useWorkspace() {
     const openProjectRequestId = ++openProjectRequestSequence
     const isLatestOpenProjectRequest = () =>
       openProjectRequestId === openProjectRequestSequence
+    let openTargetPath = ''
     const previousWorkspaceHandle =
       workspaceLifecycle.session.value.state === 'active'
         ? workspaceLifecycle.session.value.workspaceId
@@ -732,6 +745,7 @@ export function useWorkspace() {
         if (!isLatestOpenProjectRequest()) return false
         if (!selectedPath) return false
       }
+      openTargetPath = selectedPath
 
       if (!(await isProjectValid(selectedPath))) {
         if (!isLatestOpenProjectRequest()) return false
@@ -946,6 +960,28 @@ export function useWorkspace() {
     } catch (error) {
       if (sessionId) workspaceLifecycle.failSession(sessionId)
       console.error('Open project error:', error)
+      const snapshotOpenError = classifyWorkspaceOpenError(error)
+      if (snapshotOpenError && openTargetPath && !quiet) {
+        const { requestSnapshotOpenRecovery } = useSnapshotOpenRecovery()
+        requestSnapshotOpenRecovery({
+          code: snapshotOpenError,
+          detail: error instanceof Error ? error.message : String(error),
+          directory: openTargetPath,
+          // `project` is undefined for picker-driven opens; retry the resolved
+          // directory instead of asking the user to pick it again.
+          retry: () =>
+            openProject(
+              project ?? {
+                id: openTargetPath,
+                name: workspaceNameFromPath(openTargetPath),
+                path: openTargetPath,
+                lastOpened: new Date(),
+              },
+              options,
+            ),
+        })
+        return false
+      }
       if (!quiet) {
         showToast({
           severity: 'error',

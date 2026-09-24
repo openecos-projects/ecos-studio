@@ -352,6 +352,7 @@ export interface DesktopApi {
     listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]>
     pathExists(path: string): Promise<boolean>
     discardFailedWorkspaceCreate(path: string): Promise<boolean>
+    deleteEngineeringSnapshot(path: string): Promise<boolean>
     prepareProjectDirectoryReplacement(
       path: string,
     ): Promise<WorkspaceDirectoryReplacement | null>

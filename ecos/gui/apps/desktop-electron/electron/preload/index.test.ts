@@ -43,6 +43,7 @@ async function loadDesktopBridge() {
     }
     backendWorkspace: {
       getArtifact(request: unknown): Promise<unknown>
+      getChecklistEvidence(request: unknown): Promise<unknown>
       getOverview(): Promise<unknown>
       getStepDetail(request: unknown): Promise<unknown>
       refreshOverview(): Promise<unknown>
@@ -303,6 +304,13 @@ describe('preload desktop bridge contract', () => {
         workspaceRevision: 9,
       }),
     ).resolves.toEqual(overview)
+    await expect(
+      bridge.backendWorkspace.getChecklistEvidence({
+        findingId: 'place.drc',
+        workspaceContextId: 'workspace-context-1',
+        workspaceRevision: 9,
+      }),
+    ).resolves.toEqual(overview)
     await expect(bridge.backendWorkspace.refreshOverview()).resolves.toEqual(overview)
 
     const listener = vi.fn()
@@ -331,6 +339,15 @@ describe('preload desktop bridge contract', () => {
     )
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
       4,
+      desktopApiIpcChannels.backendWorkspaceGetChecklistEvidence,
+      {
+        findingId: 'place.drc',
+        workspaceContextId: 'workspace-context-1',
+        workspaceRevision: 9,
+      },
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      5,
       desktopApiIpcChannels.backendWorkspaceRefreshOverview,
     )
     expect(ipcRenderer.on).toHaveBeenCalledWith(

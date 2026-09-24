@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createHash } from 'node:crypto'
 import {
   mkdir,
   mkdtemp,
@@ -26,19 +25,16 @@ const temporaryDirectories: string[] = []
 
 function engineeringSnapshot(): EccPersistedEngineeringSnapshot {
   return {
-    analysis: { steps: [] },
     artifacts: [],
-    checklist: {},
+    cause: 'workspace.created',
+    checklist: { items: [] },
     flow: { steps: [] },
+    hotspotPreview: { hotspotCount: 0, hotspots: [], hotspotsTruncated: false },
     metrics: [],
     parameters: {},
-    qorAssessment: {
-      status: 'unavailable',
-      metrics: [],
-      steps: [],
-    },
-    schemaVersion: 1,
+    schemaVersion: 6,
     signoffAssessment: { status: 'ready', groups: [], risks: [] },
+    timingPreview: { issueCount: 0, issues: [], issuesTruncated: false },
     workspaceId: 'engineering-workspace',
     workspaceRevision: 1,
   }
@@ -400,9 +396,12 @@ describe('ProjectManagementReadService', () => {
       readBytes: Buffer.byteLength(text),
       sections: {
         artifacts: { status: 'ready' },
+        checklist: { status: 'ready' },
         flow: { status: 'ready' },
-        qor: { status: 'ready' },
+        hotspotPreview: { status: 'ready' },
+        metrics: { status: 'ready' },
         signoff: { status: 'ready' },
+        timingPreview: { status: 'ready' },
       },
       snapshot: {
         workspaceId: 'engineering-workspace',
@@ -584,8 +583,6 @@ describe('ProjectManagementReadService', () => {
       kind: 'qor_metrics',
       name: 'qor_metrics.json',
       reference,
-      sha256: 'a'.repeat(64),
-      sizeBytes: 2,
       stepId: 'sta',
     })
     await writeFile(
@@ -606,7 +603,7 @@ describe('ProjectManagementReadService', () => {
     })
     await expect(
       service.readVerifiedArtifact({
-        artifact: { reference, sha256: 'a'.repeat(64), sizeBytes: 2 },
+        artifact: { reference },
         projectRoot,
         workspacePath: workspaceRoot,
       }),
@@ -616,104 +613,78 @@ describe('ProjectManagementReadService', () => {
     })
   })
 
-  it('reads only bounded artifacts whose size, hash, and JSON match the Snapshot', async () => {
+  it('reads bounded artifacts by reference and returns the current file content', async () => {
     const { projectRoot, workspaceRoot } = await createProject()
     const reference = 'route_ecc/analysis/qor_metrics.json'
     const path = join(workspaceRoot, reference)
     const valid = '{"schema_version":3,"metrics":[]}'
     await mkdir(join(workspaceRoot, 'route_ecc', 'analysis'), { recursive: true })
     await writeFile(path, valid)
-    const request = (sizeBytes: number, sha256: string) => ({
-      artifacts: [{ reference, sha256, sizeBytes }],
+    const request = () => ({
+      artifacts: [{ reference }],
       projectRoot,
       workspacePath: workspaceRoot,
     })
     const service = createReadService()
 
-    await expect(
-      service.readVerifiedArtifacts(
-        request(
-          Buffer.byteLength(valid),
-          createHash('sha256').update(valid).digest('hex'),
-        ),
-      ),
-    ).resolves.toEqual({ ok: true, texts: { [reference]: valid } })
-    await expect(
-      service.readVerifiedArtifact({
-        ...request(
-          Buffer.byteLength(valid),
-          createHash('sha256').update(valid).digest('hex'),
-        ),
-        artifact: request(
-          Buffer.byteLength(valid),
-          createHash('sha256').update(valid).digest('hex'),
-        ).artifacts[0]!,
-      }),
-    ).resolves.toEqual({ ok: true, bytes: new TextEncoder().encode(valid) })
-
-    await expect(
-      service.readVerifiedArtifacts(
-        request(Buffer.byteLength(valid) + 1, 'a'.repeat(64)),
-      ),
-    ).resolves.toMatchObject({ ok: false, code: 'ARTIFACT_REVISION_MISMATCH' })
-    await expect(
-      service.readVerifiedArtifacts(request(Buffer.byteLength(valid), 'a'.repeat(64))),
-    ).resolves.toMatchObject({ ok: false, code: 'ARTIFACT_REVISION_MISMATCH' })
-    await expect(
-      service.readVerifiedArtifact({
-        ...request(Buffer.byteLength(valid) + 1, 'a'.repeat(64)),
-        artifact: request(Buffer.byteLength(valid) + 1, 'a'.repeat(64)).artifacts[0]!,
-        verifyFingerprint: false,
-      }),
-    ).resolves.toEqual({ ok: true, bytes: new TextEncoder().encode(valid) })
-
-    await writeFile(path, `${valid}!`)
-    await expect(
-      service.readVerifiedArtifact({
-        ...request(Buffer.byteLength(valid), 'a'.repeat(64)),
-        artifact: request(Buffer.byteLength(valid), 'a'.repeat(64)).artifacts[0]!,
-        verifyFingerprint: false,
-        includeIntegrity: true,
-      }),
-    ).resolves.toMatchObject({
+    await expect(service.readVerifiedArtifacts(request())).resolves.toEqual({
       ok: true,
-      integrity: 'externally-modified',
-      recordedSizeBytes: Buffer.byteLength(valid),
-      actualSizeBytes: Buffer.byteLength(`${valid}!`),
+      texts: { [reference]: valid },
+    })
+    await expect(
+      service.readVerifiedArtifact({
+        projectRoot,
+        workspacePath: workspaceRoot,
+        artifact: { reference },
+      }),
+    ).resolves.toEqual({ ok: true, bytes: new TextEncoder().encode(valid) })
+
+    const modified = '{"schema_version":3,"metrics":[{"id":"wns"}]}'
+    await writeFile(path, modified)
+    await expect(service.readVerifiedArtifacts(request())).resolves.toEqual({
+      ok: true,
+      texts: { [reference]: modified },
+    })
+    await expect(
+      service.readVerifiedArtifact({
+        projectRoot,
+        workspacePath: workspaceRoot,
+        artifact: { reference },
+      }),
+    ).resolves.toEqual({ ok: true, bytes: new TextEncoder().encode(modified) })
+
+    await writeFile(path, 'not json')
+    await expect(service.readVerifiedArtifacts(request())).resolves.toEqual({
+      ok: true,
+      texts: {},
+      issues: [{ code: 'FINDINGS_ARTIFACT_INVALID_JSON', reference }],
     })
 
-    const invalidJson = 'x'.repeat(Buffer.byteLength(valid))
-    await writeFile(path, invalidJson)
-    await expect(
-      service.readVerifiedArtifacts(
-        request(
-          Buffer.byteLength(invalidJson),
-          createHash('sha256').update(invalidJson).digest('hex'),
-        ),
-      ),
-    ).resolves.toMatchObject({ ok: false, code: 'FINDINGS_ARTIFACT_INVALID_JSON' })
-
     await writeFile(path, 'x'.repeat(PROJECT_FINDINGS_ARTIFACT_MAX_BYTES + 1))
-    await expect(
-      service.readVerifiedArtifacts(
-        request(PROJECT_FINDINGS_ARTIFACT_MAX_BYTES + 1, 'a'.repeat(64)),
-      ),
-    ).resolves.toMatchObject({ ok: false, code: 'FINDINGS_ARTIFACT_TOO_LARGE' })
+    await expect(service.readVerifiedArtifacts(request())).resolves.toEqual({
+      ok: true,
+      texts: {},
+      issues: [{ code: 'FINDINGS_ARTIFACT_TOO_LARGE', reference }],
+    })
 
     await unlink(path)
-    await expect(
-      service.readVerifiedArtifacts(request(Buffer.byteLength(valid), 'a'.repeat(64))),
-    ).resolves.toMatchObject({ ok: false, code: 'ARTIFACT_REFERENCE_MISSING' })
+    await expect(service.readVerifiedArtifacts(request())).resolves.toEqual({
+      ok: true,
+      texts: {},
+      issues: [{ code: 'ARTIFACT_REFERENCE_MISSING', reference }],
+    })
 
     const outside = join(projectRoot, 'outside-findings.json')
     await writeFile(outside, valid)
     await symlink(outside, path)
-    await expect(
-      service.readVerifiedArtifacts(request(Buffer.byteLength(valid), 'a'.repeat(64))),
-    ).resolves.toMatchObject({ ok: false, code: 'ARTIFACT_REFERENCE_OUTSIDE_WORKSPACE' })
+    await expect(service.readVerifiedArtifacts(request())).resolves.toEqual({
+      ok: true,
+      texts: {},
+      issues: [{ code: 'ARTIFACT_REFERENCE_OUTSIDE_WORKSPACE', reference }],
+    })
   })
 
-  it('keeps valid current artifacts when another externally modified artifact is unavailable', async () => {
+  it('keeps valid current artifacts when another artifact is unavailable', async () => {
     const { projectRoot, workspaceRoot } = await createProject()
     const validReference = 'route_ecc/analysis/qor_metrics.json'
     const missingReference = 'route_ecc/analysis/missing.json'
@@ -724,22 +695,13 @@ describe('ProjectManagementReadService', () => {
 
     await expect(
       service.readVerifiedArtifacts({
-        artifacts: [
-          {
-            reference: validReference,
-            sha256: 'a'.repeat(64),
-            sizeBytes: Buffer.byteLength(valid),
-          },
-          { reference: missingReference, sha256: 'b'.repeat(64), sizeBytes: 2 },
-        ],
-        allowExternallyModified: true,
+        artifacts: [{ reference: validReference }, { reference: missingReference }],
         projectRoot,
         workspacePath: workspaceRoot,
       }),
     ).resolves.toEqual({
       ok: true,
       texts: { [validReference]: valid },
-      integrity: { [validReference]: 'externally-modified' },
       issues: [{ code: 'ARTIFACT_REFERENCE_MISSING', reference: missingReference }],
     })
   })

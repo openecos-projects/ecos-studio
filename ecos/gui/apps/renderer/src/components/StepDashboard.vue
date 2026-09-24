@@ -943,9 +943,7 @@
                   <template v-if="report.directory">
                     <i class="ri-folder-2-line" aria-hidden="true" />
                     {{ report.directory }}
-                    <span v-if="reportMeta(report)"> · </span>
                   </template>
-                  {{ reportMeta(report) }}
                 </small>
               </span>
               <button
@@ -1013,14 +1011,14 @@
         :class="`is-${item.state}`"
       >
         <div>
-          <span>{{
-            [item.category, item.owner, item.policy].filter(Boolean).join(' · ')
-          }}</span>
+          <span v-if="item.category">{{ item.category }}</span>
           <strong>{{ item.title }}</strong>
         </div>
         <p v-if="item.summary">{{ item.summary }}</p>
-        <code v-if="item.sourcePath">{{ item.sourcePath }}</code>
-        <small v-if="item.evidenceCount">{{ item.evidenceCount }} evidence items</small>
+        <small v-if="item.reconciled">
+          Reconciled with the committed flow: {{ item.reconciled.previousState }} → pass
+          ({{ item.reconciled.committedFlowState }})
+        </small>
       </section>
     </div>
     <p v-else class="dialog-empty">No checklist detail is available for this step.</p>
@@ -1165,12 +1163,7 @@
       <span>Loading report</span>
     </div>
     <p v-else-if="reportDialog.error" class="dialog-error">{{ reportDialog.error }}</p>
-    <div v-else>
-      <p v-if="reportDialog.warning" class="dialog-warning">
-        {{ reportDialog.warning }}
-      </p>
-      <pre class="report-code">{{ reportDialog.content }}</pre>
-    </div>
+    <pre v-else class="report-code">{{ reportDialog.content }}</pre>
   </Dialog>
 </template>
 
@@ -1178,10 +1171,7 @@
 import { computed, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import { formatStepToolName, StepEnum } from '@/api/type'
-import {
-  useStepDashboardData,
-  type StepDashboardReport,
-} from '@/composables/useStepDashboardData'
+import { useStepDashboardData } from '@/composables/useStepDashboardData'
 import { useStepConfigInfo } from '@/composables/useStepConfigInfo'
 import { useStepReportDialog } from '@/composables/useStepReportDialog'
 import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
@@ -1609,12 +1599,6 @@ async function openChipViewer(mode: 'view' | 'edit' = 'view'): Promise<void> {
   } finally {
     busy.value = false
   }
-}
-
-function reportMeta(report: StepDashboardReport): string {
-  return report.sizeBytes === null
-    ? ''
-    : `${Math.max(1, Math.round(report.sizeBytes / 1024))} KB`
 }
 
 interface StepConfigPreviewEntry {
@@ -2904,11 +2888,6 @@ function fileName(path: string): string {
   color: var(--danger-color);
   font-size: 12px;
   margin: 0;
-}
-.dialog-warning {
-  color: var(--warning-color, #b7791f);
-  font-size: 12px;
-  margin: 0 0 8px;
 }
 .report-code {
   background: var(--bg-secondary);

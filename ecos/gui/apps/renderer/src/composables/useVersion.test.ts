@@ -96,6 +96,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       listProjectDirectory: async () => [],
       pathExists: async () => false,
       discardFailedWorkspaceCreate: async () => false,
+      deleteEngineeringSnapshot: async () => false,
       prepareProjectDirectoryReplacement: async () => null,
       restoreProjectDirectoryReplacement: async () => undefined,
       finalizeProjectDirectoryReplacement: async () => undefined,

@@ -22,7 +22,13 @@ export class EccRuntimeServiceError extends Error {
   }
 }
 
+// ECC puts the stable machine-readable code (e.g. "snapshot_rebuild_required")
+// in the wire error message and the human text in data.message; keep the stable
+// code when the message has that shape so consumers can classify failures.
+const STABLE_WIRE_CODE_PATTERN = /^[a-z][a-z0-9_]*$/
+
 function codeFromJsonRpcError(error: EccJsonRpcError): string {
+  if (STABLE_WIRE_CODE_PATTERN.test(error.message)) return error.message
   switch (error.code) {
     case -32602:
       return 'invalid_request'

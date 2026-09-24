@@ -93,7 +93,6 @@ function detail(): WorkspaceStepDetail {
         availability: 'available',
         kind: 'report_text',
         name: 'MAX_125/RCworst/timing_max.rpt',
-        sizeBytes: 1024,
         stepId: 'Place',
       },
     ],

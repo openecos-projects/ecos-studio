@@ -619,9 +619,17 @@ function buildWorkspaceSummary(
   const timingConstraints = resolveWorkspaceTimingConstraints(workspace)
   const snapshotAssessment = workspace.authoritativeAssessment
   const projectRecords = records
+  // Snapshot v6 inputs carry a flat normalized projection instead of per-step
+  // analysis texts; a step is analyzed when the projection attributes at
+  // least one metric record to it.
+  const projectionMetrics = workspace.normalizedMetrics !== undefined
+  const stepHasMetrics = (step: FlowStep) =>
+    projectionMetrics
+      ? records.some((record) => record.step === step)
+      : Boolean(workspace.stepMetricTexts[step])
   const missingAnalysisSteps = QOR_FLOW_STEPS.filter((step) => {
     if (step === 'LVS' && workspace.stepStatuses.LVS === undefined) return false
-    return !workspace.stepMetricTexts[step]
+    return !stepHasMetrics(step)
   })
   const blockingIssues = QOR_FLOW_STEPS.flatMap((step) =>
     normalizeQorSummaryBlockingIssues(step, workspace.stepSummaryTexts?.[step]),
@@ -727,7 +735,9 @@ function buildWorkspaceDataQuality(
     isCompletedStepStatus(workspace.stepStatuses[step]),
   )
   const analyzedSteps = completedSteps.filter((step) =>
-    hasCurrentQorMetricsText(workspace.stepMetricTexts[step]),
+    workspace.normalizedMetrics !== undefined
+      ? records.some((record) => record.step === step)
+      : hasCurrentQorMetricsText(workspace.stepMetricTexts[step]),
   )
   const missingCompletedAnalysisSteps = completedSteps.filter(
     (step) => !analyzedSteps.includes(step),
@@ -1017,7 +1027,7 @@ function buildWorkspaceDataQualityRisks(
         message:
           `${quality.missingCompletedAnalysisSteps.length} completed step` +
           `${quality.missingCompletedAnalysisSteps.length === 1 ? '' : 's'} ` +
-          'do not have current-contract V3 QoR analysis.',
+          'do not have metrics in the committed Engineering Snapshot projection.',
       },
     ]
   }
@@ -1627,6 +1637,7 @@ function projectRecordKey(record: ProjectQorMetricRecord): string {
   return [
     record.metricName,
     record.scope,
+    record.unit ?? '',
     record.corner ?? '',
     cornerContextIdentity(record.cornerContext),
   ].join('\u0000')

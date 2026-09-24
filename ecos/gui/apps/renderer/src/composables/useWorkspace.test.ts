@@ -58,11 +58,14 @@ const runtimeEventBridge = vi.hoisted(() => {
   }
 })
 
+const routerMock = vi.hoisted(() => ({
+  isReady: vi.fn(async () => undefined),
+  currentRoute: { value: { path: '/', query: {} as Record<string, unknown> } },
+  replace: vi.fn(async () => undefined),
+}))
+
 vi.mock('vue-router', () => ({
-  useRouter: () => ({
-    isReady: vi.fn(async () => undefined),
-    currentRoute: { value: { path: '/' } },
-  }),
+  useRouter: () => routerMock,
 }))
 
 vi.mock('primevue/usetoast', () => ({
@@ -130,6 +133,7 @@ vi.mock('@/utils/projectManifestRegistration', () => ({
 
 import { useWorkspace } from './useWorkspace'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
+import { useSnapshotOpenRecovery } from './useSnapshotOpenRecovery'
 import { useNotificationStore } from '@/stores/notificationStore'
 
 type SerializedRecentProject = Omit<Project, 'lastOpened'> & { lastOpened: string }
@@ -204,6 +208,7 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       listProjectDirectory: vi.fn(),
       pathExists: vi.fn(async () => false),
       discardFailedWorkspaceCreate: vi.fn(async () => false),
+      deleteEngineeringSnapshot: vi.fn(async () => false),
       prepareProjectDirectoryReplacement: vi.fn(),
       restoreProjectDirectoryReplacement: vi.fn(),
       finalizeProjectDirectoryReplacement: vi.fn(),
@@ -316,6 +321,9 @@ describe('useWorkspace openProject', () => {
     resolveProjectRouteContextForWorkspaceMock.mockResolvedValue(null)
     settingsData.clear()
     useNotificationStore().clear()
+    useSnapshotOpenRecovery().dismissSnapshotOpenRecovery()
+    routerMock.currentRoute.value = { path: '/', query: {} }
+    routerMock.replace.mockClear()
 
     desktopApi = createDesktopApiMock()
     activeProjectRoot = null
@@ -688,6 +696,227 @@ describe('useWorkspace openProject', () => {
     ).toBe(false)
     expect(loadWorkspaceApiMock).not.toHaveBeenCalled()
     expect(workspace.currentProject.value).toBeNull()
+  })
+
+  it('routes a snapshot_rebuild_required open failure to the recovery dialog', async () => {
+    const workspace = useWorkspace()
+    const project: Project = {
+      id: '/work/broken',
+      name: 'broken',
+      path: '/work/broken',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    loadWorkspaceApiMock.mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          'invalid Engineering Snapshot: /work/broken/home/engineering-snapshot.json',
+        ),
+        { code: 'snapshot_rebuild_required' },
+      ),
+    )
+
+    expect(await workspace.openProject(project)).toBe(false)
+
+    const recovery = useSnapshotOpenRecovery()
+    expect(recovery.pendingRequest.value).toMatchObject({
+      code: 'snapshot_rebuild_required',
+      detail: 'invalid Engineering Snapshot: /work/broken/home/engineering-snapshot.json',
+      directory: '/work/broken',
+    })
+    expect(
+      useNotificationStore().notifications.value.some(
+        (notification) => notification.title === 'Failed to Open Project',
+      ),
+    ).toBe(false)
+  })
+
+  it('routes a snapshot_identity_mismatch open failure to the recovery dialog', async () => {
+    const workspace = useWorkspace()
+    const project: Project = {
+      id: '/work/copied',
+      name: 'copied',
+      path: '/work/copied',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    loadWorkspaceApiMock.mockRejectedValueOnce(
+      Object.assign(new Error('Engineering Snapshot workspace identity mismatch'), {
+        code: 'snapshot_identity_mismatch',
+      }),
+    )
+
+    expect(await workspace.openProject(project)).toBe(false)
+
+    expect(useSnapshotOpenRecovery().pendingRequest.value).toMatchObject({
+      code: 'snapshot_identity_mismatch',
+      directory: '/work/copied',
+    })
+    expect(
+      useNotificationStore().notifications.value.some(
+        (notification) => notification.title === 'Failed to Open Project',
+      ),
+    ).toBe(false)
+  })
+
+  it('keeps the generic error toast for unrelated open failures', async () => {
+    const workspace = useWorkspace()
+    const project: Project = {
+      id: '/work/broken',
+      name: 'broken',
+      path: '/work/broken',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    loadWorkspaceApiMock.mockRejectedValueOnce(new Error('sidecar unavailable'))
+
+    expect(await workspace.openProject(project)).toBe(false)
+
+    expect(useSnapshotOpenRecovery().pendingRequest.value).toBeNull()
+    expect(
+      useNotificationStore().notifications.value.some(
+        (notification) => notification.title === 'Failed to Open Project',
+      ),
+    ).toBe(true)
+  })
+
+  it('suppresses the recovery dialog for quiet opens', async () => {
+    const workspace = useWorkspace()
+    loadWorkspaceApiMock.mockRejectedValueOnce(
+      Object.assign(new Error('invalid Engineering Snapshot'), {
+        code: 'snapshot_rebuild_required',
+      }),
+    )
+
+    expect(
+      await workspace.openProject(
+        {
+          id: '/work/broken',
+          name: 'broken',
+          path: '/work/broken',
+          lastOpened: new Date(),
+        },
+        { quiet: true },
+      ),
+    ).toBe(false)
+    expect(useSnapshotOpenRecovery().pendingRequest.value).toBeNull()
+  })
+
+  it('opens a workspace whose snapshot ECC rebuilt transparently on open', async () => {
+    const workspace = useWorkspace()
+    const project: Project = {
+      id: '/work/fresh',
+      name: 'fresh',
+      path: '/work/fresh',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    // A missing snapshot is rebuilt by ECC inside `workspace.open`; from the
+    // GUI's perspective the open simply succeeds and no recovery UI appears.
+    loadWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/fresh',
+        workspace_handle: '/work/fresh',
+      },
+    })
+
+    expect(await workspace.openProject(project)).toBe(true)
+    expect(useSnapshotOpenRecovery().pendingRequest.value).toBeNull()
+  })
+
+  it('rebuilds the snapshot through the bounded delete channel and retries the open', async () => {
+    const workspace = useWorkspace()
+    const project: Project = {
+      id: '/work/broken',
+      name: 'broken',
+      path: '/work/broken',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    loadWorkspaceApiMock.mockRejectedValueOnce(
+      Object.assign(new Error('invalid Engineering Snapshot'), {
+        code: 'snapshot_rebuild_required',
+      }),
+    )
+
+    expect(await workspace.openProject(project)).toBe(false)
+
+    loadWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/broken',
+        workspace_handle: '/work/broken',
+      },
+    })
+    vi.mocked(desktopApi.workspace.deleteEngineeringSnapshot).mockResolvedValueOnce(true)
+
+    const recovery = useSnapshotOpenRecovery()
+    await expect(recovery.rebuildSnapshotAndRetry()).resolves.toBe(true)
+
+    expect(desktopApi.workspace.deleteEngineeringSnapshot).toHaveBeenCalledWith(
+      '/work/broken',
+    )
+    expect(loadWorkspaceApiMock).toHaveBeenCalledTimes(2)
+    expect(recovery.pendingRequest.value).toBeNull()
+    expect(workspace.currentProject.value?.path).toBe('/work/broken')
+  })
+
+  it('retries the resolved directory for picker-driven opens instead of prompting again', async () => {
+    const workspace = useWorkspace()
+    vi.mocked(desktopApi.dialog.pickDirectory).mockResolvedValueOnce('/work/broken')
+    loadWorkspaceApiMock.mockRejectedValueOnce(
+      Object.assign(new Error('invalid Engineering Snapshot'), {
+        code: 'snapshot_rebuild_required',
+      }),
+    )
+
+    expect(await workspace.openProject()).toBe(false)
+
+    loadWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/broken',
+        workspace_handle: '/work/broken',
+      },
+    })
+    vi.mocked(desktopApi.workspace.deleteEngineeringSnapshot).mockResolvedValueOnce(true)
+
+    const recovery = useSnapshotOpenRecovery()
+    await expect(recovery.rebuildSnapshotAndRetry()).resolves.toBe(true)
+
+    // The retry reopens the already-picked directory; a second prompt would
+    // resolve undefined (mockResolvedValueOnce is exhausted) and fail.
+    expect(desktopApi.dialog.pickDirectory).toHaveBeenCalledTimes(1)
+    expect(loadWorkspaceApiMock).toHaveBeenCalledTimes(2)
+    expect(loadWorkspaceApiMock).toHaveBeenLastCalledWith('/work/broken')
+    expect(workspace.currentProject.value?.path).toBe('/work/broken')
+  })
+
+  it('routes a snapshot open failure during session restore to the recovery dialog', async () => {
+    const workspace = useWorkspace()
+    routerMock.currentRoute.value = { path: '/workspace/home', query: {} }
+    vi.mocked(desktopApi.workspace.getBoundPath).mockResolvedValueOnce('/work/broken')
+    loadWorkspaceApiMock.mockRejectedValueOnce(
+      Object.assign(new Error('invalid Engineering Snapshot'), {
+        code: 'snapshot_rebuild_required',
+      }),
+    )
+
+    await workspace.loadRecentProjects()
+
+    expect(useSnapshotOpenRecovery().pendingRequest.value).toMatchObject({
+      code: 'snapshot_rebuild_required',
+      directory: '/work/broken',
+    })
+    expect(routerMock.replace).toHaveBeenCalledWith('/')
+  })
+
+  it('keeps the silent restore fallback for unrelated reload failures', async () => {
+    const workspace = useWorkspace()
+    routerMock.currentRoute.value = { path: '/workspace/home', query: {} }
+    vi.mocked(desktopApi.workspace.getBoundPath).mockResolvedValueOnce('/work/broken')
+    loadWorkspaceApiMock.mockRejectedValueOnce(new Error('sidecar unavailable'))
+
+    await workspace.loadRecentProjects()
+
+    expect(useSnapshotOpenRecovery().pendingRequest.value).toBeNull()
+    expect(routerMock.replace).toHaveBeenCalledWith('/')
   })
 
   it('keeps Agent chat messages when a workspace opens successfully', async () => {

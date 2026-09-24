@@ -342,7 +342,6 @@ export class WorkspaceRuntimeCommands {
 
   exportSignoff(
     request: EccWorkspaceExportSignoffRequest,
-    beforeExport?: (workspaceId: string, workspaceRevision: number) => Promise<void>,
   ): Promise<EccWorkspaceExportSignoffResult> {
     return this.workspaceCall(
       'workspace.export_signoff',
@@ -353,8 +352,6 @@ export class WorkspaceRuntimeCommands {
         workspaceId,
       }),
       { timeoutMs: 0 },
-      undefined,
-      beforeExport,
     )
   }
 
@@ -490,7 +487,6 @@ export class WorkspaceRuntimeCommands {
     params: (workspaceId: string, workspaceRevision: number) => Record<string, unknown>,
     options?: { timeoutMs?: number },
     metadata?: RuntimeOperationMetadata,
-    beforeCall?: (workspaceId: string, workspaceRevision: number) => Promise<void>,
   ): Promise<T> {
     return this.context.enqueue(
       method,
@@ -503,7 +499,6 @@ export class WorkspaceRuntimeCommands {
         const workspaceRevision = this.context.sessions.require(
           request.workspaceHandle,
         ).workspaceRevision
-        await beforeCall?.(workspaceId, workspaceRevision)
         return await client.call<T>(
           method,
           params(workspaceId, workspaceRevision),

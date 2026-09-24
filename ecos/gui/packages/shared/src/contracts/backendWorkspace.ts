@@ -282,9 +282,31 @@ export interface WorkspaceTimingSummaryDetail {
   }
 }
 
+/**
+ * The full sta_timing_issues.json payload, lazy-loaded through the artifact
+ * channel (kind `sta_timing_issues`). Unlike the bounded timingPreview
+ * projection, issues here carry their dominant stage lists.
+ */
+export interface WorkspaceStaTimingIssuesDetail {
+  /** Configured corners whose timing paths file was missing when STA committed. */
+  missingCorners: string[]
+  issues: WorkspaceStaTimingIssue[]
+}
+
 export interface WorkspaceStaInsights {
   corners: WorkspaceStaCornerSummary[]
   criticalPaths: WorkspaceStaTimingIssue[]
+  /**
+   * Total committed STA timing issues, from the timingPreview projection.
+   * Null when the projection section is unavailable.
+   */
+  criticalPathIssueCount: number | null
+  /**
+   * True when `criticalPaths` is only the bounded top-N head of
+   * `criticalPathIssueCount` issues; the full list lazy-loads through the
+   * `sta_timing_issues` artifact.
+   */
+  criticalPathsTruncated: boolean
   worstSetup: { corner: string; wns: number } | null
   worstHold: { corner: string; wns: number } | null
   frequencyMhz: number | null
@@ -305,14 +327,17 @@ export interface ChecklistFinding {
   id: string
   step: string
   category: string
-  owner: string
-  policy: string
   state: string
   blocked: boolean
   title: string
   summary: string
-  source: Record<string, unknown>
-  evidence: Array<Record<string, unknown>>
+  // Set when the committed flow state contradicts a stale 'failed' flow item
+  // and the finding was reconciled to pass; the full audit trail stays in
+  // checklist.json behind the artifact channel.
+  reconciled?: {
+    previousState: string
+    committedFlowState: string
+  }
 }
 
 export interface WorkspaceChecklistSummary {
@@ -417,7 +442,6 @@ export interface WorkspaceArtifactDescriptor {
   kind: string
   name: string
   sourceRevision?: number
-  sizeBytes?: number
   stepId?: string
   timingCorner?: string
 }
@@ -478,15 +502,38 @@ export interface BackendWorkspaceArtifactContent {
   mimeType: string
   name: string
   text?: string
-  integrity?: 'verified' | 'externally-modified'
-  recordedSizeBytes?: number
-  actualSizeBytes?: number
+  timingIssues?: WorkspaceStaTimingIssuesDetail
   timingPaths?: WorkspaceTimingPathsDetail
   timingSummary?: WorkspaceTimingSummaryDetail
 }
 
 export interface BackendWorkspaceArtifactResult {
   artifact: ReadSection<BackendWorkspaceArtifactContent>
+  generation: number
+  workspaceContextId: string
+  workspaceId?: string
+  workspaceRevision?: number
+}
+
+export interface BackendWorkspaceChecklistEvidenceRequest {
+  findingId: string
+  workspaceContextId: string
+  workspaceRevision: number
+}
+
+/**
+ * The original checklist.json record for one finding, lazy-loaded through the
+ * snapshot artifact index (kind `checklist`). The record is the producer's
+ * verbatim entry, including fields the bounded projection drops (`owner`,
+ * `policy`, `source`, `evidence`).
+ */
+export interface WorkspaceChecklistEvidence {
+  findingId: string
+  item: Record<string, unknown>
+}
+
+export interface BackendWorkspaceChecklistEvidenceResult {
+  evidence: ReadSection<WorkspaceChecklistEvidence>
   generation: number
   workspaceContextId: string
   workspaceId?: string
@@ -508,6 +555,9 @@ export interface BackendWorkspaceApi {
   getArtifact(
     request: BackendWorkspaceArtifactRequest,
   ): Promise<BackendWorkspaceArtifactResult>
+  getChecklistEvidence(
+    request: BackendWorkspaceChecklistEvidenceRequest,
+  ): Promise<BackendWorkspaceChecklistEvidenceResult>
   getOverview(): Promise<BackendWorkspaceOverviewResult>
   getStepDetail(
     request: BackendWorkspaceStepDetailRequest,

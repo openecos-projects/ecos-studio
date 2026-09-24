@@ -33,19 +33,16 @@ function waitForQueuedOperation(): Promise<void> {
 
 function engineeringSnapshot(workspaceId: string, workspaceRevision = 1) {
   return {
-    analysis: { steps: [] },
     artifacts: [],
-    checklist: {},
+    cause: 'workspace.created',
+    checklist: { items: [] },
     flow: { steps: [] },
+    hotspotPreview: { hotspotCount: 0, hotspots: [], hotspotsTruncated: false },
     metrics: [],
     parameters: {},
-    qorAssessment: {
-      metrics: [],
-      status: 'unavailable',
-      steps: [],
-    },
-    schemaVersion: 1,
+    schemaVersion: 6,
     signoffAssessment: { groups: [], risks: [], status: 'ready' },
+    timingPreview: { issueCount: 0, issues: [], issuesTruncated: false },
     workspaceId,
     workspaceRevision,
   }

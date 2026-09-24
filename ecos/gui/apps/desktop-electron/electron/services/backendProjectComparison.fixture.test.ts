@@ -14,18 +14,29 @@ describe('representativeProjectComparisonFixture', () => {
       const validated = validateEngineeringSnapshot(snapshot)
       expect(validated.ok && validated.sections).toMatchObject({
         artifacts: { status: 'ready' },
+        checklist: { status: 'ready' },
         flow: { status: 'ready' },
-        qor: { status: 'ready' },
+        hotspotPreview: { status: 'ready' },
+        metrics: { status: 'ready' },
+        qorSnapshotExtension: { status: 'ready' },
         signoff: { status: 'ready' },
+        timingPreview: { status: 'ready' },
       })
       expect(snapshot.flow).toEqual({
         steps: projectManifestFlowSteps.map((name) => ({ name, state: 'Success' })),
       })
       expect(snapshot.metrics).toHaveLength(209)
-      expect(snapshot.analysis.steps).toHaveLength(12)
-      expect(snapshot.analysis.steps.map((step) => step.stepId)).toEqual(
-        projectManagementWorkspaceStepAnalysisSpecs.map((spec) => spec.step),
+      const declaredArtifacts = projectManagementWorkspaceStepAnalysisSpecs.flatMap(
+        (spec) =>
+          [spec.metricsPath, spec.summaryPath, spec.hotspotsPath].map(
+            (reference) => [spec.step, reference] as const,
+          ),
       )
+      for (const [stepId, reference] of declaredArtifacts) {
+        expect(snapshot.artifacts).toContainEqual(
+          expect.objectContaining({ availability: 'available', reference, stepId }),
+        )
+      }
       expect(snapshot.metrics[0]).toMatchObject({
         analysis_group: expect.any(String),
         category: expect.any(String),
@@ -39,10 +50,6 @@ describe('representativeProjectComparisonFixture', () => {
       })
       expect(snapshot.artifacts).toHaveLength(37)
       expect(snapshot.signoffAssessment.status).toBe('ready')
-      expect(snapshot.qorAssessment).toMatchObject({
-        status: 'ready',
-      })
-      expect(snapshot.qorAssessment).not.toHaveProperty('score')
       expect(snapshot.qorSnapshotExtension).toMatchObject({
         scoringEngine: 'qor-v3',
         score: expect.any(Number),

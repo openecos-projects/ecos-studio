@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  engineeringSnapshotMetricStep,
   projectManifestFlowSteps,
   validateEngineeringSnapshot,
   type EccPersistedEngineeringSnapshot,
@@ -23,11 +24,8 @@ function invalidated(
     workspaceRevision: previous.workspaceRevision,
     invalidatedStepIds: [...steps],
   }
-  snapshot.analysis.steps = snapshot.analysis.steps.filter(
-    (step) => !steps.includes(step.stepId),
-  )
   snapshot.artifacts = snapshot.artifacts.filter(
-    (artifact) => !steps.includes(artifact.stepId ?? ''),
+    (artifact) => !steps.includes(artifact.stepId),
   )
   snapshot.flow = {
     steps: projectManifestFlowSteps.map((name) => ({
@@ -35,20 +33,17 @@ function invalidated(
       state: steps.includes(name) ? 'Unstart' : 'Success',
     })),
   }
+  // An invalidated step's metrics leave the current projection: v6 flat
+  // records attribute their step through scope/group/id, so drop every record
+  // whose derived step was invalidated.
   snapshot.metrics = snapshot.metrics.filter(
-    (metric) => !steps.some((step) => step.toLowerCase() === metric.analysis_group),
+    (metric) =>
+      !steps.some(
+        (step) =>
+          engineeringSnapshotMetricStep(metric as unknown as Record<string, unknown>) ===
+          step,
+      ),
   )
-  snapshot.qorAssessment = {
-    status: 'ready',
-    metrics: snapshot.metrics,
-    steps: snapshot.analysis.steps.map((step) => ({
-      stepId: step.stepId,
-      name: step.stepId,
-      order: step.order,
-      status: 'pass',
-      summaryMetricCount: 14,
-    })),
-  }
   snapshot.signoffAssessment = { status: 'attention', groups: [], risks: [] }
   return snapshot
 }
@@ -154,19 +149,24 @@ describe('Project Comparison previous results', () => {
         resultState: 'stale',
         currentWorkspaceRevision: 15,
         workspaceRevision: 14,
-        details: { flowStatus: 'success', metrics: expect.any(Array) },
+        details: { flowStatus: 'success' },
       },
     })
     if (!result.ok) throw new Error('findings failed')
-    expect(result.data.details.metrics.length).toBeGreaterThan(0)
-    expect(
-      result.data.details.metrics.every((metric) => !metric.baselineComparison),
-    ).toBe(true)
+    // Stale per-step metrics come from the predecessor's normalized projection,
+    // grouped by the step derived from each record's producer-assigned scope.
+    expect(result.data.details.metrics).toHaveLength(14)
+    expect(result.data.details.metrics[0]).toMatchObject({
+      metricName: 'fixture_legal_0',
+      scope: 'legalization',
+      step: 'Legal',
+      workspaceId: 'ws_0002',
+    })
     expect(readVerifiedArtifacts).toHaveBeenCalledWith(
       expect.objectContaining({
         artifacts: previous.artifacts
           .filter((artifact) => artifact.stepId === 'Legal')
-          .map(({ reference, sha256, sizeBytes }) => ({ reference, sha256, sizeBytes })),
+          .map(({ reference }) => ({ reference })),
       }),
     )
   })
@@ -182,9 +182,11 @@ describe('Project Comparison previous results', () => {
       data: { resultState: 'stale', workspaceRevision: 14 },
     })
     current.workspaceRevision += 1
-    current.analysis.steps.push(
-      structuredClone(previous.analysis.steps.find((step) => step.stepId === 'Legal')!),
-    )
+    // A committed Legal run reports the step complete again and redeclares its
+    // artifacts in the snapshot index.
+    current.flow = {
+      steps: projectManifestFlowSteps.map((name) => ({ name, state: 'Success' })),
+    }
     current.artifacts.push(
       ...previous.artifacts.filter((artifact) => artifact.stepId === 'Legal'),
     )
@@ -211,16 +213,16 @@ describe('Project Comparison previous results', () => {
     expect(readVerifiedArtifacts).not.toHaveBeenCalled()
   })
 
-  it('still verifies old artifacts and reports actual read failures', async () => {
+  it('reports read failures for old artifacts', async () => {
     const { findings, readVerifiedArtifacts } = await harness()
     readVerifiedArtifacts.mockResolvedValue({
       ok: false,
-      code: 'ARTIFACT_REVISION_MISMATCH',
+      code: 'FINDINGS_READ_FAILED',
       reference: 'legalization_dreamplace/analysis/qor_metrics.json',
     })
     expect(await findings('Legal')).toMatchObject({
       ok: false,
-      code: 'ARTIFACT_REVISION_MISMATCH',
+      code: 'FINDINGS_READ_FAILED',
     })
   })
 })

@@ -103,70 +103,51 @@ function remainder(total: number | null, values: Array<number | null>): number |
 function drcBreakdown(
   snapshot: Extract<ProjectEngineeringSnapshotReadResult, { ok: true }>,
 ): { hotspots: WorkspaceDrcHotspot[]; reportedCount: number; truncated: boolean } {
-  const analysis = snapshot.sections.qor
+  // The hotspot preview is the bounded top-N projection across all steps; DRC
+  // rule/layer entries carry scalar fields only. When the global preview is
+  // truncated, the DRC subset shown here may be incomplete — the count of the
+  // full per-rule breakdown stays behind the qor_hotspots artifact.
   const empty = { hotspots: [], reportedCount: 0, truncated: false }
-  if (analysis.status !== 'ready' && analysis.status !== 'partial') return empty
-  const step = analysis.data.analysis.steps.find(
-    (candidate) => canonicalStepId(candidate.stepId).toLowerCase() === 'drc',
-  )
-  const details = record(step?.metrics.data)?.details
-  const detail = Array.isArray(details)
-    ? details.map(record).find((value) => value?.id === 'drc_rule_layer_summary')
-    : null
-  const summary = record(detail?.summary)
-  const detailedValues = summary?.top_violations
-  const fallbackValues = record(step?.hotspots.data)?.hotspots
-  const values = Array.isArray(detailedValues)
-    ? detailedValues
-    : Array.isArray(fallbackValues)
-      ? fallbackValues
-      : []
-  const hotspots = values.flatMap((value) => {
-    const hotspot = record(value)
-    if (!hotspot || (hotspot.kind !== undefined && hotspot.kind !== 'drc_rule_layer')) {
-      return []
-    }
-    const metricId = stringValue(hotspot, 'metric_id')
+  const preview = snapshot.sections.hotspotPreview
+  if (preview.status !== 'ready' && preview.status !== 'partial') return empty
+  const hotspots = preview.data.hotspots.flatMap((value) => {
+    if (value.kind !== 'drc_rule_layer') return []
+    const metricId = stringValue(value, 'metric_id')
     const parts = metricId.split(':')
-    const rule = stringValue(hotspot, 'rule') || parts[1] || ''
-    const layer = stringValue(hotspot, 'layer') || parts[2] || ''
-    const amount = finiteNumber(hotspot.value)
+    const rule = parts[1] ?? ''
+    const layer = parts[2] ?? ''
+    const amount = finiteNumber(value.value)
     if (!metricId || !rule || !layer || amount === null || amount < 0) return []
     return [
       {
         metricId,
         rule,
         layer,
-        displayName: stringValue(hotspot, 'display_name') || `${rule} · ${layer}`,
+        displayName: stringValue(value, 'display_name') || `${rule} · ${layer}`,
         value: amount,
-        unit: stringValue(hotspot, 'unit') || 'count',
+        unit: stringValue(value, 'unit') || 'count',
       },
     ]
   })
   return {
     hotspots,
-    reportedCount: finiteNumber(summary?.reported_count) ?? hotspots.length,
-    truncated:
-      typeof summary?.truncated === 'boolean' ? summary.truncated : hotspots.length > 0,
+    reportedCount: hotspots.length,
+    truncated: preview.data.hotspotsTruncated,
   }
 }
 
 function timingIssues(
   snapshot: Extract<ProjectEngineeringSnapshotReadResult, { ok: true }>,
-): WorkspaceStaTimingIssue[] {
-  const analysis = snapshot.sections.qor
-  if (analysis.status !== 'ready' && analysis.status !== 'partial') return []
-  const step = analysis.data.analysis.steps.find(
-    (candidate) => canonicalStepId(candidate.stepId).toLowerCase() === 'sta',
-  )
-  const values = record(step?.timingIssues?.data)?.issues
-  if (!Array.isArray(values)) return []
-  return values.flatMap((value) => {
-    const issue = record(value)
+): { issues: WorkspaceStaTimingIssue[]; issueCount: number; truncated: boolean } | null {
+  // The timing preview is the bounded top-N projection: scalar fields only,
+  // no stage lists (those load on demand from the timing artifact).
+  const preview = snapshot.sections.timingPreview
+  if (preview.status !== 'ready' && preview.status !== 'partial') return null
+  const issues: WorkspaceStaTimingIssue[] = preview.data.issues.flatMap((issue) => {
     const issueId = stringValue(issue, 'issue_id')
     const corner = stringValue(issue, 'corner')
     const analysisType = stringValue(issue, 'analysis_type')
-    const slackNs = finiteNumber(issue?.slack_ns)
+    const slackNs = finiteNumber(issue.slack_ns)
     if (
       !issueId ||
       !corner ||
@@ -175,7 +156,6 @@ function timingIssues(
     ) {
       return []
     }
-    const stages = Array.isArray(issue?.dominant_stages) ? issue.dominant_stages : []
     return [
       {
         issueId,
@@ -185,93 +165,41 @@ function timingIssues(
         startPoint: stringValue(issue, 'start_point'),
         endPoint: stringValue(issue, 'end_point'),
         pathGroup: stringValue(issue, 'path_group'),
-        stages: stages.flatMap((value) => {
-          const stage = record(value)
-          return stage
-            ? [
-                {
-                  pin: stringValue(stage, 'pin'),
-                  cell: stringValue(stage, 'cell'),
-                  arrivalNs: finiteNumber(stage.arrival_ns),
-                  delayNs: finiteNumber(stage.incremental_delay_ns),
-                },
-              ]
-            : []
-        }),
+        stages: [],
       },
     ]
   })
+  return {
+    issues,
+    issueCount: preview.data.issueCount,
+    truncated: preview.data.issuesTruncated,
+  }
 }
 
 function missingTimingCorners(
-  snapshot: Extract<ProjectEngineeringSnapshotReadResult, { ok: true }>,
+  _snapshot: Extract<ProjectEngineeringSnapshotReadResult, { ok: true }>,
 ): string[] {
-  const analysis = snapshot.sections.qor
-  if (analysis.status !== 'ready' && analysis.status !== 'partial') return []
-  const step = analysis.data.analysis.steps.find(
-    (candidate) => canonicalStepId(candidate.stepId).toLowerCase() === 'sta',
-  )
-  const missing = record(step?.timingIssues?.data)?.missing_corners
-  return Array.isArray(missing)
-    ? missing.filter((corner): corner is string => typeof corner === 'string' && !!corner)
-    : []
+  // The bounded preview does not project missing-corner bookkeeping.
+  return []
 }
 
 function congestionStatistics(
-  snapshot: Extract<ProjectEngineeringSnapshotReadResult, { ok: true }>,
+  _snapshot: Extract<ProjectEngineeringSnapshotReadResult, { ok: true }>,
 ): WorkspaceCongestionStatistic[] {
-  const analysis = snapshot.sections.qor
-  if (analysis.status !== 'ready' && analysis.status !== 'partial') return []
-  return analysis.data.analysis.steps.flatMap((step) => {
-    const details = record(step.metrics.data)?.details
-    if (!Array.isArray(details)) return []
-    return details.flatMap((value) => {
-      const detail = record(value)
-      if (detail?.id !== 'place_map_metrics') return []
-      const maps = record(detail.summary)?.maps
-      if (!Array.isArray(maps)) return []
-      return maps.flatMap((value) => {
-        const map = record(value)
-        const metric = stringValue(map, 'metric').toLowerCase()
-        const direction = stringValue(map, 'direction').toLowerCase()
-        const max = finiteNumber(map?.max)
-        const total = finiteNumber(map?.total)
-        const hotspotCount = finiteNumber(map?.nonzero_count)
-        if (
-          max === null ||
-          total === null ||
-          hotspotCount === null ||
-          !['', 'horizontal', 'vertical', 'union'].includes(direction)
-        ) {
-          return []
-        }
-        const mapKind = metric.includes('lut')
-          ? 'lut_rudy'
-          : metric.includes('rudy')
-            ? 'rudy'
-            : metric.includes('density')
-              ? 'density'
-              : 'egr'
-        return [
-          {
-            stepId: step.stepId,
-            mapKind,
-            direction: direction as WorkspaceCongestionStatistic['direction'],
-            max,
-            total,
-            hotspotCount,
-          },
-        ]
-      })
-    })
-  })
+  // Congestion map statistics are not part of the bounded v6 projections.
+  return []
 }
 
 function staInsights(
   qor: WorkspaceQorSummary,
-  issues: WorkspaceStaTimingIssue[],
+  timing: {
+    issues: WorkspaceStaTimingIssue[]
+    issueCount: number
+    truncated: boolean
+  } | null,
   missingCorners: string[],
 ): WorkspaceStaInsights | null {
+  const issues = timing?.issues ?? []
   const staMetrics = qor.metrics.filter(
     (metric) => metric.stepId === 'STA' && Boolean(metric.corner),
   )
@@ -317,6 +245,8 @@ function staInsights(
   return {
     corners: summaries,
     criticalPaths: issues,
+    criticalPathIssueCount: timing?.issueCount ?? null,
+    criticalPathsTruncated: timing?.truncated ?? false,
     worstSetup,
     worstHold,
     frequencyMhz:
@@ -383,7 +313,7 @@ export function flowInsightsSection(
       }),
     }
   })
-  const issues = timingIssues(snapshot)
+  const timing = timingIssues(snapshot)
   const drc = drcBreakdown(snapshot)
   return {
     status: 'ready',
@@ -429,7 +359,7 @@ export function flowInsightsSection(
         totalCount: metricValue(qor.data, 'DRC', 'drc_count'),
         ...drc,
       },
-      sta: staInsights(qor.data, issues, missingTimingCorners(snapshot)),
+      sta: staInsights(qor.data, timing, missingTimingCorners(snapshot)),
     },
     issues: [],
   }

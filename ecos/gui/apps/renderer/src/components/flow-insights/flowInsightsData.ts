@@ -1164,6 +1164,13 @@ export interface StaCriticalPath {
 export interface StaCriticalPathsModel {
   setup: StaCriticalPath[]
   hold: StaCriticalPath[]
+  /**
+   * Total committed STA timing issues when the model is the bounded
+   * timingPreview projection; undefined for lazily loaded full path data.
+   */
+  issueCount?: number | null
+  /** True when setup/hold above are only the projection's top-N head. */
+  issuesTruncated?: boolean
 }
 
 function analysisTypeOf(value: unknown): StaCriticalPath['analysisType'] {

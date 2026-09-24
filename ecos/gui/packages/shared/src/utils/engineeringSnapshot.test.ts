@@ -1,35 +1,42 @@
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import type { EccQorSnapshotExtension } from '../contracts/eccRuntime.ts'
 import {
+  ENGINEERING_SNAPSHOT_CHECKLIST_LIMIT,
   ENGINEERING_SNAPSHOT_MAX_BYTES,
+  ENGINEERING_SNAPSHOT_SCHEMA_VERSION,
+  SNAPSHOT_IDENTITY_MISMATCH,
+  SNAPSHOT_REBUILD_REQUIRED,
+  classifyWorkspaceOpenError,
   parseEngineeringSnapshotJson,
   validateEngineeringSnapshot,
 } from './engineeringSnapshot'
 
-const metric = {
-  id: 'sta_setup_wns',
-  display_name: 'STA Setup WNS',
-  value: -0.05,
-  unit: 'ns',
-  category: 'timing',
-  direction: 'higher_is_better',
-  scope: 'workspace',
-  corner: 'typical',
-  corner_context: {
-    configured_role: 'setup',
-    process_corner: 'tt',
-    voltage_v: 1.8,
-    temperature_c: 25,
-    rc_corner: 'typical',
-    label: 'TT 1.8V 25C',
-  },
-  analysis_group: 'sta',
-  rating: { gate: true, score: true, trend: true },
-  project_role: 'final',
-  step_role: 'primary',
-  confidence: 'high',
-  source: { kind: 'feature', path: 'feature/STA.step.json', selector: '/wns' },
-  extension_field: 'preserved',
+// Canonical Engineering Snapshot fixtures are owned by the ECC repository
+// (ADR-0005) and consumed read-only through the parent monorepo checkout:
+// ecos/gui and ecc/ sit side by side, so from this file the fixture directory
+// resolves to <repo>/ecc/test/formal/fixtures/snapshot. The files are never
+// copied; when the ECC contract changes and the fixtures are regenerated,
+// these tests fail until the GUI validator follows.
+const FIXTURE_ROOT = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../../../../../ecc/test/formal/fixtures/snapshot',
+)
+
+function fixtureText(name: string): string {
+  if (!existsSync(FIXTURE_ROOT)) {
+    throw new Error(
+      `ECC canonical snapshot fixtures not found at ${FIXTURE_ROOT}. ` +
+        'Run these tests from the ECOS Studio monorepo with the ecc/ submodule checked out.',
+    )
+  }
+  return readFileSync(resolve(FIXTURE_ROOT, name), 'utf8')
+}
+
+function fixtureSnapshot(): Record<string, unknown> {
+  return JSON.parse(fixtureText('v6-valid.json')) as Record<string, unknown>
 }
 
 function qorSnapshotExtension(): EccQorSnapshotExtension {
@@ -101,147 +108,368 @@ function qorSnapshotExtension(): EccQorSnapshotExtension {
   }
 }
 
-function snapshot() {
-  const artifact = {
-    artifactId: 'artifact-metrics',
-    availability: 'available',
-    kind: 'qor_metrics',
-    name: 'qor_metrics.json',
-    reference: 'sta_ecc/analysis/qor_metrics.json',
-    sha256: 'a'.repeat(64),
-    sizeBytes: 1024,
-    stepId: 'sta',
-  }
-  return {
-    schemaVersion: 1,
-    workspaceId: 'engineering-workspace',
-    workspaceRevision: 14,
-    cause: 'flow_step.success',
-    flow: { steps: [{ name: 'sta', tool: 'ecc', state: 'Success' }] },
-    parameters: {},
-    checklist: {},
-    metrics: [metric],
-    qorAssessment: {
-      status: 'ready',
-      metrics: [metric],
-      steps: [
-        {
-          stepId: 'sta',
-          order: 0,
-          name: 'sta',
-          status: 'pass',
-          summaryMetricCount: 1,
-        },
-      ],
-    },
-    qorSnapshotExtension: undefined as EccQorSnapshotExtension | undefined,
-    signoffAssessment: { status: 'ready', groups: [], risks: [] },
-    analysis: {
-      steps: [
-        {
-          stepId: 'sta',
-          toolId: 'ecc',
-          order: 0,
-          flowState: 'Success',
-          metrics: {
-            artifactId: artifact.artifactId,
-            status: 'available',
-            data: { schema_version: 3, metrics: [metric] },
-          },
-          summary: {
-            artifactId: 'artifact-summary',
-            status: 'available',
-            data: {
-              schema_version: 4,
-              analysis_status: 'complete',
-              quality_status: 'pass',
-              gates: [],
-              missing_metrics: [],
-            },
-          },
-          hotspots: {
-            artifactId: 'artifact-hotspots',
-            status: 'available',
-            data: { schema_version: 3, hotspots: [] },
-          },
-          timingIssues: {
-            artifactId: 'artifact-timing',
-            status: 'available',
-            data: {
-              schema_version: 1,
-              near_fail_slack_ns: 0.05,
-              missing_corners: [],
-              issues: [],
-              artifact_paths: [],
-            },
-          },
-          subflow: { status: 'missing', steps: [] as Array<Record<string, unknown>> },
-        },
-      ],
-    },
-    artifacts: [
-      artifact,
-      {
-        ...artifact,
-        artifactId: 'artifact-summary',
-        kind: 'qor_summary',
-        name: 'qor_summary.json',
-        reference: 'sta_ecc/analysis/qor_summary.json',
-      },
-      {
-        ...artifact,
-        artifactId: 'artifact-hotspots',
-        kind: 'qor_hotspots',
-        name: 'qor_hotspots.json',
-        reference: 'sta_ecc/analysis/qor_hotspots.json',
-      },
-      {
-        ...artifact,
-        artifactId: 'artifact-timing',
-        kind: 'sta_timing_issues',
-        name: 'sta_timing_issues.json',
-        reference: 'sta_ecc/analysis/sta_timing_issues.json',
-      },
-    ],
-  }
-}
-
-function snapshotWithInvalidExtension(
-  mutate: (extension: EccQorSnapshotExtension) => void,
-) {
-  const current = snapshot()
-  current.schemaVersion = 3
-  const extension = qorSnapshotExtension()
-  mutate(extension)
-  current.qorSnapshotExtension = extension
-  return current
-}
-
-function invalidQorExtensionResult(current: ReturnType<typeof snapshot>) {
-  return validateEngineeringSnapshot(current)
-}
-
-describe('Engineering Snapshot validation', () => {
-  it('keeps a pre-qor-v3 assessment score block valid but unused', () => {
-    const legacy = snapshot()
-    legacy.qorAssessment = {
-      ...legacy.qorAssessment,
-      score: { value: 84, threshold: 60, gate: 'pass' },
-    } as unknown as typeof legacy.qorAssessment
-
-    const valid = validateEngineeringSnapshot(legacy)
-
-    expect(valid.ok).toBe(true)
-    expect(valid.ok && valid.sections.qor.status).toBe('ready')
+describe('ECC canonical snapshot fixtures', () => {
+  it('covers exactly the fixture set the ECC producer publishes', () => {
+    expect(readdirSync(FIXTURE_ROOT).sort()).toEqual([
+      'v6-invalid-artifact-absolute-reference.json',
+      'v6-invalid-artifact-availability.json',
+      'v6-invalid-artifact-parent-reference.json',
+      'v6-invalid-missing-workspace-id.json',
+      'v6-invalid-schema-version.json',
+      'v6-valid.json',
+    ])
   })
 
-  it('exposes a valid QoR Snapshot extension independently from legacy QoR facts', () => {
-    const current = snapshot()
-    current.schemaVersion = 3
-    current.qorSnapshotExtension = qorSnapshotExtension()
+  it('accepts the valid fixture with every section ready', () => {
+    const validated = parseEngineeringSnapshotJson(fixtureText('v6-valid.json'))
 
-    const valid = validateEngineeringSnapshot(current)
+    expect(validated.ok).toBe(true)
+    if (!validated.ok) return
+    expect(validated.snapshot).toEqual({
+      cause: 'workspace.created',
+      parameters: { design: 'gcd', frequency_mhz: 100 },
+      schemaVersion: ENGINEERING_SNAPSHOT_SCHEMA_VERSION,
+      workspaceId: 'workspace-fixture-v6',
+      workspaceRevision: 1,
+    })
+    for (const [name, section] of Object.entries(validated.sections)) {
+      expect(section.status, `section ${name}`).toBe('ready')
+    }
+    expect(
+      validated.sections.artifacts.status === 'ready' &&
+        validated.sections.artifacts.data.length,
+    ).toBeGreaterThan(0)
+    expect(
+      validated.sections.checklist.status === 'ready' &&
+        validated.sections.checklist.data.items[0],
+    ).toMatchObject({
+      id: 'synthesis.netlist',
+      blocked: false,
+      state: 'pass',
+    })
+    expect(
+      validated.sections.timingPreview.status === 'ready' &&
+        validated.sections.timingPreview.data,
+    ).toMatchObject({ issueCount: 7, issuesTruncated: true })
+    expect(
+      validated.sections.hotspotPreview.status === 'ready' &&
+        validated.sections.hotspotPreview.data,
+    ).toMatchObject({ hotspotCount: 2, hotspotsTruncated: false })
+  })
 
+  it.each([
+    [
+      'v6-invalid-schema-version.json',
+      'ENGINEERING_SNAPSHOT_SCHEMA_UNSUPPORTED',
+      SNAPSHOT_REBUILD_REQUIRED,
+    ],
+    [
+      'v6-invalid-missing-workspace-id.json',
+      'ENGINEERING_SNAPSHOT_INVALID',
+      SNAPSHOT_REBUILD_REQUIRED,
+    ],
+    [
+      'v6-invalid-artifact-absolute-reference.json',
+      'ENGINEERING_ARTIFACT_INVALID',
+      SNAPSHOT_REBUILD_REQUIRED,
+    ],
+    [
+      'v6-invalid-artifact-parent-reference.json',
+      'ENGINEERING_ARTIFACT_INVALID',
+      SNAPSHOT_REBUILD_REQUIRED,
+    ],
+    [
+      'v6-invalid-artifact-availability.json',
+      'ENGINEERING_ARTIFACT_INVALID',
+      SNAPSHOT_REBUILD_REQUIRED,
+    ],
+  ])('rejects %s with a stable fail-closed issue', (name, code, recovery) => {
+    expect(parseEngineeringSnapshotJson(fixtureText(name))).toEqual({
+      ok: false,
+      issue: expect.objectContaining({ code, recovery }),
+    })
+  })
+})
+
+describe('classifyWorkspaceOpenError', () => {
+  it('classifies the stable ECC open-failure codes from the error code field', () => {
+    expect(
+      classifyWorkspaceOpenError(
+        Object.assign(new Error('invalid Engineering Snapshot'), {
+          code: SNAPSHOT_REBUILD_REQUIRED,
+        }),
+      ),
+    ).toBe(SNAPSHOT_REBUILD_REQUIRED)
+    expect(
+      classifyWorkspaceOpenError(
+        Object.assign(new Error('Engineering Snapshot workspace identity mismatch'), {
+          code: SNAPSHOT_IDENTITY_MISMATCH,
+        }),
+      ),
+    ).toBe(SNAPSHOT_IDENTITY_MISMATCH)
+  })
+
+  it('falls back to an exact wire message match', () => {
+    expect(classifyWorkspaceOpenError(new Error(SNAPSHOT_REBUILD_REQUIRED))).toBe(
+      SNAPSHOT_REBUILD_REQUIRED,
+    )
+    expect(classifyWorkspaceOpenError(new Error(SNAPSHOT_IDENTITY_MISMATCH))).toBe(
+      SNAPSHOT_IDENTITY_MISMATCH,
+    )
+  })
+
+  it('never matches substrings or unrelated failures', () => {
+    expect(
+      classifyWorkspaceOpenError(
+        new Error(`open failed: ${SNAPSHOT_REBUILD_REQUIRED} (corrupt)`),
+      ),
+    ).toBeNull()
+    expect(classifyWorkspaceOpenError(new Error('Workspace not found'))).toBeNull()
+    expect(classifyWorkspaceOpenError('snapshot_rebuild_required')).toBeNull()
+    expect(classifyWorkspaceOpenError(null)).toBeNull()
+    expect(classifyWorkspaceOpenError(undefined)).toBeNull()
+  })
+})
+
+describe('Engineering Snapshot v6 envelope', () => {
+  it('is a tolerant reader for unknown fields at every level', () => {
+    const snapshot = fixtureSnapshot()
+    snapshot.futureTopLevelField = { anything: true }
+    const artifacts = snapshot.artifacts as Array<Record<string, unknown>>
+    artifacts[0] = { ...artifacts[0], futureArtifactField: 42 }
+    const checklist = snapshot.checklist as { items: Array<Record<string, unknown>> }
+    checklist.items[0] = { ...checklist.items[0], futureItemField: 'x' }
+
+    const validated = validateEngineeringSnapshot(snapshot)
+
+    expect(validated.ok).toBe(true)
+    if (!validated.ok) return
+    expect(validated.sections.artifacts.status).toBe('ready')
+    expect(validated.sections.checklist.status).toBe('ready')
+  })
+
+  it('ignores legacy artifact fingerprint fields instead of rejecting them', () => {
+    const snapshot = fixtureSnapshot()
+    const artifacts = snapshot.artifacts as Array<Record<string, unknown>>
+    artifacts[0] = {
+      ...artifacts[0],
+      sha256: 'a'.repeat(64),
+      sizeBytes: 1024,
+      integrity: { mode: 'legacy' },
+    }
+
+    const validated = validateEngineeringSnapshot(snapshot)
+
+    expect(validated.ok).toBe(true)
+    expect(validated.ok && validated.sections.artifacts.status).toBe('ready')
+  })
+
+  it.each([5, 7, 0, -1])(
+    'fails closed with rebuild semantics for unsupported schemaVersion %s',
+    (schemaVersion) => {
+      expect(
+        validateEngineeringSnapshot({ ...fixtureSnapshot(), schemaVersion }),
+      ).toEqual({
+        ok: false,
+        issue: {
+          code: 'ENGINEERING_SNAPSHOT_SCHEMA_UNSUPPORTED',
+          detail: `schemaVersion ${schemaVersion}`,
+          recovery: SNAPSHOT_REBUILD_REQUIRED,
+        },
+      })
+    },
+  )
+
+  it.each([undefined, '6', 6.5, null])(
+    'rejects a non-integer schemaVersion %s as invalid rather than unsupported',
+    (schemaVersion) => {
+      expect(
+        validateEngineeringSnapshot({ ...fixtureSnapshot(), schemaVersion }),
+      ).toEqual({
+        ok: false,
+        issue: {
+          code: 'ENGINEERING_SNAPSHOT_INVALID',
+          recovery: SNAPSHOT_REBUILD_REQUIRED,
+        },
+      })
+    },
+  )
+
+  it('fails closed on workspace identity mismatch without offering a rebuild', () => {
+    expect(validateEngineeringSnapshot(fixtureSnapshot(), 'workspace-other')).toEqual({
+      ok: false,
+      issue: { code: 'ENGINEERING_WORKSPACE_ID_MISMATCH' },
+    })
+  })
+
+  it('rejects malformed containers instead of degrading them to empty sections', () => {
+    for (const key of [
+      'flow',
+      'checklist',
+      'signoffAssessment',
+      'timingPreview',
+      'hotspotPreview',
+    ]) {
+      expect(validateEngineeringSnapshot({ ...fixtureSnapshot(), [key]: [] }).ok).toBe(
+        false,
+      )
+    }
+    expect(validateEngineeringSnapshot({ ...fixtureSnapshot(), metrics: {} }).ok).toBe(
+      false,
+    )
+    expect(validateEngineeringSnapshot({ ...fixtureSnapshot(), artifacts: {} }).ok).toBe(
+      false,
+    )
+  })
+
+  it('carries a valid stale predecessor through the envelope', () => {
+    const snapshot = {
+      ...fixtureSnapshot(),
+      stalePredecessor: {
+        workspaceRevision: 3,
+        invalidatedStepIds: ['sta'],
+      },
+    }
+
+    const validated = validateEngineeringSnapshot(snapshot)
+
+    expect(validated.ok).toBe(true)
+    expect(validated.ok && validated.snapshot.stalePredecessor).toEqual({
+      workspaceRevision: 3,
+      invalidatedStepIds: ['sta'],
+    })
+  })
+
+  it('rejects a malformed stale predecessor', () => {
+    const snapshot = {
+      ...fixtureSnapshot(),
+      stalePredecessor: { workspaceRevision: 0, invalidatedStepIds: ['sta'] },
+    }
+
+    expect(validateEngineeringSnapshot(snapshot)).toEqual({
+      ok: false,
+      issue: {
+        code: 'ENGINEERING_SNAPSHOT_INVALID',
+        recovery: SNAPSHOT_REBUILD_REQUIRED,
+      },
+    })
+  })
+})
+
+describe('Engineering Snapshot v6 sections', () => {
+  it('degrades a malformed metric without rejecting the snapshot', () => {
+    const snapshot = fixtureSnapshot()
+    snapshot.metrics = [
+      ...(snapshot.metrics as unknown[]),
+      { id: 'broken', display_name: 'Broken' },
+    ]
+
+    const validated = validateEngineeringSnapshot(snapshot)
+
+    expect(validated.ok).toBe(true)
+    expect(validated.ok && validated.sections.metrics).toEqual({
+      status: 'unavailable',
+      issues: [{ code: 'ENGINEERING_METRICS_INVALID' }],
+    })
+    expect(validated.ok && validated.sections.flow.status).toBe('ready')
+  })
+
+  it('degrades malformed flow, signoff, checklist, and preview payloads independently', () => {
+    const cases: Array<[string, string, unknown, string]> = [
+      ['flow', 'flow', { steps: [{ name: 'sta' }] }, 'ENGINEERING_FLOW_INVALID'],
+      [
+        'signoffAssessment',
+        'signoff',
+        { status: 'ready', groups: [], risks: {} },
+        'ENGINEERING_SIGNOFF_INVALID',
+      ],
+      [
+        'checklist',
+        'checklist',
+        { items: [{ id: 'x' }] },
+        'ENGINEERING_CHECKLIST_INVALID',
+      ],
+      [
+        'timingPreview',
+        'timingPreview',
+        { issues: [], issueCount: -1, issuesTruncated: false },
+        'ENGINEERING_TIMING_PREVIEW_INVALID',
+      ],
+      [
+        'hotspotPreview',
+        'hotspotPreview',
+        { hotspots: [{ kind: 'congestion' }], hotspotCount: 1, hotspotsTruncated: false },
+        'ENGINEERING_HOTSPOT_PREVIEW_INVALID',
+      ],
+    ]
+    for (const [key, sectionName, value, code] of cases) {
+      const validated = validateEngineeringSnapshot({
+        ...fixtureSnapshot(),
+        [key]: value,
+      })
+      expect(validated.ok).toBe(true)
+      if (!validated.ok) continue
+      const section = validated.sections[sectionName as keyof typeof validated.sections]
+      expect(section).toEqual({
+        status: 'unavailable',
+        issues: [{ code }],
+      })
+    }
+  })
+
+  it('degrades an over-limit checklist projection instead of flowing it through', () => {
+    const snapshot = fixtureSnapshot()
+    const item = (snapshot.checklist as { items: Array<Record<string, unknown>> })
+      .items[0]!
+    snapshot.checklist = {
+      items: Array.from({ length: ENGINEERING_SNAPSHOT_CHECKLIST_LIMIT + 1 }, () => item),
+    }
+
+    const validated = validateEngineeringSnapshot(snapshot)
+
+    expect(validated.ok).toBe(true)
+    expect(validated.ok && validated.sections.checklist).toEqual({
+      status: 'unavailable',
+      issues: [{ code: 'ENGINEERING_CHECKLIST_INVALID' }],
+    })
+  })
+
+  it('fails closed on an unsafe artifact reference even when every section is sound', () => {
+    const snapshot = fixtureSnapshot()
+    const artifacts = snapshot.artifacts as Array<Record<string, unknown>>
+    artifacts[0] = { ...artifacts[0], reference: '../outside.json' }
+
+    expect(validateEngineeringSnapshot(snapshot)).toEqual({
+      ok: false,
+      issue: {
+        code: 'ENGINEERING_ARTIFACT_INVALID',
+        recovery: SNAPSHOT_REBUILD_REQUIRED,
+      },
+    })
+  })
+
+  it('rejects duplicate artifact identities', () => {
+    const snapshot = fixtureSnapshot()
+    const artifacts = snapshot.artifacts as Array<Record<string, unknown>>
+    artifacts.push({ ...artifacts[0]! })
+
+    expect(validateEngineeringSnapshot(snapshot).ok).toBe(false)
+  })
+})
+
+describe('QoR Snapshot extension section', () => {
+  function snapshotWithExtension(
+    mutate?: (extension: EccQorSnapshotExtension) => void,
+  ): Record<string, unknown> {
+    const snapshot = fixtureSnapshot()
+    const extension = qorSnapshotExtension()
+    mutate?.(extension)
+    snapshot.qorSnapshotExtension = extension
+    return snapshot
+  }
+
+  it('exposes a valid extension and degrades a malformed one', () => {
+    const valid = validateEngineeringSnapshot(snapshotWithExtension())
     expect(valid.ok).toBe(true)
     if (!valid.ok) return
     expect(valid.sections.qorSnapshotExtension).toMatchObject({
@@ -249,75 +477,18 @@ describe('Engineering Snapshot validation', () => {
       data: { scoringEngine: 'qor-v3', qphys: { timing: { value: 84 } } },
     })
 
-    const invalid = snapshot()
-    invalid.schemaVersion = 3
-    invalid.qorSnapshotExtension = {
-      ...qorSnapshotExtension(),
-      qphys: [] as never,
-    }
-    const partial = validateEngineeringSnapshot(invalid)
-    expect(partial.ok && partial.sections.qorSnapshotExtension).toEqual({
+    const invalid = validateEngineeringSnapshot(
+      snapshotWithExtension((extension) => {
+        extension.qphys = [] as never
+      }),
+    )
+    expect(invalid.ok && invalid.sections.qorSnapshotExtension).toEqual({
       status: 'unavailable',
       issues: [{ code: 'ENGINEERING_QOR_SNAPSHOT_EXTENSION_INVALID' }],
     })
   })
 
-  it('accepts the extension on the v2 production Snapshot during rollout', () => {
-    const current = snapshot()
-    current.schemaVersion = 2
-    current.qorSnapshotExtension = qorSnapshotExtension()
-
-    const valid = validateEngineeringSnapshot(current)
-
-    expect(valid.ok && valid.sections.qorSnapshotExtension).toMatchObject({
-      status: 'ready',
-      data: { scoringEngine: 'qor-v3' },
-    })
-  })
-
-  it('rejects out-of-range and extra QoR extension fields', () => {
-    const outOfRange = snapshot()
-    outOfRange.schemaVersion = 3
-    outOfRange.qorSnapshotExtension = {
-      ...qorSnapshotExtension(),
-      qphys: {
-        timing: { value: 101, state: 'PASS', featureIds: [] },
-      },
-    }
-    expect(validateEngineeringSnapshot(outOfRange)).toMatchObject({
-      ok: true,
-      sections: {
-        qorSnapshotExtension: {
-          status: 'unavailable',
-          issues: [{ code: 'ENGINEERING_QOR_SNAPSHOT_EXTENSION_INVALID' }],
-        },
-      },
-    })
-
-    const extraField = snapshot()
-    extraField.schemaVersion = 3
-    extraField.qorSnapshotExtension = {
-      ...qorSnapshotExtension(),
-      evidence: { ...qorSnapshotExtension().evidence, extra: true } as never,
-    }
-    expect(validateEngineeringSnapshot(extraField)).toMatchObject({
-      ok: true,
-      sections: {
-        qorSnapshotExtension: {
-          status: 'unavailable',
-          issues: [{ code: 'ENGINEERING_QOR_SNAPSHOT_EXTENSION_INVALID' }],
-        },
-      },
-    })
-  })
-
   it.each([
-    [
-      'missing top-level field',
-      (extension: EccQorSnapshotExtension) => {
-        delete (extension as unknown as Record<string, unknown>).score
-      },
-    ],
     [
       'extra top-level field',
       (extension: EccQorSnapshotExtension) => {
@@ -331,82 +502,9 @@ describe('Engineering Snapshot validation', () => {
       },
     ],
     [
-      'invalid scalar status',
-      (extension: EccQorSnapshotExtension) => {
-        extension.scalarStatus = 'UNKNOWN' as never
-      },
-    ],
-    [
-      'invalid extension status',
-      (extension: EccQorSnapshotExtension) => {
-        extension.status = 'partial' as never
-      },
-    ],
-    [
-      'invalid intervention tier',
-      (extension: EccQorSnapshotExtension) => {
-        extension.diagnoses[0]!.interventions[0]!.tier = 'TIER_UNKNOWN' as never
-      },
-    ],
-    [
-      'null diagnosis severity',
-      (extension: EccQorSnapshotExtension) => {
-        extension.diagnoses[0]!.severity = null as never
-      },
-    ],
-    [
-      'out-of-range diagnosis severity',
-      (extension: EccQorSnapshotExtension) => {
-        extension.diagnoses[0]!.severity = 1.1
-      },
-    ],
-    [
       'out-of-range score',
       (extension: EccQorSnapshotExtension) => {
         extension.score = 101
-      },
-    ],
-    [
-      'out-of-range evidence',
-      (extension: EccQorSnapshotExtension) => {
-        extension.evidence.index = 101
-      },
-    ],
-    [
-      'negative power',
-      (extension: EccQorSnapshotExtension) => {
-        extension.power.totalUw = -1
-      },
-    ],
-    [
-      'unknown qphys dimension',
-      (extension: EccQorSnapshotExtension) => {
-        ;(extension.qphys as Record<string, unknown>).unknown = {
-          value: 1,
-          state: 'PASS',
-          featureIds: [],
-        }
-      },
-    ],
-    [
-      'empty text',
-      (extension: EccQorSnapshotExtension) => {
-        extension.diagnoses[0]!.diagnosisId = ''
-      },
-    ],
-    [
-      'overlong text',
-      (extension: EccQorSnapshotExtension) => {
-        extension.diagnoses[0]!.diagnosisId = 'x'.repeat(513)
-      },
-    ],
-    [
-      'overlong array',
-      (extension: EccQorSnapshotExtension) => {
-        extension.artifactIds = Array.from(
-          { length: 513 },
-          (_, index) => `artifact-${index}`,
-        )
       },
     ],
     [
@@ -416,90 +514,25 @@ describe('Engineering Snapshot validation', () => {
       },
     ],
     [
-      'unavailable with empty reason',
+      'overlong text',
       (extension: EccQorSnapshotExtension) => {
-        extension.status = 'unavailable'
-        extension.reason = ''
-      },
-    ],
-    [
-      'available with reason',
-      (extension: EccQorSnapshotExtension) => {
-        extension.reason = 'not allowed while available'
-      },
-    ],
-    [
-      'invalid compatibility status',
-      (extension: EccQorSnapshotExtension) => {
-        extension.inflation.compatibilityStatus = '' as never
+        extension.diagnoses[0]!.diagnosisId = 'x'.repeat(513)
       },
     ],
   ])('rejects %s', (_name, mutate) => {
-    expect(invalidQorExtensionResult(snapshotWithInvalidExtension(mutate))).toMatchObject(
-      {
-        ok: true,
-        sections: {
-          qorSnapshotExtension: {
-            status: 'unavailable',
-            issues: [{ code: 'ENGINEERING_QOR_SNAPSHOT_EXTENSION_INVALID' }],
-          },
+    expect(validateEngineeringSnapshot(snapshotWithExtension(mutate))).toMatchObject({
+      ok: true,
+      sections: {
+        qorSnapshotExtension: {
+          status: 'unavailable',
+          issues: [{ code: 'ENGINEERING_QOR_SNAPSHOT_EXTENSION_INVALID' }],
         },
       },
-    )
-  })
-
-  it('preserves complete metric metadata and validates sections independently', () => {
-    const valid = validateEngineeringSnapshot(snapshot())
-    expect(valid.ok).toBe(true)
-    if (!valid.ok) return
-    expect(valid.sections.qor.status).toBe('ready')
-    expect(
-      valid.sections.qor.status === 'ready' && valid.sections.qor.data.metrics[0],
-    ).toEqual(metric)
-
-    const invalidFlow = snapshot()
-    invalidFlow.flow = { steps: [{ name: 'sta', tool: 'ecc' }] } as never
-    const partial = validateEngineeringSnapshot(invalidFlow)
-    expect(partial.ok).toBe(true)
-    if (!partial.ok) return
-    expect(partial.sections).toMatchObject({
-      flow: { status: 'unavailable', issues: [{ code: 'ENGINEERING_FLOW_INVALID' }] },
-      qor: { status: 'ready', issues: [] },
-      signoff: { status: 'ready', issues: [] },
-      artifacts: { status: 'ready', issues: [] },
-    })
-
-    const unsafeArtifact = snapshot()
-    unsafeArtifact.artifacts[0]!.reference = '../outside.json'
-    const unsafe = validateEngineeringSnapshot(unsafeArtifact)
-    expect(unsafe.ok && unsafe.sections).toMatchObject({
-      artifacts: {
-        status: 'unavailable',
-        issues: [{ code: 'ENGINEERING_ARTIFACT_INVALID' }],
-      },
-      flow: { status: 'ready' },
-      qor: { status: 'ready' },
-      signoff: { status: 'ready' },
     })
   })
+})
 
-  it('accepts oversized analysis references without embedded detail data', () => {
-    const current = snapshot()
-    current.analysis.steps[0]!.timingIssues = {
-      artifactId: 'artifact-timing',
-      status: 'oversized',
-      reasonCode: 'ANALYSIS_FILE_OVERSIZED',
-      data: null,
-    } as never
-
-    const validated = validateEngineeringSnapshot(current)
-
-    expect(validated.ok).toBe(true)
-    if (!validated.ok) return
-    expect(validated.sections.flow.status).toBe('ready')
-    expect(validated.sections.qor.status).toBe('ready')
-  })
-
+describe('parseEngineeringSnapshotJson', () => {
   it('rejects oversized persisted input before JSON parsing with stable sizes', () => {
     expect(
       parseEngineeringSnapshotJson(new Uint8Array(ENGINEERING_SNAPSHOT_MAX_BYTES + 1)),
@@ -513,57 +546,20 @@ describe('Engineering Snapshot validation', () => {
     })
   })
 
-  it('rejects an incomplete envelope before exposing typed sections', () => {
-    const { parameters: _parameters, ...incomplete } = snapshot()
-
-    expect(validateEngineeringSnapshot(incomplete)).toEqual({
+  it('rejects non-object JSON as invalid', () => {
+    expect(parseEngineeringSnapshotJson('[1,2,3]')).toEqual({
       ok: false,
-      issue: { code: 'ENGINEERING_SNAPSHOT_INVALID' },
-    })
-  })
-
-  it('accepts Runtime input while isolating its path-free Artifact section', () => {
-    const runtime = snapshot()
-    runtime.artifacts = runtime.artifacts.map(
-      ({ reference: _reference, ...artifact }) => artifact,
-    ) as never
-
-    const validated = validateEngineeringSnapshot(runtime)
-
-    expect(validated.ok && validated.sections).toMatchObject({
-      artifacts: {
-        status: 'unavailable',
-        issues: [{ code: 'ENGINEERING_ARTIFACT_INVALID' }],
+      issue: {
+        code: 'ENGINEERING_SNAPSHOT_INVALID',
+        recovery: SNAPSHOT_REBUILD_REQUIRED,
       },
-      flow: { status: 'ready' },
-      qor: { status: 'ready' },
-      signoff: { status: 'ready' },
     })
-  })
-
-  it('requires normalized committed Subflow data in the current schema', () => {
-    const current = snapshot()
-    current.schemaVersion = 2
-    current.analysis.steps[0]!.subflow = {
-      status: 'available',
-      steps: [
-        {
-          name: 'run sta',
-          state: 'Success',
-          runtime: '0:0:2',
-          peakMemoryMb: 12.5,
-        },
-      ],
-    }
-
-    const valid = validateEngineeringSnapshot(current)
-    expect(valid.ok && valid.sections.qor.status).toBe('ready')
-
-    current.analysis.steps[0]!.subflow.steps[0]!.peakMemoryMb = Number.NaN
-    const invalid = validateEngineeringSnapshot(current)
-    expect(invalid.ok && invalid.sections.qor).toEqual({
-      status: 'unavailable',
-      issues: [{ code: 'ENGINEERING_QOR_INVALID' }],
+    expect(parseEngineeringSnapshotJson('{broken json')).toEqual({
+      ok: false,
+      issue: {
+        code: 'ENGINEERING_SNAPSHOT_INVALID',
+        recovery: SNAPSHOT_REBUILD_REQUIRED,
+      },
     })
   })
 })

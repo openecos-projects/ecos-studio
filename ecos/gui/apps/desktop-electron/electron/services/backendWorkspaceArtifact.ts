@@ -3,6 +3,8 @@ import { performance } from 'node:perf_hooks'
 import type {
   BackendWorkspaceArtifactContent,
   ReadSection,
+  WorkspaceChecklistEvidence,
+  WorkspaceStaTimingIssuesDetail,
   WorkspaceTimingPathsDetail,
   WorkspaceTimingSummaryDetail,
 } from '@ecos-studio/shared'
@@ -17,9 +19,7 @@ type ValidSnapshot = NonNullable<ProjectEngineeringSnapshotReadResult['staleSnap
 export type WorkspaceArtifactReader = (request: {
   projectRoot: string
   workspacePath: string
-  artifact: { reference: string; sha256: string; sizeBytes: number }
-  verifyFingerprint?: boolean
-  includeIntegrity?: boolean
+  artifact: { reference: string }
 }) => Promise<VerifiedProjectArtifactReadResult>
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -154,6 +154,82 @@ function timingSummary(
   }
 }
 
+const TIMING_ISSUES_LIMIT = 4096
+const TIMING_ISSUE_STAGE_LIMIT = 2048
+
+// Full STA timing issues (with dominant stage lists) from the committed
+// sta_timing_issues.json analysis file; the bounded snapshot projection only
+// carries scalar top-N fields.
+function timingIssues(bytes: Uint8Array): WorkspaceStaTimingIssuesDetail | null {
+  const source = artifactJson(bytes)
+  if (
+    !source ||
+    source.schema_version !== 1 ||
+    !Array.isArray(source.issues) ||
+    source.issues.length > TIMING_ISSUES_LIMIT ||
+    !Array.isArray(source.missing_corners) ||
+    !source.missing_corners.every((corner) => typeof corner === 'string')
+  ) {
+    return null
+  }
+  const issues: WorkspaceStaTimingIssuesDetail['issues'] = []
+  for (const value of source.issues) {
+    const issue = record(value)
+    const issueId = issue ? stringValue(issue, 'issue_id') : ''
+    const corner = issue ? stringValue(issue, 'corner') : ''
+    const analysisType = issue ? stringValue(issue, 'analysis_type') : ''
+    const slackNs = finiteNumber(issue?.slack_ns)
+    if (
+      !issue ||
+      !issueId ||
+      !corner ||
+      (analysisType !== 'setup' && analysisType !== 'hold') ||
+      slackNs === null ||
+      !Array.isArray(issue.dominant_stages) ||
+      issue.dominant_stages.length > TIMING_ISSUE_STAGE_LIMIT
+    ) {
+      return null
+    }
+    const stages = issue.dominant_stages.flatMap((value) => {
+      const stage = record(value)
+      if (!stage || typeof stage.pin !== 'string' || typeof stage.cell !== 'string') {
+        return []
+      }
+      return [
+        {
+          pin: stringValue(stage, 'pin'),
+          cell: stringValue(stage, 'cell'),
+          arrivalNs: finiteNumber(stage.arrival_ns),
+          delayNs: finiteNumber(stage.incremental_delay_ns ?? stage.delay_ns),
+        },
+      ]
+    })
+    if (stages.length !== issue.dominant_stages.length) return null
+    issues.push({
+      issueId,
+      corner,
+      analysisType,
+      slackNs,
+      startPoint: stringValue(issue, 'start_point'),
+      endPoint: stringValue(issue, 'end_point'),
+      pathGroup: stringValue(issue, 'path_group'),
+      stages,
+    })
+  }
+  return {
+    issues,
+    missingCorners: source.missing_corners.filter((corner) => corner),
+  }
+}
+
+function readFailureCode(code: string): string {
+  return code === 'FINDINGS_ARTIFACT_TOO_LARGE'
+    ? 'ARTIFACT_TOO_LARGE'
+    : code === 'FINDINGS_READ_FAILED'
+      ? 'ARTIFACT_READ_FAILED'
+      : code
+}
+
 export async function readWorkspaceArtifact(
   snapshot: ValidSnapshot,
   workspaceRoot: string,
@@ -173,26 +249,20 @@ export async function readWorkspaceArtifact(
     ![
       'layout_image',
       'congestion_image',
+      'sta_timing_issues',
       'timing_paths',
       'timing_summary',
       'report_text',
     ].includes(artifact.kind) ||
-    artifact.sizeBytes === undefined ||
-    !artifact.sha256 ||
     !reader
   ) {
     return unavailable('ARTIFACT_REFERENCE_MISSING')
   }
   const startedAt = performance.now()
   const read = await reader({
-    artifact: {
-      reference: artifact.reference,
-      sha256: artifact.sha256,
-      sizeBytes: artifact.sizeBytes,
-    },
+    artifact: { reference: artifact.reference },
     projectRoot: dirname(workspaceRoot),
     workspacePath: workspaceRoot,
-    verifyFingerprint: false,
   })
   electronLogger.debug('[backend-workspace] artifact query metrics', {
     artifactBytes: read.ok ? read.bytes.byteLength : 0,
@@ -200,13 +270,7 @@ export async function readWorkspaceArtifact(
     totalMs: Number((performance.now() - startedAt).toFixed(2)),
   })
   if (!read.ok) {
-    const code =
-      read.code === 'FINDINGS_ARTIFACT_TOO_LARGE'
-        ? 'ARTIFACT_TOO_LARGE'
-        : read.code === 'FINDINGS_READ_FAILED'
-          ? 'ARTIFACT_READ_FAILED'
-          : read.code
-    return unavailable(code)
+    return unavailable(readFailureCode(read.code))
   }
   const parsedTimingPaths =
     artifact.kind === 'timing_paths' ? timingPaths(read.bytes) : undefined
@@ -214,9 +278,12 @@ export async function readWorkspaceArtifact(
     artifact.kind === 'timing_summary'
       ? timingSummary(read.bytes, artifact.reference)
       : undefined
+  const parsedTimingIssues =
+    artifact.kind === 'sta_timing_issues' ? timingIssues(read.bytes) : undefined
   if (
     (artifact.kind === 'timing_paths' && !parsedTimingPaths) ||
-    (artifact.kind === 'timing_summary' && !parsedTimingSummary)
+    (artifact.kind === 'timing_summary' && !parsedTimingSummary) ||
+    (artifact.kind === 'sta_timing_issues' && !parsedTimingIssues)
   ) {
     return unavailable('ARTIFACT_INVALID_JSON')
   }
@@ -239,20 +306,70 @@ export async function readWorkspaceArtifact(
           ? 'text/plain'
           : 'application/json',
       name: artifact.name,
-      ...(read.integrity
-        ? {
-            integrity: read.integrity,
-            recordedSizeBytes: artifact.sizeBytes,
-            actualSizeBytes: read.actualSizeBytes ?? read.bytes.byteLength,
-          }
-        : {}),
       ...(['layout_image', 'congestion_image'].includes(artifact.kind)
         ? { bytes: read.bytes }
         : {}),
       ...(text === undefined ? {} : { text }),
+      ...(parsedTimingIssues ? { timingIssues: parsedTimingIssues } : {}),
       ...(parsedTimingPaths ? { timingPaths: parsedTimingPaths } : {}),
       ...(parsedTimingSummary ? { timingSummary: parsedTimingSummary } : {}),
     },
+    issues: [],
+  }
+}
+
+// Checklist evidence detail: the bounded projection carries display fields
+// only, so the original checklist.json record loads on demand through the
+// artifact index (workspace-level kind `checklist`). Resolution is
+// index-driven — an unindexed or missing file reports ARTIFACT_REFERENCE_MISSING
+// rather than guessing a path.
+export async function readWorkspaceChecklistEvidence(
+  snapshot: ValidSnapshot,
+  workspaceRoot: string,
+  findingId: string,
+  reader: WorkspaceArtifactReader | undefined,
+): Promise<ReadSection<WorkspaceChecklistEvidence>> {
+  const unavailable = (code: string): ReadSection<WorkspaceChecklistEvidence> => ({
+    status: 'unavailable',
+    issues: [{ code }],
+  })
+  const artifacts = snapshot.sections.artifacts
+  if (artifacts.status !== 'ready') return unavailable('ENGINEERING_ARTIFACT_INVALID')
+  const artifact = artifacts.data.find(
+    (candidate) =>
+      candidate.kind === 'checklist' && candidate.availability === 'available',
+  )
+  if (!artifact || !reader) return unavailable('ARTIFACT_REFERENCE_MISSING')
+  const startedAt = performance.now()
+  const read = await reader({
+    artifact: { reference: artifact.reference },
+    projectRoot: dirname(workspaceRoot),
+    workspacePath: workspaceRoot,
+  })
+  electronLogger.debug('[backend-workspace] checklist evidence query metrics', {
+    artifactBytes: read.ok ? read.bytes.byteLength : 0,
+    artifactReadCount: 1,
+    totalMs: Number((performance.now() - startedAt).toFixed(2)),
+  })
+  if (!read.ok) {
+    return unavailable(readFailureCode(read.code))
+  }
+  const source = artifactJson(read.bytes)
+  if (
+    !source ||
+    source.schema_version !== 3 ||
+    source.kind !== 'signoff_checklist' ||
+    !Array.isArray(source.checklist)
+  ) {
+    return unavailable('ARTIFACT_INVALID_JSON')
+  }
+  const item = source.checklist.find(
+    (entry) => record(entry) && record(entry)!.id === findingId,
+  )
+  if (!item) return unavailable('CHECKLIST_FINDING_NOT_FOUND')
+  return {
+    status: 'ready',
+    data: { findingId, item: item as Record<string, unknown> },
     issues: [],
   }
 }

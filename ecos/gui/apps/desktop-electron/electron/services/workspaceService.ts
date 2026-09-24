@@ -4,6 +4,7 @@ import {
   open,
   readFile,
   readdir,
+  realpath,
   rename,
   rm,
   stat,
@@ -320,6 +321,44 @@ export class WorkspaceService {
     }
 
     await rm(canonicalPath, { force: true, recursive: true })
+    return true
+  }
+
+  /**
+   * Delete a workspace's committed Engineering Snapshot so the next
+   * `workspace.open` rebuilds it from flow state (ADR-0009). This is the only
+   * explicit-rebuild entry point: ECC never overwrites an existing snapshot,
+   * and the renderer cannot name any other file — the target is always
+   * `<workspace>/home/engineering-snapshot.json` after canonicalization.
+   */
+  async deleteEngineeringSnapshot(directory: string): Promise<boolean> {
+    const canonicalDirectory = await realpath(resolve(directory))
+    if (!(await stat(canonicalDirectory)).isDirectory()) {
+      throw new Error(`${canonicalDirectory} is not a directory`)
+    }
+    if (!(await this.projectScopeProvider.isProjectDirectory(canonicalDirectory))) {
+      throw new Error('Refusing to delete a snapshot outside an ECOS workspace')
+    }
+    if (await this.runtimeMutationGuard?.isWorkspaceRuntimeActive(canonicalDirectory)) {
+      throw new Error(WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE)
+    }
+
+    const snapshotPath = join(canonicalDirectory, 'home', 'engineering-snapshot.json')
+    let canonicalSnapshot: string
+    try {
+      canonicalSnapshot = await realpath(snapshotPath)
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) return false
+      throw error
+    }
+    if (
+      !isPathWithinRoot(dirname(canonicalSnapshot), canonicalDirectory) ||
+      basename(canonicalSnapshot) !== 'engineering-snapshot.json'
+    ) {
+      throw new Error('Refusing to delete a snapshot path outside the workspace')
+    }
+
+    await rm(canonicalSnapshot)
     return true
   }
 

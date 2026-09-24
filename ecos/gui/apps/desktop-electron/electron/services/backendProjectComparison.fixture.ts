@@ -86,65 +86,41 @@ function engineeringSnapshot(
   workspaceId: string,
   score: number,
 ): EccPersistedEngineeringSnapshot {
-  const texts = analysisTexts(score > 80 ? 1 : 0)
   const artifacts: EccPersistedEngineeringSnapshot['artifacts'] = []
   const analysisFile = (stepId: string, kind: string, reference: string) => {
-    const text = texts[reference]!
-    const artifactId = `artifact-${createHash('sha256')
-      .update(`${workspaceId}\0${reference}`)
-      .digest('hex')
-      .slice(0, 32)}`
     artifacts.push({
-      artifactId,
-      availability: 'available',
+      artifactId: `artifact-${createHash('sha256')
+        .update(`${workspaceId}\0${reference}`)
+        .digest('hex')
+        .slice(0, 32)}`,
+      availability: 'available' as const,
       kind,
       name: reference.split('/').at(-1)!,
       reference,
-      sha256: createHash('sha256').update(text).digest('hex'),
-      sizeBytes: Buffer.byteLength(text),
       stepId,
     })
-    return { artifactId, status: 'available' as const, data: JSON.parse(text) }
   }
-  const analysis = {
-    steps: projectManagementWorkspaceStepAnalysisSpecs.map((spec, order) => ({
-      stepId: spec.step,
-      toolId: spec.metricsPath.split('/')[0]!.split('_').at(-1)!,
-      order,
-      flowState: 'Success',
-      metrics: analysisFile(spec.step, 'qor_metrics', spec.metricsPath),
-      summary: analysisFile(spec.step, 'qor_summary', spec.summaryPath),
-      hotspots: analysisFile(spec.step, 'qor_hotspots', spec.hotspotsPath),
-      timingIssues:
-        spec.step === 'STA'
-          ? analysisFile(
-              spec.step,
-              'sta_timing_issues',
-              projectManagementStaTimingIssuesPath,
-            )
-          : null,
-    })),
+  for (const spec of projectManagementWorkspaceStepAnalysisSpecs) {
+    analysisFile(spec.step, 'qor_metrics', spec.metricsPath)
+    analysisFile(spec.step, 'qor_summary', spec.summaryPath)
+    analysisFile(spec.step, 'qor_hotspots', spec.hotspotsPath)
+    if (spec.step === 'STA') {
+      analysisFile(spec.step, 'sta_timing_issues', projectManagementStaTimingIssuesPath)
+    }
   }
   const metrics = projectManifestFlowSteps.flatMap((step, stepIndex) =>
     stepMetrics(step, stepIndex, score > 80),
   )
   return {
-    analysis,
     artifacts,
-    checklist: {},
+    cause: 'flow_step.success',
+    checklist: { items: [] },
     flow: {
       steps: projectManifestFlowSteps.map((name) => ({ name, state: 'Success' })),
     },
+    hotspotPreview: { hotspots: [], hotspotCount: 0, hotspotsTruncated: false },
     metrics,
     parameters: {},
-    qorAssessment: {
-      status: 'ready',
-      metrics,
-      steps: projectManifestFlowSteps.map((stepId, order) => {
-        const summaryMetricCount = metricCount(order)
-        return { name: stepId, order, status: 'pass', stepId, summaryMetricCount }
-      }),
-    },
     qorSnapshotExtension: {
       schemaVersion: 1,
       scoringEngine: 'qor-v3',
@@ -174,90 +150,42 @@ function engineeringSnapshot(
       power: { totalUw: null, budgetUw: null, sourceKind: null, corner: null },
       artifactIds: [],
     },
-    schemaVersion: 1,
+    schemaVersion: 6,
     signoffAssessment: { groups: [], risks: [], status: 'ready' },
+    timingPreview: { issues: [], issueCount: 0, issuesTruncated: false },
     workspaceId,
     workspaceRevision: 14,
   }
 }
 
-function analysisTexts(candidate: number): Record<string, string> {
-  const texts: Record<string, string> = {}
-  for (const [stepIndex, spec] of projectManagementWorkspaceStepAnalysisSpecs.entries()) {
-    texts[spec.metricsPath] = JSON.stringify({
-      schema_version: 3,
-      step: spec.step,
-      metrics: stepMetrics(spec.step, stepIndex, candidate === 1),
-      details: stepDetails(spec.step),
-      context: {
-        timing_constraints: {
-          sdc_sha256: 'a'.repeat(64),
-          source: featureSource(spec.step, '/context/timing_constraints'),
-        },
-      },
-      integrity: {
-        status: 'pass',
-        invalid_metric_source_ids: [],
-        invalid_detail_ids: [],
-      },
-    })
-    texts[spec.summaryPath] = JSON.stringify({
-      schema_version: 4,
-      analysis_status: 'complete',
-      quality_status: 'pass',
-      gates:
-        spec.step === 'RCX' || spec.step === 'STA'
-          ? [{ id: `${spec.step.toLowerCase()}_ready`, state: 'pass', metrics: [] }]
-          : [],
-      missing_metrics: [],
-    })
-    texts[spec.hotspotsPath] = JSON.stringify({
-      schema_version: 3,
-      hotspots:
-        candidate === 1 && spec.step === 'Route'
-          ? [
-              {
-                kind: 'congestion',
-                severity: 'warning',
-                metric_id: 'route_congestion',
-                display_name: 'Route congestion',
-                value: 0.82,
-                description: 'Congestion is concentrated near the macro channel.',
-                source: featureSource(spec.step, '/hotspots/0'),
-              },
-            ]
-          : [],
-    })
-  }
-  texts[projectManagementStaTimingIssuesPath] = JSON.stringify({
-    schema_version: 1,
-    near_fail_slack_ns: 0.05,
-    missing_corners: [],
-    issues: [
-      {
-        issue_id: 'setup-main',
-        severity: 'critical',
-        analysis_type: 'setup',
-        corner: 'typical',
-        path_group: 'reg2reg',
-        check_type: 'setup',
-        slack_ns: candidate === 1 ? -0.05 : -0.2,
-        launch_clock_network_delay_ns: 0.1,
-        capture_clock_network_delay_ns: 0.12,
-        clock_network_delay_delta_ns: 0.02,
-      },
-    ],
-    artifact_paths: [
-      {
-        corner: 'typical',
-        report_dir: 'sta_ecc/reports/typical',
-        feature_dir: 'sta_ecc/features/typical',
-        qor_summary_file: 'sta_ecc/analysis/qor_summary.json',
-        timing_paths_file: 'sta_ecc/analysis/sta_timing_paths.json',
-      },
-    ],
-  })
-  return texts
+// ECC assigns the flat Snapshot metric scope per emitting step
+// (`_metric_scope_and_roles`): six signoff/final scopes are fixed, layout
+// steps use the lowercased step name, and runtime records carry
+// `{step}_execution` with the shared `runtime` group.
+const stepMetricContext: Partial<
+  Record<ProjectManifestFlowStep, { analysisGroup: string; scope: string }>
+> = {
+  Synth: { analysisGroup: 'synthesis_metrics', scope: 'synthesis' },
+  LEC: { analysisGroup: 'lec_metrics', scope: 'lec' },
+  Floor: { analysisGroup: 'postfloorplan_metrics', scope: 'floorplan' },
+  Place: { analysisGroup: 'place_metrics', scope: 'placement' },
+  CTS: { analysisGroup: 'cts_metrics', scope: 'cts' },
+  Legal: { analysisGroup: 'legalization_metrics', scope: 'legalization' },
+  'Timing Opt': {
+    analysisGroup: 'timing_optimization_metrics',
+    scope: 'timing_optimization',
+  },
+  Route: { analysisGroup: 'route_metrics', scope: 'final_route' },
+  Filler: { analysisGroup: 'filler_metrics', scope: 'filler' },
+  RCX: { analysisGroup: 'rcx_metrics', scope: 'signoff_rcx' },
+  STA: { analysisGroup: 'sta_metrics', scope: 'all_configured_corners' },
+  LVS: { analysisGroup: 'lvs_metrics', scope: 'final_lvs' },
+  'Post-route LEC': {
+    analysisGroup: 'postroutelec_metrics',
+    scope: 'postroutelec',
+  },
+  DRC: { analysisGroup: 'drc_metrics', scope: 'final_drc' },
+  Harden: { analysisGroup: 'harden_metrics', scope: 'final_delivery' },
 }
 
 function stepMetrics(
@@ -266,8 +194,13 @@ function stepMetrics(
   candidate: boolean,
 ): EccEngineeringMetric[] {
   const preferred = metricIds[step] ?? []
+  const context = stepMetricContext[step] ?? {
+    analysisGroup: `${step.toLowerCase()}_metrics`,
+    scope: step.toLowerCase(),
+  }
   return Array.from({ length: metricCount(stepIndex) }, (_, index) => {
     const id = preferred[index] ?? `fixture_${step.toLowerCase()}_${index}`
+    const runtime = id === 'runtime_seconds' || id === 'peak_memory_mb'
     const higherIsBetter = id.includes('wns') || id.includes('frequency')
     const value = metricValue(id, stepIndex, index, candidate)
     return {
@@ -275,13 +208,15 @@ function stepMetrics(
       display_name: id.replaceAll('_', ' '),
       value,
       unit: id.includes('wns') || id.includes('tns') ? 'ns' : undefined,
-      category: id.startsWith('sta_')
-        ? 'timing'
-        : id.includes('area') || id.includes('utilization')
-          ? 'area_cost'
-          : 'routability_physical',
+      category: runtime
+        ? 'runtime'
+        : id.startsWith('sta_')
+          ? 'timing'
+          : id.includes('area') || id.includes('utilization')
+            ? 'area_cost'
+            : 'routability_physical',
       direction: higherIsBetter ? 'higher_is_better' : 'lower_is_better',
-      scope: 'design',
+      scope: runtime ? `${context.scope}_execution` : context.scope,
       corner: step === 'STA' ? 'typical' : null,
       corner_context:
         step === 'STA'
@@ -294,7 +229,7 @@ function stepMetrics(
               label: 'TT 1.8V 25C',
             }
           : null,
-      analysis_group: step.toLowerCase(),
+      analysis_group: runtime ? 'runtime' : context.analysisGroup,
       rating: { gate: index === 0, score: index < 3, trend: true },
       project_role: index < 3 ? 'final' : 'trend',
       step_role: index === 0 ? 'primary' : index === 1 ? 'secondary' : 'detail',
@@ -321,44 +256,6 @@ function metricValue(
   if (id === 'sta_hold_tns') return candidate ? 0 : -0.1
   if (id === 'sta_frequency_mhz') return candidate ? 150 : 125
   return 1000 + stepIndex * 20 + metricIndex - (candidate ? 10 : 0)
-}
-
-function stepDetails(step: ProjectManifestFlowStep) {
-  if (step === 'RCX') {
-    return [
-      {
-        id: 'rcx-corners',
-        presentation: 'rcx_spef_corner_table',
-        summary: { rc_corners: [{ rc_corner: 'typical' }] },
-        feature_source: featureSource(step, '/details/0'),
-      },
-    ]
-  }
-  if (step === 'STA') {
-    return [
-      {
-        id: 'sta-path-groups',
-        presentation: 'path_group_table',
-        summary: {
-          records: [
-            {
-              path_group: 'reg2reg',
-              corner_context: {
-                configured_role: 'setup',
-                process_corner: 'tt',
-                voltage_v: 1.8,
-                temperature_c: 25,
-                rc_corner: 'typical',
-                label: 'TT 1.8V 25C',
-              },
-            },
-          ],
-        },
-        feature_source: featureSource(step, '/details/0'),
-      },
-    ]
-  }
-  return []
 }
 
 function featureSource(step: ProjectManifestFlowStep, selector: string) {

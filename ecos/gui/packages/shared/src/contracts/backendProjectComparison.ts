@@ -508,7 +508,6 @@ export interface BackendProjectExecutionInvalidatedEvent {
 }
 
 export type BackendProjectFindingsIssueCode =
-  | 'ARTIFACT_REVISION_MISMATCH'
   | 'FINDINGS_ARTIFACT_INVALID_JSON'
   | 'FINDINGS_ARTIFACT_TOO_LARGE'
   | 'FINDINGS_READ_FAILED'
@@ -525,7 +524,6 @@ export interface BackendProjectStepFindings {
   workspaceRevision: number
   currentWorkspaceRevision?: number
   resultState?: 'current' | 'stale' | 'not-started' | 'pending-rerun'
-  artifactIntegrity?: 'verified' | 'externally-modified'
   artifactIssues?: Array<{
     code: BackendProjectFindingsIssueCode
     reference: string

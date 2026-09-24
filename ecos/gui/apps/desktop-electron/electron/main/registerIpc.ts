@@ -168,6 +168,7 @@ const acceptedWorkChannels = new Set<string>([
   desktopApiIpcChannels.workspaceExecuteFlowAgentRerun,
   desktopApiIpcChannels.workspaceWriteProjectTextFile,
   desktopApiIpcChannels.workspaceDiscardFailedWorkspaceCreate,
+  desktopApiIpcChannels.workspaceDeleteEngineeringSnapshot,
   desktopApiIpcChannels.workspacePrepareProjectDirectoryReplacement,
   desktopApiIpcChannels.workspaceRestoreProjectDirectoryReplacement,
   desktopApiIpcChannels.workspaceFinalizeProjectDirectoryReplacement,
@@ -235,6 +236,9 @@ export interface DesktopBridgeServices {
     getArtifact(
       request: import('@ecos-studio/shared').BackendWorkspaceArtifactRequest,
     ): Promise<import('@ecos-studio/shared').BackendWorkspaceArtifactResult>
+    getChecklistEvidence(
+      request: import('@ecos-studio/shared').BackendWorkspaceChecklistEvidenceRequest,
+    ): Promise<import('@ecos-studio/shared').BackendWorkspaceChecklistEvidenceResult>
     getOverview(): Promise<import('@ecos-studio/shared').BackendWorkspaceOverviewResult>
     getStepDetail(
       request: import('@ecos-studio/shared').BackendWorkspaceStepDetailRequest,
@@ -350,6 +354,7 @@ export interface DesktopBridgeServices {
     listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]>
     pathExists(path: string): Promise<boolean>
     discardFailedWorkspaceCreate(path: string): Promise<boolean>
+    deleteEngineeringSnapshot(path: string): Promise<boolean>
   }
   surferProtocolService: {
     authorizeWaveform(path: string): Promise<string>
@@ -2073,6 +2078,22 @@ export function registerIpc(
   )
 
   handle(
+    desktopApiIpcChannels.workspaceDeleteEngineeringSnapshot,
+    async (event, path) => {
+      requireBackendMutationAllowed(event)
+      if (typeof path !== 'string') {
+        throw new Error('Workspace path must be a string')
+      }
+      const deleted = await services.workspaceService.deleteEngineeringSnapshot(path)
+      if (deleted) {
+        invalidateBackendWorkspaceForSender(event.sender)
+        services.backendProjectComparisonService.invalidateWorkspace(path)
+      }
+      return deleted
+    },
+  )
+
+  handle(
     desktopApiIpcChannels.workspacePrepareProjectDirectoryReplacement,
     async (event, path) => {
       requireBackendMutationAllowed(event)
@@ -2201,6 +2222,15 @@ export function registerIpc(
       request as import('@ecos-studio/shared').BackendWorkspaceArtifactRequest,
     )
   })
+
+  handle(
+    desktopApiIpcChannels.backendWorkspaceGetChecklistEvidence,
+    async (_event, request) => {
+      return await services.backendWorkspaceService.getChecklistEvidence(
+        request as import('@ecos-studio/shared').BackendWorkspaceChecklistEvidenceRequest,
+      )
+    },
+  )
 
   handle(desktopApiIpcChannels.backendWorkspaceGetStepDetail, async (_event, request) => {
     return await services.backendWorkspaceService.getStepDetail(

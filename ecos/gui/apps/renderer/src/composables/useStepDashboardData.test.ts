@@ -77,11 +77,7 @@ function detailResult(revision = 9): BackendWorkspaceStepDetailResult {
             {
               blocked: false,
               category: 'flow',
-              evidence: [],
               id: 'place-complete',
-              owner: 'checklist',
-              policy: 'block',
-              source: {},
               state: 'pass',
               step: 'Place',
               summary: 'done',

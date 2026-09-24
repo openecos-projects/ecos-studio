@@ -134,6 +134,8 @@
 
     <DesignFilesManageDialog v-model="showManageDialog" />
 
+    <WorkspaceSnapshotRecoveryDialog />
+
     <Dialog
       :visible="pdkNameDialogVisible"
       modal
@@ -250,6 +252,7 @@ import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import NewProjectWizard from '@/components/NewProjectWizard.vue'
 import DesignFilesManageDialog from '@/components/DesignFilesManageDialog.vue'
+import WorkspaceSnapshotRecoveryDialog from '@/components/WorkspaceSnapshotRecoveryDialog.vue'
 import WorkspaceStepConfigDialog from '@/components/WorkspaceStepConfigDialog.vue'
 import type { WorkspaceConfig } from '@/types'
 import { setWindowResizing } from '@/composables/useWindowResizeState'

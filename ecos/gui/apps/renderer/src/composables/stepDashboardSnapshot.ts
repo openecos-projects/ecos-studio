@@ -52,7 +52,6 @@ export interface StepDashboardReport {
   id: string
   label: string
   relativePath: string
-  sizeBytes: number | null
   modifiedAt: number | null
 }
 
@@ -382,7 +381,6 @@ export function snapshotStepDashboardData(
           id: artifact.artifactId,
           label: parts[parts.length - 1] ?? artifact.name,
           relativePath: artifact.name,
-          sizeBytes: artifact.sizeBytes ?? null,
           modifiedAt: null,
         }
       }),

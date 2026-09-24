@@ -37,6 +37,11 @@ export interface FlowInsightsData {
   drcRelated: DrcRelatedMetrics
   sta: StaOverviewModel | null
   staCriticalPaths: StaCriticalPathsModel | null
+  /**
+   * Indexed sta_timing_issues artifact for lazy-loading the full timing issue
+   * list (with stage detail) when the preview is only the bounded head.
+   */
+  timingIssuesArtifact: WorkspaceArtifactDescriptor | null
 }
 
 function trendRows(
@@ -199,6 +204,9 @@ export function staCriticalPathsFromSnapshot(
   sta: WorkspaceStaInsights | null,
 ): StaCriticalPathsModel | null {
   if (!sta?.criticalPaths.length) return null
+  // The preview decides the bound; the GUI never re-slices to a tool-side
+  // limit (timing_path_limit etc.) — it renders the projection verbatim and
+  // carries its truncation truth.
   const paths = sta.criticalPaths.map((path) => ({
     id: path.issueId,
     corner: path.corner,
@@ -210,6 +218,8 @@ export function staCriticalPathsFromSnapshot(
   return {
     setup: paths.filter((path) => path.analysisType === 'setup'),
     hold: paths.filter((path) => path.analysisType === 'hold'),
+    issueCount: sta.criticalPathIssueCount,
+    issuesTruncated: sta.criticalPathsTruncated,
   }
 }
 
@@ -295,14 +305,15 @@ export function buildSnapshotFlowInsights(
   }))
   const rows = trendRows(steps, insights.data)
   const artifacts = overview.artifacts
-  const maps =
+  const artifactItems =
     artifacts?.status === 'ready' || artifacts?.status === 'partial'
-      ? congestionTilesFromArtifacts(
-          artifacts.data.items,
-          steps,
-          insights.data.congestion,
-        )
+      ? artifacts.data.items
       : []
+  const maps = congestionTilesFromArtifacts(
+    artifactItems,
+    steps,
+    insights.data.congestion,
+  )
   return {
     signature: `${revision.data.workspaceId}:${revision.data.workspaceRevision}`,
     stepResources: buildStepResourcesModel(steps),
@@ -326,5 +337,10 @@ export function buildSnapshotFlowInsights(
     }),
     sta: staOverviewFromSnapshot(insights.data.sta),
     staCriticalPaths: staCriticalPathsFromSnapshot(insights.data.sta),
+    timingIssuesArtifact:
+      artifactItems.find(
+        (artifact) =>
+          artifact.kind === 'sta_timing_issues' && artifact.availability === 'available',
+      ) ?? null,
   }
 }
