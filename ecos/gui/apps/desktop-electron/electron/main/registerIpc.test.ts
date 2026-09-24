@@ -1873,6 +1873,29 @@ describe('registerIpc', () => {
     expect(openExternal).toHaveBeenCalledWith('https://openecos.org')
   })
 
+  it('rejects non-web external URLs', async () => {
+    const { handlers } = registerHandlers()
+    const handler = handlers.get(desktopApiIpcChannels.systemOpenExternal)
+    const event = { sender: { id: 'web-contents' } }
+
+    const expectRejected = async (url: unknown, messagePart: string) => {
+      const result = (await handler?.(event, url)) as {
+        ok: boolean
+        error?: { message: string }
+      }
+      expect(result.ok).toBe(false)
+      expect(result.error?.message).toContain(messagePart)
+    }
+
+    await expectRejected('file:///etc/passwd', "scheme 'file:'")
+    await expectRejected('javascript:alert(1)', "scheme 'javascript:'")
+    await expectRejected('ecos-internal://open', "scheme 'ecos-internal:'")
+    await expectRejected('not a url', 'absolute URL')
+    await expectRejected(42, 'URL string')
+
+    expect(openExternal).not.toHaveBeenCalled()
+  })
+
   it('opens validated waveform paths without converting Windows paths to URLs', async () => {
     const { handlers, services } = registerHandlers()
     const requestedPath = String.raw`C:\work\cpu\trace.vcd`
