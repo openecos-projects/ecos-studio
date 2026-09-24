@@ -46,6 +46,7 @@ from ecos_agent.optimization.parameters.semantics import load_parameter_cards
 from ecos_agent.optimization.parameter_projection import (
     planner_parameter_knowledge_payload,
 )
+from ecos_agent.optimization.planning import v2_provider_payload_sha256
 
 HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64
@@ -575,7 +576,8 @@ def test_planner_binds_domain_and_consumable_evidence(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     provider = _provider(tmp_path)
-    context, domain = _context(), _domain()
+    domain = _domain()
+    context = replace(_context(), effective_domains=(domain,))
     captured: dict[str, object] = {}
 
     def request(**kwargs: object) -> dict[str, object]:
@@ -598,6 +600,7 @@ def test_planner_binds_domain_and_consumable_evidence(
     assert evidence.response_sha256 == HASH
     assert evidence.envelope.prompt == _build_prompt(captured["system"], captured["user"])
     assert evidence.envelope.planner_payload_sha256 == canonical_sha256(captured["user"])
+    assert evidence.envelope.planner_payload_sha256 == v2_provider_payload_sha256(context)
     assert evidence.envelope.output_schema == captured["output_schema"]
     assert evidence.envelope.envelope_sha256 == canonical_sha256(
         evidence.envelope.model_dump(mode="json", exclude={"envelope_sha256"})

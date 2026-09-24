@@ -712,10 +712,10 @@ def v2_provider_payload_sha256(context: OptimizationPlanningContext) -> str:
         raise EffectiveDomainError("v2 planning domain is unavailable")
     payload = planning_context_payload(context)
     if len(domains) == 1:
-        payload["effective_domain"] = domains[0].model_dump(mode="json")
+        payload["effective_domain"] = planner_effective_domain_payload(domains[0])
     else:
         payload["effective_domains"] = [
-            item.model_dump(mode="json") for item in domains
+            planner_effective_domain_payload(item) for item in domains
         ]
     return canonical_sha256(payload)
 
