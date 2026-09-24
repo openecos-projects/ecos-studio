@@ -130,18 +130,27 @@ def render_case_matrix_markdown(matrix: Mapping[str, Any]) -> str:
         "# RQ1 Tier-A Contract Case Matrix",
         "",
         "| Case | Pass | Producer coverage | Expected status/relation | "
-        "Observed status/relation | Promotion | Mismatch |",
-        "|---|---:|---|---|---|---:|---|",
+        "Expected roles | Expected promotion | Observed status/relation | "
+        "Observed roles | Observed promotion | Mismatch |",
+        "|---|---:|---|---|---|---:|---|---|---:|---|",
     ]
     for row in matrix.get("cases", ()):
         expected = row.get("expected", {})
         observed = row.get("observed", {})
+        expected_roles = json.dumps(
+            expected.get("roles", {}), sort_keys=True, separators=(",", ":")
+        )
+        observed_roles = json.dumps(
+            observed.get("roles", {}), sort_keys=True, separators=(",", ":")
+        )
         lines.append(
             f"| {row.get('case', '')} | {'yes' if row.get('pass') else 'no'} | "
             f"{row.get('producer_coverage', '')} | "
             f"{expected.get('status', '')}/{expected.get('relation', '')} | "
+            f"`{expected_roles}` | {expected.get('promotion', '')} | "
             f"{observed.get('status', '')}/{observed.get('relation', '')} | "
-            f"{observed.get('promotion', '')} | {row.get('mismatch_reason') or ''} |"
+            f"`{observed_roles}` | {observed.get('promotion', '')} | "
+            f"{row.get('mismatch_reason') or ''} |"
         )
     summary = matrix.get("summary", {})
     lines.extend((

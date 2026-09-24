@@ -73,9 +73,12 @@ def test_tier_a_artifacts_are_generated_from_cases(tmp_path) -> None:
         )
     )
     assert stored == matrix
-    assert "| exact mapping | yes |" in (
+    markdown = (
         output_dir / "rq1-contract-case-matrix.v1.md"
     ).read_text(encoding="utf-8")
+    assert "| exact mapping | yes | fixture-only |" in markdown
+    assert "Expected roles" in markdown
+    assert '"consumed":{"present":true' in markdown
     for row in matrix["cases"]:
         for reference in row["evidence_refs"]:
             assert (tmp_path / reference).is_file()
