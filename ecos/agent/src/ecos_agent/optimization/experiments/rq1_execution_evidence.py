@@ -429,7 +429,10 @@ def analyze_records(
         "S25": {"provider": failure["provider_error"], "schema": failure["schema_error"], "repair": 0, "parser": failure["parser_producer_context_mismatch"]},
         "S26": {"timeout": failure["timeout"], "cap_truncated": 0, "terminal_incomplete": failure["terminal_incomplete"], "replay_invalid": 0},
     }
-    return {"schema_version": SCHEMA, "producer_coverage": producer_coverage_register(), "primary": p, "secondary": s, "terminal": terminal, "counts": {"N_start": expected, "N_terminal": len(outcomes_v), "N_receipt_expected": expected, "N_receipt_emitted": emitted, "N_receipt_valid": valid, "N_applied_expected_consumed": applied}, "receipt_ids": [item.receipt_id for item in valid_receipts]}
+    return {"schema_version": SCHEMA, "producer_coverage": producer_coverage_register(), "primary": p, "secondary": s, "terminal": terminal, "counts": {"N_start": expected, "N_terminal": len(outcomes_v), "N_receipt_expected": expected, "N_receipt_emitted": emitted, "N_receipt_valid": valid, "N_applied_expected_consumed": applied}, "receipt_ids": [item.receipt_id for item in valid_receipts], "receipt_semantics": [
+        {"knob": item.parameter.knob_id.value, "requested": item.parameter.requested.value, "written": item.parameter.written.value, "consumed": item.parameter.consumed.value if item.parameter.consumed else None, "status": _status(item.application.status), "relation": _relation(item.application.relation)}
+        for item in valid_receipts
+    ]}
 
 
 def analyze_episode(root: Path) -> dict[str, Any]:
@@ -453,12 +456,25 @@ def analyze_episode(root: Path) -> dict[str, Any]:
 
 
 def replay_fidelity(original: Mapping[str, Any], replay: Mapping[str, Any], *, terminal_tolerance: float = 1e-6) -> dict[str, Any]:
-    def compare(left: Any, right: Any, normalize: Any = lambda x: x) -> dict[str, int]:
-        a, b = normalize(left), normalize(right)
-        return {"exact": int(a == b), "within_band": 0, "mismatch": int(a != b)}
-    left_receipts = original.get("receipt_ids", [])
-    right_receipts = replay.get("receipt_ids", [])
-    return {"schema_version": REPLAY_SCHEMA, "proposal_action": compare(original.get("requested"), replay.get("requested")), "receipt_semantics": compare(left_receipts, right_receipts, lambda x: sorted(str(item).split(".")[-1] for item in x)), "promotion_decision": compare(original.get("primary", {}).get("P10"), replay.get("primary", {}).get("P10")), "terminal_metrics": compare(original.get("terminal", {}).get("values"), replay.get("terminal", {}).get("values"))}
+    def compare(left: Any, right: Any) -> dict[str, int]:
+        if left == right:
+            return {"exact": 1, "within_band": 0, "mismatch": 0}
+        if isinstance(left, Mapping) and isinstance(right, Mapping):
+            numeric = [
+                abs(float(left[key]) - float(right[key])) <= terminal_tolerance
+                for key in left.keys() & right.keys()
+                if isinstance(left[key], (int, float)) and isinstance(right[key], (int, float))
+            ]
+            if numeric and all(numeric) and len(left) == len(right):
+                return {"exact": 0, "within_band": 1, "mismatch": 0}
+        return {"exact": 0, "within_band": 0, "mismatch": 1}
+    return {
+        "schema_version": REPLAY_SCHEMA,
+        "proposal_action": compare(original.get("requested"), replay.get("requested")),
+        "receipt_semantics": compare(original.get("receipt_semantics", len(original.get("receipt_ids", []))), replay.get("receipt_semantics", len(replay.get("receipt_ids", [])))),
+        "promotion_decision": compare(original.get("primary", {}).get("P10"), replay.get("primary", {}).get("P10")),
+        "terminal_metrics": compare(original.get("terminal", {}).get("values"), replay.get("terminal", {}).get("values")),
+    }
 
 
 def aggregate_reports(reports: Iterable[Mapping[str, Any]]) -> dict[str, Any]:

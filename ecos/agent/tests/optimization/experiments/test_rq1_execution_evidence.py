@@ -22,15 +22,15 @@ from ecos_agent.optimization.rules import IncumbentDecision
 HASH = "sha256:" + "a" * 64
 
 
-def _receipt(*, status: str = "applied", receipt_id: str = "receipt-1") -> ParameterApplicationReceipt:
+def _receipt(*, status: str = "applied", receipt_id: str = "receipt-1", requested: float = 0.5) -> ParameterApplicationReceipt:
     return ParameterApplicationReceipt.model_construct(
         receipt_id=receipt_id,
         tool=ToolRef(name="tool", revision="test"),
         context={"stage": "place"},
         parameter=ParameterEvidence(
             knob_id="place.target_density",
-            requested=ParameterValueEvidence(value=0.5, unit="ratio"),
-            written=ParameterValueEvidence(value=0.5, unit="ratio"),
+            requested=ParameterValueEvidence(value=requested, unit="ratio"),
+            written=ParameterValueEvidence(value=requested, unit="ratio"),
             consumed=(
                 ParameterValueEvidence(value=0.6, unit="ratio", source="native")
                 if status == "applied" else None
@@ -46,7 +46,7 @@ def _receipt(*, status: str = "applied", receipt_id: str = "receipt-1") -> Param
             workspace_ref="candidate-1",
             config_before_sha256=HASH,
             config_after_sha256=HASH,
-            written_value=0.5,
+            written_value=requested,
             unit="ratio",
         ),
         application=ParameterApplication(status=status, relation="transformed", reason="native inactive"),
@@ -103,3 +103,35 @@ def test_analyzer_marks_missing_receipt_promotion_as_invariant_violation() -> No
     report = analyze_records([_start()], [_outcome(None, promoted=True)])
     assert report["primary"]["P10"]["count"] == 1
     assert report["secondary"]["S06"]["count"] == 1
+
+
+def test_analyzer_rejects_tampered_and_foreign_receipts() -> None:
+    receipt = _receipt()
+    tampered = receipt.model_dump(mode="json")
+    tampered["evidence_sha256"] = "sha256:" + "b" * 64
+    report = analyze_records([_start()], [_outcome(None)], receipts=[tampered])
+    assert report["primary"]["P01"]["receipt_valid_of_emitted"]["numerator"] == 0
+
+    foreign_payload = _outcome(None).model_dump(mode="python")
+    foreign_payload["parameter_application_receipt_id"] = "foreign-receipt"
+    foreign = OptimizationTerminalOutcome.model_construct(**foreign_payload)
+    report = analyze_records([_start()], [foreign], receipts=[receipt])
+    assert report["primary"]["P08"]["foreign_candidate"] == 1
+
+
+def test_analyzer_detects_shadow_duplicate_consumed_values() -> None:
+    first = _receipt(receipt_id="receipt-1", requested=0.5)
+    second = _receipt(receipt_id="receipt-2", requested=0.7)
+    report = analyze_records([_start("i-1"), _start("i-2")], [], receipts=[first, second])
+    assert report["primary"]["P14"]["shadow_duplicates"] == 1
+
+
+def test_replay_fidelity_ignores_episode_specific_receipt_ids() -> None:
+    row = {"knob": "place.target_density", "requested": 0.5, "written": 0.5, "consumed": 0.6, "status": "applied", "relation": "transformed"}
+    from ecos_agent.optimization.experiments.rq1_execution_evidence import replay_fidelity
+
+    result = replay_fidelity(
+        {"receipt_ids": ["episode-a.receipt-1"], "receipt_semantics": [row]},
+        {"receipt_ids": ["episode-b.receipt-9"], "receipt_semantics": [row]},
+    )
+    assert result["receipt_semantics"] == {"exact": 1, "within_band": 0, "mismatch": 0}
