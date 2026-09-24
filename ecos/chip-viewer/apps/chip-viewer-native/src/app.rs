@@ -50,6 +50,10 @@ const PATTERN_MIN_SIZE_PX: f32 = 20.0;
 const MAX_PATTERN_OPS_PER_SHAPE: usize = 96;
 const MAX_SELECTION_ENDPOINT_LINES: usize = 6;
 const HOVER_NEAREST_RADIUS_PX: f32 = 8.0;
+/// Screen-space slop allowed when clicking an editable instance bbox. At fit
+/// zoom one pixel spans many DBU, so a zero-tolerance point-in-rect hit test
+/// makes small or far-outside-die macros unselectable until zoomed in.
+const EDIT_PICK_TOLERANCE_PX: f32 = 6.0;
 const MAX_PARAMETERIZED_GRID_LINES_PER_GRID: usize = 4096;
 const MAX_JAVASCRIPT_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const SIDEBAR_SECTION_RESERVE_HEIGHT: f32 = 34.0;
@@ -3993,6 +3997,7 @@ impl LoadedViewer {
                             point,
                             modifiers.shift,
                             modifiers.command || modifiers.ctrl,
+                            edit_pick_tolerance_dbu(world, canvas, self.zoom),
                         )
                     });
                     macro_mode.or_else(|| {
@@ -4089,8 +4094,13 @@ impl LoadedViewer {
                 let modifiers = ui.ctx().input(|input| input.modifiers);
                 let mode =
                     SelectionMode::for_click(modifiers.shift, modifiers.command || modifiers.ctrl);
-                let handled =
-                    interaction_point.is_some_and(|point| self.select_macro_at(point, mode));
+                let handled = interaction_point.is_some_and(|point| {
+                    self.select_macro_at(
+                        point,
+                        mode,
+                        edit_pick_tolerance_dbu(world, canvas, self.zoom),
+                    )
+                });
                 if !handled {
                     self.selected = response
                         .interact_pointer_pos()
@@ -6572,11 +6582,12 @@ impl LoadedViewer {
         canvas: egui::Rect,
     ) -> bool {
         let point = screen_to_world_point(pos, world, canvas, self.zoom, self.pan);
-        if let Some(draft) = self.begin_macro_staged_drag(point) {
+        let tolerance = edit_pick_tolerance_dbu(world, canvas, self.zoom);
+        if let Some(draft) = self.begin_macro_staged_drag(point, tolerance) {
             self.draft = Some(draft);
             return true;
         }
-        if let Some(shape_id) = self.pick_editable_instance_bbox_at(point) {
+        if let Some(shape_id) = self.pick_editable_instance_bbox_at(point, tolerance) {
             self.selected = Some(shape_id);
         }
         self.begin_edit_drag(pos, world, canvas)
@@ -6655,7 +6666,7 @@ impl LoadedViewer {
     /// Starts dragging an unplaced macro from its staging slot. The draft
     /// uses `shape_id 0` because the instance has no snapshot shape until
     /// the placement command is accepted.
-    fn begin_macro_staged_drag(&mut self, point: Point32) -> Option<EditDraft> {
+    fn begin_macro_staged_drag(&mut self, point: Point32, tolerance_dbu: i32) -> Option<EditDraft> {
         if !can_start_edit_command(
             self.draft.is_some(),
             self.pending_edit.is_some(),
@@ -6670,7 +6681,7 @@ impl LoadedViewer {
         }
         let (name, rect, orient) = {
             let staging = self.macro_staging.as_ref()?;
-            let index = staging.staged_index_at(point)?;
+            let index = staging.staged_index_at(point, tolerance_dbu)?;
             let staged = &staging.staged[index];
             (staged.name.clone(), staged.rect, staged.orient)
         };
@@ -6748,16 +6759,20 @@ impl LoadedViewer {
         staging.is_macro_instance(&self.db, name)
     }
 
-    fn macro_hit_at(&self, point: Point32) -> Option<(MacroTarget, Option<ShapeId>)> {
+    fn macro_hit_at(
+        &self,
+        point: Point32,
+        tolerance_dbu: i32,
+    ) -> Option<(MacroTarget, Option<ShapeId>)> {
         if let Some(target) = self
             .macro_staging
             .as_ref()
-            .and_then(|staging| staging.staged_target_at(point))
+            .and_then(|staging| staging.staged_target_at(point, tolerance_dbu))
         {
             return Some((target, None));
         }
         let shape_id = self
-            .pick_editable_instance_bbox_at(point)
+            .pick_editable_instance_bbox_at(point, tolerance_dbu)
             .filter(|shape_id| self.placed_shape_is_macro(*shape_id))?;
         let shape = self.db.find_shape(shape_id)?;
         let name = crate::macro_staging::shape_instance_name(&self.db, shape)?;
@@ -6767,8 +6782,8 @@ impl LoadedViewer {
     /// Handles a primary click in macro placement mode. A replace click on
     /// empty space clears the macro selection before ordinary shape picking
     /// continues.
-    fn select_macro_at(&mut self, point: Point32, mode: SelectionMode) -> bool {
-        let hit = self.macro_hit_at(point);
+    fn select_macro_at(&mut self, point: Point32, mode: SelectionMode, tolerance_dbu: i32) -> bool {
+        let hit = self.macro_hit_at(point, tolerance_dbu);
         let target = hit.as_ref().map(|(target, _)| target.clone());
         let preferred_shape = hit.as_ref().and_then(|(_, shape_id)| *shape_id);
         let Some(staging) = self.macro_staging.as_mut() else {
@@ -6814,9 +6829,10 @@ impl LoadedViewer {
         point: Point32,
         shift: bool,
         command_or_ctrl: bool,
+        tolerance_dbu: i32,
     ) -> Option<CanvasDragMode> {
         self.macro_staging.as_ref()?;
-        if let Some((target, preferred_shape)) = self.macro_hit_at(point) {
+        if let Some((target, preferred_shape)) = self.macro_hit_at(point, tolerance_dbu) {
             let already_selected = self
                 .macro_staging
                 .as_ref()
@@ -8020,7 +8036,8 @@ impl LoadedViewer {
             y: hit.ly,
         };
         if self.edit_enabled {
-            if let Some(shape_id) = self.pick_editable_instance_bbox_at(point) {
+            let tolerance = edit_pick_tolerance_dbu(world, canvas, self.zoom);
+            if let Some(shape_id) = self.pick_editable_instance_bbox_at(point, tolerance) {
                 return Some(shape_id);
             }
         }
@@ -8033,12 +8050,16 @@ impl LoadedViewer {
             })
     }
 
-    fn pick_editable_instance_bbox_at(&self, point: Point32) -> Option<ShapeId> {
+    fn pick_editable_instance_bbox_at(
+        &self,
+        point: Point32,
+        tolerance_dbu: i32,
+    ) -> Option<ShapeId> {
         let point_bbox = Rect32 {
-            lx: point.x,
-            ly: point.y,
-            hx: point.x,
-            hy: point.y,
+            lx: point.x.saturating_sub(tolerance_dbu),
+            ly: point.y.saturating_sub(tolerance_dbu),
+            hx: point.x.saturating_add(tolerance_dbu),
+            hy: point.y.saturating_add(tolerance_dbu),
         };
         pick_top_editable_instance_bbox(
             self.db
@@ -8050,6 +8071,7 @@ impl LoadedViewer {
                         .then_some((shape, owner))
                 }),
             point,
+            tolerance_dbu,
         )
     }
 
@@ -11120,6 +11142,26 @@ fn hover_nearest_radius_dbu(world: Rect32, canvas: egui::Rect, zoom: f32) -> i32
     (HOVER_NEAREST_RADIUS_PX / scale).ceil().max(1.0) as i32
 }
 
+/// Click slop for editable-instance picking, in DBU, derived from the current
+/// viewport so the tolerable screen distance stays constant across zooms.
+fn edit_pick_tolerance_dbu(world: Rect32, canvas: egui::Rect, zoom: f32) -> i32 {
+    let scale = world_to_screen_scale(world, canvas, zoom);
+    if !scale.is_finite() || scale <= 0.0 {
+        return 0;
+    }
+    (EDIT_PICK_TOLERANCE_PX / scale).ceil().max(0.0) as i32
+}
+
+/// Chebyshev distance from a point to a rectangle: 0 while inside, otherwise
+/// the gap to the nearest horizontal or vertical edge.
+fn rect_edge_distance_dbu(rect: Rect32, point: Point32) -> i32 {
+    rect.lx
+        .saturating_sub(point.x)
+        .max(point.x.saturating_sub(rect.hx))
+        .max(rect.ly.saturating_sub(point.y))
+        .max(point.y.saturating_sub(rect.hy))
+}
+
 fn ruler_edge_snap_radius_dbu(world: Rect32, canvas: egui::Rect, zoom: f32) -> i32 {
     let scale = world_to_screen_scale(world, canvas, zoom);
     if !scale.is_finite() || scale <= 0.0 {
@@ -11610,23 +11652,36 @@ fn instance_move_is_allowed(owner_type: u8) -> bool {
     OwnerType::from_raw(owner_type) == Some(OwnerType::InstanceBBox)
 }
 
+/// Picks the editable instance bbox under (or within `tolerance_dbu` of) the
+/// point. Exact containment wins over near-misses; within each group the
+/// later candidate in iteration order wins, preserving the previous
+/// topmost-shape behavior. `tolerance_dbu` is 0 for an exact hit test.
 fn pick_top_editable_instance_bbox<'a>(
     candidates: impl IntoIterator<Item = (&'a ShapeRecord, &'a OwnerRef)>,
     point: Point32,
+    tolerance_dbu: i32,
 ) -> Option<ShapeId> {
-    candidates
-        .into_iter()
-        .filter(|(shape, owner)| {
-            shape.state == ShapeState::Alive as u8
-                && shape.kind == ShapeKind::Rect as u8
-                && OwnerType::from_raw(owner.owner_type) == Some(OwnerType::InstanceBBox)
-                && point.x >= shape.bbox.lx
-                && point.x <= shape.bbox.hx
-                && point.y >= shape.bbox.ly
-                && point.y <= shape.bbox.hy
-        })
-        .last()
-        .map(|(shape, _)| shape.id)
+    let mut best: Option<(i64, std::cmp::Reverse<usize>, ShapeId)> = None;
+    for (index, (shape, owner)) in candidates.into_iter().enumerate() {
+        if !(shape.state == ShapeState::Alive as u8
+            && shape.kind == ShapeKind::Rect as u8
+            && OwnerType::from_raw(owner.owner_type) == Some(OwnerType::InstanceBBox))
+        {
+            continue;
+        }
+        let distance = i64::from(rect_edge_distance_dbu(shape.bbox, point));
+        if distance > i64::from(tolerance_dbu) {
+            continue;
+        }
+        let key = (distance, std::cmp::Reverse(index));
+        if best
+            .as_ref()
+            .is_none_or(|(best_distance, best_index, _)| key < (*best_distance, *best_index))
+        {
+            best = Some((distance, std::cmp::Reverse(index), shape.id));
+        }
+    }
+    best.map(|(_, _, shape_id)| shape_id)
 }
 
 fn edit_capability_lines(
@@ -15638,6 +15693,7 @@ mod tests {
             pick_top_editable_instance_bbox(
                 [(&instance, &instance_owner), (&wire, &wire_owner)],
                 point,
+                0,
             ),
             Some(instance.id)
         );
@@ -15675,8 +15731,60 @@ mod tests {
                     (&upper_instance, &instance_owner)
                 ],
                 point,
+                0,
             ),
             Some(upper_instance.id)
+        );
+    }
+
+    #[test]
+    fn editable_instance_hit_accepts_near_miss_within_tolerance() {
+        let instance = ShapeRecord {
+            id: 7,
+            kind: ShapeKind::Rect as u8,
+            state: ShapeState::Alive as u8,
+            bbox: Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 30,
+                hy: 30,
+            },
+            ..ShapeRecord::default()
+        };
+        let instance_owner = OwnerRef {
+            owner_type: OwnerType::InstanceBBox as u8,
+            ..OwnerRef::default()
+        };
+        // A click just outside the bbox selects the macro only when the
+        // zoom-derived tolerance reaches it, and stays a miss otherwise.
+        let near_point = Point32 { x: 35, y: 15 };
+        assert_eq!(
+            pick_top_editable_instance_bbox([(&instance, &instance_owner)], near_point, 4),
+            None
+        );
+        assert_eq!(
+            pick_top_editable_instance_bbox([(&instance, &instance_owner)], near_point, 5),
+            Some(instance.id)
+        );
+        // Exact containment still wins over a nearer near-miss.
+        let other = ShapeRecord {
+            id: 8,
+            bbox: Rect32 {
+                lx: 32,
+                ly: 0,
+                hx: 60,
+                hy: 30,
+            },
+            ..instance
+        };
+        let inside_point = Point32 { x: 15, y: 15 };
+        assert_eq!(
+            pick_top_editable_instance_bbox(
+                [(&other, &instance_owner), (&instance, &instance_owner)],
+                inside_point,
+                20,
+            ),
+            Some(instance.id)
         );
     }
 
