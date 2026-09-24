@@ -1,21 +1,6 @@
 <template>
-  <div
-    class="plugin-card"
-    :class="{ selected }"
-    :style="{ '--row-accent': row.accent }"
-    role="button"
-    tabindex="0"
-    @keydown.enter.prevent="emit('toggle')"
-    @keydown.space.prevent="emit('toggle')"
-  >
+  <div class="plugin-card" :style="{ '--row-accent': row.accent }">
     <div class="plugin-card-row">
-      <span
-        class="resource-check"
-        :class="{ checked: selected }"
-        @click.stop="emit('toggle')"
-      >
-        <i v-if="selected" class="ri-check-line" aria-hidden="true"></i>
-      </span>
       <span class="resource-avatar">{{ row.icon }}</span>
 
       <div class="plugin-card-main">
@@ -49,44 +34,46 @@
         >
           <span>{{ row.statusText }}</span>
         </b>
-        <span
-          v-if="row.progressPercent !== null"
-          class="mini-progress"
-          role="progressbar"
-          :style="{ '--progress': row.progressPercent / 100 }"
-          :aria-valuenow="row.progressPercent"
-          aria-valuemin="0"
-          aria-valuemax="100"
-          :aria-label="`${row.name} installation progress`"
-        >
-          <span></span>
-        </span>
-        <span class="plugin-card-actions">
-          <button
-            v-if="homepageUrl"
-            type="button"
-            class="row-action-btn icon-only info"
-            data-title="Homepage"
-            aria-label="Open homepage"
-            @click.stop="emit('homepage')"
+        <div class="plugin-card-side-bottom">
+          <span
+            v-if="row.progressPercent !== null"
+            class="mini-progress"
+            role="progressbar"
+            :style="{ '--progress': row.progressPercent / 100 }"
+            :aria-valuenow="row.progressPercent"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            :aria-label="`${row.name} installation progress`"
           >
-            <i class="ri-external-link-line" aria-hidden="true"></i>
-          </button>
-          <button
-            v-for="action in actions"
-            :key="action.id"
-            type="button"
-            class="row-action-btn"
-            :class="[action.tone, { 'icon-only': action.iconOnly }]"
-            :data-title="action.iconOnly ? action.label : undefined"
-            :aria-label="action.iconOnly ? action.label : undefined"
-            :disabled="action.disabled"
-            @click.stop="emit('action', action.id)"
-          >
-            <i :class="action.icon" aria-hidden="true"></i>
-            <span v-if="!action.iconOnly">{{ action.label }}</span>
-          </button>
-        </span>
+            <span></span>
+          </span>
+          <span class="plugin-card-actions">
+            <button
+              v-if="homepageUrl"
+              type="button"
+              class="row-action-btn icon-only info"
+              data-title="Homepage"
+              aria-label="Open homepage"
+              @click.stop="emit('homepage')"
+            >
+              <i class="ri-external-link-line" aria-hidden="true"></i>
+            </button>
+            <button
+              v-for="action in actions"
+              :key="action.id"
+              type="button"
+              class="row-action-btn"
+              :class="[action.tone, { 'icon-only': action.iconOnly }]"
+              :data-title="action.iconOnly ? action.label : undefined"
+              :aria-label="action.iconOnly ? action.label : undefined"
+              :disabled="action.disabled"
+              @click.stop="emit('action', action.id)"
+            >
+              <i :class="action.icon" aria-hidden="true"></i>
+              <span v-if="!action.iconOnly">{{ action.label }}</span>
+            </button>
+          </span>
+        </div>
       </div>
     </div>
 
@@ -107,12 +94,10 @@ import type { PluginCardActionId } from '@/views/pluginResourceCards'
 
 const props = defineProps<{
   row: ResourceRow
-  selected: boolean
   importing: boolean
 }>()
 
 const emit = defineEmits<{
-  toggle: []
   action: [id: PluginCardActionId]
   homepage: []
 }>()
@@ -133,26 +118,11 @@ const homepageUrl = computed(() => homepageUrlFor(props.row))
   border-radius: 10px;
   color: var(--text-primary);
   background: color-mix(in srgb, var(--bg-primary) 85%, transparent);
-  cursor: default;
-  transition:
-    border-color 0.15s ease,
-    background 0.15s ease,
-    box-shadow 0.15s ease;
+  transition: border-color 0.15s ease;
 }
 
 .plugin-card:hover {
   border-color: color-mix(in srgb, var(--accent-color) 36%, var(--border-color));
-}
-
-.plugin-card:focus-visible {
-  outline: 2px solid var(--accent-color);
-  outline-offset: -2px;
-}
-
-.plugin-card.selected {
-  border-color: color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
-  background: color-mix(in srgb, var(--accent-color) 6%, var(--bg-primary));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 40%, transparent);
 }
 
 .plugin-card-row {
@@ -160,26 +130,6 @@ const homepageUrl = computed(() => homepageUrlFor(props.row))
   align-items: flex-start;
   gap: 12px;
   padding: 14px 16px;
-}
-
-.resource-check {
-  display: grid;
-  width: 18px;
-  height: 18px;
-  margin-top: 7px;
-  place-items: center;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  color: var(--accent-text);
-  background: var(--bg-primary);
-  cursor: pointer;
-  font-size: 12px;
-  flex: 0 0 auto;
-}
-
-.resource-check.checked {
-  border-color: var(--accent-color);
-  background: var(--accent-color);
 }
 
 .resource-avatar {
@@ -255,7 +205,7 @@ const homepageUrl = computed(() => homepageUrlFor(props.row))
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 10px;
-  margin-top: 7px;
+  margin-top: 11px;
 }
 
 .resource-flow-tags {
@@ -301,9 +251,18 @@ const homepageUrl = computed(() => homepageUrlFor(props.row))
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+  justify-content: space-between;
   gap: 8px;
   flex: 0 0 auto;
+  align-self: stretch;
   padding-top: 2px;
+}
+
+.plugin-card-side-bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
 }
 
 /* ---- Pills ---- */

@@ -48,7 +48,6 @@ function mountGrid(overrides: Record<string, unknown> = {}) {
     props: {
       rows: rows(),
       loading: false,
-      selectedIds: new Set<string>(),
       importingIds: new Set<string>(),
       ...overrides,
     },
@@ -56,13 +55,12 @@ function mountGrid(overrides: Record<string, unknown> = {}) {
 }
 
 describe('PluginResourceCardGrid', () => {
-  it('renders one card per row and marks the selected ones', () => {
-    const wrapper = mountGrid({ selectedIds: new Set(['tool:verilator']) })
+  it('renders one card per row', () => {
+    const wrapper = mountGrid()
 
-    const cards = wrapper.findAll('.plugin-card')
-    expect(cards).toHaveLength(2)
-    expect(cards[0].classes()).not.toContain('selected')
-    expect(cards[1].classes()).toContain('selected')
+    expect(wrapper.findAll('.plugin-card')).toHaveLength(2)
+    expect(gridSource).toContain('grid-template-columns: minmax(0, 1fr)')
+    expect(gridSource).not.toContain('auto-fill')
   })
 
   it('shows the loading state instead of the grid', () => {
@@ -80,11 +78,8 @@ describe('PluginResourceCardGrid', () => {
     expect(wrapper.emitted('clearFilters')).toHaveLength(1)
   })
 
-  it('re-raises card toggle and action events with row context', async () => {
+  it('re-raises card action events with row context', async () => {
     const wrapper = mountGrid()
-
-    await wrapper.findAll('.resource-check')[0].trigger('click')
-    expect(wrapper.emitted('toggle')).toEqual([['tool:yosys']])
 
     const install = wrapper
       .findAll('button')
@@ -95,10 +90,5 @@ describe('PluginResourceCardGrid', () => {
     const [row, actionId] = actions[0] as [unknown, string]
     expect(actionId).toBe('install')
     expect((row as { id: string }).id).toBe('tool:yosys')
-  })
-
-  it('lays out one card per row', () => {
-    expect(gridSource).toContain('grid-template-columns: minmax(0, 1fr)')
-    expect(gridSource).not.toContain('auto-fill')
   })
 })

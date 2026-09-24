@@ -11,9 +11,7 @@
           v-for="row in rows"
           :key="row.id"
           :row="row"
-          :selected="selectedIds.has(row.id)"
           :importing="importingIds.has(row.id)"
-          @toggle="emit('toggle', row.id)"
           @action="emit('action', row, $event)"
           @homepage="emit('homepage', row)"
         />
@@ -40,12 +38,10 @@ import type { PluginCardActionId } from '@/views/pluginResourceCards'
 defineProps<{
   rows: ResourceRow[]
   loading: boolean
-  selectedIds: Set<string>
   importingIds: Set<string>
 }>()
 
 const emit = defineEmits<{
-  toggle: [id: string]
   action: [row: ResourceRow, id: PluginCardActionId]
   homepage: [row: ResourceRow]
   clearFilters: []

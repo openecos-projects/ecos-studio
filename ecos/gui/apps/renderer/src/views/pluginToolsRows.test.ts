@@ -6,14 +6,11 @@ import {
   formatResourceSize,
   formatResourceSizeMb,
   formatResourceVersion,
-  managedInstallLocation,
   isEdaToolRow,
   primaryActionForRow,
   resourceToRow,
   removalActionForRow,
   rowActionForStatus,
-  selectedResourceMetaText,
-  runBatchDownload,
   createPrimaryActionTask,
   canImportLocalResource,
 } from './pluginToolsRows'
@@ -337,7 +334,6 @@ describe('pluginToolsRows', () => {
     expect(rowActionForStatus(row.resource)).toBe('replace')
     expect(primaryActionForRow(row)).toBe('replace')
     expect(removalActionForRow(row)).toBe('remove_reference')
-    expect(selectedResourceMetaText(row)).toBe('Replace with managed v2026-05-13')
 
     await createPrimaryActionTask(row, { installResource, updateResource })
 
@@ -401,100 +397,6 @@ describe('pluginToolsRows', () => {
     expect(row.statusText).toBe('Local')
   })
 
-  it('runs batch download for selected available PDKs and updateable tools', async () => {
-    const installResource = vi.fn(async () => undefined)
-    const updateResource = vi.fn(async () => undefined)
-
-    const rows = [
-      resourceToRow(
-        resource({ id: 'pdk:ics55', status: 'available', actions: ['install'] }),
-        undefined,
-      ),
-      resourceToRow(
-        resource({
-          id: 'tool:yosys',
-          type: 'tool',
-          name: 'yosys',
-          display_name: 'Yosys',
-          description: 'RTL synthesis',
-          category: 'synthesis',
-          status: 'update_available',
-          installed_version: '0.60',
-          available_versions: ['0.61'],
-          platform: 'linux-x86_64',
-          size: 123,
-          managed_root: '/home/user/.local/share/ecos-studio/tools',
-          source: 'registry',
-          actions: ['update', 'uninstall'],
-        }),
-        undefined,
-      ),
-      resourceToRow(
-        resource({
-          id: 'pdk:local55',
-          status: 'installed',
-          source: 'local',
-          path: '/tmp/pdks/local55',
-          actions: ['validate', 'remove_reference'],
-        }),
-        undefined,
-      ),
-    ]
-
-    await runBatchDownload(rows, {
-      installResource,
-      updateResource,
-    })
-
-    expect(installResource).toHaveBeenCalledTimes(1)
-    expect(installResource).toHaveBeenCalledWith('pdk:ics55')
-    expect(updateResource).toHaveBeenCalledTimes(1)
-    expect(updateResource).toHaveBeenCalledWith('tool:yosys')
-  })
-
-  it('skips selected dependency rows when a selected parent installs them', async () => {
-    const installResource = vi.fn(async () => undefined)
-    const updateResource = vi.fn(async () => undefined)
-    const parent = resourceToRow(
-      resource({
-        id: 'tool:ecc-fe',
-        type: 'tool',
-        name: 'ecc-fe',
-        display_name: 'ECC-FE Frontend Flow',
-        description: 'Frontend flow runtime CLI.',
-        category: 'frontend',
-        status: 'available',
-        actions: ['install'],
-        requires: ['tool:ecc-fe-soc-ysyx-am'],
-        missing_requires: ['tool:ecc-fe-soc-ysyx-am'],
-      }),
-      undefined,
-    )
-    const dependency = resourceToRow(
-      resource({
-        id: 'tool:ecc-fe-soc-ysyx-am',
-        type: 'tool',
-        name: 'ecc-fe-soc-ysyx-am',
-        display_name: 'ECC-FE YSYX AM SoC Harness',
-        description: 'Frontend SoC harness resource.',
-        category: 'frontend',
-        status: 'available',
-        actions: ['install'],
-      }),
-      undefined,
-    )
-
-    await runBatchDownload([parent, dependency], {
-      installResource,
-      updateResource,
-    })
-
-    expect(parent.flowTags).toContain('Frontend CLI')
-    expect(parent.dependencyLabel).toContain('ecc-fe-soc-ysyx-am')
-    expect(installResource).toHaveBeenCalledTimes(1)
-    expect(installResource).toHaveBeenCalledWith('tool:ecc-fe')
-  })
-
   it('allows local import for tool and PDK rows that are not currently mutating', () => {
     expect(
       canImportLocalResource(
@@ -548,37 +450,5 @@ describe('pluginToolsRows', () => {
         ),
       ),
     ).toBe(false)
-  })
-
-  it('derives managed install location from downloadable resource types', () => {
-    const installablePdk = resourceToRow(
-      resource({ id: 'pdk:ics55', status: 'available', actions: ['install'] }),
-      undefined,
-    )
-    const installableTool = resourceToRow(
-      resource({
-        id: 'tool:yosys',
-        type: 'tool',
-        name: 'yosys',
-        display_name: 'Yosys',
-        category: 'synthesis',
-        status: 'available',
-        available_versions: ['0.61'],
-        managed_root: '/home/user/.local/share/ecos-studio/tools',
-        actions: ['install'],
-      }),
-      undefined,
-    )
-
-    expect(managedInstallLocation([installablePdk])).toBe(
-      '/home/user/.local/share/ecos-studio/pdks/ics55/1.01',
-    )
-    expect(managedInstallLocation([installableTool])).toBe(
-      '/home/user/.local/share/ecos-studio/tools/yosys/0.61',
-    )
-    expect(managedInstallLocation([installableTool, installablePdk])).toBe(
-      '/home/user/.local/share/ecos-studio/tools/yosys/0.61, /home/user/.local/share/ecos-studio/pdks/ics55/1.01',
-    )
-    expect(managedInstallLocation([])).toBe('')
   })
 })

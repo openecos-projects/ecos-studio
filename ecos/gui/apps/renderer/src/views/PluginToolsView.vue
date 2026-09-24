@@ -57,23 +57,12 @@
           <PluginResourceCardGrid
             :rows="filteredRows"
             :loading="pluginStore.loading"
-            :selected-ids="selectedResourceIds"
             :importing-ids="importingResourceIds"
-            @toggle="toggleResource"
             @action="handleCardAction"
             @homepage="handleHomepage"
             @clear-filters="clearFilters"
           />
         </main>
-
-        <PluginSelectedPanel
-          :rows="selectedResources"
-          :total-size-text="totalSizeText"
-          :download-disabled="downloadableSelectedResources.length === 0"
-          @remove="removeSelected"
-          @download="downloadSelected"
-          @cancel="goHome"
-        />
       </div>
     </section>
   </div>
@@ -87,17 +76,13 @@ import PluginFrontendReadiness from '@/components/plugins/PluginFrontendReadines
 import PluginManagerSidebar from '@/components/plugins/PluginManagerSidebar.vue'
 import PluginManagerToolbar from '@/components/plugins/PluginManagerToolbar.vue'
 import PluginResourceCardGrid from '@/components/plugins/PluginResourceCardGrid.vue'
-import PluginSelectedPanel from '@/components/plugins/PluginSelectedPanel.vue'
 import { usePluginStore } from '@/stores/pluginStore'
 import { usePdkManager } from '@/composables/usePdkManager'
-import { usePluginSelection } from '@/composables/usePluginSelection'
 import { getDesktopApi } from '@/platform/desktop'
 import {
   compactResourceMessage,
-  primaryActionForRow,
   resourceToRow,
   removalActionForRow,
-  runBatchDownload,
   runPrimaryAction,
 } from './pluginToolsRows'
 import type { ResourceRow } from './pluginToolsRows'
@@ -126,12 +111,6 @@ const resourceRows = computed<ResourceRow[]>(() => {
   })
 })
 
-const {
-  selectedIds: selectedResourceIds,
-  toggle: toggleResource,
-  remove: removeSelected,
-} = usePluginSelection(resourceRows)
-
 const managerErrorText = computed(() => {
   return pluginStore.error
     ? compactResourceMessage(pluginStore.error, 'Resource manager error')
@@ -145,21 +124,6 @@ const filteredRows = computed(() =>
     query: searchQuery.value,
   }),
 )
-
-const selectedResources = computed(() => {
-  const selected = selectedResourceIds.value
-  return resourceRows.value.filter((row) => selected.has(row.id))
-})
-
-const downloadableSelectedResources = computed(() => {
-  return selectedResources.value.filter((row) => primaryActionForRow(row) !== null)
-})
-
-const totalSizeMb = computed(() => {
-  return downloadableSelectedResources.value.reduce((sum, row) => sum + row.sizeMb, 0)
-})
-
-const totalSizeText = computed(() => formatSize(totalSizeMb.value))
 
 const sidebarItems = computed(() => buildSidebarItems(resourceRows.value))
 const tabItems = computed(() => buildStatusTabs(resourceRows.value))
@@ -188,7 +152,7 @@ async function handleCardAction(
     case 'update':
     case 'replace':
     case 'retry':
-      await handleRowInstall(row)
+      await runPrimaryAction(row, pluginStore)
       return
     case 'cancel':
       await pluginStore.cancelResource(row.resource.id)
@@ -204,10 +168,6 @@ async function handleCardAction(
       await handleRowRemove(row)
       return
   }
-}
-
-async function handleRowInstall(row: ResourceRow): Promise<void> {
-  await runPrimaryAction(row, pluginStore)
 }
 
 async function handleLocalImport(row: ResourceRow): Promise<void> {
@@ -262,10 +222,6 @@ async function handleRowRemove(row: ResourceRow): Promise<void> {
   await pluginStore.uninstallResource(row.resource.id)
 }
 
-async function downloadSelected(): Promise<void> {
-  await runBatchDownload(downloadableSelectedResources.value, pluginStore)
-}
-
 async function handleHomepage(row: ResourceRow): Promise<void> {
   const url = homepageUrlFor(row)
   if (!url) return
@@ -274,12 +230,6 @@ async function handleHomepage(row: ResourceRow): Promise<void> {
   } catch (error) {
     console.error('Failed to open homepage:', error)
   }
-}
-
-function formatSize(sizeMb: number): string {
-  if (sizeMb <= 0) return '0 MB'
-  if (sizeMb >= 1024) return `${(sizeMb / 1024).toFixed(2)} GB`
-  return `${Math.round(sizeMb)} MB`
 }
 
 function goHome(): void {
@@ -394,9 +344,10 @@ async function openDocs(): Promise<void> {
 /* ---- Grid ---- */
 .manager-grid {
   display: grid;
-  grid-template-columns: minmax(170px, 200px) minmax(420px, 1fr) minmax(220px, 240px);
+  grid-template-columns: minmax(170px, 200px) minmax(0, 1fr);
   gap: 12px;
   min-height: 0;
+  margin-top: 14px;
   overflow: hidden;
   flex: 1 1 auto;
 }
