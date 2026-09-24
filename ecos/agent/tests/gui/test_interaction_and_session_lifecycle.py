@@ -70,6 +70,34 @@ def test_operation_choice_uses_interaction_request_and_dedicated_answer() -> Non
     )
 
 
+def test_reconnecting_session_does_not_repeat_welcome_messages() -> None:
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    events.clear()
+
+    provider.start_session(
+        {"sessionId": session_id, "mode": "home", "reconnect": True}
+    )
+
+    assert not any(
+        event["type"] == "message"
+        and event.get("text", "").startswith("ECOS Agent helps")
+        for event in events
+    )
+    interaction = next(event for event in events if event["type"] == "interaction")
+    request = interaction["interaction"]
+    assert request["kind"] == "choice"
+    provider.answer_interaction(
+        {
+            "sessionId": session_id,
+            "requestId": request["requestId"],
+            "kind": "choice",
+            "optionId": request["interaction"]["options"][0]["id"],
+        }
+    )
+
+
 def test_interaction_choice_accepts_a_typed_answer() -> None:
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(emit=events.append)

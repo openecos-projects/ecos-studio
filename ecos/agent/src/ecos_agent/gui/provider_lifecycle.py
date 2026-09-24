@@ -247,6 +247,13 @@ class ProviderLifecycleMixin(ProviderTurnMixin):
         # Directory alone is only a rerun default; GUI must pass mode explicitly.
         session.phase = "operation" if session.mode == "workspace" else "home_ready"
         self._emit_status(session, "idle")
+        if request.get("reconnect") is True:
+            self._emit_phase_choice(session)
+            return {
+                "sessionId": session_id,
+                "pendingInteraction": session.pending_interaction
+                and session.pending_interaction["request"],
+            }
         self._emit(
             session,
             "message",

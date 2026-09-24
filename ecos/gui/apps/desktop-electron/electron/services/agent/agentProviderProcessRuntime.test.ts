@@ -97,6 +97,7 @@ describe('AgentProviderProcessRuntime', () => {
       knownProjects: [{ name: 'work', path: '/work' }],
       projectRoot: '/work',
       providerId: 'codex',
+      reconnect: true,
     })
     const child = harness.children[0]
     const request = readProtocolRequest(child)
@@ -114,6 +115,7 @@ describe('AgentProviderProcessRuntime', () => {
         knownProjects: [{ name: 'work', path: '/work' }],
         projectRoot: '/work',
         providerId: 'codex',
+        reconnect: true,
       },
     })
 

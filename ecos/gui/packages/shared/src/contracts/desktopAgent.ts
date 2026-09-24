@@ -29,6 +29,8 @@ export interface DesktopAgentStartSessionRequest extends DesktopAgentProviderReq
   knownProjects?: DesktopAgentKnownProject[]
   mode?: DesktopAgentSessionMode
   projectRoot?: string
+  /** Rebind a restarted provider without replaying first-session UI messages. */
+  reconnect?: boolean
   sessionId?: string
   workspaceId?: string
   /** Electron-populated canonical context; renderer values are ignored. */
