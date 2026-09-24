@@ -9,6 +9,7 @@ const testState = vi.hoisted(() => ({
   dashboard: null as Record<string, unknown> | null,
   openReport: vi.fn(),
   chipViewerOpen: vi.fn(),
+  showToast: vi.fn(),
 }))
 
 vi.mock('@/composables/useStepDashboardData', () => ({
@@ -40,7 +41,10 @@ vi.mock('@/composables/useBackendWorkspaceQor', () => ({
   useBackendWorkspaceQor: () => ({ state: ref({ comparison: null }) }),
 }))
 vi.mock('@/composables/useWorkspace', () => ({
-  useWorkspace: () => ({ currentProject: ref({ path: '/project/ws-a' }) }),
+  useWorkspace: () => ({
+    currentProject: ref({ path: '/project/ws-a' }),
+    showToast: testState.showToast,
+  }),
 }))
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => ({ chipViewer: { open: testState.chipViewerOpen } }),
@@ -107,6 +111,8 @@ describe('StepDashboard committed Snapshot rendering', () => {
   beforeEach(() => {
     testState.openReport.mockReset()
     testState.chipViewerOpen.mockReset()
+    testState.chipViewerOpen.mockResolvedValue({})
+    testState.showToast.mockReset()
     testState.dashboard = {
       currentStep: ref('Place'),
       data: ref(snapshotStepDashboardData(detail())),
@@ -200,6 +206,64 @@ describe('StepDashboard committed Snapshot rendering', () => {
       mode: 'edit',
       projectPath: '/project/ws-a',
       step: 'preFloorplan',
+    })
+  })
+
+  it('warns when macro staging falls back to move-only mode', async () => {
+    const preFloorplanDetail = detail()
+    preFloorplanDetail.step = {
+      stepId: 'preFloorplan',
+      order: 0,
+      name: 'preFloorplan',
+      state: 'succeeded',
+    }
+    preFloorplanDetail.artifacts.push({
+      artifactId: 'geometry-prefloorplan',
+      availability: 'available',
+      kind: 'layout_geometry',
+      name: 'gcd_preFloorplan',
+      stepId: 'preFloorplan',
+    })
+    testState.dashboard = {
+      currentStep: ref('preFloorplan'),
+      data: ref(snapshotStepDashboardData(preFloorplanDetail)),
+      error: ref(null),
+      loadTimingCorner: vi.fn(),
+      loading: ref(false),
+      refresh: vi.fn(),
+      timingDetailErrors: ref({}),
+      timingDetailLoading: ref([]),
+    }
+    testState.chipViewerOpen.mockResolvedValue({
+      macroStaging: {
+        enabled: false,
+        warning: 'DEF parsing failed; move-only mode is active.',
+      },
+    })
+
+    const wrapper = mount(StepDashboard, {
+      global: {
+        stubs: {
+          Dialog: { template: '<div><slot /></div>' },
+          StatusPieChart: true,
+          StepConfigPanel: true,
+          TimingAnalysisDialog: true,
+          TimingCornerTable: true,
+          TimingKpis: true,
+          StepDataSummaryDialog: true,
+          StepSnapshotPanel: true,
+          CongestionPanel: true,
+        },
+      },
+    })
+
+    await wrapper.get('[aria-label="Place Macros"]').trigger('click')
+
+    expect(testState.showToast).toHaveBeenCalledWith({
+      severity: 'warn',
+      summary: 'Macro placement staging unavailable',
+      detail: 'DEF parsing failed; move-only mode is active.',
+      life: 8000,
     })
   })
 

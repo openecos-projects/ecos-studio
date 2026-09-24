@@ -23,6 +23,7 @@ import {
   type DesignRuntimeWorkspaceHandleRequest,
   type DesignRuntimeWorkspaceInfoRequest,
   type DesignRuntimeWorkspaceOpenRequest,
+  type DesignRuntimeWorkspaceRefreshConfigRequest,
   type DesignRuntimeWorkspaceStepOutputsRequest,
   type DesignTool,
   type DesktopDirectoryDialogOptions,
@@ -433,7 +434,6 @@ export interface DesktopBridgeServices {
   }
   workspaceResourceService: {
     getIndex(): Promise<WorkspaceResourceIndex>
-    readHome(): Promise<Record<string, unknown> | null>
     readFlow(): Promise<Record<string, unknown> | null>
     readParameters(): Promise<Record<string, unknown> | null>
     resolveStepInfo(request: WorkspaceStepInfoRequest): Promise<WorkspaceStepInfoResult>
@@ -505,7 +505,6 @@ export interface DesktopBridgeServices {
       payload: Record<string, unknown> & { step: string },
     ): Promise<unknown>
     validateConfig(payload: Record<string, unknown>): Promise<Record<string, unknown>>
-    workspaceHome(workspaceHandle: string): Promise<unknown>
     workspaceInfo(workspaceHandle: string, step: string, id: string): Promise<unknown>
   }
   eccRuntimeService: {
@@ -569,7 +568,6 @@ export interface DesktopBridgeServices {
     ): Promise<EccWorkspaceStepOutputsResult>
     updateWorkspace(request: EccWorkspaceUpdateRequest): Promise<unknown>
     validateWorkspaceSpec(request: EccWorkspaceSpecValidationRequest): Promise<unknown>
-    workspaceHome(request: EccWorkspaceHandleRequest): Promise<unknown>
     workspaceInfo(request: EccWorkspaceInfoRequest): Promise<unknown>
     workspaceSnapshot(request: EccWorkspaceHandleRequest): Promise<unknown>
     workspaceSession(workspaceHandle: string): Promise<EccWorkspaceOpenResult>
@@ -2562,10 +2560,6 @@ export function registerIpc(
     return await services.backendWorkspaceService.refreshOverview()
   })
 
-  handle(desktopApiIpcChannels.workspaceResourcesReadHome, async () => {
-    return await services.workspaceResourceService.readHome()
-  })
-
   handle(desktopApiIpcChannels.workspaceResourcesReadFlow, async () => {
     return await services.workspaceResourceService.readFlow()
   })
@@ -2973,17 +2967,6 @@ export function registerIpc(
     return await trackedClosePromise
   })
 
-  handle(desktopApiIpcChannels.designRuntimeWorkspaceHome, async (_event, request) => {
-    const runtimeRequest = request as DesignRuntimeWorkspaceHandleRequest
-    return requireDesignTool(runtimeRequest.designTool) === 'frontend'
-      ? await services.frontendRpcRuntimeService.workspaceHome(
-          runtimeRequest.workspaceHandle,
-        )
-      : await services.eccRuntimeService.workspaceHome({
-          workspaceHandle: runtimeRequest.workspaceHandle,
-        })
-  })
-
   handle(desktopApiIpcChannels.designRuntimeWorkspaceInfo, async (_event, request) => {
     const runtimeRequest = request as DesignRuntimeWorkspaceInfoRequest
     return requireDesignTool(runtimeRequest.designTool) === 'frontend'
@@ -3050,7 +3033,7 @@ export function registerIpc(
   handle(
     desktopApiIpcChannels.designRuntimeWorkspaceRefreshConfig,
     async (_event, request) => {
-      const runtimeRequest = request as DesignRuntimeWorkspaceHandleRequest
+      const runtimeRequest = request as DesignRuntimeWorkspaceRefreshConfigRequest
       return requireDesignTool(runtimeRequest.designTool) === 'frontend'
         ? await services.frontendRpcRuntimeService.refreshConfig(
             runtimeRequest.workspaceHandle,
@@ -3358,7 +3341,19 @@ export function registerIpc(
   })
 
   handle(desktopApiIpcChannels.systemOpenExternal, async (_event, url) => {
-    await shell.openExternal(url as string)
+    if (typeof url !== 'string') {
+      throw new Error('openExternal requires a URL string')
+    }
+    let parsed: URL
+    try {
+      parsed = new URL(url)
+    } catch {
+      throw new Error('openExternal requires an absolute URL')
+    }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new Error(`Refusing to open external URL with scheme '${parsed.protocol}'`)
+    }
+    await shell.openExternal(url)
   })
 }
 

@@ -331,17 +331,29 @@ describe('FlowLogCodeViewer Monaco behavior', () => {
     expect(editor.scrollTop).toBe(80)
   })
 
+  it('opens a finished log at the tail on first view', async () => {
+    await mountViewer({ content: 'first line\nlast line' })
+    editor.scrollHeight = 300
+    expect(flushNextAnimationFrame()).toBe(true)
+
+    expect(editor.setScrollTop).toHaveBeenLastCalledWith(300)
+    expect(editor.scrollTop).toBe(300)
+    expect(editor.setScrollPosition).not.toHaveBeenCalled()
+  })
+
   it('keeps a model and view state for each flow channel', async () => {
     const mounted = await mountViewer({
       channelKey: 'lint\u001fverilator',
       content: 'lint',
     })
+    flushNextAnimationFrame()
     editor.scrollTop = 47
 
     await mounted.setProps({
       channelKey: 'sim\u001fverilator',
       content: 'sim',
     })
+    flushNextAnimationFrame()
     flushNextAnimationFrame()
     editor.scrollTop = 82
 
@@ -362,6 +374,7 @@ describe('FlowLogCodeViewer Monaco behavior', () => {
       content: `${escape}[31mERROR${escape}[0m`,
     })
     expect(models[0]?.value).toBe('ERROR')
+    flushNextAnimationFrame()
 
     await mounted.setProps({ content: 'replacement' })
     flushNextAnimationFrame()
@@ -393,6 +406,7 @@ describe('FlowLogCodeViewer Monaco behavior', () => {
 
   it('applies theme changes and disposes the editor and every model', async () => {
     const mounted = await mountViewer({ channelKey: 'lint', content: 'lint' })
+    flushNextAnimationFrame()
     await mounted.setProps({ channelKey: 'sim', content: 'sim' })
     flushNextAnimationFrame()
 

@@ -113,7 +113,7 @@ import Dialog from 'primevue/dialog'
 import FlowLogCodeViewer from '@/components/FlowLogCodeViewer.vue'
 import { copyFlowLogText } from '@/components/flowLogCopy'
 import { matchingFlowLogSegments, selectedFlowLogSegment } from './flowLogSelection'
-import { formatFlowLogTitle } from './flowLogTitle'
+import { formatFlowLogTitle, formatLiveRuntime } from './flowLogTitle'
 import type { FlowStatusNode } from './flowStatus'
 import type { FlowLogSegment } from '@/composables/useBackendFlowLogs'
 
@@ -145,9 +145,30 @@ const selectedSegment = computed(
 const selectedContent = computed(() =>
   selectedSegment.value ? (props.contentByKey[keyFor(selectedSegment.value)] ?? '') : '',
 )
+const liveClockTick = ref(0)
+let liveClockTimer: ReturnType<typeof setInterval> | null = null
+const titleSegment = computed(() => {
+  const segment = selectedSegment.value
+  if (!segment?.live || typeof segment.startedAtMs !== 'number') return segment
+  void liveClockTick.value
+  return { ...segment, runtime: formatLiveRuntime(Date.now() - segment.startedAtMs) }
+})
 const logTitle = computed(() =>
-  formatFlowLogTitle(selectedSegment.value, props.selectedNode),
+  formatFlowLogTitle(titleSegment.value, props.selectedNode),
 )
+
+function startLiveClock(): void {
+  if (liveClockTimer) return
+  liveClockTimer = setInterval(() => {
+    liveClockTick.value += 1
+  }, 1000)
+}
+
+function stopLiveClock(): void {
+  if (!liveClockTimer) return
+  clearInterval(liveClockTimer)
+  liveClockTimer = null
+}
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
 
 function keyFor(segment: FlowLogSegment): string {
@@ -232,8 +253,22 @@ watch(
   { immediate: true },
 )
 
+watch(
+  () =>
+    Boolean(
+      selectedSegment.value?.live &&
+      typeof selectedSegment.value.startedAtMs === 'number',
+    ),
+  (timing) => {
+    if (timing) startLiveClock()
+    else stopLiveClock()
+  },
+  { immediate: true },
+)
+
 onBeforeUnmount(() => {
   if (copiedTimer) clearTimeout(copiedTimer)
+  stopLiveClock()
 })
 </script>
 

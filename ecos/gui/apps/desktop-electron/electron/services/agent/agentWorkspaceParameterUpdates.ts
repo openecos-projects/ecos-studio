@@ -40,6 +40,10 @@ const numericString = (
   transform: (value) => String(value),
 })
 
+const LEGACY_KNOB_ALIASES: Record<string, string> = {
+  'floorplan.utilitization': 'floorplan.utilization',
+}
+
 // Built-in fallback table, used when the ECC parameter catalog carries no
 // knob_id fields (old ECC). Keys are Agent knob ids; `parameter` is the ECC
 // spec key the value is written to. 'floorplan.utilitization' is the legacy
@@ -178,6 +182,12 @@ export function resolveAgentWorkspaceKnobs(): Record<string, Knob> {
     const knob = knobFromCatalogEntry(entry.knob_id, entry)
     if (knob) knobs[entry.knob_id] = knob
   }
+  for (const [legacyId, canonicalId] of Object.entries(LEGACY_KNOB_ALIASES)) {
+    const canonical = knobs[canonicalId]
+    const legacy = knobs[legacyId]
+    if (canonical && !legacy) knobs[legacyId] = canonical
+    if (legacy && !canonical) knobs[canonicalId] = legacy
+  }
   return knobs
 }
 
@@ -233,6 +243,8 @@ export function readAgentWorkspaceParameterValues(
   const result: Record<string, ParameterValue> = {}
   const knobs = resolveAgentWorkspaceKnobs()
   for (const [knobId, knob] of Object.entries(knobs)) {
+    const canonicalId = LEGACY_KNOB_ALIASES[knobId]
+    if (canonicalId && knobs[canonicalId]) continue
     const value = stepValues[knob.parameter] ?? parameters[knob.parameter]
     let normalized = value
     if (
@@ -272,11 +284,23 @@ export function deriveAgentWorkspaceParameterUpdates(
   step_configurations: []
 } | null {
   const workspaceParameters: Record<string, unknown> = {}
+  const valuesByParameter = new Map<string, ParameterValue>()
   const knobs = resolveAgentWorkspaceKnobs()
   for (const item of patch) {
     const knob = knobs[item.knob_id]
     if (!knob || !validValue(item.value, knob)) return null
     const value = knob.transform?.(item.value) ?? item.value
+    const previous = valuesByParameter.get(knob.parameter)
+    const conflicting =
+      previous !== undefined &&
+      (Array.isArray(previous) || Array.isArray(value)
+        ? !Array.isArray(previous) ||
+          !Array.isArray(value) ||
+          previous.length !== value.length ||
+          previous.some((item, index) => !Object.is(item, value[index]))
+        : !Object.is(previous, value))
+    if (conflicting) return null
+    valuesByParameter.set(knob.parameter, value)
     workspaceParameters[knob.parameter] = Array.isArray(value) ? [...value] : value
   }
   return {

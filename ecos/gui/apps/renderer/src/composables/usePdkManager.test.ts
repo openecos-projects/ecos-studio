@@ -202,10 +202,8 @@ const desktopBridge = {
       home: {
         checklistJson: { exists: false, kind: 'checklist', path: '' },
         flowJson: { exists: false, kind: 'flow', path: '' },
-        homeJson: { exists: false, kind: 'home', path: '' },
         parametersJson: { exists: false, kind: 'parameters', path: '' },
       },
-      homeData: null,
       messages: [],
       parameters: null,
       pdk: '',
@@ -213,7 +211,6 @@ const desktopBridge = {
       status: 'missing',
       topModule: '',
     }),
-    readHome: async () => null,
     readFlow: async () => null,
     readParameters: async () => null,
     resolveStepInfo: async (request) => ({

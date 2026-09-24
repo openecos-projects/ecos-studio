@@ -268,7 +268,7 @@ watch(
     [
       currentProject.value?.path,
       resourceVersions.value.all,
-      resourceVersions.value.home,
+      resourceVersions.value.parameters,
     ] as const,
   () => void loadTech(),
 )

@@ -30,6 +30,8 @@ function codeFromJsonRpcError(error: EccJsonRpcError): string {
       return 'workspace_session_not_found'
     case -32020:
       return 'command_failed'
+    case -32021:
+      return 'derived_configs_modified'
     default:
       return `json_rpc_${error.code}`
   }

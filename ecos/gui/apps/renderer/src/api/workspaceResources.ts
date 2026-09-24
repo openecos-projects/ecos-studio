@@ -10,10 +10,6 @@ export function getWorkspaceResourceIndexApi(): Promise<WorkspaceResourceIndex> 
   return getDesktopApi().workspaceResources.getIndex()
 }
 
-export function readWorkspaceHomeResourceApi(): Promise<Record<string, unknown> | null> {
-  return getDesktopApi().workspaceResources.readHome()
-}
-
 export function readWorkspaceFlowResourceApi(): Promise<Record<string, unknown> | null> {
   return getDesktopApi().workspaceResources.readFlow()
 }

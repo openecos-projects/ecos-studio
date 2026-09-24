@@ -23,122 +23,28 @@
       <CliInstallerCard />
 
       <div class="manager-grid">
-        <aside class="manager-sidebar" aria-label="Resource categories">
-          <nav class="resource-nav">
-            <button
-              v-for="item in sidebarItems"
-              :key="item.id"
-              type="button"
-              class="resource-nav-item"
-              :class="{ active: categoryFilter === item.id }"
-              @click="categoryFilter = item.id"
-            >
-              <i :class="item.icon" aria-hidden="true"></i>
-              <span>{{ item.label }}</span>
-              <b>{{ item.count }}</b>
-            </button>
-          </nav>
+        <PluginManagerSidebar
+          :items="sidebarItems"
+          :active="categoryFilter"
+          @select="categoryFilter = $event"
+          @docs="openDocs"
+        />
 
-          <div class="manager-help">
-            <div class="help-icon">
-              <i class="ri-question-line" aria-hidden="true"></i>
-            </div>
-            <div>
-              <strong>Need help?</strong>
-              <p>Learn how to add and manage resources.</p>
-            </div>
-            <button type="button" @click="openDocs">
-              View Documentation
-              <i class="ri-external-link-line" aria-hidden="true"></i>
-            </button>
-          </div>
-        </aside>
+        <main class="manager-content-panel">
+          <PluginManagerToolbar
+            v-model:search="searchQuery"
+            :tabs="tabItems"
+            :active-tab="statusFilter"
+            :result-count="filteredRows.length"
+            :refreshing="pluginStore.refreshing"
+            @select-tab="statusFilter = $event"
+            @refresh="pluginStore.refresh()"
+          />
 
-        <main class="manager-table-panel">
-          <div class="manager-toolbar">
-            <label class="resource-search">
-              <i class="ri-search-line" aria-hidden="true"></i>
-              <input
-                :value="searchInput"
-                type="text"
-                placeholder="Search"
-                aria-label="Search resources"
-                @input="searchInput = ($event.target as HTMLInputElement).value"
-              />
-            </label>
-
-            <div
-              class="resource-tabs"
-              role="tablist"
-              aria-label="Resource status filters"
-            >
-              <button
-                v-for="tab in tabItems"
-                :key="tab.id"
-                type="button"
-                :class="{ active: statusFilter === tab.id }"
-                @click="statusFilter = tab.id"
-              >
-                <i :class="tab.icon" aria-hidden="true"></i>
-                {{ tab.label }}
-                <span v-if="tab.badge">{{ tab.badge }}</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="manager-table-meta">
-            <strong>{{ filteredRows.length }} Resources</strong>
-            <div class="manager-table-actions">
-              <button
-                type="button"
-                :disabled="pluginStore.refreshing"
-                @click="pluginStore.refresh()"
-              >
-                <i
-                  :class="
-                    pluginStore.refreshing ? 'ri-loader-4-line spin' : 'ri-refresh-line'
-                  "
-                  aria-hidden="true"
-                ></i>
-                Refresh
-              </button>
-            </div>
-          </div>
-
-          <section
+          <PluginFrontendReadiness
             v-if="categoryFilter === 'frontend'"
-            class="frontend-flow-strip"
-            aria-label="Frontend flow tool readiness"
-          >
-            <div class="frontend-flow-summary">
-              <strong>Frontend Flow</strong>
-              <span
-                >{{ frontendInstalledCount }}/{{
-                  frontendToolRows.length
-                }}
-                installed</span
-              >
-              <em v-if="frontendAvailableCount">
-                {{ frontendAvailableCount }} ready to install
-              </em>
-            </div>
-            <div
-              class="frontend-flow-steps"
-              role="list"
-              aria-label="Frontend tool readiness by workflow stage"
-            >
-              <div
-                v-for="item in frontendFlowItems"
-                :key="item.label"
-                class="frontend-flow-step"
-                :class="item.status"
-                role="listitem"
-              >
-                <span>{{ item.label }}</span>
-                <b>{{ item.installed }}/{{ item.total }}</b>
-              </div>
-            </div>
-          </section>
+            :summary="frontendSummary"
+          />
 
           <div
             v-if="managerErrorText"
@@ -148,342 +54,55 @@
             {{ managerErrorText }}
           </div>
 
-          <div class="resource-table-scroll">
-            <div class="resource-table">
-              <div class="resource-table-head">
-                <span></span>
-                <span>Name</span>
-                <span>Version</span>
-                <span>Size</span>
-                <span>Status</span>
-                <span></span>
-              </div>
-
-              <div v-if="pluginStore.loading" class="resource-loading">
-                <i class="ri-loader-4-line spin" aria-hidden="true"></i>
-                Loading resources...
-              </div>
-
-              <template v-else>
-                <div
-                  v-for="row in filteredRows"
-                  :key="row.id"
-                  class="resource-row"
-                  :class="{ selected: isSelected(row.id) }"
-                  :style="{ '--row-accent': row.accent }"
-                  role="button"
-                  tabindex="0"
-                  @keydown.enter.prevent="toggleResource(row.id)"
-                  @keydown.space.prevent="toggleResource(row.id)"
-                >
-                  <span
-                    class="resource-check"
-                    :class="{ checked: isSelected(row.id) }"
-                    @click.stop="toggleResource(row.id)"
-                  >
-                    <i
-                      v-if="isSelected(row.id)"
-                      class="ri-check-line"
-                      aria-hidden="true"
-                    ></i>
-                  </span>
-
-                  <span class="resource-name-cell">
-                    <span class="resource-avatar">{{ row.icon }}</span>
-                    <span class="resource-copy">
-                      <strong>{{ row.name }}</strong>
-                      <small :title="row.descriptionTitle || undefined">{{
-                        row.description
-                      }}</small>
-                      <span v-if="row.flowTags.length" class="resource-flow-tags">
-                        <b v-for="tag in row.flowTags.slice(0, 4)" :key="tag">{{
-                          tag
-                        }}</b>
-                      </span>
-                      <span v-if="row.dependencyLabel" class="resource-dependency">
-                        <i class="ri-node-tree" aria-hidden="true"></i>
-                        <span>{{ row.dependencyLabel }}</span>
-                      </span>
-                    </span>
-                  </span>
-
-                  <span class="resource-muted">{{ row.version }}</span>
-                  <span class="resource-muted">{{ row.sizeLabel }}</span>
-                  <span class="resource-status-cell">
-                    <b
-                      class="status-pill"
-                      :class="row.statusKind"
-                      :title="row.statusTitle || undefined"
-                    >
-                      <span>{{ row.statusText }}</span>
-                    </b>
-                    <span
-                      v-if="row.progressPercent !== null"
-                      class="mini-progress"
-                      role="progressbar"
-                      :style="{ '--progress': row.progressPercent / 100 }"
-                      :aria-valuenow="row.progressPercent"
-                      aria-valuemin="0"
-                      aria-valuemax="100"
-                      :aria-label="`${row.name} installation progress`"
-                    >
-                      <span></span>
-                    </span>
-                  </span>
-
-                  <span class="row-actions">
-                    <template
-                      v-if="
-                        rowActionForStatus(row.resource) !== 'none' ||
-                        removalActionForRow(row) !== null ||
-                        canImportLocalResource(row) ||
-                        (row.statusKind !== 'installing' &&
-                          row.actions.includes('validate'))
-                      "
-                    >
-                      <button
-                        v-if="canImportLocalResource(row)"
-                        type="button"
-                        class="row-action-btn icon-only info"
-                        data-title="Import Local"
-                        :disabled="importingResourceIds.has(row.id)"
-                        @click.stop="handleLocalImport(row)"
-                      >
-                        <i
-                          :class="
-                            importingResourceIds.has(row.id)
-                              ? 'ri-loader-4-line spin'
-                              : 'ri-folder-add-line'
-                          "
-                          aria-hidden="true"
-                        ></i>
-                      </button>
-                      <button
-                        v-if="
-                          rowActionForStatus(row.resource) === 'install' &&
-                          row.statusKind !== 'error'
-                        "
-                        type="button"
-                        class="row-action-btn icon-only primary"
-                        data-title="Install"
-                        @click.stop="handleRowInstall(row)"
-                      >
-                        <i class="ri-download-line" aria-hidden="true"></i>
-                      </button>
-                      <button
-                        v-else-if="
-                          rowActionForStatus(row.resource) === 'update' &&
-                          row.statusKind !== 'error'
-                        "
-                        type="button"
-                        class="row-action-btn icon-only info"
-                        data-title="Update"
-                        @click.stop="handleRowInstall(row)"
-                      >
-                        <i class="ri-refresh-line" aria-hidden="true"></i>
-                      </button>
-                      <button
-                        v-else-if="rowActionForStatus(row.resource) === 'replace'"
-                        type="button"
-                        class="row-action-btn icon-only info"
-                        data-title="Replace"
-                        @click.stop="handleRowInstall(row)"
-                      >
-                        <i class="ri-loop-left-line" aria-hidden="true"></i>
-                      </button>
-                      <button
-                        v-else-if="rowActionForStatus(row.resource) === 'cancel'"
-                        type="button"
-                        class="row-action-btn icon-only danger"
-                        data-title="Cancel"
-                        @click.stop="handleRowCancel(row)"
-                      >
-                        <i class="ri-close-line" aria-hidden="true"></i>
-                      </button>
-                      <button
-                        v-else-if="row.statusKind === 'error'"
-                        type="button"
-                        class="row-action-btn icon-only danger"
-                        data-title="Retry"
-                        @click.stop="handleRowInstall(row)"
-                      >
-                        <i class="ri-restart-line" aria-hidden="true"></i>
-                      </button>
-                      <button
-                        v-else-if="
-                          row.statusKind !== 'installing' &&
-                          row.actions.includes('validate')
-                        "
-                        type="button"
-                        class="row-action-btn icon-only info"
-                        data-title="Validate"
-                        @click.stop="handlePdkValidate(row)"
-                      >
-                        <i class="ri-shield-check-line" aria-hidden="true"></i>
-                      </button>
-                      <button
-                        v-if="removalActionForRow(row) !== null"
-                        type="button"
-                        class="row-action-btn icon-only danger-outlined"
-                        :data-title="
-                          removalActionForRow(row) === 'remove_reference'
-                            ? 'Remove'
-                            : 'Uninstall'
-                        "
-                        @click.stop="handleRowRemove(row)"
-                      >
-                        <i
-                          :class="
-                            removalActionForRow(row) === 'remove_reference'
-                              ? 'ri-link-unlink'
-                              : 'ri-delete-bin-line'
-                          "
-                          aria-hidden="true"
-                        ></i>
-                      </button>
-                    </template>
-                  </span>
-                </div>
-              </template>
-
-              <div
-                v-if="!pluginStore.loading && filteredRows.length === 0"
-                class="resource-empty"
-              >
-                <i class="ri-search-2-line" aria-hidden="true"></i>
-                <strong>No resources found</strong>
-                <p>Try adjusting your search or filters.</p>
-                <button type="button" class="clear-filters-btn" @click="clearFilters">
-                  <i class="ri-close-circle-line" aria-hidden="true"></i>
-                  Clear all filters
-                </button>
-              </div>
-            </div>
-          </div>
+          <PluginResourceCardGrid
+            :rows="filteredRows"
+            :loading="pluginStore.loading"
+            :importing-ids="importingResourceIds"
+            @action="handleCardAction"
+            @homepage="handleHomepage"
+            @clear-filters="clearFilters"
+          />
         </main>
-
-        <aside class="selected-panel" aria-label="Selected resources">
-          <h2>
-            Selected Resources <span>({{ selectedResources.length }})</span>
-          </h2>
-
-          <div class="selected-list">
-            <div v-if="selectedResources.length === 0" class="selected-empty">
-              <i class="ri-checkbox-multiple-line" aria-hidden="true"></i>
-              <span>No resources selected</span>
-              <small
-                >Click rows in the table to select resources for batch operations.</small
-              >
-            </div>
-
-            <div
-              v-for="row in selectedResources"
-              :key="row.id"
-              class="selected-item"
-              :style="{ '--row-accent': row.accent }"
-            >
-              <span class="resource-avatar compact">{{ row.icon }}</span>
-              <span class="selected-item-body">
-                <strong>{{ row.name }}</strong>
-                <small class="selected-item-meta" :title="resolveInstallPath(row)">
-                  <span>{{ selectedResourceMetaText(row) }}</span>
-                </small>
-                <span v-if="row.flowTags.length" class="selected-flow-tags">
-                  {{ row.flowTags.slice(0, 3).join(' / ') }}
-                </span>
-                <span
-                  v-if="row.missingRequires.length"
-                  class="selected-flow-tags dependency"
-                >
-                  +{{ row.missingRequires.length }} required
-                </span>
-              </span>
-              <em>{{ row.sizeLabel }}</em>
-              <button
-                type="button"
-                aria-label="Remove selected resource"
-                @click.stop="removeSelected(row.id)"
-              >
-                <i class="ri-close-line" aria-hidden="true"></i>
-              </button>
-            </div>
-          </div>
-
-          <div class="total-size">
-            <span>Estimated Total Size</span>
-            <strong>{{ totalSizeText }}</strong>
-          </div>
-
-          <p class="manager-note">
-            <i class="ri-information-line" aria-hidden="true"></i>
-            Updates apply to managed installs. Replace switches a local tool to the
-            registry-managed version without deleting the original local directory.
-          </p>
-
-          <div class="selected-actions">
-            <button
-              type="button"
-              class="download-button"
-              :disabled="downloadableSelectedResources.length === 0"
-              @click="downloadSelected"
-            >
-              <i class="ri-download-line" aria-hidden="true"></i>
-              <span>
-                Download
-                <small>{{ totalSizeText }}</small>
-              </span>
-            </button>
-            <button type="button" class="cancel-button" @click="goHome">Cancel</button>
-          </div>
-        </aside>
       </div>
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import CliInstallerCard from '@/components/CliInstallerCard.vue'
+import PluginFrontendReadiness from '@/components/plugins/PluginFrontendReadiness.vue'
+import PluginManagerSidebar from '@/components/plugins/PluginManagerSidebar.vue'
+import PluginManagerToolbar from '@/components/plugins/PluginManagerToolbar.vue'
+import PluginResourceCardGrid from '@/components/plugins/PluginResourceCardGrid.vue'
 import { usePluginStore } from '@/stores/pluginStore'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { getDesktopApi } from '@/platform/desktop'
 import {
-  canImportLocalResource,
   compactResourceMessage,
-  isEdaToolRow,
-  primaryActionForRow,
   resourceToRow,
   removalActionForRow,
-  resolveRowInstallPath,
-  rowActionForStatus,
-  selectedResourceMetaText,
-  runBatchDownload,
   runPrimaryAction,
 } from './pluginToolsRows'
 import type { ResourceRow } from './pluginToolsRows'
-
-type CategoryFilter = 'all' | 'frontend' | 'tools' | 'pdks' | 'mpc' | 'installed'
-type StatusFilter = 'all' | 'available' | 'installed' | 'updates'
+import { homepageUrlFor } from './pluginResourceCards'
+import type { PluginCardActionId } from './pluginResourceCards'
+import {
+  buildSidebarItems,
+  buildStatusTabs,
+  filterResourceRows,
+  frontendReadiness,
+} from './pluginManagerFilters'
+import type { CategoryFilter, StatusFilter } from './pluginManagerFilters'
 
 const router = useRouter()
 const pluginStore = usePluginStore()
 const { importPdk } = usePdkManager()
 
 const searchQuery = ref('')
-const searchInput = ref('')
-let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
-
-watch(searchInput, (val) => {
-  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
-  searchDebounceTimer = setTimeout(() => {
-    searchQuery.value = val
-  }, 200)
-})
-
 const categoryFilter = ref<CategoryFilter>('all')
 const statusFilter = ref<StatusFilter>('all')
-const selectedResourceIds = ref<Set<string>>(new Set())
 const importingResourceIds = ref<Set<string>>(new Set())
 
 const resourceRows = computed<ResourceRow[]>(() => {
@@ -498,144 +117,17 @@ const managerErrorText = computed(() => {
     : null
 })
 
-const filteredRows = computed(() => {
-  const q = searchQuery.value.trim().toLowerCase()
-
-  return resourceRows.value.filter((row) => {
-    if (categoryFilter.value === 'frontend' && !row.isFrontendTool) return false
-    if (categoryFilter.value === 'tools' && !isEdaToolRow(row)) return false
-    if (categoryFilter.value === 'pdks' && row.type !== 'pdk') return false
-    if (categoryFilter.value === 'mpc' && row.type !== 'mpc') return false
-    if (categoryFilter.value === 'installed' && !isInstalledLike(row)) return false
-
-    if (statusFilter.value === 'available' && row.statusKind !== 'available') return false
-    if (statusFilter.value === 'installed' && !isInstalledLike(row)) return false
-    if (statusFilter.value === 'updates' && row.statusKind !== 'update') return false
-
-    if (!q) return true
-    return `${row.name} ${row.description} ${row.version} ${row.requires.join(' ')}`
-      .toLowerCase()
-      .includes(q)
-  })
-})
-
-const selectedResources = computed(() => {
-  const selected = selectedResourceIds.value
-  return resourceRows.value.filter((row) => selected.has(row.id))
-})
-
-const downloadableSelectedResources = computed(() => {
-  return selectedResources.value.filter((row) => primaryActionForRow(row) !== null)
-})
-
-const totalSizeMb = computed(() => {
-  return downloadableSelectedResources.value.reduce((sum, row) => sum + row.sizeMb, 0)
-})
-
-const totalSizeText = computed(() => formatSize(totalSizeMb.value))
-
-const updatesCount = computed(
-  () => resourceRows.value.filter((row) => row.statusKind === 'update').length,
+const filteredRows = computed(() =>
+  filterResourceRows(resourceRows.value, {
+    category: categoryFilter.value,
+    status: statusFilter.value,
+    query: searchQuery.value,
+  }),
 )
-const installedCount = computed(() => resourceRows.value.filter(isInstalledLike).length)
-const frontendToolRows = computed(() =>
-  resourceRows.value.filter((row) => row.isFrontendTool),
-)
-const edaToolRows = computed(() => resourceRows.value.filter(isEdaToolRow))
-const frontendInstalledCount = computed(
-  () => frontendToolRows.value.filter(isInstalledLike).length,
-)
-const frontendAvailableCount = computed(
-  () => frontendToolRows.value.filter((row) => row.statusKind === 'available').length,
-)
-const frontendFlowItems = computed(() => [
-  frontendFlowItem('Review', ['Yosys']),
-  frontendFlowItem('Elab', ['Elab']),
-  frontendFlowItem('Lint', ['Lint']),
-  frontendFlowItem('Sim', ['Sim']),
-  frontendFlowItem('Wave', ['Wave']),
-])
 
-const sidebarItems = computed(() => [
-  {
-    id: 'all' as const,
-    label: 'All Resources',
-    icon: 'ri-apps-2-line',
-    count: resourceRows.value.length,
-  },
-  {
-    id: 'frontend' as const,
-    label: 'Frontend Flow',
-    icon: 'ri-flow-chart',
-    count: frontendToolRows.value.length,
-  },
-  {
-    id: 'tools' as const,
-    label: 'EDA Tools',
-    icon: 'ri-tools-line',
-    count: edaToolRows.value.length,
-  },
-  {
-    id: 'pdks' as const,
-    label: 'PDKs',
-    icon: 'ri-cpu-line',
-    count: resourceRows.value.filter((row) => row.type === 'pdk').length,
-  },
-  {
-    id: 'mpc' as const,
-    label: 'MPC',
-    icon: 'ri-layout-grid-line',
-    count: resourceRows.value.filter((row) => row.type === 'mpc').length,
-  },
-  {
-    id: 'installed' as const,
-    label: 'Installed',
-    icon: 'ri-checkbox-circle-line',
-    count: installedCount.value,
-  },
-])
-
-const tabItems = computed(() => [
-  { id: 'all' as const, label: 'All', icon: 'ri-apps-line', badge: 0 },
-  {
-    id: 'available' as const,
-    label: 'Available',
-    icon: 'ri-download-line',
-    badge: resourceRows.value.filter((row) => row.statusKind === 'available').length,
-  },
-  {
-    id: 'installed' as const,
-    label: 'Installed',
-    icon: 'ri-check-line',
-    badge: installedCount.value,
-  },
-  {
-    id: 'updates' as const,
-    label: 'Updates',
-    icon: 'ri-arrow-up-circle-line',
-    badge: updatesCount.value,
-  },
-])
-
-watch(
-  resourceRows,
-  (rows) => {
-    const rowIds = new Set(rows.map((row) => row.id))
-    const nextSelected = new Set(
-      [...selectedResourceIds.value].filter((id) => rowIds.has(id)),
-    )
-
-    if (nextSelected.size === 0) {
-      const defaults = rows
-        .filter((row) => row.statusKind === 'update' || row.statusKind === 'installing')
-        .slice(0, 2)
-      defaults.forEach((row) => nextSelected.add(row.id))
-    }
-
-    selectedResourceIds.value = nextSelected
-  },
-  { immediate: true },
-)
+const sidebarItems = computed(() => buildSidebarItems(resourceRows.value))
+const tabItems = computed(() => buildStatusTabs(resourceRows.value))
+const frontendSummary = computed(() => frontendReadiness(resourceRows.value))
 
 onMounted(() => {
   void pluginStore.fetchTools()
@@ -645,55 +137,37 @@ onUnmounted(() => {
   pluginStore.cleanup()
 })
 
-function isInstalledLike(row: ResourceRow): boolean {
-  return row.statusKind === 'installed' || row.statusKind === 'update'
-}
-
-function frontendFlowItem(
-  label: string,
-  tags: string[],
-): { label: string; installed: number; total: number; status: string } {
-  const rows = frontendToolRows.value.filter((row) =>
-    tags.some((tag) => row.flowTags.includes(tag)),
-  )
-  const installed = rows.filter(isInstalledLike).length
-  return {
-    label,
-    installed,
-    total: rows.length,
-    status: rows.length > 0 && installed === rows.length ? 'ready' : 'missing',
-  }
-}
-
-function isSelected(id: string): boolean {
-  return selectedResourceIds.value.has(id)
-}
-
-function toggleResource(id: string): void {
-  const next = new Set(selectedResourceIds.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  selectedResourceIds.value = next
-}
-
-function removeSelected(id: string): void {
-  const next = new Set(selectedResourceIds.value)
-  next.delete(id)
-  selectedResourceIds.value = next
-}
-
 function clearFilters(): void {
   searchQuery.value = ''
   categoryFilter.value = 'all'
   statusFilter.value = 'all'
 }
 
-async function handleRowInstall(row: ResourceRow): Promise<void> {
-  await runPrimaryAction(row, pluginStore)
-}
-
-async function handleRowCancel(row: ResourceRow): Promise<void> {
-  await pluginStore.cancelResource(row.resource.id)
+async function handleCardAction(
+  row: ResourceRow,
+  action: PluginCardActionId,
+): Promise<void> {
+  switch (action) {
+    case 'install':
+    case 'update':
+    case 'replace':
+    case 'retry':
+      await runPrimaryAction(row, pluginStore)
+      return
+    case 'cancel':
+      await pluginStore.cancelResource(row.resource.id)
+      return
+    case 'validate':
+      await pluginStore.validatePdk(row.resource.id)
+      return
+    case 'import_local':
+      await handleLocalImport(row)
+      return
+    case 'uninstall':
+    case 'remove_reference':
+      await handleRowRemove(row)
+      return
+  }
 }
 
 async function handleLocalImport(row: ResourceRow): Promise<void> {
@@ -728,12 +202,6 @@ async function handleLocalImport(row: ResourceRow): Promise<void> {
   }
 }
 
-async function handlePdkValidate(row: ResourceRow): Promise<void> {
-  if (row.resource) {
-    await pluginStore.validatePdk(row.resource.id)
-  }
-}
-
 async function handleRowRemove(row: ResourceRow): Promise<void> {
   const action = removalActionForRow(row)
   if (!action) return
@@ -754,18 +222,14 @@ async function handleRowRemove(row: ResourceRow): Promise<void> {
   await pluginStore.uninstallResource(row.resource.id)
 }
 
-async function downloadSelected(): Promise<void> {
-  await runBatchDownload(downloadableSelectedResources.value, pluginStore)
-}
-
-function resolveInstallPath(row: ResourceRow): string {
-  return resolveRowInstallPath(row)
-}
-
-function formatSize(sizeMb: number): string {
-  if (sizeMb <= 0) return '0 MB'
-  if (sizeMb >= 1024) return `${(sizeMb / 1024).toFixed(2)} GB`
-  return `${Math.round(sizeMb)} MB`
+async function handleHomepage(row: ResourceRow): Promise<void> {
+  const url = homepageUrlFor(row)
+  if (!url) return
+  try {
+    await getDesktopApi().system.openExternal(url)
+  } catch (error) {
+    console.error('Failed to open homepage:', error)
+  }
 }
 
 function goHome(): void {
@@ -880,350 +344,25 @@ async function openDocs(): Promise<void> {
 /* ---- Grid ---- */
 .manager-grid {
   display: grid;
-  grid-template-columns: minmax(170px, 200px) minmax(420px, 1fr) minmax(220px, 240px);
+  grid-template-columns: minmax(170px, 200px) minmax(0, 1fr);
   gap: 12px;
   min-height: 0;
+  margin-top: 14px;
   overflow: hidden;
   flex: 1 1 auto;
 }
 
-.manager-sidebar,
-.manager-table-panel,
-.selected-panel {
+.manager-content-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   min-height: 0;
+  padding: 16px;
+  overflow: hidden;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg-primary) 72%, transparent);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--bg-primary) 78%, transparent);
-}
-
-/* ---- Sidebar ---- */
-.manager-sidebar {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  padding: 16px;
-}
-
-.resource-nav {
-  display: grid;
-  gap: 10px;
-}
-
-.resource-nav-item {
-  display: grid;
-  grid-template-columns: 24px 1fr auto;
-  align-items: center;
-  width: 100%;
-  min-height: 34px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 8px;
-  color: var(--text-secondary);
-  background: transparent;
-  cursor: pointer;
-  font-size: 13px;
-  text-align: left;
-  transition:
-    background 0.15s ease,
-    color 0.15s ease;
-}
-
-.resource-nav-item i {
-  font-size: 16px;
-}
-
-.resource-nav-item b {
-  display: grid;
-  min-width: 22px;
-  height: 22px;
-  place-items: center;
-  border-radius: 999px;
-  color: var(--text-secondary);
-  background: var(--bg-secondary);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.resource-nav-item.active {
-  color: var(--accent-color);
-  background: color-mix(in srgb, var(--accent-color) 12%, transparent);
-}
-
-.resource-nav-item.active b {
-  color: var(--accent-color);
-  background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
-}
-
-.manager-help {
-  display: grid;
-  grid-template-columns: 24px 1fr;
-  gap: 10px;
-  padding: 16px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-primary) 78%, transparent);
-}
-
-.help-icon {
-  display: grid;
-  width: 24px;
-  height: 24px;
-  place-items: center;
-  border-radius: 8px;
-  color: var(--accent-color);
-  background: color-mix(in srgb, var(--accent-color) 12%, transparent);
-}
-
-.manager-help strong {
-  display: block;
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 750;
-}
-
-.manager-help p {
-  margin: 3px 0 12px;
-  color: var(--text-secondary);
-  font-size: 11px;
-  line-height: 1.45;
-}
-
-.manager-help button {
-  grid-column: 1 / -1;
-  justify-self: start;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 0;
-  color: var(--accent-color);
-  background: transparent;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-/* ---- Table panel ---- */
-.manager-table-panel {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  padding: 16px;
-  overflow: hidden;
-}
-
-.manager-toolbar {
-  display: grid;
-  grid-template-columns: minmax(120px, 180px) minmax(0, auto);
-  align-items: center;
-  gap: 12px;
-  margin-bottom: clamp(14px, 2.5vh, 24px);
-}
-
-.resource-search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 28px;
-  padding: 0 14px;
-  border: 1px solid var(--border-color);
-  border-radius: 999px;
-  color: var(--text-secondary);
-  background: color-mix(in srgb, var(--bg-primary) 90%, transparent);
-}
-
-.resource-search input {
-  width: 100%;
-  min-width: 0;
-  border: 0;
-  outline: 0;
-  color: var(--text-primary);
-  background: transparent;
-  font-size: 13px;
-}
-
-.resource-search input::placeholder {
-  color: color-mix(in srgb, var(--text-secondary) 60%, transparent);
-}
-
-.resource-search:focus-within {
-  border-color: var(--accent-color);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 16%, transparent);
-}
-
-.resource-tabs {
-  justify-self: end;
-  display: flex;
-  align-items: center;
-  max-width: 100%;
-  min-height: 36px;
-  padding: 3px;
-  overflow-x: auto;
-  border: 1px solid var(--border-color);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-primary) 80%, transparent);
-  scrollbar-width: none;
-}
-
-.resource-tabs::-webkit-scrollbar {
-  display: none;
-}
-
-.resource-tabs button {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 28px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 999px;
-  color: var(--text-secondary);
-  background: transparent;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.resource-tabs button + button::before {
-  content: '';
-  position: absolute;
-  left: -1px;
-  width: 1px;
-  height: 14px;
-  background: var(--border-color);
-}
-
-.resource-tabs button.active {
-  color: var(--accent-color);
-  background: color-mix(in srgb, var(--accent-color) 12%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 46%, transparent);
-}
-
-.resource-tabs button.active::before,
-.resource-tabs button.active + button::before {
-  opacity: 0;
-}
-
-.resource-tabs span {
-  display: grid;
-  min-width: 20px;
-  height: 20px;
-  place-items: center;
-  border-radius: 999px;
-  color: var(--accent-color);
-  background: color-mix(in srgb, var(--accent-color) 16%, transparent);
-  font-size: 11px;
-}
-
-.manager-table-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.manager-table-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.manager-table-meta strong {
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 750;
-}
-
-.manager-table-meta button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 0;
-  color: var(--accent-color);
-  background: transparent;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.manager-table-meta button:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-
-.frontend-flow-strip {
-  display: grid;
-  grid-template-columns: minmax(140px, 180px) minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
-  padding: 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-primary) 78%, transparent);
-}
-
-.frontend-flow-summary {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.frontend-flow-summary strong {
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 750;
-}
-
-.frontend-flow-summary span,
-.frontend-flow-summary em {
-  overflow: hidden;
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-style: normal;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.frontend-flow-steps {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 6px;
-  min-width: 0;
-}
-
-.frontend-flow-step {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-width: 0;
-  height: 30px;
-  padding: 0 8px;
-  border: 1px solid var(--border-color);
-  border-radius: 7px;
-  color: var(--text-secondary);
-  background: var(--bg-primary);
-  cursor: default;
-  font-size: 11px;
-}
-
-.frontend-flow-step.ready {
-  border-color: color-mix(in srgb, var(--success-color) 36%, var(--border-color));
-  color: var(--success-color);
-  background: var(--success-bg);
-}
-
-.frontend-flow-step span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.frontend-flow-step b {
-  flex: 0 0 auto;
-  margin-left: 6px;
-  font-weight: 750;
 }
 
 .resource-error {
@@ -1235,747 +374,6 @@ async function openDocs(): Promise<void> {
   font-size: 12px;
 }
 
-/* ---- Table ---- */
-.resource-table-scroll {
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  flex: 1;
-}
-
-.resource-table {
-  --resource-table-columns: 32px minmax(150px, 2fr) minmax(96px, 0.6fr)
-    minmax(68px, 0.5fr) minmax(112px, 0.7fr) 116px;
-  width: 100%;
-}
-
-.resource-table-head,
-.resource-row {
-  display: grid;
-  grid-template-columns: var(--resource-table-columns);
-  align-items: center;
-  gap: 0;
-}
-
-.resource-table-head > *,
-.resource-row > * {
-  min-width: 0;
-}
-
-.resource-table-head {
-  height: 36px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--border-color);
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-.resource-row {
-  --resource-row-primary-line: 22px;
-  width: 100%;
-  min-height: 56px;
-  padding: 8px 12px;
-  border: 0;
-  border-bottom: 1px solid var(--border-color);
-  color: var(--text-primary);
-  background: transparent;
-  cursor: pointer;
-  align-items: start;
-  text-align: left;
-  transition: background 0.15s ease;
-}
-
-.resource-row:hover {
-  background: color-mix(in srgb, var(--accent-color) 4%, transparent);
-}
-
-.resource-row:focus-visible {
-  outline: 2px solid var(--accent-color);
-  outline-offset: -2px;
-}
-
-.resource-row.selected {
-  background: color-mix(in srgb, var(--accent-color) 7%, transparent);
-}
-
-.resource-check {
-  display: grid;
-  width: 18px;
-  height: 18px;
-  margin-top: 7px;
-  place-items: center;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  color: var(--accent-text);
-  background: var(--bg-primary);
-  font-size: 12px;
-}
-
-.resource-check.checked {
-  border-color: var(--accent-color);
-  background: var(--accent-color);
-}
-
-.resource-name-cell {
-  display: flex;
-  align-items: flex-start;
-  min-width: 0;
-}
-
-.resource-avatar {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  flex: 0 0 auto;
-  place-items: center;
-  border-radius: 8px;
-  color: #fff;
-  background: linear-gradient(
-    145deg,
-    color-mix(in srgb, var(--row-accent) 92%, white),
-    color-mix(in srgb, var(--row-accent) 76%, black)
-  );
-  box-shadow:
-    inset 0 1px 1px rgba(255, 255, 255, 0.35),
-    0 6px 14px rgba(15, 23, 42, 0.12);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0;
-}
-
-.resource-avatar.compact {
-  width: 34px;
-  height: 34px;
-}
-
-.resource-copy {
-  min-width: 0;
-  margin-left: 12px;
-}
-
-.resource-copy strong {
-  display: block;
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 750;
-  line-height: var(--resource-row-primary-line);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.resource-copy small {
-  display: block;
-  overflow: hidden;
-  max-width: min(260px, 100%);
-  color: var(--text-secondary);
-  font-size: 11px;
-  line-height: 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.resource-flow-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 5px;
-}
-
-.resource-flow-tags b,
-.selected-flow-tags {
-  color: var(--accent-color);
-  background: color-mix(in srgb, var(--accent-color) 11%, transparent);
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.resource-flow-tags b {
-  min-height: 18px;
-  padding: 2px 5px;
-  border-radius: 5px;
-  line-height: 1.2;
-}
-
-.resource-dependency {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  margin-top: 4px;
-  color: var(--text-secondary);
-  font-size: 10px;
-  gap: 4px;
-}
-
-.resource-dependency i {
-  flex: 0 0 auto;
-  color: var(--accent-color);
-  font-size: 12px;
-}
-
-.resource-dependency span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.resource-row > .resource-muted,
-.resource-status-cell,
-.row-actions {
-  align-self: start;
-}
-
-.resource-muted {
-  display: inline-flex;
-  align-items: center;
-  min-height: var(--resource-row-primary-line);
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.2;
-}
-
-/* ---- Pills ---- */
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  max-width: 100%;
-  min-height: 22px;
-  padding: 0 8px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.status-pill span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.status-pill.installed {
-  color: var(--success-color);
-  background: var(--success-bg);
-}
-
-.status-pill.available {
-  color: var(--text-secondary);
-  background: var(--bg-secondary);
-}
-
-.status-pill.update {
-  color: var(--info-color);
-  background: var(--info-bg);
-}
-
-.status-pill.installing {
-  font-size: 10px;
-  font-weight: 700;
-  padding: 0 7px;
-  color: var(--info-color);
-  background: var(--info-bg);
-}
-
-.status-pill.error {
-  color: var(--danger-color);
-  background: var(--danger-bg);
-}
-
-.mini-progress {
-  --progress: 0;
-  display: block;
-  position: relative;
-  width: 62px;
-  height: 4px;
-  margin-top: 5px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--info-color) 16%, var(--bg-secondary));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--info-color) 10%, transparent);
-}
-
-.mini-progress span {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(
-    90deg,
-    var(--info-color),
-    color-mix(in srgb, var(--info-color) 70%, var(--accent-text))
-  );
-  box-shadow: 0 0 10px color-mix(in srgb, var(--info-color) 34%, transparent);
-  transform: scaleX(var(--progress, 0));
-  transform-origin: left center;
-  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: transform;
-}
-
-/* ---- Row actions ---- */
-.row-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.row-action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  height: 26px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 650;
-  cursor: pointer;
-  white-space: nowrap;
-  transition:
-    opacity 0.15s ease,
-    background 0.15s ease;
-}
-
-.row-action-btn.icon-only {
-  width: 26px;
-  padding: 0;
-  font-size: 13px;
-}
-
-/* ---- Custom tooltip ---- */
-.row-action-btn[data-title] {
-  position: relative;
-}
-
-.row-action-btn[data-title]::after {
-  content: attr(data-title);
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%) scale(0.96);
-  padding: 4px 8px;
-  border-radius: 6px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transition:
-    opacity 0.12s ease,
-    transform 0.12s ease;
-  z-index: 10;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.row-action-btn[data-title]::before {
-  content: '';
-  position: absolute;
-  bottom: calc(100% + 2px);
-  left: 50%;
-  transform: translateX(-50%) scale(0.96);
-  width: 0;
-  height: 0;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-top: 4px solid var(--border-color);
-  opacity: 0;
-  pointer-events: none;
-  transition:
-    opacity 0.12s ease,
-    transform 0.12s ease;
-  z-index: 10;
-}
-
-.row-action-btn[data-title]:not(:disabled):hover::after,
-.row-action-btn[data-title]:not(:disabled):hover::before {
-  opacity: 1;
-  transform: translateX(-50%) scale(1);
-}
-
-.row-action-btn.primary {
-  color: var(--accent-text);
-  background: var(--accent-color);
-}
-
-.row-action-btn.primary:not(:disabled):hover {
-  opacity: 0.9;
-}
-
-.row-action-btn.danger-outlined {
-  color: var(--danger-color);
-  background: transparent;
-  border: 1px solid var(--danger-color);
-}
-
-.row-action-btn.danger-outlined:not(:disabled):hover {
-  background: var(--danger-bg);
-}
-
-.row-action-btn.info {
-  color: var(--info-color);
-  background: var(--info-bg);
-}
-
-.row-action-btn.info:not(:disabled):hover {
-  opacity: 0.85;
-}
-
-.row-action-btn.warn {
-  color: var(--warn-color);
-  background: var(--warn-bg);
-}
-
-.row-action-btn.warn:disabled {
-  cursor: default;
-  opacity: 0.7;
-}
-
-.row-action-btn:disabled {
-  cursor: default;
-  opacity: 0.65;
-}
-
-.row-action-btn.danger {
-  color: var(--danger-color);
-  background: var(--danger-bg);
-}
-
-/* ---- Loading / Empty ---- */
-.resource-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 260px;
-  gap: 10px;
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
-.resource-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 260px;
-  gap: 8px;
-  color: var(--text-secondary);
-  font-size: 13px;
-  text-align: center;
-  padding: 24px;
-}
-
-.resource-empty i {
-  font-size: 28px;
-  opacity: 0.35;
-  margin-bottom: 4px;
-}
-
-.resource-empty strong {
-  color: var(--text-primary);
-  font-size: 14px;
-  font-weight: 650;
-}
-
-.resource-empty p {
-  margin: 0;
-  font-size: 12px;
-}
-
-.clear-filters-btn {
-  margin-top: 8px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  color: var(--accent-color);
-  background: transparent;
-  cursor: pointer;
-  font-size: 12px;
-  line-height: 1;
-  font-weight: 600;
-  transition: background 0.15s ease;
-}
-
-.clear-filters-btn i {
-  font-size: 15px;
-  line-height: 1;
-  position: relative;
-  top: 1px;
-}
-
-.clear-filters-btn:hover {
-  background: color-mix(in srgb, var(--accent-color) 8%, transparent);
-}
-
-/* ---- Selected panel ---- */
-.selected-panel {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 16px 16px 12px;
-}
-
-.selected-panel h2 {
-  margin: 0 0 16px;
-  color: var(--text-primary);
-  font-size: 15px;
-  font-weight: 750;
-}
-
-.selected-panel h2 span {
-  color: var(--text-secondary);
-  font-weight: 650;
-}
-
-.selected-list {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  flex: 1 1 0;
-  overflow: auto;
-  min-height: 0;
-}
-
-.selected-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 100px;
-  gap: 6px;
-  border: 1px dashed var(--border-color);
-  border-radius: 8px;
-  color: var(--text-secondary);
-  font-size: 12px;
-  text-align: center;
-  padding: 16px;
-}
-
-.selected-empty i {
-  font-size: 28px;
-  opacity: 0.35;
-}
-
-.selected-empty small {
-  font-size: 11px;
-  opacity: 0.7;
-  max-width: 180px;
-}
-
-.selected-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 4px 0;
-}
-
-.selected-item-body {
-  min-width: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.selected-item strong {
-  display: block;
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 750;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.selected-item-meta {
-  display: block;
-  overflow: hidden;
-  max-width: 260px;
-  color: var(--text-secondary);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.selected-item-meta b {
-  padding: 2px 5px;
-  border-radius: 5px;
-  color: var(--info-color);
-  background: var(--info-bg);
-  font-size: 10px;
-  font-style: normal;
-}
-
-.selected-flow-tags {
-  width: fit-content;
-  max-width: 100%;
-  overflow: hidden;
-  padding: 2px 5px;
-  border-radius: 5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.selected-flow-tags.dependency {
-  color: var(--info-color);
-  background: var(--info-bg);
-}
-
-.selected-item em {
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-style: normal;
-  white-space: nowrap;
-  margin-top: 2px;
-}
-
-.selected-item button {
-  display: grid;
-  width: 24px;
-  height: 24px;
-  place-items: center;
-  border: 0;
-  border-radius: 7px;
-  color: var(--text-secondary);
-  background: transparent;
-  cursor: pointer;
-}
-
-.selected-item button:hover {
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
-}
-
-/* ---- Total size ---- */
-.total-size {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin: 16px -16px 0;
-  padding: 16px;
-  border-top: 1px solid var(--border-color);
-  border-bottom: 1px solid var(--border-color);
-  color: var(--text-primary);
-  font-size: 13px;
-}
-
-.total-size span {
-  color: var(--text-secondary);
-  font-weight: 650;
-}
-
-.total-size strong {
-  font-size: 14px;
-  font-weight: 800;
-}
-
-/* ---- Note & actions ---- */
-.manager-note {
-  display: grid;
-  grid-template-columns: 20px 1fr;
-  align-items: start;
-  gap: 10px;
-  margin-top: 12px;
-  margin-bottom: 12px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  color: color-mix(in srgb, var(--text-primary) 50%, transparent);
-  background: color-mix(in srgb, var(--accent-color) 16%, transparent);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.manager-note i {
-  color: var(--accent-color);
-  font-size: 16px;
-}
-
-.selected-actions {
-  display: grid;
-  gap: 10px;
-  flex: 0 0 auto;
-  margin-top: auto;
-}
-
-.download-button,
-.cancel-button {
-  width: 100%;
-  min-height: 50px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 750;
-}
-
-.download-button {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  color: var(--accent-text);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--accent-color) 85%, white),
-    var(--accent-color)
-  );
-}
-
-.download-button:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
-
-.download-button i {
-  position: absolute;
-  left: 14px;
-  font-size: 16px;
-}
-
-.download-button span {
-  display: grid;
-  gap: 1px;
-  font-size: 13px;
-}
-
-.download-button small {
-  font-size: 10px;
-  font-weight: 750;
-  opacity: 0.9;
-}
-
-.cancel-button {
-  border: 1px solid var(--border-color);
-  color: var(--text-secondary);
-  background: var(--bg-primary);
-  font-size: 13px;
-  transition: background 0.15s ease;
-}
-
-.cancel-button:hover {
-  background: var(--bg-secondary);
-}
-
-/* ---- Animation ---- */
-.spin {
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 /* ---- Dark mode overrides ---- */
 :global(.dark) .manager-scrim {
   background: rgba(0, 0, 0, 0.4);
@@ -1983,10 +381,6 @@ async function openDocs(): Promise<void> {
 
 :global(.dark) .manager-dialog {
   box-shadow: 0 34px 90px rgba(0, 0, 0, 0.4);
-}
-
-:global(.dark) .selected-empty {
-  border-color: color-mix(in srgb, var(--border-color) 60%, transparent);
 }
 
 /* ---- Responsive ---- */
@@ -2006,54 +400,9 @@ async function openDocs(): Promise<void> {
     padding-right: 2px;
   }
 
-  .manager-sidebar {
-    flex: 0 0 auto;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .resource-nav {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-  }
-
-  .resource-nav-item {
-    min-height: 42px;
-    padding: 0 12px;
-  }
-
-  .manager-help {
-    width: auto;
-    grid-template-columns: 24px minmax(0, 1fr) auto;
-    align-items: center;
-    padding: 12px 14px;
-  }
-
-  .manager-help p {
-    margin: 2px 0 0;
-  }
-
-  .manager-help button {
-    grid-column: auto;
-    justify-self: end;
-    margin-left: 12px;
-    white-space: nowrap;
-  }
-
-  .manager-table-panel {
+  .manager-content-panel {
     flex: 0 0 clamp(280px, 42vh, 420px);
     min-height: 280px;
-  }
-
-  .selected-panel {
-    flex: 0 0 auto;
-    min-height: 220px;
-    max-height: none;
-  }
-
-  .selected-list {
-    max-height: 120px;
   }
 }
 
@@ -2067,57 +416,6 @@ async function openDocs(): Promise<void> {
     width: calc(100% - 24px);
     height: calc(100% - var(--dialog-block-gutter));
     padding: 24px 18px;
-  }
-
-  .manager-sidebar {
-    flex-direction: column;
-  }
-
-  .resource-nav {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .resource-nav-item {
-    min-height: 40px;
-  }
-
-  .manager-help {
-    width: auto;
-  }
-
-  .manager-toolbar {
-    grid-template-columns: 1fr;
-    margin-bottom: 16px;
-  }
-
-  .resource-tabs {
-    justify-self: stretch;
-  }
-
-  .manager-table-meta {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .frontend-flow-strip {
-    grid-template-columns: 1fr;
-  }
-
-  .frontend-flow-steps {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .resource-table-head,
-  .resource-row {
-    --resource-table-columns: 28px minmax(88px, 1fr) minmax(96px, auto) minmax(68px, auto);
-  }
-
-  .resource-table-head span:nth-child(3),
-  .resource-row > .resource-muted:nth-child(3),
-  .resource-table-head span:nth-child(4),
-  .resource-row > .resource-muted:nth-child(4) {
-    display: none;
   }
 
   .manager-close {

@@ -64,11 +64,6 @@ export class WorkspaceResourceService {
     return index
   }
 
-  async readHome(): Promise<Record<string, unknown> | null> {
-    const root = await this.projectScopeProvider.getProjectRoot()
-    return await this.readJsonOrNull(join(root, 'home', 'home.json'))
-  }
-
   async readFlow(): Promise<Record<string, unknown> | null> {
     const root = await this.projectScopeProvider.getProjectRoot()
     return await this.readJsonOrNull(join(root, 'home', 'flow.json'))
@@ -146,20 +141,17 @@ export class WorkspaceResourceService {
     const root = await this.projectScopeProvider.getProjectRoot()
     const messages: string[] = []
     const statErrors: string[] = []
-    const homePath = join(root, 'home', 'home.json')
     const flowPath = join(root, 'home', 'flow.json')
     const parametersLocation = await locateWorkspaceParametersFile(root)
     const parametersPath = parametersLocation.path
     const checklistPath = join(root, 'home', 'checklist.json')
 
-    const [homeJson, flowJson, parametersJson, checklistJson] = await Promise.all([
-      this.describeFile(homePath, 'home', statErrors),
+    const [flowJson, parametersJson, checklistJson] = await Promise.all([
       this.describeFile(flowPath, 'flow', statErrors),
       this.describeFile(parametersPath, 'parameters', statErrors),
       this.describeFile(checklistPath, 'checklist', statErrors),
     ])
 
-    const homeData = await this.readJsonForIndex(homePath, messages)
     const parameters = await this.readParametersForIndex(
       root,
       parametersLocation,
@@ -204,12 +196,10 @@ export class WorkspaceResourceService {
         topModule,
         pdk,
         home: {
-          homeJson,
           flowJson,
           parametersJson,
           checklistJson,
         },
-        homeData,
         parameters,
         flow: {
           steps: flowSteps,

@@ -5,7 +5,6 @@ import { useDesignReportExport } from './useDesignReportExport'
 const mockGetIndex = vi.fn()
 const mockReadFlow = vi.fn()
 const mockReadParameters = vi.fn()
-const mockReadHome = vi.fn()
 const mockReadOptionalProjectTextFile = vi.fn()
 const mockRequestProjectPathAccess = vi.fn()
 const mockSaveFile = vi.fn()
@@ -22,7 +21,6 @@ vi.mock('@/platform/desktop', () => ({
       getIndex: mockGetIndex,
       readFlow: mockReadFlow,
       readParameters: mockReadParameters,
-      readHome: mockReadHome,
     },
     workspace: {
       readOptionalProjectTextFile: mockReadOptionalProjectTextFile,
@@ -119,7 +117,6 @@ describe('useDesignReportExport', () => {
         workspaceRevision: 1,
       },
       flow: { steps: [] },
-      home: {},
       parameters: { Design: 'gcd', PDK: 'ic55' },
     })
     mockRequestProjectPathAccess.mockImplementation(async (p: string) => p)
@@ -157,7 +154,6 @@ describe('useDesignReportExport', () => {
     })
     expect(mockReadFlow).not.toHaveBeenCalled()
     expect(mockReadParameters).not.toHaveBeenCalled()
-    expect(mockReadHome).not.toHaveBeenCalled()
     expect(mockReadOptionalProjectTextFile).not.toHaveBeenCalled()
     expect(mockRequestProjectPathAccess).not.toHaveBeenCalled()
   })
@@ -195,6 +191,33 @@ describe('useDesignReportExport', () => {
 
     composable.selectedFormat.value = 'text'
     expect(composable.generatedContent.value).toContain('ECOS STUDIO — DESIGN SUMMARY')
+  })
+
+  it('loads PDK metadata from its explicit project file', async () => {
+    currentProject.value = {
+      path: '/projects/gcd/ws_001',
+      name: 'gcd_run',
+      designTool: 'frontend',
+    }
+    mockReadOptionalProjectTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/home/pdk.json')) {
+        return JSON.stringify({
+          pdk_version: 'v2.1.0',
+          pdk_commit: '1234567890abcdef',
+        })
+      }
+      return null
+    })
+    const composable = useDesignReportExport({ currentProject, showToast })
+
+    composable.openDesignReportExport('text')
+    await vi.waitFor(() => expect(composable.loading.value).toBe(false))
+
+    expect(composable.reportData.value?.design.pdkVersion).toBe('v2.1.0')
+    expect(composable.reportData.value?.design.pdkCommit).toBe('1234567890abcdef')
+    expect(mockReadOptionalProjectTextFile).toHaveBeenCalledWith(
+      '/projects/gcd/ws_001/home/pdk.json',
+    )
   })
 
   it('resolves fallback analysis paths inside the active workspace', async () => {

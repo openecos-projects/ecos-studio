@@ -84,15 +84,15 @@ describe('PluginToolsView PDK behavior', () => {
     ]
     const wrapper = mount(PluginToolsView)
 
-    expect(wrapper.findAll('.resource-row')).toHaveLength(2)
+    expect(wrapper.findAll('.plugin-card')).toHaveLength(2)
     const tabs = wrapper.findAll('.resource-tabs button')
     await tabs.find((button) => button.text().includes('Available'))!.trigger('click')
-    expect(wrapper.findAll('.resource-row')).toHaveLength(1)
-    expect(wrapper.find('.resource-row').text()).toContain('Available')
+    expect(wrapper.findAll('.plugin-card')).toHaveLength(1)
+    expect(wrapper.find('.plugin-card').text()).toContain('Available')
 
     await tabs.find((button) => button.text().includes('Installed'))!.trigger('click')
-    expect(wrapper.findAll('.resource-row')).toHaveLength(1)
-    expect(wrapper.find('.resource-row').text()).toContain('Installed')
+    expect(wrapper.findAll('.plugin-card')).toHaveLength(1)
+    expect(wrapper.find('.plugin-card').text()).toContain('Installed')
     wrapper.unmount()
   })
 
@@ -121,6 +121,42 @@ describe('PluginToolsView PDK behavior', () => {
     await vi.waitFor(() => expect(viewMocks.importPdk).toHaveBeenCalled())
 
     expect(wrapper.find('[data-title="Import Local"] i').classes()).not.toContain('spin')
+    wrapper.unmount()
+  })
+})
+
+describe('PluginToolsView structure', () => {
+  it('renders the dialog shell with a card grid instead of the legacy table', () => {
+    viewMocks.store.resources = [pdkResource({})]
+    const wrapper = mount(PluginToolsView)
+
+    expect(wrapper.find('.manager-dialog').exists()).toBe(true)
+    expect(wrapper.find('.resource-card-grid').exists()).toBe(true)
+    expect(wrapper.find('.resource-table').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps the frontend readiness strip non-interactive', async () => {
+    viewMocks.store.resources = [
+      pdkResource({
+        id: 'tool:yosys',
+        type: 'tool',
+        name: 'yosys',
+        display_name: 'Yosys',
+        description: 'Open synthesis suite',
+        category: 'synthesis',
+        platform: 'linux-x86_64',
+      }),
+    ]
+    const wrapper = mount(PluginToolsView)
+    const sidebarButtons = wrapper.findAll('.resource-nav-item')
+    await sidebarButtons
+      .find((button) => button.text().includes('Frontend Flow'))!
+      .trigger('click')
+
+    const strip = wrapper.find('.frontend-flow-strip')
+    expect(strip.exists()).toBe(true)
+    expect(strip.findAll('button')).toHaveLength(0)
     wrapper.unmount()
   })
 })

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import { parse as parseToml } from 'smol-toml'
 
 import {
   findTableSpan,
   formatTomlValue,
+  maskStringsAndComments,
   removeScopedKey,
   setScopedKey,
 } from './eccTomlEdit'
@@ -49,6 +51,21 @@ describe('eccTomlEdit findTableSpan', () => {
     const [start, end] = findTableSpan(text, 'pdk.overrides')!
     expect(text.slice(start, end)).toContain('lefs = []')
     expect(text.slice(start, end)).toContain('[pdk.overrides] docs')
+  })
+
+  it('keeps UTF-16 offsets stable for astral characters', () => {
+    const text = '# note 😀\n[params]\nvalue = 1\n'
+    const masked = maskStringsAndComments(text)
+    expect(masked).toHaveLength(text.length)
+    expect(findTableSpan(text, 'params')).not.toBeNull()
+  })
+
+  it('matches quoted table headers against their original spelling', () => {
+    const text = '["pdk"]\nroot = "/pdks/ics55"\n'
+    expect(findTableSpan(text, 'pdk')).not.toBeNull()
+    const updated = setScopedKey(text, 'pdk', 'root', '/pdks/ics55-v2')
+    expect(updated).toContain('root = "/pdks/ics55-v2"')
+    expect(() => parseToml(updated)).not.toThrow()
   })
 })
 
@@ -118,6 +135,13 @@ describe('eccTomlEdit setScopedKey', () => {
     const updated = setScopedKey(text, 'params', 'external_paths', ['/a'])
     expect(updated).toContain('note = "external_paths = fake"')
     expect(updated).toContain('external_paths = ["/a"]')
+  })
+
+  it('preserves astral comments while keeping the resulting TOML valid', () => {
+    const text = '# keep 😀\n[params]\nvalue = "😀"\n'
+    const updated = setScopedKey(text, 'params', 'value', 'changed')
+    expect(updated).toContain('# keep 😀')
+    expect(() => parseToml(updated)).not.toThrow()
   })
 })
 

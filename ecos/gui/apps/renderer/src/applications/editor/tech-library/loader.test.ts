@@ -9,7 +9,6 @@ function indexWithTech(): WorkspaceResourceIndex {
     topModule: 'gcd',
     pdk: 'ics55',
     home: {
-      homeJson: { path: '/workspace/demo/home/home.json', exists: true, kind: 'home' },
       flowJson: { path: '/workspace/demo/home/flow.json', exists: true, kind: 'flow' },
       parametersJson: {
         path: '/workspace/demo/home/parameters.json',
@@ -22,7 +21,6 @@ function indexWithTech(): WorkspaceResourceIndex {
         kind: 'checklist',
       },
     },
-    homeData: null,
     parameters: null,
     flow: { steps: [] },
     tech: {

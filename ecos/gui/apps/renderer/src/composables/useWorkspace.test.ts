@@ -2120,14 +2120,13 @@ describe('useWorkspace openProject', () => {
 
     expect(workspace.resourceVersions.value.all).toBe(before.all)
     expect(workspace.resourceVersions.value['step-config']).toBe(before['step-config'])
-    expect(workspace.resourceVersions.value.home).toBe(before.home + 1)
     expect(workspace.resourceVersions.value.flow).toBe(before.flow + 1)
     expect(workspace.resourceVersions.value.step).toBe(before.step + 1)
     expect(workspace.resourceVersions.value.maps).toBe(before.maps + 1)
     expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
   })
 
-  it('requests Home artifact reset after ECC prepares a full-flow rerun', async () => {
+  it('requests result resource reset after ECC prepares a full-flow rerun', async () => {
     const workspace = await openWorkspaceAndConnectRuntimeEvents()
 
     onRuntimeEvent?.(
@@ -2702,7 +2701,6 @@ describe('useWorkspace openProject', () => {
     ).resolves.toBe(true)
 
     expect(workspace.workspaceSession.value.state).toBe('active')
-    expect(workspace.resourceVersions.value.home).toBe(before.home + 1)
     expect(workspace.resourceVersions.value.flow).toBe(before.flow + 1)
     expect(workspace.resourceVersions.value.parameters).toBe(before.parameters + 1)
   })

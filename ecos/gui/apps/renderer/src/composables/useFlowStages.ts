@@ -307,7 +307,6 @@ export function useFlowStages() {
 
   /**
    * 从 flow.json 加载流程步骤
-   * 通过共享缓存获取 home.json 数据（不重复调用 API），从中提取 flow 路径
    */
   async function loadFlowStages(): Promise<void> {
     const loadGeneration = ++flowLoadGeneration
