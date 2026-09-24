@@ -1014,7 +1014,10 @@ async function undoLastInteraction(): Promise<void> {
   }
 }
 
-async function startProviderSession(sessionId: string): Promise<void> {
+async function startProviderSession(
+  sessionId: string,
+  options: { reconnect?: boolean } = {},
+): Promise<void> {
   const desktopApi = getOptionalDesktopApi()
   const agent = desktopApi?.agent
   const tab = agentShell.tabs.find((candidate) => candidate.id === sessionId)
@@ -1037,6 +1040,7 @@ async function startProviderSession(sessionId: string): Promise<void> {
       providerId: AGENT_PROVIDER_ID,
       sessionId,
       mode: tab.mode,
+      ...(options.reconnect ? { reconnect: true } : {}),
       ...(tab.projectRoot ? { projectRoot: tab.projectRoot } : {}),
       ...(tab.workspacePath ? { directory: tab.workspacePath } : {}),
       ...(knownProjects.length > 0 ? { knownProjects } : {}),
@@ -1221,7 +1225,12 @@ async function afterProfileMutation(): Promise<void> {
   if (status?.state === 'ready') {
     codexSetupManageOpen.value = false
     const sessionId = agentSessionId.value
-    if (sessionId) await startProviderSession(sessionId)
+    const tab = sessionId
+      ? agentShell.tabs.find((candidate) => candidate.id === sessionId)
+      : undefined
+    if (sessionId) {
+      await startProviderSession(sessionId, { reconnect: tab?.started === true })
+    }
   }
 }
 

@@ -3467,6 +3467,7 @@ function readAgentStartSessionRequest(value: unknown): DesktopAgentStartSessionR
     providerId: readAgentProviderId(record),
     sessionId: readAgentSessionId(record.sessionId),
     mode: mode === 'home' || mode === 'workspace' ? mode : undefined,
+    ...(record.reconnect === true ? { reconnect: true } : {}),
     ...(directory ? { directory } : {}),
     ...(projectRoot ? { projectRoot } : {}),
     ...(knownProjects ? { knownProjects } : {}),
