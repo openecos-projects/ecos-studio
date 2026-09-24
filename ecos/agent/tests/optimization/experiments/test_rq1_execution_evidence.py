@@ -135,3 +135,38 @@ def test_replay_fidelity_ignores_episode_specific_receipt_ids() -> None:
         {"receipt_ids": ["episode-b.receipt-9"], "receipt_semantics": [row]},
     )
     assert result["receipt_semantics"] == {"exact": 1, "within_band": 0, "mismatch": 0}
+
+
+def test_strict_episode_analysis_fails_on_promotion_integrity_error() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="promotion invariant"):
+        analyze_records([_start()], [_outcome(None, promoted=True)], strict=True)
+
+
+def test_contract_matrix_reports_missing_cases_and_markdown() -> None:
+    from ecos_agent.optimization.experiments.rq1_execution_evidence import (
+        build_case_matrix,
+        render_case_matrix_markdown,
+    )
+
+    matrix = build_case_matrix([
+        {
+            "case": "exact mapping",
+            "expected": {"status": "applied"},
+            "observed": {"status": "applied"},
+            "evidence_refs": ["fixture/exact.json"],
+        }
+    ])
+    assert matrix["summary"]["passed"] == 1
+    assert "converted" in matrix["summary"]["missing_tier_a_cases"]
+    assert "| exact mapping | yes | fixture-only |" in render_case_matrix_markdown(matrix)
+
+
+def test_analyze_episode_rejects_corrupt_ledger(tmp_path) -> None:
+    import pytest
+
+    (tmp_path / "optimization-outcomes.v1.jsonl").write_text("{}\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        from ecos_agent.optimization.experiments.rq1_execution_evidence import analyze_episode
+        analyze_episode(tmp_path)
