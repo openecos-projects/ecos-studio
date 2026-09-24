@@ -4199,8 +4199,6 @@ impl LoadedViewer {
                 std::sync::Arc::from(Vec::new())
             };
 
-            self.paint_gpu_heatmap_overlay(ui, canvas, world);
-
             if self.is_gpu_active() {
                 let gpu_start = Instant::now();
 
@@ -4450,6 +4448,13 @@ impl LoadedViewer {
                 }
             }
         }
+        // The heatmap is an overlay: paint it after the geometry (and after
+        // the view-tile overview branch) so rows / obstructions / instances
+        // stacked over the whole die do not hide the density map. Skipping it
+        // in the overview branch used to make the EGR maps do nothing at the
+        // fit-to-die zoom where they matter most.
+        self.paint_gpu_heatmap_overlay(ui, canvas, world);
+
         drawn += paint_parameterized_grid_overlay(
             &painter,
             self.db.grid_metadata(),
