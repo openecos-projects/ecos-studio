@@ -348,6 +348,11 @@ impl HeatmapData {
         })
     }
 
+    /// Pitch of the interior core grid, used to drop the non-uniform
+    /// boundary ring before rendering. Some generators transpose the axes
+    /// (`pixel_row` steps x, `pixel_col` steps y), so each axis takes the
+    /// larger step of the two neighbor directions; a zero result means the
+    /// pitch is unknown and callers must keep every cell.
     pub fn core_pitch(&self) -> Option<(i32, i32)> {
         let rows = self.rows();
         let cols = self.columns();
@@ -359,8 +364,11 @@ impl HeatmapData {
         let a = self.layout.get(&(r, c))?;
         let b = self.layout.get(&(r, c + 1))?;
         let d = self.layout.get(&(r + 1, c))?;
-        let pitch_x = (b.lx - a.lx).abs();
-        let pitch_y = (d.ly - a.ly).abs();
+        let pitch_x = (b.lx - a.lx).abs().max((d.lx - a.lx).abs());
+        let pitch_y = (b.ly - a.ly).abs().max((d.ly - a.ly).abs());
+        if pitch_x <= 0 || pitch_y <= 0 {
+            return None;
+        }
         Some((pitch_x, pitch_y))
     }
 
@@ -728,6 +736,58 @@ mod tests {
             })
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn core_pitch_handles_transposed_axes_and_degenerate_grids() {
+        // Some generators write pixel_row stepping x and pixel_col stepping y.
+        let root = temp_directory("egr-transposed-pitch");
+        let values = root.join("values.csv");
+        let layout = root.join("layout.csv");
+        fs::write(&values, "1,2,3\n4,5,6\n7,8,9\n").unwrap();
+        fs::write(
+            &layout,
+            "pixel_row,pixel_col,lx,ly,ux,uy\n\
+             0,0,0,20,10,30\n\
+             0,1,0,10,10,20\n\
+             0,2,0,0,10,10\n\
+             1,0,10,20,20,30\n\
+             1,1,10,10,20,20\n\
+             1,2,10,0,20,10\n\
+             2,0,20,20,30,30\n\
+             2,1,20,10,30,20\n\
+             2,2,20,0,30,10\n",
+        )
+        .unwrap();
+
+        let heatmap = HeatmapData::load(&values, &layout).unwrap();
+        assert_eq!(heatmap.core_pitch(), Some((10, 10)));
+        fs::remove_dir_all(root).unwrap();
+
+        // A zero pitch must read as "unknown" so renderers keep every cell
+        // instead of dropping the whole grid as a fake boundary ring.
+        let zero_x_layout = (0..3)
+            .flat_map(|r| {
+                (0..3usize).map(move |c| {
+                    (
+                        (r, c),
+                        Rect32 {
+                            lx: 0,
+                            ly: (c as i32) * 10,
+                            hx: 0,
+                            hy: (c as i32) * 10 + 10,
+                        },
+                    )
+                })
+            })
+            .collect::<BTreeMap<_, _>>();
+        let zero_x = HeatmapData {
+            values: vec![vec![Some(1.0); 3]; 3],
+            layout: zero_x_layout,
+            min: 1.0,
+            max: 1.0,
+        };
+        assert_eq!(zero_x.core_pitch(), None);
     }
 
     #[test]
