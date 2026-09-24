@@ -8949,7 +8949,8 @@ fn overview_tile_color(style: LayerStyle, shape_count: u32) -> egui::Color32 {
 }
 
 fn style_for_shape(style: LayerStyle, owner: Option<&OwnerRef>) -> LayerStyle {
-    let style = match owner.and_then(|owner| OwnerType::from_raw(owner.owner_type)) {
+    let owner_type = owner.and_then(|owner| OwnerType::from_raw(owner.owner_type));
+    let style = match owner_type {
         Some(OwnerType::Die | OwnerType::Core) => context_style(style, 170, 2),
         Some(OwnerType::Row) => context_style(style, 46, 1),
         Some(OwnerType::TrackGrid) => context_style(style, 82, 1),
@@ -8976,7 +8977,6 @@ fn style_for_shape(style: LayerStyle, owner: Option<&OwnerRef>) -> LayerStyle {
             owner_texture_style(style, 76, 235, FillPattern::Grid, 2)
         }
         Some(OwnerType::InstanceBBox) => solid_owner_texture_style(style, 64, 172, 1),
-        Some(OwnerType::InstanceHalo) => halo_texture_style(style),
         Some(OwnerType::Blockage) => {
             owner_texture_style(style, 66, 220, FillPattern::CrossHatch, 1)
         }
@@ -8990,8 +8990,17 @@ fn style_for_shape(style: LayerStyle, owner: Option<&OwnerRef>) -> LayerStyle {
         _ => style,
     };
 
-    if style.layer_id == LAYOUT_GEOMETRY_LAYER {
+    let style = if style.layer_id == LAYOUT_GEOMETRY_LAYER {
         transparent_gray_layout_style(style)
+    } else {
+        style
+    };
+
+    // Halo carries its own fixed color; applying it last keeps the orange even
+    // on the layout-geometry layer, where the transparent-gray conversion
+    // above would otherwise mute it to dark gray.
+    if owner_type == Some(OwnerType::InstanceHalo) {
+        halo_texture_style(style)
     } else {
         style
     }
@@ -14274,6 +14283,11 @@ mod tests {
         let other_halo_style = style_for_shape(other_base, Some(&halo));
         assert_eq!(&other_halo_style.rgba[..3], &[255, 140, 0]);
         assert_eq!(&other_halo_style.frame_rgba[..3], &[255, 140, 0]);
+        // Real halo shapes live on the layout-geometry layer; the fixed orange
+        // must survive that layer's transparent-gray conversion.
+        let layout_halo_style = style_for_shape(layout_geometry_layer_style(), Some(&halo));
+        assert_eq!(&layout_halo_style.rgba, &[255, 140, 0, 38]);
+        assert_eq!(&layout_halo_style.frame_rgba, &[255, 140, 0, 156]);
 
         let via = OwnerRef {
             owner_type: OwnerType::Via as u8,
