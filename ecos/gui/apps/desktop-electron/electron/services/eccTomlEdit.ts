@@ -46,7 +46,9 @@ function headerMatches(
   const rawHeaderMatch = /^[ \t]*\[([^\]]+)\][ \t]*(?:#.*)?$/.exec(rawLine)
   if (!rawHeaderMatch) return false
   const rawHeader = rawHeaderMatch[1]
-  return splitDottedKey(rawHeader).join('\u0000') === splitDottedKey(tableName).join('\u0000')
+  return (
+    splitDottedKey(rawHeader).join('\u0000') === splitDottedKey(tableName).join('\u0000')
+  )
 }
 
 /**
