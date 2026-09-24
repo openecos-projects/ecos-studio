@@ -89,7 +89,7 @@ class CandidateTrace:
     requested_value: str | float | int | bool | None = None
     requested_knob: str | None = None
     consumed_value: float | int | bool | None = None
-    application_status: Literal["applied", "inactive", "unknown"] = "unknown"
+    application_status: Literal["applied", "inactive", "failed", "unknown"] = "unknown"
     parameter_reason: str | None = None
     # Feasible = signoff-eligible terminal; promoted = became the incumbent.
     feasible: bool = False
@@ -125,6 +125,8 @@ class EqualBudgetSummary:
     effective_rate: float
     inactive: int
     inactive_rate: float
+    failed: int
+    failed_rate: float
     unknown: int
     stale_rule: int
     fail_closed: int
@@ -497,7 +499,7 @@ def evaluate_equal_budget(
         raise ValueError("planning calls exceed the frozen budget")
     selected = list(traces)
     for item in selected:
-        if item.application_status not in {"applied", "inactive", "unknown"}:
+        if item.application_status not in {"applied", "inactive", "failed", "unknown"}:
             raise ValueError("candidate parameter status is invalid")
         if item.planning_mode != mode:
             raise ValueError("candidate trace planning mode does not match evaluation mode")
@@ -527,6 +529,7 @@ def evaluate_equal_budget(
         raise ValueError("started candidate traces exceed the frozen budget")
     effective = sum(item.application_status == "applied" for item in started)
     inactive = sum(item.application_status == "inactive" for item in started)
+    failed = sum(item.application_status == "failed" for item in started)
     receipt_missing = sum(item.receipt_status == "missing" for item in selected)
     parser_failure = sum(item.receipt_status == "parser_failure" for item in selected)
     producer_failure = sum(item.receipt_status == "producer_failure" for item in selected)
@@ -569,6 +572,8 @@ def evaluate_equal_budget(
         effective_rate=effective / len(started) if started else 0.0,
         inactive=inactive,
         inactive_rate=inactive / len(started) if started else 0.0,
+        failed=failed,
+        failed_rate=failed / len(started) if started else 0.0,
         unknown=sum(item.application_status == "unknown" for item in started),
         stale_rule=sum(item.stale_rule for item in selected),
         fail_closed=sum(item.fail_closed for item in selected),

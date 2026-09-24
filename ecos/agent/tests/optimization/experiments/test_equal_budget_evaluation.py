@@ -112,6 +112,36 @@ def test_equal_budget_counts_application_status_and_receipts() -> None:
     assert summary.peak_memory_mb == 8.0
 
 
+def test_equal_budget_counts_application_failures_separately() -> None:
+    summary = evaluate_equal_budget(
+        [
+            CandidateTrace(
+                design_id="gcd",
+                candidate_id="application-failed",
+                started=True,
+                planning_mode="receipt-aware",
+                terminal_success=False,
+                application_status="failed",
+            ),
+            CandidateTrace(
+                design_id="gcd",
+                candidate_id="execution-failed",
+                started=True,
+                planning_mode="receipt-aware",
+                terminal_success=False,
+                application_status="applied",
+            ),
+        ],
+        mode="receipt-aware",
+    )
+
+    assert summary.terminal_successes == 0
+    assert summary.effective == 1
+    assert summary.effective_rate == 0.5
+    assert summary.failed == 1
+    assert summary.failed_rate == 0.5
+
+
 def test_equal_budget_rejects_unknown_status_vocabulary() -> None:
     trace = CandidateTrace(
         design_id="gcd", candidate_id="c1", started=True,
