@@ -2892,7 +2892,19 @@ export function registerIpc(
   })
 
   handle(desktopApiIpcChannels.systemOpenExternal, async (_event, url) => {
-    await shell.openExternal(url as string)
+    if (typeof url !== 'string') {
+      throw new Error('openExternal requires a URL string')
+    }
+    let parsed: URL
+    try {
+      parsed = new URL(url)
+    } catch {
+      throw new Error('openExternal requires an absolute URL')
+    }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new Error(`Refusing to open external URL with scheme '${parsed.protocol}'`)
+    }
+    await shell.openExternal(url)
   })
 }
 
