@@ -55,7 +55,16 @@ def _diagnostic_metrics(path: Path) -> dict[str, Any]:
 
 
 def _episode_run_metrics(root: Path, provider_calls: int) -> dict[str, Any]:
-    summary_path = root / "episode-summary.v1.json"
+    metrics_root = root
+    if root.parent.name == "optimization" and root.parent.parent.name == ".agent":
+        workspace = root.parent.parent.parent
+        if workspace.parent.name == "workspaces":
+            report_root = (
+                workspace.parent.parent / "reports" / workspace.name / root.name
+            )
+            if report_root.is_dir():
+                metrics_root = report_root
+    summary_path = metrics_root / "episode-summary.v1.json"
     summary: Mapping[str, Any] = {}
     if summary_path.is_file():
         try:
@@ -65,7 +74,7 @@ def _episode_run_metrics(root: Path, provider_calls: int) -> dict[str, Any]:
         except (OSError, json.JSONDecodeError):
             summary = {}
     budget = summary.get("budget") if isinstance(summary.get("budget"), Mapping) else {}
-    diagnostics = _diagnostic_metrics(root / "codex-diagnostics.jsonl")
+    diagnostics = _diagnostic_metrics(metrics_root / "codex-diagnostics.jsonl")
     return {
         "planning_calls": provider_calls,
         "wall_time_seconds": budget.get("elapsed_wall_time_seconds"),

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from ecos_agent.optimization.experiments.rq1_execution_evidence import (
     analyze_records,
     auc20,
@@ -90,6 +92,36 @@ def test_auc20_pads_only_a_complete_terminal_curve() -> None:
     assert result["partial"] == 0.5
 
 
+def test_analyzer_builds_cumulative_success_curve_from_terminal_outcomes() -> None:
+    receipt = _receipt()
+    terminal = SimpleNamespace(
+        model_dump=lambda **_: {
+            "metrics": {},
+            "objective_metrics": {},
+            "timing_guardrail": {},
+            "evaluation_metrics": [],
+        }
+    )
+    report = analyze_records(
+        [_start("i-1"), _start("i-2")],
+        [
+            _outcome(receipt, promoted=True).model_copy(
+                update={"terminal_observation": terminal}
+            ),
+            _outcome(receipt).model_copy(
+                update={
+                    "intervention_id": "i-2",
+                    "terminal_observation": terminal,
+                }
+            ),
+        ],
+    )
+
+    assert report["secondary"]["S11"]["value"] == 1
+    assert report["secondary"]["S15"]["value"] == 1.0
+    assert report["secondary"]["S15"]["numerator"] == 2
+
+
 def test_analyzer_keeps_failed_and_downstream_failure_distinct() -> None:
     receipt = _receipt()
     report = analyze_records([_start()], [_outcome(receipt)])
@@ -161,6 +193,53 @@ def test_contract_matrix_reports_missing_cases_and_markdown() -> None:
     assert matrix["summary"]["passed"] == 1
     assert "converted" in matrix["summary"]["missing_tier_a_cases"]
     assert "| exact mapping | yes | fixture-only |" in render_case_matrix_markdown(matrix)
+
+
+def test_episode_run_metrics_resolve_report_sibling_from_optimization_root(
+    tmp_path,
+) -> None:
+    from ecos_agent.optimization.experiments.rq1_execution_evidence_io import (
+        _episode_run_metrics,
+    )
+
+    root = (
+        tmp_path
+        / "cells"
+        / "rq1-ra-gcd-r1"
+        / "workspaces"
+        / "gcd"
+        / ".agent"
+        / "optimization"
+        / "rq1-ra-gcd-r1"
+    )
+    report = (
+        tmp_path
+        / "cells"
+        / "rq1-ra-gcd-r1"
+        / "reports"
+        / "gcd"
+        / "rq1-ra-gcd-r1"
+    )
+    root.mkdir(parents=True)
+    report.mkdir(parents=True)
+    (report / "episode-summary.v1.json").write_text(
+        '{"planning_calls":1,"budget":{"elapsed_wall_time_seconds":12.5}}',
+        encoding="utf-8",
+    )
+    (report / "codex-diagnostics.jsonl").write_text(
+        '{"usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}}\n',
+        encoding="utf-8",
+    )
+
+    metrics = _episode_run_metrics(root, provider_calls=1)
+
+    assert metrics["summary_available"] is True
+    assert metrics["wall_time_seconds"] == 12.5
+    assert metrics["token_usage"] == {
+        "input_tokens": 10,
+        "output_tokens": 2,
+        "total_tokens": 12,
+    }
 
 
 def test_analyze_episode_rejects_corrupt_ledger(tmp_path) -> None:

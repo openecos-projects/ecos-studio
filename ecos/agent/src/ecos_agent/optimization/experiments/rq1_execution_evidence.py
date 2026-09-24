@@ -5,6 +5,7 @@ import json
 import math
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from itertools import accumulate
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -424,7 +425,16 @@ def analyze_records(
     )
     terminal_complete = terminal_complete if terminal_complete is not None else all(item.terminal_observation is not None for item in outcomes_v)
     applied_candidates = [item for item in outcomes_v if outcome_receipt(item) is not None and outcome_receipt(item).application.status == "applied"]
-    success_curve = [item.terminal_observation is not None and _value(item.outcome) in {"improved", "execution_succeeded"} for item in outcomes_v]
+    success_curve = list(
+        accumulate(
+            (
+                item.terminal_observation is not None
+                and _value(item.outcome) in {"improved", "execution_succeeded"}
+                for item in outcomes_v
+            ),
+            lambda seen, current: seen or current,
+        )
+    )
     auc = auc20(success_curve, terminal_complete=terminal_complete)
     run_metrics = run_metrics or {}
     terminal_values = _terminal_metrics(outcomes_v)["values"]
