@@ -468,6 +468,49 @@ def test_planner_bounds_oversized_rationale_without_model_repair(
     assert oversized in provider._last_response_text
 
 
+def test_planner_bounds_oversized_nested_strings_without_model_repair(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    provider = _provider(tmp_path)
+    proposal = _proposal_v2(_context(), _domain())
+    oversized_goal = "g" * 400
+    oversized_rationale = "r" * 400
+    proposal["strategy"] = {
+        "schema_version": "ecos.optimization_strategy.v1",
+        "goal": oversized_goal,
+        "steps": [
+            {
+                "step_id": "s1",
+                "knob_id": "place.target_density",
+                "direction": "increase",
+                "requested_value": 0.85,
+                "rationale": oversized_rationale,
+            }
+        ],
+    }
+    calls = 0
+
+    def run_turn(*_args: object, **_kwargs: object) -> str:
+        nonlocal calls
+        calls += 1
+        provider._completed_turn = (f"thread-{tmp_path.name}", "turn", HASH)
+        return json.dumps(proposal)
+
+    monkeypatch.setattr(provider, "_run_turn", run_turn)
+    monkeypatch.setattr(provider, "_ensure_client", lambda: None)
+    monkeypatch.setattr(
+        provider, "_ensure_thread", lambda _client: f"thread-{tmp_path.name}"
+    )
+
+    result = provider.propose_v2(_context(), _domain())
+
+    assert calls == 1
+    assert result["strategy"]["goal"] == oversized_goal[:280]
+    assert result["strategy"]["steps"][0]["rationale"] == oversized_rationale[:280]
+    assert provider._last_response_text is not None
+    assert oversized_goal in provider._last_response_text
+
+
 def test_planner_evidence_has_no_excerpt_on_accepted_proposal(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

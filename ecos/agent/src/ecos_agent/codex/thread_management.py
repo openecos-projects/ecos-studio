@@ -31,6 +31,89 @@ _REPAIR_INSTRUCTION = (
 _REPAIR_EXCERPT_LIMIT = 1200
 
 
+def _resolve_schema_ref(
+    schema: dict[str, Any] | None, defs: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    if not isinstance(schema, dict):
+        return None
+    ref = schema.get("$ref")
+    if isinstance(ref, str) and ref.startswith("#/$defs/") and isinstance(defs, dict):
+        return defs.get(ref.rsplit("/", 1)[-1])
+    return schema
+
+
+def _effective_max_length(
+    schema: dict[str, Any] | None, defs: dict[str, Any] | None, depth: int = 0
+) -> int | None:
+    """Tightest ``maxLength`` declared on a schema node or its anyOf branches.
+
+    Optional model fields compile to ``anyOf: [{... maxLength ...}, null]``,
+    so the cap often lives one branch below the field schema.
+    """
+    schema = _resolve_schema_ref(schema, defs)
+    if not isinstance(schema, dict) or depth > 4:
+        return None
+    max_length = schema.get("maxLength")
+    if type(max_length) is int and max_length > 0:
+        return max_length
+    best: int | None = None
+    for key in ("anyOf", "oneOf"):
+        nested = schema.get(key)
+        if not isinstance(nested, list):
+            continue
+        for branch in nested:
+            candidate = _effective_max_length(branch, defs, depth + 1)
+            if candidate is not None and (best is None or candidate < best):
+                best = candidate
+    return best
+
+
+def _bound_strings_to_schema(
+    payload: Any,
+    schema: dict[str, Any] | None,
+    defs: dict[str, Any] | None = None,
+) -> Any:
+    """Truncate every string past its schema ``maxLength``, recursively.
+
+    The endpoint does not enforce the JSON schema it is handed; a single
+    oversized text field (rationale summary, strategy goal/rationale) would
+    otherwise burn the turn on validation rejection or the repair prompt.
+    Bounding happens in place before validation; length caps are the only
+    constraint touched here, everything else still routes through the model
+    validator.
+    """
+    schema = _resolve_schema_ref(schema, defs)
+    if not isinstance(schema, dict):
+        return payload
+    if isinstance(payload, str):
+        max_length = _effective_max_length(schema, defs)
+        if max_length is not None and max_length < len(payload):
+            return payload[:max_length]
+        return payload
+    if isinstance(payload, list):
+        items = schema.get("items")
+        if items is not None:
+            payload[:] = [_bound_strings_to_schema(item, items, defs) for item in payload]
+        return payload
+    if isinstance(payload, dict):
+        branches = [schema]
+        for key in ("anyOf", "oneOf"):
+            nested = schema.get(key)
+            if isinstance(nested, list):
+                branches.extend(nested)
+        properties: dict[str, Any] = {}
+        for branch in branches:
+            resolved = _resolve_schema_ref(branch, defs)
+            if isinstance(resolved, dict) and isinstance(resolved.get("properties"), dict):
+                for key, sub in resolved["properties"].items():
+                    properties.setdefault(key, sub)
+        for key, value in payload.items():
+            if key in properties:
+                payload[key] = _bound_strings_to_schema(value, properties[key], defs)
+        return payload
+    return payload
+
+
 class CodexThreadManagementMixin:
     def _request_json(
         self,
@@ -77,20 +160,11 @@ class CodexThreadManagementMixin:
                 payload = json.loads(text)
                 if not isinstance(payload, dict):
                     raise ValueError("assistant JSON must be an object")
-                rationale = payload.get("rationale_summary")
-                rationale_schema = output_schema.get("properties", {}).get(
-                    "rationale_summary", {}
-                )
-                max_length = rationale_schema.get("maxLength")
-                if (
-                    isinstance(rationale, str)
-                    and type(max_length) is int
-                    and max_length > 0
-                    and len(rationale) > max_length
-                ):
-                    # Keep the raw model text in _last_response_text for audit;
-                    # only bound the non-authoritative model-facing summary.
-                    payload["rationale_summary"] = rationale[:max_length]
+                # Keep the raw model text in _last_response_text for audit;
+                # only bound the non-authoritative model-facing strings to
+                # their declared schema caps (any depth, incl. action anyOf
+                # variants and the strategy object).
+                _bound_strings_to_schema(payload, output_schema, output_schema.get("$defs"))
                 if model is not None:
                     model.model_validate(payload)
             except (json.JSONDecodeError, ValueError) as exc:
