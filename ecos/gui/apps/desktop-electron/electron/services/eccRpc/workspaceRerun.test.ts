@@ -158,6 +158,10 @@ describe('prepareWorkspaceRerun', () => {
     await writeFile(join(source, 'home', 'home.json'), '{legacy')
     await writeFile(join(source, 'home', 'home.json.lock'), 'locked')
     await writeFile(
+      join(source, 'home', 'engineering-snapshot.json'),
+      '{"schemaVersion":2,"workspaceId":"source"}',
+    )
+    await writeFile(
       join(source, 'home', 'pdk.json'),
       JSON.stringify({ root: `${source}/pdk` }),
     )
@@ -204,6 +208,12 @@ describe('prepareWorkspaceRerun', () => {
     await expect(
       readFile(`${contract.target_workspace}/home/home.json.lock`, 'utf8'),
     ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(
+      readFile(`${contract.target_workspace}/home/engineering-snapshot.json`, 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(
+      readFile(join(source, 'home', 'engineering-snapshot.json'), 'utf8'),
+    ).resolves.toBe('{"schemaVersion":2,"workspaceId":"source"}')
     await expect(readFile(join(source, 'home', 'home.json'), 'utf8')).resolves.toBe(
       '{legacy',
     )
