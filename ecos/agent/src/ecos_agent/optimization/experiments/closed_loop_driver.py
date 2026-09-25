@@ -61,6 +61,9 @@ from ecos_agent.optimization.experiments.knowledge_metrics import (
     decision_level_endpoints,
     state_match_summary,
 )
+from ecos_agent.optimization.experiments.knowledge_treatments import (
+    ZERO_SHOT_GATE_TREATMENTS,
+)
 from ecos_agent.optimization.knowledge.cases import EmpiricalCaseAuditStore
 from ecos_agent.optimization.decision_audit import OptimizationDecisionAudit
 from ecos_agent.optimization.ledger import (
@@ -282,6 +285,7 @@ def _build_mediation_audit(
     reference_observation: TerminalObservation,
     noise_epsilon: dict[str, object] | None,
     objective_metric: ObjectiveMetric,
+    treatment: str = "closed_loop_episode",
 ) -> dict[str, object] | None:
     """Join the episode's persisted chains into one mediation audit artifact."""
     observation_path = episode_root / "optimization-proposal-observations.v1.jsonl"
@@ -314,11 +318,13 @@ def _build_mediation_audit(
         reference_observation=reference_observation,
         objective_metric=objective_metric.value,
         epsilon=epsilon,
+        treatment=treatment,
     )
     return {
         "schema_version": EPISODE_AUDIT_SCHEMA_VERSION,
         "design_id": design_id,
         "objective_metric": objective_metric.value,
+        "treatment": treatment,
         "calls": calls,
         "summary": summarize_episode_mediation(calls),
         "state_match": state_match_summary(calls),
@@ -499,7 +505,22 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
         "freeze, fixed pins the outline",
     )
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--agent-mode", default="full_agent")
+    parser.add_argument(
+        "--agent-mode",
+        default=None,
+        help="controller agent mode; defaults to full_agent, or to the mode "
+        "implied by --knowledge-treatment",
+    )
+    parser.add_argument(
+        "--knowledge-treatment",
+        default=None,
+        choices=tuple(
+            config.treatment.value for config in ZERO_SHOT_GATE_TREATMENTS
+        ),
+        help="RQ2 canonical treatment id; enters provider/context construction "
+        "through the single runtime-context entry point and stamps the "
+        "mediation audit and episode summary (never a shell prompt edit)",
+    )
     parser.add_argument(
         "--baseline-method",
         choices=tuple(method.value for method in BaselineMethod),
@@ -550,6 +571,22 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
     args = parser.parse_args(argv)
     if not _RUN_ID.fullmatch(args.design):
         raise SystemExit(f"design id is invalid: {args.design}")
+    treatment_modes = {
+        config.treatment.value: config.agent_mode
+        for config in ZERO_SHOT_GATE_TREATMENTS
+    }
+    if args.knowledge_treatment is not None:
+        if args.planning_evidence != "receipt-aware":
+            raise SystemExit(
+                "RQ2 knowledge treatments share the receipt-aware execution contract"
+            )
+        if args.agent_mode not in (None, treatment_modes[args.knowledge_treatment]):
+            raise SystemExit(
+                "--agent-mode conflicts with the mode implied by --knowledge-treatment"
+            )
+        args.agent_mode = treatment_modes[args.knowledge_treatment]
+    elif args.agent_mode is None:
+        args.agent_mode = "full_agent"
     goal_text = args.goal_text or _OBJECTIVES[args.objective]["goal_text"]
 
     design = load_design(args.designs_root.resolve(), args.design)
@@ -734,6 +771,11 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
         reference_observation=canonical,
         noise_epsilon=noise_epsilon,
         objective_metric=primary_metric,
+        treatment=(
+            args.knowledge_treatment
+            if args.knowledge_treatment is not None
+            else "closed_loop_episode"
+        ),
     )
     state_files = sorted(episode_root.glob("optimization-episode-state.v*.json"))
     if not state_files:
@@ -749,6 +791,7 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
         "primary_metric": primary_metric.value,
         "goal_text": goal_text,
         "agent_mode": args.agent_mode,
+        "knowledge_treatment": args.knowledge_treatment,
         "planning_evidence": args.planning_evidence,
         "planner_policy": (
             f"baseline:{args.baseline_method}"

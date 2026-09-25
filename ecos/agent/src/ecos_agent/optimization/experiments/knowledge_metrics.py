@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
+import random
 from collections import Counter
 from typing import Iterable, Mapping, Sequence
 
@@ -508,5 +510,149 @@ def offline_gate(
             and divergence > disagreement
             and errors == 0
             and opportunity_contexts >= min_opportunity_contexts
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# RQ2 empirical posteriors over frozen-context action projections.
+#
+# The provider exposes no logprob and no sampling seed, so policy posteriors
+# are Dirichlet-multinomial over observed action signatures with a symmetric
+# prior.  Monte-Carlo seeds control only the posterior draw sequence (a
+# registered analysis artifact); they never claim provider-side seeding.
+# ---------------------------------------------------------------------------
+
+RQ2_POSTERIOR_PRIOR_ALPHA = 1.0
+
+
+def posterior_seed(*parts: str) -> int:
+    """Deterministic MC seed derived from row identities (not provider state)."""
+    digest = hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()
+    return int(digest[:16], 16)
+
+
+def _dirichlet_draws(
+    counts: Mapping[str, int],
+    alpha: float,
+    *,
+    draws: int,
+    seed: int,
+) -> tuple[tuple[str, ...], list[list[float]]]:
+    keys = tuple(sorted(counts))
+    concentrations = [float(counts[key]) + alpha for key in keys]
+    rng = random.Random(seed)
+    samples: list[list[float]] = []
+    for _ in range(draws):
+        gammas = [rng.gammavariate(value, 1.0) for value in concentrations]
+        total = sum(gammas)
+        samples.append([value / total for value in gammas] if total else [1.0 / len(keys)] * len(keys))
+    return keys, samples
+
+
+def _percentiles(values: Sequence[float]) -> tuple[float, float]:
+    ordered = sorted(values)
+    if not ordered:
+        return 0.0, 0.0
+    lo = ordered[min(int(0.025 * (len(ordered) - 1)), len(ordered) - 1)]
+    hi = ordered[min(int(0.975 * (len(ordered) - 1)), len(ordered) - 1)]
+    return float(lo), float(hi)
+
+
+def posterior_cell_metrics(
+    counts: Mapping[str, int],
+    *,
+    alpha: float = RQ2_POSTERIOR_PRIOR_ALPHA,
+    draws: int = 4000,
+    seed: int = 0,
+) -> dict[str, object]:
+    """Dirichlet-multinomial posterior summary for one cell at one action level.
+
+    ``counts`` maps action signatures to observation counts; errors and
+    abstentions stay in the vocabulary so provider noise is never silently
+    dropped from the denominator.
+    """
+    total = sum(counts.values())
+    keys, samples = _dirichlet_draws(counts, alpha, draws=draws, seed=seed)
+    posterior_mean = {
+        key: (count + alpha) / (total + alpha * len(keys))
+        for key, count in sorted(counts.items())
+    }
+    mass_by_key = {
+        key: [sample[index] for sample in samples] for index, key in enumerate(keys)
+    }
+    intervals = {
+        key: _percentiles(values) for key, values in mass_by_key.items()
+    }
+    entropies = [
+        -sum(mass * math.log2(mass) for mass in sample if mass > 0.0)
+        for sample in samples
+    ]
+    top_action = max(posterior_mean, key=lambda key: posterior_mean[key]) if posterior_mean else None
+    top_lo, top_hi = (intervals[top_action] if top_action is not None else (0.0, 0.0))
+    entropy_lo, entropy_hi = _percentiles(entropies)
+    return {
+        "schema_version": "ecos.rq2_posterior_cell.v1",
+        "observations": total,
+        "vocabulary_size": len(keys),
+        "prior_alpha": alpha,
+        "mc_draws": draws,
+        "mc_seed": seed,
+        "posterior_action_mass": {
+            key: {"mean": posterior_mean[key], "lo95": intervals[key][0], "hi95": intervals[key][1]}
+            for key in posterior_mean
+        },
+        "posterior_entropy": {
+            "mean": sum(entropies) / len(entropies) if entropies else 0.0,
+            "lo95": entropy_lo,
+            "hi95": entropy_hi,
+        },
+        "top_action": top_action,
+        "top_action_lower_bound": top_lo if top_action is not None else None,
+        "credible_interval_width": (top_hi - top_lo) if top_action is not None else None,
+    }
+
+
+def total_variation(p: Mapping[str, float], q: Mapping[str, float]) -> float:
+    keys = set(p) | set(q)
+    return 0.5 * sum(abs(float(p.get(key, 0.0)) - float(q.get(key, 0.0))) for key in keys)
+
+
+def posterior_mean_distribution(counts: Mapping[str, int], *, alpha: float) -> dict[str, float]:
+    total = sum(counts.values())
+    return {
+        key: (value + alpha) / (total + alpha * len(counts))
+        for key, value in counts.items()
+    }
+
+
+def material_shift_probability(
+    counts_a: Mapping[str, int],
+    counts_b: Mapping[str, int],
+    *,
+    tau: float,
+    alpha: float = RQ2_POSTERIOR_PRIOR_ALPHA,
+    draws: int = 4000,
+    seed: int = 0,
+) -> dict[str, object]:
+    """Pr[TV(p_a, p_b) > tau] under independent Dirichlet posteriors."""
+    vocabulary = sorted(set(counts_a) | set(counts_b))
+    if not vocabulary:
+        return {"probability": None, "paired_draws": 0, "tau": tau}
+    padded_a = {key: counts_a.get(key, 0) for key in vocabulary}
+    padded_b = {key: counts_b.get(key, 0) for key in vocabulary}
+    _, samples_a = _dirichlet_draws(padded_a, alpha, draws=draws, seed=seed)
+    _, samples_b = _dirichlet_draws(padded_b, alpha, draws=draws, seed=seed ^ 0x5A5A5A5A)
+    exceeded = 0
+    for sample_a, sample_b in zip(samples_a, samples_b):
+        distance = 0.5 * sum(abs(x - y) for x, y in zip(sample_a, sample_b))
+        exceeded += distance > tau
+    return {
+        "probability": exceeded / len(samples_a),
+        "paired_draws": len(samples_a),
+        "tau": tau,
+        "posterior_mean_tv": total_variation(
+            posterior_mean_distribution(padded_a, alpha=alpha),
+            posterior_mean_distribution(padded_b, alpha=alpha),
         ),
     }

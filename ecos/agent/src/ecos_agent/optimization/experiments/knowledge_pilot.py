@@ -66,8 +66,10 @@ from ecos_agent.optimization.knowledge.compiler import (
     StateEvidenceFeature,
     SupportedActionView,
     compile_supported_action_view,
+    knowledge_support_catalog_from_bundles,
     load_state_rule_manifest,
 )
+from ecos_agent.knowledge.step import load_default_general_knowledge_bundles
 from ecos_agent.optimization.objective_alignment import (
     ActiveOptimizationObjective,
     OptimizationObjectiveAlignment,
@@ -268,6 +270,34 @@ def apply_treatment(
         return replace(context, supported_action_view=None)
     if agent_mode == "full_agent":
         return context
+    if agent_mode == "unconditioned_support":
+        # Mirrors the online controller: identical compiled scaffold and
+        # exposure format, state predicate gate skipped.  The catalog is
+        # rebuilt deterministically from the knowledge bundles and must hash
+        # to the frozen view's catalog, so the projection cannot smuggle in
+        # a different knowledge layer.
+        view = context.supported_action_view
+        if view is None:
+            raise ValueError(
+                "unconditioned_support projection requires a supported action view"
+            )
+        catalog = knowledge_support_catalog_from_bundles(
+            load_default_general_knowledge_bundles()
+        )
+        if catalog.catalog_sha256 != view.catalog_sha256:
+            raise ValueError(
+                "unconditioned_support projection catalog drifted from the frozen bank"
+            )
+        ungated = compile_supported_action_view(
+            state=view.state,
+            catalog=catalog,
+            candidate_refs=view.candidate_refs,
+            retrieval_ranked_refs=view.retrieval_ranked_refs,
+            legal_actions=context.legal_actions,
+            effective_domains=context.effective_domains,
+            state_gated=False,
+        )
+        return replace(context, supported_action_view=ungated)
     raise ValueError(f"offline pilot treatment agent mode is invalid: {agent_mode}")
 
 

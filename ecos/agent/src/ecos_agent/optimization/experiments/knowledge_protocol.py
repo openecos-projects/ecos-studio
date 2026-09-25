@@ -8,6 +8,11 @@ from ecos_agent.hashing import canonical_sha256
 
 PILOT_DESIGNS = ("gcd", "vm80")
 
+# Formal RQ2 cohort (frozen design manifest v3).  Kept separate from the
+# two-design pilot cohort so the old pilot schema and its manifests stay
+# valid; the RQ2 runner validates against this tuple instead.
+RQ2_DESIGNS = ("dcpu", "gcd", "i2c", "s35932", "vm80", "xtea")
+
 # Registered ahead of the formal matrix: the three prewritten answers to the
 # LLM-randomness review question.  Frozen into every protocol manifest so
 # the threats section cannot drift from the frozen protocol.
@@ -32,6 +37,15 @@ def validate_design_ids(design_ids: Sequence[str]) -> tuple[str, ...]:
     if not values or any(item not in PILOT_DESIGNS for item in values):
         raise ValueError(
             f"knowledge pilot is limited to the pilot cohort: {PILOT_DESIGNS}"
+        )
+    return values
+
+
+def validate_rq2_design_ids(design_ids: Sequence[str]) -> tuple[str, ...]:
+    values = tuple(sorted(set(design_ids)))
+    if not values or any(item not in RQ2_DESIGNS for item in values):
+        raise ValueError(
+            f"formal RQ2 knowledge experiment is limited to the frozen cohort: {RQ2_DESIGNS}"
         )
     return values
 
