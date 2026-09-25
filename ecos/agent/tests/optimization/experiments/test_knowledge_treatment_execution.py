@@ -307,7 +307,7 @@ def test_phase8_calibration_stops_after_two_identical_replays(
     context = json.loads(
         (tmp_path / "calibration" / "noise-context.v1.json").read_text(encoding="utf-8")
     )
-    assert context["schema_version"] == "ecos.noise_context.v1"
+    assert context["schema_version"] == "ecos.noise_context.v2"
     assert context["fingerprint"].startswith("sha256:")
     assert context["context"]["baseline"] == {"density_weight": 0.00085}
     assert context["context"]["flow_steps"] == list(runner.GUI_WORKSPACE_FLOW_STEPS)
@@ -370,6 +370,86 @@ def test_phase8_calibration_reuses_cached_replays_for_unchanged_context(
     assert reference == observation
     assert runtime == 12.0
     assert len(list(calibration.glob("default-replay-*"))) == 2
+
+
+def test_phase8_calibration_reuses_replays_after_nonsemantic_source_changes(
+    tmp_path, monkeypatch
+) -> None:
+    runner = _load_experiment_execution()
+    workspace = _canonical_workspace(tmp_path)
+    manifest, design = _calibration_manifest(tmp_path)
+    observation = _terminal_observation()
+    calls: list = []
+    _patch_calibration(monkeypatch, tmp_path, lambda _workspace: observation)
+    monkeypatch.setattr(runner, "EccContentLengthRpcClient", _replay_client(calls))
+    repo_root = Path(runner.__file__).resolve().parents[6]
+    ecos_revision = ["ecos-before"]
+    monkeypatch.setattr(
+        runner,
+        "_git_identity",
+        lambda root: ecos_revision[0]
+        if Path(root).resolve() == repo_root
+        else "unchanged-input-revision",
+    )
+    calibration = tmp_path / "calibration"
+
+    runner._calibrate(manifest, design, workspace, observation, calibration, 1.0)
+    context_path = calibration / "noise-context.v1.json"
+    legacy = json.loads(context_path.read_text(encoding="utf-8"))
+    legacy_context = dict(legacy["context"])
+    legacy_context.pop("calibration_protocol")
+    legacy_context["ecos_revision"] = "ecos-before"
+    legacy_context["ecc_revision"] = "unchanged-input-revision"
+    context_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "ecos.noise_context.v1",
+                "fingerprint": "sha256:legacy-context",
+                "context": legacy_context,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (workspace / "origin/filelist").write_bytes(
+        (workspace / "origin/filelist.f").read_bytes()
+    )
+    ecos_revision[0] = "ecos-after"
+
+    replay_calls: list = []
+    monkeypatch.setattr(runner, "EccContentLengthRpcClient", _replay_client(replay_calls))
+    runner._calibrate(manifest, design, workspace, observation, calibration, 1.0)
+
+    assert replay_calls == []
+    assert not list(calibration.glob("stale-default-replay-*"))
+    context = json.loads(context_path.read_text(encoding="utf-8"))
+    assert context["schema_version"] == "ecos.noise_context.v2"
+    assert context["provenance"]["ecos_revision"] == "ecos-after"
+    assert context["compatible_reuse"]["previous_fingerprint"] == (
+        "sha256:legacy-context"
+    )
+    assert "ecos_revision" not in context["context"]
+    assert "filelist" not in context["context"]["design_inputs"]
+
+
+def test_phase8_calibration_invalidates_replays_when_ecc_binary_changes(
+    tmp_path, monkeypatch
+) -> None:
+    runner = _load_experiment_execution()
+    workspace = _canonical_workspace(tmp_path)
+    manifest, design = _calibration_manifest(tmp_path)
+    observation = _terminal_observation()
+    calls: list = []
+    _patch_calibration(monkeypatch, tmp_path, lambda _workspace: observation)
+    monkeypatch.setattr(runner, "EccContentLengthRpcClient", _replay_client(calls))
+    calibration = tmp_path / "calibration"
+
+    runner._calibrate(manifest, design, workspace, observation, calibration, 1.0)
+    (tmp_path / "ecc").write_bytes(b"changed-ecc-agent-rpc")
+    runner._calibrate(manifest, design, workspace, observation, calibration, 1.0)
+
+    starts = [params for method, params, _ in calls if method == "operation.start_flow"]
+    assert len(starts) == 4
+    assert list(calibration.glob("stale-default-replay-*"))
 
 
 def test_phase8_calibration_invalidates_replays_when_context_changes(

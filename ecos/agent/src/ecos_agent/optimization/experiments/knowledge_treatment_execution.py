@@ -43,6 +43,7 @@ _ECC_DISABLED_FLOW_STEPS = frozenset({"lec"})
 # identical; the third only runs when drift appears and needs bounding.
 _DEFAULT_REPLAYS = 3
 _MIN_NOISE_REPLAYS = 2
+_NOISE_CONTEXT_PROTOCOL = "phase8-default-replay-v1"
 
 
 class DesignSpec(NamedTuple):
@@ -477,21 +478,55 @@ def _ensure_noise_context(
     stays auditable.
     """
     context = _noise_context_payload(manifest, workspace)
+    provenance = _noise_context_provenance(manifest)
     context_path = output / "noise-context.v1.json"
-    stored = None
+    stored_payload: dict[str, object] = {}
     if context_path.is_file():
         try:
-            stored = json.loads(context_path.read_text(encoding="utf-8")).get(
-                "context"
-            )
+            loaded = json.loads(context_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                stored_payload = loaded
         except (OSError, ValueError):
-            stored = None
+            pass
+    stored = _semantic_noise_context(stored_payload.get("context"))
     if stored == context:
+        if (
+            stored_payload.get("schema_version") != "ecos.noise_context.v2"
+            or stored_payload.get("context") != context
+            or stored_payload.get("provenance") != provenance
+        ):
+            previous_context = stored_payload.get("context")
+            previous_provenance = stored_payload.get("provenance")
+            _write_json(
+                context_path,
+                {
+                    "schema_version": "ecos.noise_context.v2",
+                    "fingerprint": canonical_sha256(context),
+                    "context": context,
+                    "provenance": provenance,
+                    "compatible_reuse": {
+                        "basis": "semantic_context_equal",
+                        "previous_fingerprint": stored_payload.get("fingerprint"),
+                        "previous_ecos_revision": (
+                            previous_context.get("ecos_revision")
+                            if isinstance(previous_context, dict)
+                            else None
+                        )
+                        or (
+                            previous_provenance.get("ecos_revision")
+                            if isinstance(previous_provenance, dict)
+                            else None
+                        ),
+                    },
+                },
+            )
         return
     for stale in output.glob("default-replay-*"):
         renamed = output / f"stale-{stale.name}"
-        if renamed.exists():
-            shutil.rmtree(renamed)
+        suffix = 2
+        while renamed.exists():
+            renamed = output / f"stale-{stale.name}-{suffix}"
+            suffix += 1
         stale.rename(renamed)
     epsilon_path = output / "noise-epsilon.v1.json"
     if epsilon_path.exists():
@@ -499,9 +534,10 @@ def _ensure_noise_context(
     _write_json(
         context_path,
         {
-            "schema_version": "ecos.noise_context.v1",
+            "schema_version": "ecos.noise_context.v2",
             "fingerprint": canonical_sha256(context),
             "context": context,
+            "provenance": provenance,
         },
     )
 
@@ -509,13 +545,11 @@ def _ensure_noise_context(
 def _noise_context_payload(
     manifest: ExperimentManifest, workspace: Path
 ) -> dict[str, object]:
-    repo_root = Path(__file__).resolve().parents[6]
     ecc_executable = _ecc_executable()
     # Design inputs enter through workspace/origin/ (the exact bytes the
     # canonical flow consumed); `design` itself needs no separate entry.
     return {
-        "ecos_revision": _git_identity(repo_root),
-        "ecc_revision": _git_identity(ecc_executable.parents[2]),
+        "calibration_protocol": _NOISE_CONTEXT_PROTOCOL,
         "ecc_executable_sha256": file_sha256(ecc_executable),
         "pdk_revision": _git_identity(manifest.pdk_root),
         "design_inputs": _workspace_input_hashes(workspace),
@@ -526,6 +560,31 @@ def _noise_context_payload(
             if isinstance(item, dict)
         ],
     }
+
+
+def _noise_context_provenance(manifest: ExperimentManifest) -> dict[str, object]:
+    ecc_executable = _ecc_executable()
+    return {
+        "ecos_revision": _git_identity(Path(__file__).resolve().parents[6]),
+        "ecc_revision": _git_identity(ecc_executable.parents[2]),
+        "pdk_revision": _git_identity(manifest.pdk_root),
+    }
+
+
+def _semantic_noise_context(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    context = dict(value)
+    context.pop("ecos_revision", None)
+    context.pop("ecc_revision", None)
+    context.setdefault("calibration_protocol", _NOISE_CONTEXT_PROTOCOL)
+    inputs = context.get("design_inputs")
+    if isinstance(inputs, dict):
+        inputs = dict(inputs)
+        if inputs.get("filelist") == inputs.get("filelist.f"):
+            inputs.pop("filelist", None)
+        context["design_inputs"] = inputs
+    return context
 
 
 def _git_identity(root: Path) -> str | None:
@@ -545,11 +604,14 @@ def _git_identity(root: Path) -> str | None:
 
 def _workspace_input_hashes(workspace: Path) -> dict[str, str]:
     origin = workspace / "origin"
-    return {
+    hashes = {
         str(path.relative_to(origin)): file_sha256(path)
         for path in sorted(origin.rglob("*"))
         if path.is_file()
     }
+    if hashes.get("filelist") == hashes.get("filelist.f"):
+        hashes.pop("filelist", None)
+    return hashes
 
 
 def _replays_drift(observations: list[TerminalObservation]) -> bool:
