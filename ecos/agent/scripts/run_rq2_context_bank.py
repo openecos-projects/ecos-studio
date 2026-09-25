@@ -28,6 +28,7 @@ from ecos_agent.optimization.experiments.knowledge_protocol import (
 from ecos_agent.optimization.experiments.rq2_knowledge_experiment import (
     RQ2_BANK_SCHEMA,
     STRATUM_ALIASES,
+    canonical_stratum,
     upgrade_bank_contexts,
     validate_rq2_context_bank,
 )
@@ -133,12 +134,17 @@ def capture_design(
             prompt_skeleton_sha256=prompt_skeleton_sha256,
             state_rule_manifest_sha256=manifest.manifest_sha256,
         )
-        wanted = {alias for alias in strata}
+        wanted = {canonical_stratum(alias) for alias in strata}
         upgraded = [
             context
             for context in upgraded
             if context["state_stratum"] in wanted
         ]
+        excluded.extend(
+            record
+            for record in missing
+            if record["state_stratum"] in wanted
+        )
         contexts.extend(upgraded)
         excluded.extend(missing)
         checkpoint_records.append(
