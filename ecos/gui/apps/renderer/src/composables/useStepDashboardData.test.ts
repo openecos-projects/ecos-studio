@@ -319,6 +319,142 @@ describe('useStepDashboardData', () => {
     expect(dashboard.timingDetailErrors.value).toEqual({})
   })
 
+  it('loads per-step QoR summary and hotspots through the artifact channel', async () => {
+    const result = detailResult()
+    if (result.detail.status !== 'ready') throw new Error('expected fixture detail')
+    result.detail.data.analysis.summary = null
+    result.detail.data.artifacts = [
+      {
+        artifactId: 'qor-summary-place',
+        availability: 'available',
+        kind: 'qor_summary',
+        name: 'qor_summary.json',
+        stepId: 'Place',
+      },
+      {
+        artifactId: 'qor-hotspots-place',
+        availability: 'available',
+        kind: 'qor_hotspots',
+        name: 'qor_hotspots.json',
+        stepId: 'Place',
+      },
+    ]
+    testState.getStepDetail.mockResolvedValue(result)
+    testState.getArtifact.mockImplementation(({ artifactId, workspaceRevision }) => ({
+      artifact: {
+        status: 'ready',
+        issues: [],
+        data: {
+          artifactId,
+          kind: artifactId.startsWith('qor_summary') ? 'qor_summary' : 'qor_hotspots',
+          mimeType: 'application/json',
+          name: `${artifactId}.json`,
+          ...(artifactId.startsWith('qor-summary')
+            ? {
+                summary: {
+                  quality_status: 'blocked',
+                  gates: [{ id: 'area', state: 'failed', blocking: true, metrics: [] }],
+                },
+              }
+            : {}),
+          ...(artifactId.startsWith('qor-hotspots')
+            ? { hotspots: [{ kind: 'congestion', severity: 'warning' }] }
+            : {}),
+        },
+      },
+      workspaceContextId: 'context-a',
+      workspaceRevision,
+    }))
+    const dashboard = scope.run(() => useStepDashboardData())!
+
+    await vi.waitFor(() => expect(dashboard.loading.value).toBe(false))
+
+    expect(dashboard.data.value?.qor).toMatchObject({
+      status: 'blocked',
+      blocked: 1,
+      hotspotCount: 1,
+      gates: [{ id: 'area', state: 'failed', blocking: true }],
+    })
+  })
+
+  it('does not refetch or error on timing corners that bulk-loaded without a corner directory', async () => {
+    const result = detailResult()
+    if (result.detail.status !== 'ready') throw new Error('expected fixture detail')
+    result.detail.data.artifacts = [
+      {
+        artifactId: 'timing-summary-synthesis',
+        availability: 'available',
+        kind: 'timing_summary',
+        name: 'qor_summary.json',
+        stepId: 'Place',
+      },
+      {
+        artifactId: 'timing-paths-synthesis',
+        availability: 'available',
+        kind: 'timing_paths',
+        name: 'timing_paths.json',
+        stepId: 'Place',
+      },
+    ]
+    testState.getStepDetail.mockResolvedValue(result)
+    testState.getArtifact.mockImplementation(({ artifactId, workspaceRevision }) => ({
+      artifact: {
+        status: 'ready',
+        issues: [],
+        data: {
+          artifactId,
+          kind: artifactId.startsWith('timing-summary')
+            ? 'timing_summary'
+            : 'timing_paths',
+          mimeType: 'application/json',
+          name: `${artifactId}.json`,
+          ...(artifactId.startsWith('timing-summary')
+            ? {
+                timingSummary: {
+                  corner: 'post_synthesis',
+                  meetsTiming: false,
+                  setup: { wns: 18.4, tns: 0, violationCount: 0, frequencyMhz: 640 },
+                  hold: { wns: -0.038, tns: -0.2, violationCount: 12 },
+                },
+              }
+            : {}),
+          ...(artifactId.startsWith('timing-paths')
+            ? {
+                timingPaths: {
+                  corner: 'post_synthesis',
+                  pathLimit: 20,
+                  paths: [
+                    {
+                      pathId: 'setup-1',
+                      analysisType: 'setup',
+                      pathGroup: 'clk',
+                      startPoint: 'u0/Q',
+                      endPoint: 'u1/D',
+                      slackNs: 18.4,
+                      stages: [],
+                    },
+                  ],
+                },
+              }
+            : {}),
+        },
+      },
+      workspaceContextId: 'context-a',
+      workspaceRevision,
+    }))
+    const dashboard = scope.run(() => useStepDashboardData())!
+    await vi.waitFor(() => expect(dashboard.loading.value).toBe(false))
+    expect(testState.getArtifact).toHaveBeenCalledTimes(2)
+
+    await dashboard.loadTimingCorner('post_synthesis')
+
+    expect(testState.getArtifact).toHaveBeenCalledTimes(2)
+    expect(dashboard.timingDetailErrors.value).toEqual({})
+    expect(dashboard.data.value?.timingAnalysis?.pathsByCorner).toMatchObject([
+      { corner: 'post_synthesis', paths: [{ id: 'post_synthesis:setup-1' }] },
+    ])
+  })
+
   it.each(['succeeded', 'skipped'] as const)(
     'keeps stale artifacts and Checklist until the current Step is %s',
     async (state) => {

@@ -498,9 +498,13 @@ export interface BackendWorkspaceArtifactRequest {
 export interface BackendWorkspaceArtifactContent {
   artifactId: string
   bytes?: Uint8Array
+  /** Per-step QoR hotspot records, lazy-loaded from kind `qor_hotspots`. */
+  hotspots?: Array<Record<string, unknown>>
   kind: string
   mimeType: string
   name: string
+  /** Per-step QoR summary (quality gates), lazy-loaded from kind `qor_summary`. */
+  summary?: Record<string, unknown>
   text?: string
   timingIssues?: WorkspaceStaTimingIssuesDetail
   timingPaths?: WorkspaceTimingPathsDetail

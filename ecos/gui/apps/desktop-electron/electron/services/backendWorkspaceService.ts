@@ -32,6 +32,10 @@ import { artifactDescriptor, workspaceStepDetail } from './backendWorkspaceDetai
 import {
   readWorkspaceArtifact,
   readWorkspaceChecklistEvidence,
+  readWorkspaceLecResult,
+  readWorkspaceRcxInsights,
+  readWorkspaceStepFacts,
+  readWorkspaceSubflow,
   type WorkspaceArtifactReader,
 } from './backendWorkspaceArtifact'
 import type {
@@ -262,17 +266,97 @@ export class BackendWorkspaceService {
     const flow = flowSection(snapshot)
     const checklist = checklistSection(snapshot, flow)
     const insights = context.flowInsights
-    return {
-      detail: workspaceStepDetail(
+    const detail = workspaceStepDetail(
+      snapshot,
+      request.stepId,
+      flow,
+      checklist,
+      insights?.status === 'ready' || insights?.status === 'partial'
+        ? insights.data
+        : null,
+      snapshot.staleSnapshot,
+    )
+    if (
+      (detail.status === 'ready' || detail.status === 'partial') &&
+      context.workspaceRoot
+    ) {
+      const reader = this.options.projectManagementReadService.readVerifiedArtifact
+        ? (artifactRequest: Parameters<WorkspaceArtifactReader>[0]) =>
+            this.options.projectManagementReadService.readVerifiedArtifact!(
+              artifactRequest,
+            )
+        : undefined
+      detail.data.subflow = await readWorkspaceSubflow(
         snapshot,
+        context.workspaceRoot,
         request.stepId,
-        flow,
-        checklist,
-        insights?.status === 'ready' || insights?.status === 'partial'
-          ? insights.data
-          : null,
-        snapshot.staleSnapshot,
-      ),
+        reader,
+      )
+      const analysis = detail.data.analysis
+      if (!analysis.lec) {
+        analysis.lec = await readWorkspaceLecResult(
+          snapshot,
+          context.workspaceRoot,
+          request.stepId,
+          reader,
+        )
+      }
+      if (!analysis.rcx) {
+        analysis.rcx = await readWorkspaceRcxInsights(
+          snapshot,
+          context.workspaceRoot,
+          request.stepId,
+          reader,
+        )
+      }
+      if (!analysis.database || !analysis.lvs) {
+        const facts = await readWorkspaceStepFacts(
+          snapshot,
+          context.workspaceRoot,
+          request.stepId,
+          reader,
+        )
+        if (!analysis.database) analysis.database = facts.database
+        if (!analysis.lvs) analysis.lvs = facts.lvs
+      }
+      if (detail.data.staleEvidence && snapshot.staleSnapshot) {
+        const stale = detail.data.staleEvidence
+        stale.subflow = await readWorkspaceSubflow(
+          snapshot.staleSnapshot,
+          context.workspaceRoot,
+          request.stepId,
+          reader,
+        )
+        if (!stale.analysis.lec) {
+          stale.analysis.lec = await readWorkspaceLecResult(
+            snapshot.staleSnapshot,
+            context.workspaceRoot,
+            request.stepId,
+            reader,
+          )
+        }
+        if (!stale.analysis.rcx) {
+          stale.analysis.rcx = await readWorkspaceRcxInsights(
+            snapshot.staleSnapshot,
+            context.workspaceRoot,
+            request.stepId,
+            reader,
+          )
+        }
+        if (!stale.analysis.database || !stale.analysis.lvs) {
+          const staleFacts = await readWorkspaceStepFacts(
+            snapshot.staleSnapshot,
+            context.workspaceRoot,
+            request.stepId,
+            reader,
+          )
+          if (!stale.analysis.database) stale.analysis.database = staleFacts.database
+          if (!stale.analysis.lvs) stale.analysis.lvs = staleFacts.lvs
+        }
+      }
+    }
+    return {
+      detail,
       generation: context.generation,
       workspaceContextId: context.id,
       workspaceId: snapshot.snapshot.workspaceId,

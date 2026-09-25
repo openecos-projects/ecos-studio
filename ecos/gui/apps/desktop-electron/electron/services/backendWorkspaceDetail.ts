@@ -1,5 +1,6 @@
 import type {
   EccEngineeringAnalysisArtifactRef,
+  EccEngineeringMetric,
   ReadSection,
   WorkspaceArtifactDescriptor,
   WorkspaceChecklistSummary,
@@ -14,6 +15,23 @@ type ValidSnapshot = NonNullable<ProjectEngineeringSnapshotReadResult['staleSnap
 
 function sameStep(left: string, right: string): boolean {
   return left.trim().toLowerCase() === right.trim().toLowerCase()
+}
+
+// The committed metrics section carries every step's bounded QoR projection:
+// per-step groups are prefixed with the lowercased step name (`sta_metrics`,
+// `sta_signoff_coverage`, `rcx_corner_coverage`, ...), while run facts live in
+// the shared `runtime` group scoped as `<step>_execution`.
+function stepMetrics(snapshot: ValidSnapshot, stepId: string): EccEngineeringMetric[] {
+  const section = snapshot.sections.metrics
+  if (section.status !== 'ready' && section.status !== 'partial') return []
+  const stepKey = stepId.trim().toLowerCase()
+  const groupPrefix = `${stepKey}_`
+  const runtimeScope = `${stepKey}_execution`
+  return section.data.filter((metric) =>
+    metric.analysis_group === 'runtime'
+      ? metric.scope === runtimeScope
+      : metric.analysis_group.startsWith(groupPrefix),
+  )
 }
 
 export function artifactDescriptor(
@@ -90,13 +108,14 @@ export function workspaceStepDetail(
       }
     }
   }
-  // v6 snapshots carry no inlined per-step analysis payloads; report content
+  // v6 snapshots carry no inlined per-step analysis payloads; per-step metrics
+  // project from the committed metrics section, and summary/hotspot content
   // loads on demand through the artifact channel.
   return {
     status: 'ready',
     data: {
       analysis: {
-        metrics: [],
+        metrics: stepMetrics(snapshot, stepId),
         summary: null,
         hotspots: [],
         lec: null,

@@ -1229,9 +1229,10 @@ describe('BackendWorkspaceService', () => {
         status: 'ready',
         data: {
           step: { state: 'not-started' },
-          // v6 step detail carries no inlined metrics; stale evidence keeps the
-          // predecessor flow/checklist context while per-step metrics return
-          // through the artifact channel (T07).
+          // Stale evidence projects its metrics from the predecessor's committed
+          // metrics section; this fixture groups them under `test`, so no
+          // per-step metrics match and summary/hotspots stay on the artifact
+          // channel.
           staleEvidence: {
             workspaceRevision: 1,
             analysis: { metrics: [] },
@@ -1921,6 +1922,646 @@ describe('BackendWorkspaceService', () => {
         issues: [{ code: 'ARTIFACT_INVALID_JSON' }],
       },
     })
+  })
+
+  it('projects per-step metrics from the committed metrics section into Step detail', async () => {
+    const snapshot = engineeringSnapshot()
+    snapshot.workspaceRevision = 2
+    snapshot.flow = {
+      steps: [
+        { name: 'Place', tool: 'ecc', state: 'Success', runtime: '0:0:2' },
+        {
+          name: 'Timing optimization',
+          tool: 'sizer',
+          state: 'Success',
+          runtime: '0:0:1',
+        },
+        { name: 'sta', tool: 'ecc', state: 'Success', runtime: '0:0:1' },
+      ],
+    }
+    const placeMetric = {
+      ...engineeringMetric('place_hpwl', 1234),
+      analysis_group: 'place_metrics',
+    }
+    const placeRuntime = {
+      ...engineeringMetric('runtime_seconds', 2, { scope: 'place_execution' }),
+      analysis_group: 'runtime',
+      category: 'runtime' as const,
+    }
+    const timingMetric = {
+      ...engineeringMetric('to_setup_tns', 0),
+      analysis_group: 'timing optimization_metrics',
+    }
+    const staMetric = {
+      ...engineeringMetric('sta_wns', -0.1),
+      analysis_group: 'sta_metrics',
+    }
+    const staRuntime = {
+      ...engineeringMetric('peak_memory_mb', 100, { scope: 'sta_execution' }),
+      analysis_group: 'runtime',
+      category: 'runtime' as const,
+    }
+    snapshot.metrics = [placeMetric, placeRuntime, timingMetric, staMetric, staRuntime]
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: persistedReadService(snapshot),
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+    const overview = await runWithWindowScope(57, () => service.getOverview())
+
+    const placeDetail = await runWithWindowScope(57, () =>
+      service.getStepDetail({
+        stepId: 'Place',
+        workspaceContextId: overview.workspaceContextId,
+        workspaceRevision: 2,
+      }),
+    )
+    expect(
+      placeDetail.detail.status === 'ready' &&
+        placeDetail.detail.data.analysis.metrics.map((metric) => metric.id),
+    ).toEqual(['place_hpwl', 'runtime_seconds'])
+
+    const timingDetail = await runWithWindowScope(57, () =>
+      service.getStepDetail({
+        stepId: 'Timing optimization',
+        workspaceContextId: overview.workspaceContextId,
+        workspaceRevision: 2,
+      }),
+    )
+    expect(
+      timingDetail.detail.status === 'ready' &&
+        timingDetail.detail.data.analysis.metrics.map((metric) => metric.id),
+    ).toEqual(['to_setup_tns'])
+  })
+
+  it('reads per-step QoR summary and hotspots through the artifact channel', async () => {
+    const snapshot = engineeringSnapshot()
+    snapshot.workspaceRevision = 2
+    const summaryBytes = new TextEncoder().encode(
+      JSON.stringify({
+        schema_version: 4,
+        analysis_status: 'valid',
+        quality_status: 'fail',
+        gates: [
+          {
+            id: 'timing-setup',
+            title: 'Setup closure',
+            state: 'failed',
+            blocking: true,
+            metrics: [{ id: 'sta_wns', expected: 0, operator: '>=' }],
+          },
+        ],
+        missing_metrics: [],
+      }),
+    )
+    const hotspotBytes = new TextEncoder().encode(
+      JSON.stringify({
+        schema_version: 3,
+        hotspots: [
+          {
+            kind: 'congestion',
+            severity: 'warning',
+            metric_id: 'place_rudy_utilization_max',
+            value: 0.9,
+          },
+        ],
+      }),
+    )
+    snapshot.artifacts = [
+      {
+        artifactId: 'qor-summary-sta',
+        availability: 'available',
+        kind: 'qor_summary',
+        name: 'qor_summary.json',
+        reference: 'STA_ecc/analysis/qor_summary.json',
+        sizeBytes: summaryBytes.byteLength,
+        stepId: 'sta',
+      },
+      {
+        artifactId: 'qor-hotspots-sta',
+        availability: 'available',
+        kind: 'qor_hotspots',
+        name: 'qor_hotspots.json',
+        reference: 'STA_ecc/analysis/qor_hotspots.json',
+        sizeBytes: hotspotBytes.byteLength,
+        stepId: 'sta',
+      },
+    ] as never
+    const readVerifiedArtifact = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true as const, bytes: summaryBytes })
+      .mockResolvedValueOnce({ ok: true as const, bytes: hotspotBytes })
+      .mockResolvedValueOnce({
+        ok: true as const,
+        bytes: new TextEncoder().encode('{"schema_version": 2, "gates": []}'),
+      })
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: {
+        ...persistedReadService(snapshot),
+        readVerifiedArtifact,
+      },
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+    const overview = await runWithWindowScope(58, () => service.getOverview())
+
+    const summary = await runWithWindowScope(58, () =>
+      service.getArtifact({
+        artifactId: 'qor-summary-sta',
+        workspaceContextId: overview.workspaceContextId,
+        workspaceRevision: 2,
+      }),
+    )
+    expect(summary.artifact).toMatchObject({
+      status: 'ready',
+      data: {
+        artifactId: 'qor-summary-sta',
+        mimeType: 'application/json',
+        summary: {
+          quality_status: 'fail',
+          gates: [{ id: 'timing-setup', blocking: true }],
+        },
+      },
+    })
+
+    const hotspots = await runWithWindowScope(58, () =>
+      service.getArtifact({
+        artifactId: 'qor-hotspots-sta',
+        workspaceContextId: overview.workspaceContextId,
+        workspaceRevision: 2,
+      }),
+    )
+    expect(hotspots.artifact).toMatchObject({
+      status: 'ready',
+      data: {
+        artifactId: 'qor-hotspots-sta',
+        hotspots: [{ kind: 'congestion', metric_id: 'place_rudy_utilization_max' }],
+      },
+    })
+
+    await expect(
+      runWithWindowScope(58, () =>
+        service.getArtifact({
+          artifactId: 'qor-summary-sta',
+          workspaceContextId: overview.workspaceContextId,
+          workspaceRevision: 2,
+        }),
+      ),
+    ).resolves.toMatchObject({
+      artifact: {
+        status: 'unavailable',
+        issues: [{ code: 'ARTIFACT_INVALID_JSON' }],
+      },
+    })
+  })
+
+  it('serves per-step subflow progress through the artifact index', async () => {
+    const snapshot = engineeringSnapshot()
+    snapshot.workspaceRevision = 2
+    snapshot.flow = { steps: [{ name: 'sta', tool: 'ecc', state: 'Success' }] }
+    const subflowBytes = new TextEncoder().encode(
+      JSON.stringify({
+        path: '/project/ws-a/STA_ecc/subflow.json',
+        steps: [
+          {
+            name: 'run sta',
+            state: 'Success',
+            runtime: '0:00:01',
+            'peak memory (mb)': 12.5,
+            info: {},
+          },
+          {
+            name: 'analysis',
+            state: 'Unstart',
+            runtime: '',
+            'peak memory (mb)': 0,
+            info: {},
+          },
+        ],
+      }),
+    )
+    snapshot.artifacts = [
+      {
+        artifactId: 'subflow-sta',
+        availability: 'available',
+        kind: 'subflow',
+        name: 'subflow.json',
+        reference: 'STA_ecc/subflow.json',
+        sizeBytes: subflowBytes.byteLength,
+        stepId: 'sta',
+      },
+    ] as never
+    const readVerifiedArtifact = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true as const, bytes: subflowBytes })
+      .mockResolvedValueOnce({
+        ok: true as const,
+        bytes: new TextEncoder().encode('{"steps": [{"name": ""}]}'),
+      })
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: {
+        ...persistedReadService(snapshot),
+        readVerifiedArtifact,
+      },
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+    const overview = await runWithWindowScope(59, () => service.getOverview())
+
+    const result = await runWithWindowScope(59, () =>
+      service.getStepDetail({
+        stepId: 'sta',
+        workspaceContextId: overview.workspaceContextId,
+        workspaceRevision: 2,
+      }),
+    )
+
+    expect(readVerifiedArtifact).toHaveBeenCalledWith({
+      artifact: { reference: 'STA_ecc/subflow.json' },
+      projectRoot: '/project',
+      workspacePath: '/project/ws-a',
+    })
+    expect(result.detail).toMatchObject({
+      status: 'ready',
+      data: {
+        subflow: {
+          status: 'available',
+          steps: [
+            { name: 'run sta', state: 'Success', runtime: '0:00:01', peakMemoryMb: 12.5 },
+            { name: 'analysis', state: 'Unstart', runtime: '', peakMemoryMb: 0 },
+          ],
+        },
+      },
+    })
+    // The runtime-absolute `path` field never crosses the bridge.
+    expect(JSON.stringify(result)).not.toContain('/project/ws-a/STA_ecc/subflow.json')
+
+    await expect(
+      runWithWindowScope(59, () =>
+        service.getStepDetail({
+          stepId: 'sta',
+          workspaceContextId: overview.workspaceContextId,
+          workspaceRevision: 2,
+        }),
+      ),
+    ).resolves.toMatchObject({
+      detail: { status: 'ready', data: { subflow: { status: 'invalid', steps: [] } } },
+    })
+  })
+
+  it('reports subflow as missing when the snapshot indexes no subflow artifact', async () => {
+    const snapshot = engineeringSnapshot()
+    snapshot.flow = { steps: [{ name: 'sta', tool: 'ecc', state: 'Success' }] }
+    const readVerifiedArtifact = vi.fn()
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: {
+        ...persistedReadService(snapshot),
+        readVerifiedArtifact,
+      },
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+    const overview = await runWithWindowScope(60, () => service.getOverview())
+
+    const result = await runWithWindowScope(60, () =>
+      service.getStepDetail({
+        stepId: 'sta',
+        workspaceContextId: overview.workspaceContextId,
+        workspaceRevision: 1,
+      }),
+    )
+
+    expect(result.detail).toMatchObject({
+      status: 'ready',
+      data: { subflow: { status: 'missing', steps: [] } },
+    })
+    expect(readVerifiedArtifact).not.toHaveBeenCalled()
+  })
+
+  it('serves the LEC equivalence result with netlists reduced to basenames', async () => {
+    const snapshot = engineeringSnapshot()
+    snapshot.workspaceRevision = 2
+    snapshot.flow = {
+      steps: [{ name: 'postRouteLec', tool: 'yosys_lec', state: 'Success' }],
+    }
+    const lecBytes = new TextEncoder().encode(
+      JSON.stringify({
+        status: 'proven',
+        golden_verilog: '/project/ws-a/Synthesis_yosys/output/gcd_Synthesis.v.gz',
+        gate_verilog: '/project/ws-a/lvs_ecc/output/gcd_lvs.v.gz',
+        golden_sha256: 'a'.repeat(64),
+        gate_sha256: 'b'.repeat(64),
+        golden_size_bytes: 8362,
+        gate_size_bytes: 9985,
+        equiv_status: '/project/ws-a/postRouteLec_yosys_lec/report/equiv_status.rpt',
+        status_report: '/project/ws-a/postRouteLec_yosys_lec/report/run_lec_status.rpt',
+      }),
+    )
+    snapshot.artifacts = [
+      {
+        artifactId: 'lec-result',
+        availability: 'available',
+        kind: 'lec_result',
+        name: 'gcd_postRouteLec_result.json',
+        reference: 'postRouteLec_yosys_lec/output/gcd_postRouteLec_result.json',
+        sizeBytes: lecBytes.byteLength,
+        stepId: 'postRouteLec',
+      },
+    ] as never
+    const readVerifiedArtifact = vi
+      .fn()
+      .mockResolvedValue({ ok: true as const, bytes: lecBytes })
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: {
+        ...persistedReadService(snapshot),
+        readVerifiedArtifact,
+      },
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+    const overview = await runWithWindowScope(61, () => service.getOverview())
+
+    const result = await runWithWindowScope(61, () =>
+      service.getStepDetail({
+        stepId: 'postRouteLec',
+        workspaceContextId: overview.workspaceContextId,
+        workspaceRevision: 2,
+      }),
+    )
+
+    expect(result.detail).toMatchObject({
+      status: 'ready',
+      data: {
+        analysis: {
+          lec: {
+            status: 'proven',
+            golden_verilog: 'gcd_Synthesis.v.gz',
+            gate_verilog: 'gcd_lvs.v.gz',
+            golden_sha256: 'a'.repeat(64),
+            golden_size_bytes: 8362,
+          },
+        },
+      },
+    })
+    // Absolute runtime paths never cross the bridge.
+    expect(JSON.stringify(result)).not.toContain('/project/ws-a')
+  })
+
+  it('serves RCX per-corner electrical facts as typed insights', async () => {
+    const snapshot = engineeringSnapshot()
+    snapshot.workspaceRevision = 2
+    snapshot.flow = { steps: [{ name: 'RCX', tool: 'ecc', state: 'Success' }] }
+    const factsBytes = new TextEncoder().encode(
+      JSON.stringify({
+        rcx: {
+          electrical_summary: {
+            schema_version: 1,
+            parsed_corner_count: 2,
+            parse_failure_count: 0,
+            corners: [
+              {
+                corner: 'Cbest_125C',
+                net_count: 337,
+                ground_capacitance_ff: 242.779728,
+                coupling_capacitance_ff: 367.18326,
+                total_capacitance_ff: 609.962988,
+                total_resistance_ohm: 8385.265995,
+              },
+            ],
+            parse_failures: [],
+            worst_total_capacitance_ff: 729.019552,
+            worst_coupling_capacitance_ff: 416.084464,
+            worst_total_resistance_ohm: 10788.354292,
+          },
+          signoff_metrics: {
+            schema_version: 1,
+            coverage: { expected_corner_count: 2 },
+            rc_corners: [
+              {
+                rc_corner: 'Cbest_125C',
+                label: 'Cbest 125C',
+                availability: 'available',
+                total_capacitance_ff: 609.962988,
+                coupling_capacitance_ff: 367.18326,
+                total_resistance_ohm: 8385.265995,
+              },
+            ],
+            parasitic_envelope: {
+              worst_total_capacitance_ff: 729.019552,
+              worst_total_resistance_ohm: 10788.354292,
+            },
+          },
+        },
+        run: { log: '/project/ws-a/RCX_ecc/log/rcx.log' },
+      }),
+    )
+    snapshot.artifacts = [
+      {
+        artifactId: 'rcx-facts',
+        availability: 'available',
+        kind: 'rcx_feature_facts',
+        name: 'RCX.step.json',
+        reference: 'RCX_ecc/feature/RCX.step.json',
+        sizeBytes: factsBytes.byteLength,
+        stepId: 'RCX',
+      },
+    ] as never
+    const readVerifiedArtifact = vi
+      .fn()
+      .mockResolvedValue({ ok: true as const, bytes: factsBytes })
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: {
+        ...persistedReadService(snapshot),
+        readVerifiedArtifact,
+      },
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+    const overview = await runWithWindowScope(62, () => service.getOverview())
+
+    const result = await runWithWindowScope(62, () =>
+      service.getStepDetail({
+        stepId: 'RCX',
+        workspaceContextId: overview.workspaceContextId,
+        workspaceRevision: 2,
+      }),
+    )
+
+    expect(result.detail).toMatchObject({
+      status: 'ready',
+      data: {
+        analysis: {
+          rcx: {
+            electricalMetrics: [
+              { id: 'rcx-electrical-parsed_corner_count', value: '2' },
+              { id: 'rcx-electrical-worst_total_capacitance_ff', value: '729.02' },
+              { id: 'rcx-electrical-worst_coupling_capacitance_ff', value: '416.084' },
+              { id: 'rcx-electrical-worst_total_resistance_ohm', value: '10788.354' },
+            ],
+            electricalCorners: [
+              {
+                corner: 'Cbest_125C',
+                netCount: 337,
+                totalCapacitanceFf: 609.962988,
+                totalResistanceOhm: 8385.265995,
+              },
+            ],
+            signoffMetrics: [
+              { id: 'rcx-envelope-worst_total_capacitance_ff', value: '729.02' },
+              { id: 'rcx-envelope-worst_total_resistance_ohm', value: '10788.354' },
+            ],
+            signoffCorners: [
+              {
+                corner: 'Cbest 125C',
+                availability: 'available',
+                totalCapacitanceFf: 609.962988,
+              },
+            ],
+          },
+        },
+      },
+    })
+    // The feature file's run/constraints sections never cross the bridge.
+    expect(JSON.stringify(result)).not.toContain('/project/ws-a')
+  })
+
+  it('serves database facts and LVS connectivity from the qor_metrics details', async () => {
+    const snapshot = engineeringSnapshot()
+    snapshot.workspaceRevision = 2
+    snapshot.flow = { steps: [{ name: 'lvs', tool: 'ecc', state: 'Success' }] }
+    const metricsBytes = new TextEncoder().encode(
+      JSON.stringify({
+        schema_version: 3,
+        step: 'lvs',
+        metrics: [],
+        details: [
+          {
+            id: 'database_facts',
+            presentation: 'database_facts',
+            summary: {
+              schema_version: 1,
+              layout: {
+                die_area: 2724.2,
+                die_usage: 0.2536,
+                die_width: 51.4,
+                die_height: 53,
+                core_area: 2322.6,
+                core_usage: 0.2975,
+                core_width: 47.4,
+                core_height: 49,
+                dbu: 1000,
+              },
+              statistics: { io_pins: 54, instances: 1064, nets: 337, pdn: 2 },
+              instance_classes: [
+                { kind: 'logic', count: 301, area: 691.6, pin_count: 1078 },
+              ],
+              instance_total: { kind: 'total', count: 1064, area: 2322, pin_count: 1078 },
+              pin_distribution: [{ pin_count: 1, instance_count: 763, net_count: 200 }],
+              cut_layers: [{ layer: 'via1', via_count: 120 }],
+              routing_layers: [{ layer: 'met1', wire_length: 5500.5 }],
+              wire_length: 40000.5,
+              via_count: 890,
+            },
+            feature_source: {
+              kind: 'feature',
+              path: 'feature/lvs.db.json',
+              selector: '',
+            },
+          },
+          {
+            id: 'lvs_connectivity_summary',
+            presentation: 'lvs_connectivity_tables',
+            summary: {
+              schema_version: 1,
+              entities: [
+                { entity: 'IO(without pg)', netlist: 54, def: 54, difference: 0 },
+                { entity: 'Net', netlist: 337, def: 337, difference: 0 },
+              ],
+              connectivity: [
+                {
+                  connectivity: 'Routing',
+                  open: 0,
+                  short: 0,
+                  connected: 337,
+                  total: 337,
+                },
+              ],
+              violations: [
+                {
+                  type: 'open',
+                  net: 'n1',
+                  instance: 'u1',
+                  terminals: 'A, B',
+                  components: '',
+                },
+              ],
+            },
+            feature_source: {
+              kind: 'feature',
+              path: 'feature/lvs.step.json',
+              selector: '/lvs',
+            },
+          },
+        ],
+        sources: [{ path: '/project/ws-a/lvs_ecc/feature/lvs.db.json' }],
+      }),
+    )
+    snapshot.artifacts = [
+      {
+        artifactId: 'qor-metrics-lvs',
+        availability: 'available',
+        kind: 'qor_metrics',
+        name: 'qor_metrics.json',
+        reference: 'lvs_ecc/analysis/qor_metrics.json',
+        sizeBytes: metricsBytes.byteLength,
+        stepId: 'lvs',
+      },
+    ] as never
+    const readVerifiedArtifact = vi
+      .fn()
+      .mockResolvedValue({ ok: true as const, bytes: metricsBytes })
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: {
+        ...persistedReadService(snapshot),
+        readVerifiedArtifact,
+      },
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+    const overview = await runWithWindowScope(63, () => service.getOverview())
+
+    const result = await runWithWindowScope(63, () =>
+      service.getStepDetail({
+        stepId: 'lvs',
+        workspaceContextId: overview.workspaceContextId,
+        workspaceRevision: 2,
+      }),
+    )
+
+    expect(result.detail).toMatchObject({
+      status: 'ready',
+      data: {
+        analysis: {
+          database: {
+            layout: { dieArea: 2724.2, coreUsage: 0.2975, dbu: 1000 },
+            statistics: { ioPins: 54, instances: 1064, nets: 337, pdn: 2 },
+            instanceClasses: [{ kind: 'logic', count: 301, pinCount: 1078 }],
+            instanceTotal: { count: 1064, area: 2322 },
+            pinDistribution: [{ pinCount: 1, instanceCount: 763, netCount: 200 }],
+            cutLayers: [{ layer: 'via1', viaCount: 120 }],
+            routingLayers: [{ layer: 'met1', wireLength: 5500.5 }],
+            wireLength: 40000.5,
+            viaCount: 890,
+          },
+          lvs: {
+            entities: [
+              { entity: 'IO(without pg)', netlist: 54, def: 54, difference: 0 },
+              { entity: 'Net', netlist: 337 },
+            ],
+            connections: [
+              { connectivity: 'Routing', open: 0, short: 0, connected: 337, total: 337 },
+            ],
+            violations: [{ type: 'open', net: 'n1', instance: 'u1', terminals: 'A, B' }],
+          },
+        },
+      },
+    })
+    // Feature source paths and source lists never cross the bridge.
+    expect(JSON.stringify(result)).not.toContain('/project/ws-a')
+    expect(JSON.stringify(result.detail)).not.toContain('feature/lvs.db.json')
   })
 
   it('serves checklist evidence from the indexed artifact for the requested finding', async () => {

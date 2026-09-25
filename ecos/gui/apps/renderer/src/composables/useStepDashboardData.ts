@@ -147,6 +147,7 @@ export function useStepDashboardData() {
   }
 
   async function loadTimingCorner(corner: string): Promise<void> {
+    if (loadedTimingCorners.has(corner)) return
     const artifact = timingPathArtifacts.get(corner)
     const contextId = timingArtifactContextId
     const revision = timingArtifactRevision
@@ -154,7 +155,6 @@ export function useStepDashboardData() {
       setTimingError(corner, 'TIMING_ARTIFACT_UNAVAILABLE')
       return
     }
-    if (loadedTimingCorners.has(corner)) return
     const key = `${contextId}\u0000${revision}\u0000${corner}`
     const pending = timingPathLoads.get(key)
     if (pending) return await pending
@@ -252,12 +252,12 @@ export function useStepDashboardData() {
         if (!cached && viewChanged) data.value = null
         return
       }
-      const next = snapshotStepDashboardData(detail)
-      const artifacts =
-        next.staleRevision !== null && detail.staleEvidence
-          ? detail.staleEvidence.artifacts
-          : detail.artifacts
-      const artifactRevision = next.staleRevision ?? revision
+      const stale =
+        detail.step.state !== 'succeeded' && detail.step.state !== 'skipped'
+          ? detail.staleEvidence
+          : undefined
+      const artifacts = stale ? stale.artifacts : detail.artifacts
+      const artifactRevision = stale ? stale.workspaceRevision : revision
       resetTimingArtifacts(contextId, artifactRevision, artifacts)
       const readArtifact = async (
         artifactId: string,
@@ -278,6 +278,21 @@ export function useStepDashboardData() {
         }
         return artifact.artifact.data
       }
+      // Per-step QoR summary/hotspots carry no bounded snapshot projection;
+      // they lazy-load through the artifact channel like report content.
+      const analysis = stale ? stale.analysis : detail.analysis
+      for (const descriptor of artifacts) {
+        if (
+          descriptor.availability !== 'available' ||
+          (descriptor.kind !== 'qor_summary' && descriptor.kind !== 'qor_hotspots')
+        ) {
+          continue
+        }
+        const artifact = await readArtifact(descriptor.artifactId)
+        if (artifact?.summary) analysis.summary = artifact.summary
+        if (artifact?.hotspots) analysis.hotspots = artifact.hotspots
+      }
+      const next = snapshotStepDashboardData(detail)
       const readImage = async (artifactId: string): Promise<string | null> => {
         const artifact = await readArtifact(artifactId)
         if (!artifact?.bytes) return null
@@ -326,6 +341,10 @@ export function useStepDashboardData() {
         if (artifact?.timingPaths) timingPaths.push(artifact.timingPaths)
       }
       applyTimingArtifacts(next, timingSummaries, timingPaths)
+      // Corner-less timing artifacts (e.g. post-synthesis timing) load in bulk
+      // above; mark their corners so the details dialog does not retry them
+      // through the per-corner channel and report TIMING_ARTIFACT_UNAVAILABLE.
+      for (const timingPath of timingPaths) loadedTimingCorners.add(timingPath.corner)
       if (version !== requestVersion) {
         revokeDashboardData(next)
         return
