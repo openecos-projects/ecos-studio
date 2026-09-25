@@ -141,6 +141,7 @@ import { executeProductCommand } from '../services/productCommandService'
 import { buildWorkspaceCreationModel } from '../services/workspaceCreationModel'
 import { rememberWorkspaceParameterCatalog } from '../services/workspaceParameterCatalogCache'
 import {
+  ensureBackendProjectManifestForCreate,
   persistEccPdkConfigFromCreate,
   prepareWorkspaceCreateBinding,
   prepareWorkspaceOpenBinding,
@@ -2810,6 +2811,7 @@ export function registerIpc(
       isWorkspaceMutationBusy: (workspaceHandle) =>
         services.chipViewerService.isWorkspaceMutationBusy?.(workspaceHandle) ?? false,
       prepareCreate: async (createRequest) => {
+        await ensureBackendProjectManifestForCreate(services, createRequest)
         const prepared = await prepareWorkspaceCreateBinding(services, createRequest)
         const { eccPdkConfig: persistConfig, ...runtimeRequest } = prepared
         await persistEccPdkConfigFromCreate(services, runtimeRequest, persistConfig)

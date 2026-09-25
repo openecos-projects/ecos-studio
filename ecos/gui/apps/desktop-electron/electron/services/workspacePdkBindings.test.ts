@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  ensureBackendProjectManifestForCreate,
   persistEccPdkConfigFromCreate,
   prepareWorkspaceCreateBinding,
   prepareWorkspaceOpenBinding,
@@ -132,6 +133,33 @@ describe('prepareWorkspaceOpenBinding', () => {
     await expect(
       prepareWorkspaceOpenBinding(dependencies, '/projects/demo/runs/workspace'),
     ).resolves.toEqual({ directory: '/projects/demo/runs/workspace' })
+  })
+})
+
+describe('ensureBackendProjectManifestForCreate', () => {
+  it('creates the manifest before ECC creates a managed workspace', async () => {
+    const writeProjectTextFile = vi.fn()
+    const dependencies = {
+      workspaceService: {
+        pathExists: vi.fn().mockResolvedValue(false),
+        registerProjectRoot: vi.fn().mockResolvedValue('/projects/test_agent'),
+        writeProjectTextFile,
+      },
+    }
+
+    await ensureBackendProjectManifestForCreate(dependencies, {
+      commandId: 'create-1',
+      projectId: 'proj_test_agent',
+      projectRoot: '/projects/test_agent',
+      targetDirectory: '/projects/test_agent/ws_0001',
+      workspaceBindings: {},
+      workspaceSpec: { design: { name: 'test_agent' } },
+    })
+
+    expect(writeProjectTextFile).toHaveBeenCalledWith(
+      '/projects/test_agent/project.json',
+      expect.stringContaining('"project_id": "proj_test_agent"'),
+    )
   })
 })
 
