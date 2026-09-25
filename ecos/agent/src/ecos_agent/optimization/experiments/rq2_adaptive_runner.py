@@ -36,6 +36,12 @@ from ecos_agent.optimization.experiments.rq2_knowledge_experiment import (
 )
 from ecos_agent.optimization.parameters.contracts import OptimizationProposalV2
 
+# Plan-registered transient-failure recovery (llm-rq-2-implement.md 9.1):
+# provider rate limiting is auto-recoverable, same cell identity, at most 3
+# attempts, backoff between attempts, every attempt recorded in the row.
+_RATE_LIMIT_MAX_ATTEMPTS = 3
+_RATE_LIMIT_BACKOFF_SECONDS = 30.0
+
 
 # ---------------------------------------------------------------------------
 # Offline adaptive bank runner
@@ -91,37 +97,65 @@ def _one_observation(
         "claim_ids": [],
         "binding_ids": [],
     }
-    try:
-        from ecos_agent.optimization.planning import v2_domains
+    attempts: list[dict[str, object]] = []
+    for attempt in range(1, _RATE_LIMIT_MAX_ATTEMPTS + 1):
+        try:
+            from ecos_agent.optimization.planning import v2_domains
 
-        raw = provider.propose_v2(projected, v2_domains(projected))
-        row["request_id"] = raw.get("id") or f"local-{uuid.uuid4()}"
-        row["raw_response_sha256"] = canonical_sha256(raw)
-        proposal = OptimizationProposalV2.model_validate(raw)
-    except ValidationError as exc:
-        row.update(
-            schema_status="invalid",
-            invalid_reason=f"schema_error: {str(exc)[:400]}",
-            levels=action_signature_levels(
-                decision="schema_error", action=None, effective_domains=()
-            ),
-            request_id=f"local-{uuid.uuid4()}",
-            wall_seconds=time.monotonic() - started,
-        )
-        return row
-    except Exception as exc:  # transport failures stay in the denominator
-        text = str(exc).lower()
-        status = "timeout" if "timeout" in text or "timed out" in text else "provider_error"
-        row.update(
-            schema_status=status,
-            invalid_reason=f"{status}: {str(exc)[:400]}",
-            levels=action_signature_levels(
-                decision=status, action=None, effective_domains=()
-            ),
-            request_id=f"local-{uuid.uuid4()}",
-            wall_seconds=time.monotonic() - started,
-        )
-        return row
+            raw = provider.propose_v2(projected, v2_domains(projected))
+            row["request_id"] = raw.get("id") or f"local-{uuid.uuid4()}"
+            row["raw_response_sha256"] = canonical_sha256(raw)
+            proposal = OptimizationProposalV2.model_validate(raw)
+            break
+        except ValidationError as exc:
+            row.update(
+                schema_status="invalid",
+                invalid_reason=f"schema_error: {str(exc)[:400]}",
+                levels=action_signature_levels(
+                    decision="schema_error", action=None, effective_domains=()
+                ),
+                request_id=f"local-{uuid.uuid4()}",
+                wall_seconds=time.monotonic() - started,
+            )
+            return row
+        except Exception as exc:  # transport failures stay in the denominator
+            text = str(exc).lower()
+            rate_limited = "rate limit" in text or "速率限制" in text
+            status = (
+                "timeout"
+                if "timeout" in text or "timed out" in text
+                else "provider_error"
+            )
+            attempts.append(
+                {
+                    "attempt": attempt,
+                    "status": status,
+                    "rate_limited": rate_limited,
+                    "reason": str(exc)[:200],
+                }
+            )
+            if rate_limited and attempt < _RATE_LIMIT_MAX_ATTEMPTS:
+                # Plan-registered auto-recovery (llm-rq-2-implement.md 9.1):
+                # provider rate limiting is transient; same cell identity,
+                # bounded attempts, backoff, every attempt recorded.
+                time.sleep(_RATE_LIMIT_BACKOFF_SECONDS * attempt)
+                continue
+            row.update(
+                schema_status=status,
+                invalid_reason=f"{status}: {str(exc)[:400]}",
+                levels=action_signature_levels(
+                    decision=status, action=None, effective_domains=()
+                ),
+                request_id=f"local-{uuid.uuid4()}",
+                wall_seconds=time.monotonic() - started,
+            )
+            if attempts:
+                row["provider_attempts"] = attempts
+            return row
+    else:  # pragma: no cover - loop always breaks or returns
+        raise AssertionError("unreachable provider attempt loop")
+    if attempts:
+        row["provider_attempts"] = attempts
     action = proposal.action
     row["levels"] = action_signature_levels(
         decision=proposal.decision,
