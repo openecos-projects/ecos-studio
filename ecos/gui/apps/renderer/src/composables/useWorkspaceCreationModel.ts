@@ -61,7 +61,11 @@ export function useWorkspaceCreationModel(options: {
           values.value[parameter.definition.id] = parameter.value
         }
       }
-    } catch {
+    } catch (error) {
+      console.warn(
+        'Failed to load the ECC workspace creation model; flow steps and the parameter catalog are unavailable.',
+        error,
+      )
       if (requestGeneration === generation) model.value = null
     }
   }
