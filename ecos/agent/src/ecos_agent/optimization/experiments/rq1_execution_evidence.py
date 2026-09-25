@@ -465,6 +465,18 @@ def analyze_records(
         "P19": {"counts": dict(failure), "conservation": sum(failure.values()) >= expected, "accounted_started": expected, "accounted_terminal": len(outcomes_v), "exclusions": []},
     }
     terminal = _terminal_metrics(outcomes_v)
+    wall_seconds = run_metrics.get("wall_time_seconds")
+    wall_hours = wall_seconds / 3600 if wall_seconds else None
+    planning_calls_used = (
+        planning_calls if planning_calls is not None else run_metrics.get("planning_calls", 0)
+    )
+    route_best = run_metrics.get("route_wirelength_best")
+    route_reference = run_metrics.get("route_wirelength_reference")
+    route_reduction = (
+        (route_reference - route_best) / route_reference * 100
+        if route_reference and route_best is not None
+        else None
+    )
     s = {
         "S01": _metric(sum(outcome_receipt(item) is not None and outcome_receipt(item).application.status == "applied" and _source_backed(outcome_receipt(item).parameter.consumed) for item in outcomes_v), expected),
         "S02": {status: _metric(status_values.count(status), expected) for status in ("inactive", "failed", "unknown")},
@@ -472,18 +484,18 @@ def analyze_records(
         "S05": p["P14"], "S06": {"count": len(invariant_violations), **_metric(len(invariant_violations), len(promoting))},
         "S07": {"events": [], **_metric(0, len(invariant_violations), "mis-promotion event trace unavailable")},
         "S08": {"started": _metric(expected, expected), "terminal": _metric(len(outcomes_v), expected), "artifact_complete": terminal["completeness"], "exclusions": []},
-        "S09": _metric(planning_calls or run_metrics.get("planning_calls", 0), len(applied_candidates), "planning calls unavailable" if planning_calls is None and not run_metrics.get("planning_calls") else "no verified applied candidates"),
-        "S10": _metric(planning_calls or run_metrics.get("planning_calls", 0), expected, "planning calls unavailable" if planning_calls is None and not run_metrics.get("planning_calls") else "no started candidates"),
+        "S09": _metric(planning_calls_used, len(applied_candidates), *(() if applied_candidates else ("no verified applied candidates",))),
+        "S10": _metric(planning_calls_used, expected),
         "S11": _value_report(next((index for index, value in enumerate(success_curve, 1) if value), None), "no feasible candidate"),
-        "S12": {"terminal_per_wall_hour": _value_report(None, "wall time unavailable"), "verified_applied_per_wall_hour": _value_report(None, "wall time unavailable")},
-        "S13": _value_report(None, "reference and selected route wirelength are unavailable"),
+        "S12": {"terminal_per_wall_hour": _value_report(len(outcomes_v) / wall_hours if wall_hours else None, None if wall_hours else "wall time unavailable"), "verified_applied_per_wall_hour": _value_report(len(applied_candidates) / wall_hours if wall_hours else None, None if wall_hours else "wall time unavailable")},
+        "S13": _value_report(route_reduction, None if route_reduction is not None else "reference and selected route wirelength are unavailable"),
         "S14": {"value": bool(auc["value"]), **_metric(int(bool(auc["value"])), 1, "AUC20 unavailable" if auc["value"] is None else "")},
         "S15": {**auc, **_metric(sum(success_curve), 20, "formal AUC20 unavailable" if auc["value"] is None else "")},
         "S16": _value_report(terminal["values"].get("route_la_total_overflow"), "terminal overflow unavailable"),
         "S17": _value_report(terminal["values"].get("setup_wns") or terminal["values"].get("sta_setup_wns"), "setup WNS unavailable"),
         "S18": _value_report(terminal["values"].get("hold_wns") or terminal["values"].get("sta_hold_wns"), "hold WNS unavailable"),
         "S19": _value_report(terminal["values"].get("drc_count"), "DRC count unavailable"),
-        "S20": _value_report(planning_calls or run_metrics.get("planning_calls"), "planning calls unavailable"),
+        "S20": _value_report(planning_calls_used, None if planning_calls_used is not None else "planning calls unavailable"),
         "S21": _value_report(run_metrics.get("wall_time_seconds"), "wall time unavailable"),
         "S22": _value_report(terminal_values.get("flow_tool_runtime"), "candidate runtime unavailable"),
         "S23": _value_report(terminal_values.get("flow_peak_memory"), "peak memory unavailable"),

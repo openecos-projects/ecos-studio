@@ -75,6 +75,16 @@ def _episode_run_metrics(root: Path, provider_calls: int) -> dict[str, Any]:
             summary = {}
     budget = summary.get("budget") if isinstance(summary.get("budget"), Mapping) else {}
     diagnostics = _diagnostic_metrics(metrics_root / "codex-diagnostics.jsonl")
+    comparisons = (
+        summary.get("metric_comparison", {}).get("metrics", {})
+        if isinstance(summary.get("metric_comparison"), Mapping)
+        else {}
+    )
+    route_comparison = (
+        comparisons.get("route_wirelength")
+        if isinstance(comparisons.get("route_wirelength"), Mapping)
+        else {}
+    )
     return {
         "planning_calls": provider_calls,
         "wall_time_seconds": budget.get("elapsed_wall_time_seconds"),
@@ -84,6 +94,8 @@ def _episode_run_metrics(root: Path, provider_calls: int) -> dict[str, Any]:
         "repair_errors": diagnostics["errors"].get("repair", 0),
         "summary_planning_calls": summary.get("planning_calls"),
         "summary_available": bool(summary),
+        "route_wirelength_best": route_comparison.get("best"),
+        "route_wirelength_reference": route_comparison.get("reference"),
     }
 
 def analyze_episode(root: Path) -> dict[str, Any]:
