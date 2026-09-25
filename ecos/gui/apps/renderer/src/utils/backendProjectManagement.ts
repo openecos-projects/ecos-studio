@@ -1233,6 +1233,7 @@ function detailHintForStep(step: FlowStep): string {
     'Post-route LEC': 'Open workspace post-route LEC for equivalence evidence.',
     RCX: 'Open workspace RCX for extraction readiness details.',
     STA: 'Open workspace STA for path detail and corner matrix.',
+    'Power Analysis': 'Open workspace Power Analysis for iPW power details.',
     Harden: 'Open workspace Harden for final artifact details.',
   }
   return hints[step]

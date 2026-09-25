@@ -75,6 +75,8 @@ const FLOW_STEP_BY_DASHBOARD_LABEL: Record<string, FlowStep> = {
   'post-route lec': 'Post-route LEC',
   rcx: 'RCX',
   sta: 'STA',
+  poweranalysis: 'Power Analysis',
+  'power analysis': 'Power Analysis',
   harden: 'Harden',
 }
 
@@ -93,6 +95,7 @@ const FLOW_STEP_LABELS: Record<FlowStep, string> = {
   'Post-route LEC': 'Post-route LEC',
   RCX: 'RCX',
   STA: 'STA',
+  'Power Analysis': 'Power Analysis',
   Harden: 'Harden',
 }
 

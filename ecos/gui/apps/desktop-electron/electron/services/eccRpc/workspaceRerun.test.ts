@@ -465,6 +465,7 @@ describe('prepareWorkspaceRerun', () => {
       'postRouteLec',
       'RCX',
       'sta',
+      'powerAnalysis',
       'Harden',
     ])
     expect(targetFlow.steps.find((step) => step.name === 'place')?.state).toBe('Unstart')

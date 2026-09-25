@@ -21,6 +21,7 @@ describe('project manifest presentation', () => {
       'Filler',
       'RCX',
       'STA',
+      'Power Analysis',
       'LVS',
       'Post-route LEC',
       'DRC',
@@ -32,6 +33,8 @@ describe('project manifest presentation', () => {
     expect(parseProjectManifestFlowStep('postRouteLec')).toBe('Post-route LEC')
     expect(parseProjectManifestFlowStep('post_route_lec')).toBe('Post-route LEC')
     expect(parseProjectManifestFlowStep('timing-optimization')).toBe('Timing Opt')
+    expect(parseProjectManifestFlowStep('powerAnalysis')).toBe('Power Analysis')
+    expect(parseProjectManifestFlowStep('power-analysis')).toBe('Power Analysis')
     expect(parseProjectManifestFlowStep('fixFanout')).toBeNull()
     expect(parseProjectManifestFlowStep('future-step')).toBeNull()
     expect(sameProjectManifestFlowStep('placement', 'place')).toBe(true)

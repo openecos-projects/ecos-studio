@@ -1793,6 +1793,7 @@ const FALLBACK_FLOW_STEPS: Array<{ name: FlowStepName; description: string }> = 
   { name: 'filler', description: 'Filler insertion.' },
   { name: 'RCX', description: 'Parasitic extraction.' },
   { name: 'sta', description: 'Static timing analysis.' },
+  { name: 'powerAnalysis', description: 'iPW power analysis.' },
   { name: 'lvs', description: 'Layout versus netlist connectivity.' },
   { name: 'postRouteLec', description: 'Post-route logic equivalence check.' },
   { name: 'drc', description: 'Design rule checking.' },
@@ -2394,6 +2395,7 @@ function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStep
     postroutelec: 'postRouteLec',
     rcx: 'RCX',
     sta: 'sta',
+    poweranalysis: 'powerAnalysis',
     harden: 'Harden',
   }
   const alias = aliases[candidate.toLowerCase().replace(/[_\-\s]+/g, '')]

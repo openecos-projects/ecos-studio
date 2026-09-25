@@ -36,6 +36,7 @@ const FLOW_STEP_SEQUENCE = [
   'postRouteLec',
   'RCX',
   'sta',
+  'powerAnalysis',
   'Harden',
 ] as const
 const FLOW_STEPS: Set<string> = new Set(FLOW_STEP_SEQUENCE)
@@ -61,6 +62,7 @@ const DEFAULT_STEP_TOOLS: Record<(typeof FLOW_STEP_SEQUENCE)[number], string> = 
   postRouteLec: 'yosys_lec',
   RCX: 'ecc',
   sta: 'ecc',
+  powerAnalysis: 'ecc',
   Harden: 'ecc',
 }
 const STAGE_OUTPUT_SUFFIXES = ['.def.gz', '.v.gz', '.gds']

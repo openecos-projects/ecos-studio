@@ -25,7 +25,7 @@ describe('representativeProjectComparisonFixture', () => {
       expect(snapshot.flow).toEqual({
         steps: projectManifestFlowSteps.map((name) => ({ name, state: 'Success' })),
       })
-      expect(snapshot.metrics).toHaveLength(209)
+      expect(snapshot.metrics).toHaveLength(223)
       const declaredArtifacts = projectManagementWorkspaceStepAnalysisSpecs.flatMap(
         (spec) =>
           [spec.metricsPath, spec.summaryPath, spec.hotspotsPath].map(

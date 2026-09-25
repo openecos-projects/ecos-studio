@@ -64,6 +64,8 @@ const FLOW_STEP_ALIASES: Record<string, ProjectManifestFlowStep> = {
   postroutelec: 'Filler',
   rcx: 'RCX',
   sta: 'STA',
+  // Power Analysis runs between STA and LVS; same preceding-step rationale.
+  poweranalysis: 'STA',
   gds: 'Harden',
   signoff: 'Harden',
   harden: 'Harden',

@@ -1280,6 +1280,7 @@ describe('NewProjectWizard behavior', () => {
       'filler',
       'RCX',
       'sta',
+      'powerAnalysis',
       'lvs',
       'postRouteLec',
       'drc',
