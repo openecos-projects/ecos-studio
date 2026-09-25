@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { open, readdir, realpath, stat } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import {
   ENGINEERING_SNAPSHOT_MAX_BYTES,
   parseEngineeringSnapshotJson,
@@ -191,7 +191,12 @@ export class ProjectManagementReadService {
   ) {}
 
   async resolveProjectRoot(path: string): Promise<string> {
-    return await (this.resolveProjectRootAccess ?? canonicalizeExistingDirectory)(path)
+    if (!this.resolveProjectRootAccess) return await canonicalizeExistingDirectory(path)
+    // Read scopes grant the manifest file and the declared workspace roots, not
+    // the project root directory itself, so authorize the manifest and derive
+    // the canonical project root from it.
+    const manifestPath = await this.resolveProjectRootAccess(join(path, 'project.json'))
+    return dirname(manifestPath)
   }
 
   async readManifest(projectRoot: string): Promise<ProjectManifest | null> {

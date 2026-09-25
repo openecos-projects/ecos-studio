@@ -5,35 +5,31 @@
     aria-label="Background Operation"
   >
     <div class="operation-panel" :class="{ attention: needsAttention }">
-      <div class="operation-identity">
-        <span class="operation-state" role="status">
-          <i :class="stateIcon" aria-hidden="true"></i>
-          {{ stateText }}
-        </span>
-        <strong>{{
-          operation?.currentStep || operation?.step || 'Workspace finalization'
-        }}</strong>
-        <span class="operation-kind">{{
-          operation?.kind === 'step' ? 'Step run' : 'Full Flow'
-        }}</span>
-      </div>
-
-      <dl v-if="operation" class="operation-facts">
-        <div>
-          <dt>Workspace</dt>
-          <dd :title="operation.workspaceDirectory">{{ workspaceName }}</dd>
-        </div>
-        <div>
-          <dt>Started</dt>
-          <dd>{{ formatTime(operation.createdAt) }}</dd>
-        </div>
-        <div>
-          <dt>Updated</dt>
-          <dd>{{ formatTime(operation.updatedAt) }}</dd>
-        </div>
-      </dl>
-
-      <p v-if="finalization?.issue" class="operation-issue">{{ finalization.issue }}</p>
+      <span class="operation-state" role="status">
+        <i :class="stateIcon" aria-hidden="true"></i>
+        {{ stateText }}
+      </span>
+      <strong class="operation-step">{{
+        operation?.currentStep || operation?.step || 'Workspace finalization'
+      }}</strong>
+      <span class="operation-kind">{{
+        operation?.kind === 'step' ? 'Step run' : 'Full Flow'
+      }}</span>
+      <span class="operation-workspace" :title="operation?.workspaceDirectory">{{
+        workspaceName
+      }}</span>
+      <span
+        v-if="operation"
+        class="operation-time"
+        :title="`Started ${formatTime(operation.createdAt)}`"
+        >{{ formatTime(operation.updatedAt) }}</span
+      >
+      <span
+        v-if="finalization?.issue"
+        class="operation-issue"
+        :title="finalization.issue"
+        >{{ finalization.issue }}</span
+      >
 
       <div class="operation-actions">
         <button
@@ -180,13 +176,13 @@ function formatTime(timestamp: number): string {
 }
 
 .operation-panel {
-  display: grid;
-  grid-template-columns: minmax(128px, max-content) minmax(0, 1fr) max-content;
-  gap: 8px 16px;
+  display: flex;
   align-items: center;
+  gap: 10px;
   min-width: 0;
+  min-height: 32px;
   margin: 0 0 8px;
-  padding: 8px 12px;
+  padding: 4px 12px;
   border: 1px solid color-mix(in srgb, var(--accent-color) 18%, var(--border-color));
   border-radius: 8px;
   color: var(--text-primary);
@@ -198,34 +194,9 @@ function formatTime(timestamp: number): string {
   background: color-mix(in srgb, var(--danger-color, #d85d5d) 8%, var(--bg-primary));
 }
 
-.operation-identity {
-  display: grid;
-  min-width: 0;
-  gap: 1px;
-}
-
-.operation-identity strong,
-.operation-kind {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.operation-identity strong {
-  font-size: 13px;
-  font-weight: 720;
-  line-height: 1.2;
-}
-
-.operation-kind,
-.operation-facts dt {
-  color: var(--text-secondary);
-  font-size: 10px;
-  font-weight: 650;
-}
-
 .operation-state {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 5px;
   color: var(--accent-color);
@@ -233,6 +204,7 @@ function formatTime(timestamp: number): string {
   font-weight: 780;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .operation-state i {
@@ -243,55 +215,51 @@ function formatTime(timestamp: number): string {
   color: var(--danger-color, #d85d5d);
 }
 
-.operation-facts {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px 12px;
-  min-width: 0;
-  margin: 0;
-}
-
-.operation-facts div {
-  min-width: 0;
-}
-
-.operation-facts dt,
-.operation-facts dd {
-  margin: 0;
-}
-
-.operation-facts dd {
+.operation-step {
   overflow: hidden;
-  margin-top: 1px;
-  color: var(--text-primary);
-  font-size: 11px;
-  font-weight: 650;
+  min-width: 0;
+  flex: 1 1 auto;
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.operation-kind,
+.operation-workspace,
+.operation-time {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
 .operation-issue {
-  grid-column: 1 / -1;
+  overflow: hidden;
   min-width: 0;
+  flex: 0 1 auto;
   margin: 0;
   color: var(--danger-color, #d85d5d);
   font-size: 11px;
   line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .operation-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
   gap: 6px;
   justify-content: flex-end;
-  min-width: max-content;
 }
 
 .operation-action {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-height: 26px;
+  min-height: 24px;
   padding: 0 10px;
   border: 1px solid var(--border-color);
   border-radius: 6px;
@@ -329,28 +297,16 @@ function formatTime(timestamp: number): string {
   opacity: 0.45;
 }
 
-@container (max-width: 980px) {
-  .operation-panel {
-    grid-template-columns: minmax(0, 1fr) max-content;
-  }
-
-  .operation-facts {
-    grid-column: 1 / -1;
+@container (max-width: 720px) {
+  .operation-time,
+  .operation-kind {
+    display: none;
   }
 }
 
-@container (max-width: 640px) {
-  .operation-panel {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .operation-facts {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .operation-actions {
-    min-width: 0;
-    justify-content: flex-start;
+@container (max-width: 480px) {
+  .operation-workspace {
+    display: none;
   }
 }
 

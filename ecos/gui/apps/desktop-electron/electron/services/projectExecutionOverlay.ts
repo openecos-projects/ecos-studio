@@ -83,14 +83,11 @@ function projectOperations(
   operations: EccRuntimeOperation[],
   workspaces: CommittedProjectWorkspace[],
 ): BackendProjectActiveOperation[] {
-  const byEngineeringIdentity = new Map(
-    workspaces.map((workspace) => [
-      `${workspace.engineeringWorkspaceId}\0${workspace.workspaceRevision}`,
-      workspace,
-    ]),
+  const byEngineeringWorkspaceId = new Map(
+    workspaces.map((workspace) => [workspace.engineeringWorkspaceId, workspace]),
   )
   return operations.flatMap((operation) =>
-    projectOperation(operation, byEngineeringIdentity),
+    projectOperation(operation, byEngineeringWorkspaceId),
   )
 }
 
@@ -98,16 +95,19 @@ function projectOperation(
   operation: EccRuntimeOperation,
   workspaces: Map<string, CommittedProjectWorkspace>,
 ): BackendProjectActiveOperation[] {
+  if (operation.state !== 'queued' && operation.state !== 'running') return []
+  const workspace = workspaces.get(operation.workspaceId)
+  if (!workspace) return []
+  // ECC omits the revision from operation start and step progress events, so
+  // it only becomes known after the first step commit. Treat a missing
+  // revision as at-least-committed, and only drop an operation whose known
+  // revision is behind the committed snapshot (genuinely stale).
   if (
-    (operation.state !== 'queued' && operation.state !== 'running') ||
-    typeof operation.workspaceRevision !== 'number'
+    typeof operation.workspaceRevision === 'number' &&
+    operation.workspaceRevision < workspace.workspaceRevision
   ) {
     return []
   }
-  const workspace = workspaces.get(
-    `${operation.workspaceId}\0${operation.workspaceRevision}`,
-  )
-  if (!workspace) return []
   const step = parseProjectManifestFlowStep(operation.currentStep || operation.step)
   const committedStep = step ? workspace.stepStatuses[step] : undefined
   return [
@@ -126,7 +126,7 @@ function projectOperation(
           ? null
           : step,
       updatedAt: operation.updatedAt,
-      workspaceRevision: operation.workspaceRevision,
+      workspaceRevision: operation.workspaceRevision ?? workspace.workspaceRevision,
     },
   ]
 }
