@@ -68,6 +68,7 @@ vi.mock('electron', () => ({
 }))
 
 const electronLogger = vi.hoisted(() => ({
+  debug: vi.fn(),
   warn: vi.fn(),
 }))
 
@@ -583,8 +584,45 @@ describe('registerIpc', () => {
     )
   })
 
-  it('authorizes a Project Comparison root before selecting it', async () => {
+  it('grants a read root for Project Comparison without replacing the active root', async () => {
     const { handlers, services } = registerHandlers()
+    services.workspaceService.getProjectRoot.mockResolvedValue('/work/demo/ws_0001')
+    services.workspaceService.registerProjectReadRoot.mockResolvedValue(
+      '/projects/canonical',
+    )
+    services.backendProjectComparisonService.selectProject.mockResolvedValue({
+      generation: 0,
+      ok: true,
+      projectComparisonContextId: 'context-1',
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.backendProjectComparisonSelectProject)?.(
+        { sender: { id: 7 } },
+        { projectRootLocator: '/projects/requested' },
+      ),
+    ).resolves.toEqual({
+      generation: 0,
+      ok: true,
+      projectComparisonContextId: 'context-1',
+    })
+    expect(services.workspaceService.registerProjectRoot).not.toHaveBeenCalled()
+    expect(services.workspaceService.registerProjectReadRoot).toHaveBeenCalledWith(
+      '/projects/requested',
+    )
+    expect(services.backendProjectComparisonService.selectProject).toHaveBeenCalledWith(
+      7,
+      { projectRootLocator: '/projects/canonical' },
+    )
+  })
+
+  it('registers the active root when Project Comparison selects without one', async () => {
+    const { handlers, services } = registerHandlers()
+    services.workspaceService.getProjectRoot.mockRejectedValue(
+      Object.assign(new Error('Project root is not registered'), {
+        code: 'PROJECT_ROOT_NOT_REGISTERED',
+      }),
+    )
     services.workspaceService.registerProjectRoot.mockResolvedValue('/projects/canonical')
     services.backendProjectComparisonService.selectProject.mockResolvedValue({
       generation: 0,
@@ -605,10 +643,31 @@ describe('registerIpc', () => {
     expect(services.workspaceService.registerProjectRoot).toHaveBeenCalledWith(
       '/projects/requested',
     )
+    expect(services.workspaceService.registerProjectReadRoot).not.toHaveBeenCalled()
     expect(services.backendProjectComparisonService.selectProject).toHaveBeenCalledWith(
       7,
       { projectRootLocator: '/projects/canonical' },
     )
+  })
+
+  it('returns a structured result when a Project read root cannot be granted', async () => {
+    const { handlers, services } = registerHandlers()
+    services.workspaceService.registerProjectReadRoot.mockRejectedValue(
+      new Error('Project read root manifest does not declare the active workspace'),
+    )
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.backendProjectComparisonSelectProject)?.(
+        { sender: { id: 7 } },
+        { projectRootLocator: '/projects/unrelated' },
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      code: 'invalid-project',
+      detail: 'Project read root manifest does not declare the active workspace',
+    })
+    expect(services.backendProjectComparisonService.selectProject).not.toHaveBeenCalled()
+    expect(electronLogger.warn).not.toHaveBeenCalled()
   })
 
   it('queries Project execution state for only the sending window context', async () => {
@@ -2592,10 +2651,10 @@ describe('registerIpc', () => {
     )
   })
 
-  it('authorizes Project Management Step Configuration reads', async () => {
+  it('authorizes Project Management Step Configuration reads via the manifest', async () => {
     const { handlers, services } = registerHandlers()
     services.workspaceService.requestProjectPathAccess.mockResolvedValue(
-      '/projects/canonical',
+      '/projects/canonical/project.json',
     )
     const result = { status: 'available', step: 'CTS' }
     services.projectManagementReadService.readWorkspaceStepConfiguration.mockResolvedValue(
@@ -2615,7 +2674,7 @@ describe('registerIpc', () => {
       ),
     ).resolves.toEqual(result)
     expect(services.workspaceService.requestProjectPathAccess).toHaveBeenCalledWith(
-      '/projects/requested',
+      '/projects/requested/project.json',
     )
     expect(
       services.projectManagementReadService.readWorkspaceStepConfiguration,
@@ -3296,6 +3355,91 @@ describe('registerIpc', () => {
     expect(
       services.backendProjectComparisonService.invalidateWorkspace,
     ).toHaveBeenCalledWith('/work/demo')
+  })
+
+  it('invalidates Project execution snapshots for step progress without repeating duplicates', () => {
+    const { services } = registerHandlers()
+    const listener = services.eccRuntimeService.onEvent.mock.calls[0]?.[0]
+    const stepProgress = (
+      operationId: string,
+      step: string,
+      sequence: number,
+    ): EccRuntimeEvent => ({
+      event: {
+        eventId: `event-${sequence}`,
+        operationId,
+        origin: 'gui',
+        payload: { state: 'running', step, workspaceRevision: 1 },
+        sequence,
+        timestamp: sequence,
+        type: 'execution.progress',
+        workspaceId: 'engineering-1',
+      },
+      type: 'runtime.protocol',
+      workspaceDirectory: '/work/demo',
+    })
+
+    listener?.(stepProgress('operation-1', 'Synth', 1))
+    expect(
+      services.backendProjectComparisonService.invalidateExecution,
+    ).toHaveBeenCalledOnce()
+
+    listener?.(stepProgress('operation-1', 'Synth', 2))
+    expect(
+      services.backendProjectComparisonService.invalidateExecution,
+    ).toHaveBeenCalledOnce()
+
+    listener?.(stepProgress('operation-1', 'Floorplan', 3))
+    expect(
+      services.backendProjectComparisonService.invalidateExecution,
+    ).toHaveBeenCalledTimes(2)
+
+    listener?.({
+      event: {
+        eventId: 'event-terminal',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: { state: 'succeeded', workspaceRevision: 2 },
+        sequence: 4,
+        timestamp: 4,
+        type: 'operation.changed',
+        workspaceId: 'engineering-1',
+      },
+      type: 'runtime.protocol',
+      workspaceDirectory: '/work/demo',
+    })
+    expect(
+      services.backendProjectComparisonService.invalidateExecution,
+    ).toHaveBeenCalledTimes(3)
+
+    listener?.(stepProgress('operation-1', 'Floorplan', 5))
+    expect(
+      services.backendProjectComparisonService.invalidateExecution,
+    ).toHaveBeenCalledTimes(4)
+  })
+
+  it('does not invalidate Project execution snapshots for progress events without a step', () => {
+    const { services } = registerHandlers()
+    const listener = services.eccRuntimeService.onEvent.mock.calls[0]?.[0]
+
+    listener?.({
+      event: {
+        eventId: 'event-progress',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: { state: 'running', workspaceRevision: 1 },
+        sequence: 1,
+        timestamp: 1,
+        type: 'execution.progress',
+        workspaceId: 'engineering-1',
+      },
+      type: 'runtime.protocol',
+      workspaceDirectory: '/work/demo',
+    })
+
+    expect(
+      services.backendProjectComparisonService.invalidateExecution,
+    ).not.toHaveBeenCalled()
   })
 
   it('matches directory-scoped events after normalizing trailing slashes', async () => {
@@ -4057,6 +4201,29 @@ describe('registerIpc', () => {
     ).resolves.toBeNull()
 
     expect(services.projectManagementReadService.discoverProject).not.toHaveBeenCalled()
+    expect(electronLogger.warn).not.toHaveBeenCalled()
+  })
+
+  it('resolves project discovery of a missing directory as null without warning', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    services.projectManagementReadService.discoverProject.mockRejectedValue(
+      Object.assign(
+        new Error("ENOENT: no such file or directory, realpath '/tmp/project/ws_0007'"),
+        { code: 'ENOENT' },
+      ),
+    )
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementDiscoverProject)?.(
+        event,
+        '/tmp/project/ws_0007',
+      ),
+    ).resolves.toBeNull()
+
+    expect(services.projectManagementReadService.discoverProject).toHaveBeenCalledWith(
+      '/tmp/project/ws_0007',
+    )
     expect(electronLogger.warn).not.toHaveBeenCalled()
   })
 

@@ -8,7 +8,7 @@ import {
 } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { mkdir, realpath, stat, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
@@ -902,6 +902,7 @@ export function registerIpc(
   >()
   const workspaceHandleClosePromises = new Map<string, Promise<unknown>>()
   const backendWorkspaceOpenClaims = new Map<string, IpcMainInvokeEvent['sender']>()
+  const executionProgressSignatures = new Map<string, string>()
   const agentSessionSubscriptions = new Map<
     string,
     {
@@ -1113,18 +1114,38 @@ export function registerIpc(
     return deliveredSenders.size
   }
 
+  const invalidateExecutionForRuntimeEvent = (payload: EccRuntimeEvent): void => {
+    if (payload.type !== 'runtime.protocol') return
+    const event = payload.event
+    if (event.type === 'operation.changed') {
+      if (
+        ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(
+          String(event.payload.state),
+        )
+      ) {
+        executionProgressSignatures.delete(event.operationId)
+      }
+      services.backendProjectComparisonService.invalidateExecution()
+      return
+    }
+    if (event.type !== 'execution.progress') return
+    if (event.payload.sourceType === 'operation.rerun_prepared') {
+      services.backendProjectComparisonService.invalidateExecution()
+      return
+    }
+    if (typeof event.payload.step !== 'string' || !event.payload.step) return
+    const signature = `${String(event.payload.state ?? '')}:${event.payload.step}`
+    if (executionProgressSignatures.get(event.operationId) === signature) return
+    executionProgressSignatures.set(event.operationId, signature)
+    services.backendProjectComparisonService.invalidateExecution()
+  }
+
   const deliverRuntimeEvent = (
     designTool: DesignTool,
     payload: EccRuntimeEvent,
   ): void => {
-    if (
-      designTool === 'backend' &&
-      payload.type === 'runtime.protocol' &&
-      (payload.event.type === 'operation.changed' ||
-        (payload.event.type === 'execution.progress' &&
-          payload.event.payload.sourceType === 'operation.rerun_prepared'))
-    ) {
-      services.backendProjectComparisonService.invalidateExecution()
+    if (designTool === 'backend') {
+      invalidateExecutionForRuntimeEvent(payload)
     }
     const workspaceHandle = readWorkspaceHandleFromEvent(payload)
     if (workspaceHandle) {
@@ -1615,9 +1636,32 @@ export function registerIpc(
       if (!isRecord(request) || typeof request.projectRootLocator !== 'string') {
         throw new Error('Backend project comparison selection is invalid.')
       }
-      const projectRoot = await services.workspaceService.registerProjectRoot(
-        request.projectRootLocator,
-      )
+      let projectRoot: string | undefined
+      try {
+        try {
+          await services.workspaceService.getProjectRoot()
+        } catch (error) {
+          if (!isNodeErrorWithCode(error, 'PROJECT_ROOT_NOT_REGISTERED')) {
+            throw error
+          }
+          projectRoot = await services.workspaceService.registerProjectRoot(
+            request.projectRootLocator,
+          )
+        }
+        if (!projectRoot) {
+          projectRoot = await services.workspaceService.registerProjectReadRoot(
+            request.projectRootLocator,
+          )
+        }
+      } catch (error) {
+        // A project unrelated to the active workspace cannot be granted a read
+        // root; surface that as a selection result instead of an IPC failure.
+        return {
+          ok: false,
+          code: 'invalid-project',
+          detail: error instanceof Error ? error.message : String(error),
+        }
+      }
       return await services.backendProjectComparisonService.selectProject(
         event.sender.id,
         {
@@ -1725,9 +1769,21 @@ export function registerIpc(
         }
         throw error
       }
-      return await services.projectManagementReadService.discoverProject(
-        authorizedDirectory,
-      )
+      try {
+        return await services.projectManagementReadService.discoverProject(
+          authorizedDirectory,
+        )
+      } catch (error) {
+        // A probe target that does not exist yet (for example a workspace whose
+        // directory is still being created) has no visible project either.
+        if (
+          isNodeErrorWithCode(error, 'ENOENT') ||
+          isNodeErrorWithCode(error, 'ENOTDIR')
+        ) {
+          return null
+        }
+        throw error
+      }
     },
   )
 
@@ -1791,12 +1847,12 @@ export function registerIpc(
       ) {
         throw new Error('Project management Step Configuration request is invalid.')
       }
-      const projectRoot = await services.workspaceService.requestProjectPathAccess(
-        request.projectRoot,
+      const manifestPath = await services.workspaceService.requestProjectPathAccess(
+        join(request.projectRoot, 'project.json'),
       )
       return await services.projectManagementReadService.readWorkspaceStepConfiguration({
         ...(request as unknown as DesktopProjectManagementWorkspaceStepConfigurationRequest),
-        projectRoot,
+        projectRoot: dirname(manifestPath),
       })
     },
   )

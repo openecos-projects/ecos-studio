@@ -259,6 +259,25 @@ describe('ProjectManagementReadService', () => {
     })
   })
 
+  it('authorizes the manifest file when resolving a read-scoped project root', async () => {
+    const { projectRoot } = await createProject()
+    const access = vi.fn(async (path: string) => path)
+    const service = new ProjectManagementReadService(
+      {
+        discover: async () => null,
+        load: async () => {
+          throw new Error('manifest load is unused')
+        },
+      },
+      undefined,
+      undefined,
+      access,
+    )
+
+    await expect(service.resolveProjectRoot(projectRoot)).resolves.toBe(projectRoot)
+    expect(access).toHaveBeenCalledWith(join(projectRoot, 'project.json'))
+  })
+
   it('reuses canonical design defaults from an existing Project Workspace', async () => {
     const { projectRoot, workspaceRoot } = await createProject()
     const readWorkspaceConfiguration = vi.fn().mockResolvedValue({
