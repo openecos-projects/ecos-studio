@@ -36,7 +36,7 @@ def _append_jsonl(path: Path, rows) -> None:
             handle.write(json.dumps(row, sort_keys=True) + "\n")
 
 
-def run_worker(args, config: AdaptiveConfig, worker_index: int, workers: int) -> int:
+def run_worker(args, config: AdaptiveConfig, worker_index: int, workers: int, treatments: list[str]) -> int:
     bank = json.loads(args.bank.read_text(encoding="utf-8"))
     contexts = sorted(
         (context for context in bank["contexts"] if context.get("eligibility") == "eligible"),
@@ -67,7 +67,7 @@ def run_worker(args, config: AdaptiveConfig, worker_index: int, workers: int) ->
 
     def on_group(group) -> None:
         design = group["rows"][0]["design"] if group["rows"] else "unknown"
-        for treatment in args.treatments:
+        for treatment in treatments:
             rows = [row for row in group["rows"] if row["treatment"] == treatment]
             _append_jsonl(
                 observations_root / design / treatment / f"observations.part-w{worker_index}.jsonl",
@@ -98,7 +98,7 @@ def run_worker(args, config: AdaptiveConfig, worker_index: int, workers: int) ->
     summary = run_rq2_adaptive_bank(
         shard,
         provider_factory=provider_factory,
-        treatments=tuple(args.treatments),
+        treatments=tuple(treatments),
         config=config,
         worker=worker,
         on_group=on_group,
@@ -238,7 +238,7 @@ def main() -> int:
         levels=levels or (3, 5, 7),
         draws=args.draws,
     )
-    return run_worker(args, config, int(index), int(workers))
+    return run_worker(args, config, int(index), int(workers), treatments)
 
 
 if __name__ == "__main__":
