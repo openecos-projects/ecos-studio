@@ -115,7 +115,9 @@ def merge(args) -> int:
     designs = sorted(
         path.name
         for path in root.iterdir()
-        if path.is_dir() and path.name not in {"logs"}
+        if path.is_dir()
+        and path.name not in {"logs"}
+        and not path.name.startswith(("pilot", "g4-attempt1"))
     )
     reconciliation = {"schema_version": "ecos.rq2_offline_reconciliation.v1", "designs": {}}
     for design in designs:
