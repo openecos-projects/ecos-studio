@@ -8,6 +8,7 @@ members = [
   "crates/chip-render",
   "apps/chipgeom-probe-cli",
   "apps/chip-viewer-native",
+  "apps/chip-viewer-wasm",
 ]
 
 [workspace.package]
