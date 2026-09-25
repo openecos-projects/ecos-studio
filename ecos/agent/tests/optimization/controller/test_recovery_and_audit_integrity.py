@@ -70,6 +70,43 @@ def test_recovery_reattaches_pending_execution_and_rejects_tampered_state(
         )
 
 
+def test_recovery_resumes_pending_candidate_without_recharging_budget(
+    tmp_path: Path,
+) -> None:
+    controller = _controller(
+        tmp_path,
+        _FakeCodex(_proposal),
+        _FakeEcc(_started("execution-old")),
+    )
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    controller.execute()
+
+    class _ResumableEcc(_FakeEcc):
+        def __init__(self) -> None:
+            super().__init__()
+            self.resume_calls = []
+
+        def resume(self, request: object):
+            self.resume_calls.append(request)
+            return _started("execution-new")
+
+    ecc = _ResumableEcc()
+    recovered = OptimizationEpisodeController.recover(
+        planner=_FakeCodex(_proposal),
+        executor=ecc,
+        ledger=controller.ledger,
+        clock=_Clock(),
+        execution_context=_execution_context(),
+    )
+
+    assert [request.intervention_id for request in ecc.resume_calls] == [
+        "intervention-1"
+    ]
+    assert recovered.pending_execution_ids == ("execution-new",)
+    assert recovered.budget.consumed_candidates == 1
+    assert len(recovered.ledger.replay().entries) == 1
+
+
 def test_recovery_requires_the_same_proposal_validation_mode(tmp_path: Path) -> None:
     controller = _controller(
         tmp_path,

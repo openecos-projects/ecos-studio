@@ -15,12 +15,18 @@ from ecos_agent.optimization.contracts import (
 from ecos_agent.optimization.parameters.effective_domain import ProposalValidationMode
 from ecos_agent.optimization.controller_models import (
     _PersistedEpisodeState,
+    ExecutionBinding,
     OptimizationEpisodeControllerError,
+    PendingExecutionRecord,
 )
 from ecos_agent.optimization.decision_audit import (
     OptimizationDecisionAudit,
 )
-from ecos_agent.optimization.execution import CandidateExecutionEvidence
+from ecos_agent.optimization.execution import (
+    CandidateExecutionEvidence,
+    CandidateExecutionReceipt,
+    CandidateExecutionRequest,
+)
 from ecos_agent.optimization.knowledge.cases import (
     EmpiricalCaseAuditReplay,
     EmpiricalCaseAuditStore,
@@ -278,7 +284,64 @@ class ControllerRecoveryMixin:
             controller._state = OptimizationEpisodeState.PLANNING
         if surplus_terminals or controller._state != snapshot.state:
             controller._persist()
+        if (
+            controller._pending_executions
+            and controller._state == OptimizationEpisodeState.EXECUTING
+        ):
+            controller.resume_pending_executions()
         return controller
+
+    def resume_pending_executions(self) -> None:
+        """Rebind persisted candidates to a restarted execution backend."""
+        resume = getattr(self.executor, "resume", None)
+        if not callable(resume):
+            return
+        updates: list[tuple[PendingExecutionRecord, CandidateExecutionReceipt]] = []
+        pending_ids = set(self.pending_execution_ids)
+        for record in self._pending_executions.values():
+            request = CandidateExecutionRequest(
+                intervention_id=record.intervention_id,
+                episode_id=self.episode_id,
+                checkpoint_id=self.checkpoint_id,
+                proposal=record.proposal,
+                requested=record.requested,
+                context_sha256=record.context_sha256,
+                seed=self._execution_seed(),
+                ecc_revision=self._execution_revision(),
+                parent_candidate_root_ref=record.parent_candidate_root_ref,
+            )
+            try:
+                receipt = resume(request)
+            except Exception as exc:
+                raise OptimizationEpisodeControllerError(
+                    "pending candidate resume failed"
+                ) from exc
+            if not isinstance(receipt, CandidateExecutionReceipt) or not receipt.started:
+                raise OptimizationEpisodeControllerError(
+                    "pending candidate resume receipt is invalid"
+                )
+            if receipt.execution_id in pending_ids - {record.execution_id}:
+                raise OptimizationEpisodeControllerError(
+                    "pending candidate resume reused another execution id"
+                )
+            pending_ids.discard(record.execution_id)
+            pending_ids.add(receipt.execution_id)
+            updates.append((record, receipt))
+
+        for record, receipt in updates:
+            if receipt.execution_id == record.execution_id:
+                continue
+            self._pending_executions[record.intervention_id] = record.model_copy(
+                update={"execution_id": receipt.execution_id, "cancel_requested": False}
+            )
+            self._execution_bindings = (
+                *self._execution_bindings,
+                ExecutionBinding(
+                    intervention_id=record.intervention_id,
+                    execution_id=receipt.execution_id,
+                ),
+            )
+        self._persist()
 
     @staticmethod
     def _surplus_terminal_outcomes(

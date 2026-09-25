@@ -455,6 +455,10 @@ def write_episode_reports(
     return episode_output
 
 
+def _episode_exit_code(final_state: str, complete: bool) -> int:
+    return int(final_state == "quarantined" or not complete)
+
+
 def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = None) -> int:
     _self_check()
     parser = argparse.ArgumentParser(description=__doc__)
@@ -621,9 +625,7 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
         raise SystemExit(
             f"episode already exists: {episode_id}; pass --episode-id to resume"
         )
-    # Episode-scoped reports live in their own directory so a second episode
-    # of the same design can never overwrite the first one's summary
-    # (glm4→glm8→glm9 overwrote each other three times under the old layout).
+    # Keep each episode's reports isolated from later runs of the same design.
     episode_output = output / episode_id
     episode_output.mkdir(parents=True, exist_ok=True)
 
@@ -676,10 +678,8 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
             args.objective, goal_text, args.geometry_mode
         )
         primary_metric = _OBJECTIVES[args.objective]["primary_metric"]
-        # alignment 必须锚定 workspace 本体（canonical）观测：runner 启动时用
-        # build_terminal_observation(workspace) 重建 alignment 并做整对象比较，而
-        # terminal observation 含 flow_tool_runtime/flow_peak_memory 等易变遥测，
-        # 用 replay clone 的观测构建必然失配。reference 只用于墙钟预算（22x 中位数）。
+        # Alignment anchors to canonical workspace evidence; replay telemetry drifts.
+        # The reference observation is used only for the 22x wall-clock budget.
         runtime_context = {
             "workspace": str(workspace),
             "episode_id": episode_id,
@@ -797,4 +797,4 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
             default=str,
         )
     )
-    return 0
+    return _episode_exit_code(str(budget_snapshot["final_state"]), bool(summary["terminal_artifacts_complete"]))

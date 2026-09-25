@@ -9,6 +9,7 @@ from ecos_agent.optimization.experiments.closed_loop_driver import (
     _DEFAULT_GEOMETRY_MODE,
     _DEFAULT_GOAL_TEXT,
     _OBJECTIVES,
+    _episode_exit_code,
     _episode_objective,
     build_metric_comparison,
     write_episode_reports,
@@ -21,6 +22,23 @@ from ecos_agent.optimization.metrics.contracts import TerminalEvaluationMetric
 from tests.optimization.experiments.equal_budget_support import (
     _terminal_observation,
 )
+
+
+@pytest.mark.parametrize(
+    ("final_state", "complete", "expected"),
+    [
+        ("stopped", True, 0),
+        ("quarantined", True, 1),
+        ("stopped", False, 1),
+    ],
+)
+def test_episode_exit_code_rejects_incomplete_or_quarantined_runs(
+    final_state: str, complete: bool, expected: int
+) -> None:
+    assert (
+        _episode_exit_code(final_state, complete)
+        == expected
+    )
 
 
 def test_default_episode_objective_matches_treatment_freeze() -> None:
