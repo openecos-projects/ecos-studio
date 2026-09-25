@@ -13,7 +13,6 @@ import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 import {
   snapshotStepDashboardData,
   applyTimingArtifacts,
-  type StepDashboardArtifactIntegrityWarning,
   type StepDashboardData,
 } from './stepDashboardSnapshot'
 
@@ -193,10 +192,6 @@ export function useStepDashboardData() {
           setTimingError(corner, 'TIMING_ARTIFACT_INVALID')
           return
         }
-        recordArtifactIntegrity(
-          data.value.artifactIntegrityWarnings,
-          result.artifact.data,
-        )
         applyTimingArtifacts(data.value, [], [detail])
         loadedTimingCorners.add(corner)
       } catch {
@@ -264,7 +259,6 @@ export function useStepDashboardData() {
       const artifacts = stale ? stale.artifacts : detail.artifacts
       const artifactRevision = stale ? stale.workspaceRevision : revision
       resetTimingArtifacts(contextId, artifactRevision, artifacts)
-      const pendingIntegrityWarnings: StepDashboardArtifactIntegrityWarning[] = []
       const readArtifact = async (
         artifactId: string,
       ): Promise<BackendWorkspaceArtifactContent | null> => {
@@ -282,7 +276,6 @@ export function useStepDashboardData() {
         ) {
           return null
         }
-        recordArtifactIntegrity(pendingIntegrityWarnings, artifact.artifact.data)
         return artifact.artifact.data
       }
       // Per-step QoR summary/hotspots carry no bounded snapshot projection;
@@ -300,7 +293,6 @@ export function useStepDashboardData() {
         if (artifact?.hotspots) analysis.hotspots = artifact.hotspots
       }
       const next = snapshotStepDashboardData(detail)
-      next.artifactIntegrityWarnings = pendingIntegrityWarnings
       const readImage = async (artifactId: string): Promise<string | null> => {
         const artifact = await readArtifact(artifactId)
         if (!artifact?.bytes) return null
@@ -367,21 +359,6 @@ export function useStepDashboardData() {
       if (!cached && viewChanged) data.value = null
     } finally {
       if (version === requestVersion) loading.value = false
-    }
-  }
-
-  function recordArtifactIntegrity(
-    warnings: StepDashboardArtifactIntegrityWarning[],
-    artifact: BackendWorkspaceArtifactContent,
-  ): void {
-    if (artifact.integrity !== 'externally-modified') return
-    const warning: StepDashboardArtifactIntegrityWarning = {
-      actualSizeBytes: artifact.actualSizeBytes ?? null,
-      name: artifact.name,
-      recordedSizeBytes: artifact.recordedSizeBytes ?? null,
-    }
-    if (!warnings.some((item) => item.name === warning.name)) {
-      warnings.push(warning)
     }
   }
 
