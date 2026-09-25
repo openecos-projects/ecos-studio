@@ -370,8 +370,19 @@ class EccCandidateRerunAdapter:
         if not all(isinstance(value, str) for value in required) or any(
             value is not None and not isinstance(value, str) for value in optional
         ):
+            error = response.get("error")
+            detail = error.get("message") if isinstance(error, Mapping) else None
+            if not isinstance(detail, str) or not _SAFE_RPC_ERROR_DETAIL.fullmatch(detail):
+                evidence_error = result.get("evidenceError")
+                detail = (
+                    evidence_error
+                    if isinstance(evidence_error, str)
+                    and _SAFE_RPC_ERROR_DETAIL.fullmatch(evidence_error)
+                    else None
+                )
+            suffix = f": {detail}" if detail else ""
             raise OptimizationEccAdapterError(
-                "candidate terminal evidence is incomplete"
+                f"candidate terminal evidence is incomplete{suffix}"
             )
         try:
             return CandidateExecutionEvidence(**values)

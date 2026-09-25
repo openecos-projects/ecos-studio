@@ -6,6 +6,7 @@ import pytest
 
 from ecos_agent.optimization.contracts import StrategyDirection
 from ecos_agent.optimization.ecc.adapter import EccCandidateRerunAdapter
+from ecos_agent.optimization.ecc.evidence import OptimizationEccAdapterError
 from ecos_agent.optimization.ledger import OptimizationOutcomeKind
 
 HASH = "sha256:" + "a" * 64
@@ -72,6 +73,35 @@ def test_adapter_classifies_an_immediate_execution_failure() -> None:
     )
 
     assert receipt.outcome == OptimizationOutcomeKind.EXECUTION_FAILED
+
+
+def test_adapter_preserves_failed_resume_error_when_evidence_is_partial() -> None:
+    rpc = _FakeEccRpc(
+        {
+            **_running_operation(),
+            "state": "failed",
+            "error": {
+                "code": "command_failed",
+                "message": "candidate artifact escapes workspace: CTS",
+            },
+            "result": {
+                "candidateId": "candidate-1",
+                "candidateRootRef": ".agent/candidates/candidate-1",
+                "evidenceError": "candidate runtime report is unavailable",
+            },
+        }
+    )
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
+
+    with pytest.raises(
+        OptimizationEccAdapterError,
+        match="candidate artifact escapes workspace: CTS",
+    ):
+        adapter.resume(
+            _request("place.target_density", 0.65, StrategyDirection.INCREASE)
+        )
 
 
 def test_adapter_preserves_immediate_success_for_controller_validation(tmp_path: Path) -> None:
