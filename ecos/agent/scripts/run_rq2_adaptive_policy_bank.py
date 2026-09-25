@@ -103,7 +103,7 @@ def run_worker(args, config: AdaptiveConfig, worker_index: int, workers: int, tr
         worker=worker,
         on_group=on_group,
     )
-    (observations_root / f"worker-{worker}.summary.json").write_text(
+    (observations_root / f"worker-{worker_index}-of-{workers}.summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     print(json.dumps({"worker": worker, **summary}, sort_keys=True))
