@@ -610,3 +610,82 @@ def test_knowledge_treatment_flag_contract() -> None:
                 "--knowledge-treatment", "unconditioned-support-zero-shot",
             ],
         )
+
+
+def _analysis_row(*, design: str, fingerprint: str, treatment: str, signature: str,
+                  stratum: str = "knowledge_opportunity", status: str = "valid") -> dict:
+    return {
+        "design": design,
+        "checkpoint": "cp1",
+        "state_stratum": stratum,
+        "context_fingerprint": fingerprint,
+        "treatment": treatment,
+        "repeat": 1,
+        "schema_status": status,
+        "levels": {
+            "L0": signature,
+            "L1": signature,
+            "L2": signature,
+            "L3": signature,
+            "evidence_status": (
+                "claim_bound" if signature.startswith("propose") else "abstain"
+            ),
+        },
+    }
+
+
+def test_analysis_noise_floor_posterior_and_shift() -> None:
+    from ecos_agent.optimization.experiments.rq2_analysis import (
+        noise_floor_calibration,
+        policy_posterior,
+        policy_shift,
+        provenance_support,
+    )
+
+    dual = "state-conditioned-dual-layer-zero-shot"
+    noknow = "llm-no-knowledge"
+    rows = []
+    # cf-a: Dual proposes place; NoKnow abstains -> material shift
+    for repeat in range(3):
+        rows.append(_analysis_row(design="gcd", fingerprint="cf-a", treatment=dual,
+                                  signature="propose:place"))
+        rows.append(_analysis_row(design="gcd", fingerprint="cf-a", treatment=noknow,
+                                  signature="continue"))
+    # cf-b: both arms identical -> no shift
+    for repeat in range(3):
+        rows.append(_analysis_row(design="gcd", fingerprint="cf-b", treatment=dual,
+                                  signature="propose:cts"))
+        rows.append(_analysis_row(design="gcd", fingerprint="cf-b", treatment=noknow,
+                                  signature="propose:cts"))
+    # provider error row stays in the denominator
+    rows.append(_analysis_row(design="gcd", fingerprint="cf-b", treatment=dual,
+                              signature="provider_error", status="provider_error"))
+
+    noise = noise_floor_calibration(rows)
+    assert noise["attempted_rows"] == 13
+    assert noise["provider_error_rows"] == 1
+    assert noise["noise_floor_status_overall"] in {"low", "material", "high", "not_estimable"}
+
+    support = provenance_support(rows)
+    assert support["treatments"][noknow]["support_exposed"] == "n/a"
+    assert support["treatments"][dual]["schema_status_counts"]["provider_error"] == 1
+
+    posterior = policy_posterior(rows, draws=200)
+    cells = {(cell["context_fingerprint"], cell["treatment"]): cell for cell in posterior["cells"]}
+    assert len(cells) == 4
+    assert cells[("cf-a", dual)]["levels"]["L2"]["posterior_action_mass"]["propose:place"]["mean"] == 1.0
+
+    shift = policy_shift(rows, draws=200)
+    key = f"L2|{dual}||{noknow}"
+    summary = shift["summary"][key]
+    assert summary["delta_local_contexts"] == 2
+    deltas = [
+        context["comparisons"][f"{dual}||{noknow}"]["delta_local_tv"]
+        for context in shift["contexts"]
+        if context["level"] == "L2"
+    ]
+    assert len(deltas) == 2
+    # cf-a fully shifted (TV=1); cf-b carries the provider_error row in the
+    # Dual denominator (failures never leave the denominator), giving
+    # TV = 1/3 against the identical NoKnow arm -> mean 2/3
+    assert abs(summary["delta_local_mean"] - (1.0 + 1.0 / 3.0) / 2.0) < 1e-9
