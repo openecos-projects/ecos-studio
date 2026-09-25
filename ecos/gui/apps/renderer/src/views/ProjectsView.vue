@@ -363,6 +363,13 @@
                         class="popover-step-empty"
                       >
                         Step outputs unavailable.
+                        <button
+                          type="button"
+                          class="popover-step-retry"
+                          @click="retryWorkspaceStepOutputs"
+                        >
+                          Retry
+                        </button>
                       </p>
                       <p
                         v-else-if="!popoverBranchRows.rows.length"
@@ -973,6 +980,7 @@ const popoverWorkspaceTarget = ref<WorkspaceTarget | null>(null)
 const workspaceStepOutputs = ref<Record<string, EccWorkspaceStepOutputsResult>>({})
 const workspaceStepOutputsFailed = ref<Record<string, boolean>>({})
 const workspacePopoverStyle = ref<Record<string, string>>({})
+let workspaceStepOutputRequestQueue = Promise.resolve()
 const projectActionMenuId = ref<string | null>(null)
 const workspaceActionMenuTarget = ref<WorkspaceTarget | null>(null)
 const pendingDeleteWorkspaceTarget = ref<WorkspaceTarget | null>(null)
@@ -1255,16 +1263,30 @@ function branchStepLabel(status: ProjectStepStatus): string {
   return map[status]
 }
 
+function workspaceStepOutputKey(projectRoot: string, workspacePath: string): string {
+  return normalizePath(projectRoot) + '\u0000' + normalizePath(workspacePath)
+}
+
+function selectedPopoverStepOutputKey(): string | null {
+  const target = popoverWorkspaceTarget.value
+  const project = target ? workspaceTargetProject(target) : null
+  const workspace = selectedPopoverWorkspace.value
+  if (!project || !workspace) return null
+  return workspaceStepOutputKey(project.path, workspace.workspacePath)
+}
+
 const popoverBranchRows = computed<{
   status: 'loading' | 'error' | 'ready'
   rows: PopoverBranchRow[]
 }>(() => {
   const workspace = selectedPopoverWorkspace.value
   if (!workspace) return { status: 'ready', rows: [] }
-  if (workspaceStepOutputsFailed.value[workspace.id]) {
+  const key = selectedPopoverStepOutputKey()
+  if (!key) return { status: 'ready', rows: [] }
+  if (workspaceStepOutputsFailed.value[key]) {
     return { status: 'error', rows: [] }
   }
-  const result = workspaceStepOutputs.value[workspace.id]
+  const result = workspaceStepOutputs.value[key]
   if (!result) return { status: 'loading', rows: [] }
   return {
     status: 'ready',
@@ -1574,27 +1596,75 @@ function toggleDialogMaximized() {
   isDialogMaximized.value = !isDialogMaximized.value
 }
 
-async function loadWorkspaceStepOutputs(workspaceId: string) {
+const workspaceStepOutputLoadGeneration: Record<string, number> = {}
+
+function readWorkspaceStepOutputsWithAccess(
+  projectRoot: string,
+  workspacePath: string,
+): Promise<EccWorkspaceStepOutputsResult> {
+  const request = workspaceStepOutputRequestQueue.then(async () => {
+    const desktopApi = getDesktopApi()
+    const normalizedProjectRoot = normalizePath(projectRoot)
+    const normalizedWorkspacePath = normalizePath(workspacePath)
+
+    await desktopApi.workspace.registerProjectRoot(normalizedWorkspacePath)
+    await desktopApi.workspace.registerProjectReadRoot(normalizedProjectRoot)
+    return await readWorkspaceStepOutputsApi(normalizedWorkspacePath)
+  })
+
+  workspaceStepOutputRequestQueue = request.then(
+    () => undefined,
+    () => undefined,
+  )
+  return request
+}
+
+async function loadWorkspaceStepOutputs(
+  projectId: string,
+  workspaceId: string,
+  force = false,
+) {
+  const project = projectCards.value.find(
+    (candidate) => candidate.model.id === projectId,
+  )?.model
+  if (!project) return
+  const workspace = project.workspaces.find((candidate) => candidate.id === workspaceId)
+  if (!workspace) return
+  const key = workspaceStepOutputKey(project.path, workspace.workspacePath)
   if (
-    workspaceStepOutputs.value[workspaceId] ||
-    workspaceStepOutputsFailed.value[workspaceId]
+    !force &&
+    (workspaceStepOutputs.value[key] || workspaceStepOutputsFailed.value[key])
   ) {
     return
   }
-  const workspace = selectedProject.value.workspaces.find(
-    (candidate) => candidate.id === workspaceId,
-  )
-  if (!workspace) return
+  const generation = (workspaceStepOutputLoadGeneration[key] ?? 0) + 1
+  workspaceStepOutputLoadGeneration[key] = generation
+  if (force) {
+    const nextFailures = { ...workspaceStepOutputsFailed.value }
+    delete nextFailures[key]
+    workspaceStepOutputsFailed.value = nextFailures
+  }
   try {
-    const result = await readWorkspaceStepOutputsApi(workspace.workspacePath)
-    workspaceStepOutputs.value = { ...workspaceStepOutputs.value, [workspaceId]: result }
+    const result = await readWorkspaceStepOutputsWithAccess(
+      project.path,
+      workspace.workspacePath,
+    )
+    if (workspaceStepOutputLoadGeneration[key] !== generation) return
+    workspaceStepOutputs.value = { ...workspaceStepOutputs.value, [key]: result }
   } catch (error) {
     console.warn('Failed to load workspace step outputs.', error)
+    if (workspaceStepOutputLoadGeneration[key] !== generation) return
     workspaceStepOutputsFailed.value = {
       ...workspaceStepOutputsFailed.value,
-      [workspaceId]: true,
+      [key]: true,
     }
   }
+}
+
+function retryWorkspaceStepOutputs() {
+  const target = popoverWorkspaceTarget.value
+  if (!target) return
+  void loadWorkspaceStepOutputs(target.projectId, target.workspaceId, true)
 }
 
 function toggleWorkspaceFlowPopover(projectId: string, workspaceId: string) {
@@ -1608,7 +1678,9 @@ function toggleWorkspaceFlowPopover(projectId: string, workspaceId: string) {
   branchDraft.value = null
   closeRowActionMenus()
   popoverWorkspaceTarget.value = wasOpen ? null : { projectId, workspaceId }
-  if (popoverWorkspaceTarget.value) void loadWorkspaceStepOutputs(workspaceId)
+  if (popoverWorkspaceTarget.value) {
+    void loadWorkspaceStepOutputs(projectId, workspaceId, true)
+  }
   void nextTick(updateWorkspaceFlowPopoverPosition)
 }
 
@@ -1742,11 +1814,35 @@ function handleWorkspacePopoverKeydown(event: KeyboardEvent) {
 }
 
 async function startWorkspaceFromPopoverStep(workspaceId: string, row: PopoverBranchRow) {
+  const target = popoverWorkspaceTarget.value
+  const project = target ? workspaceTargetProject(target) : null
+  const workspace = project?.workspaces.find((candidate) => candidate.id === workspaceId)
+  if (
+    !target ||
+    !project ||
+    !workspace ||
+    target.projectId !== selectedProject.value.id ||
+    target.workspaceId !== workspaceId
+  ) {
+    return
+  }
   const targetWorkspaceId = await nextAvailableWorkspaceId(selectedProject.value)
   if (!targetWorkspaceId) return
-  const result = workspaceStepOutputs.value[workspaceId]
+  const key = workspaceStepOutputKey(project.path, workspace.workspacePath)
+  const result = workspaceStepOutputs.value[key]
+  if (
+    !result ||
+    normalizePath(result.directory) !== normalizePath(workspace.workspacePath)
+  ) {
+    showToast({
+      severity: 'warn',
+      summary: 'Workspace output changed',
+      detail: 'Reload the workspace step outputs before creating a branch.',
+    })
+    return
+  }
   branchDraft.value = createWorkspaceBranchDraft(
-    selectedProject.value,
+    project,
     workspaceId,
     {
       step: row.step,

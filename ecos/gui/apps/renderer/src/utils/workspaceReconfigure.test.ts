@@ -61,7 +61,6 @@ describe('workspaceReconfigureInitialConfig', () => {
             { name: 'STA', tool: 'ecc', state: 'Unstart', runtime: '', peakMemory: 0 },
           ],
         },
-        home: {},
         lastEventId: 'event-1',
         operations: [],
         parameters: {},

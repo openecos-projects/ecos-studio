@@ -535,7 +535,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
       workspaceLifecycle.updateWorkspaceRevision(nextWorkspaceRevision, sessionId)
       workspaceRevision.value = nextWorkspaceRevision
       if (!canApply()) return false
-      workspaceLifecycle.invalidate(['step-config', 'step', 'home'], {
+      workspaceLifecycle.invalidate(['step-config', 'step'], {
         reason: 'step-config-save',
         sessionId,
         step,

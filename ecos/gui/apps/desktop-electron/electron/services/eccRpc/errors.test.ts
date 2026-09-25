@@ -33,6 +33,17 @@ describe('normalizeRuntimeError', () => {
     expect(identityMismatch.code).toBe(SNAPSHOT_IDENTITY_MISMATCH)
   })
 
+  it('preserves the derived-config conflict code from the RPC error', () => {
+    const error = normalizeRuntimeError(
+      new EccJsonRpcError(-32021, 'derived config files changed', {
+        files: ['config/sta.json'],
+      }),
+    )
+
+    expect(error.code).toBe('derived_configs_modified')
+    expect(error.message).toBe('derived config files changed')
+  })
+
   it('keeps the existing mapping for named JSON-RPC codes', () => {
     expect(
       normalizeRuntimeError(new EccJsonRpcError(-32602, 'invalid_request')).code,

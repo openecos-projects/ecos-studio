@@ -17,7 +17,6 @@ import {
   getWorkspaceResourceIndexApi,
   getWorkspaceRuntimeSnapshotApi,
   readWorkspaceFlowResourceApi,
-  readWorkspaceHomeResourceApi,
   readWorkspaceParametersResourceApi,
 } from '@/api/workspaceResources'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
@@ -217,7 +216,7 @@ export function useDesignReportExport({
       // 3. Backend configuration comes from ECC; frontend keeps its file resources.
       let flow: Record<string, unknown> | null = null
       let parameters: Record<string, unknown> | null = null
-      let homeData: Record<string, unknown> | null = null
+      let projectMetadata: Record<string, unknown> | null = null
 
       const runtimeSnapshot =
         isBackend &&
@@ -233,7 +232,6 @@ export function useDesignReportExport({
       if (runtimeSnapshot) {
         flow = runtimeSnapshot.flow
         parameters = runtimeSnapshot.parameters
-        homeData = runtimeSnapshot.home
       }
 
       if (!runtimeSnapshot && !isBackend) {
@@ -259,18 +257,10 @@ export function useDesignReportExport({
         }
         if (!parameters) parameters = await readWorkspaceJson('home/parameters.json')
 
-        try {
-          homeData = await readWorkspaceHomeResourceApi()
-        } catch {
-          /* ignore */
-        }
-        if (!homeData && resourceIndex?.homeData) homeData = resourceIndex.homeData
-
-        const pdkJson =
+        projectMetadata =
           (await readWorkspaceJson('home/pdk.json')) ||
           (await readWorkspaceJson('config/pdk.json')) ||
           (await readWorkspaceJson('pdk.json'))
-        if (pdkJson) homeData = { ...homeData, ...pdkJson }
       }
 
       const topModule =
@@ -619,7 +609,7 @@ export function useDesignReportExport({
         frequencyTarget: currentProject.value?.frequencyTarget,
         parameters,
         flow,
-        homeData,
+        projectMetadata,
         stepMetrics,
         stepSummaries,
         stepHotspots,

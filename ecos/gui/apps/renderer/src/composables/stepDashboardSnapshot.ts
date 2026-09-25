@@ -55,6 +55,12 @@ export interface StepDashboardReport {
   modifiedAt: number | null
 }
 
+export interface StepDashboardArtifactIntegrityWarning {
+  actualSizeBytes: number | null
+  name: string
+  recordedSizeBytes: number | null
+}
+
 export interface StepDashboardData {
   step: string
   tool: string
@@ -85,6 +91,7 @@ export interface StepDashboardData {
   designStatis: StepDesignStatis | null
   hasGeometry: boolean
   reports: StepDashboardReport[]
+  artifactIntegrityWarnings: StepDashboardArtifactIntegrityWarning[]
   staleRevision: number | null
 }
 
@@ -384,6 +391,7 @@ export function snapshotStepDashboardData(
           modifiedAt: null,
         }
       }),
+    artifactIntegrityWarnings: [],
     staleRevision: staleEvidence?.workspaceRevision ?? null,
   }
 }

@@ -21,7 +21,6 @@ const {
   invalidateWorkspaceResources: vi.fn(),
   resourceVersions: {
     value: {
-      home: 0,
       flow: 0,
       parameters: 0,
       step: 0,
@@ -112,7 +111,6 @@ describe('useFlowRunner desktop and design-tool routing', () => {
       state: undefined,
     }
     resourceVersions.value = {
-      home: 0,
       flow: 0,
       parameters: 0,
       step: 0,
@@ -266,7 +264,6 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     resolveOperation?.()
     await vi.waitFor(() => expect(runner.isRunning.value).toBe(false))
     expect(invalidateWorkspaceResources).toHaveBeenCalledWith([
-      'home',
       'flow',
       'step',
       'maps',

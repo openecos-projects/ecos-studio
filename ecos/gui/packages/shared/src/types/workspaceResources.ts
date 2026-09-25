@@ -4,7 +4,6 @@ export interface WorkspaceResourceFile {
   path: string
   exists: boolean
   kind:
-    | 'home'
     | 'flow'
     | 'parameters'
     | 'checklist'
@@ -64,12 +63,10 @@ export interface WorkspaceResourceIndex {
   topModule: string
   pdk: string
   home: {
-    homeJson: WorkspaceResourceFile
     flowJson: WorkspaceResourceFile
     parametersJson: WorkspaceResourceFile
     checklistJson: WorkspaceResourceFile
   }
-  homeData: Record<string, unknown> | null
   parameters: Record<string, unknown> | null
   flow: {
     steps: WorkspaceStepResource[]

@@ -111,8 +111,8 @@ Available levels: `debug`, `info`, `warning` (default), `error`, `critical`.
 **Q: How does the desktop app run workspace and flow actions?**
 
 Workspace queries and flow queries are regular CLI request/response calls over
-the Electron desktop bridge. `get_info`, `home_page`, workspace loading, and
-workspace creation return data to their caller and do not enter the runtime
+the Electron desktop bridge. `get_info`, runtime snapshots, workspace loading,
+and workspace creation return data to their caller and do not enter the runtime
 refresh stream. Runtime events are used only for running flow lifecycle changes
 from `run_step` and `rtl2gds`; stdout and stderr log output is not treated as a
 workspace data-refresh signal.

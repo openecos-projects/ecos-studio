@@ -8,6 +8,7 @@ import {
   realpath,
   rename,
   rm,
+  unlink,
   writeFile,
 } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
@@ -39,7 +40,7 @@ const FLOW_STEP_SEQUENCE = [
 ] as const
 const FLOW_STEPS: Set<string> = new Set(FLOW_STEP_SEQUENCE)
 const CATALOG_END_STEP = FLOW_STEP_SEQUENCE[FLOW_STEP_SEQUENCE.length - 1]!
-const OBSOLETE_STEP_DIRECTORY = 'fixFanout_ecc'
+const LEGACY_HOME_FILES = ['home.json', 'home.json.lock'] as const
 /** Default tool names when extending a short source flow to the catalog end. */
 const DEFAULT_STEP_TOOLS: Record<(typeof FLOW_STEP_SEQUENCE)[number], string> = {
   Synthesis: 'yosys',
@@ -179,7 +180,7 @@ export async function prepareWorkspaceRerun(
       contract.end_step,
       contract.execution_scope,
     )
-    await rewriteAndPruneWorkspaceRerunHome({
+    await prepareWorkspaceRerunMetadata({
       sourceWorkspace: verified.sourceWorkspace,
       sourceWorkspaceRaw: contract.source_workspace,
       stagedWorkspace,
@@ -565,7 +566,7 @@ async function prepareWorkspaceRerunFlow(
   await writeFile(flowPath, `${JSON.stringify(flow.data, null, 2)}\n`, 'utf8')
 }
 
-async function rewriteAndPruneWorkspaceRerunHome(options: {
+async function prepareWorkspaceRerunMetadata(options: {
   sourceWorkspace: string
   sourceWorkspaceRaw: string
   stagedWorkspace: string
@@ -577,31 +578,37 @@ async function rewriteAndPruneWorkspaceRerunHome(options: {
     join(options.stagedWorkspace, 'home'),
     'rerun home',
   )
-  await rewriteHomeJsonSourcePaths(home, options)
+  await removeLegacyWorkspaceHomeFiles(home)
+  await rewriteWorkspaceHomeFilePaths(home, options)
 
   const targetIndex = FLOW_STEP_SEQUENCE.indexOf(
     options.targetStep as (typeof FLOW_STEP_SEQUENCE)[number],
   )
   if (targetIndex < 0) {
-    throw new Error('Workspace rerun home prune target is invalid.')
+    throw new Error('Workspace rerun metadata prune target is invalid.')
   }
 
-  const flow = parseWorkspaceFlow(await readFile(join(home, 'flow.json'), 'utf8'))
-  const toolByStep = new Map(flow.steps.map((step) => [step.name, step.tool]))
   const wipedStageNames = new Set<string>(FLOW_STEP_SEQUENCE.slice(targetIndex))
-  const wipedDirectories = new Set<string>([OBSOLETE_STEP_DIRECTORY])
-  for (const stageName of wipedStageNames) {
-    const tool =
-      toolByStep.get(stageName) ??
-      DEFAULT_STEP_TOOLS[stageName as (typeof FLOW_STEP_SEQUENCE)[number]]
-    wipedDirectories.add(rerunStageDirectoryName(stageName, tool))
-  }
-
-  await pruneWorkspaceRerunHomeJson(join(home, 'home.json'), {
-    targetIndex,
-    wipedDirectories,
-  })
   await pruneWorkspaceRerunChecklistJson(join(home, 'checklist.json'), wipedStageNames)
+}
+
+async function removeLegacyWorkspaceHomeFiles(homeDirectory: string): Promise<void> {
+  const removals: string[] = []
+  for (const filename of LEGACY_HOME_FILES) {
+    const path = join(homeDirectory, filename)
+    try {
+      const stats = await lstat(path)
+      if (!stats.isFile() && !stats.isSymbolicLink()) {
+        throw new Error(`Workspace rerun legacy home file is invalid: ${filename}`)
+      }
+      removals.push(path)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
+  for (const path of removals) {
+    await unlink(path)
+  }
 }
 
 function trimPathSeparators(value: string): string {
@@ -718,7 +725,7 @@ export function rewriteSourceRootedPath(
   return value
 }
 
-export async function rewriteHomeJsonSourcePaths(
+export async function rewriteWorkspaceHomeFilePaths(
   homeDirectory: string,
   options: {
     sourceWorkspace: string
@@ -809,121 +816,6 @@ function uniquePathPrefixes(values: string[]): string[] {
     prefixes.add(trimmed.replace(/\//g, '\\'))
   }
   return [...prefixes].sort((left, right) => right.length - left.length)
-}
-
-async function pruneWorkspaceRerunHomeJson(
-  homeJsonPath: string,
-  options: {
-    targetIndex: number
-    wipedDirectories: Set<string>
-  },
-): Promise<void> {
-  let raw: string
-  try {
-    raw = await readFile(homeJsonPath, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
-    throw error
-  }
-
-  let data: Record<string, unknown>
-  try {
-    data = JSON.parse(raw) as Record<string, unknown>
-  } catch {
-    throw new Error('Workspace rerun home.json is invalid.')
-  }
-
-  if (
-    typeof data.layout === 'string' &&
-    pathBelongsToWipedStage(data.layout, options.wipedDirectories)
-  ) {
-    data.layout = ''
-  }
-  if (data.metrics && typeof data.metrics === 'object' && !Array.isArray(data.metrics)) {
-    const metrics = { ...(data.metrics as Record<string, unknown>) }
-    for (const [key, value] of Object.entries(metrics)) {
-      if (
-        typeof value === 'string' &&
-        pathBelongsToWipedStage(value, options.wipedDirectories)
-      ) {
-        delete metrics[key]
-      }
-    }
-    data.metrics = metrics
-  }
-
-  if (data.monitor && typeof data.monitor === 'object' && !Array.isArray(data.monitor)) {
-    data.monitor = pruneWorkspaceRerunMonitor(
-      data.monitor as Record<string, unknown>,
-      options.targetIndex,
-    )
-  }
-
-  await writeFile(homeJsonPath, `${JSON.stringify(data, null, 4)}\n`, 'utf8')
-}
-
-function pruneWorkspaceRerunMonitor(
-  monitor: Record<string, unknown>,
-  targetIndex: number,
-): Record<string, unknown> {
-  const steps = Array.isArray(monitor.step)
-    ? monitor.step.filter((value): value is string => typeof value === 'string')
-    : []
-  const keepIndexes: number[] = []
-  steps.forEach((label, index) => {
-    const stage = monitorStepStage(label)
-    if (isObsoleteFlowStep(stage ?? label)) return
-    if (!stage) {
-      keepIndexes.push(index)
-      return
-    }
-    const stageIndex = FLOW_STEP_SEQUENCE.indexOf(
-      stage as (typeof FLOW_STEP_SEQUENCE)[number],
-    )
-    if (stageIndex >= 0 && stageIndex < targetIndex) {
-      keepIndexes.push(index)
-    }
-  })
-
-  const pruneSeries = (value: unknown): unknown[] => {
-    if (!Array.isArray(value)) return []
-    return keepIndexes.map((index) => value[index]).filter((item) => item !== undefined)
-  }
-
-  return {
-    ...monitor,
-    step: keepIndexes.map((index) => steps[index]),
-    memory: pruneSeries(monitor.memory),
-    runtime: pruneSeries(monitor.runtime),
-    instance: pruneSeries(monitor.instance),
-    frequency: pruneSeries(monitor.frequency),
-  }
-}
-
-function monitorStepStage(label: string): string | null {
-  const separator = ' - '
-  const index = label.indexOf(separator)
-  const prefix = (index >= 0 ? label.slice(0, index) : label).trim()
-  return FLOW_STEPS.has(prefix) || isObsoleteFlowStep(prefix) ? prefix : null
-}
-
-function pathBelongsToWipedStage(
-  pathValue: string,
-  wipedDirectories: Set<string>,
-): boolean {
-  const normalized = pathValue.trim().replace(/\\/g, '/')
-  if (!normalized) return false
-  for (const directory of wipedDirectories) {
-    if (
-      normalized === directory ||
-      normalized.startsWith(`${directory}/`) ||
-      normalized.includes(`/${directory}/`) ||
-      normalized.endsWith(`/${directory}`)
-    ) {
-      return true
-    }
-  }
-  return false
 }
 
 async function pruneWorkspaceRerunChecklistJson(

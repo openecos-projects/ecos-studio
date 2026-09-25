@@ -2341,6 +2341,28 @@ function normalizePath(path: string) {
   return path.replace(/\\/g, '/').replace(/\/+$/g, '')
 }
 
+function resolveProjectRelativePath(projectRoot: string, path: string): string {
+  const normalized = normalizePath(path)
+  if (!normalized || normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized)) {
+    return normalized
+  }
+  const combined = normalizePath(joinPath(projectRoot, normalized))
+  const parts = combined.split('/')
+  const resolved: string[] = []
+  for (const part of parts) {
+    if (!part || part === '.') continue
+    if (part === '..') {
+      const hasDriveRoot = resolved.length === 1 && /^[A-Za-z]:$/.test(resolved[0])
+      if (resolved.length > 0 && !hasDriveRoot) {
+        resolved.pop()
+      }
+      continue
+    }
+    resolved.push(part)
+  }
+  return `${combined.startsWith('/') ? '/' : ''}${resolved.join('/')}`
+}
+
 function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStepName {
   const candidate = String(value ?? '')
   const aliases: Record<string, FlowStepName> = {
@@ -3876,7 +3898,11 @@ async function handleAddExternalPdkPath() {
   externalPdkPaths.value = [...externalPdkPaths.value, directory]
   await scanExternalPdkPaths()
   syncWorkspaceConfig()
-  void persistExternalPdkPaths()
+  void persistExternalPdkPaths(
+    projectContext.value.project_root,
+    externalPdkPaths.value,
+    getCurrentPdkRoot(),
+  )
 }
 
 function handleRemoveExternalPdkPath(path: string) {
@@ -3884,26 +3910,48 @@ function handleRemoveExternalPdkPath(path: string) {
   externalPdkPaths.value = externalPdkPaths.value.filter((item) => item !== path)
   externalPdkScans.value.delete(path)
   syncWorkspaceConfig()
-  void persistExternalPdkPaths()
+  void persistExternalPdkPaths(
+    projectContext.value.project_root,
+    externalPdkPaths.value,
+    getCurrentPdkRoot(),
+  )
 }
 
 /**
  * Record the current external paths in the project's ecc.toml right away.
- * Fails silently while the project directory does not exist yet (fresh
- * projects persist through the create pipeline instead).
+ * Fails silently only while the project directory does not exist yet (fresh
+ * projects persist through the create pipeline instead). The arguments are
+ * captured by the caller so a project switch cannot redirect an in-flight
+ * write to the new project.
  */
-async function persistExternalPdkPaths() {
-  const projectRoot = projectContext.value.project_root
+async function persistExternalPdkPaths(
+  projectRoot: string,
+  externalPaths: string[],
+  pdkRoot: string,
+) {
   if (!projectRoot) return
   try {
     await getDesktopApi().projectEccConfig.write({
       projectRoot,
-      externalPaths: [...externalPdkPaths.value],
-      ...(getCurrentPdkRoot() ? { pdkRoot: getCurrentPdkRoot() } : {}),
+      externalPaths: [...externalPaths],
+      ...(pdkRoot ? { pdkRoot } : {}),
     })
-  } catch {
-    // New projects have no project directory yet; the create pipeline
-    // persists ecc.toml once the project exists.
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.startsWith('project root does not exist:')
+    ) {
+      return
+    }
+    showToast({
+      severity: 'error',
+      summary: 'External PDK Update Failed',
+      detail:
+        error instanceof Error
+          ? error.message
+          : 'Could not update the project ecc.toml external PDK paths.',
+      life: 5000,
+    })
   }
 }
 
@@ -3940,10 +3988,13 @@ async function loadProjectEccPdkConfig() {
   const generation = ++projectEccPdkLoadGeneration
   const projectRoot = projectContext.value.project_root
   if (loadedEccPdkProjectRoot !== projectRoot) {
+    const initialProjectLoad = loadedEccPdkProjectRoot === ''
     loadedEccPdkProjectRoot = projectRoot
     externalPdkPathsEdited = false
     manualPdkEdited = false
-    externalPdkPaths.value = [...(props.initialConfig?.pdk_external_paths ?? [])]
+    externalPdkPaths.value = initialProjectLoad
+      ? [...(props.initialConfig?.pdk_external_paths ?? [])]
+      : []
     externalPdkScans.value = new Map()
   }
   projectEccPdkConfig.value = null
@@ -3962,7 +4013,13 @@ async function loadProjectEccPdkConfig() {
     if (generation !== projectEccPdkLoadGeneration) return
     projectEccPdkConfig.value = result
     if (result.exists) {
-      await selectDeclaredProjectPdk(result, generation)
+      await selectDeclaredProjectPdk(
+        {
+          ...result,
+          pdkRoot: resolveProjectRelativePath(projectRoot, result.pdkRoot),
+        },
+        generation,
+      )
       if (generation !== projectEccPdkLoadGeneration) return
       if (!externalPdkPathsEdited) {
         externalPdkPaths.value = [...result.externalPaths]
@@ -4299,6 +4356,9 @@ watch(
       projectEccPdkError.value = ''
       isLoadingProjectEccPdk.value = false
       manualPdkEdited = false
+      externalPdkPathsEdited = false
+      externalPdkPaths.value = []
+      externalPdkScans.value = new Map()
       pdkSelections.value = { tech_lef: [], cell_lef: [], liberty: [] }
     }
     if (currentStep.value === 5) void loadProjectEccPdkConfig()

@@ -153,38 +153,13 @@ describe('prepareWorkspaceRerun', () => {
     ])
   })
 
-  it('rewrites home.json paths and prunes post-target home aggregates', async () => {
+  it('removes legacy home files and prunes the independent checklist', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
-    await mkdir(join(source, 'drc_ecc', 'analysis'), { recursive: true })
-    await writeFile(join(source, 'drc_ecc', 'analysis', 'drc.png'), 'drc')
+    await writeFile(join(source, 'home', 'home.json'), '{legacy')
+    await writeFile(join(source, 'home', 'home.json.lock'), 'locked')
     await writeFile(
-      join(source, 'home', 'home.json'),
-      `${JSON.stringify(
-        {
-          parameters: `${source}/home/parameters.json`,
-          flow: `${source}/home/flow.json`,
-          layout: `${source}/legalization_dreamplace/output/layout.png`,
-          checklist: `${source}/home/checklist.json`,
-          metrics: {
-            'drc dist.': `${source}/drc_ecc/analysis/drc.png`,
-            'fanout dist.': `${source}/fixFanout_ecc/output/fanout.png`,
-          },
-          monitor: {
-            step: [
-              'fixFanout - analysis',
-              'place - analysis',
-              'CTS - analysis',
-              'legalization - analysis',
-            ],
-            memory: ['1', '2', '3', '4'],
-            runtime: ['1', '2', '3', '4'],
-            instance: ['1', '2', '3', '4'],
-            frequency: ['1', '2', '3', '4'],
-          },
-        },
-        null,
-        4,
-      )}\n`,
+      join(source, 'home', 'pdk.json'),
+      JSON.stringify({ root: `${source}/pdk` }),
     )
     await writeFile(
       join(source, 'home', 'checklist.json'),
@@ -223,23 +198,24 @@ describe('prepareWorkspaceRerun', () => {
 
     await prepareWorkspaceRerun(contract)
 
-    const home = JSON.parse(
-      await readFile(`${contract.target_workspace}/home/home.json`, 'utf8'),
-    ) as {
-      parameters: string
-      flow: string
-      layout: string
-      checklist: string
-      metrics: Record<string, string>
-      monitor: { step: string[]; memory: string[] }
-    }
-    expect(home.parameters).toBe(`${contract.target_workspace}/home/parameters.json`)
-    expect(home.flow).toBe(`${contract.target_workspace}/home/flow.json`)
-    expect(home.checklist).toBe(`${contract.target_workspace}/home/checklist.json`)
-    expect(home.layout).toBe('')
-    expect(home.metrics).toEqual({})
-    expect(home.monitor.step).toEqual([])
-    expect(home.monitor.memory).toEqual([])
+    await expect(
+      readFile(`${contract.target_workspace}/home/home.json`, 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(
+      readFile(`${contract.target_workspace}/home/home.json.lock`, 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(join(source, 'home', 'home.json'), 'utf8')).resolves.toBe(
+      '{legacy',
+    )
+    await expect(readFile(join(source, 'home', 'home.json.lock'), 'utf8')).resolves.toBe(
+      'locked',
+    )
+    await expect(
+      readFile(`${contract.target_workspace}/home/pdk.json`, 'utf8'),
+    ).resolves.toContain(`${contract.target_workspace}/pdk`)
+    await expect(readFile(join(source, 'home', 'pdk.json'), 'utf8')).resolves.toContain(
+      `${source}/pdk`,
+    )
 
     const checklist = JSON.parse(
       await readFile(`${contract.target_workspace}/home/checklist.json`, 'utf8'),
@@ -265,6 +241,37 @@ describe('prepareWorkspaceRerun', () => {
     expect(contractText).not.toContain(
       `"source_workspace": "${contract.target_workspace}"`,
     )
+  })
+
+  it('unlinks a legacy home symlink without touching its target', async () => {
+    const { artifact, flow, root, source } = await writeSourceWorkspace()
+    const outside = join(root, 'outside-legacy-home.json')
+    await writeFile(outside, 'outside')
+    await symlink(outside, join(source, 'home', 'home.json'))
+    const contract = contractFor(source, flow, artifact)
+
+    await prepareWorkspaceRerun(contract)
+
+    await expect(
+      readFile(`${contract.target_workspace}/home/home.json`, 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(outside, 'utf8')).resolves.toBe('outside')
+    await expect(readFile(join(source, 'home', 'home.json'), 'utf8')).resolves.toBe(
+      'outside',
+    )
+  })
+
+  it('rejects a legacy home path that is not a file or symlink', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    await mkdir(join(source, 'home', 'home.json'))
+    const contract = contractFor(source, flow, artifact)
+
+    await expect(prepareWorkspaceRerun(contract)).rejects.toThrow(
+      'legacy home file is invalid: home.json',
+    )
+    await expect(
+      readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('executes the frozen contract through acknowledged ECC runtime operations', async () => {

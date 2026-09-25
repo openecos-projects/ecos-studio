@@ -44,7 +44,11 @@
       </div>
       <div v-else-if="cornerFilter && detailError" class="timing-detail-state is-error">
         <i class="ri-error-warning-line" aria-hidden="true" />
-        <span>{{ detailError }}</span>
+        <span
+          :data-error-code="detailError"
+          :title="`Timing detail error: ${detailError}`"
+          >{{ timingDetailErrorLabel(detailError) }}</span
+        >
       </div>
       <TimingCriticalPaths
         v-else-if="showCriticalPaths"
@@ -178,6 +182,25 @@ function emptyStaOverview(): StaOverviewModel {
     setupViolationCount: 0,
     holdViolationCount: 0,
     allCornersMet: null,
+  }
+}
+
+function timingDetailErrorLabel(code: string): string {
+  switch (code) {
+    case 'TIMING_ARTIFACT_READ_FAILED':
+      return 'Timing path data could not be read.'
+    case 'TIMING_ARTIFACT_INVALID':
+      return 'Timing path data is invalid.'
+    case 'TIMING_ARTIFACT_UNAVAILABLE':
+      return 'Timing path data is unavailable for this corner.'
+    case 'ARTIFACT_TOO_LARGE':
+    case 'ENGINEERING_ARTIFACT_TOO_LARGE':
+    case 'FINDINGS_ARTIFACT_TOO_LARGE':
+      return 'Timing path data is too large to display.'
+    case 'ARTIFACT_REVISION_MISMATCH':
+      return 'Timing path data changed after the committed snapshot.'
+    default:
+      return 'Timing path data is unavailable.'
   }
 }
 </script>

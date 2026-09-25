@@ -33,7 +33,6 @@ describe('workspace resource API desktop bridge payloads', () => {
       topModule: 'top',
       pdk: 'ics55',
       home: {
-        homeJson: { path: '/workspace/demo/.home.json', exists: true, kind: 'home' },
         flowJson: {
           path: '/workspace/demo/workspace.flow.json',
           exists: true,
@@ -50,13 +49,11 @@ describe('workspace resource API desktop bridge payloads', () => {
           kind: 'checklist',
         },
       },
-      homeData: { design: 'demo' },
       parameters: { clock: 'clk' },
       flow: { steps: [] },
       status: 'available',
       messages: [],
     }
-    const home = { design: 'demo' }
     const flow = { steps: [] }
     const parameters = { clock: 'clk' }
     const stepInfo = {
@@ -69,7 +66,6 @@ describe('workspace resource API desktop bridge payloads', () => {
     }
     const request: WorkspaceStepInfoRequest = { step: 'placement', id: 'metrics' }
     const getIndex = vi.fn(async () => index)
-    const readHome = vi.fn(async () => home)
     const readFlow = vi.fn(async () => flow)
     const readParameters = vi.fn(async () => parameters)
     const resolveStepInfo = vi.fn(async () => stepInfo)
@@ -78,7 +74,6 @@ describe('workspace resource API desktop bridge payloads', () => {
       ecosDesktop: {
         workspaceResources: {
           getIndex,
-          readHome,
           readFlow,
           readParameters,
           resolveStepInfo,
@@ -89,21 +84,17 @@ describe('workspace resource API desktop bridge payloads', () => {
     const {
       getWorkspaceResourceIndexApi,
       readWorkspaceFlowResourceApi,
-      readWorkspaceHomeResourceApi,
       readWorkspaceParametersResourceApi,
       resolveWorkspaceStepInfoApi,
     } = await import('./workspaceResources')
 
     await expect(getWorkspaceResourceIndexApi()).resolves.toBe(index)
-    await expect(readWorkspaceHomeResourceApi()).resolves.toBe(home)
     await expect(readWorkspaceFlowResourceApi()).resolves.toBe(flow)
     await expect(readWorkspaceParametersResourceApi()).resolves.toBe(parameters)
     await expect(resolveWorkspaceStepInfoApi(request)).resolves.toBe(stepInfo)
 
     expect(getIndex).toHaveBeenCalledTimes(1)
     expect(getIndex).toHaveBeenCalledWith()
-    expect(readHome).toHaveBeenCalledTimes(1)
-    expect(readHome).toHaveBeenCalledWith()
     expect(readFlow).toHaveBeenCalledTimes(1)
     expect(readFlow).toHaveBeenCalledWith()
     expect(readParameters).toHaveBeenCalledTimes(1)

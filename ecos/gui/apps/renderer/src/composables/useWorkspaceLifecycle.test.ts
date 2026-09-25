@@ -203,7 +203,6 @@ describe('useWorkspaceLifecycle', () => {
 
   it('exposes the expected invalidation scope names', () => {
     const expected: WorkspaceInvalidationScope[] = [
-      'home',
       'flow',
       'parameters',
       'step',

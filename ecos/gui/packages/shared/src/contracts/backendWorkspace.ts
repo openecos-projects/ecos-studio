@@ -500,6 +500,9 @@ export interface BackendWorkspaceArtifactContent {
   bytes?: Uint8Array
   /** Per-step QoR hotspot records, lazy-loaded from kind `qor_hotspots`. */
   hotspots?: Array<Record<string, unknown>>
+  integrity?: 'verified' | 'externally-modified'
+  recordedSizeBytes?: number
+  actualSizeBytes?: number
   kind: string
   mimeType: string
   name: string

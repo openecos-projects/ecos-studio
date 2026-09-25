@@ -567,6 +567,43 @@ export function useParameters() {
     })
   }
 
+  function isDerivedConfigConflict(error: unknown): boolean {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error as { code?: unknown }).code === 'derived_configs_modified'
+    )
+  }
+
+  function confirmDerivedConfigOverwrite(): boolean {
+    if (typeof globalThis.confirm !== 'function') return false
+    return globalThis.confirm(
+      'ECC detected manually modified derived configuration files. Refreshing will overwrite those edits. Continue?',
+    )
+  }
+
+  async function refreshWorkspaceConfigForSave(
+    sessionId: string,
+    request: Parameters<typeof refreshConfigApi>[0],
+  ) {
+    try {
+      return await workspaceLifecycle.runForSession(sessionId, () =>
+        refreshConfigApi(request),
+      )
+    } catch (error) {
+      if (!isDerivedConfigConflict(error) || !confirmDerivedConfigOverwrite()) {
+        throw error
+      }
+      return await workspaceLifecycle.runForSession(sessionId, () =>
+        refreshConfigApi({
+          ...request,
+          data: { ...request.data, force: true },
+        }),
+      )
+    }
+  }
+
   function applyParametersFileContent(fileContent: string): void {
     applyParametersData(parseParametersData(fileContent))
   }
@@ -879,25 +916,23 @@ export function useParameters() {
           updatedWorkspaceRevision,
           saveSessionId,
         )
-        invalidateWorkspaceResources(['parameters', 'home', 'step-config', 'flow'], {
+        invalidateWorkspaceResources(['parameters', 'step-config', 'flow'], {
           sessionId: saveSessionId,
         })
         console.log('Workspace configuration updated successfully')
         return true
       }
 
-      const refreshResult = await workspaceLifecycle.runForSession(saveSessionId, () =>
-        refreshConfigApi({
-          cmd: CMDEnum.refresh_config,
-          data: {
-            ...(currentProject.value?.designTool === 'frontend'
-              ? { designTool: 'frontend' as const }
-              : {}),
-            directory: saveProjectPath,
-            workspaceHandle: workspaceLifecycle.session.value.workspaceId,
-          },
-        }),
-      )
+      const refreshResult = await refreshWorkspaceConfigForSave(saveSessionId, {
+        cmd: CMDEnum.refresh_config,
+        data: {
+          ...(currentProject.value?.designTool === 'frontend'
+            ? { designTool: 'frontend' as const }
+            : {}),
+          directory: saveProjectPath,
+          workspaceHandle: workspaceLifecycle.session.value.workspaceId,
+        },
+      })
       if (
         !isSaveContextCurrent({
           sessionId: saveSessionId,
@@ -910,7 +945,7 @@ export function useParameters() {
         return refreshResult?.response === ResponseEnum.success
       }
 
-      invalidateWorkspaceResources(['parameters', 'home', 'step-config', 'flow'], {
+      invalidateWorkspaceResources(['parameters', 'step-config', 'flow'], {
         sessionId: saveSessionId,
       })
 
@@ -1016,11 +1051,7 @@ export function useParameters() {
   )
 
   watch(
-    () => [
-      resourceVersions.value.parameters,
-      resourceVersions.value.home,
-      resourceVersions.value.all,
-    ],
+    () => [resourceVersions.value.parameters, resourceVersions.value.all],
     async () => {
       await reloadParametersIfClean()
     },

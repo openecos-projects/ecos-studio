@@ -6,8 +6,8 @@ use std::time::Instant;
 use anyhow::Result;
 use chip_display::LayerRole;
 use chip_view_db::{
-    ChipViewDb, ChipViewMemoryStats, DeltaStats, NearestShape, OwnerLocalInfo, ShapeGeometry,
-    SnapshotStats,
+    ChipViewDb, ChipViewMemoryStats, DeltaStats, NearestShape, OpenTimings, OwnerLocalInfo,
+    ShapeGeometry, SnapshotStats,
 };
 use chipgeom_format::{
     OwnerRef, OwnerType, Point32, Rect32, ShapeId, ShapeKind, ShapeRecord, ShapeState,
@@ -44,6 +44,8 @@ struct Args {
     #[arg(long)]
     bench_point: bool,
     #[arg(long)]
+    bench_open: bool,
+    #[arg(long)]
     layer: Option<u16>,
     #[arg(long, num_args = 4, value_names = ["LX", "LY", "HX", "HY"])]
     bbox: Option<Vec<i32>>,
@@ -59,7 +61,12 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let db = ChipViewDb::open(&args.manifest)?;
+    let (db, open_timings) = if args.bench_open {
+        let (db, timings) = ChipViewDb::open_with_timings(&args.manifest)?;
+        (db, Some(timings))
+    } else {
+        (ChipViewDb::open(&args.manifest)?, None)
+    };
     let stats = db.stats();
     let memory_stats = db.memory_stats();
     let delta_stats = db.delta_stats();
@@ -104,6 +111,7 @@ fn main() -> Result<()> {
             &args,
             &db,
             &stats,
+            open_timings.as_ref(),
             layer_query_report.as_ref(),
             point_query_report.as_ref(),
             point_bench_report.as_ref(),
@@ -114,6 +122,9 @@ fn main() -> Result<()> {
     let name_reports = bench_name_reports(&args, &db);
 
     println!("manifest={}", args.manifest.display());
+    if let Some(timings) = &open_timings {
+        print_open_timings(timings);
+    }
     println!("schema_version={}", db.snapshot().manifest().schema_version);
     if let Some(name) = db.snapshot().manifest().design_name.as_deref() {
         println!("design.name={name}");
@@ -833,6 +844,60 @@ fn percentile_nanos(samples: &[u128], percentile: f64) -> u128 {
     sorted[rank.saturating_sub(1).min(sorted.len() - 1)]
 }
 
+fn open_timings_millis(micros: u128) -> f64 {
+    micros as f64 / 1000.0
+}
+
+fn print_open_timings(timings: &OpenTimings) {
+    println!(
+        "open_ms.snapshot_open={:.3}",
+        open_timings_millis(timings.snapshot_open)
+    );
+    println!(
+        "open_ms.connectivity_index={:.3}",
+        open_timings_millis(timings.connectivity_index)
+    );
+    println!(
+        "open_ms.net_index={:.3}",
+        open_timings_millis(timings.net_index)
+    );
+    println!(
+        "open_ms.view_index={:.3}",
+        open_timings_millis(timings.view_index)
+    );
+    println!(
+        "open_ms.layer_index={:.3}",
+        open_timings_millis(timings.layer_index)
+    );
+    println!(
+        "open_ms.shape_index={:.3}",
+        open_timings_millis(timings.shape_index)
+    );
+    println!(
+        "open_ms.name_index={:.3}",
+        open_timings_millis(timings.name_index)
+    );
+    println!(
+        "open_ms.net_guides={:.3}",
+        open_timings_millis(timings.net_guides)
+    );
+    println!("open_ms.total={:.3}", open_timings_millis(timings.total));
+}
+
+fn open_timings_json(timings: &OpenTimings) -> Value {
+    json!({
+        "snapshot_open": open_timings_millis(timings.snapshot_open),
+        "connectivity_index": open_timings_millis(timings.connectivity_index),
+        "net_index": open_timings_millis(timings.net_index),
+        "view_index": open_timings_millis(timings.view_index),
+        "layer_index": open_timings_millis(timings.layer_index),
+        "shape_index": open_timings_millis(timings.shape_index),
+        "name_index": open_timings_millis(timings.name_index),
+        "net_guides": open_timings_millis(timings.net_guides),
+        "total": open_timings_millis(timings.total),
+    })
+}
+
 fn print_memory_stats(stats: &ChipViewMemoryStats) {
     println!("mmap_bytes.total={}", stats.mapped_bytes.total());
     println!("mmap_bytes.meta={}", stats.mapped_bytes.meta);
@@ -1124,6 +1189,7 @@ fn print_json(
     args: &Args,
     db: &ChipViewDb,
     stats: &SnapshotStats,
+    open_timings: Option<&OpenTimings>,
     layer_query_report: Option<&LayerQueryReport>,
     point_query_report: Option<&PointQueryReport>,
     point_bench_report: Option<&PointBenchReport>,
@@ -1146,6 +1212,7 @@ fn print_json(
     let value = json!({
         "manifest": args.manifest,
         "schema_version": db.snapshot().manifest().schema_version,
+        "open_ms": open_timings.map(open_timings_json),
         "design": design_metadata_json(db.snapshot().manifest()),
         "snapshot_write": snapshot_write_metadata_json(db.snapshot().manifest()),
         "shape_count": stats.shape_count,

@@ -105,6 +105,10 @@ export interface EccWorkspaceHandleRequest {
   expectedWorkspaceRevision?: number
 }
 
+export interface EccWorkspaceRefreshConfigRequest extends EccWorkspaceHandleRequest {
+  force?: boolean
+}
+
 export interface EccWorkspaceStepOutputArtifact {
   exists: boolean
   path: string
@@ -203,10 +207,6 @@ export interface EccWorkspaceCreateResult extends EccWorkspaceOpenResult {
 
 export interface EccWorkspaceCloseResult {
   ok: boolean
-}
-
-export interface EccWorkspaceHomeResult {
-  path: string
 }
 
 export interface EccWorkspaceInfoResult {
@@ -443,7 +443,6 @@ export interface EccWorkspaceRuntimeSnapshot extends EccWorkspaceHandleRequest {
   directory: string
   engineeringSnapshot?: EccPersistedEngineeringSnapshot
   flow: { steps: EccRuntimeStepSnapshot[] }
-  home: Record<string, unknown>
   lastEventId: string
   operations: EccRuntimeOperation[]
   parameters: Record<string, unknown>
