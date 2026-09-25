@@ -1,6 +1,11 @@
 import { computed, ref } from 'vue'
+import { toDesktopBridgeData } from '@/api/desktopPayload'
 import { getDesktopApi } from '@/platform/desktop'
-import type { DesignTool, WorkspaceCreationModel } from '@ecos-studio/shared'
+import type {
+  DesignTool,
+  WorkspaceCreationModel,
+  WorkspaceCreationModelRequest,
+} from '@ecos-studio/shared'
 
 const WIZARD_PARAMETER_IDS = new Set([
   'frequency_max',
@@ -43,14 +48,19 @@ export function useWorkspaceCreationModel(options: {
     if (options.designTool() === 'frontend') return
     const requestGeneration = ++generation
     try {
-      const next = await getDesktopApi().workspaceCreationModel.get({
+      const request: WorkspaceCreationModelRequest = {
         explicitParameters: explicitValues(),
         flowId: options.flowId(),
         inputMode: options.inputMode(),
         mpc: options.mpc(),
         pdk: options.pdk(),
         projectPresetParameters: options.projectPresetParameters(),
-      })
+      }
+      const next = await getDesktopApi().workspaceCreationModel.get(
+        toDesktopBridgeData(
+          request as unknown as Record<string, unknown>,
+        ) as WorkspaceCreationModelRequest,
+      )
       if (requestGeneration !== generation) return
       model.value = next
       for (const parameter of next.parameters) {
