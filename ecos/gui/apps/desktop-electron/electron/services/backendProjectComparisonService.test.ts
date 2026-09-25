@@ -211,10 +211,11 @@ function activeOperation(
 describe('BackendProjectComparisonService', () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it('builds a lightweight revision-matched execution overlay', async () => {
+  it('builds a lightweight forward-tolerant execution overlay', async () => {
     const fixture = serviceFixture()
     const activeOperations = vi.fn(() => [
       activeOperation(),
+      activeOperation({ operationId: 'ahead', workspaceRevision: 2 }),
       activeOperation({ operationId: 'stale', workspaceRevision: 0 }),
       activeOperation({ operationId: 'other', workspaceId: 'engineering-other' }),
     ])
@@ -248,6 +249,11 @@ describe('BackendProjectComparisonService', () => {
             projectWorkspaceId: 'ws_1',
             step: null,
             workspaceRevision: 1,
+          }),
+          expect.objectContaining({
+            operationId: 'ahead',
+            projectWorkspaceId: 'ws_1',
+            workspaceRevision: 2,
           }),
         ],
       },
