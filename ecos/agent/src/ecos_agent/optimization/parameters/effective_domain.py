@@ -25,6 +25,9 @@ class EffectiveDomainError(ValueError):
     """A domain cannot be compiled or a proposal is outside its authority."""
 
 
+ProposalValidationMode = Literal["strict", "frozen_replay"]
+
+
 class _Model(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -190,6 +193,7 @@ def validate_numeric_proposal(
     domain: EffectiveDomainSnapshot,
     *,
     attempted: Iterable[RequestedKnobValue] = (),
+    validation_mode: ProposalValidationMode = "strict",
 ) -> None:
     action = getattr(proposal, "action", None)
     if action is None:
@@ -201,6 +205,8 @@ def validate_numeric_proposal(
         raise EffectiveDomainError("proposal domain does not match current context")
     if not domain.value_bounds.contains(action.requested_value):
         raise EffectiveDomainError("proposal value is outside the legal bounds or type")
+    if validation_mode == "frozen_replay":
+        return
     if action.requested_value in domain.attempted_values or any(
         item.knob_id == domain.knob_id and item.value == action.requested_value
         for item in attempted
@@ -234,6 +240,7 @@ def validate_optimization_proposal_v2(
     context_ref: Mapping[str, str],
     attempted: Iterable[RequestedKnobValue] = (),
     supported_action: Mapping[str, Any] | None = None,
+    validation_mode: ProposalValidationMode = "strict",
 ) -> OptimizationProposalV2:
     """Validate one range-bound proposal without granting execution authority."""
     try:
@@ -242,7 +249,9 @@ def validate_optimization_proposal_v2(
         raise EffectiveDomainError(f"optimization proposal v3 is invalid: {exc}") from exc
     if proposal.context_ref.model_dump(mode="json") != dict(context_ref):
         raise EffectiveDomainError("proposal context does not match planning turn")
-    validate_numeric_proposal(proposal, domain, attempted=attempted)
+    validate_numeric_proposal(
+        proposal, domain, attempted=attempted, validation_mode=validation_mode
+    )
     if supported_action is not None:
         _validate_supported_action(proposal, supported_action)
     return proposal

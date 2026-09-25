@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from ecos_agent.errors import ProposalProviderError
 from ecos_agent.optimization.parameters.effective_domain import (
     EffectiveDomainError,
+    ProposalValidationMode,
     compile_effective_domain,
 )
 from ecos_agent.hashing import canonical_sha256
@@ -189,12 +190,18 @@ class OptimizationEpisodeController(
         design_id: str | None = None,
         trend_noise_epsilon: Mapping[str, float] | None = None,
         toolchain_sha256: str | None = None,
+        proposal_validation_mode: ProposalValidationMode = "strict",
     ) -> None:
         if not _ID.fullmatch(episode_id) or not _ID.fullmatch(checkpoint_id):
             raise OptimizationEpisodeControllerError("episode identifiers are invalid")
         self.episode_id = episode_id
         self.checkpoint_id = checkpoint_id
         self.mode = OptimizationAgentMode(mode)
+        if proposal_validation_mode not in {"strict", "frozen_replay"}:
+            raise OptimizationEpisodeControllerError(
+                "proposal validation mode is invalid"
+            )
+        self.proposal_validation_mode = proposal_validation_mode
         if type(receipt_aware_planning) is not bool:
             raise OptimizationEpisodeControllerError(
                 "receipt-aware planning flag is invalid"
@@ -650,6 +657,8 @@ class OptimizationEpisodeController(
             value["baseline_geometry"] = self._baseline_geometry.model_dump(mode="json")
         if self._frozen_objective is not None:
             value["frozen_objective"] = self._frozen_objective.model_dump(mode="json")
+        if self.proposal_validation_mode != "strict":
+            value["proposal_validation_mode"] = self.proposal_validation_mode
         if not self.receipt_aware_planning:
             value["receipt_aware_planning"] = False
         if self.knowledge_case_shots:

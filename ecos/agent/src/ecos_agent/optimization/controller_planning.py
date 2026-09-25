@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, Mapping
+from typing import Mapping
 
 from pydantic import ValidationError
 
@@ -18,6 +18,7 @@ from ecos_agent.optimization.contracts import (
 )
 from ecos_agent.optimization.decision_audit import (
     DecisionValidationResult,
+    PlannerSource,
 )
 from ecos_agent.optimization.ledger import (
     OptimizationPlanningAuditEntry,
@@ -99,10 +100,12 @@ class ControllerPlanningMixin:
         )
         planning_entry = self._append_planning_audit(context)
         self._persist()
-        planner_source: Literal["llm", "repair"] = "llm"
+        planner_source: PlannerSource = (
+            "replay" if self.proposal_validation_mode == "frozen_replay" else "llm"
+        )
         planner_turn: OptimizationPlannerTurn | None = None
         provider_payload_sha256 = None
-        if not context.legal_actions:
+        if not context.legal_actions and self.proposal_validation_mode == "strict":
             return self._defer_or_escalate(
                 planning_entry, context, proposal=None, reason="no_legal_candidate",
             )
@@ -114,6 +117,7 @@ class ControllerPlanningMixin:
                 context,
                 proposal=None,
                 reason="parameter_domain_unavailable",
+                planner_source=planner_source,
                 immediate_escalation=True,
             )
         try:
@@ -135,6 +139,8 @@ class ControllerPlanningMixin:
                 planning_entry,
                 expected_payload_sha256=provider_payload_sha256,
             )
+            if self.proposal_validation_mode == "frozen_replay":
+                self._state = OptimizationEpisodeState.ESCALATED
             self._decision_audit.append(
                 planning_entry_sha256=planning_entry.entry_sha256,
                 proposal=None,
@@ -150,8 +156,15 @@ class ControllerPlanningMixin:
                     if self._objective is not None
                     else None
                 ),
+                planner_source=planner_source,
             )
             self._persist()
+            if self.proposal_validation_mode == "frozen_replay":
+                return OptimizationControlResult(
+                    state=self._state,
+                    rejection_reason=rejection,
+                    planner_source=planner_source,
+                )
             self._refresh_budget()
             if (
                 self._budget.remaining_planning_calls == 0
@@ -220,6 +233,7 @@ class ControllerPlanningMixin:
             proposal,
             context,
             forbid_knowledge=self.mode == OptimizationAgentMode.LLM_NO_KNOWLEDGE,
+            validation_mode=self.proposal_validation_mode,
         )
         if rejection_reason is not None:
             return self._defer_or_escalate(
@@ -330,6 +344,7 @@ class ControllerPlanningMixin:
             parsed,
             context,
             attempted=self._attempted_requests(context.parent_config_sha256),
+            validation_mode=self.proposal_validation_mode,
         )
         return OptimizationPlannerTurn(
             v2_to_v1(proposal),
@@ -401,7 +416,7 @@ class ControllerPlanningMixin:
         *,
         proposal: OptimizationProposal | None,
         reason: str,
-        planner_source: Literal["llm", "repair"] = "llm",
+        planner_source: PlannerSource = "llm",
         immediate_escalation: bool = False,
     ) -> OptimizationControlResult:
         self._proposal = None
@@ -460,7 +475,7 @@ class ControllerPlanningMixin:
         validation_result: DecisionValidationResult,
         rejection_reason: str | None,
         *,
-        planner_source: Literal["llm", "repair"] = "llm",
+        planner_source: PlannerSource = "llm",
         attribution: PlanningFeedbackEntry | None = None,
     ) -> OptimizationControlResult:
         self._decision_audit.append(

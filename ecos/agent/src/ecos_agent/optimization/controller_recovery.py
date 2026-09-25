@@ -12,6 +12,7 @@ from ecos_agent.optimization.contracts import (
     OptimizationEpisodeState,
     TerminalObservation,
 )
+from ecos_agent.optimization.parameters.effective_domain import ProposalValidationMode
 from ecos_agent.optimization.controller_models import (
     _PersistedEpisodeState,
     OptimizationEpisodeControllerError,
@@ -79,6 +80,7 @@ class ControllerRecoveryMixin:
         design_id: str | None = None,
         trend_noise_epsilon: Mapping[str, float] | None = None,
         toolchain_sha256: str | None = None,
+        proposal_validation_mode: ProposalValidationMode = "strict",
     ) -> "OptimizationEpisodeController":
         path = ledger.root / _STATE_FILE
         if not path.is_file():
@@ -145,6 +147,11 @@ class ControllerRecoveryMixin:
         controller.episode_id = snapshot.episode_id
         controller.checkpoint_id = snapshot.checkpoint_id
         controller.mode = snapshot.mode
+        if snapshot.proposal_validation_mode != proposal_validation_mode:
+            raise OptimizationEpisodeControllerError(
+                "proposal validation mode does not match the recovered episode"
+            )
+        controller.proposal_validation_mode = snapshot.proposal_validation_mode
         controller._trend_noise_epsilon = controller._validated_trend_noise_epsilon(
             trend_noise_epsilon
         )

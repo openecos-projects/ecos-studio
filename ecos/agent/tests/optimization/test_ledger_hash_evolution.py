@@ -299,6 +299,35 @@ def test_episode_state_verifies_strategy_fields_across_generations(
     assert snapshot.strategy_parent_config_sha256 is None
 
 
+def test_episode_state_verifies_legacy_state_without_replay_mode(
+    tmp_path: Path,
+) -> None:
+    from ecos_agent.optimization.controller_models import _PersistedEpisodeState
+    from tests.optimization.controller.support import (
+        _FakeCodex,
+        _FakeEcc,
+        _controller,
+    )
+
+    controller = _controller(
+        tmp_path,
+        _FakeCodex(),
+        _FakeEcc(),
+        proposal_validation_mode="frozen_replay",
+    )
+    state = json.loads(controller.state_path.read_text(encoding="utf-8"))
+    assert state["proposal_validation_mode"] == "frozen_replay"
+
+    legacy = {
+        key: value
+        for key, value in state.items()
+        if key not in {"proposal_validation_mode", "state_sha256"}
+    }
+    legacy["state_sha256"] = canonical_sha256(legacy)
+    snapshot = _PersistedEpisodeState.model_validate(legacy)
+    assert snapshot.proposal_validation_mode == "strict"
+
+
 def test_episode_state_replays_the_legacy_two_turn_stall_budget(
     tmp_path: Path,
 ) -> None:

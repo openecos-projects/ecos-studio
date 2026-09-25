@@ -22,7 +22,7 @@ from ecos_agent.optimization.contracts import (
 from ecos_agent.optimization.reflection import PlanningFeedbackEntry
 
 DecisionValidationResult = Literal["accepted", "rejected"]
-PlannerSource = Literal["llm", "repair"]
+PlannerSource = Literal["llm", "repair", "replay"]
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 

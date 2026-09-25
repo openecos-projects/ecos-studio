@@ -57,6 +57,50 @@ def test_proposal_accepts_llm_probe_without_threshold_authority() -> None:
         OptimizationProposalV2.model_validate(payload)
 
 
+def test_frozen_replay_keeps_bounds_but_ignores_current_direction_and_attempts() -> None:
+    card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
+    domain = compile_effective_domain(
+        card, context=domain_context(), baseline_surface_value=0.7
+    )
+    proposal = OptimizationProposalV2(
+        context_ref={
+            "episode_id": "episode-1",
+            "checkpoint_id": "place",
+            "input_sha256": HASH,
+        },
+        decision="propose",
+        reason_code="observation",
+        rationale_summary="frozen replay proposal",
+        observation_refs=({"observation_id": "obs-1", "sha256": HASH},),
+        action=NumericProposalActionV2(
+            knob_id=card.knob_id,
+            direction="increase",
+            requested_value=0.55,
+            effective_domain_sha256=domain.snapshot_sha256,
+            expected_effects=(
+                {"metric_id": "route_wirelength", "direction": "decrease"},
+            ),
+        ),
+    )
+    attempted = (RequestedKnobValue(knob_id=card.knob_id, value=0.55),)
+
+    with pytest.raises(EffectiveDomainError, match="direction"):
+        validate_numeric_proposal(proposal, domain)
+    with pytest.raises(EffectiveDomainError, match="already attempted"):
+        validate_numeric_proposal(proposal, domain, attempted=attempted)
+    validate_numeric_proposal(
+        proposal, domain, attempted=attempted, validation_mode="frozen_replay"
+    )
+
+    invalid = proposal.model_copy(
+        update={"action": proposal.action.model_copy(update={"requested_value": 0.99})}
+    )
+    with pytest.raises(EffectiveDomainError, match="bounds"):
+        validate_numeric_proposal(
+            invalid, domain, attempted=attempted, validation_mode="frozen_replay"
+        )
+
+
 def test_v2_proposal_expected_effect_uses_controller_objective_metrics() -> None:
     with pytest.raises(ValueError, match="route_dr_total_violation_count"):
         NumericProposalActionV2(

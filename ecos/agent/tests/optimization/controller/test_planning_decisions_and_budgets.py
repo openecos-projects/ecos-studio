@@ -43,6 +43,10 @@ from ecos_agent.optimization.controller import (
     OptimizationEpisodeController,
 )
 from ecos_agent.optimization.decision_audit import OptimizationDecisionAudit
+from ecos_agent.optimization.experiments.replay_provider import (
+    ReplayProposalProvider,
+    replay_provider_and_runtime,
+)
 from ecos_agent.optimization.knowledge.cases import EmpiricalCaseAuditStore
 from ecos_agent.optimization.ledger import (
     OptimizationOutcomeKind,
@@ -241,6 +245,55 @@ def test_full_agent_v2_rejects_mismatched_compiled_binding(
     result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
     assert result.rejection_reason == "proposal_repair_failed"
+
+
+def test_frozen_replay_dispatches_direction_mismatch_and_duplicate_with_provenance(
+    tmp_path: Path,
+) -> None:
+    specs = [
+        {
+            "knob_id": "place.cell_padding_x",
+            "direction": "decrease",
+            "requested_value": 4,
+            "expected_effects": [
+                {"metric_id": "route_wirelength", "direction": "decrease"}
+            ],
+        },
+    ] * 2
+    planner = ReplayProposalProvider(specs)
+    executor = _FakeEcc(_started("execution-1"), _started("execution-2"))
+    controller = _controller(
+        tmp_path,
+        planner,
+        executor,
+        proposal_validation_mode="frozen_replay",
+    )
+
+    first = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    assert first.requested == RequestedKnobValue(
+        knob_id="place.cell_padding_x", value=4
+    )
+    controller.execute()
+    controller.complete_terminal(
+        CandidateExecutionReceipt(
+            execution_id="execution-1",
+            started=True,
+            outcome=OptimizationOutcomeKind.EXECUTION_FAILED,
+        )
+    )
+
+    second = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    assert second.requested == first.requested
+    controller.execute()
+
+    assert len(executor.start_calls) == 2
+    assert planner.consumed == 2
+    decisions = OptimizationDecisionAudit(tmp_path / "episode").replay().entries
+    assert [entry.planner_source for entry in decisions] == ["replay", "replay"]
+    assert all(entry.validation_result == "accepted" for entry in decisions)
+    resumed, runtime = replay_provider_and_runtime(specs, tmp_path / "episode")
+    assert resumed.consumed == 2
+    assert runtime["proposal_validation_mode"] == "frozen_replay"
 
 
 def test_controller_uses_exact_v2_value_by_default(

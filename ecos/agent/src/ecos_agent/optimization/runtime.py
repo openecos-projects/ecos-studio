@@ -20,6 +20,7 @@ from pydantic import (
     StrictInt,
     ValidationError,
     field_validator,
+    model_validator,
 )
 
 from ecos_agent.ecc_contracts import ECCStepName
@@ -31,6 +32,7 @@ from ecos_agent.optimization.contracts import (
     RoutabilityObjectiveContract,
     TerminalObservation,
 )
+from ecos_agent.optimization.parameters.effective_domain import ProposalValidationMode
 from ecos_agent.optimization.controller import (
     OptimizationAgentMode,
     OptimizationEpisodeController,
@@ -140,15 +142,27 @@ class OptimizationRuntimeContext(BaseModel):
     trend_noise_epsilon: dict[str, float] | None = None
     toolchain_sha256: str | None = None
     planner_reasoning_effort: Literal["low", "medium", "high"] | None = None
+    proposal_validation_mode: ProposalValidationMode = "strict"
+    replay_proposals_sha256: str | None = None
 
-    @field_validator("toolchain_sha256")
+    @field_validator("toolchain_sha256", "replay_proposals_sha256")
     @classmethod
     def validate_toolchain_sha256(cls, value: str | None) -> str | None:
         if value is None:
             return None
         if not re.fullmatch(r"sha256:[0-9a-f]{64}", value):
-            raise ValueError("toolchain hash is invalid")
+            raise ValueError("runtime context hash is invalid")
         return value
+
+    @model_validator(mode="after")
+    def validate_replay_configuration(self) -> "OptimizationRuntimeContext":
+        if (self.proposal_validation_mode == "frozen_replay") != (
+            self.replay_proposals_sha256 is not None
+        ):
+            raise ValueError(
+                "frozen replay requires exactly one replay proposal sequence hash"
+            )
+        return self
 
     @field_validator("session_id", "episode_id", "workspace")
     @classmethod
@@ -292,6 +306,8 @@ def create_optimization_runner(
         parent_manifest=parent_manifest,
         design_id=design_id,
     )
+    if runtime.proposal_validation_mode == "frozen_replay":
+        execution_context["replay_proposals_sha256"] = runtime.replay_proposals_sha256
     if objective.parameter_policy.geometry_mode == "fixed":
         execution_context["geometry_baseline_sha256"] = canonical_sha256(
             terminal_observation.geometry.model_dump(mode="json")
@@ -444,6 +460,7 @@ def _recover_or_create_controller(
         max_in_flight_candidates=runtime.max_in_flight_candidates,
         design_id=design_id, trend_noise_epsilon=runtime.trend_noise_epsilon,
         toolchain_sha256=runtime.toolchain_sha256,
+        proposal_validation_mode=runtime.proposal_validation_mode,
     )
 
 
@@ -474,6 +491,7 @@ def _recover_controller(
         max_in_flight_candidates=runtime.max_in_flight_candidates,
         design_id=design_id, trend_noise_epsilon=runtime.trend_noise_epsilon,
         toolchain_sha256=runtime.toolchain_sha256,
+        proposal_validation_mode=runtime.proposal_validation_mode,
     )
     if controller.objective != runtime.objective:
         raise OptimizationRuntimeError(

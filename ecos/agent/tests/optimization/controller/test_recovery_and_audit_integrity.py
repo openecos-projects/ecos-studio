@@ -70,6 +70,50 @@ def test_recovery_reattaches_pending_execution_and_rejects_tampered_state(
         )
 
 
+def test_recovery_requires_the_same_proposal_validation_mode(tmp_path: Path) -> None:
+    controller = _controller(
+        tmp_path,
+        _FakeCodex(_proposal),
+        _FakeEcc(),
+        proposal_validation_mode="frozen_replay",
+    )
+
+    with pytest.raises(
+        OptimizationEpisodeControllerError,
+        match="proposal validation mode does not match",
+    ):
+        OptimizationEpisodeController.recover(
+            planner=_FakeCodex(_proposal),
+            executor=_FakeEcc(),
+            ledger=controller.ledger,
+            clock=_Clock(),
+            execution_context={**_execution_context(), "replay_proposals_sha256": "sha256:" + "a" * 64},
+        )
+
+    with pytest.raises(
+        OptimizationEpisodeControllerError,
+        match="execution context does not match",
+    ):
+        OptimizationEpisodeController.recover(
+            planner=_FakeCodex(_proposal),
+            executor=_FakeEcc(),
+            ledger=controller.ledger,
+            clock=_Clock(),
+            execution_context={**_execution_context(), "replay_proposals_sha256": "sha256:" + "b" * 64},
+            proposal_validation_mode="frozen_replay",
+        )
+
+    recovered = OptimizationEpisodeController.recover(
+        planner=_FakeCodex(_proposal),
+        executor=_FakeEcc(),
+        ledger=controller.ledger,
+        clock=_Clock(),
+        execution_context={**_execution_context(), "replay_proposals_sha256": "sha256:" + "a" * 64},
+        proposal_validation_mode="frozen_replay",
+    )
+    assert recovered.proposal_validation_mode == "frozen_replay"
+
+
 def test_recovery_rejects_single_pending_v9_state_file(tmp_path: Path) -> None:
     controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc(_started()))
     controller.state_path.rename(

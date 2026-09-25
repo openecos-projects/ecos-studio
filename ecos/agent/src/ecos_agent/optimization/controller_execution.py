@@ -239,8 +239,15 @@ class ControllerExecutionMixin:
             )
         if (
             action.effective_domain_sha256 != domain.snapshot_sha256
-            or domain.direction_schema(action.direction) is None
-            or not domain.accepts(self._requested.value)
+            or (
+                self.proposal_validation_mode == "strict"
+                and domain.direction_schema(action.direction) is None
+            )
+            or not (
+                domain.value_bounds.contains(self._requested.value)
+                if self.proposal_validation_mode == "frozen_replay"
+                else domain.accepts(self._requested.value)
+            )
         ):
             raise OptimizationEpisodeControllerError("execution request does not match the approved parameter domain")
         intervention_id = self._next_intervention_id()

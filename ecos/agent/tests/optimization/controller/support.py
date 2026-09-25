@@ -292,6 +292,7 @@ def _controller(
     knowledge_case_shots: int = 0,
     knowledge_case_pool_root: Path | None = None,
     max_in_flight: int = 1,
+    proposal_validation_mode: str = "strict",
 ) -> OptimizationEpisodeController:
     return OptimizationEpisodeController(
         episode_id="episode-1",
@@ -309,11 +310,19 @@ def _controller(
             task_memory.scope.scope_sha256 if task_memory is not None else None
         ),
         task_memory_supplier=(lambda: task_memory) if task_memory is not None else None,
-        execution_context=_execution_context(),
+        execution_context={
+            **_execution_context(),
+            **(
+                {"replay_proposals_sha256": HASH}
+                if proposal_validation_mode == "frozen_replay"
+                else {}
+            ),
+        },
         receipt_aware_planning=receipt_aware_planning,
         knowledge_case_shots=knowledge_case_shots,
         knowledge_case_pool_root=knowledge_case_pool_root,
         max_in_flight_candidates=max_in_flight,
+        proposal_validation_mode=proposal_validation_mode,
     )
 
 

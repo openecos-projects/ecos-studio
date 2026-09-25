@@ -8,6 +8,7 @@ from typing import Mapping, Protocol
 from ecos_agent.optimization.parameters.effective_domain import (
     EffectiveDomainError,
     EffectiveDomainSnapshot,
+    ProposalValidationMode,
     validate_optimization_proposal_v2,
 )
 from ecos_agent.hashing import canonical_sha256
@@ -725,6 +726,7 @@ def validate_v2_proposal(
     context: OptimizationPlanningContext,
     *,
     attempted: tuple[RequestedKnobValue, ...],
+    validation_mode: ProposalValidationMode = "strict",
 ) -> OptimizationProposalV2:
     domains = v2_domains(context)
     if not domains:
@@ -736,9 +738,10 @@ def validate_v2_proposal(
     )
     if domain is None:
         raise EffectiveDomainError("v2 proposal knob is not legal")
-    clamped = clamped_density_equivalent_error(proposal, context)
-    if clamped is not None:
-        raise EffectiveDomainError(clamped)
+    if validation_mode == "strict":
+        clamped = clamped_density_equivalent_error(proposal, context)
+        if clamped is not None:
+            raise EffectiveDomainError(clamped)
     validated = validate_optimization_proposal_v2(
         proposal,
         domain,
@@ -746,11 +749,12 @@ def validate_v2_proposal(
         attempted=attempted,
         supported_action=(
             _supported_v2_action(context, proposal)
-            if proposal.action.claim_id is not None
+            if validation_mode == "strict" and proposal.action.claim_id is not None
             else None
         ),
+        validation_mode=validation_mode,
     )
-    if validated.action is not None and not any(
+    if validation_mode == "strict" and validated.action is not None and not any(
         item.knob_id == validated.action.knob_id
         and item.direction == validated.action.direction
         for item in context.legal_actions
@@ -787,6 +791,7 @@ def validate_planner_proposal(
     context: OptimizationPlanningContext,
     *,
     forbid_knowledge: bool,
+    validation_mode: ProposalValidationMode = "strict",
 ) -> str | None:
     if proposal.context_ref != context.context_ref:
         return "context_reference"
@@ -818,7 +823,7 @@ def validate_planner_proposal(
         return None
     if proposal.action is None:
         return "proposal_action"
-    if not any(
+    if validation_mode == "strict" and not any(
         action.knob_id == proposal.action.knob_id
         and action.direction == proposal.action.direction
         for action in context.legal_actions

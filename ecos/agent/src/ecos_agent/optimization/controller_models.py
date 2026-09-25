@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from ecos_agent.errors import ProposalProviderError
 from ecos_agent.optimization.parameters.effective_domain import (
     EffectiveDomainError,
+    ProposalValidationMode,
     compile_effective_domain,
 )
 from ecos_agent.hashing import canonical_sha256
@@ -52,6 +53,7 @@ from ecos_agent.optimization.contracts import (
 from ecos_agent.optimization.decision_audit import (
     DecisionValidationResult,
     OptimizationDecisionAudit,
+    PlannerSource,
     OptimizationDecisionAuditReplay,
 )
 from ecos_agent.optimization.execution import (
@@ -152,7 +154,7 @@ class OptimizationControlResult:
     proposal: OptimizationProposal | None = None
     requested: RequestedKnobValue | None = None
     rejection_reason: str | None = None
-    planner_source: Literal["llm", "repair"] = "llm"
+    planner_source: PlannerSource = "llm"
 
 
 class _PersistedModel(BaseModel):
@@ -219,6 +221,9 @@ class _PersistedEpisodeState(BaseModel):
     episode_id: str
     checkpoint_id: str
     mode: OptimizationAgentMode
+    proposal_validation_mode: ProposalValidationMode = Field(
+        default="strict", exclude_if=lambda value: value == "strict"
+    )
     receipt_aware_planning: bool = Field(
         default=True, exclude_if=lambda value: value is True
     )

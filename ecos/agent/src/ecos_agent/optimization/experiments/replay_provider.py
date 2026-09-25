@@ -10,8 +10,11 @@ direction, requested_value, claim four-tuple, expected_effects).
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from ecos_agent.hashing import canonical_sha256
+from ecos_agent.optimization.decision_audit import OptimizationDecisionAudit
 from ecos_agent.optimization.parameters.effective_domain import (
     EffectiveDomainSnapshot,
 )
@@ -26,7 +29,9 @@ _CONTINUE_PROPOSAL = {
 class ReplayProposalProvider:
     """Rebuild proposal v3 payloads from a frozen spec sequence, in order."""
 
-    def __init__(self, specs: Sequence[Mapping[str, object]]) -> None:
+    def __init__(
+        self, specs: Sequence[Mapping[str, object]], *, start_index: int = 0
+    ) -> None:
         self._specs: tuple[dict[str, object], ...] = tuple(dict(s) for s in specs)
         for spec in self._specs:
             if not spec.get("expected_effects"):
@@ -34,8 +39,10 @@ class ReplayProposalProvider:
                     "replay proposal spec requires expected_effects; copy them "
                     "from the source episode's proposal observations"
                 )
-        self._index = 0
-        self.consumed = 0
+        if type(start_index) is not int or not 0 <= start_index <= len(self._specs):
+            raise ValueError("replay proposal start index is invalid")
+        self._index = start_index
+        self.consumed = start_index
 
     def select_model(self, model: str) -> None:
         return None
@@ -87,6 +94,23 @@ class ReplayProposalProvider:
             "observation_refs": [context.observation_ref.model_dump(mode="json")],
             "action": action,
         }
+
+
+def replay_provider_and_runtime(
+    specs: Sequence[Mapping[str, object]], episode_root: Path
+) -> tuple[ReplayProposalProvider, dict[str, object]]:
+    start_index = 0
+    if (episode_root / "optimization-episode-state.v10.json").is_file():
+        start_index = sum(
+            entry.planner_source == "replay"
+            and entry.proposal is not None
+            and entry.proposal.action is not None
+            for entry in OptimizationDecisionAudit(episode_root).replay().entries
+        )
+    return ReplayProposalProvider(specs, start_index=start_index), {
+        "proposal_validation_mode": "frozen_replay",
+        "replay_proposals_sha256": canonical_sha256(specs),
+    }
 
 
 def _snapshot_for(domains: Any, knob_id: str) -> EffectiveDomainSnapshot:

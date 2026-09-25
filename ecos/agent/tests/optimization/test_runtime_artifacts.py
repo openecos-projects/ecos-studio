@@ -438,6 +438,22 @@ def test_runtime_context_rejects_unknown_and_coerced_fields(tmp_path: Path) -> N
         OptimizationRuntimeContext.model_validate({**payload, "unknown": 1})
     with pytest.raises(ValidationError, match="seed"):
         OptimizationRuntimeContext.model_validate({**payload, "seed": True})
+    with pytest.raises(ValidationError, match="frozen replay"):
+        OptimizationRuntimeContext.model_validate(
+            {**payload, "proposal_validation_mode": "frozen_replay"}
+        )
+    with pytest.raises(ValidationError, match="frozen replay"):
+        OptimizationRuntimeContext.model_validate(
+            {**payload, "replay_proposals_sha256": _HASH}
+        )
+    replay = OptimizationRuntimeContext.model_validate(
+        {
+            **payload,
+            "proposal_validation_mode": "frozen_replay",
+            "replay_proposals_sha256": _HASH,
+        }
+    )
+    assert replay.proposal_validation_mode == "frozen_replay"
 
 
 def test_terminal_waiter_propagates_stop_to_cancel_and_returns_terminal_receipt() -> (

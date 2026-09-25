@@ -223,6 +223,16 @@ def test_replay_provider_rebuilds_a_valid_v3_proposal() -> None:
     assert provider.consumed == 1
 
 
+def test_replay_provider_resumes_at_a_persisted_decision_offset() -> None:
+    provider = ReplayProposalProvider(
+        [_replay_spec(requested_value=0.55), _replay_spec(requested_value=0.6)],
+        start_index=1,
+    )
+    payload = provider.propose_v2(_replay_context(), (_density_domain(),))
+    assert payload["action"]["requested_value"] == 0.6
+    assert provider.consumed == 2
+
+
 def test_replay_provider_requires_expected_effects_and_exhausts_cleanly() -> None:
     with pytest.raises(ValueError):
         ReplayProposalProvider([_replay_spec(expected_effects=[])])

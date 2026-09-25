@@ -41,7 +41,7 @@ from ecos_agent.optimization.experiments.direction_only_provider import (
     DirectionOnlyProposalProvider,
 )
 from ecos_agent.optimization.experiments.replay_provider import (
-    ReplayProposalProvider,
+    replay_provider_and_runtime,
 )
 from ecos_agent.optimization.experiments.knowledge_treatment_execution import (
     DesignSpec,
@@ -628,13 +628,14 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
     episode_output.mkdir(parents=True, exist_ok=True)
 
     replay_specs: list[dict[str, object]] | None = None
+    replay_runtime: dict[str, object] = {}
     if args.replay_proposals is not None:
         if args.baseline_method:
             raise SystemExit("--replay-proposals drives the LLM arm only")
         replay_specs = json.loads(
             args.replay_proposals.read_text(encoding="utf-8")
         )
-        provider = ReplayProposalProvider(replay_specs)
+        provider, replay_runtime = replay_provider_and_runtime(replay_specs, episode_root)
     elif args.baseline_method:
         if args.value_policy != "model":
             raise SystemExit(
@@ -697,6 +698,7 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
             "planner_reasoning_effort": args.reasoning_effort,
             "max_in_flight_candidates": args.max_in_flight_candidates,
         }
+        runtime_context.update(replay_runtime)
         runner = create_optimization_runner(runtime_context, provider)
         try:
             while runner.state in _ACTIVE:
