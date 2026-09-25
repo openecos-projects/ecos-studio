@@ -162,6 +162,8 @@ class EccCandidateRerunAdapter:
             ),
             "seed": seed,
         }
+        if parent_candidate_root_ref is not None:
+            params["parentCandidateRootRef"] = parent_candidate_root_ref
         method = "candidate.resume" if patch is None else "candidate.rerun"
         if patch is not None:
             params.update(
@@ -174,8 +176,6 @@ class EccCandidateRerunAdapter:
             )
             if params["targetStep"] == "Floorplan":
                 params["floorplanMode"] = "die_util"
-            if parent_candidate_root_ref is not None:
-                params["parentCandidateRootRef"] = parent_candidate_root_ref
         try:
             response = self._rpc.call(method, params)
         except OptimizationEccAdapterError as exc:

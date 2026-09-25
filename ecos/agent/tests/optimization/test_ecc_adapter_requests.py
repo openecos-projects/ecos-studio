@@ -72,7 +72,10 @@ def test_adapter_resumes_only_the_bound_existing_candidate(knob_id: str) -> None
     )
 
     receipt = adapter.resume(
-        _request(knob_id, 0.65, StrategyDirection.INCREASE)
+        replace(
+            _request(knob_id, 0.65, StrategyDirection.INCREASE),
+            parent_candidate_root_ref=".agent/candidates/candidate-parent",
+        )
     )
 
     assert receipt.execution_id == "operation-1"
@@ -89,6 +92,7 @@ def test_adapter_resumes_only_the_bound_existing_candidate(knob_id: str) -> None
                     load_parameter_cards()[OptimizationKnob(knob_id)]
                 ),
                 "seed": 17,
+                "parentCandidateRootRef": ".agent/candidates/candidate-parent",
             },
         ),
     ]
