@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ecos_agent.optimization.decision_audit import OptimizationDecisionAudit
-from ecos_agent.optimization.experiments.rq1_execution_evidence import analyze_records
+from ecos_agent.optimization.experiments.rq1_execution_evidence import (
+    analyze_records,
+    realized_obligation_receipt_ids,
+)
 from ecos_agent.optimization.ledger import (
     OptimizationInterventionStart,
     OptimizationLedger,
@@ -126,4 +129,17 @@ def analyze_episode(root: Path) -> dict[str, Any]:
         }
     starts = [entry.payload for entry in replay.entries if isinstance(entry.payload, OptimizationInterventionStart)]
     outcomes = [entry.payload for entry in replay.entries if isinstance(entry.payload, OptimizationTerminalOutcome)]
-    return analyze_records(starts, outcomes, integrity=integrity, strict=True, planning_calls=provider_calls, run_metrics=run_metrics)
+    expected_realized = realized_obligation_receipt_ids(
+        outcome.parameter_application_receipt
+        for outcome in outcomes
+        if outcome.parameter_application_receipt is not None
+    )
+    return analyze_records(
+        starts,
+        outcomes,
+        integrity=integrity,
+        strict=True,
+        planning_calls=provider_calls,
+        run_metrics=run_metrics,
+        expected_realized=expected_realized,
+    )

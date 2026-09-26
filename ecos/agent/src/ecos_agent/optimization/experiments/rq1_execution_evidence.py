@@ -27,6 +27,10 @@ RELATIONS = (
     "rederived", "unknown",
 )
 _GENERIC_REASONS = {"unknown", "n/a", "na", "none", "unspecified", ""}
+_REALIZED_OBLIGATION_SOURCES = {
+    "floorplan.aspect_ratio": "floorplan.core_geometry",
+    "place.target_overflow": "DREAMPlace.final_overflow",
+}
 
 
 @dataclass(frozen=True)
@@ -138,6 +142,83 @@ def _presence(value: Any) -> bool:
 
 def _source_backed(value: Any) -> bool:
     return _presence(value) and bool(getattr(value, "source", None))
+
+
+def realized_obligation_receipt_ids(
+    receipts: Iterable[Any],
+) -> set[str]:
+    """Return receipts covered by the frozen native realized-source registry."""
+    return {
+        receipt.receipt_id
+        for item in receipts
+        if (receipt := _receipt(item)).parameter.knob_id.value
+        in _REALIZED_OBLIGATION_SOURCES
+    }
+
+
+def _registered_realized_issue(
+    receipt: ParameterApplicationReceipt,
+) -> str | None:
+    knob = receipt.parameter.knob_id.value
+    expected_source = _REALIZED_OBLIGATION_SOURCES.get(knob)
+    realized = receipt.parameter.realized
+    if realized is None:
+        return "realized missing"
+    if expected_source is None:
+        return None if _source_backed(realized) else "realized source missing"
+    if realized.source != expected_source:
+        return f"realized source mismatch: expected {expected_source}"
+    observed = _finite_number(realized.value)
+    if observed is None:
+        return "realized value is not finite"
+    if knob == "floorplan.aspect_ratio":
+        width = _finite_number(receipt.observation.get("core_bounding_width"))
+        height = _finite_number(receipt.observation.get("core_bounding_height"))
+        expected = width / height if width is not None and height and height > 0 else None
+    else:
+        expected = _finite_number(receipt.observation.get("final_overflow"))
+    if expected is None:
+        return "native realized observation missing"
+    if not math.isclose(observed, expected, rel_tol=1e-12, abs_tol=1e-12):
+        return f"realized value mismatch: expected {expected!r}"
+    return None
+
+
+def _realized_obligation_report(
+    receipts: Sequence[ParameterApplicationReceipt],
+    expected_ids: set[str],
+) -> dict[str, Any]:
+    by_id = {receipt.receipt_id: receipt for receipt in receipts}
+    by_knob: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"expected": 0, "valid": 0}
+    )
+    issues: list[dict[str, str]] = []
+    valid = 0
+    for receipt_id in sorted(expected_ids):
+        receipt = by_id.get(receipt_id)
+        if receipt is None:
+            issues.append({"receipt_id": receipt_id, "knob": "unknown", "reason": "receipt missing or invalid"})
+            continue
+        knob = receipt.parameter.knob_id.value
+        by_knob[knob]["expected"] += 1
+        issue = _registered_realized_issue(receipt)
+        if issue is None:
+            valid += 1
+            by_knob[knob]["valid"] += 1
+        else:
+            issues.append({"receipt_id": receipt_id, "knob": knob, "reason": issue})
+    return {
+        **_metric(
+            valid,
+            len(expected_ids),
+            "realized not declared required" if not expected_ids else "",
+        ),
+        "by_knob": dict(sorted(by_knob.items())),
+        "issues": issues,
+        "not_applicable": len(receipts) - sum(
+            receipt.receipt_id in expected_ids for receipt in receipts
+        ),
+    }
 
 
 def _distribution(values: Iterable[str], allowed: Sequence[str]) -> dict[str, int]:
@@ -447,7 +528,7 @@ def analyze_records(
         "P01": {"receipt_emitted": _metric(emitted, expected), "receipt_valid_of_emitted": _metric(valid, emitted), "receipt_valid_of_expected": _metric(valid, expected), "invalid": receipt_errors},
         "P02": _role_report(valid_receipts, expected_realized_set),
         "P03": _metric(sum(_source_backed(item.parameter.consumed) for item in valid_receipts if _status(item.application.status) == "applied"), applied, "source/ref missing"),
-        "P04": _metric(sum(_source_backed(item.parameter.realized) for item in valid_receipts if item.receipt_id in expected_realized_set), len([item for item in valid_receipts if item.receipt_id in expected_realized_set]), "realized not declared required"),
+        "P04": _realized_obligation_report(valid_receipts, expected_realized_set),
         "P05": _distribution_report(status_values, STATUSES),
         "P06": _distribution_report(relation_values, RELATIONS),
         "P07": _metric(reason_complete, len(reason_rows), "reason required only for inactive/failed/unknown"),
@@ -504,7 +585,22 @@ def analyze_records(
         "S26": {"timeout": failure["timeout"], "cap_truncated": 0, "terminal_incomplete": failure["terminal_incomplete"], "replay_invalid": 0, "denominator": expected, "exclusions": []},
     }
     report = {"schema_version": SCHEMA, "producer_coverage": producer_coverage_register(), "primary": p, "secondary": s, "terminal": terminal, "counts": {"N_start": expected, "N_terminal": len(outcomes_v), "N_receipt_expected": expected, "N_receipt_emitted": emitted, "N_receipt_valid": valid, "N_applied_expected_consumed": applied}, "receipt_ids": [item.receipt_id for item in valid_receipts], "receipt_semantics": [
-        {"knob": item.parameter.knob_id.value, "requested": item.parameter.requested.value, "written": item.parameter.written.value, "consumed": item.parameter.consumed.value if item.parameter.consumed else None, "status": _status(item.application.status), "relation": _relation(item.application.relation)}
+        {
+            "knob": item.parameter.knob_id.value,
+            "requested": item.parameter.requested.value,
+            "requested_unit": item.parameter.requested.unit,
+            "written": item.parameter.written.value,
+            "written_unit": item.parameter.written.unit,
+            "consumed": item.parameter.consumed.value if item.parameter.consumed else None,
+            "consumed_unit": item.parameter.consumed.unit if item.parameter.consumed else None,
+            "consumed_source": item.parameter.consumed.source if item.parameter.consumed else None,
+            "realized": item.parameter.realized.value if item.parameter.realized else None,
+            "realized_unit": item.parameter.realized.unit if item.parameter.realized else None,
+            "realized_source": item.parameter.realized.source if item.parameter.realized else None,
+            "status": _status(item.application.status),
+            "relation": _relation(item.application.relation),
+            "reason": item.application.reason,
+        }
         for item in valid_receipts
     ]}
     if strict:
@@ -514,6 +610,8 @@ def analyze_records(
             raise ValueError("promotion invariant failed")
         if any(p["P12"][key] for key in ("false_applied", "false_inactive", "false_promotion")):
             raise ValueError("contract verdict integrity failed")
+        if p["P04"]["issues"]:
+            raise ValueError("realized obligation integrity failed")
     return report
 
 

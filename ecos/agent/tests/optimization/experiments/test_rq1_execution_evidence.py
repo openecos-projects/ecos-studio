@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from ecos_agent.optimization.experiments.rq1_execution_evidence import (
     analyze_records,
     auc20,
+    realized_obligation_receipt_ids,
 )
 from ecos_agent.optimization.ledger import (
     OptimizationInterventionStart,
@@ -24,20 +25,35 @@ from ecos_agent.optimization.rules import IncumbentDecision
 HASH = "sha256:" + "a" * 64
 
 
-def _receipt(*, status: str = "applied", receipt_id: str = "receipt-1", requested: float = 0.5) -> ParameterApplicationReceipt:
+def _receipt(
+    *,
+    status: str = "applied",
+    receipt_id: str = "receipt-1",
+    requested: float = 0.5,
+    knob_id: str = "place.target_density",
+    realized: float | None = None,
+    realized_source: str | None = None,
+    observation: dict | None = None,
+) -> ParameterApplicationReceipt:
     return ParameterApplicationReceipt.model_construct(
         receipt_id=receipt_id,
         tool=ToolRef(name="tool", revision="test"),
         context={"stage": "place"},
         parameter=ParameterEvidence(
-            knob_id="place.target_density",
+            knob_id=knob_id,
             requested=ParameterValueEvidence(value=requested, unit="ratio"),
             written=ParameterValueEvidence(value=requested, unit="ratio"),
             consumed=(
                 ParameterValueEvidence(value=0.6, unit="ratio", source="native")
                 if status == "applied" else None
             ),
-            realized=None,
+            realized=(
+                ParameterValueEvidence(
+                    value=realized, unit="ratio", source=realized_source
+                )
+                if realized is not None
+                else None
+            ),
         ),
         materialization=MaterializationRef(
             receipt_ref="receipt.json",
@@ -52,7 +68,7 @@ def _receipt(*, status: str = "applied", receipt_id: str = "receipt-1", requeste
             unit="ratio",
         ),
         application=ParameterApplication(status=status, relation="transformed", reason="native inactive"),
-        observation={},
+        observation=observation or {},
         evidence_sha256=HASH,
     )
 
@@ -194,6 +210,58 @@ def test_contract_matrix_reports_missing_cases_and_markdown() -> None:
     assert "converted" in matrix["summary"]["missing_tier_a_cases"]
     assert "| exact mapping | yes | fixture-only |" in render_case_matrix_markdown(matrix)
 
+
+
+def test_registered_realized_obligations_are_required_and_verified() -> None:
+    receipt = _receipt(
+        knob_id="floorplan.aspect_ratio",
+        realized=1.25,
+        realized_source="floorplan.core_geometry",
+        observation={"core_bounding_width": 10.0, "core_bounding_height": 8.0},
+    )
+
+    expected = realized_obligation_receipt_ids([receipt])
+    report = analyze_records(
+        [_start()], [_outcome(receipt)], expected_realized=expected
+    )
+
+    assert expected == {receipt.receipt_id}
+    assert report["primary"]["P04"]["numerator"] == 1
+    assert report["primary"]["P04"]["denominator"] == 1
+    assert report["primary"]["P04"]["issues"] == []
+    assert report["primary"]["P04"]["by_knob"] == {
+        "floorplan.aspect_ratio": {"expected": 1, "valid": 1}
+    }
+    assert report["receipt_semantics"][0]["realized"] == 1.25
+    assert (
+        report["receipt_semantics"][0]["realized_source"]
+        == "floorplan.core_geometry"
+    )
+
+
+def test_registered_realized_obligation_fails_closed_when_missing() -> None:
+    import pytest
+
+    receipt = _receipt(
+        knob_id="place.target_overflow",
+        observation={"final_overflow": 0.05},
+    )
+    expected = realized_obligation_receipt_ids([receipt])
+
+    report = analyze_records(
+        [_start()], [_outcome(receipt)], expected_realized=expected
+    )
+    assert report["primary"]["P04"]["numerator"] == 0
+    assert report["primary"]["P04"]["denominator"] == 1
+    assert report["primary"]["P04"]["issues"][0]["reason"] == "realized missing"
+
+    with pytest.raises(ValueError, match="realized obligation"):
+        analyze_records(
+            [_start()],
+            [_outcome(receipt)],
+            expected_realized=expected,
+            strict=True,
+        )
 
 def test_episode_run_metrics_resolve_report_sibling_from_optimization_root(
     tmp_path,
