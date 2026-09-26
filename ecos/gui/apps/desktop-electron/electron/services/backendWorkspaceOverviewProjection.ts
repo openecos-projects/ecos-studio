@@ -1,5 +1,6 @@
 import { relative, resolve } from 'node:path'
 import {
+  isObsoleteFlowStepName,
   parseRuntimeSeconds,
   type ChecklistFinding,
   type FlowStepState,
@@ -181,7 +182,7 @@ export function flowSection(
       steps: steps.flatMap((value, order) => {
         const step = record(value)
         if (!step || typeof step.name !== 'string') return []
-        if (step.name.toLowerCase().replace(/[\s_-]/g, '') === 'fixfanout') return []
+        if (isObsoleteFlowStepName(step.name)) return []
         const runtimeSeconds = parseRuntimeSeconds(String(step.runtime ?? ''))
         const peakMemoryMb = finiteNumber(
           step['peak memory (mb)'] ?? record(step.info)?.['peak memory (mb)'],

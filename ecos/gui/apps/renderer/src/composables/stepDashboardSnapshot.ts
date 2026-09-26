@@ -1,9 +1,10 @@
-import type {
-  WorkspaceDrcInsights,
-  WorkspaceStaInsights,
-  WorkspaceStepDetail,
-  WorkspaceTimingPathsDetail,
-  WorkspaceTimingSummaryDetail,
+import {
+  parseProjectManifestFlowStep,
+  type WorkspaceDrcInsights,
+  type WorkspaceStaInsights,
+  type WorkspaceStepDetail,
+  type WorkspaceTimingPathsDetail,
+  type WorkspaceTimingSummaryDetail,
 } from '@ecos-studio/shared'
 import {
   canonicalStepKey,
@@ -38,13 +39,6 @@ import {
   staOverviewFromSnapshot,
 } from './snapshotFlowInsights'
 import { designStatistics, physicalInsights } from './stepDashboardPhysicalSnapshot'
-
-const FLOORPLAN_STEP_NAMES = new Set([
-  'floorplan',
-  'prefloorplan',
-  'macroplacement',
-  'postfloorplan',
-])
 
 export interface StepDashboardReport {
   artifactId: string
@@ -309,7 +303,8 @@ export function snapshotStepDashboardData(
         truncated: false,
       },
     ),
-    floorplanInsights: FLOORPLAN_STEP_NAMES.has(normalizedStep) ? physical : null,
+    floorplanInsights:
+      parseProjectManifestFlowStep(detail.step.name) === 'Floor' ? physical : null,
     hardenInsights:
       normalizedStep === 'harden' && hardenArtifacts.length
         ? {

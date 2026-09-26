@@ -1,35 +1,27 @@
 import {
+  flowStepRegistry,
   parseProjectManifestFlowStep,
   type ProjectManifestFlowStep,
-} from './projectManifest.ts'
+} from './flowStepRegistry.ts'
 
 /**
- * Fixed `scope` values assigned by ECC `_metric_scope_and_roles`
- * (chipcompiler/tools/ecc/metrics.py) for steps whose scope is not the
- * lowercased step name.
+ * Producer `scope` values assigned by ECC `_metric_scope_and_roles`
+ * (chipcompiler/tools/ecc/metrics.py), mirrored in the flow step registry:
+ * the six pinned signoff/final scopes plus each step's lowercased name.
  */
-const METRIC_SCOPE_STEPS: Record<string, ProjectManifestFlowStep> = {
-  all_configured_corners: 'STA',
-  final_delivery: 'Harden',
-  final_drc: 'DRC',
-  final_lvs: 'LVS',
-  final_route: 'Route',
-  signoff_rcx: 'RCX',
-}
+const METRIC_SCOPE_STEPS: Record<string, ProjectManifestFlowStep> = Object.fromEntries(
+  flowStepRegistry.flatMap((step) =>
+    step.metricScopes.map((scope) => [scope, step.id] as const),
+  ),
+)
 
 /** Canonical metric ids are namespaced by their emitting step. */
-const METRIC_ID_PREFIX_STEPS: Record<string, ProjectManifestFlowStep> = {
-  clock: 'CTS',
-  cts: 'CTS',
-  drc: 'DRC',
-  harden: 'Harden',
-  lvs: 'LVS',
-  place: 'Place',
-  rcx: 'RCX',
-  route: 'Route',
-  sta: 'STA',
-  synthesis: 'Synth',
-}
+const METRIC_ID_PREFIX_STEPS: Record<string, ProjectManifestFlowStep> =
+  Object.fromEntries(
+    flowStepRegistry.flatMap((step) =>
+      step.metricIdPrefixes.map((prefix) => [prefix, step.id] as const),
+    ),
+  )
 
 function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''

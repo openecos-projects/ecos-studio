@@ -510,6 +510,7 @@ import {
   formatQorScore,
   homeQorFlowStepForLabel,
   qorScoreTone as getQorScoreTone,
+  qorStepRouteTarget,
   summarizeHomeQorComparison,
 } from '@/components/home/qorComparisonData'
 import { useDashboardOverview } from '@/composables/useDashboardOverview'
@@ -880,9 +881,12 @@ function statusTone(summary: {
 }
 
 function openStepQorAnalysis(step: string): void {
+  const flowStepIds = flowStages.value
+    .filter((stage) => stage.group === 'run')
+    .map((stage) => stage.path)
   void router.push({
     name: ':step',
-    params: { step },
+    params: { step: qorStepRouteTarget(step, flowStepIds) },
     query: { ...route.query, panel: 'analysis' },
   })
 }

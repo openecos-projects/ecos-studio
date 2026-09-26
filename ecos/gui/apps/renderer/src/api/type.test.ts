@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { flowStepRegistry } from '@ecos-studio/shared'
 import {
+  FLOW_START_DISABLED_STEPS,
   StepEnum,
   catalogAppliesToFlowStep,
   formatStepToolName,
@@ -73,5 +75,39 @@ describe('formatStepToolName', () => {
     expect(formatStepToolName('YOSYS_LEC')).toBe('Yosys LEC')
     expect(formatStepToolName('unknown_tool')).toBe('unknown_tool')
     expect(formatStepToolName('')).toBe('')
+  })
+})
+
+describe('step metadata ↔ flow step registry consistency', () => {
+  it('covers every persisted ECC step name with metadata', () => {
+    for (const step of flowStepRegistry) {
+      for (const eccName of step.eccNames) {
+        expect(getStepMetadata(eccName)).toMatchObject({ path: eccName })
+      }
+    }
+  })
+
+  it('keeps StepEnum flow-step values mirrored in the registry', () => {
+    // Legacy or non-flow members: RTL2GDS/Init pseudo-steps, the shared
+    // Floorplan config key, and the retired GDS/Signoff/Abstract lef steps.
+    const excluded = new Set([
+      StepEnum.RTL2GDS,
+      StepEnum.INIT,
+      StepEnum.FLOORPLAN,
+      StepEnum.GDS,
+      StepEnum.SIGNOFF,
+      StepEnum.ABSTRACT_LEF,
+    ])
+    const registryNames = new Set(
+      flowStepRegistry.flatMap((step) => step.eccNames.map((name) => name.toLowerCase())),
+    )
+    for (const value of Object.values(StepEnum)) {
+      if (excluded.has(value)) continue
+      expect(registryNames.has(value.toLowerCase())).toBe(true)
+    }
+  })
+
+  it('derives flow-start-disabled steps from the registry', () => {
+    expect([...FLOW_START_DISABLED_STEPS].sort()).toEqual(['lec', 'postRouteLec'].sort())
   })
 })

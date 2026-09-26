@@ -1,5 +1,8 @@
 import {
+  flowStepLabel,
+  parseProjectManifestFlowStep,
   projectManifestFlowSteps as FLOW_STEPS,
+  sameProjectManifestFlowStep,
   type ProjectManifestFlowStep as FlowStep,
   type QorScalarStatus,
 } from '@ecos-studio/shared'
@@ -47,60 +50,26 @@ export interface HomeQorDetailModel {
   steps: HomeQorDetailStep[]
 }
 
-const FLOW_STEP_BY_DASHBOARD_LABEL: Record<string, FlowStep> = {
-  synthesis: 'Synth',
-  synth: 'Synth',
-  lec: 'LEC',
-  floorplan: 'Floor',
-  floor: 'Floor',
-  'pre floorplan': 'Floor',
-  prefloorplan: 'Floor',
-  'macro placement': 'Floor',
-  macroplacement: 'Floor',
-  'post floorplan': 'Floor',
-  postfloorplan: 'Floor',
-  place: 'Place',
-  placement: 'Place',
-  cts: 'CTS',
-  legalization: 'Legal',
-  legal: 'Legal',
-  'timing optimization': 'Timing Opt',
-  'timing opt': 'Timing Opt',
-  route: 'Route',
-  routing: 'Route',
-  drc: 'DRC',
-  lvs: 'LVS',
-  filler: 'Filler',
-  postroutelec: 'Post-route LEC',
-  'post-route lec': 'Post-route LEC',
-  rcx: 'RCX',
-  sta: 'STA',
-  poweranalysis: 'Power Analysis',
-  'power analysis': 'Power Analysis',
-  harden: 'Harden',
-}
-
-const FLOW_STEP_LABELS: Record<FlowStep, string> = {
-  Synth: 'Synthesis',
-  LEC: 'LEC',
-  Floor: 'Floorplan',
-  Place: 'Place',
-  CTS: 'CTS',
-  Legal: 'Legalization',
-  'Timing Opt': 'Timing Optimization',
-  Route: 'Route',
-  DRC: 'DRC',
-  LVS: 'LVS',
-  Filler: 'Filler',
-  'Post-route LEC': 'Post-route LEC',
-  RCX: 'RCX',
-  STA: 'STA',
-  'Power Analysis': 'Power Analysis',
-  Harden: 'Harden',
-}
-
 export function homeQorFlowStepForLabel(label: string): FlowStep | null {
-  return FLOW_STEP_BY_DASHBOARD_LABEL[label.trim().toLowerCase()] ?? null
+  return parseProjectManifestFlowStep(label)
+}
+
+/**
+ * QoR rows are labeled with canonical manifest steps (e.g. `Legal`), while the
+ * `:step` route resolves against flow.json step names (e.g. `legalization`).
+ * Map the label back to the persisted flow step; when one canonical step spans
+ * several flow steps (Floor covers preFloorplan/macroPlacement/postFloorplan),
+ * open the last one — it holds the phase's final state.
+ */
+export function qorStepRouteTarget(
+  label: string,
+  flowStepIds: readonly string[],
+): string {
+  let target: string | null = null
+  for (const stepId of flowStepIds) {
+    if (sameProjectManifestFlowStep(label, stepId)) target = stepId
+  }
+  return target ?? label
 }
 
 export function summarizeHomeQorComparison(
@@ -168,7 +137,7 @@ export function buildHomeQorDetailModel(
     return [
       {
         step,
-        label: FLOW_STEP_LABELS[step],
+        label: flowStepLabel(step),
         order: index + 1,
         improvedCount: counts?.improvedCount ?? 0,
         regressedCount: counts?.regressedCount ?? 0,

@@ -1,12 +1,13 @@
-import type {
-  ReadSection,
-  WorkspaceCongestionStatistic,
-  WorkspaceDrcHotspot,
-  WorkspaceFlowInsightsSummary,
-  WorkspaceFlowSummary,
-  WorkspaceQorSummary,
-  WorkspaceStaInsights,
-  WorkspaceStaTimingIssue,
+import {
+  parseProjectManifestFlowStep,
+  type ReadSection,
+  type WorkspaceCongestionStatistic,
+  type WorkspaceDrcHotspot,
+  type WorkspaceFlowInsightsSummary,
+  type WorkspaceFlowSummary,
+  type WorkspaceQorSummary,
+  type WorkspaceStaInsights,
+  type WorkspaceStaTimingIssue,
 } from '@ecos-studio/shared'
 import type { ProjectEngineeringSnapshotReadResult } from './projectManagementReadService'
 
@@ -30,22 +31,6 @@ const TREND_METRIC_IDS = new Set([
   'route_via_count',
 ])
 
-const STEP_ALIASES: Record<string, string> = {
-  synthesis: 'Synth',
-  synth: 'Synth',
-  floorplan: 'Floor',
-  floor: 'Floor',
-  prefloorplan: 'Floor',
-  macroplacement: 'Floor',
-  postfloorplan: 'Floor',
-  lec: 'LEC',
-  legalization: 'Legal',
-  legal: 'Legal',
-  'timing optimization': 'Timing Opt',
-  timingoptimization: 'Timing Opt',
-  postroutelec: 'Post-route LEC',
-}
-
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -63,7 +48,7 @@ function finiteNumber(value: unknown): number | null {
 
 function canonicalStepId(value: string): string {
   const trimmed = value.trim()
-  return STEP_ALIASES[trimmed.toLowerCase()] ?? trimmed
+  return parseProjectManifestFlowStep(trimmed) ?? trimmed
 }
 
 function metricValue(

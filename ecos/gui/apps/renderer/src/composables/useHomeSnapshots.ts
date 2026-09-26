@@ -1,4 +1,4 @@
-import type { WorkspaceArtifactDescriptor } from '@ecos-studio/shared'
+import { isLayoutFlowStep, type WorkspaceArtifactDescriptor } from '@ecos-studio/shared'
 import { onScopeDispose, ref, watch } from 'vue'
 import { onWorkspaceRerunPrepared } from './homeRunArtifacts'
 import { useWorkspace } from './useWorkspace'
@@ -17,23 +17,6 @@ export interface HomeLayoutThumbnail {
 }
 
 const layoutUrls = new Map<string, string>()
-const layoutSteps = new Set([
-  'floorplan',
-  'prefloorplan',
-  'macroplacement',
-  'postfloorplan',
-  'place',
-  'cts',
-  'legalization',
-  'timing optimization',
-  'route',
-  'drc',
-  'lvs',
-  'filler',
-  'rcx',
-  'sta',
-  'harden',
-])
 
 function revoke(url: string): void {
   if (url.startsWith('blob:')) URL.revokeObjectURL(url)
@@ -109,7 +92,7 @@ export function useHomeSnapshots() {
           artifact.kind === 'layout_image' &&
           artifact.availability !== 'missing' &&
           artifact.stepId &&
-          layoutSteps.has(artifact.stepId.trim().toLowerCase()) &&
+          isLayoutFlowStep(artifact.stepId) &&
           (artifact.sourceRevision !== undefined ||
             successfulSteps.has(artifact.stepId.trim().toLowerCase())),
       )

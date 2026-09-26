@@ -14,6 +14,7 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import type { DesktopAgentWorkspaceRerunContract } from '@ecos-studio/shared'
+import { isObsoleteFlowStepName } from '@ecos-studio/shared'
 import { isPathWithinRoot, isRelativePathOutsideRoot } from '../pathScope'
 import {
   executeWorkspaceRerunDomain,
@@ -84,9 +85,6 @@ function rerunStepSlug(stepName: string): string {
   return stepName.trim().split(/\s+/).join('_').toLowerCase()
 }
 
-function isObsoleteFlowStep(stepName: string): boolean {
-  return stepName.toLowerCase().replace(/[\s_-]/g, '') === 'fixfanout'
-}
 const AUTHORIZED_KNOBS = {
   place: new Set([
     'place.target_density',
@@ -850,7 +848,7 @@ async function pruneWorkspaceRerunChecklistJson(
     const step = (item as { step?: unknown }).step
     return (
       typeof step !== 'string' ||
-      (!isObsoleteFlowStep(step) && !wipedStageNames.has(step))
+      (!isObsoleteFlowStepName(step) && !wipedStageNames.has(step))
     )
   })
 
@@ -928,7 +926,7 @@ function parseWorkspaceFlow(flowText: string): {
         (value) =>
           typeof value !== 'object' ||
           value === null ||
-          !isObsoleteFlowStep(String((value as { name?: unknown }).name ?? '')),
+          !isObsoleteFlowStepName(String((value as { name?: unknown }).name ?? '')),
       )
       .map((value) => {
         if (

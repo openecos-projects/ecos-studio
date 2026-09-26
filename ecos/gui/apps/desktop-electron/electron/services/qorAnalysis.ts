@@ -767,7 +767,10 @@ function buildWorkspaceDataQuality(
   }
 }
 
-const PROJECT_GATE_STEPS: FlowStep[] = ['DRC', 'LVS', 'RCX', 'STA']
+// Gate evaluation order is deliberate (geometry/netlist gates before
+// extraction/timing): the first failing gate decides the verdict. Membership
+// must match the registry's `gate` steps — pinned by qorAnalysis.test.ts.
+export const PROJECT_GATE_STEPS: FlowStep[] = ['DRC', 'LVS', 'RCX', 'STA']
 
 function workspaceGateSteps(
   stepStatuses: ProjectQorWorkspaceInput['stepStatuses'],

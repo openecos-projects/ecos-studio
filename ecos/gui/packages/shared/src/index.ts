@@ -457,6 +457,16 @@ export {
 export { validateMpcSpec } from './utils/mpcSpec.ts'
 export type { ValidatedMpcSpec, ValidatedMpcSpecDesign } from './utils/mpcSpec.ts'
 export {
+  flowStepCanonicalIds,
+  flowStepDefinition,
+  flowStepLabel,
+  flowStepRegistry,
+  isLayoutFlowStep,
+  isObsoleteFlowStepName,
+  normalizeFlowStepName,
+} from './utils/flowStepRegistry.ts'
+export type { FlowStepDefinition } from './utils/flowStepRegistry.ts'
+export {
   normalizeProjectManifestFlowStep,
   normalizeProjectManifestStage,
   parseProjectManifestFlowStep,
