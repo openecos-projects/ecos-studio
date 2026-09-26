@@ -309,6 +309,34 @@ def policy_shift(
                 ),
                 "resolved_contexts": len(resolved),
             }
+    # Delta_marginal: bank-level pooled posterior TV with context weights
+    # fixed to bank registration (each eligible context weighs equally)
+    pooled: dict[str, dict[str, dict[str, int]]] = {}
+    for level in ("L1", "L2"):
+        totals: dict[str, dict[str, int]] = {}
+        for fingerprint, cell_rows in by_context.items():
+            counts = _cell_counts_by_treatment(cell_rows, level)
+            for treatment, bucket in counts.items():
+                target = totals.setdefault(treatment, {})
+                for signature, count in bucket.items():
+                    target[signature] = target.get(signature, 0) + count
+        pooled[level] = totals
+    marginal = {}
+    for level in ("L1", "L2"):
+        for base, comparator in RQ2_PRIMARY_COMPARISONS:
+            if base not in pooled[level] or comparator not in pooled[level]:
+                continue
+            marginal[f"{level}|{base}||{comparator}"] = {
+                "delta_marginal_tv": total_variation(
+                    posterior_mean_distribution(pooled[level][base], alpha=alpha),
+                    posterior_mean_distribution(pooled[level][comparator], alpha=alpha),
+                ),
+                "pooled_observations": {
+                    base: sum(pooled[level][base].values()),
+                    comparator: sum(pooled[level][comparator].values()),
+                },
+            }
+
     # design heterogeneity on the primary pair (Dual vs NoKnow) at L2
     pair_key = f"{RQ2_PRIMARY_COMPARISONS[0][0]}||{RQ2_PRIMARY_COMPARISONS[0][1]}"
     designs = sorted({str(row.get("design")) for row in rows})
@@ -343,6 +371,7 @@ def policy_shift(
         "probability_cutoff": cutoff,
         "contexts": contexts,
         "summary": summary,
+        "delta_marginal": marginal,
         "design_heterogeneity": heterogeneity,
     }
 
