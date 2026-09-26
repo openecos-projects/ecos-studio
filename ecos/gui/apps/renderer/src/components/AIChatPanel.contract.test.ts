@@ -332,7 +332,7 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).not.toContain('applyParameterPatchToParametersJson')
     expect(source).not.toContain("'place.target_density': 'Target density'")
     expect(source).toContain(
-      "invalidateWorkspaceResources(['parameters', 'home', 'step-config', 'flow'])",
+      "invalidateWorkspaceResources(['parameters', 'step-config', 'flow'])",
     )
     expect(source).toContain('executeConfirmedWorkspaceParameterUpdate(contract, {')
     expect(source).toContain('updateWorkspaceConfigurationApi')
@@ -379,7 +379,7 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('workspace_rerun_result:')
     expect(source).toContain('await desktopApi.workspace.bindWindow(prepared.directory)')
     expect(source).toMatch(
-      /const opened = await openProject\([\s\S]*const projectContext = await registerAgentRerunWorkspaceInProject\([\s\S]*await router\.push\(\{[\s\S]*projectRoot: projectContext\?\.projectRoot[\s\S]*await nextTick\(\)[\s\S]*invalidateWorkspaceResources\(\['home', 'flow', 'step', 'maps', 'logs', 'parameters'\]\)[\s\S]*await executeRerun/,
+      /const opened = await openProject\([\s\S]*const projectContext = await registerAgentRerunWorkspaceInProject\([\s\S]*await router\.push\(\{[\s\S]*projectRoot: projectContext\?\.projectRoot[\s\S]*await nextTick\(\)[\s\S]*invalidateWorkspaceResources\(\['flow', 'step', 'maps', 'logs', 'parameters'\]\)[\s\S]*await executeRerun/,
     )
     expect(source).toContain('executeRerun({ token: prepared.executionToken })')
     expect(source).toContain('markAgentWorkspaceRerunHomePrepared(prepared.directory)')
@@ -393,7 +393,7 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('projectRoot: projectContext?.projectRoot')
     expect(source).toContain('projectName: projectContext?.projectName')
     expect(source).toContain(
-      "invalidateWorkspaceResources(['home', 'flow', 'step', 'maps', 'logs', 'parameters'])",
+      "invalidateWorkspaceResources(['flow', 'step', 'maps', 'logs', 'parameters'])",
     )
     expect(source).toContain(
       "appendToolProgress('Preparing isolated rerun workspace.', ownerSessionId)",

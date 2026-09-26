@@ -456,6 +456,7 @@ def _workspace_rerun_execution_contract(
         "schema_version": "flow-agent.resolved_execution_contract.v1",
         "title": title,
         "fields": fields,
+        "workspace_rerun": contract.model_dump(mode="json"),
     }
 
 
@@ -785,7 +786,6 @@ def _propose_source_retrieval(context: dict[str, Any]) -> SourceSearchProposal:
     finally:
         register_interrupt(None)
         provider.close()
-
 
 from ecos_agent.gui.workspace_results import (  # noqa: E402
     _optional_text,

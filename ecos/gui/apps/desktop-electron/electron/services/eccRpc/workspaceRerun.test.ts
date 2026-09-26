@@ -27,6 +27,7 @@ async function writeSourceWorkspace(): Promise<{
   const source = join(root, 'gcd')
   const flow = JSON.stringify({
     steps: [
+      { name: 'postFloorplan', state: 'Success', tool: 'ecc' },
       { name: 'place', state: 'Success', tool: 'dreamplace' },
       { name: 'CTS', state: 'Success', tool: 'ecc' },
       { name: 'legalization', state: 'Success', tool: 'dreamplace' },
@@ -95,6 +96,36 @@ describe('verifyWorkspaceRerunContract', () => {
     const contract = contractFor(source, flow, artifact)
     contract.target_workspace = `${contract.target_workspace}_0001`
     contract.rerun_id = 'gcd_rerun_place_0001'
+
+    await expect(verifyWorkspaceRerunContract(contract)).resolves.toEqual({
+      sourceWorkspace: source,
+      targetWorkspace: contract.target_workspace,
+    })
+  })
+
+  it('accepts a full-flow rerun from the Agent postFloorplan stage', async () => {
+    const { flow, source } = await writeSourceWorkspace()
+    const artifact = Buffer.from('post-floorplan-def')
+    const artifactPath = join(
+      source,
+      'postFloorplan_ecc',
+      'output',
+      'gcd_postFloorplan.def.gz',
+    )
+    await mkdir(join(source, 'postFloorplan_ecc', 'output'), { recursive: true })
+    await writeFile(artifactPath, artifact)
+    const contract: DesktopAgentWorkspaceRerunContract = {
+      ...contractFor(source, flow, artifact),
+      end_step: 'Harden',
+      execution_scope: 'full_flow',
+      parameter_patch: [],
+      rerun_id: 'gcd_rerun_postfloorplan',
+      source_stage_artifact: 'postFloorplan_ecc/output/gcd_postFloorplan.def.gz',
+      step_configurations: [],
+      target_step: 'postFloorplan',
+      target_workspace: `${source}_rerun_postfloorplan`,
+      workspace_parameters: {},
+    }
 
     await expect(verifyWorkspaceRerunContract(contract)).resolves.toEqual({
       sourceWorkspace: source,

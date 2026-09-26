@@ -39,6 +39,7 @@ import { WorkspaceSessionRegistry } from './workspaceSessions'
 
 export interface EccWorkspaceSessionResult {
   directory: string
+  reused?: boolean
   workspaceId: string
   workspaceRevision?: number
 }
@@ -146,6 +147,7 @@ export class WorkspaceRuntimeCommands {
       )
       return {
         directory: session.directory,
+        ...(response.reused === true ? { reused: true } : {}),
         workspaceHandle: session.workspaceHandle,
         workspaceId: session.eccWorkspaceId ?? undefined,
         workspaceRevision: session.workspaceRevision,
