@@ -5,9 +5,10 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mount } from '@vue/test-utils'
 import { ref } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const episodeForParent = vi.hoisted(() => vi.fn())
+const dynamicFlowStages = vi.hoisted(() => ({ value: [] as Array<{ state: string }> }))
 
 vi.mock('@/stores/optimizationEpisodeStore', () => ({
   useOptimizationEpisodeStore: () => ({ episodeForParent }),
@@ -23,7 +24,7 @@ vi.mock('@/composables/useFlowRunner', () => ({
 
 vi.mock('@/composables/useBackendFlowStages', () => ({
   useBackendFlowStages: () => ({
-    dynamicFlowStages: ref([]),
+    dynamicFlowStages,
     refreshFlowStages: vi.fn(),
     setFirstRunStepOngoing: vi.fn(),
     setRunStepOngoingByPath: vi.fn(),
@@ -51,6 +52,11 @@ const source = readFileSync(
 )
 
 describe('FlowRunControl Agent capture', () => {
+  beforeEach(() => {
+    dynamicFlowStages.value = []
+    episodeForParent.mockReset()
+  })
+
   it('starts the flow without owning Agent artifact capture', () => {
     expect(source).not.toContain('startFlowRunArtifactCapture')
     expect(source).not.toContain('useFlowRunArtifacts')
@@ -70,5 +76,19 @@ describe('FlowRunControl Agent capture', () => {
     expect(button.attributes('title')).toBe('Optimization is running in the background.')
     expect(button.get('i').classes()).toContain('ri-play-fill')
     expect(button.get('i').classes()).not.toContain('ri-loader-4-line')
+  })
+
+  it('presents an externally started flow as running', () => {
+    dynamicFlowStages.value = [{ state: 'Ongoing' }]
+
+    const wrapper = mount(FlowRunControl, {
+      global: { stubs: { Dialog: true } },
+    })
+    const button = wrapper.get('button.flow-run-start-button')
+
+    expect(button.attributes('disabled')).toBeDefined()
+    expect(button.attributes('aria-busy')).toBe('true')
+    expect(button.get('i').classes()).toContain('ri-loader-4-line')
+    expect(button.get('i').classes()).not.toContain('ri-play-fill')
   })
 })

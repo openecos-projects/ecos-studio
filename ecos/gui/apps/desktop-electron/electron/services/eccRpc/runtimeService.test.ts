@@ -503,6 +503,24 @@ describe('EccRpcRuntimeService pool', () => {
     ])
   })
 
+  it('skips interrupted recovery when ECC reuses an active session', async () => {
+    const pool = createPool()
+    const opening = pool.service.openWorkspace({ directory: '/work/demo' })
+    pool.clientFor('/work/demo').responses.push({
+      directory: '/work/demo',
+      reused: true,
+      workspaceId: 'id-/work/demo',
+    })
+
+    await opening
+
+    expect(
+      pool
+        .clientFor('/work/demo')
+        .calls.filter((call) => call.method === 'workspace.recover_interrupted'),
+    ).toEqual([])
+  })
+
   it('reuses one sidecar for the same directory and creates one per directory', async () => {
     const pool = createPool()
     await pool.service.openWorkspace({ directory: '/work/demo' })

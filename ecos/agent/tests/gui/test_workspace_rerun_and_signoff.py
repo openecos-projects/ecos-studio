@@ -190,6 +190,7 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
     _send(provider, session_id, "1")
 
     rerun = _last_event(events, "workspace_rerun")["workspaceRerun"]
+    assert contract["contract"]["workspace_rerun"] == rerun
     assert rerun["schema_version"] == "flow-agent.workspace_rerun_contract.v1"
     assert rerun["execution_scope"] == "full_flow"
     assert rerun["end_step"] == "Harden"

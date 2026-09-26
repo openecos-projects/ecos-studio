@@ -2,7 +2,12 @@ import { createHash } from 'node:crypto'
 import { lstat, readFile, realpath } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
-import type { DesktopAgentWorkspaceRerunContract } from '@ecos-studio/shared'
+import {
+  ECC_CATALOG_END_STEP as CATALOG_END_STEP,
+  ECC_FLOW_STEPS as FLOW_STEP_SEQUENCE,
+  ECC_FLOW_STEP_SET as FLOW_STEPS,
+  type DesktopAgentWorkspaceRerunContract,
+} from '@ecos-studio/shared'
 import { isPathWithinRoot, isRelativePathOutsideRoot } from '../pathScope'
 import {
   executeWorkspaceRerunDomain,
@@ -11,24 +16,6 @@ import {
   type WorkspaceRerunRuntime,
 } from './workspaceRerunDomain'
 
-const FLOW_STEP_SEQUENCE = [
-  'Synthesis',
-  'Floorplan',
-  'place',
-  'CTS',
-  'legalization',
-  'Timing optimization',
-  'route',
-  'drc',
-  'lvs',
-  'filler',
-  'postRouteLec',
-  'RCX',
-  'sta',
-  'Harden',
-] as const
-const FLOW_STEPS: Set<string> = new Set(FLOW_STEP_SEQUENCE)
-const CATALOG_END_STEP = FLOW_STEP_SEQUENCE[FLOW_STEP_SEQUENCE.length - 1]!
 const STAGE_OUTPUT_SUFFIXES = ['.def.gz', '.v.gz', '.gds']
 
 /** Sizer publishes underscored lowercase directory and file stems. */

@@ -252,6 +252,22 @@ async function registerLocalProjectRoot(rootPath: string): Promise<string | null
   }
 }
 
+// project.json start_step/end_step drive the executed flow slice in ECC, so
+// registration must persist the ECC manifest spelling: the display vocabulary
+// coarsens the three floorplan sub-steps to "Floor" and would silently move a
+// workspace's start to PostFloorplan.
+const FLOORPLAN_SUBSTEP_MANIFEST_SPELLING: Record<string, string> = {
+  prefloorplan: 'PreFloorplan',
+  macroplacement: 'MacroPlacement',
+  postfloorplan: 'PostFloorplan',
+}
+
+const MANIFEST_STEP_SPELLING: Record<string, string> = {
+  Floor: 'PostFloorplan',
+  'Timing Opt': 'TimingOpt',
+  'Post-route LEC': 'PostRouteLEC',
+}
+
 function canonicalManifestStep(value: string, frontend = false): string | undefined {
   if (!value) return undefined
   if (frontend) {
@@ -261,13 +277,21 @@ function canonicalManifestStep(value: string, frontend = false): string | undefi
     }
     throw new Error(`Unknown frontend flow step: ${value}`)
   }
+  const substep =
+    FLOORPLAN_SUBSTEP_MANIFEST_SPELLING[
+      value
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_-]/g, '')
+    ]
+  if (substep) return substep
   const canonical = parseProjectManifestFlowStep(value)
   if (!canonical) {
     throw new Error(
       `Flow step "${value}" is not a canonical project.json step. Use names such as Synth or Harden.`,
     )
   }
-  return canonical
+  return MANIFEST_STEP_SPELLING[canonical] ?? canonical
 }
 
 function projectManifestUpdateFailureDetail(error: unknown): string {

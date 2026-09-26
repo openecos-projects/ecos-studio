@@ -167,9 +167,41 @@ describe('projectManifestRegistration', () => {
       expect.objectContaining({
         type: 'register-workspace',
         input: expect.objectContaining({
-          sourceStep: 'Post-route LEC',
+          sourceStep: 'PostRouteLEC',
           startStep: 'Legal',
           endStep: 'STA',
+        }),
+      }),
+    )
+  })
+
+  it('persists manifest step spellings with floorplan sub-step precision', async () => {
+    await registerProjectManagedWorkspace({
+      workspacePath: '/projects/gcd/ws_0003',
+      config: {
+        directory: '/projects/gcd/ws_0003',
+        pdk: 'ics55',
+        pdk_root: '',
+        parameters: {},
+        origin_def: '',
+        origin_verilog: '',
+        rtl_list: [],
+        flow_config: {
+          start_step: 'macroPlacement',
+          end_step: 'Timing optimization',
+          steps: [],
+        },
+      },
+      projectContext: { projectRoot: '/projects/gcd', projectName: 'gcd' },
+    })
+
+    expect(mutateProjectManifest).toHaveBeenCalledWith(
+      '/projects/gcd',
+      expect.objectContaining({
+        type: 'register-workspace',
+        input: expect.objectContaining({
+          startStep: 'MacroPlacement',
+          endStep: 'TimingOpt',
         }),
       }),
     )

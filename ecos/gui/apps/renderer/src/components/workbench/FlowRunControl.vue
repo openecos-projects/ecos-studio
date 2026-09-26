@@ -74,7 +74,11 @@ const chipViewerSaving = ref(false)
 let chipViewerSavingTimer: ReturnType<typeof setInterval> | undefined
 
 const flowRunControlBusy = computed(
-  () => preparingRerun.value || isRunning.value || chipViewerSaving.value,
+  () =>
+    preparingRerun.value ||
+    isRunning.value ||
+    dynamicFlowStages.value.some((stage) => flowNodeStatus(stage.state) === 'running') ||
+    chipViewerSaving.value,
 )
 const parentRunGuarded = computed(() =>
   Boolean(
