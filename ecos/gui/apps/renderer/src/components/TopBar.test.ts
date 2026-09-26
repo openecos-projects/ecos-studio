@@ -41,6 +41,24 @@ vi.mock('@/components/ShutdownStatusButton.vue', () => ({
 
 import TopBar from './TopBar.vue'
 
+describe('TopBar title', () => {
+  it('shows the Background Tasks identity label from the route query before project state loads', async () => {
+    testState.route.path = '/workspace/home'
+    testState.route.query = {
+      projectRoot: '/work/gcd',
+      projectName: 'gcd',
+      workspaceId: 'ws_0036',
+    }
+    const wrapper = mount(TopBar, { props: { hasWorkspace: true } })
+
+    expect(wrapper.get('.project-name').text()).toBe('gcd / ws_0036')
+
+    wrapper.unmount()
+    testState.route.path = '/workspace/demo'
+    testState.route.query = {}
+  })
+})
+
 describe('TopBar signoff export menu', () => {
   it('disables signoff export while a flow is running and explains why', async () => {
     const wrapper = mount(TopBar, {

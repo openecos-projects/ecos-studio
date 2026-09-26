@@ -46,7 +46,7 @@
     <div class="topbar-drag-spacer" data-window-drag-region aria-hidden="true"></div>
 
     <div class="topbar-center">
-      <span class="project-name">{{ props.projectName }}</span>
+      <span class="project-name">{{ titleLabel }}</span>
     </div>
 
     <!-- 右侧：窗口控制按钮 -->
@@ -197,7 +197,7 @@
 <script setup lang="ts">
 import type { AppMenuAction } from '@ecos-studio/shared'
 import { appMenuActionIds } from '@ecos-studio/shared'
-import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick, toRef } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useThemeStore } from '@/stores/themeStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
@@ -207,6 +207,7 @@ import NotificationCenter from '@/components/NotificationCenter.vue'
 import BackgroundTasksButton from '@/components/BackgroundTasksButton.vue'
 import ShutdownStatusButton from '@/components/ShutdownStatusButton.vue'
 import { rememberWorkspaceManagementReturnRoute } from '@/utils/workspaceNavigation'
+import { useWorkspaceTitle } from '@/composables/useWorkspaceTitle'
 // ---- 类型定义 ----
 type TopBarMenuAction = AppMenuAction | 'step-config'
 
@@ -234,6 +235,7 @@ const workspaceProjectName = computed(() => queryString(route.query.projectName)
 // ---- Props & Emits ----
 const props = defineProps<{
   projectName?: string | null
+  workspacePath?: string | null
   hasWorkspace?: boolean
   mutationsDisabled?: boolean
   signoffExportDisabled?: boolean
@@ -244,6 +246,11 @@ const emit = defineEmits<{
   (e: 'menu-action', action: AppMenuAction): void
   (e: 'step-config'): void
 }>()
+
+const titleLabel = useWorkspaceTitle({
+  workspacePath: toRef(props, 'workspacePath'),
+  fallbackName: toRef(props, 'projectName'),
+})
 
 const workspaceFocusId = computed(
   () =>

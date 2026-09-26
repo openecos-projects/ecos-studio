@@ -5,6 +5,7 @@
       <!-- 全局顶部菜单栏 -->
       <TopBar
         :project-name="isWelcome ? null : currentProject?.name"
+        :workspace-path="currentProject?.path ?? null"
         :has-workspace="Boolean(currentProject?.path)"
         :mutations-disabled="mutationsDisabled"
         :signoff-export-disabled="currentWorkspaceFlowActive"
