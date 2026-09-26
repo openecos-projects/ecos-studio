@@ -222,6 +222,13 @@ const desktopApi: DesktopApi = {
       ),
     importWorkspace: (projectRoot) =>
       invokeDesktop(desktopApiIpcChannels.projectManagementImportWorkspace, projectRoot),
+    checkConsistency: (projectRoot) =>
+      invokeDesktop(desktopApiIpcChannels.projectManagementCheckConsistency, projectRoot),
+    repairConsistency: (projectRoot) =>
+      invokeDesktop(
+        desktopApiIpcChannels.projectManagementRepairConsistency,
+        projectRoot,
+      ),
   },
   dialog: {
     pickDirectory: (options?: DesktopDirectoryDialogOptions) =>

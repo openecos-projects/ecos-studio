@@ -59,6 +59,12 @@ export type ProjectQorBaselineSource = 'selected' | 'default'
 export interface ProjectQorBaselineResolution {
   workspaceId: string
   source: ProjectQorBaselineSource
+  /**
+   * Source annotation when the resolved entry is archived (e.g. a retained
+   * replace backup): "Archived backup of <source workspace>". Null for active
+   * entries.
+   */
+  archivedLabel: string | null
 }
 
 export interface ProjectStepCell {
@@ -285,32 +291,49 @@ export function resolveProjectQorBaselineWorkspace(
   manifest: ProjectManifest,
   currentWorkspaceId: string,
 ): ProjectQorBaselineResolution | null {
+  // Archived entries resolve like active ones: after a generation replacement
+  // the baseline/best pointers follow the retained archived backup entry.
+  const resolve = (
+    workspaceId: string,
+    source: ProjectQorBaselineSource,
+  ): ProjectQorBaselineResolution => ({
+    workspaceId,
+    source,
+    archivedLabel: archivedBaselineLabel(manifest, workspaceId),
+  })
+
   const selectedId = manifest.qor_baseline?.workspace_id
-  if (
-    selectedId &&
-    manifest.workspaces.some(
-      (workspace) =>
-        workspace.workspace_id === selectedId && workspace.status !== 'archived',
-    )
-  ) {
-    return { workspaceId: selectedId, source: 'selected' }
+  if (selectedId && manifest.workspaces.some((w) => w.workspace_id === selectedId)) {
+    return resolve(selectedId, 'selected')
   }
 
   const defaultWorkspace = manifest.workspaces.find(
-    (workspace) =>
-      workspace.workspace_id !== currentWorkspaceId && workspace.status !== 'archived',
+    (workspace) => workspace.workspace_id !== currentWorkspaceId,
   )
   if (defaultWorkspace) {
-    return { workspaceId: defaultWorkspace.workspace_id, source: 'default' }
+    return resolve(defaultWorkspace.workspace_id, 'default')
   }
 
   const currentWorkspace = manifest.workspaces.find(
-    (workspace) =>
-      workspace.workspace_id === currentWorkspaceId && workspace.status !== 'archived',
+    (workspace) => workspace.workspace_id === currentWorkspaceId,
   )
-  return currentWorkspace
-    ? { workspaceId: currentWorkspace.workspace_id, source: 'default' }
-    : null
+  return currentWorkspace ? resolve(currentWorkspace.workspace_id, 'default') : null
+}
+
+/**
+ * Source annotation for an archived baseline entry: a retained replace backup
+ * reads as "Archived backup of <source workspace>" from its recorded lineage,
+ * falling back to the entry's own id. Active entries have no annotation.
+ */
+export function archivedBaselineLabel(
+  manifest: ProjectManifest,
+  workspaceId: string,
+): string | null {
+  const workspace = manifest.workspaces.find(
+    (candidate) => candidate.workspace_id === workspaceId,
+  )
+  if (!workspace || workspace.status !== 'archived') return null
+  return `Archived backup of ${workspace.source_workspace_id || workspace.workspace_id}`
 }
 
 export function buildProjectManagementProject(
@@ -327,18 +350,17 @@ export function buildProjectManagementProject(
   const manifestWorkspaces = manifest?.workspaces ?? []
   const lineageItems = sortWorkspacesByLineage(manifestWorkspaces)
   const sortedWorkspaces = lineageItems.map((item) => item.workspace)
-  const workspaces = lineageItems.map(({ workspace, depth }) => {
-    const flowStates = workspaceFlowStates[workspace.workspace_id] ?? {}
-    return buildProjectWorkspace(
-      {
-        ...workspace,
-        status: workspaceStatusFromFlow(workspace.status, flowStates),
-      },
-      flowStates,
+  const workspaces = lineageItems.map(({ workspace, depth }) =>
+    buildProjectWorkspace(
+      workspace,
+      workspaceFlowStates[workspace.workspace_id] ?? {},
       depth,
-    )
-  })
-  const qorTrendSummary = sectionData(comparison?.trend) ?? emptyProjectQorTrendSummary()
+    ),
+  )
+  const qorTrendSummary = withArchivedBaselineLabel(
+    sectionData(comparison?.trend) ?? emptyProjectQorTrendSummary(),
+    manifest,
+  )
   const stepComparisons = sectionData(comparison?.stepComparisons)?.steps ?? []
   const snapshots = new Map(
     (sectionData(comparison?.workspaceSnapshots)?.items ?? []).map((snapshot) => [
@@ -502,6 +524,22 @@ function emptyProjectQorTrendSummary(): ProjectQorTrendSummary {
       unavailableWorkspaceCount: 0,
     },
   }
+}
+
+/**
+ * The trend baseline label surfaces the archived backup's lineage when the
+ * baseline pointer followed a retained replace backup, so every consumer of
+ * the summary reads the annotated source instead of the generated backup name.
+ */
+function withArchivedBaselineLabel(
+  summary: ProjectQorTrendSummary,
+  manifest: ProjectManifest | null | undefined,
+): ProjectQorTrendSummary {
+  const label =
+    manifest && summary.baselineWorkspaceId
+      ? archivedBaselineLabel(manifest, summary.baselineWorkspaceId)
+      : null
+  return label ? { ...summary, baselineLabel: label } : summary
 }
 
 function v3FinalMetrics(
@@ -855,7 +893,7 @@ function buildProjectWorkspace(
     id: workspace.workspace_id,
     name: workspaceDisplayName(workspace),
     workspacePath: workspace.workspace_path,
-    status: workspace.status,
+    status: workspaceDisplayStatus(workspace.status, flowStateMap),
     description: workspace.branch_from
       ? `from ${workspace.branch_from.source_workspace_id}/${branchStep}`
       : 'initial workspace',
@@ -864,7 +902,13 @@ function buildProjectWorkspace(
     startStep,
     endStep,
     depth,
-    flowStatusHint: buildFlowStatusHint(steps, startStep, endStep, flowStateMap),
+    flowStatusHint: buildFlowStatusHint(
+      steps,
+      startStep,
+      endStep,
+      flowStateMap,
+      workspace.status,
+    ),
     steps,
   }
 }
@@ -882,6 +926,68 @@ export function workspaceStatusFromFlow(
   if (states.includes('warning')) return 'warning'
   if (states.some((state) => state === 'success' || state === 'reused')) return 'success'
   return manifestStatus
+}
+
+/**
+ * Display-only severity floor: a terminal manifest outcome (failed/warning) never
+ * renders more optimistically than the manifest records, even when the flow states
+ * disagree. Progress statuses (running/in_progress/not_started/success) stay
+ * flow-driven because flow.json is authoritative for execution state, and archived
+ * keeps its committed flow state. The floor rewrites no facts; it only caps how
+ * optimistic the display reduction may be.
+ */
+const FLOW_HINT_STATE_SEVERITY: Record<ProjectFlowStatusHint['state'], number> = {
+  skipped: 0,
+  success: 1,
+  warning: 2,
+  unstart: 3,
+  running: 4,
+  failed: 5,
+}
+
+const WORKSPACE_STATUS_SEVERITY: Record<ProjectWorkspaceStatus, number> = {
+  not_started: 0,
+  success: 1,
+  warning: 2,
+  in_progress: 3,
+  running: 4,
+  failed: 5,
+  archived: 6,
+}
+
+function manifestStatusSeverityFloor(
+  status: ProjectWorkspaceStatus,
+): 'warning' | 'failed' | null {
+  if (status === 'failed') return 'failed'
+  if (status === 'warning') return 'warning'
+  return null
+}
+
+function workspaceDisplayStatus(
+  manifestStatus: ProjectWorkspaceStatus,
+  flowStates: ProjectWorkspaceFlowStateMap,
+): ProjectWorkspaceStatus {
+  const reduced = workspaceStatusFromFlow(manifestStatus, flowStates)
+  const floor = manifestStatusSeverityFloor(manifestStatus)
+  if (!floor) return reduced
+  return WORKSPACE_STATUS_SEVERITY[reduced] < WORKSPACE_STATUS_SEVERITY[floor]
+    ? floor
+    : reduced
+}
+
+function flowStatusHintWithManifestFloor(
+  hint: ProjectFlowStatusHint,
+  manifestStatus: ProjectWorkspaceStatus,
+): ProjectFlowStatusHint {
+  const floor = manifestStatusSeverityFloor(manifestStatus)
+  if (!floor) return hint
+  if (FLOW_HINT_STATE_SEVERITY[hint.state] >= FLOW_HINT_STATE_SEVERITY[floor]) return hint
+  // The recorded steps claim nothing worse, so the floored hint carries no step
+  // attribution.
+  return {
+    state: floor,
+    label: floor === 'failed' ? 'Failed' : 'Completed with warnings',
+  }
 }
 
 function workspaceDisplayName(workspace: ProjectManifestWorkspace): string {
@@ -940,6 +1046,19 @@ function sortWorkspacesByLineage(workspaces: ProjectManifestWorkspace[]): Array<
 }
 
 function buildFlowStatusHint(
+  steps: ProjectStepCell[],
+  startStep: FlowStep,
+  endStep: FlowStep,
+  flowStateMap: ProjectWorkspaceFlowStateMap,
+  manifestStatus: ProjectWorkspaceStatus,
+): ProjectFlowStatusHint {
+  return flowStatusHintWithManifestFloor(
+    reduceFlowStatusHint(steps, startStep, endStep, flowStateMap),
+    manifestStatus,
+  )
+}
+
+function reduceFlowStatusHint(
   steps: ProjectStepCell[],
   startStep: FlowStep,
   endStep: FlowStep,

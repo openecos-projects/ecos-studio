@@ -68,6 +68,94 @@ describe('executeProductCommand Workspace creation', () => {
     ).rejects.toThrow('Product Command requires parameters')
   })
 
+  it('routes a workspace update with retainBackup and invalidates the workspace', async () => {
+    const updateWorkspace = vi.fn().mockResolvedValue({
+      backupDirectory: '/projects/demo/.ws_1.replace-backup-1',
+      directory: '/projects/demo/ws_1',
+      workspaceRevision: 2,
+    })
+    const invalidateWorkspace = vi.fn()
+    const payload = {
+      commandId: 'update-1',
+      draft: {
+        targetDirectory: '/projects/demo/ws_1',
+        workspaceBindings: { pdk: { root: '/pdks/ics55' } },
+        workspaceSpec: { design: { name: 'gcd' } },
+      },
+      expectedWorkspaceRevision: 1,
+      retainBackup: true,
+      workspaceHandle: 'handle-1',
+    }
+
+    await expect(
+      executeProductCommand({ command: 'workspace.update', payload }, {
+        invalidateWorkspace,
+        ownsWorkspaceHandle: (handle: string) => handle === 'handle-1',
+        prepareCreate: vi.fn(async (request) => request),
+        runtime: { updateWorkspace } as never,
+      } as never),
+    ).resolves.toEqual({
+      backupDirectory: '/projects/demo/.ws_1.replace-backup-1',
+      directory: '/projects/demo/ws_1',
+      workspaceRevision: 2,
+    })
+    expect(updateWorkspace).toHaveBeenCalledWith({
+      commandId: 'update-1',
+      expectedWorkspaceRevision: 1,
+      retainBackup: true,
+      workspaceBindings: { pdk: { root: '/pdks/ics55' } },
+      workspaceHandle: 'handle-1',
+      workspaceSpec: { design: { name: 'gcd' } },
+    })
+    expect(invalidateWorkspace).toHaveBeenCalledWith('/projects/demo/ws_1')
+  })
+
+  it('omits retainBackup on permanent-replacement workspace updates', async () => {
+    const updateWorkspace = vi.fn().mockResolvedValue({
+      directory: '/projects/demo/ws_1',
+      workspaceRevision: 2,
+    })
+    const payload = {
+      commandId: 'update-2',
+      draft: {
+        targetDirectory: '/projects/demo/ws_1',
+        workspaceBindings: {},
+        workspaceSpec: {},
+      },
+      expectedWorkspaceRevision: 1,
+      workspaceHandle: 'handle-1',
+    }
+
+    await executeProductCommand({ command: 'workspace.update', payload }, {
+      ownsWorkspaceHandle: (handle: string) => handle === 'handle-1',
+      prepareCreate: vi.fn(async (request) => request),
+      runtime: { updateWorkspace } as never,
+    } as never)
+
+    expect(updateWorkspace.mock.calls[0][0]).not.toHaveProperty('retainBackup')
+  })
+
+  it('rejects a non-boolean retainBackup on workspace updates', async () => {
+    await expect(
+      executeProductCommand(
+        {
+          command: 'workspace.update',
+          payload: {
+            commandId: 'update-3',
+            draft: { workspaceBindings: {}, workspaceSpec: {} },
+            expectedWorkspaceRevision: 1,
+            retainBackup: 'yes',
+            workspaceHandle: 'handle-1',
+          },
+        } as never,
+        {
+          ownsWorkspaceHandle: (handle: string) => handle === 'handle-1',
+          runtime: { updateWorkspace: vi.fn() } as never,
+        } as never,
+      ),
+    ).rejects.toThrow('Workspace update retainBackup must be a boolean')
+  })
+
   it('rejects invalid optional Project identity fields at the command boundary', async () => {
     await expect(
       executeProductCommand(

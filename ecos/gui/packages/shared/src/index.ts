@@ -15,6 +15,15 @@ export type {
   DesktopFrontendWorkspaceTextsResult,
 } from './contracts/desktopApi.ts'
 export type {
+  ProjectDoctorCheckResult,
+  ProjectDoctorCheckStatus,
+  ProjectDoctorFinding,
+  ProjectDoctorFixAction,
+  ProjectDoctorFixRecord,
+  ProjectDoctorRepairResult,
+  ProjectDoctorRepairStatus,
+} from './contracts/projectDoctor.ts'
+export type {
   ProductCommandApi,
   ProductCommandRequest,
   ProductCommandResult,

@@ -452,6 +452,7 @@ export function updateWorkspaceApi(
   options: BackendWorkspaceCreateOptions,
   workspaceHandle: string,
   expectedWorkspaceRevision: number,
+  updateOptions: { retainBackup?: boolean } = {},
 ) {
   const { designTool: _designTool, ...request } = options
   return getDesktopApi().productCommands.execute({
@@ -460,6 +461,7 @@ export function updateWorkspaceApi(
       draft: toDesktopBridgeData(request) as Omit<EccWorkspaceCreateRequest, 'commandId'>,
       commandId: crypto.randomUUID(),
       expectedWorkspaceRevision,
+      ...(updateOptions.retainBackup === true ? { retainBackup: true } : {}),
       workspaceHandle,
     },
   })

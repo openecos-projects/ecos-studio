@@ -131,6 +131,49 @@ describe('useBaselineStepConfig', () => {
     expect(testState.readWorkspaceStepConfiguration).not.toHaveBeenCalled()
   })
 
+  it('labels an archived replace backup baseline with its source lineage', async () => {
+    const manifest = projectManifest()
+    const backupManifest = {
+      ...manifest,
+      workspaces: [
+        ...manifest.workspaces,
+        {
+          workspace_id: '.ws_0001.replace-backup-1',
+          name: '.ws_0001.replace-backup-1 backup',
+          workspace_path: '/projects/gcd/.ws_0001.replace-backup-1',
+          source_workspace_id: 'ws_0001',
+          branch_from: null,
+          start_step: 'Synth' as const,
+          end_step: 'Harden' as const,
+          status: 'archived' as const,
+          created_at: '2026-08-04T00:00:00.000Z',
+          updated_at: '2026-08-04T00:00:00.000Z',
+          parameter_patch: {},
+          metrics_summary: {},
+          step_metrics: {},
+        },
+      ],
+      qor_baseline: {
+        workspace_id: '.ws_0001.replace-backup-1',
+        reason: 'Default project QoR baseline',
+      },
+    }
+    testState.readManifest.mockResolvedValue(backupManifest)
+    const baseline = scope.run(() => useBaselineStepConfig(step))!
+
+    await vi.waitFor(() => expect(baseline.status.value).toBe('available'))
+
+    // The repointed baseline resolves to the archived backup entry: its config
+    // is read from the backup directory and the UI name carries the lineage.
+    expect(testState.readWorkspaceStepConfiguration).toHaveBeenCalledWith({
+      projectRoot: '/projects/gcd',
+      step: 'CTS',
+      workspacePath: '/projects/gcd/.ws_0001.replace-backup-1',
+    })
+    expect(baseline.baselineWorkspaceName.value).toBe('Archived backup of ws_0001')
+    expect(baseline.baselineSource.value).toBe('selected')
+  })
+
   it('reports no project without an open workspace', async () => {
     testState.currentProject = ref(null)
     const baseline = scope.run(() => useBaselineStepConfig(step))!

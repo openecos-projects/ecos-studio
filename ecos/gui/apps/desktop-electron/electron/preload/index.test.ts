@@ -94,6 +94,8 @@ async function loadDesktopBridge() {
     }
     projectManagement: {
       importWorkspace(projectRoot: string): Promise<unknown>
+      checkConsistency(projectRoot: string): Promise<unknown>
+      repairConsistency(projectRoot: string): Promise<unknown>
     }
     workspace: {
       openWaveformExternal(path: string): Promise<void>
@@ -373,6 +375,42 @@ describe('preload desktop bridge contract', () => {
     })
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
       desktopApiIpcChannels.projectManagementImportWorkspace,
+      '/work/gcd',
+    )
+  })
+
+  it('routes project consistency check and repair through the project management channels', async () => {
+    const bridge = await loadDesktopBridge()
+    ipcRenderer.invoke.mockResolvedValueOnce({
+      doctor: 'project',
+      status: 'failed',
+      projectRoot: '/work/gcd',
+      checked: 2,
+      inconsistent: 1,
+      findings: [],
+    })
+    ipcRenderer.invoke.mockResolvedValueOnce({
+      doctor: 'project',
+      status: 'fixed',
+      projectRoot: '/work/gcd',
+      checked: 2,
+      inconsistent: 1,
+      fixed: 1,
+      findings: [],
+    })
+
+    await expect(bridge.projectManagement.checkConsistency('/work/gcd')).resolves.toEqual(
+      expect.objectContaining({ status: 'failed' }),
+    )
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.projectManagementCheckConsistency,
+      '/work/gcd',
+    )
+    await expect(
+      bridge.projectManagement.repairConsistency('/work/gcd'),
+    ).resolves.toEqual(expect.objectContaining({ status: 'fixed' }))
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.projectManagementRepairConsistency,
       '/work/gcd',
     )
   })

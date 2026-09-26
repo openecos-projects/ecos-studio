@@ -111,6 +111,10 @@ function registerHandlers(
     projectManifestService: {
       mutate: vi.fn(),
     },
+    projectDoctorService: {
+      check: vi.fn(),
+      repair: vi.fn(),
+    },
     projectManagementReadService: {
       discoverProject: vi.fn(),
       readManifest: vi.fn(),
@@ -818,6 +822,120 @@ describe('registerIpc', () => {
       ),
     ).resolves.toEqual({ status: 'cancelled' })
     expect(services.projectWorkspaceImportService.importWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('checks project consistency through the doctor service', async () => {
+    const { handlers, services } = registerHandlers()
+    const report = {
+      doctor: 'project',
+      status: 'failed',
+      projectRoot: '/tmp/project',
+      checked: 2,
+      inconsistent: 1,
+      findings: [
+        {
+          check: 'missing-directory',
+          status: 'fail',
+          workspace_id: 'ws_0002',
+          workspace: '/tmp/project/ws_0002',
+          detail: 'workspace directory does not exist',
+        },
+      ],
+    }
+    services.projectDoctorService.check.mockResolvedValueOnce(report)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementCheckConsistency)?.(
+        { sender: {} },
+        '/tmp/project',
+      ),
+    ).resolves.toEqual(report)
+    expect(services.projectDoctorService.check).toHaveBeenCalledWith('/tmp/project')
+  })
+
+  it('rejects a consistency check without a project root', async () => {
+    const { handlers, services } = registerHandlers()
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementCheckConsistency)?.(
+        { sender: {} },
+        42,
+      ),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { message: 'Project consistency check requires a project root.' },
+    })
+    expect(services.projectDoctorService.check).not.toHaveBeenCalled()
+  })
+
+  it('repairs project consistency and invalidates the affected project', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 7 } }
+    services.projectDoctorService.repair.mockResolvedValueOnce({
+      doctor: 'project',
+      status: 'fixed',
+      projectRoot: '/tmp/project',
+      checked: 2,
+      inconsistent: 1,
+      fixed: 1,
+      findings: [],
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementRepairConsistency)?.(
+        event,
+        '/tmp/project',
+      ),
+    ).resolves.toMatchObject({ status: 'fixed' })
+    expect(services.projectDoctorService.repair).toHaveBeenCalledWith('/tmp/project')
+    expect(services.backendWorkspaceService.invalidateWindow).toHaveBeenCalledWith(7)
+    expect(
+      services.backendProjectComparisonService.invalidateProject,
+    ).toHaveBeenCalledWith('/tmp/project')
+  })
+
+  it('skips invalidation when a consistency repair changed nothing', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 7 } }
+    services.projectDoctorService.repair.mockResolvedValueOnce({
+      doctor: 'project',
+      status: 'ok',
+      projectRoot: '/tmp/project',
+      checked: 1,
+      inconsistent: 0,
+      findings: [],
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementRepairConsistency)?.(
+        event,
+        '/tmp/project',
+      ),
+    ).resolves.toMatchObject({ status: 'ok' })
+    expect(services.backendWorkspaceService.invalidateWindow).not.toHaveBeenCalled()
+    expect(
+      services.backendProjectComparisonService.invalidateProject,
+    ).not.toHaveBeenCalled()
+  })
+
+  it('blocks consistency repairs while shutdown drains mutations', async () => {
+    const { handlers, services } = registerHandlers()
+    services.shutdownCoordinator.isMutationBlocked.mockReturnValue(true)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementRepairConsistency)?.(
+        { sender: { id: 7 } },
+        '/tmp/project',
+      ),
+    ).resolves.toEqual({
+      error: {
+        code: 'SHUTDOWN_IN_PROGRESS',
+        message: 'Shutdown is in progress.',
+        name: 'Error',
+      },
+      ok: false,
+    })
+    expect(services.projectDoctorService.repair).not.toHaveBeenCalled()
   })
 
   it('requires native confirmation before approving external frontend roots', async () => {
@@ -2872,6 +2990,72 @@ describe('registerIpc', () => {
     ).resolves.toEqual(result)
 
     expect(services.eccRuntimeService.exportSignoff).toHaveBeenCalledWith(request)
+  })
+
+  it('routes workspace.update with retainBackup and invalidates workspace projections', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 11 } }
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+    })
+    await openBackendWorkspace(handlers, event, { directory: '/work/demo' })
+    services.pdkInventoryService.resolveBinding.mockResolvedValue({
+      installationId: 'pdk-installation:ics55',
+      projectId: 'proj_demo',
+      projectRoot: '/work',
+    })
+    services.pdkInventoryService.validateWorkspace.mockResolvedValue({
+      id: 'pdk-installation:ics55',
+      familyId: 'ics55',
+      displayName: 'ICS55',
+      version: null,
+      root: '/canonical/pdk',
+      ownership: 'imported',
+      readiness: 'ready',
+      reason: null,
+    })
+    services.eccRuntimeService.updateWorkspace.mockResolvedValue({
+      backupDirectory: '/work/.demo.replace-backup-1',
+      directory: '/work/demo',
+      workspaceRevision: 2,
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.productCommandExecute)?.(event, {
+        command: 'workspace.update',
+        payload: {
+          commandId: 'workspace-update-1',
+          draft: {
+            targetDirectory: '/work/demo',
+            workspaceBindings: { inputs: {}, pdk: {} },
+            workspaceSpec: { pdk: { familyId: 'ics55', mode: 'default' } },
+            pdkRequirement: { familyId: 'ics55', version: null, manualConfig: null },
+          },
+          expectedWorkspaceRevision: 1,
+          retainBackup: true,
+          workspaceHandle: 'workspace-handle-1',
+        },
+      }),
+    ).resolves.toMatchObject({
+      backupDirectory: '/work/.demo.replace-backup-1',
+      workspaceRevision: 2,
+    })
+
+    expect(services.eccRuntimeService.updateWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        commandId: 'workspace-update-1',
+        expectedWorkspaceRevision: 1,
+        retainBackup: true,
+        workspaceHandle: 'workspace-handle-1',
+      }),
+    )
+    // The in-place update replaced the journal IPC handlers that used to
+    // invalidate the Project Management and Workspace projections.
+    expect(services.backendWorkspaceService.invalidateWindow).toHaveBeenCalledWith(11)
+    expect(
+      services.backendProjectComparisonService.invalidateWorkspace,
+    ).toHaveBeenCalledWith('/work/demo')
   })
 
   it('rejects Product Commands from a Renderer that does not own the Workspace', async () => {

@@ -164,6 +164,65 @@ describe('EccWorkspaceRuntime', () => {
     expect(service.workspaceSession(opened.workspaceHandle).workspaceRevision).toBe(2)
   })
 
+  it('forwards retainBackup on workspace updates only when set', async () => {
+    const { client, service } = createService()
+    client.responses.push({
+      directory: '/work/demo',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 1,
+    })
+    const opened = await service.openWorkspace({ directory: '/work/demo' })
+    client.responses.push({
+      backupDirectory: '/work/.demo.replace-backup-1',
+      directory: '/work/demo',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 2,
+    })
+
+    await expect(
+      service.updateWorkspace({
+        commandId: 'update-1',
+        expectedWorkspaceRevision: 1,
+        retainBackup: true,
+        workspaceBindings: { pdk: { root: '/pdks/ics55' } },
+        workspaceHandle: opened.workspaceHandle,
+        workspaceSpec: { design: { name: 'gcd' } },
+      }),
+    ).resolves.toMatchObject({
+      backupDirectory: '/work/.demo.replace-backup-1',
+      workspaceRevision: 2,
+    })
+
+    expect(client.calls.at(-1)).toMatchObject({
+      method: 'workspace.update',
+      params: {
+        commandId: 'update-1',
+        expectedWorkspaceRevision: 1,
+        retainBackup: true,
+        workspaceBindings: { pdk: { root: '/pdks/ics55' } },
+        workspaceId: 'workspace-1',
+        workspaceSpec: { design: { name: 'gcd' } },
+      },
+    })
+    expect(service.workspaceSession(opened.workspaceHandle).workspaceRevision).toBe(2)
+
+    // Permanent replacement omits the flag so older ECC sidecars accept it.
+    client.responses.push({
+      directory: '/work/demo',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 3,
+    })
+    await service.updateWorkspace({
+      commandId: 'update-2',
+      expectedWorkspaceRevision: 2,
+      workspaceBindings: { pdk: { root: '/pdks/ics55' } },
+      workspaceHandle: opened.workspaceHandle,
+      workspaceSpec: { design: { name: 'gcd' } },
+    })
+    expect(client.calls.at(-1)).toMatchObject({ method: 'workspace.update' })
+    expect(client.calls.at(-1)?.params).not.toHaveProperty('retainBackup')
+  })
+
   it('reads Step Configuration without entering the operation queue', async () => {
     const { client, service, events } = createService()
     client.responses.push({

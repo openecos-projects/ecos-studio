@@ -181,6 +181,9 @@ export class WorkspaceRuntimeCommands {
       (workspaceId) => ({
         commandId: request.commandId,
         expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+        // Omitted unless retaining so older ECC sidecars (which reject
+        // unknown fields) still accept permanent-replacement updates.
+        ...(request.retainBackup === true ? { retainBackup: true } : {}),
         workspaceBindings: request.workspaceBindings,
         workspaceId,
         workspaceSpec: request.workspaceSpec,

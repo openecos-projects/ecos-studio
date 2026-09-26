@@ -40,9 +40,17 @@ export interface EccWorkspaceSpecValidationResult {
 export interface EccWorkspaceUpdateRequest
   extends EccWorkspaceMutationRequest, EccWorkspaceSpecValidationRequest {
   commandId: string
+  /**
+   * Keep the replaced Workspace generation as a sibling backup directory.
+   * Omitted when false so older ECC runtimes (which reject unknown fields)
+   * still accept the update; ECC treats a missing flag as false.
+   */
+  retainBackup?: boolean
 }
 
 export interface EccWorkspaceUpdateResult {
+  /** Retained previous-generation directory when the update kept a backup. */
+  backupDirectory?: string | null
   directory: string
   executionReadiness?: { ready: boolean; code?: string }
   workspaceId: string

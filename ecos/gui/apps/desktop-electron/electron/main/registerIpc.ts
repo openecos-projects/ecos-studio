@@ -53,6 +53,8 @@ import {
   type DesktopSaveFileDialogOptions,
   type DesktopRtlSourceDialogOptions,
   type PickedRtlSources,
+  type ProjectDoctorCheckResult,
+  type ProjectDoctorRepairResult,
   type ProjectManifest,
   type ProjectManifestMutationRequest,
   type ProjectManifestMutationResult,
@@ -220,6 +222,10 @@ export interface DesktopBridgeServices {
     mutate(
       request: ProjectManifestMutationRequest,
     ): Promise<ProjectManifestMutationResult>
+  }
+  projectDoctorService?: {
+    check(projectRoot: string): Promise<ProjectDoctorCheckResult>
+    repair(projectRoot: string): Promise<ProjectDoctorRepairResult>
   }
   projectManagementReadService?: {
     discoverProject(directory: string): Promise<ProjectManifest | null>
@@ -1896,6 +1902,41 @@ export function registerIpc(
     },
   )
 
+  handle(
+    desktopApiIpcChannels.projectManagementCheckConsistency,
+    async (_event, projectRoot) => {
+      if (!services.projectDoctorService) {
+        throw new Error('Project consistency checks are unavailable.')
+      }
+      if (typeof projectRoot !== 'string' || !projectRoot.trim()) {
+        throw new Error('Project consistency check requires a project root.')
+      }
+      return await services.projectDoctorService.check(projectRoot)
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.projectManagementRepairConsistency,
+    async (event, projectRoot) => {
+      if (!services.projectDoctorService) {
+        throw new Error('Project consistency repairs are unavailable.')
+      }
+      if (typeof projectRoot !== 'string' || !projectRoot.trim()) {
+        throw new Error('Project consistency repair requires a project root.')
+      }
+      // Repair is an explicit, visible mutation of project.json.
+      requireBackendMutationAllowed(event)
+      const result = await services.projectDoctorService.repair(projectRoot)
+      if (result.status === 'fixed' || result.status === 'failed') {
+        invalidateBackendWorkspaceForSender(event.sender)
+        services.backendProjectComparisonService.invalidateProject(
+          result.projectRoot ?? projectRoot,
+        )
+      }
+      return result
+    },
+  )
+
   handle(desktopApiIpcChannels.dialogPickDirectory, async (_event, options) => {
     return await pickDirectory(options as DesktopDirectoryDialogOptions | undefined)
   })
@@ -2468,6 +2509,13 @@ export function registerIpc(
         workspaceHandleSubscriptions.get(workspaceHandle)?.sender === event.sender,
       isWorkspaceMutationBusy: (workspaceHandle) =>
         services.chipViewerService.isWorkspaceMutationBusy?.(workspaceHandle) ?? false,
+      // An in-place workspace update commits new workspace facts and (when a
+      // backup is retained) a new archived manifest entry, without any of the
+      // directory-replacement IPC handlers that used to trigger invalidation.
+      invalidateWorkspace: (workspaceDirectory) => {
+        invalidateBackendWorkspaceForSender(event.sender)
+        services.backendProjectComparisonService.invalidateWorkspace(workspaceDirectory)
+      },
       prepareCreate: async (createRequest) => {
         const prepared = await prepareWorkspaceCreateBinding(services, createRequest)
         const { eccPdkConfig: persistConfig, ...runtimeRequest } = prepared

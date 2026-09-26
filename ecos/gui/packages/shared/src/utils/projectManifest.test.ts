@@ -5,7 +5,68 @@ import {
   projectManifestForPresentation,
   projectManifestFlowSteps,
   sameProjectManifestFlowStep,
+  type ProjectManifest,
 } from './projectManifest'
+import {
+  createProjectManifestDraft,
+  registerWorkspaceInManifest,
+  setQorBaselineInManifest,
+} from './frontendProjectManifest'
+
+const NOW = '2026-07-01T00:00:00.000Z'
+
+function backendManifestWithArchivedBackup(): ProjectManifest {
+  return projectManifestForPresentation(
+    {
+      schema_version: 1,
+      project_id: 'proj_gcd',
+      name: 'gcd',
+      design_name: 'gcd',
+      description: '',
+      root_path: '/work/gcd',
+      created_at: NOW,
+      updated_at: NOW,
+      base_design: { pdk: 'ics55', top_module: 'gcd_top', parameters: {} },
+      objectives: { primary: 'timing', directions: {} },
+      workspaces: [
+        {
+          workspace_id: 'ws_0001',
+          name: 'ws_0001',
+          workspace_path: 'ws_0001',
+          source_workspace_id: null,
+          branch_from: null,
+          start_step: 'Synth',
+          end_step: 'Harden',
+          status: 'not_started',
+          created_at: NOW,
+          updated_at: NOW,
+          parameter_patch: {},
+          metrics_summary: {},
+          step_metrics: {},
+        },
+        {
+          workspace_id: '.ws_0001.replace-backup-1',
+          name: '.ws_0001.replace-backup-1 backup',
+          workspace_path: '.ws_0001.replace-backup-1',
+          source_workspace_id: 'ws_0001',
+          branch_from: null,
+          start_step: 'Synth',
+          end_step: 'Harden',
+          status: 'archived',
+          created_at: NOW,
+          updated_at: NOW,
+          parameter_patch: {},
+          metrics_summary: {},
+          step_metrics: {},
+        },
+      ],
+      mpc: null,
+      best_workspace: null,
+      qor_baseline: { workspace_id: 'ws_0001', reason: 'Default project QoR baseline' },
+    },
+    '/work/gcd',
+  )
+}
 
 describe('project manifest presentation', () => {
   it('keeps the canonical flow order and legacy display aliases', () => {
@@ -103,6 +164,56 @@ describe('project manifest presentation', () => {
       resource_id: 'mpc:frame',
       installed_version: '1.0.0',
       design: { design_name: 'gcd' },
+    })
+  })
+})
+
+describe('QoR baseline mutation with archived entries', () => {
+  it('accepts an archived entry as the QoR baseline', () => {
+    const manifest = backendManifestWithArchivedBackup()
+
+    const updated = setQorBaselineInManifest(manifest, '.ws_0001.replace-backup-1')
+
+    expect(updated.qor_baseline).toEqual({
+      workspace_id: '.ws_0001.replace-backup-1',
+      reason: 'Selected from Project QoR Trend',
+    })
+  })
+
+  it('still rejects unknown workspace ids and non-backend projects', () => {
+    const manifest = backendManifestWithArchivedBackup()
+
+    expect(setQorBaselineInManifest(manifest, 'ws_missing')).toBe(manifest)
+
+    const frontend = createProjectManifestDraft({
+      rootPath: '/work/cpu',
+      name: 'cpu',
+      designName: 'cpu',
+      projectType: 'frontend',
+    })
+    expect(setQorBaselineInManifest(frontend, 'ws_0001')).toBe(frontend)
+  })
+
+  it('keeps a baseline pointing at an archived backup across later mutations', () => {
+    const manifest = {
+      ...backendManifestWithArchivedBackup(),
+      qor_baseline: {
+        workspace_id: '.ws_0001.replace-backup-1',
+        reason: 'Default project QoR baseline',
+      },
+    }
+
+    // A repointed baseline (generation replacement followed the archived
+    // backup) survives subsequent workspace registrations instead of being
+    // re-resolved to the first active workspace.
+    const updated = registerWorkspaceInManifest(manifest, {
+      projectRoot: '/work/gcd',
+      workspacePath: '/work/gcd/ws_0002',
+    })
+
+    expect(updated.qor_baseline).toEqual({
+      workspace_id: '.ws_0001.replace-backup-1',
+      reason: 'Default project QoR baseline',
     })
   })
 })

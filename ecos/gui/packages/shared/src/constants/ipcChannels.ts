@@ -30,6 +30,8 @@ export const desktopApiIpcChannels = {
   projectManagementReadWorkspaceStepConfiguration:
     'project-management:read-workspace-step-configuration',
   projectManagementImportWorkspace: 'project-management:import-workspace',
+  projectManagementCheckConsistency: 'project-management:check-consistency',
+  projectManagementRepairConsistency: 'project-management:repair-consistency',
   backendWorkspaceGetOverview: 'backend-workspace:get-overview',
   backendWorkspaceGetArtifact: 'backend-workspace:get-artifact',
   backendWorkspaceGetChecklistEvidence: 'backend-workspace:get-checklist-evidence',

@@ -1126,9 +1126,11 @@ export function useWorkspace() {
       ) {
         return true
       }
+      // Backend workspace updates — under either backup option — converge on
+      // ECC's in-place update; only Frontend workspaces still use the Electron
+      // directory-replacement journal below.
       const updatesCurrentBackendWorkspace = Boolean(
         config?.replaceExistingWorkspace &&
-        !config.keepReplacementBackup &&
         (config.designTool ?? 'backend') === 'backend' &&
         currentProject.value &&
         normalizePath(currentProject.value.path) === selectedPath &&
@@ -1155,6 +1157,7 @@ export function useWorkspace() {
           backendWorkspaceOptions(config!, selectedPath, parameterDisplayIndex),
           currentWorkspaceHandle,
           expectedWorkspaceRevision!,
+          { retainBackup: config!.keepReplacementBackup === true },
         )
         if (
           !('workspaceRevision' in updated) ||
@@ -1195,7 +1198,10 @@ export function useWorkspace() {
       previousCreatePath = createAffinity.previousPath
 
       let creationConfig = config
-      if (config?.replaceExistingWorkspace) {
+      // Frontend workspace replacement keeps the Electron replacement-journal
+      // path unchanged; backend updates (both backup options) already returned
+      // via the ECC in-place update above, so no backend journal is prepared.
+      if (config?.replaceExistingWorkspace && creationConfig?.designTool === 'frontend') {
         const desktopApi = getDesktopApi()
         const registeredParent = await registerProjectRoot(
           workspaceParentPath(selectedPath),

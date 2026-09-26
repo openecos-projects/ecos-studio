@@ -8,8 +8,11 @@ import type {
   DesktopAgentStartSessionRequest,
   DesktopSaveFileDialogOptions,
   EccWorkspacePdkConfigPersist,
+  ProjectDoctorCheckResult,
+  ProjectDoctorRepairResult,
   ProjectEccPdkConfigWriteRequest,
 } from './index.ts'
+import { desktopApiIpcChannels } from './index.ts'
 
 describe('shared public contracts', () => {
   it('exports Save As dialog options from the package entry point', () => {
@@ -77,5 +80,43 @@ describe('shared public contracts', () => {
       externalPaths: ['/pdk/macros/sram'],
     } satisfies EccWorkspacePdkConfigPersist
     expect(persist.externalPaths?.[0]).toBe('/pdk/macros/sram')
+  })
+
+  it('exports project doctor consistency contracts and IPC channels', () => {
+    const check = {
+      doctor: 'project',
+      status: 'failed',
+      projectRoot: '/projects/gcd',
+      checked: 2,
+      inconsistent: 1,
+      findings: [
+        {
+          check: 'missing-directory',
+          status: 'fail',
+          workspace_id: 'ws_0002',
+          workspace: '/projects/gcd/ws_0002',
+          detail: 'workspace directory does not exist',
+        },
+      ],
+    } satisfies ProjectDoctorCheckResult
+    expect(check.findings[0]?.check).toBe('missing-directory')
+
+    const repair = {
+      doctor: 'project',
+      status: 'fixed',
+      projectRoot: '/projects/gcd',
+      checked: 2,
+      inconsistent: 1,
+      fixed: 1,
+      findings: [{ ...check.findings[0]!, fix: 'removed' }],
+    } satisfies ProjectDoctorRepairResult
+    expect(repair.findings[0]?.fix).toBe('removed')
+
+    expect(desktopApiIpcChannels.projectManagementCheckConsistency).toBe(
+      'project-management:check-consistency',
+    )
+    expect(desktopApiIpcChannels.projectManagementRepairConsistency).toBe(
+      'project-management:repair-consistency',
+    )
   })
 })

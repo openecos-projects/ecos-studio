@@ -40,6 +40,10 @@ import type {
   ProjectEccPdkConfigWriteRequest,
 } from './projectEccConfig.ts'
 import type {
+  ProjectDoctorCheckResult,
+  ProjectDoctorRepairResult,
+} from './projectDoctor.ts'
+import type {
   ProjectManifest,
   ProjectManifestMutationRequest,
   ProjectManifestMutationResult,
@@ -312,6 +316,8 @@ export interface DesktopApi {
     importWorkspace(
       projectRoot: string,
     ): Promise<DesktopProjectManagementWorkspaceImportResult>
+    checkConsistency(projectRoot: string): Promise<ProjectDoctorCheckResult>
+    repairConsistency(projectRoot: string): Promise<ProjectDoctorRepairResult>
   }
   dialog: {
     pickDirectory(options?: DesktopDirectoryDialogOptions): Promise<string | null>

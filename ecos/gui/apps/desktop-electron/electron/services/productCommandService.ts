@@ -44,6 +44,8 @@ interface ProductCommandContext {
   registerCreateWorkspace?(creationId: string): Promise<void>
   ownsWorkspaceHandle(workspaceHandle: string): boolean
   isWorkspaceMutationBusy?(workspaceHandle: string): boolean
+  /** Called after a successful in-place workspace update commits new facts. */
+  invalidateWorkspace?(workspaceDirectory: string): void
   prepareCreate(request: EccWorkspaceCreateRequest): Promise<EccWorkspaceCreateRequest>
   runtime: ProductCommandRuntime
   trackCreateResult(result: unknown): void
@@ -150,13 +152,18 @@ export async function executeProductCommand(
         ...request.payload.draft,
         commandId: request.payload.commandId,
       })
-      return await context.runtime.updateWorkspace({
+      const updated = await context.runtime.updateWorkspace({
         commandId: request.payload.commandId,
         expectedWorkspaceRevision: request.payload.expectedWorkspaceRevision,
         workspaceBindings: draft.workspaceBindings,
         workspaceHandle,
         workspaceSpec: draft.workspaceSpec,
+        ...(request.payload.retainBackup === true ? { retainBackup: true } : {}),
       })
+      if (isRecord(updated) && typeof updated.directory === 'string') {
+        context.invalidateWorkspace?.(updated.directory)
+      }
+      return updated
     }
     case 'workspace.updateConfiguration':
       return await context.runtime.updateWorkspaceConfiguration(request.payload)
@@ -211,6 +218,9 @@ function readProductCommandRequest(value: unknown): ProductCommandRequest {
       requireRecord(payload.draft, 'workspaceSpec')
       if ('eccPdkConfig' in payload.draft && !isRecord(payload.draft.eccPdkConfig)) {
         throw new Error('Workspace update eccPdkConfig must be an object')
+      }
+      if ('retainBackup' in payload && typeof payload.retainBackup !== 'boolean') {
+        throw new Error('Workspace update retainBackup must be a boolean')
       }
       validateRevision(payload.expectedWorkspaceRevision)
       break
