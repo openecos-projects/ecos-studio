@@ -675,7 +675,9 @@ def test_analysis_noise_floor_posterior_and_shift() -> None:
     assert len(cells) == 4
     assert cells[("cf-a", dual)]["levels"]["L2"]["posterior_action_mass"]["propose:place"]["mean"] == 1.0
 
-    shift = policy_shift(rows, draws=200)
+    shift = policy_shift(
+        rows, draws=200, permutations=100, bootstrap_draws=100
+    )
     key = f"L2|{dual}||{noknow}"
     summary = shift["summary"][key]
     assert summary["delta_local_contexts"] == 2
@@ -685,7 +687,7 @@ def test_analysis_noise_floor_posterior_and_shift() -> None:
         if context["level"] == "L2"
     ]
     assert len(deltas) == 2
-    # cf-a fully shifted (TV=1); cf-b carries the provider_error row in the
-    # Dual denominator (failures never leave the denominator), giving
-    # TV = 1/3 against the identical NoKnow arm -> mean 2/3
-    assert abs(summary["delta_local_mean"] - (1.0 + 1.0 / 3.0) / 2.0) < 1e-9
+    # cf-a fully shifted (TV=1); cf-b carries one provider error among four
+    # Dual outcomes, giving TV=1/4 against the three identical NoKnow calls.
+    assert abs(summary["matched_context_tv_mean"] - (1.0 + 0.25) / 2.0) < 1e-9
+    assert summary["permutation"]["draws"] == 100
