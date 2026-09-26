@@ -63,6 +63,28 @@ describe('useAgentFlowProgress', () => {
     expect(changes).toEqual([1])
   })
 
+  it('renders already completed steps skipped by ECC as successful progress', async () => {
+    const messages: string[] = []
+    const events = ref<DesignRuntimeEvent[]>([])
+    const progress = useAgentFlowProgress(
+      (message) => messages.push(message),
+      undefined,
+      events,
+    )
+
+    progress.start('/runs/gcd')
+    events.value.push(
+      runtimeEvent('step.completed', {
+        eventId: 'event-1',
+        state: 'Skipped',
+        step: 'Synthesis',
+      }),
+    )
+    await nextTick()
+
+    expect(messages).toEqual(['Completed Synthesis.'])
+  })
+
   it('ignores duplicate and unrelated workspace protocol events', async () => {
     const messages: string[] = []
     const events = ref<DesignRuntimeEvent[]>([])

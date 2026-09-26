@@ -277,9 +277,9 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-primary);
   display: flex;
-  flex: 0 1 min(28vh, 220px);
+  flex: 0 1 min(20vh, 160px);
   flex-direction: column;
-  min-height: 124px;
+  min-height: 96px;
   min-width: 0;
 }
 

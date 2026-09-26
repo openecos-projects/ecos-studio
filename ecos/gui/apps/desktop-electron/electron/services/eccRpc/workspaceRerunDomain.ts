@@ -85,13 +85,17 @@ export async function executeWorkspaceRerunDomain(
   if (!Number.isInteger(initialWorkspaceRevision)) {
     throw new Error('Workspace rerun revision is unavailable.')
   }
+  const workspaceParameters = contract.workspace_parameters
+  if (!workspaceParameters) {
+    throw new Error('Workspace rerun contract is invalid.')
+  }
   let workspaceRevision = initialWorkspaceRevision!
-  if (Object.keys(contract.workspace_parameters).length) {
+  if (Object.keys(workspaceParameters).length) {
     const updated = await runtime.updateWorkspaceConfiguration({
       commandId: randomUUID(),
       configuration: {
         design: {},
-        parameters: contract.workspace_parameters,
+        parameters: workspaceParameters,
         pdk: {},
       },
       expectedWorkspaceRevision: workspaceRevision,

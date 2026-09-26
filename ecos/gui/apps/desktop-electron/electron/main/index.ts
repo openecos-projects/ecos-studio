@@ -15,6 +15,7 @@ import { createShutdownCoordinator } from './createShutdownCoordinator'
 import { handleSecondInstance } from '../services/appSecondInstance'
 import { createAgentRuntimeFromEnvironment } from '../services/agent/agentProviderRuntimeFactory'
 import { CodexDependencyService } from '../services/agent/codexDependencyService'
+import { ModelProfileService } from '../services/agent/modelProfileService'
 import { AppInfoService } from '../services/appInfoService'
 import { BackendWorkspaceService } from '../services/backendWorkspaceService'
 import { ProjectComparisonFileWatcher } from '../services/projectComparisonFileWatcher'
@@ -65,6 +66,7 @@ import { bindWindowEvents } from '../services/windowService'
 import { WorkspaceResourceService } from '../services/workspaceResourceService'
 import { WorkspaceService } from '../services/workspaceService'
 import { WorkspaceCreationJournal } from '../services/workspaceCreationJournal'
+import { QuickStartResourceService } from '../services/quickStartResourceService'
 import {
   workspaceWindowRegistry,
   type WorkspaceWindowLike,
@@ -97,9 +99,11 @@ let services: {
   codexDependencyService: CodexDependencyService
   eccRuntimeService: EccRpcRuntimeService
   frontendRpcRuntimeService: FrontendRpcRuntimeService
+  modelProfileService: ModelProfileService
   projectManagementReadService: ProjectManagementReadService
   projectWorkspaceImportService: ProjectWorkspaceImportService
   projectManifestService: ProjectManifestService
+  quickStartResourceService: QuickStartResourceService
   settingsStore: SettingsStore
   resourceManagerService: ResourceManagerService
   pdkInventoryService: PdkInventoryService
@@ -302,6 +306,11 @@ function getDesktopServices() {
     eccRuntimeService,
     workspaceCreationJournal,
   )
+  const quickStartResourceService = new QuickStartResourceService({
+    appPath: app.getAppPath(),
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+  })
   const projectManagementReadService = new ProjectManagementReadService(
     projectManifestService,
     (directory, step) =>
@@ -354,11 +363,15 @@ function getDesktopServices() {
     workspaceResourceService,
   })
 
+  const modelProfileService = new ModelProfileService({
+    settingsStore,
+  })
   const codexDependencyService = new CodexDependencyService({
     env: process.env,
     installRoot: join(app.getPath('userData'), 'codex-cli'),
     platform: process.platform,
     arch: process.arch,
+    profileService: modelProfileService,
     settingsStore,
   })
 
@@ -371,9 +384,11 @@ function getDesktopServices() {
     chipViewerService,
     codexDependencyService,
     eccRuntimeService,
+    modelProfileService,
     projectManagementReadService,
     projectWorkspaceImportService,
     projectManifestService,
+    quickStartResourceService,
     pdkInventoryService,
     projectEccConfigService,
     resourceManagerService,
@@ -411,8 +426,50 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       app.isPackaged
         ? join(process.resourcesPath, 'agent')
         : resolve(app.getAppPath(), '..', '..', '..', 'agent'),
+      {
+        candidateCapabilities: (request) =>
+          desktopServices.eccRuntimeService.candidateCapabilities(request),
+        candidateRerun: (request) =>
+          desktopServices.eccRuntimeService.candidateRerun(request),
+        candidateResume: (request) =>
+          desktopServices.eccRuntimeService.candidateResume(request),
+        cancelOperation: (request) =>
+          desktopServices.eccRuntimeService.cancelOperation(request),
+        hello: () =>
+          desktopServices.eccRuntimeService.callRuntime('rpc.hello', { version: 1 }),
+        openWorkspace: (request) =>
+          desktopServices.eccRuntimeService.openWorkspace(request),
+        operationStatus: (request) =>
+          desktopServices.eccRuntimeService.operationStatus(request),
+        startFlowOperation: (request) =>
+          desktopServices.eccRuntimeService.startFlowOperation(request),
+        waitForOperation: (request) =>
+          desktopServices.eccRuntimeService.waitForOperation(request),
+        workspaceSession: async (workspaceHandle) => {
+          try {
+            return await desktopServices.eccRuntimeService.workspaceSession(
+              workspaceHandle,
+            )
+          } catch {
+            return null
+          }
+        },
+      },
+      join(app.getPath('userData'), 'agent', 'optimization-episodes.v1.json'),
     )
+    if (agentRuntimeService) {
+      desktopServices.shutdownCoordinator.setOptimizationLifecycle({
+        beginDrain: (workspaceHandles) =>
+          agentRuntimeService.beginOptimizationShutdownDrain(workspaceHandles),
+        cancelDrain: () => agentRuntimeService.cancelOptimizationShutdownDrain(),
+        episodes: () => agentRuntimeService.optimizationProjection().episodes,
+      })
+      agentRuntimeService.onOptimizationProjectionInvalidated(() => {
+        void desktopServices.shutdownCoordinator.notifyBlockersChanged()
+      })
+    }
     registerIpc(undefined, {
+      agentQuickRunRoot: join(app.getPath('userData'), 'quick-runs'),
       agentRuntimeService: agentRuntimeService ?? undefined,
       appInfoService: desktopServices.appInfoService,
       backendWorkspaceService: desktopServices.backendWorkspaceService,
@@ -427,9 +484,11 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       },
       eccRuntimeService: desktopServices.eccRuntimeService,
       frontendRpcRuntimeService: desktopServices.frontendRpcRuntimeService,
+      modelProfileService: desktopServices.modelProfileService,
       projectManagementReadService: desktopServices.projectManagementReadService,
       projectWorkspaceImportService: desktopServices.projectWorkspaceImportService,
       projectManifestService: desktopServices.projectManifestService,
+      quickStartResourceService: desktopServices.quickStartResourceService,
       resourceManagerService: desktopServices.resourceManagerService,
       pdkInventoryService: desktopServices.pdkInventoryService,
       projectEccConfigService: desktopServices.projectEccConfigService,

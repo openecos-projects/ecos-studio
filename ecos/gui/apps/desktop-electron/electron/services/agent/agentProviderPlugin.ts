@@ -1,7 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
-export const supportedAgentProviderProtocolVersion = 1
+export const supportedAgentProviderProtocolVersion = 2
 export const agentProviderManifestFileName = 'agent-provider.json'
 
 export interface AgentProviderManifest {

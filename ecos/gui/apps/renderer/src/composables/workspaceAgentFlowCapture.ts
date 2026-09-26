@@ -1,10 +1,36 @@
 import { getCurrentInstance, onUnmounted, watch } from 'vue'
 import { useAgentFlowProgress } from '@/composables/useAgentFlowProgress'
-import { useFlowRunArtifacts } from '@/composables/useFlowRunArtifacts'
+import {
+  useFlowRunArtifacts,
+  type FlowRunArtifactCapture,
+} from '@/composables/useFlowRunArtifacts'
 import { useWorkspace } from '@/composables/useWorkspace'
+import { getAgentSessionUi } from '@/components/agentSessionUi'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useMessageStore } from '@/stores/messageStore'
 import { isFlowExecutionActiveForWorkspace } from './flowExecutionState'
+import { normalizeWorkspaceProjectPath } from './homeRunArtifacts'
+
+const activeCaptures = new Map<
+  string,
+  { workspacePath: string; capture: FlowRunArtifactCapture }
+>()
+
+/** Publish queued artifacts before the Agent appends its terminal response. */
+export async function waitForWorkspaceAgentFlowArtifacts(
+  workspacePath: string,
+  sessionId: string,
+): Promise<void> {
+  const active = activeCaptures.get(sessionId)
+  if (
+    !active ||
+    normalizeWorkspaceProjectPath(active.workspacePath) !==
+      normalizeWorkspaceProjectPath(workspacePath)
+  ) {
+    return
+  }
+  await active.capture.inspect()
+}
 
 /**
  * Publishes GUI-started flow reports and layouts into the visible Agent tab.
@@ -33,6 +59,9 @@ export function useWorkspaceAgentFlowCapture(): void {
   let runWasActive = false
 
   function stopCapture(): void {
+    if (activeCaptures.get(activeSessionId)?.capture === capture) {
+      activeCaptures.delete(activeSessionId)
+    }
     capture?.stop()
     capture = null
     activeWorkspacePath = ''
@@ -65,6 +94,7 @@ export function useWorkspaceAgentFlowCapture(): void {
       ownerSessionId: sessionId,
       stopOnTerminal: false,
     })
+    activeCaptures.set(sessionId, { workspacePath, capture })
   }
 
   watch(
@@ -72,9 +102,26 @@ export function useWorkspaceAgentFlowCapture(): void {
       running: isFlowExecutionActiveForWorkspace(currentProject.value?.path),
       sessionId: agentShell.sessionId,
       workspacePath: currentProject.value?.path ?? '',
+      tabWorkspacePath: agentShell.activeTab?.workspacePath ?? '',
+      // Session start emits the welcome message; publishing before it settles
+      // interleaves restored artifacts with the greeting.
+      connecting: agentShell.sessionId
+        ? getAgentSessionUi(agentShell.sessionId).isConnecting
+        : false,
     }),
-    ({ running, sessionId, workspacePath }) => {
+    ({ running, sessionId, workspacePath, tabWorkspacePath, connecting }) => {
       if (!sessionId || !workspacePath) {
+        stopCapture()
+        stopProgress()
+        return
+      }
+      // A tab bound to another workspace keeps its own conversation.
+      if (
+        connecting ||
+        (tabWorkspacePath &&
+          normalizeWorkspaceProjectPath(tabWorkspacePath) !==
+            normalizeWorkspaceProjectPath(workspacePath))
+      ) {
         stopCapture()
         stopProgress()
         return

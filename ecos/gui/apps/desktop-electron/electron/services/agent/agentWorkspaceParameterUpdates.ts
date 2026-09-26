@@ -46,8 +46,8 @@ const LEGACY_KNOB_ALIASES: Record<string, string> = {
 
 // Built-in fallback table, used when the ECC parameter catalog carries no
 // knob_id fields (old ECC). Keys are Agent knob ids; `parameter` is the ECC
-// spec key the value is written to. The legacy utilization spelling remains a
-// compatibility alias for one release cycle.
+// spec key the value is written to. 'floorplan.utilitization' is the legacy
+// misspelled knob id kept as a read alias for at least one release cycle.
 const builtinKnobs: Record<string, Knob> = {
   'design.frequency_max': workspace('design.frequency_mhz', 'positive'),
   'floorplan.utilization': workspace('floorplan.core_util', 'number', [0.01, 1]),
@@ -94,6 +94,18 @@ const builtinKnobs: Record<string, Knob> = {
     transform: (value) => (value ? '1' : '0'),
   },
 }
+
+/**
+ * ECC flow steps whose Step Options can override the Agent knob table. Derived
+ * from the knob domains: floorplan knobs live on preFloorplan, place knobs on
+ * place, cts knobs on CTS, and route knobs on route.
+ */
+export const AGENT_STEP_OPTION_STEPS: readonly string[] = [
+  'preFloorplan',
+  'place',
+  'CTS',
+  'route',
+]
 
 function catalogValueKind(type: unknown): ValueKind | null {
   if (typeof type !== 'string') return null
@@ -212,7 +224,7 @@ function validValue(value: ParameterValue, knob: Knob): boolean {
 
 export function readAgentWorkspaceParameterValues(
   workspaceSpec: Record<string, unknown>,
-  _stepConfigurations: Record<string, Record<string, unknown>>,
+  stepConfigurations: Record<string, Record<string, unknown>>,
 ): Record<string, ParameterValue> {
   const parameters =
     workspaceSpec.parameters &&
@@ -220,12 +232,20 @@ export function readAgentWorkspaceParameterValues(
     !Array.isArray(workspaceSpec.parameters)
       ? (workspaceSpec.parameters as Record<string, unknown>)
       : {}
+  // Step Options are step-specific values keyed by ECC parameter name; they
+  // win over the workspace-wide projection for the same parameter.
+  const stepValues: Record<string, unknown> = {}
+  for (const configuration of Object.values(stepConfigurations)) {
+    for (const [parameter, value] of Object.entries(configuration)) {
+      stepValues[parameter] = value
+    }
+  }
   const result: Record<string, ParameterValue> = {}
   const knobs = resolveAgentWorkspaceKnobs()
   for (const [knobId, knob] of Object.entries(knobs)) {
     const canonicalId = LEGACY_KNOB_ALIASES[knobId]
     if (canonicalId && knobs[canonicalId]) continue
-    const value = parameters[knob.parameter]
+    const value = stepValues[knob.parameter] ?? parameters[knob.parameter]
     let normalized = value
     if (
       knob.kind === 'boolean' &&

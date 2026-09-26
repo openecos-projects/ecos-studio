@@ -20,7 +20,7 @@ async function writePackagedAgent(appOutDir: string, agentDir?: string): Promise
     join(dir, 'agent-provider.json'),
     JSON.stringify({
       command: './ecos-agent',
-      protocolVersion: 1,
+      protocolVersion: 2,
       providerId: 'ecos_agent',
     }),
   )

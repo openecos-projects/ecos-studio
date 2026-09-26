@@ -10,7 +10,12 @@ import {
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { createEccRuntimeEnv, resolveDataHome, resolveEccExecutable } from './runtimeEnv'
+import {
+  createEccRuntimeEnv,
+  resolveDataHome,
+  resolveEccExecutable,
+  resolveEccSidecarLaunch,
+} from './runtimeEnv'
 
 function createRepoFixture(): {
   appPath: string
@@ -84,6 +89,30 @@ describe('createEccRuntimeEnv', () => {
     expect(env.PATH).toBe(
       `${join(fixture.userDataPath, 'runtime-bin')}:/home/ecos/.local/ecos/ecc:/usr/bin`,
     )
+  })
+
+  it('uses the staged Sizer runtime in development', () => {
+    const fixture = createRepoFixture()
+    writeFileSync(join(fixture.repoRoot, 'ecc', 'pyproject.toml'), '')
+    const wrapperDir = join(fixture.repoRoot, 'ecos', 'scripts')
+    mkdirSync(wrapperDir, { recursive: true })
+    writeFileSync(join(wrapperDir, 'ecc-wrapper.sh'), '#!/usr/bin/env bash\n')
+    const sizerRoot = join(fixture.appPath, 'resources', 'binaries', 'sizer')
+    mkdirSync(join(sizerRoot, 'bin'), { recursive: true })
+    mkdirSync(join(sizerRoot, 'src'), { recursive: true })
+    writeFileSync(join(sizerRoot, 'bin', 'Sizer'), '#!/usr/bin/env bash\n')
+    writeFileSync(join(sizerRoot, 'src', 'sizer_os.tcl'), '')
+
+    const env = createEccRuntimeEnv({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: { PATH: '/usr/bin' },
+      isPackaged: false,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+    })
+
+    expect(env.CHIPCOMPILER_ECC_SIZER_ROOT).toBe(sizerRoot)
   })
 
   it('leaves Windows development env unchanged', () => {
@@ -198,6 +227,33 @@ describe('createEccRuntimeEnv', () => {
     )
   })
 
+  it('uses the packaged Sizer runtime instead of an inherited host runtime', () => {
+    const fixture = createRepoFixture()
+    const resourcesPath = join(fixture.repoRoot, 'packaged-resources')
+    const binariesPath = join(resourcesPath, 'binaries')
+    const sizerRoot = join(binariesPath, 'sizer')
+    mkdirSync(join(sizerRoot, 'bin'), { recursive: true })
+    mkdirSync(join(sizerRoot, 'src'), { recursive: true })
+    writeFileSync(join(binariesPath, 'ecc'), '#!/usr/bin/env bash\n')
+    writeFileSync(join(sizerRoot, 'bin', 'Sizer'), '#!/usr/bin/env bash\n')
+    writeFileSync(join(sizerRoot, 'src', 'sizer_os.tcl'), '')
+
+    const env = createEccRuntimeEnv({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: {
+        CHIPCOMPILER_ECC_SIZER_ROOT: '/host/ecc-sizer',
+        ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
+        PATH: '/usr/bin',
+      },
+      isPackaged: true,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+    })
+
+    expect(env.CHIPCOMPILER_ECC_SIZER_ROOT).toBe(sizerRoot)
+  })
+
   it('adds packaged ECC libraries even when only chip viewer subprocesses are bundled', () => {
     const fixture = createRepoFixture()
     const resourcesPath = join(fixture.repoRoot, 'packaged-resources')
@@ -250,6 +306,7 @@ describe('createEccRuntimeEnv', () => {
     expect(env.PATH).toBe(`${join(resourcesPath, 'binaries')}:/usr/bin`)
     expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBeUndefined()
     expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBeUndefined()
+    expect(env.CHIPCOMPILER_ECC_SIZER_ROOT).toBeUndefined()
   })
 
   it('removes inherited host OSS CAD vars in packaged mode', () => {
@@ -265,6 +322,7 @@ describe('createEccRuntimeEnv', () => {
       appPath: fixture.appPath,
       cwd: fixture.appPath,
       env: {
+        CHIPCOMPILER_ECC_SIZER_ROOT: '/host/ecc-sizer',
         CHIPCOMPILER_OSS_CAD_DIR: '/host/oss-cad-suite',
         ECOS_ELECTRON_OSS_CAD_DIR: '/host/electron-oss-cad-suite',
         ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
@@ -277,6 +335,7 @@ describe('createEccRuntimeEnv', () => {
 
     expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBeUndefined()
     expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBeUndefined()
+    expect(env.CHIPCOMPILER_ECC_SIZER_ROOT).toBeUndefined()
   })
 
   it('does not inject OSS CAD env when packaged yosys is missing', () => {
@@ -474,6 +533,17 @@ describe('createEccRuntimeEnv', () => {
     })
 
     expect(executable).toBe(join(fixture.userDataPath, 'runtime-bin', 'ecc'))
+  })
+
+  it('launches every sidecar through ecc rpc serve', () => {
+    expect(
+      resolveEccSidecarLaunch({
+        eccExecutable: '/runtime/ecc',
+      }),
+    ).toEqual({
+      command: '/runtime/ecc',
+      commandArgs: ['rpc', 'serve', '--stdio', '--persistent-db'],
+    })
   })
 
   it('strips inherited OSS CAD vars in packaged mode without bundled ecc', () => {

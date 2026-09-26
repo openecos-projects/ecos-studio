@@ -1,7 +1,10 @@
 <template>
   <div
     class="new-workspace-wizard-overlay fixed inset-0 z-[100] flex items-center justify-center bg-black/45"
-    :class="isWizardMaximized ? 'p-0' : 'p-4 sm:p-6'"
+    :class="[
+      isWizardMaximized ? 'p-0' : 'p-4 sm:p-6',
+      { 'new-workspace-wizard-overlay--quick-start': props.quickStart },
+    ]"
     @click.self="closeWizard"
   >
     <div
@@ -11,6 +14,7 @@
           ? 'h-full max-h-none max-w-none rounded-none'
           : 'h-[88vh] max-h-[900px] max-w-6xl rounded-[20px]'
       "
+      :data-current-step="currentStep"
     >
       <button
         type="button"
@@ -1762,11 +1766,11 @@ type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
   lockProjectContext?: boolean
   lockWorkspaceDirectory?: boolean
   standaloneWorkspace?: boolean
-  suggestedWorkspaceName?: string
 }
 
 interface Props {
   initialConfig?: WorkspaceWizardInitialConfig
+  quickStart?: boolean
   title?: string
 }
 type ProjectMode = 'select' | 'create'
@@ -2273,10 +2277,7 @@ function initialWorkspaceName(initialConfig?: WorkspaceWizardInitialConfig) {
   if (initialConfig?.directory) {
     return getFileName(initialConfig.directory)
   }
-  return (
-    initialConfig?.suggestedWorkspaceName ??
-    String(initialConfig?.parameters?.design ?? '').trim()
-  )
+  return String(initialConfig?.parameters?.design ?? '').trim()
 }
 
 function defaultWorkspaceName() {
@@ -2383,6 +2384,9 @@ function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStep
     cts: 'CTS',
     legal: 'legalization',
     legalization: 'legalization',
+    sizer: 'Timing optimization',
+    timing_optimization: 'Timing optimization',
+    'timing optimization': 'Timing optimization',
     timingopt: 'Timing optimization',
     timingoptimization: 'Timing optimization',
     route: 'route',
@@ -3509,7 +3513,7 @@ function showDirectoryUploadFailurePrompt() {
     severity: 'warn',
     summary: 'Folder Upload Failed',
     detail: DIRECTORY_UPLOAD_FAILURE_MESSAGE,
-    life: 5000,
+    life: 15000,
   })
 }
 
@@ -3859,7 +3863,7 @@ async function scanManualPdkResources() {
           error instanceof Error
             ? error.message
             : 'Failed to scan the current PDK folder.',
-        life: 5000,
+        life: 15000,
       })
     }
   }
@@ -3882,7 +3886,7 @@ async function scanExternalPdkPaths() {
           error instanceof Error
             ? error.message
             : `Failed to scan the external PDK folder ${path}.`,
-        life: 5000,
+        life: 15000,
       })
     }
   }
@@ -4454,6 +4458,11 @@ function createWorkspace() {
 }
 
 @media (min-width: 1280px) {
+  .new-workspace-wizard-overlay--quick-start {
+    right: var(--home-agent-drawer-width);
+    overflow: hidden;
+  }
+
   .flow-step-connector {
     display: flex;
   }

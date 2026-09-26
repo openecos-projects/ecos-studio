@@ -53,12 +53,22 @@ import type {
 } from './desktopShell.ts'
 import type {
   DesktopAgentEvent,
+  DesktopAgentOptimizationEpisodeControlRequest,
+  DesktopAgentOptimizationEpisodeNotificationAckRequest,
+  DesktopAgentOptimizationEpisodeInvalidatedEvent,
+  DesktopAgentOptimizationEpisodeProjection,
   DesktopAgentInterruptRequest,
+  DesktopAgentInteractionAnswerRequest,
+  DesktopAgentInteractionAnswerResponse,
+  DesktopAgentModelSettings,
+  DesktopAgentModelSettingsRequest,
+  DesktopAgentSetModelSettingsRequest,
   DesktopAgentWorkspaceRerunExecuteRequest,
   DesktopAgentWorkspaceRerunPrepareRequest,
   DesktopAgentWorkspaceRerunPrepareResult,
   DesktopAgentSendMessageRequest,
   DesktopAgentSendMessageResponse,
+  DesktopAgentOperationAssociationRequest,
   DesktopAgentStartRequest,
   DesktopAgentStartSessionRequest,
   DesktopAgentStartSessionResponse,
@@ -67,6 +77,10 @@ import type {
   DesktopCodexDependencyStatus,
   DesktopCodexInstallProgressEvent,
   DesktopCodexSetBinPathRequest,
+  DesktopModelProfileIdRequest,
+  DesktopModelProfileSetApiKeyRequest,
+  DesktopModelProfileState,
+  DesktopModelProfileUpsertRequest,
 } from './desktopCodex.ts'
 import type { CliInstallState, CliInstallerProgressEvent } from './cliInstaller.ts'
 
@@ -82,6 +96,18 @@ export type DesktopSettingsValue =
 
 export interface DesktopDirectoryDialogOptions {
   title?: string
+}
+
+export interface QuickStartBuiltinResource {
+  id: string
+  path: string
+  version: string
+}
+
+export interface QuickStartBuiltinResources {
+  design: QuickStartBuiltinResource | null
+  diagnostics: string[]
+  pdk: QuickStartBuiltinResource | null
 }
 
 export interface DesktopFileDialogFilter {
@@ -264,6 +290,9 @@ export type WorkspaceOpenOrFocusResult =
 export interface DesktopApi {
   app: {
     getVersions(): Promise<VersionInfo>
+    getQuickStartResources?(): Promise<QuickStartBuiltinResources>
+    getQuickStartRoot?(): Promise<string>
+    prepareQuickStartProject?(name: string): Promise<string>
   }
   productCommands: ProductCommandApi
   workspaceCreationModel: WorkspaceCreationModelApi
@@ -419,6 +448,12 @@ export interface DesktopApi {
   ecc: EccRuntimeApi
   shutdown?: DesktopShutdownApi
   agent?: {
+    controlOptimizationEpisode(
+      request: DesktopAgentOptimizationEpisodeControlRequest,
+    ): Promise<void>
+    acknowledgeOptimizationEpisodeNotification(
+      request: DesktopAgentOptimizationEpisodeNotificationAckRequest,
+    ): Promise<void>
     interrupt(request: DesktopAgentInterruptRequest): Promise<void>
     start(request: DesktopAgentStartRequest): Promise<void>
     startSession(
@@ -427,7 +462,23 @@ export interface DesktopApi {
     sendMessage(
       request: DesktopAgentSendMessageRequest,
     ): Promise<DesktopAgentSendMessageResponse>
+    registerOperationAssociation(
+      request: DesktopAgentOperationAssociationRequest,
+    ): Promise<void>
+    getModelSettings(
+      request: DesktopAgentModelSettingsRequest,
+    ): Promise<DesktopAgentModelSettings>
+    setModelSettings(
+      request: DesktopAgentSetModelSettingsRequest,
+    ): Promise<DesktopAgentModelSettings>
+    answerInteraction(
+      request: DesktopAgentInteractionAnswerRequest,
+    ): Promise<DesktopAgentInteractionAnswerResponse>
     onEvent(listener: (event: DesktopAgentEvent) => void): DesktopEventUnsubscribe
+    onOptimizationProjectionInvalidated(
+      listener: (event: DesktopAgentOptimizationEpisodeInvalidatedEvent) => void,
+    ): DesktopEventUnsubscribe
+    optimizationProjection(): Promise<DesktopAgentOptimizationEpisodeProjection>
     codex?: {
       getStatus(): Promise<DesktopCodexDependencyStatus>
       install(): Promise<DesktopCodexDependencyStatus>
@@ -436,6 +487,20 @@ export interface DesktopApi {
       setBinPath(
         request: DesktopCodexSetBinPathRequest,
       ): Promise<DesktopCodexDependencyStatus>
+      listProfiles(): Promise<DesktopModelProfileState>
+      upsertProfile(
+        request: DesktopModelProfileUpsertRequest,
+      ): Promise<DesktopModelProfileState>
+      /** Delete a custom profile, or restore a built-in profile while keeping its key. */
+      deleteProfile(
+        request: DesktopModelProfileIdRequest,
+      ): Promise<DesktopModelProfileState>
+      selectProfile(
+        request: DesktopModelProfileIdRequest,
+      ): Promise<DesktopModelProfileState>
+      setProfileApiKey(
+        request: DesktopModelProfileSetApiKeyRequest,
+      ): Promise<DesktopModelProfileState>
       onProgress(
         listener: (event: DesktopCodexInstallProgressEvent) => void,
       ): DesktopEventUnsubscribe

@@ -585,13 +585,19 @@
             v-model="projectRootDraft.name"
             type="text"
             placeholder="project_name"
+            name="project-name"
             data-dialog-initial-focus
           />
         </label>
 
         <label class="form-field">
           <span>Design Name</span>
-          <input v-model="projectRootDraft.designName" type="text" placeholder="gcd" />
+          <input
+            v-model="projectRootDraft.designName"
+            type="text"
+            placeholder="gcd"
+            name="design-name"
+          />
         </label>
 
         <fieldset class="project-type-field">
@@ -626,6 +632,7 @@
               type="text"
               readonly
               placeholder="/path/to/project_root"
+              name="project-storage-location"
               @click="selectProjectStorageLocation"
             />
             <button type="button" @click="selectProjectStorageLocation">Browse</button>
@@ -635,7 +642,11 @@
         <template v-if="projectRootDraft.projectType === 'backend'">
           <label class="form-field">
             <span>Managed MPC</span>
-            <select v-model="projectRootDraft.mpcId" :disabled="isLoadingProjectMpcs">
+            <select
+              v-model="projectRootDraft.mpcId"
+              name="managed-mpc"
+              :disabled="isLoadingProjectMpcs"
+            >
               <option value="">No MPC</option>
               <option
                 v-for="mpc in projectMpcs"

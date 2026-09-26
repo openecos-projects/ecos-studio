@@ -29,6 +29,10 @@ export interface EccRuntimeEnvOptions {
   externalEccBinDir?: string | null
 }
 
+export interface EccSidecarLaunchOptions {
+  eccExecutable: string
+}
+
 function getPathKey(env: NodeJS.ProcessEnv): string {
   return Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'PATH'
 }
@@ -171,6 +175,22 @@ function packagedEccLibraryEnv(
   }
 }
 
+function packagedSizerEnv(
+  binariesPath: string,
+  platform: RuntimePlatform,
+): NodeJS.ProcessEnv {
+  if (platform !== 'linux') return {}
+
+  const root = join(binariesPath, 'sizer')
+  if (
+    !existsSync(join(root, 'bin', 'Sizer')) ||
+    !existsSync(join(root, 'src', 'sizer_os.tcl'))
+  ) {
+    return {}
+  }
+  return { CHIPCOMPILER_ECC_SIZER_ROOT: root }
+}
+
 /** POSIX single-quote a value so it stays literal in the generated shim. */
 function shQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
@@ -238,6 +258,16 @@ export function resolveEccExecutable(options: EccRuntimeEnvOptions): string | nu
   return existsSync(candidate) ? candidate : null
 }
 
+export function resolveEccSidecarLaunch(options: EccSidecarLaunchOptions): {
+  command: string
+  commandArgs: string[]
+} {
+  return {
+    command: options.eccExecutable,
+    commandArgs: ['rpc', 'serve', '--stdio', '--persistent-db'],
+  }
+}
+
 /**
  * Directory that wins the ECC runtime resolution (external override,
  * packaged binaries, bundle home, or the development runtime-bin shim), or
@@ -263,6 +293,7 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
     const libraryBinariesPath = runtimeBin ?? resolvePackagedBinariesPath(options)
     const resourcesPath = resolvePackagedResourcesPath(options)
     const {
+      CHIPCOMPILER_ECC_SIZER_ROOT: _inheritedSizerRoot,
       CHIPCOMPILER_OSS_CAD_DIR: _inheritedOssCadDir,
       ECOS_ELECTRON_OSS_CAD_DIR: _inheritedElectronOssCadDir,
       ...baseEnv
@@ -272,6 +303,10 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
       libraryBinariesPath,
       options.platform,
     )
+    const sizerEnv = packagedSizerEnv(
+      resolvePackagedBinariesPath(options),
+      options.platform,
+    )
 
     if (runtimeBin) {
       const nextPath = prependPath(baseEnv, runtimeBin, options.platform)
@@ -279,6 +314,7 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
       return {
         ...baseEnv,
         ...libraryEnv,
+        ...sizerEnv,
         ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
         [nextPath.key]: nextPath.value,
       }
@@ -288,11 +324,12 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
       return {
         ...baseEnv,
         ...libraryEnv,
+        ...sizerEnv,
         ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
       }
     }
 
-    return { ...baseEnv }
+    return { ...baseEnv, ...sizerEnv }
   }
 
   const developmentBinDir = externalRuntimeBin ?? resolveDevelopmentEccBinDir(options)
@@ -301,6 +338,9 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
   }
 
   const nextPath = prependPath(options.env, developmentBinDir, options.platform)
+  const sizerEnv = options.env.CHIPCOMPILER_ECC_SIZER_ROOT?.trim()
+    ? {}
+    : packagedSizerEnv(resolvePackagedBinariesPath(options), options.platform)
   // An external bundle ships the same _internal layout as a packaged one;
   // its native tools need the library path in development mode too.
   const libraryEnv = externalRuntimeBin
@@ -309,6 +349,7 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
 
   return {
     ...options.env,
+    ...sizerEnv,
     ...libraryEnv,
     [nextPath.key]: nextPath.value,
   }

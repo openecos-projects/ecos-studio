@@ -6,19 +6,36 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, Stri
 
 
 class ECCStepName(StrEnum):
+    """Canonical ECC flow step catalog.
+
+    The order matches the flow ECC actually writes to ``home/flow.json``
+    (verified against ECC a4ac15e6): the floorplan phase runs as the three
+    sub-steps ``preFloorplan, macroPlacement, postFloorplan`` sharing the
+    ``Floorplan`` configuration, and after ``route`` the tail runs
+    ``filler, RCX, sta, lvs, postRouteLec, drc``. Isolated floorplan-geometry
+    candidates still target the RPC-level ``Floorplan`` step name.
+
+    The Electron counterpart is `ECC_FLOW_STEPS`
+    (ecos/gui/packages/shared/src/contracts/eccFlowSteps.ts) — keep entries and
+    order identical; the joint contract lives in `ecos/agent/docs/ecc-agent-rpc.md`.
+    """
+
     SYNTHESIS = "Synthesis"
-    FLOORPLAN = "Floorplan"
+    LEC = "lec"
+    PRE_FLOORPLAN = "preFloorplan"
+    MACRO_PLACEMENT = "macroPlacement"
+    POST_FLOORPLAN = "postFloorplan"
     PLACEMENT = "place"
     CTS = "CTS"
     LEGALIZATION = "legalization"
     TIMING_OPT = "Timing optimization"
     ROUTING = "route"
-    DRC = "drc"
-    LVS = "lvs"
     FILLER = "filler"
-    POST_ROUTE_LEC = "postRouteLec"
     RCX = "RCX"
     STA = "sta"
+    LVS = "lvs"
+    POST_ROUTE_LEC = "postRouteLec"
+    DRC = "drc"
     HARDEN = "Harden"
 
 

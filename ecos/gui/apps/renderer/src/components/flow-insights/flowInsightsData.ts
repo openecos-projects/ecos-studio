@@ -82,9 +82,9 @@ export function describeMetricDelta(
 }
 
 export interface FlowInsightStep {
-  /** 原始 step 名（flow.json name，如 "Synthesis"/"Floorplan"） */
+  /** 原始 step 名（flow.json name，如 "Synthesis"/"Timing optimization"） */
   name: string
-  /** 规范化短名（"Synth"/"Floor"…，用于与 FlowStep 对齐） */
+  /** 规范化短名（"Synth"/"Sizer"…，用于与 FlowStep 对齐） */
   key: string
   tool: string
   state: string
@@ -122,6 +122,8 @@ const FLOW_STEP_CANONICAL_KEYS: Array<[RegExp, string]> = [
   [/^place/i, 'Place'],
   [/^cts/i, 'CTS'],
   [/^legal/i, 'Legal'],
+  [/^timing[ _]+optimization/i, 'Sizer'],
+  [/^sizer/i, 'Sizer'],
   [/^route/i, 'Route'],
   [/^drc/i, 'DRC'],
   [/^filler/i, 'Filler'],

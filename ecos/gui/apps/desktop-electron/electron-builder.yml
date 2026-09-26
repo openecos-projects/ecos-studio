@@ -13,6 +13,8 @@ extraResources:
     to: binaries
   - from: resources/agent
     to: agent
+  - from: ../../../../ecc/docs/examples/gcd/gcd.v
+    to: agent/quick-start/gcd.v
 linux:
   artifactName: ECOS-Studio_${version}_${arch}.${ext}
   executableName: ecos-studio

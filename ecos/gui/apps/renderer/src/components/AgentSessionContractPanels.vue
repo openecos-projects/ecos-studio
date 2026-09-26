@@ -2,54 +2,48 @@
   <AgentWorkspaceSetupPanel
     v-if="showSetup"
     :answered-option-id="workspaceSetupAnsweredOptionId"
-    :choice="workspaceSetupChoice"
-    :choice-disabled="choiceDisabled"
     :contract="workspaceSetupContract"
     :confirmation-text="workspaceSetupMessage"
     :create-setup-id="workspaceCreateSetupId"
     @create-workspace="onCreateWorkspace"
-    @select="emit('setupSelect', $event)"
   />
   <AgentExecutionContractPanel
     v-if="showRerun"
     :answered-option-id="workspaceRerunAnsweredOptionId"
-    :choice="workspaceRerunChoice"
-    :choice-disabled="choiceDisabled"
     :confirmation-text="workspaceRerunMessage"
     :execution-state="workspaceRerunExecutionState"
     :rows="workspaceRerunRows"
     :title="workspaceRerunTitle"
-    @select="emit('rerunSelect', $event)"
   />
   <AgentExecutionContractPanel
     v-if="showContinue"
     :answered-option-id="workspaceContinueAnsweredOptionId"
-    :choice="workspaceContinueChoice"
-    :choice-disabled="choiceDisabled"
     :confirmation-text="workspaceContinueMessage"
     :execution-state="workspaceContinueExecutionState"
     :rows="workspaceContinueRows"
     :title="workspaceContinueTitle"
-    @select="emit('continueSelect', $event)"
   />
   <AgentExecutionContractPanel
     v-if="showParameter"
     :answered-option-id="workspaceParameterAnsweredOptionId"
-    :choice="workspaceParameterChoice"
-    :choice-disabled="choiceDisabled"
     :confirmation-text="workspaceParameterMessage"
     :execution-state="workspaceParameterExecutionState"
     :rows="workspaceParameterRows"
     :title="workspaceParameterTitle"
-    @select="emit('parameterSelect', $event)"
   />
+  <template v-if="showSignoff">
+    <AgentExecutionContractPanel
+      :answered-option-id="workspaceSignoffAnsweredOptionId"
+      :execution-state="workspaceSignoffExecutionState"
+      :rows="workspaceSignoffRows"
+      :title="workspaceSignoffTitle"
+    />
+  </template>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import type {
-  DesktopAgentChoice,
-  DesktopAgentChoiceOption,
   DesktopAgentEvent,
   DesktopAgentWorkspaceSetupContract,
 } from '@ecos-studio/shared'
@@ -58,80 +52,83 @@ import AgentExecutionContractPanel from './AgentExecutionContractPanel.vue'
 import AgentWorkspaceSetupPanel from './AgentWorkspaceSetupPanel.vue'
 
 const props = defineProps<{
-  choiceDisabled?: boolean
   isLastTurn?: boolean
+  messageId?: string
   mode: 'awaiting' | 'committed'
-  turnId: string
   workspaceContinueAnsweredOptionId: string
-  workspaceContinueAnchorTurnId?: string
-  workspaceContinueChoice?: DesktopAgentChoice
+  workspaceContinueAnchorMessageId?: string
   workspaceContinueExecutionState: string
   workspaceContinueMessage: string
   workspaceContinueRows: [string, string][]
   workspaceContinueTitle: string
   workspaceCreateSetupId?: string
   workspaceParameterAnsweredOptionId: string
-  workspaceParameterAnchorTurnId?: string
-  workspaceParameterChoice?: DesktopAgentChoice
+  workspaceParameterAnchorMessageId?: string
   workspaceParameterExecutionState: string
   workspaceParameterMessage: string
   workspaceParameterRows: [string, string][]
   workspaceParameterTitle: string
   workspaceRerunAnsweredOptionId: string
-  workspaceRerunAnchorTurnId?: string
-  workspaceRerunChoice?: DesktopAgentChoice
+  workspaceRerunAnchorMessageId?: string
   workspaceRerunExecutionState: string
   workspaceRerunMessage: string
   workspaceRerunRows: [string, string][]
   workspaceRerunTitle: string
+  workspaceSignoffAnsweredOptionId: string
+  workspaceSignoffAnchorMessageId?: string
+  workspaceSignoffExecutionState: string
+  workspaceSignoffRows: [string, string][]
+  workspaceSignoffTitle: string
   workspaceSetupAnsweredOptionId: string
-  workspaceSetupAnchorTurnId?: string
-  workspaceSetupChoice?: DesktopAgentChoice
+  workspaceSetupAnchorMessageId?: string
   workspaceSetupContract?: DesktopAgentEvent['workspaceSetup']
   workspaceSetupMessage: string
 }>()
 
 const emit = defineEmits<{
-  continueSelect: [option: DesktopAgentChoiceOption]
   createWorkspace: [config: WorkspaceConfig, contract: DesktopAgentWorkspaceSetupContract]
-  parameterSelect: [option: DesktopAgentChoiceOption]
-  rerunSelect: [option: DesktopAgentChoiceOption]
-  setupSelect: [option: DesktopAgentChoiceOption]
 }>()
 
 const showSetup = computed(() =>
   visibleForMode(
     Boolean(props.workspaceSetupContract),
     props.workspaceSetupAnsweredOptionId,
-    props.workspaceSetupAnchorTurnId,
+    props.workspaceSetupAnchorMessageId,
   ),
 )
 const showRerun = computed(() =>
   visibleForMode(
     Boolean(props.workspaceRerunTitle),
     props.workspaceRerunAnsweredOptionId,
-    props.workspaceRerunAnchorTurnId,
+    props.workspaceRerunAnchorMessageId,
   ),
 )
 const showContinue = computed(() =>
   visibleForMode(
     Boolean(props.workspaceContinueTitle),
     props.workspaceContinueAnsweredOptionId,
-    props.workspaceContinueAnchorTurnId,
+    props.workspaceContinueAnchorMessageId,
   ),
 )
 const showParameter = computed(() =>
   visibleForMode(
     Boolean(props.workspaceParameterTitle),
     props.workspaceParameterAnsweredOptionId,
-    props.workspaceParameterAnchorTurnId,
+    props.workspaceParameterAnchorMessageId,
+  ),
+)
+const showSignoff = computed(() =>
+  visibleForMode(
+    Boolean(props.workspaceSignoffTitle),
+    props.workspaceSignoffAnsweredOptionId,
+    props.workspaceSignoffAnchorMessageId,
   ),
 )
 
 function visibleForMode(
   hasContract: boolean,
   answeredOptionId: string,
-  anchorTurnId: string | undefined,
+  anchorMessageId: string | undefined,
 ): boolean {
   if (!hasContract) return false
   const committed = Boolean(answeredOptionId)
@@ -139,8 +136,7 @@ function visibleForMode(
     return !committed && Boolean(props.isLastTurn)
   }
   if (!committed) return false
-  if (anchorTurnId) return anchorTurnId === props.turnId
-  return Boolean(props.isLastTurn)
+  return Boolean(anchorMessageId && anchorMessageId === props.messageId)
 }
 
 function onCreateWorkspace(

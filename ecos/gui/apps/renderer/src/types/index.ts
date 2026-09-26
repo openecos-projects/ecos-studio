@@ -1,6 +1,8 @@
 import type {
   DesignTool,
-  DesktopAgentChoice,
+  DesktopAgentActivity,
+  DesktopAgentInteractionRequest,
+  DesktopAgentOptimizationPayload,
   ManualPdkConfiguration,
   PdkReadiness,
   ProjectManifestType,
@@ -47,7 +49,15 @@ export interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
-  type?: 'text' | 'image' | 'info' | 'map' | 'choice' | 'tool'
+  type?:
+    | 'text'
+    | 'image'
+    | 'info'
+    | 'map'
+    | 'interaction'
+    | 'tool'
+    | 'activity'
+    | 'optimization'
   /** Ephemeral report/layout content rendered by the workspace GUI. */
   isGuiArtifact?: boolean
   status?: 'loading' | 'done' | 'error'
@@ -60,8 +70,21 @@ export interface Message {
   }
   infoData?: InfoData
   mapData?: MapData
-  choice?: DesktopAgentChoice
-  answeredOptionId?: string
+  interaction?: DesktopAgentInteractionRequest
+  interactionAnswered?: boolean
+  interactionAnswer?: string
+  interactionCompanionId?: string
+  activity?: {
+    completedAt?: number
+    items: DesktopAgentActivity[]
+    notice?: string
+    startedAt: number
+    turnId: string
+  }
+  /** Latest optimization event payload for the episode card. */
+  optimization?: DesktopAgentOptimizationPayload
+  /** Chronological optimization payloads accumulated for one episode. */
+  optimizationTimeline?: DesktopAgentOptimizationPayload[]
 }
 
 export interface Thumbnail {

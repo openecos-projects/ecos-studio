@@ -236,9 +236,14 @@ export class ProjectManagementReadService {
   }
 
   async discoverProject(directory: string): Promise<ProjectManifest | null> {
-    return await this.projectManifestReader.discover(
-      await canonicalizeExistingDirectory(directory),
-    )
+    let root: string
+    try {
+      root = await canonicalizeExistingDirectory(directory)
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) return null
+      throw error
+    }
+    return await this.projectManifestReader.discover(root)
   }
 
   async listProjectEntries(projectRoot: string): Promise<string[]> {

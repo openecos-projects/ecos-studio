@@ -1,14 +1,14 @@
 <template>
-  <div class="app-wrapper">
+  <div
+    class="app-wrapper"
+    :style="{ '--home-agent-drawer-width': `${quickStartAgentPanelWidth}px` }"
+  >
     <!-- 主应用容器 -->
     <div class="app-container">
       <!-- 全局顶部菜单栏 -->
       <TopBar
         :project-name="isWelcome ? null : currentProject?.name"
         :has-workspace="Boolean(currentProject?.path)"
-        :mutations-disabled="mutationsDisabled"
-        :signoff-export-disabled="currentWorkspaceFlowActive"
-        :workspace-update-disabled="currentWorkspaceFlowActive"
         @menu-action="handleMenuAction"
         @step-config="showStepConfigDialog = true"
       />
@@ -52,9 +52,20 @@
       v-if="showNewProjectWizard"
       :title="workspaceWizardTitle"
       :initial-config="workspaceWizardInitialConfig"
+      :quick-start="quickStartWizardResolve !== null"
       @close="handleWizardClose"
       @create="handleWizardCreate"
     />
+
+    <div
+      v-if="quickStartCursor.visible"
+      class="quick-start-cursor"
+      :class="{ 'is-clicking': quickStartCursor.clicking }"
+      :style="{ left: `${quickStartCursor.left}px`, top: `${quickStartCursor.top}px` }"
+      aria-hidden="true"
+    >
+      <i class="ri-cursor-fill"></i>
+    </div>
 
     <Teleport to="body">
       <div
@@ -71,11 +82,7 @@
         >
           <p class="workspace-update-backup-eyebrow">Update Workspace</p>
           <h2 id="workspace-update-backup-title">Backup Original Workspace?</h2>
-          <p>
-            Updating replaces the current Flow state, engineering results, Artifacts,
-            logs, and user files. Keep a complete Project-managed backup for later
-            inspection or recovery, or choose permanent replacement without a backup.
-          </p>
+          <p>Keep a copy of the current workspace before replacing it.</p>
           <div class="workspace-update-backup-actions">
             <button
               type="button"
@@ -215,28 +222,50 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, nextTick, provide, watch } from 'vue'
+import {
+  ref,
+  onMounted,
+  onUnmounted,
+  computed,
+  nextTick,
+  provide,
+  reactive,
+  watch,
+} from 'vue'
 import {
   appMenuActionIds,
   type AppMenuAction,
   type DesktopAgentWorkspaceSetupContract,
+  type DesktopApi,
+  ECC_FLOW_STEPS,
+  type QuickStartBuiltinResources,
+  type ResourceInfo,
 } from '@ecos-studio/shared'
 import { useRouter, useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/themeStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
+import { AGENT_PANEL_DEFAULT_WIDTH } from '@/composables/agentPanelWidth'
 import { useAppMenuActions } from '@/composables/useAppMenuActions'
 import { useAppWindowClose } from '@/composables/useAppWindowClose'
-import {
-  isShutdownInProgress,
-  useBackgroundOperationStore,
-} from '@/stores/backgroundOperationStore'
 import { useSignoffPackageExport } from '@/composables/useSignoffPackageExport'
 import { useDesignReportExport } from '@/composables/useDesignReportExport'
 import { useWorkspace } from '@/composables/useWorkspace'
+import { useFlowRunner } from '@/composables/useFlowRunner'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
-import { isFlowExecutionActiveForWorkspace } from '@/composables/flowExecutionState'
-import { getDesktopApi } from '@/platform/desktop'
+import {
+  hasCanonicalDieDimensions,
+  losslessNumberList,
+  losslessOptionalNumber,
+  losslessOptionalString,
+  losslessOptionalRecord,
+  scalarMarginFromCore,
+} from '@/utils/numbers'
+import {
+  getOptionalDesktopApi,
+  hasDesktopApi,
+  waitForDesktopApi,
+} from '@/platform/desktop'
 
 import TopBar from '@/components/TopBar.vue'
 import HomeAgentDrawer from '@/components/HomeAgentDrawer.vue'
@@ -254,35 +283,58 @@ import WorkspaceStepConfigDialog from '@/components/WorkspaceStepConfigDialog.vu
 import type { WorkspaceConfig } from '@/types'
 import { setWindowResizing } from '@/composables/useWindowResizeState'
 import { useDesignFiles } from '@/composables/useDesignFiles'
-import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
+import {
+  agentWorkspaceSetupKey,
+  prepareAgentWorkspaceConfig,
+} from '@/composables/agentWorkspaceSetup'
+import {
+  runQuickStartWorkflow,
+  type QuickStartResourceSnapshot,
+} from '@/composables/quickStartController'
+import { quickStartRunnerKey, type QuickStartRunner } from '@/composables/quickStartUi'
+import {
+  runQuickStartFlow,
+  type QuickStartFlowResult,
+} from '@/composables/quickStartFlow'
+import { createProjectManifestMpcSnapshot, parseMpcSpecDesigns } from '@/utils/mpcSpec'
 import {
   requestOpenStepConfigAfterCreate,
   usePendingOpenStepConfigAfterCreate,
 } from '@/composables/openStepConfigAfterCreate'
-import { getWorkspaceRuntimeSnapshotApi } from '@/api/workspaceResources'
+import {
+  readOptionalProjectTextFile,
+  readWorkspaceParametersFile,
+} from '@/utils/projectFiles'
 import { consumeOpenWorkspaceLaunchQuery } from '@/utils/openWorkspaceLaunchQuery'
 import {
   projectContextFromWorkspaceConfig,
   registerProjectManagedWorkspace,
   resolveProjectRouteContextForWorkspace,
-  workspaceRouteQueryFromProjectContext,
   type ProjectRouteContext,
 } from '@/utils/projectManifestRegistration'
 import {
-  beginWorkspaceCreation,
   consumeWorkspaceWizardRequest,
-  finishWorkspaceCreation,
   useWorkspaceWizardRequest,
-  type WorkspaceWizardInitialConfig,
-  consumeWorkspaceManagementReturnRoute,
 } from '@/utils/workspaceNavigation'
-import { workspaceReconfigureInitialConfig } from '@/utils/workspaceReconfigure'
+
+type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
+  managedWorkspaceRoot?: string
+  deriveDirectoryFromDesign?: boolean
+  lockWorkspaceDirectory?: boolean
+  standaloneWorkspace?: boolean
+}
 
 const router = useRouter()
 const themeStore = useThemeStore()
+const agentShell = useAgentShellStore()
 const route = useRoute()
 const isWelcome = computed(() => route.path === '/')
 const isWorkspaceRoute = computed(() => route.path.startsWith('/workspace'))
+const quickStartAgentPanelWidth = computed(() =>
+  agentShell.homeAgentOpen
+    ? Math.min(agentShell.panelWidthPx, AGENT_PANEL_DEFAULT_WIDTH)
+    : 0,
+)
 const zoomFactors = [0.8, 0.9, 1, 1.1, 1.25, 1.4] as const
 const zoomFactor = ref<(typeof zoomFactors)[number]>(1)
 const zoomSettingKey = 'ui.zoomFactor'
@@ -298,6 +350,7 @@ const {
   runtimeBackendTitle,
   runtimeBackendSubtitle,
 } = useWorkspace()
+const { runAllFlow } = useFlowRunner()
 const { loadPdks, pdkNameDialogVisible, pdkNameDraft, confirmPdkName, cancelPdkName } =
   usePdkManager()
 const { loadVersions } = useVersion()
@@ -314,9 +367,6 @@ const {
   showToast,
   workspaceSession,
 })
-const currentWorkspaceFlowActive = computed(() =>
-  isFlowExecutionActiveForWorkspace(currentProject.value?.path),
-)
 const {
   closeDesignReportExport,
   copyToClipboard: copyDesignReport,
@@ -334,45 +384,30 @@ const {
 } = useDesignReportExport({
   currentProject,
   showToast,
-  workspaceSession,
 })
-const desktopApi = getDesktopApi()
+const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
+let quickStartRunning = false
 
 function updatePdkNameDialogVisibility(visible: boolean): void {
   if (!visible) cancelPdkName()
 }
 
 watch(
-  () =>
-    [
-      Boolean(currentProject.value?.path),
-      isWorkspaceRoute.value,
-      currentWorkspaceFlowActive.value,
-    ] as const,
-  ([hasWorkspace, workspaceRoute, flowActive]) => {
+  () => [Boolean(currentProject.value?.path), isWorkspaceRoute.value] as const,
+  ([hasWorkspace, workspaceRoute]) => {
     void (async () => {
       try {
+        const api = desktopApi.value ?? (await waitForDesktopApi({ timeoutMs: 5000 }))
+        desktopApi.value = api
         await Promise.all([
-          desktopApi.menu.setActionEnabled(
-            appMenuActionIds.reconfigureWorkspace,
-            hasWorkspace && !flowActive,
-          ),
-          desktopApi.menu.setActionEnabled(
-            appMenuActionIds.manageDesignFiles,
-            hasWorkspace,
-          ),
-          desktopApi.menu.setActionEnabled(
-            appMenuActionIds.exportDesignMetrics,
-            hasWorkspace,
-          ),
-          desktopApi.menu.setActionEnabled(
+          api.menu.setActionEnabled(appMenuActionIds.reconfigureWorkspace, hasWorkspace),
+          api.menu.setActionEnabled(appMenuActionIds.manageDesignFiles, hasWorkspace),
+          api.menu.setActionEnabled(appMenuActionIds.exportDesignMetrics, hasWorkspace),
+          api.menu.setActionEnabled(
             appMenuActionIds.exportSignoffPackage,
             workspaceRoute,
           ),
-          desktopApi.menu.setActionEnabled(
-            appMenuActionIds.exportDesignSummary,
-            workspaceRoute,
-          ),
+          api.menu.setActionEnabled(appMenuActionIds.exportDesignSummary, workspaceRoute),
         ])
       } catch (error) {
         console.warn('[App] Failed to sync workspace menu availability:', error)
@@ -382,20 +417,13 @@ watch(
   { immediate: true },
 )
 
-watch(
-  [() => route.path, () => Boolean(currentProject.value?.path)] as const,
-  ([path, hasWorkspace]) => {
-    if (path === '/workspace/projects' && !hasWorkspace) {
-      void router.replace({ path: '/projects', query: route.query })
-    }
-  },
-  { immediate: true },
-)
-
 const documentationUrl =
   'https://github.com/openecos-projects/ecos-studio/blob/main/ecos/docs/user-guide.md'
 // ---- 新建工程向导 ----
 const showNewProjectWizard = ref(false)
+const quickStartCursor = reactive({ clicking: false, visible: false, left: 0, top: 0 })
+let quickStartWizardResolve: ((config: WorkspaceConfig) => void) | null = null
+let quickStartWizardReject: ((error: Error) => void) | null = null
 const showStepConfigDialog = ref(false)
 const pendingOpenStepConfigAfterCreate = usePendingOpenStepConfigAfterCreate()
 watch(
@@ -417,10 +445,6 @@ const workspaceWizardInitialConfig = ref<WorkspaceWizardInitialConfig | undefine
 const reconfigureWorkspacePath = ref('')
 const pendingWorkspaceUpdateConfig = ref<WorkspaceConfig | null>(null)
 const pendingWorkspaceWizardRequest = useWorkspaceWizardRequest()
-const backgroundOperations = useBackgroundOperationStore()
-const mutationsDisabled = computed(() =>
-  isShutdownInProgress(backgroundOperations.shutdownStatus.state),
-)
 
 watch(
   pendingWorkspaceWizardRequest,
@@ -451,7 +475,6 @@ function updateStepConfigDialogVisibility(visible: boolean): void {
   }
   closeStepConfigDialog()
 }
-
 const pendingWorkspaceUpdatePath = ref('')
 const showWorkspaceUpdateBackupDialog = ref(false)
 const workspaceWizardTitle = computed(() => {
@@ -463,22 +486,61 @@ async function createWorkspaceFromAgent(
   contract: DesktopAgentWorkspaceSetupContract,
   ownerSessionId: string,
 ): Promise<import('@/composables/agentWorkspaceSetup').AgentWorkspaceCreationResult> {
-  const agentShell = useAgentShellStore()
+  if (contract.mpc_enabled && !config.mpc) {
+    return {
+      created: false,
+      error: 'SoC-MPC was selected, but no validated MPC template was resolved.',
+    }
+  }
+  config = await prepareAgentWorkspaceConfig(config)
+  const ownerTab = agentShell.tabs.find((tab) => tab.id === ownerSessionId)
+  const targetWorkspacePath = normalizeLocalPath(config.directory)
+  const previousWorkspaceTab =
+    ownerTab?.workspacePath &&
+    normalizeLocalPath(ownerTab.workspacePath) !== targetWorkspacePath
+      ? {
+          mode: 'workspace' as const,
+          projectRoot: ownerTab.projectRoot,
+          projectName: ownerTab.projectName,
+          workspacePath: ownerTab.workspacePath,
+          workspaceName: ownerTab.workspaceName,
+          step: ownerTab.step,
+        }
+      : null
+  if (previousWorkspaceTab) {
+    agentShell.bindTabToWorkspace(ownerSessionId, targetWorkspacePath)
+    agentShell.activateTab(ownerSessionId)
+  }
   agentShell.beginPreserveForAgentWorkspaceSwitch()
   const success = await newProject(config)
   if (!success) {
+    if (previousWorkspaceTab) {
+      agentShell.bindTabToWorkspace(ownerSessionId, previousWorkspaceTab.workspacePath)
+    }
     agentShell.consumePreserveMessages()
     agentShell.consumePreserveSession()
     return { created: false, error: lastWorkspaceCreationError.value }
   }
   const workspacePath = currentProject.value?.path
   if (!workspacePath) throw new Error('Workspace creation did not return a project path.')
-  await desktopApi.workspace.writeProjectTextFile(
+  const api = desktopApi.value ?? (await waitForDesktopApi())
+  desktopApi.value = api
+  await api.workspace.writeProjectTextFile(
     `${normalizeLocalPath(workspacePath)}/home/workspace_setup_contract.v2.json`,
     `${JSON.stringify(contract, null, 2)}\n`,
   )
   await syncProjectManagedWorkspace(config)
   agentShell.closeHomeAgent()
+  agentShell.bindTabToWorkspace(ownerSessionId, workspacePath)
+  if (
+    previousWorkspaceTab &&
+    !agentShell.tabs.some(
+      (tab) => tab.workspacePath === previousWorkspaceTab.workspacePath,
+    )
+  ) {
+    agentShell.createTab(previousWorkspaceTab, { activate: false })
+  }
+  agentShell.activateTab(ownerSessionId)
   agentShell.setPendingPostCreateFlow({
     setupId: contract.setup_id,
     ownerSessionId,
@@ -497,6 +559,732 @@ async function createWorkspaceFromAgent(
 }
 
 provide(agentWorkspaceSetupKey, createWorkspaceFromAgent)
+
+const runQuickStart: QuickStartRunner = async (onEvent, signal, onNarration) => {
+  if (quickStartRunning) throw new Error('A Quick Start workflow is already running.')
+  quickStartRunning = true
+  const narrate = (message: string): void => onNarration?.(message)
+  try {
+    signal?.throwIfAborted()
+    const api = desktopApi.value ?? (await waitForDesktopApi())
+    desktopApi.value = api
+    const versions = await api.app.getVersions()
+    const resources = await resolveQuickStartResources(api)
+    let completedFlow: QuickStartFlowResult | undefined
+    const host = {
+      appVersion: versions.gui,
+      listResources: async () => resources,
+      navigate: async (surface: string) => {
+        if (surface === 'project-management') {
+          let homeProjectButton: HTMLButtonElement | undefined
+          for (let attempt = 0; attempt < 100; attempt += 1) {
+            signal?.throwIfAborted()
+            homeProjectButton =
+              document.querySelector<HTMLButtonElement>('.project-management-entry') ??
+              undefined
+            if (homeProjectButton) break
+            await delay(100, signal)
+          }
+          if (!homeProjectButton) {
+            throw new Error('Quick Start could not find the Project Management button.')
+          }
+          narrate('现在打开项目管理页面，准备创建 Project。')
+          await clickQuickStartTarget(homeProjectButton, signal, {
+            offsetX: 96,
+            offsetY: 96,
+          })
+          await delay(450, signal)
+          if (route.path === '/projects') {
+            await router.replace({
+              path: '/projects',
+              query: { ...route.query, quickStart: '1' },
+            })
+          }
+          let newProjectButton: HTMLButtonElement | undefined
+          for (let attempt = 0; attempt < 30; attempt += 1) {
+            signal?.throwIfAborted()
+            newProjectButton = [
+              ...document.querySelectorAll<HTMLButtonElement>('.project-toolbar-action'),
+            ].find(
+              (button) =>
+                button.textContent?.replace(/\s+/g, ' ').trim().toLowerCase() ===
+                'new project',
+            )
+            if (newProjectButton) break
+            await delay(100, signal)
+          }
+          if (newProjectButton) {
+            narrate('项目管理页面已打开，接下来进入新建 Project。')
+            await clickQuickStartTarget(newProjectButton, signal)
+            await delay(350, signal)
+          }
+        }
+      },
+      createProject: async (input: {
+        design: QuickStartResourceSnapshot['design']
+        mpc: QuickStartResourceSnapshot['mpc']
+        pdk: QuickStartResourceSnapshot['pdk']
+      }) => {
+        narrate('现在正在创建 Project，使用 GCD 示例和已准备好的 MPC 配置。')
+        if (!api.app.getQuickStartRoot) {
+          throw new Error('Quick Start storage is unavailable in this desktop runtime.')
+        }
+        const root = normalizeLocalPath(await api.app.getQuickStartRoot())
+        const projectName = await nextQuickStartProjectName(api, root)
+        if (!api.app.prepareQuickStartProject) {
+          throw new Error(
+            'Quick Start project storage is unavailable in this desktop runtime.',
+          )
+        }
+        const projectRoot = normalizeLocalPath(
+          await api.app.prepareQuickStartProject(projectName),
+        )
+        await showQuickStartProjectDialog(
+          {
+            projectName,
+            designName: 'gcd',
+            projectRoot,
+            mpcId: input.mpc?.id ?? '',
+          },
+          signal,
+          narrate,
+        )
+        signal?.throwIfAborted()
+        const mpc = input.mpc ? await quickStartMpcSnapshot(api, input.mpc) : null
+        await api.workspace.registerProjectRoot(projectRoot)
+        await writeQuickStartRunRecord(api, projectRoot, {
+          design_resource: input.design,
+          mpc_resource: input.mpc,
+          pdk_resource: input.pdk,
+          project: { name: projectName, root: projectRoot },
+          schema_version: 'ecos.quick_start.run.v1',
+          snapshot: {
+            project: {
+              design_name: 'gcd',
+              managed_mpc: mpc,
+              storage_root: root,
+            },
+            resources: {
+              design: input.design,
+              mpc: input.mpc,
+              pdk: input.pdk,
+            },
+          },
+          status: 'project_created',
+          workflow_id: 'backend-gcd-quick-start',
+          workflow_version: '1.0.0',
+        })
+        await delay(250, signal)
+        return {
+          id: projectName,
+          name: projectName,
+          root: projectRoot,
+          mpc,
+        }
+      },
+      createWorkspace: async (input: {
+        project: any
+        resources: QuickStartResourceSnapshot
+      }) => {
+        const project = input.project as { name: string; root: string }
+        narrate('现在正在创建 Workspace。')
+        const workspaceId = await nextQuickStartWorkspaceId(api, project.root)
+        const workspacePath = joinLocalPath(project.root, workspaceId)
+        const config: WorkspaceConfig = {
+          directory: workspacePath,
+          designTool: 'backend',
+          pdk: 'ics55',
+          pdk_root: input.resources.pdk?.path ?? '',
+          pdk_installation_id: input.resources.pdk?.id,
+          pdk_requirement: input.resources.pdk
+            ? {
+                familyId: 'ics55',
+                version: input.resources.pdk.version || null,
+                manualConfig: null,
+              }
+            : undefined,
+          parameters: {
+            design: 'gcd',
+            description: 'Created by Quick Start',
+            top_module: '',
+            clock: '',
+            frequency_max: 50,
+            max_fanout: 32,
+            die_area_mode: 'utilitization_margin',
+            utilitization: 0.3,
+            margin: 2,
+            target_density: 0.2,
+            target_overflow: 0.1,
+          },
+          origin_def: '',
+          origin_verilog: '',
+          rtl_list: input.resources.design ? [input.resources.design.path] : [],
+          design_input_mode: 'rtl',
+          pdk_config_mode: 'default',
+          pdk_config: { mode: 'default', tech_lef: [], cell_lef: [], liberty: [] },
+          flow_config: {
+            start_step: 'Synthesis',
+            end_step: 'Harden',
+            // Full ECC flow catalog, identical to the agent wizard's default
+            // range (product decision 2026-09-13, see ecos/agent/docs/diff.md #7).
+            steps: [...ECC_FLOW_STEPS],
+          },
+          mpc: (input.project as { mpc?: WorkspaceConfig['mpc'] }).mpc ?? null,
+          project_context: {
+            mode: 'select',
+            project_name: project.name,
+            project_root: project.root,
+            project_json_path: joinLocalPath(project.root, 'project.json'),
+          },
+        }
+        narrate('接下来配置 PDK、布局密度、顶层模块和时钟。')
+        const createdConfig = await driveQuickStartWorkspaceWizard(
+          config,
+          signal,
+          narrate,
+        )
+        await writeQuickStartRunRecord(api, workspacePath, {
+          project: { name: project.name, root: project.root },
+          schema_version: 'ecos.quick_start.run.v1',
+          snapshot: {
+            flow: createdConfig.flow_config,
+            resources: input.resources,
+            workspace: createdConfig,
+          },
+          status: 'workspace_created',
+          workspace: { id: workspaceId, path: workspacePath },
+        })
+        return { id: workspaceId, path: workspacePath, config: createdConfig }
+      },
+      handoff: async (input: { project: any; workspace: any }) => {
+        narrate('Workspace 已创建，正在打开 Workspace 页面。')
+        await router.push({
+          path: '/workspace/home',
+          query: {
+            projectRoot: input.project.root,
+            projectName: input.project.name,
+          },
+        })
+        await nextTick()
+        showStepConfigDialog.value = true
+        const reducedMotion =
+          typeof window !== 'undefined' &&
+          typeof window.matchMedia === 'function' &&
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        await delay(reducedMotion ? 100 : 800, signal)
+        showStepConfigDialog.value = false
+      },
+      startFlow: async (input: { project: any; workspace: any }) => {
+        narrate('现在正在启动完整 RTL 到 GDS 流程。')
+        completedFlow = await runQuickStartFlow({
+          api,
+          workspaceHandle: workspaceSession.value.workspaceId,
+          workspacePath: input.workspace.path,
+          narrate,
+          signal,
+          start: () => runAllFlow({ rerun: false }),
+          onStarted: async (flowResult) => {
+            await writeQuickStartRunRecord(api, input.workspace.path, {
+              flow: {
+                operation_id: flowResult.operationId,
+                plan: (input.workspace as { config?: WorkspaceConfig }).config
+                  ?.flow_config,
+              },
+              started_at: new Date().toISOString(),
+              status: 'flow_running',
+            })
+          },
+        })
+        return completedFlow
+      },
+    }
+    await runQuickStartWorkflow(host, onEvent, signal)
+    if (!completedFlow) throw new Error('Quick Start did not return a flow result.')
+    return completedFlow
+  } finally {
+    quickStartCursor.visible = false
+    if (signal?.aborted) {
+      closeQuickStartProjectDialog()
+      resetWorkspaceWizard()
+    }
+    quickStartRunning = false
+  }
+}
+
+provide(quickStartRunnerKey, runQuickStart)
+
+async function resolveQuickStartResources(
+  api: DesktopApi,
+): Promise<QuickStartResourceSnapshot> {
+  let builtin: QuickStartBuiltinResources | undefined
+  if (api.app.getQuickStartResources) {
+    try {
+      builtin = await api.app.getQuickStartResources()
+    } catch (error) {
+      builtin = {
+        design: null,
+        diagnostics: [
+          `Built-in Quick Start resources are unavailable: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        ],
+        pdk: null,
+      }
+    }
+  }
+  const listed = (await api.resources.list()).resources
+  let pdkCandidate = await api.resources.get('pdk:ics55').catch(() => undefined)
+  const ready = (resource: ResourceInfo | undefined) =>
+    Boolean(
+      resource &&
+      resource.path &&
+      (resource.status === 'installed' || resource.status === 'update_available') &&
+      resource.health.status === 'ok',
+    )
+  const legacyDesign = listed.find((resource) => {
+    const candidate = resource as ResourceInfo & { type?: string; version?: string }
+    return (
+      candidate.id === 'example:gcd' &&
+      (candidate.type as string) === 'design' &&
+      ready(resource)
+    )
+  })
+  const design =
+    builtin?.design ??
+    (legacyDesign
+      ? {
+          id: legacyDesign.id,
+          path: legacyDesign.path!,
+          version:
+            (legacyDesign as ResourceInfo & { version?: string }).version ?? '1.0.0',
+        }
+      : null)
+  let pdk = ready(pdkCandidate) ? pdkCandidate : undefined
+  if (!pdk) {
+    pdkCandidate = listed.find(
+      (resource) =>
+        resource.type === 'pdk' && resource.id.startsWith('pdk:ics55') && ready(resource),
+    )
+    pdk = ready(pdkCandidate) ? pdkCandidate : undefined
+  }
+  let pdkImportError: string | undefined
+  if (!pdk && builtin?.pdk?.path) {
+    try {
+      const imported = await api.resources.importPdkPath({ path: builtin.pdk.path })
+      pdkCandidate = await api.resources.get('pdk:ics55').catch(() => undefined)
+      pdk = ready(pdkCandidate) ? pdkCandidate : ready(imported) ? imported : undefined
+    } catch (error) {
+      pdkImportError = error instanceof Error ? error.message : String(error)
+    }
+  }
+  const mpcCandidates = listed.filter(
+    (resource) =>
+      resource.type === 'mpc' &&
+      resource.id.startsWith('mpc:mpc-frame') &&
+      resource.display_name === 'MPC Frame' &&
+      resource.installed_version === '0.1.0' &&
+      resource.health.managed === true &&
+      ready(resource),
+  )
+  const mpc = mpcCandidates.find((resource) => resource.active) ?? mpcCandidates[0]
+  const diagnostics: string[] = []
+  if (!design) {
+    const candidate = listed.find((resource) => resource.id === 'example:gcd')
+    diagnostics.push(
+      candidate
+        ? `GCD design example:gcd is not Ready (status=${candidate.status}, path=${candidate.path ?? 'none'}, health=${resourceHealth(candidate)}).`
+        : 'GCD built-in example is unavailable.',
+    )
+  }
+  if (!pdk) {
+    const candidate =
+      pdkCandidate ??
+      listed.find(
+        (resource) => resource.type === 'pdk' && resource.id.startsWith('pdk:ics55'),
+      )
+    diagnostics.push(
+      candidate
+        ? `PDK pdk:ics55 is not Ready (status=${candidate.status}, version=${candidate.installed_version ?? 'none'}, path=${candidate.path ?? 'none'}, health=${resourceHealth(candidate)}).`
+        : 'PDK pdk:ics55 is not installed (no matching Resource Management identity).',
+    )
+    if (pdkImportError) {
+      diagnostics.push(`Built-in ICS55 PDK import failed: ${pdkImportError}`)
+    }
+  }
+  if (!mpc) {
+    const candidate = listed.find(
+      (resource) => resource.type === 'mpc' && resource.id.startsWith('mpc:mpc-frame'),
+    )
+    diagnostics.push(
+      candidate
+        ? `MPC mpc:mpc-frame is not Ready at version 0.1.0 (status=${candidate.status}, version=${candidate.installed_version ?? 'none'}, managed=${String(candidate.health.managed ?? false)}, health=${resourceHealth(candidate)}).`
+        : 'MPC mpc:mpc-frame is not installed (no matching Resource Management identity).',
+    )
+  }
+  return {
+    design,
+    diagnostics: [...(builtin?.diagnostics ?? []), ...diagnostics],
+    pdk: pdk
+      ? { id: pdk.id, path: pdk.path!, version: pdk.installed_version ?? '' }
+      : null,
+    mpc: mpc
+      ? {
+          displayName: mpc.display_name,
+          id: mpc.id,
+          path: mpc.path ?? undefined,
+          version: mpc.installed_version!,
+        }
+      : null,
+  }
+}
+
+function resourceHealth(resource: ResourceInfo): string {
+  return String(resource.health.status ?? 'unknown')
+}
+
+async function writeQuickStartRunRecord(
+  api: DesktopApi,
+  projectRoot: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const path = `${normalizeLocalPath(projectRoot)}/quick_start_run.json`
+  let current: Record<string, unknown> = {}
+  try {
+    const existing = await api.workspace.readOptionalProjectTextFile(path)
+    if (existing) current = JSON.parse(existing) as Record<string, unknown>
+  } catch {
+    // A missing record is expected on the first capability.
+  }
+  const snapshot =
+    patch.snapshot && typeof patch.snapshot === 'object'
+      ? {
+          ...(typeof current.snapshot === 'object' && current.snapshot
+            ? current.snapshot
+            : {}),
+          ...patch.snapshot,
+        }
+      : current.snapshot
+  await api.workspace.writeProjectTextFile(
+    path,
+    `${JSON.stringify(
+      {
+        ...current,
+        ...patch,
+        ...(snapshot ? { snapshot } : {}),
+        updated_at: new Date().toISOString(),
+      },
+      null,
+      2,
+    )}\n`,
+  )
+}
+
+async function quickStartMpcSnapshot(
+  api: DesktopApi,
+  resource: NonNullable<QuickStartResourceSnapshot['mpc']>,
+) {
+  if (!resource.path) throw new Error('Managed MPC path is unavailable.')
+  const candidate = {
+    resource_id: resource.id,
+    display_name: resource.displayName ?? 'MPC Frame',
+    installed_version: resource.version,
+    path: resource.path,
+    spec_path: joinLocalPath(resource.path, 'spec/spec.json.in'),
+  }
+  const spec = await api.resources.readMpcSpec(resource.id)
+  const design = parseMpcSpecDesigns(spec.spec)[0]
+  if (!design) throw new Error('MPC Frame has no usable design specification.')
+  return createProjectManifestMpcSnapshot(candidate, design)
+}
+
+async function nextQuickStartProjectName(api: DesktopApi, root: string): Promise<string> {
+  for (let index = 0; index < 1000; index += 1) {
+    const suffix = index === 0 ? '' : `_${index + 1}`
+    const name = `gcd${suffix}`
+    if (!(await api.workspace.pathExists(joinLocalPath(root, name)))) return name
+  }
+  throw new Error('Unable to allocate a Quick Start Project name.')
+}
+
+async function nextQuickStartWorkspaceId(
+  api: DesktopApi,
+  projectRoot: string,
+): Promise<string> {
+  for (let index = 1; index < 1000; index += 1) {
+    const id = `ws_${String(index).padStart(4, '0')}`
+    if (!(await api.workspace.pathExists(joinLocalPath(projectRoot, id)))) return id
+  }
+  throw new Error('Unable to allocate a Quick Start Workspace ID.')
+}
+
+async function driveQuickStartWorkspaceWizard(
+  config: WorkspaceConfig,
+  signal?: AbortSignal,
+  narrate?: (message: string) => void,
+): Promise<WorkspaceConfig> {
+  const created = new Promise<WorkspaceConfig>((resolve, reject) => {
+    quickStartWizardResolve = resolve
+    quickStartWizardReject = reject
+  })
+  showNewProjectWizard.value = false
+  await nextTick()
+  workspaceWizardInitialConfig.value = { ...config }
+  showNewProjectWizard.value = true
+  try {
+    for (let step = 1; step < 6; step += 1) {
+      await clickQuickStartWizardButton('Continue', step, signal)
+      if (step === 1) {
+        narrate?.('正在填写布局密度和 Workspace 目录。')
+        await showQuickStartInput(
+          'density_065_from_floorplan',
+          getPathLeafName(config.directory),
+          signal,
+        )
+      }
+    }
+    narrate?.('正在填写顶层模块 gcd 和时钟 clk。')
+    await showQuickStartInput('top', 'gcd', signal)
+    await showQuickStartInput('clk', 'clk', signal)
+    await clickQuickStartWizardButton('Create Workspace', 6, signal)
+    return await created
+  } finally {
+    quickStartWizardResolve = null
+    quickStartWizardReject = null
+  }
+}
+
+async function clickQuickStartWizardButton(
+  label: string,
+  expectedStep: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  let button: HTMLButtonElement | undefined
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    signal?.throwIfAborted()
+    await nextTick()
+    const wizard = document.querySelector<HTMLElement>('.new-workspace-wizard-panel')
+    if (wizard?.dataset.currentStep !== String(expectedStep)) {
+      await delay(100, signal)
+      continue
+    }
+    button = [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        '.new-workspace-wizard-panel button',
+      ),
+    ].find(
+      (candidate) =>
+        candidate.textContent?.replace(/\s+/g, ' ').trim() === label &&
+        !candidate.disabled,
+    )
+    if (button) break
+    await delay(100, signal)
+  }
+  if (!button)
+    throw new Error(
+      `Quick Start could not find an enabled ${label} button on wizard step ${expectedStep}.`,
+    )
+  await clickQuickStartTarget(button, signal)
+}
+
+async function showQuickStartInput(
+  placeholder: string,
+  value?: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted()
+  await nextTick()
+  const input = document.querySelector<HTMLInputElement>(
+    `.new-workspace-wizard-panel input[placeholder="${placeholder}"]`,
+  )
+  if (!input) return
+  await moveQuickStartCursor(input, signal)
+  if (value !== undefined) await typeQuickStartInput(input, value, signal)
+}
+
+async function typeQuickStartInput(
+  input: HTMLInputElement,
+  value: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  input.value = ''
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  for (const character of value) {
+    signal?.throwIfAborted()
+    input.value += character
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await delay(35, signal)
+  }
+}
+
+async function showQuickStartProjectDialog(
+  input: {
+    projectName: string
+    designName: string
+    projectRoot: string
+    mpcId: string
+  },
+  signal?: AbortSignal,
+  narrate?: (message: string) => void,
+): Promise<void> {
+  narrate?.('正在填写 Project 名称、设计名称和存储位置。')
+  for (const [name, value] of [
+    ['project-name', input.projectName],
+    ['design-name', input.designName],
+    ['project-storage-location', input.projectRoot],
+  ]) {
+    signal?.throwIfAborted()
+    const field = document.querySelector<HTMLInputElement>(
+      `.new-project-dialog input[name="${name}"]`,
+    )
+    if (!field) throw new Error(`Quick Start could not find the ${name} field.`)
+    await moveQuickStartCursor(field, signal)
+    await typeQuickStartInput(field, value, signal)
+  }
+
+  let select: HTMLSelectElement | null = null
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    signal?.throwIfAborted()
+    select = document.querySelector<HTMLSelectElement>(
+      '.new-project-dialog select[name="managed-mpc"]',
+    )
+    if (
+      select &&
+      !select.disabled &&
+      [...select.options].some((option) => option.value === input.mpcId)
+    ) {
+      break
+    }
+    await delay(100, signal)
+  }
+  if (!select || select.disabled) {
+    throw new Error('Quick Start could not select the managed MPC.')
+  }
+  await moveQuickStartCursor(select, signal)
+  signal?.throwIfAborted()
+  select.value = input.mpcId
+  select.dispatchEvent(new Event('change', { bubbles: true }))
+  await delay(450, signal)
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    signal?.throwIfAborted()
+    const loadingMpcSpec = [
+      ...document.querySelectorAll('.new-project-dialog .modal-help'),
+    ].some((message) => message.textContent?.includes('Loading MPC design specification'))
+    if (!loadingMpcSpec) break
+    await delay(100, signal)
+  }
+
+  const createButton = document.querySelector<HTMLButtonElement>(
+    '.new-project-dialog .primary-button',
+  )
+  if (!createButton || createButton.disabled) {
+    throw new Error('Quick Start could not find an enabled Create button.')
+  }
+  createButton.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  await delay(350, signal)
+  narrate?.('Project 信息已填写，正在提交创建。')
+  await clickQuickStartTarget(createButton, signal)
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    signal?.throwIfAborted()
+    if (!document.querySelector('.new-project-dialog')) {
+      await clickQuickStartProjectWorkspaceButton(input.projectName, signal)
+      return
+    }
+    await delay(100, signal)
+  }
+  throw new Error('Quick Start project dialog did not close after creation.')
+}
+
+async function clickQuickStartProjectWorkspaceButton(
+  projectName: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    signal?.throwIfAborted()
+    const projectRow = [
+      ...document.querySelectorAll<HTMLElement>('article.project-workspace-tree'),
+    ].find(
+      (candidate) =>
+        candidate.querySelector('.project-tree-row strong')?.textContent?.trim() ===
+        projectName,
+    )
+    const newButton = projectRow?.querySelector<HTMLButtonElement>(
+      '.project-tree-actions .row-primary-action',
+    )
+    if (newButton && !newButton.disabled) {
+      await clickQuickStartTarget(newButton, signal)
+      return
+    }
+    await delay(100, signal)
+  }
+  throw new Error(
+    `Quick Start could not find the new workspace button for ${projectName}.`,
+  )
+}
+
+function closeQuickStartProjectDialog(): void {
+  document.querySelector<HTMLButtonElement>('.new-project-dialog .modal-close')?.click()
+}
+
+async function clickQuickStartTarget(
+  target: HTMLElement,
+  signal?: AbortSignal,
+  offset: { offsetX: number; offsetY: number } = { offsetX: -96, offsetY: -96 },
+): Promise<void> {
+  await moveQuickStartCursor(target, signal, offset)
+  signal?.throwIfAborted()
+  target.classList.add('quick-start-target-highlight')
+  quickStartCursor.clicking = true
+  try {
+    await delay(400, signal)
+    target.click()
+    await delay(900, signal)
+  } finally {
+    target.classList.remove('quick-start-target-highlight')
+    quickStartCursor.clicking = false
+  }
+}
+
+async function moveQuickStartCursor(
+  target: HTMLElement,
+  signal?: AbortSignal,
+  offset: { offsetX: number; offsetY: number } = { offsetX: -96, offsetY: -96 },
+): Promise<void> {
+  const rect = target.getBoundingClientRect()
+  const left = rect.left + Math.min(rect.width - 10, rect.width * 0.72)
+  const top = rect.top + Math.min(rect.height - 8, rect.height * 0.72)
+  if (!quickStartCursor.visible) {
+    quickStartCursor.left = left + offset.offsetX
+    quickStartCursor.top = top + offset.offsetY
+    quickStartCursor.visible = true
+    await nextTick()
+    await delay(120, signal)
+  }
+  quickStartCursor.left = left
+  quickStartCursor.top = top
+  await nextTick()
+  await delay(2000, signal)
+}
+
+function joinLocalPath(root: string, child: string): string {
+  return `${normalizeLocalPath(root).replace(/\/$/, '')}/${child.replace(/^\/+/, '')}`
+}
+
+function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted()
+  if (!signal) return new Promise((resolve) => setTimeout(resolve, milliseconds))
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timeout)
+      reject(signal.reason)
+    }
+    const timeout = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, milliseconds)
+    signal.addEventListener('abort', onAbort, { once: true })
+    if (signal.aborted) onAbort()
+  })
+}
 const showAboutDialog = ref(false)
 const terminalExpanded = ref(false)
 const terminalPanelHeight = ref('min(300px, 42vh)')
@@ -526,6 +1314,9 @@ function resetWorkspaceWizard() {
 }
 
 function handleWizardClose() {
+  quickStartWizardReject?.(new Error('Quick Start workspace setup was cancelled.'))
+  quickStartWizardResolve = null
+  quickStartWizardReject = null
   resetWorkspaceWizard()
 }
 
@@ -536,6 +1327,23 @@ function showCreateWorkspaceWizard() {
 }
 
 const handleWizardCreate = async (config: WorkspaceConfig) => {
+  if (quickStartWizardResolve) {
+    const resolve = quickStartWizardResolve
+    const reject = quickStartWizardReject
+    quickStartWizardResolve = null
+    quickStartWizardReject = null
+    resetWorkspaceWizard()
+    const success = await newProject(config)
+    if (!success) {
+      reject?.(
+        new Error(lastWorkspaceCreationError.value || 'Workspace creation failed.'),
+      )
+      return
+    }
+    await syncProjectManagedWorkspace(config, config.directory)
+    resolve(config)
+    return
+  }
   const targetReconfigurePath = reconfigureWorkspacePath.value
 
   if (targetReconfigurePath) {
@@ -545,54 +1353,13 @@ const handleWizardCreate = async (config: WorkspaceConfig) => {
     return
   }
 
-  const creationToken = beginWorkspaceCreation(config.directory)
-  if (creationToken === null) {
-    showToast({
-      severity: 'info',
-      summary: 'Workspace creation already in progress',
-      detail:
-        'Wait for the current Workspace creation to finish before submitting again.',
-      life: 4000,
-    })
-    return
-  }
-
-  const creationOriginPath = route.path
-  const creationOriginFullPath = route.fullPath
-  const creationOriginWorkspacePath = currentProject.value?.path
-  const managementRoute =
-    creationOriginPath === '/projects' || creationOriginPath === '/workspace/projects'
   resetWorkspaceWizard()
-  try {
-    const success = await newProject(config, {
-      shouldActivate: () =>
-        route.fullPath === creationOriginFullPath &&
-        normalizeLocalPath(currentProject.value?.path ?? '') ===
-          normalizeLocalPath(creationOriginWorkspacePath ?? ''),
-    })
-    if (!success) {
-      if (managementRoute && route.fullPath === creationOriginFullPath) {
-        const returnRoute = consumeWorkspaceManagementReturnRoute()
-        await router.replace(returnRoute ?? '/workspace/home')
-      }
-      return
-    }
+  const success = await newProject(config)
+  if (!success) return
 
-    const projectContext = projectContextFromWorkspaceConfig(config)
-    await syncProjectManagedWorkspace(config, config.directory)
-    if (route.fullPath === creationOriginFullPath) {
-      requestOpenStepConfigAfterCreate()
-      await router.push({
-        path: '/workspace/home',
-        query: workspaceRouteQueryFromProjectContext(
-          currentProject.value?.path ?? config.directory,
-          projectContext,
-        ),
-      })
-    }
-  } finally {
-    finishWorkspaceCreation(creationToken)
-  }
+  await syncProjectManagedWorkspace(config)
+  requestOpenStepConfigAfterCreate()
+  router.push('/workspace')
 }
 
 function cancelWorkspaceUpdateBackup() {
@@ -659,19 +1426,21 @@ async function openWorkspaceReconfigureWizard() {
       severity: 'warn',
       summary: 'Workspace Required',
       detail: 'Open a workspace before updating it.',
-      life: 3000,
+      life: 15000,
     })
     return
   }
 
   try {
     const normalizedWorkspacePath = normalizeLocalPath(workspacePath)
-    await desktopApi.workspace.registerProjectRoot(normalizedWorkspacePath)
+    const api = desktopApi.value ?? (await waitForDesktopApi())
+    desktopApi.value = api
+    await api.workspace.registerProjectRoot(normalizedWorkspacePath)
     const projectContext = await resolveProjectRouteContextForWorkspace(
       normalizedWorkspacePath,
     )
     if (projectContext) {
-      await desktopApi.workspace.registerProjectReadRoot(projectContext.projectRoot)
+      await api.workspace.registerProjectReadRoot(projectContext.projectRoot)
     }
 
     workspaceWizardInitialConfig.value = await buildReconfigureWizardInitialConfig(
@@ -686,7 +1455,7 @@ async function openWorkspaceReconfigureWizard() {
       severity: 'error',
       summary: 'Failed to Update Workspace',
       detail: error instanceof Error ? error.message : String(error),
-      life: 5000,
+      life: 15000,
     })
   }
 }
@@ -699,14 +1468,393 @@ async function buildReconfigureWizardInitialConfig(
     projectContext === undefined
       ? await resolveProjectRouteContextForWorkspace(workspacePath)
       : projectContext
-  const workspaceHandle = workspaceSession.value.workspaceId
-  if (!workspaceHandle) throw new Error('ECC Workspace session is unavailable.')
-  const snapshot = await getWorkspaceRuntimeSnapshotApi(workspaceHandle)
-  return workspaceReconfigureInitialConfig(
-    snapshot,
-    workspacePath,
-    resolvedProjectContext,
+  const [parametersJson, pdkText, dbConfigText, flowText] = await Promise.all([
+    readWorkspaceParametersFile(workspacePath),
+    readOptionalProjectTextFile('home/pdk.json', { projectPath: workspacePath }),
+    readOptionalProjectTextFile('config/db_ecc.json', {
+      projectPath: workspacePath,
+    }),
+    readOptionalProjectTextFile('home/flow.json', { projectPath: workspacePath }),
+  ])
+
+  const pdkJson = parseOptionalJson(pdkText)
+  const dbConfigJson = parseOptionalJson(dbConfigText)
+  const flowConfig = normalizeWorkspaceFlowConfig(flowText)
+  const normalizedParameters = normalizeWorkspaceParameters(parametersJson, workspacePath)
+  const dbInput = optionalRecord(dbConfigJson?.INPUT)
+  const pdkConfig = normalizePdkConfig(pdkJson, dbConfigJson)
+  const designName =
+    optionalString(parametersJson?.Design) ||
+    optionalString(parametersJson?.design) ||
+    getPathLeafName(workspacePath)
+  const originInputs = await scanWorkspaceOriginDesignInputs(workspacePath)
+  const rtlList =
+    flowConfig.start_step === 'Synthesis'
+      ? await existingWorkspaceFiles(workspacePath, [
+          ...originInputs.rtlFiles,
+          `origin/${designName}.v`,
+          `origin/${designName}.v.gz`,
+          `origin/${designName}.sv`,
+          `origin/${designName}.sv.gz`,
+          `origin/${designName}.vhd`,
+          `origin/${designName}.vhdl`,
+          ...stringList(dbInput?.rtl_paths),
+          ...stringList(dbInput?.rtl_list),
+        ])
+      : []
+  const filelist =
+    flowConfig.start_step === 'Synthesis'
+      ? await firstExistingWorkspaceFile(workspacePath, [
+          ...originInputs.filelists,
+          'origin/filelist',
+          optionalString(dbInput?.filelist),
+          optionalString(dbInput?.filelist_path),
+        ])
+      : ''
+  const originDef =
+    flowConfig.start_step === 'Synthesis'
+      ? ''
+      : await firstExistingWorkspaceFile(workspacePath, [
+          ...originInputs.defFiles,
+          `origin/${designName}.def`,
+          `origin/${designName}.def.gz`,
+          optionalString(dbInput?.origin_def),
+          optionalString(dbInput?.def_path),
+        ])
+  const originVerilog =
+    flowConfig.start_step === 'Synthesis'
+      ? ''
+      : await firstExistingWorkspaceFile(workspacePath, [
+          ...originInputs.verilogFiles,
+          `origin/${designName}.v`,
+          `origin/${designName}.v.gz`,
+          `origin/${designName}.sv`,
+          `origin/${designName}.sv.gz`,
+          `origin/${designName}.vg`,
+          `origin/${designName}.vg.gz`,
+          optionalString(dbInput?.origin_verilog),
+          optionalString(dbInput?.verilog_path),
+        ])
+  const sdc =
+    (await firstExistingWorkspaceFile(workspacePath, [
+      ...originInputs.sdcFiles,
+      `origin/${designName}.sdc`,
+      `origin/${designName}.sdc.gz`,
+      optionalString(dbInput?.sdc_path),
+      optionalString(pdkJson?.sdc),
+    ])) || ''
+
+  return {
+    directory: workspacePath,
+    lockWorkspaceDirectory: true,
+    standaloneWorkspace: !resolvedProjectContext,
+    pdk:
+      optionalString(parametersJson?.PDK) ||
+      optionalString(parametersJson?.pdk) ||
+      'ics55',
+    pdk_root:
+      optionalString(parametersJson?.['PDK Root']) ||
+      optionalString(parametersJson?.pdk_root),
+    parameters: normalizedParameters,
+    origin_def: originDef,
+    origin_verilog: originVerilog,
+    rtl_list: rtlList,
+    filelist,
+    design_input_mode: flowConfig.start_step === 'Synthesis' ? 'rtl' : 'post_synthesis',
+    sdc,
+    pdk_config_mode: pdkConfig.mode,
+    pdk_config: pdkConfig,
+    pdk_json: pdkText ? `${workspacePath}/home/pdk.json` : '',
+    flow_config: flowConfig,
+    project_context: resolvedProjectContext
+      ? {
+          mode: 'select',
+          project_name:
+            resolvedProjectContext.projectName ||
+            getPathLeafName(resolvedProjectContext.projectRoot),
+          project_root: resolvedProjectContext.projectRoot,
+          project_json_path: `${resolvedProjectContext.projectRoot}/project.json`,
+        }
+      : undefined,
+  }
+}
+
+function parseOptionalJson(content: string | null): Record<string, unknown> | null {
+  if (!content) return null
+  try {
+    return JSON.parse(content) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+function normalizeWorkspaceParameters(
+  parametersJson: Record<string, unknown> | null,
+  workspacePath: string,
+): WorkspaceConfig['parameters'] {
+  const dieArea =
+    optionalRecord(parametersJson?.['Die Area']) ??
+    optionalRecord(parametersJson?.die_area) ??
+    {}
+  const die =
+    optionalRecord(parametersJson?.Die) ?? optionalRecord(parametersJson?.die) ?? {}
+  const core =
+    optionalRecord(parametersJson?.Core) ?? optionalRecord(parametersJson?.core) ?? {}
+  const dieSize = numberList(die.Size ?? die.size)
+  const coreMargin = numberList(core.Margin ?? core.margin)
+  const hasDieSize = dieSize.length >= 2
+  const hasCanonicalDieSize = hasCanonicalDieDimensions(dieArea)
+  const inferredDieAreaMode: NonNullable<WorkspaceConfig['parameters']['die_area_mode']> =
+    hasCanonicalDieSize || hasDieSize ? 'width_height' : 'utilitization_margin'
+
+  return {
+    design:
+      optionalString(parametersJson?.Design) ||
+      optionalString(parametersJson?.design) ||
+      getPathLeafName(workspacePath),
+    description: optionalString(parametersJson?.description),
+    top_module:
+      optionalString(parametersJson?.['Top module']) ||
+      optionalString(parametersJson?.top_module),
+    clock: optionalString(parametersJson?.Clock) || optionalString(parametersJson?.clock),
+    frequency_max: optionalNumber(
+      parametersJson?.['Frequency max [MHz]'] ?? parametersJson?.frequency_max,
+      50,
+    ),
+    max_fanout: optionalNumber(
+      parametersJson?.['Max fanout'] ?? parametersJson?.max_fanout,
+      32,
+    ),
+    die_area_mode: normalizeDieAreaMode(
+      dieArea.mode ?? parametersJson?.die_area_mode,
+      inferredDieAreaMode,
+    ),
+    die_width: optionalNumber(
+      dieArea.width ?? dieSize[0] ?? parametersJson?.die_width,
+      100,
+    ),
+    die_height: optionalNumber(
+      dieArea.height ?? dieSize[1] ?? parametersJson?.die_height,
+      100,
+    ),
+    utilitization: optionalNumber(
+      dieArea.utilitization ??
+        core.Utilitization ??
+        core.utilitization ??
+        parametersJson?.utilitization,
+      0.6,
+    ),
+    margin: optionalNumber(
+      scalarMarginFromCore(coreMargin, 'workspace parameter') ??
+        dieArea.margin ??
+        parametersJson?.margin,
+      0,
+    ),
+  }
+}
+
+function normalizeWorkspaceFlowConfig(
+  flowText: string | null,
+): NonNullable<WorkspaceConfig['flow_config']> {
+  const flowJson = parseOptionalJson(flowText)
+  const steps = Array.isArray(flowJson?.steps)
+    ? flowJson.steps
+        .map((step) => {
+          if (typeof step === 'string') return step
+          if (optionalRecord(step)) return optionalString(optionalRecord(step)?.name)
+          return ''
+        })
+        .filter((step): step is string => step.trim() !== '')
+    : []
+  const normalizedSteps = steps.length > 0 ? steps : ['Synthesis', 'Harden']
+
+  return {
+    start_step: normalizedSteps[0],
+    end_step: normalizedSteps[normalizedSteps.length - 1],
+    steps: normalizedSteps,
+  }
+}
+
+function normalizePdkConfig(
+  pdkJson: Record<string, unknown> | null,
+  dbConfigJson: Record<string, unknown> | null,
+): NonNullable<WorkspaceConfig['pdk_config']> & { mode: 'default' | 'manual' } {
+  const dbInput = optionalRecord(dbConfigJson?.INPUT)
+  const techLef = stringList(
+    pdkJson?.tech_lef ??
+      pdkJson?.tech ??
+      pdkJson?.selected_tech_lef ??
+      dbInput?.tech_lef_path,
   )
+  const cellLef = stringList(
+    pdkJson?.cell_lef ?? pdkJson?.lefs ?? pdkJson?.cell_lef_list ?? dbInput?.lef_paths,
+  )
+  const liberty = stringList(
+    pdkJson?.liberty ?? pdkJson?.libs ?? pdkJson?.liberty_list ?? dbInput?.lib_path,
+  )
+  const hasManualResources =
+    techLef.length > 0 || cellLef.length > 0 || liberty.length > 0
+
+  return {
+    mode: hasManualResources ? 'manual' : 'default',
+    tech_lef: techLef,
+    cell_lef: cellLef,
+    liberty,
+  }
+}
+
+async function firstExistingWorkspaceFile(
+  workspacePath: string,
+  candidates: string[],
+): Promise<string> {
+  const files = await existingWorkspaceFiles(workspacePath, candidates)
+  return files[0] ?? ''
+}
+
+interface WorkspaceOriginDesignInputs {
+  rtlFiles: string[]
+  filelists: string[]
+  defFiles: string[]
+  verilogFiles: string[]
+  sdcFiles: string[]
+}
+
+function emptyWorkspaceOriginDesignInputs(): WorkspaceOriginDesignInputs {
+  return {
+    rtlFiles: [],
+    filelists: [],
+    defFiles: [],
+    verilogFiles: [],
+    sdcFiles: [],
+  }
+}
+
+async function scanWorkspaceOriginDesignInputs(
+  workspacePath: string,
+): Promise<WorkspaceOriginDesignInputs> {
+  const inputs = emptyWorkspaceOriginDesignInputs()
+  try {
+    const api = desktopApi.value ?? (await waitForDesktopApi())
+    desktopApi.value = api
+    const entries = await api.workspace.listProjectDirectory(`${workspacePath}/origin`)
+    for (const entry of entries) {
+      if (entry.type !== 'file') continue
+      const filePath = normalizeLocalPath(entry.path)
+      if (hasAnySuffix(filePath, ['.def', '.def.gz'])) {
+        inputs.defFiles.push(filePath)
+      }
+      if (hasAnySuffix(filePath, ['.v', '.v.gz', '.sv', '.sv.gz', '.vg', '.vg.gz'])) {
+        inputs.rtlFiles.push(filePath)
+        inputs.verilogFiles.push(filePath)
+      }
+      if (hasAnySuffix(filePath, ['.vhd', '.vhd.gz', '.vhdl', '.vhdl.gz'])) {
+        inputs.rtlFiles.push(filePath)
+      }
+      if (hasAnySuffix(filePath, ['.sdc', '.sdc.gz'])) {
+        inputs.sdcFiles.push(filePath)
+      }
+      const fileName = getPathLeafName(filePath).toLowerCase()
+      if (
+        fileName === 'filelist' ||
+        hasAnySuffix(filePath, [
+          '.f',
+          '.f.gz',
+          '.fl',
+          '.fl.gz',
+          '.flist',
+          '.flist.gz',
+          '.filelist',
+          '.filelist.gz',
+          '.lst',
+          '.lst.gz',
+          '.txt',
+          '.txt.gz',
+        ])
+      ) {
+        inputs.filelists.push(filePath)
+      }
+    }
+    return {
+      rtlFiles: uniquePathList(inputs.rtlFiles),
+      filelists: uniquePathList(inputs.filelists),
+      defFiles: uniquePathList(inputs.defFiles),
+      verilogFiles: uniquePathList(inputs.verilogFiles),
+      sdcFiles: uniquePathList(inputs.sdcFiles),
+    }
+  } catch {
+    return inputs
+  }
+}
+
+function hasAnySuffix(filePath: string, suffixes: string[]): boolean {
+  const lowerPath = filePath.toLowerCase()
+  return suffixes.some((suffix) => lowerPath.endsWith(suffix))
+}
+
+function uniquePathList(paths: string[]): string[] {
+  return [...new Set(paths)]
+}
+
+async function existingWorkspaceFiles(
+  workspacePath: string,
+  candidates: string[],
+): Promise<string[]> {
+  const existing: string[] = []
+  const seen = new Set<string>()
+  for (const candidate of candidates) {
+    const relativeOrAbsolute = candidate.trim()
+    if (!relativeOrAbsolute) continue
+    const path = isAbsoluteLocalPath(relativeOrAbsolute)
+      ? normalizeLocalPath(relativeOrAbsolute)
+      : `${workspacePath}/${relativeOrAbsolute.replace(/^\/+/, '')}`
+    if (seen.has(path)) continue
+    seen.add(path)
+    if (await workspaceTextFileExists(path)) {
+      existing.push(path)
+    }
+  }
+  return existing
+}
+
+async function workspaceTextFileExists(path: string): Promise<boolean> {
+  try {
+    return (await readOptionalProjectTextFile(path)) !== null
+  } catch {
+    return false
+  }
+}
+
+function optionalRecord(value: unknown): Record<string, unknown> | null {
+  return losslessOptionalRecord(value, 'workspace parameter')
+}
+
+function optionalString(value: unknown): string {
+  return losslessOptionalString(value, 'workspace parameter')
+}
+
+function optionalNumber(value: unknown, fallback: number): number {
+  return losslessOptionalNumber(value, fallback, 'workspace parameter')
+}
+
+function normalizeDieAreaMode(
+  value: unknown,
+  fallback: NonNullable<WorkspaceConfig['parameters']['die_area_mode']>,
+): NonNullable<WorkspaceConfig['parameters']['die_area_mode']> {
+  return value === 'width_height' || value === 'utilitization_margin' ? value : fallback
+}
+
+function stringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter(
+      (item): item is string => typeof item === 'string' && item.trim() !== '',
+    )
+  }
+  if (typeof value === 'string' && value.trim()) return [value.trim()]
+  return []
+}
+
+function numberList(value: unknown): number[] {
+  return losslessNumberList(value, 'workspace parameter')
 }
 
 function normalizeLocalPath(path: string): string {
@@ -714,16 +1862,30 @@ function normalizeLocalPath(path: string): string {
   return normalized.length > 1 ? normalized.replace(/\/+$/g, '') : normalized
 }
 
+function getPathLeafName(path: string): string {
+  return normalizeLocalPath(path).split('/').filter(Boolean).pop() || path
+}
+
+function isAbsoluteLocalPath(path: string): boolean {
+  return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)
+}
+
 const openDocumentation = async () => {
   try {
-    await desktopApi.system.openExternal(documentationUrl)
+    if (desktopApi.value ?? hasDesktopApi()) {
+      const api = desktopApi.value ?? (await waitForDesktopApi())
+      desktopApi.value = api
+      await api.system.openExternal(documentationUrl)
+    } else {
+      window.open(documentationUrl, '_blank', 'noopener,noreferrer')
+    }
   } catch (error) {
     console.error('Failed to open documentation:', error)
     showToast({
       severity: 'error',
       summary: 'Error',
       detail: `Failed to open documentation because of ${error instanceof Error ? error.message : String(error)}`,
-      life: 3000,
+      life: 15000,
     })
   }
 }
@@ -732,10 +1894,12 @@ async function setZoomFactor(nextFactor: number): Promise<void> {
   const factor = zoomFactors.includes(nextFactor as (typeof zoomFactors)[number])
     ? (nextFactor as (typeof zoomFactors)[number])
     : 1
-  await desktopApi.window.setZoomFactor(factor)
+  const api = desktopApi.value ?? (await waitForDesktopApi())
+  desktopApi.value = api
+  await api.window.setZoomFactor(factor)
   zoomFactor.value = factor
   try {
-    await desktopApi.settings.set(zoomSettingKey, factor)
+    await api.settings.set(zoomSettingKey, factor)
   } catch (error) {
     console.warn('[App] Failed to persist UI zoom setting:', error)
   }
@@ -755,7 +1919,8 @@ async function adjustZoom(action: AppMenuAction): Promise<void> {
 
 const { handleMenuAction } = useAppMenuActions({
   createWindow: async () => {
-    await desktopApi.window.create({ initialRoute: '/' })
+    const api = await waitForDesktopApi()
+    await api.window.create({ initialRoute: '/' })
   },
   navigateToWorkspace: () => {
     router.push('/workspace')
@@ -768,18 +1933,7 @@ const { handleMenuAction } = useAppMenuActions({
   showNewProjectWizard: showCreateWorkspaceWizard,
   reconfigureWorkspace: openWorkspaceReconfigureWizard,
   exportSignoffPackage: () => {
-    if (!isWorkspaceRoute.value) return
-    if (currentWorkspaceFlowActive.value) {
-      showToast({
-        severity: 'warn',
-        summary: 'Signoff Export Unavailable',
-        detail:
-          'Wait for the current flow to finish before exporting the signoff package.',
-        life: 5000,
-      })
-      return
-    }
-    return exportSignoffPackage()
+    if (isWorkspaceRoute.value) return exportSignoffPackage()
   },
   exportDesignSummary: () => {
     if (isWorkspaceRoute.value) openDesignReportExport()
@@ -859,11 +2013,15 @@ const markResizing = () => {
  * 见 styles/index.css 与本文件 scoped 样式中的 `.window-maximized` 规则。
  */
 async function syncMaximizedClass() {
+  if (!desktopApi.value) {
+    return
+  }
+
   try {
-    const maxed = await desktopApi.window.isMaximized()
+    const maxed = await desktopApi.value.window.isMaximized()
     document.body.classList.toggle('window-maximized', maxed)
   } catch {
-    /* ignore window state query failures */
+    /* ignore: window API unavailable (e.g. SSR / test) */
   }
 }
 
@@ -876,17 +2034,27 @@ const handleSelectStart = (e: Event) => {
 }
 
 onMounted(async () => {
-  void backgroundOperations.start()
-  try {
-    const savedZoom = await desktopApi.settings.get<number>(zoomSettingKey)
-    if (
-      typeof savedZoom === 'number' &&
-      zoomFactors.includes(savedZoom as (typeof zoomFactors)[number])
-    ) {
-      await setZoomFactor(savedZoom)
+  if (!desktopApi.value) {
+    try {
+      desktopApi.value = await waitForDesktopApi({ timeoutMs: 5000 })
+    } catch (error) {
+      console.warn('[App] Desktop bridge not available on initial mount:', error)
     }
-  } catch (error) {
-    console.warn('[App] Failed to restore UI zoom setting:', error)
+  }
+  console.info('[App] Desktop bridge available:', Boolean(desktopApi.value))
+
+  if (desktopApi.value) {
+    try {
+      const savedZoom = await desktopApi.value.settings.get<number>(zoomSettingKey)
+      if (
+        typeof savedZoom === 'number' &&
+        zoomFactors.includes(savedZoom as (typeof zoomFactors)[number])
+      ) {
+        await setZoomFactor(savedZoom)
+      }
+    } catch (error) {
+      console.warn('[App] Failed to restore UI zoom setting:', error)
+    }
   }
 
   themeStore.initTheme()
@@ -911,17 +2079,22 @@ onMounted(async () => {
   // 启动时先同步一次最大化状态（从持久化会话恢复的场景）
   void syncMaximizedClass()
 
+  if (!desktopApi.value) {
+    return
+  }
+
   // 由桌面桥接的 resize 事件统一驱动降级状态，覆盖所有缩放来源。
-  unlistenWindowResized = desktopApi.window.onResized(() => {
+  unlistenWindowResized = desktopApi.value.window.onResized(() => {
     markResizing()
   })
-  unlistenWindowMaximizedChanged = desktopApi.window.onMaximizedChanged((isMaximized) => {
-    document.body.classList.toggle('window-maximized', isMaximized)
-  })
+  unlistenWindowMaximizedChanged = desktopApi.value.window.onMaximizedChanged(
+    (isMaximized) => {
+      document.body.classList.toggle('window-maximized', isMaximized)
+    },
+  )
 })
 
 onUnmounted(() => {
-  backgroundOperations.dispose()
   document.removeEventListener('selectstart', handleSelectStart)
   if (resizeIdleTimer) {
     clearTimeout(resizeIdleTimer)
@@ -1105,6 +2278,87 @@ onUnmounted(() => {
   height: 100%;
   min-height: 0;
   position: relative;
+}
+
+.quick-start-cursor {
+  position: fixed;
+  z-index: 10001;
+  pointer-events: none;
+  color: var(--text-primary);
+  font-size: 1.85rem;
+  filter: drop-shadow(0 1px 1px rgb(255 255 255 / 88%))
+    drop-shadow(0 3px 5px rgb(0 0 0 / 42%));
+  transform: translate(-50%, -50%);
+  transition:
+    left 1s cubic-bezier(0.22, 1, 0.36, 1),
+    top 1s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.quick-start-cursor::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2.4rem;
+  height: 2.4rem;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(0.35);
+}
+
+.quick-start-cursor i {
+  display: inline-block;
+}
+
+.quick-start-cursor.is-clicking i {
+  animation: quick-start-cursor-press 300ms ease-out;
+}
+
+.quick-start-cursor.is-clicking::after {
+  animation: quick-start-cursor-ripple 850ms ease-out;
+}
+
+:global(.quick-start-target-highlight) {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-color) 24%, transparent);
+  transition:
+    outline-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+@keyframes quick-start-cursor-press {
+  50% {
+    transform: scale(0.78);
+  }
+}
+
+@keyframes quick-start-cursor-ripple {
+  0% {
+    opacity: 0.78;
+    transform: translate(-50%, -50%) scale(0.35);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.25);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quick-start-cursor {
+    transition-duration: 100ms;
+  }
+
+  .quick-start-cursor.is-clicking i,
+  .quick-start-cursor.is-clicking::after {
+    animation: none;
+  }
+
+  :global(.quick-start-target-highlight) {
+    transition: none;
+  }
 }
 
 .app-container {

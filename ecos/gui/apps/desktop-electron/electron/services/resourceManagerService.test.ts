@@ -2165,7 +2165,7 @@ describe('ResourceManagerService', () => {
     expect(env.PATH?.split(':')).toEqual([slangRoot, '/usr/bin'])
   })
 
-  it('returns a copied base env when no Resource Manager manifest exists', async () => {
+  it('preserves pre-resolved ECC runtime env when no Resource Manager manifest exists', async () => {
     const root = await createTempDir('ecos-resources-')
     const service = new ResourceManagerService({
       resourcesDir: join(root, 'state', 'resources'),
@@ -2175,6 +2175,7 @@ describe('ResourceManagerService', () => {
     const baseEnv = {
       PATH: '/usr/bin',
       ECOS_ELECTRON_OSS_CAD_DIR: '/packaged/oss-cad-suite',
+      CHIPCOMPILER_ECC_SIZER_ROOT: '/packaged/sizer',
     }
 
     const env = await service.createRuntimeEnv(baseEnv, { platform: 'linux' })
@@ -4898,6 +4899,61 @@ describe('ResourceManagerService', () => {
         error: expectedMessage,
       }),
     )
+  })
+
+  it('falls back to the direct GitHub codeload URL for archive downloads', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archiveUrl =
+      'https://github.com/openecos-projects/mpc-frame/archive/80f226fdd11d7a9e651ca0b113d320606b2c549c.tar.gz'
+    const codeloadUrl =
+      'https://codeload.github.com/openecos-projects/mpc-frame/tar.gz/80f226fdd11d7a9e651ca0b113d320606b2c549c'
+    const archive = Buffer.from('archive')
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        schema_version: 2,
+        tools: [],
+        pdks: [],
+        mpcs: [
+          {
+            id: 'mpc-frame',
+            display_name: 'MPC Frame',
+            versions: [
+              {
+                version: '0.1.0',
+                platforms: {
+                  'all-platform': {
+                    url: archiveUrl,
+                    sha256: createHash('sha256').update(archive).digest('hex'),
+                    size: archive.byteLength,
+                    strip_prefix: 'mpc-frame-80f226fdd11d7a9e651ca0b113d320606b2c549c',
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      }),
+      'utf8',
+    )
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      if (String(url) === archiveUrl) throw new TypeError('fetch failed')
+      expect(String(url)).toBe(codeloadUrl)
+      return new Response(archive)
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      fetchImpl: fetchImpl as typeof fetch,
+      archiveExtractor: vi.fn(async () => undefined),
+    })
+
+    await expect(service.installResource('mpc:mpc-frame')).rejects.toThrow(
+      'Unable to read MPC spec',
+    )
+    expect(fetchImpl).toHaveBeenCalledWith(archiveUrl, expect.anything())
+    expect(fetchImpl).toHaveBeenCalledWith(codeloadUrl, expect.anything())
   })
 
   it('cancels an active tool download and removes temporary downloads', async () => {

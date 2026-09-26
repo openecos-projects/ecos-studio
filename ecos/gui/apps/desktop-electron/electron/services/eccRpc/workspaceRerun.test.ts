@@ -1,20 +1,12 @@
 import { createHash } from 'node:crypto'
-import {
-  mkdtemp,
-  mkdir,
-  readFile,
-  readdir,
-  rm,
-  symlink,
-  writeFile,
-} from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { DesktopAgentWorkspaceRerunContract } from '@ecos-studio/shared'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { executeWorkspaceRerun, prepareWorkspaceRerun } from './workspaceRerun'
+import { executeWorkspaceRerun, verifyWorkspaceRerunContract } from './workspaceRerun'
 
 const temporaryRoots: string[] = []
 
@@ -35,6 +27,7 @@ async function writeSourceWorkspace(): Promise<{
   const source = join(root, 'gcd')
   const flow = JSON.stringify({
     steps: [
+      { name: 'postFloorplan', state: 'Success', tool: 'ecc' },
       { name: 'place', state: 'Success', tool: 'dreamplace' },
       { name: 'CTS', state: 'Success', tool: 'ecc' },
       { name: 'legalization', state: 'Success', tool: 'dreamplace' },
@@ -56,14 +49,6 @@ async function writeSourceWorkspace(): Promise<{
     join(source, 'place_dreamplace', 'output', 'gcd_place.def.gz'),
     artifact,
   )
-  await writeFile(join(source, 'CTS_ecc', 'output', 'gcd_CTS.def.gz'), 'stale')
-  await writeFile(
-    join(source, 'legalization_dreamplace', 'output', 'gcd_legalization.def.gz'),
-    'stale',
-  )
-  for (const directory of ['place_dreamplace', 'CTS_ecc', 'legalization_dreamplace']) {
-    await writeFile(join(source, directory, 'subflow.json'), '{"state":"Success"}\n')
-  }
   return { artifact, flow, root, source }
 }
 
@@ -95,27 +80,15 @@ function contractFor(
   }
 }
 
-describe('prepareWorkspaceRerun', () => {
-  it('creates the target workspace and persists the frozen rerun contract', async () => {
+describe('verifyWorkspaceRerunContract', () => {
+  it('accepts an isolated rerun target and returns the resolved directories', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = contractFor(source, flow, artifact)
 
-    await expect(prepareWorkspaceRerun(contract)).resolves.toEqual({
-      directory: contract.target_workspace,
+    await expect(verifyWorkspaceRerunContract(contract)).resolves.toEqual({
+      sourceWorkspace: source,
+      targetWorkspace: contract.target_workspace,
     })
-
-    await expect(
-      readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
-    ).resolves.toContain('"state": "Unstart"')
-    await expect(
-      readFile(
-        `${contract.target_workspace}/home/flow_agent_workspace_rerun_contract.v1.json`,
-        'utf8',
-      ),
-    ).resolves.toContain(contract.rerun_id)
-    await expect(
-      readFile(`${contract.target_workspace}/home/parameters.json`, 'utf8'),
-    ).resolves.toContain('0.45')
   })
 
   it('accepts a numbered isolated rerun target', async () => {
@@ -124,156 +97,155 @@ describe('prepareWorkspaceRerun', () => {
     contract.target_workspace = `${contract.target_workspace}_0001`
     contract.rerun_id = 'gcd_rerun_place_0001'
 
-    await expect(prepareWorkspaceRerun(contract)).resolves.toEqual({
-      directory: contract.target_workspace,
+    await expect(verifyWorkspaceRerunContract(contract)).resolves.toEqual({
+      sourceWorkspace: source,
+      targetWorkspace: contract.target_workspace,
     })
   })
 
-  it('empties the target and downstream steps without restoring FixFanout', async () => {
-    const { artifact, flow, source } = await writeSourceWorkspace()
-    const contract = contractFor(source, flow, artifact)
-
-    await prepareWorkspaceRerun(contract)
-
-    await expect(
-      readdir(`${contract.target_workspace}/place_dreamplace`),
-    ).resolves.toEqual([])
-    await expect(readdir(`${contract.target_workspace}/CTS_ecc`)).resolves.toEqual([])
-    await expect(
-      readdir(`${contract.target_workspace}/legalization_dreamplace`),
-    ).resolves.toEqual([])
-
-    const targetFlow = JSON.parse(
-      await readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
-    ) as { steps: Array<{ name: string; state: string; runtime?: string }> }
-    expect(targetFlow.steps).toEqual([
-      { name: 'place', state: 'Unstart', tool: 'dreamplace', runtime: '' },
-      { name: 'CTS', state: 'Unstart', tool: 'ecc', runtime: '' },
-      { name: 'legalization', state: 'Unstart', tool: 'dreamplace', runtime: '' },
-    ])
-  })
-
-  it('removes legacy home files and prunes the independent checklist', async () => {
-    const { artifact, flow, source } = await writeSourceWorkspace()
-    await writeFile(join(source, 'home', 'home.json'), '{legacy')
-    await writeFile(join(source, 'home', 'home.json.lock'), 'locked')
-    await writeFile(
-      join(source, 'home', 'pdk.json'),
-      JSON.stringify({ root: `${source}/pdk` }),
+  it('accepts a full-flow rerun from the Agent postFloorplan stage', async () => {
+    const { flow, source } = await writeSourceWorkspace()
+    const artifact = Buffer.from('post-floorplan-def')
+    const artifactPath = join(
+      source,
+      'postFloorplan_ecc',
+      'output',
+      'gcd_postFloorplan.def.gz',
     )
-    await writeFile(
-      join(source, 'home', 'checklist.json'),
-      `${JSON.stringify(
-        {
-          schema_version: 3,
-          kind: 'signoff_checklist',
-          status: 'blocked',
-          summary: { passed: 1, blocked: 2, attention: 0, unavailable: 0 },
-          checklist: [
-            {
-              id: 'artifact.fixFanout',
-              step: 'fixFanout',
-              state: 'pass',
-              blocked: false,
-            },
-            {
-              id: 'quality.place',
-              step: 'place',
-              state: 'failed',
-              blocked: true,
-            },
-            {
-              id: 'quality.drc.clean',
-              step: 'drc',
-              state: 'failed',
-              blocked: true,
-            },
-          ],
-        },
-        null,
-        4,
-      )}\n`,
-    )
-    const contract = contractFor(source, flow, artifact)
-
-    await prepareWorkspaceRerun(contract)
-
-    await expect(
-      readFile(`${contract.target_workspace}/home/home.json`, 'utf8'),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(
-      readFile(`${contract.target_workspace}/home/home.json.lock`, 'utf8'),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(readFile(join(source, 'home', 'home.json'), 'utf8')).resolves.toBe(
-      '{legacy',
-    )
-    await expect(readFile(join(source, 'home', 'home.json.lock'), 'utf8')).resolves.toBe(
-      'locked',
-    )
-    await expect(
-      readFile(`${contract.target_workspace}/home/pdk.json`, 'utf8'),
-    ).resolves.toContain(`${contract.target_workspace}/pdk`)
-    await expect(readFile(join(source, 'home', 'pdk.json'), 'utf8')).resolves.toContain(
-      `${source}/pdk`,
-    )
-
-    const checklist = JSON.parse(
-      await readFile(`${contract.target_workspace}/home/checklist.json`, 'utf8'),
-    ) as {
-      status: string
-      summary: { passed: number; blocked: number }
-      checklist: Array<{ step: string }>
+    await mkdir(join(source, 'postFloorplan_ecc', 'output'), { recursive: true })
+    await writeFile(artifactPath, artifact)
+    const contract: DesktopAgentWorkspaceRerunContract = {
+      ...contractFor(source, flow, artifact),
+      end_step: 'Harden',
+      execution_scope: 'full_flow',
+      parameter_patch: [],
+      rerun_id: 'gcd_rerun_postfloorplan',
+      source_stage_artifact: 'postFloorplan_ecc/output/gcd_postFloorplan.def.gz',
+      step_configurations: [],
+      target_step: 'postFloorplan',
+      target_workspace: `${source}_rerun_postfloorplan`,
+      workspace_parameters: {},
     }
-    expect(checklist.checklist).toEqual([])
-    expect(checklist.summary).toEqual({
-      passed: 0,
-      blocked: 0,
-      attention: 0,
-      unavailable: 0,
+
+    await expect(verifyWorkspaceRerunContract(contract)).resolves.toEqual({
+      sourceWorkspace: source,
+      targetWorkspace: contract.target_workspace,
     })
-    expect(checklist.status).toBe('ready')
-
-    const contractText = await readFile(
-      `${contract.target_workspace}/home/flow_agent_workspace_rerun_contract.v1.json`,
-      'utf8',
-    )
-    expect(contractText).toContain(source)
-    expect(contractText).not.toContain(
-      `"source_workspace": "${contract.target_workspace}"`,
-    )
   })
 
-  it('unlinks a legacy home symlink without touching its target', async () => {
-    const { artifact, flow, root, source } = await writeSourceWorkspace()
-    const outside = join(root, 'outside-legacy-home.json')
-    await writeFile(outside, 'outside')
-    await symlink(outside, join(source, 'home', 'home.json'))
-    const contract = contractFor(source, flow, artifact)
-
-    await prepareWorkspaceRerun(contract)
-
-    await expect(
-      readFile(`${contract.target_workspace}/home/home.json`, 'utf8'),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(readFile(outside, 'utf8')).resolves.toBe('outside')
-    await expect(readFile(join(source, 'home', 'home.json'), 'utf8')).resolves.toBe(
-      'outside',
-    )
-  })
-
-  it('rejects a legacy home path that is not a file or symlink', async () => {
+  it('rejects a nonempty patch without domain updates', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
-    await mkdir(join(source, 'home', 'home.json'))
     const contract = contractFor(source, flow, artifact)
+    contract.workspace_parameters = null as never
 
-    await expect(prepareWorkspaceRerun(contract)).rejects.toThrow(
-      'legacy home file is invalid: home.json',
+    await expect(verifyWorkspaceRerunContract(contract)).rejects.toThrow(
+      'Workspace rerun contract is invalid',
+    )
+  })
+
+  it('rejects unsafe Step Option keys', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    const contract = contractFor(source, flow, artifact)
+    contract.workspace_parameters = {}
+    contract.step_configurations = [
+      { step_id: 'place', options: JSON.parse('{"__proto__": {"polluted": true}}') },
+    ]
+
+    await expect(verifyWorkspaceRerunContract(contract)).rejects.toThrow(
+      'Workspace rerun contract is invalid',
+    )
+  })
+
+  it('fails closed when the frozen source evidence is stale', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    const contract = contractFor(source, flow, artifact)
+    contract.source_flow_json_sha256 = '0'.repeat(64)
+    await expect(verifyWorkspaceRerunContract(contract)).rejects.toThrow(
+      'evidence is stale',
     )
     await expect(
       readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    ).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 
+  it('rejects evidence that is not the completed target-stage artifact', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    const contract = contractFor(source, flow, artifact)
+    contract.source_stage_artifact = 'home/flow.json'
+    contract.source_stage_artifact_sha256 = sha256(flow)
+
+    await expect(verifyWorkspaceRerunContract(contract)).rejects.toThrow(
+      'does not match the completed stage',
+    )
+  })
+
+  it('rejects a full-flow end step that is not the catalog terminus', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    const contract = {
+      ...contractFor(source, flow, artifact),
+      end_step: 'CTS',
+      execution_scope: 'full_flow' as const,
+    }
+
+    await expect(verifyWorkspaceRerunContract(contract)).rejects.toThrow(
+      'full-flow end step must be the catalog terminus',
+    )
+  })
+
+  it.each([
+    [
+      'targets a non-isolated directory',
+      (contract: DesktopAgentWorkspaceRerunContract) => {
+        contract.target_workspace = `${contract.source_workspace}_other`
+      },
+    ],
+    [
+      'duplicates a patch knob',
+      (contract: DesktopAgentWorkspaceRerunContract) => {
+        contract.parameter_patch.push({ knob_id: 'place.target_density', value: 0.6 })
+      },
+    ],
+    [
+      'uses an unauthorized patch knob',
+      (contract: DesktopAgentWorkspaceRerunContract) => {
+        contract.parameter_patch = [{ knob_id: 'place.unknown', value: 0.55 }]
+      },
+    ],
+    [
+      'uses an out-of-range patch value',
+      (contract: DesktopAgentWorkspaceRerunContract) => {
+        contract.parameter_patch = [{ knob_id: 'place.target_density', value: 1 }]
+      },
+    ],
+  ])('fails closed when the contract %s', async (_case, mutate) => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    const contract = contractFor(source, flow, artifact)
+    mutate(contract)
+    await expect(verifyWorkspaceRerunContract(contract)).rejects.toThrow(
+      /Workspace rerun/,
+    )
+    await expect(
+      readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
+    ).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('rejects a source workspace whose home path escapes through a symlink', async () => {
+    const { artifact, flow, root, source } = await writeSourceWorkspace()
+    const contract = contractFor(source, flow, artifact)
+    const outsideHome = join(root, 'outside-home')
+    await mkdir(outsideHome)
+    await writeFile(join(outsideHome, 'flow.json'), flow)
+    await rm(join(source, 'home'), { force: true, recursive: true })
+    await symlink(outsideHome, join(source, 'home'))
+    await expect(verifyWorkspaceRerunContract(contract)).rejects.toThrow('outside')
+  })
+})
+
+describe('executeWorkspaceRerun', () => {
   it('executes the frozen contract through acknowledged ECC runtime operations', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = contractFor(source, flow, artifact)
@@ -311,20 +283,6 @@ describe('prepareWorkspaceRerun', () => {
       operationId: 'operation-place',
       workspaceHandle: 'target-gui-handle',
     })
-  })
-
-  it('does not materialize parameters while preparing the isolated workspace', async () => {
-    const { artifact, flow, source } = await writeSourceWorkspace()
-    const contract = contractFor(source, flow, artifact)
-    contract.parameter_patch = [{ knob_id: 'place.density_weight', value: 0.1 }]
-    contract.workspace_parameters = { 'place.density_weight': 0.1 }
-    contract.step_configurations = []
-
-    await prepareWorkspaceRerun(contract)
-
-    await expect(
-      readFile(`${contract.target_workspace}/config/dreamplace_ecc.json`, 'utf8'),
-    ).resolves.toContain('0.01')
   })
 
   it('updates parameters atomically and executes every full-flow step in order', async () => {
@@ -369,143 +327,5 @@ describe('prepareWorkspaceRerun', () => {
       operationId: 'operation-flow',
       workspaceHandle: 'target-gui-handle',
     })
-  })
-
-  it('rejects a nonempty patch without domain updates', async () => {
-    const { artifact, flow, source } = await writeSourceWorkspace()
-    const contract = contractFor(source, flow, artifact)
-    contract.workspace_parameters = null as never
-
-    await expect(prepareWorkspaceRerun(contract)).rejects.toThrow(
-      'Workspace rerun contract is invalid',
-    )
-  })
-
-  it('rejects unsafe Step Option keys', async () => {
-    const { artifact, flow, source } = await writeSourceWorkspace()
-    const contract = contractFor(source, flow, artifact)
-    contract.workspace_parameters = {}
-    contract.step_configurations = [
-      { step_id: 'place', options: JSON.parse('{"__proto__": {"polluted": true}}') },
-    ]
-
-    await expect(prepareWorkspaceRerun(contract)).rejects.toThrow(
-      'Workspace rerun contract is invalid',
-    )
-  })
-
-  it('fails closed before copying when the frozen source evidence is stale', async () => {
-    const { artifact, flow, source } = await writeSourceWorkspace()
-    const contract = contractFor(source, flow, artifact)
-    contract.source_flow_json_sha256 = '0'.repeat(64)
-    await expect(prepareWorkspaceRerun(contract)).rejects.toThrow('evidence is stale')
-    await expect(
-      readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
-    ).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
-  })
-
-  it('rejects evidence that is not the completed target-stage artifact', async () => {
-    const { artifact, flow, source } = await writeSourceWorkspace()
-    const contract = contractFor(source, flow, artifact)
-    contract.source_stage_artifact = 'home/flow.json'
-    contract.source_stage_artifact_sha256 = sha256(flow)
-
-    await expect(prepareWorkspaceRerun(contract)).rejects.toThrow(
-      'does not match the completed stage',
-    )
-  })
-
-  it('rejects a full-flow end step that is not the catalog terminus', async () => {
-    const { artifact, flow, source } = await writeSourceWorkspace()
-    const contract = {
-      ...contractFor(source, flow, artifact),
-      end_step: 'CTS',
-      execution_scope: 'full_flow' as const,
-    }
-
-    await expect(prepareWorkspaceRerun(contract)).rejects.toThrow(
-      'full-flow end step must be the catalog terminus',
-    )
-  })
-
-  it('extends a short source flow to the catalog terminus for full_flow', async () => {
-    const { artifact, flow, source } = await writeSourceWorkspace()
-    const contract = {
-      ...contractFor(source, flow, artifact),
-      end_step: 'Harden',
-      execution_scope: 'full_flow' as const,
-    }
-
-    await prepareWorkspaceRerun(contract)
-
-    const targetFlow = JSON.parse(
-      await readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
-    ) as { steps: Array<{ name: string; state: string }> }
-    expect(targetFlow.steps.map((step) => step.name)).toEqual([
-      'place',
-      'CTS',
-      'legalization',
-      'Timing optimization',
-      'route',
-      'drc',
-      'lvs',
-      'filler',
-      'postRouteLec',
-      'RCX',
-      'sta',
-      'Harden',
-    ])
-    expect(targetFlow.steps.find((step) => step.name === 'place')?.state).toBe('Unstart')
-    expect(targetFlow.steps.find((step) => step.name === 'Harden')?.state).toBe('Unstart')
-  })
-
-  it.each([
-    [
-      'targets a non-isolated directory',
-      (contract: DesktopAgentWorkspaceRerunContract) => {
-        contract.target_workspace = `${contract.source_workspace}_other`
-      },
-    ],
-    [
-      'duplicates a patch knob',
-      (contract: DesktopAgentWorkspaceRerunContract) => {
-        contract.parameter_patch.push({ knob_id: 'place.target_density', value: 0.6 })
-      },
-    ],
-    [
-      'uses an unauthorized patch knob',
-      (contract: DesktopAgentWorkspaceRerunContract) => {
-        contract.parameter_patch = [{ knob_id: 'place.unknown', value: 0.55 }]
-      },
-    ],
-    [
-      'uses an out-of-range patch value',
-      (contract: DesktopAgentWorkspaceRerunContract) => {
-        contract.parameter_patch = [{ knob_id: 'place.target_density', value: 1 }]
-      },
-    ],
-  ])('fails closed before copying when the contract %s', async (_case, mutate) => {
-    const { artifact, flow, source } = await writeSourceWorkspace()
-    const contract = contractFor(source, flow, artifact)
-    mutate(contract)
-    await expect(prepareWorkspaceRerun(contract)).rejects.toThrow(/Workspace rerun/)
-    await expect(
-      readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
-    ).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
-  })
-
-  it('rejects a source workspace whose home path escapes through a symlink', async () => {
-    const { artifact, flow, root, source } = await writeSourceWorkspace()
-    const contract = contractFor(source, flow, artifact)
-    const outsideHome = join(root, 'outside-home')
-    await mkdir(outsideHome)
-    await writeFile(join(outsideHome, 'flow.json'), flow)
-    await rm(join(source, 'home'), { force: true, recursive: true })
-    await symlink(outsideHome, join(source, 'home'))
-    await expect(prepareWorkspaceRerun(contract)).rejects.toThrow('outside')
   })
 })

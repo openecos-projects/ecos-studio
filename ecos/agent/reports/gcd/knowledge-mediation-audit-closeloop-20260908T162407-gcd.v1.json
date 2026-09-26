@@ -1,0 +1,50 @@
+{
+  "calls": [
+    {
+      "actual_value": null,
+      "claim_bound": false,
+      "context_fingerprint": null,
+      "counts_toward_knowledge_attribution": false,
+      "direction": null,
+      "knob": null,
+      "matched_claim_ids": [],
+      "missing_evidence_reason": "context_fingerprint,proposal_observation,receipt_link,terminal_observation_link,promotion_decision",
+      "planning_call": 1,
+      "planning_entry_sha256": "sha256:9f8e682abddf2787cbefa380bd98f4881adc6cd3300f757e6924272be53cb89a",
+      "promotion_decision": null,
+      "receipt_status": "unknown",
+      "requested_value": null,
+      "schema_version": "ecos.knowledge_planning_call_audit.v1",
+      "support_status": "unknown",
+      "terminal_delta": null
+    },
+    {
+      "actual_value": null,
+      "claim_bound": false,
+      "context_fingerprint": null,
+      "counts_toward_knowledge_attribution": false,
+      "direction": null,
+      "knob": null,
+      "matched_claim_ids": [],
+      "missing_evidence_reason": "context_fingerprint,proposal_observation,receipt_link,terminal_observation_link,promotion_decision",
+      "planning_call": 2,
+      "planning_entry_sha256": "sha256:380620276c0c11b48f1fa21573a21b1d1a7cc1f94ed5c01acc1a05e706d5c1e7",
+      "promotion_decision": null,
+      "receipt_status": "unknown",
+      "requested_value": null,
+      "schema_version": "ecos.knowledge_planning_call_audit.v1",
+      "support_status": "unknown",
+      "terminal_delta": null
+    }
+  ],
+  "claim_bound_observation_reason": "no structured proposal observation artifact provided",
+  "claim_bound_proposal_rows": 0,
+  "claim_bound_proposals_observed": false,
+  "knowledge_payload_calls": 2,
+  "missing_evidence_reason_counts": {
+    "context_fingerprint,proposal_observation,receipt_link,terminal_observation_link,promotion_decision": 2
+  },
+  "planning_calls": 2,
+  "proposal_observation_rows": 0,
+  "schema_version": "ecos.knowledge_planning_audit_summary.v1"
+}

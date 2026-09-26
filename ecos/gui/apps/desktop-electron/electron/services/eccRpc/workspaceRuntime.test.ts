@@ -49,6 +49,22 @@ class FakeRpcClient implements EccRpcRuntimeClient {
     this.calls.push(
       options === undefined ? { method, params } : { method, options, params },
     )
+    if (method === 'rpc.hello') {
+      const queued = this.responses[0]
+      if (
+        queued &&
+        typeof queued === 'object' &&
+        queued !== null &&
+        'capabilities' in queued
+      ) {
+        return (await this.responses.shift()) as T
+      }
+      return {
+        capabilities: ['candidate.capabilities', 'candidate.rerun', 'candidate.resume'],
+        eccVersion: '0.1.0',
+        version: 1,
+      } as T
+    }
     const response = this.responses.shift()
     if (response instanceof Error) {
       throw response
@@ -641,6 +657,153 @@ describe('EccWorkspaceRuntime', () => {
     })
   })
 
+  it('starts Candidate rerun after handshake advertises the capability', async () => {
+    const { client, service } = createService()
+    client.responses.push(
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      {
+        createdAt: 1,
+        currentStep: 'place',
+        currentTool: 'dreamplace',
+        error: null,
+        kind: 'flow',
+        operationId: 'candidate-operation-1',
+        origin: 'agent',
+        rerun: true,
+        result: null,
+        state: 'queued',
+        step: 'place',
+        updatedAt: 1,
+        workspaceId: 'workspace-1::candidate::candidate-1',
+      },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+
+    await expect(
+      service.candidateRerun({
+        candidateId: 'candidate-1',
+        contextSha256: `sha256:${'a'.repeat(64)}`,
+        endStep: 'Harden',
+        executionScope: 'full_flow',
+        expectedWorkspaceRevision: 1,
+        idempotencyKey: 'episode-1.intervention-1',
+        parameterCardSha256: `sha256:${'b'.repeat(64)}`,
+        patch: [{ knob_id: 'place.target_density', value: 0.6 }],
+        seed: 17,
+        targetStep: 'place',
+        workspaceHandle: workspace.workspaceHandle,
+      }),
+    ).resolves.toMatchObject({ operationId: 'candidate-operation-1', state: 'queued' })
+    expect(client.calls.at(-1)).toEqual({
+      method: 'candidate.rerun',
+      params: {
+        candidateId: 'candidate-1',
+        contextSha256: `sha256:${'a'.repeat(64)}`,
+        endStep: 'Harden',
+        executionScope: 'full_flow',
+        expectedWorkspaceRevision: 1,
+        idempotencyKey: 'episode-1.intervention-1',
+        parameterCardSha256: `sha256:${'b'.repeat(64)}`,
+        patch: [{ knob_id: 'place.target_density', value: 0.6 }],
+        seed: 17,
+        targetStep: 'place',
+        workspaceId: 'workspace-1',
+      },
+    })
+  })
+
+  it('derives a Workspace through the ECC derive RPC and activates the target session', async () => {
+    const { client, service } = createService()
+    client.responses.push({
+      directory: '/work/demo_derived',
+      workspaceId: 'workspace-2',
+      workspaceRevision: 1,
+    })
+
+    await expect(
+      service.deriveWorkspace({
+        cause: 'workspace.derived',
+        commandId: 'derive-1',
+        directory: '/work/demo',
+        resetFromStep: 'place',
+        targetDirectory: '/work/demo_derived',
+      }),
+    ).resolves.toMatchObject({
+      directory: '/work/demo_derived',
+      workspaceRevision: 1,
+    })
+    expect(client.calls.at(-1)).toEqual({
+      method: 'workspace.derive',
+      options: { timeoutMs: 0 },
+      params: {
+        cause: 'workspace.derived',
+        command_id: 'derive-1',
+        directory: '/work/demo',
+        reset_from_step: 'place',
+        target_directory: '/work/demo_derived',
+      },
+    })
+  })
+
+  it('rejects Candidate evidence that escapes the authorized Workspace', async () => {
+    const { client, service } = createService()
+    client.responses.push(
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      {
+        createdAt: 1,
+        currentStep: 'place',
+        currentTool: 'dreamplace',
+        error: null,
+        kind: 'flow',
+        operationId: 'candidate-operation-1',
+        origin: 'agent',
+        rerun: true,
+        result: {
+          candidateId: 'candidate-1',
+          candidateRootRef: '../escaped',
+        },
+        state: 'succeeded',
+        step: 'place',
+        updatedAt: 1,
+        workspaceId: 'workspace-1::candidate::candidate-1',
+      },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+
+    await expect(
+      service.candidateRerun({
+        candidateId: 'candidate-1',
+        contextSha256: `sha256:${'a'.repeat(64)}`,
+        endStep: 'Harden',
+        executionScope: 'full_flow',
+        expectedWorkspaceRevision: 1,
+        idempotencyKey: 'episode-1.intervention-1',
+        parameterCardSha256: `sha256:${'b'.repeat(64)}`,
+        patch: [{ knob_id: 'place.target_density', value: 0.6 }],
+        seed: 17,
+        targetStep: 'place',
+        workspaceHandle: workspace.workspaceHandle,
+      }),
+    ).rejects.toThrow('Candidate evidence path is outside the authorized Workspace')
+  })
+
+  it('fails closed when the handshake lacks Candidate capabilities', async () => {
+    const { client, service } = createService()
+    client.responses.unshift({
+      capabilities: ['workspace.open'],
+      eccVersion: '0.1.0',
+      version: 1,
+    })
+    client.responses.push({ directory: '/work/demo', workspaceId: 'workspace-1' })
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+
+    await expect(
+      service.candidateCapabilities({ workspaceHandle: workspace.workspaceHandle }),
+    ).rejects.toThrow(
+      'ECC Runtime is missing required capability: candidate.capabilities',
+    )
+  })
+
   it('binds sidecar progress events to the active GUI operation', async () => {
     const { client, events, service, sidecarEvent } = createService()
     const flowResult = deferred<{ rerun: boolean }>()
@@ -1134,6 +1297,7 @@ describe('EccWorkspaceRuntime', () => {
 
     expect(sidecar.startCount).toBe(1)
     expect(client.calls).toEqual([
+      { method: 'rpc.hello', params: { version: 1 } },
       { method: 'workspace.open', params: { directory: '/work/demo' } },
     ])
     expect(result).toEqual({
@@ -1257,7 +1421,10 @@ describe('EccWorkspaceRuntime', () => {
       code: 'SIGNOFF_ARTIFACT_REVISION_MISMATCH',
       details: { references: [reference] },
     })
-    expect(client.calls).toHaveLength(1)
+    expect(client.calls.map((call) => call.method)).toEqual([
+      'rpc.hello',
+      'workspace.open',
+    ])
     rmSync(directory, { force: true, recursive: true })
   })
 
@@ -1406,7 +1573,10 @@ describe('EccWorkspaceRuntime', () => {
     ).resolves.toEqual({ rerun: false })
 
     expect(sidecar.startCount).toBe(3)
-    expect(client.calls.slice(1)).toEqual([
+    expect(client.calls).toEqual([
+      { method: 'rpc.hello', params: { version: 1 } },
+      { method: 'workspace.open', params: { directory: '/work/demo' } },
+      { method: 'rpc.hello', params: { version: 1 } },
       { method: 'workspace.open', params: { directory: '/work/demo' } },
       { method: 'workspace.recover_interrupted', params: { workspaceId: 'workspace-2' } },
       {
@@ -1923,6 +2093,7 @@ describe('EccWorkspaceRuntime', () => {
     ).resolves.toEqual({ rerun: false })
 
     expect(replacementClient.calls).toEqual([
+      { method: 'rpc.hello', params: { version: 1 } },
       {
         method: 'workspace.open',
         params: { directory: '/work/demo', workspaceBindings },
@@ -1979,7 +2150,9 @@ describe('EccWorkspaceRuntime', () => {
       service.closeWorkspace({ workspaceHandle: workspace.workspaceHandle }),
     ).resolves.toEqual({ ok: true })
 
-    expect(replacementClient.calls).toEqual([])
+    expect(replacementClient.calls).toEqual([
+      { method: 'rpc.hello', params: { version: 1 } },
+    ])
     await expect(
       service.runFlow({
         rerun: false,

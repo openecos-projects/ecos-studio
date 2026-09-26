@@ -1,0 +1,90 @@
+{
+  "schema_version": "ecos.state_rule_manifest.v1",
+  "scope": [
+    "gcd",
+    "aes",
+    "PPU",
+    "y_huff",
+    "picorv32a",
+    "sha256",
+    "vm80",
+    "mos6502",
+    "dbg_bridge",
+    "s35932"
+  ],
+  "rules": {
+    "rules.evidence.present.v1": {
+      "op": "present",
+      "required_evidence": "observation",
+      "noise_tolerance": 0.0,
+      "positive_control": "feature present evaluates true",
+      "negative_control": "feature absent evaluates unknown, never false"
+    },
+    "rules.anti_condition.absent.v1": {
+      "op": "true",
+      "required_evidence": "observation",
+      "noise_tolerance": 0.0,
+      "positive_control": "anti feature true blocks the claim",
+      "negative_control": "anti feature false keeps the claim eligible"
+    },
+    "rules.boolean.true.v1": {
+      "op": "true",
+      "required_evidence": "observation",
+      "noise_tolerance": 0.0,
+      "positive_control": "boolean true evaluates true",
+      "negative_control": "boolean false evaluates false"
+    },
+    "rules.boolean.false.v1": {
+      "op": "false",
+      "required_evidence": "observation",
+      "noise_tolerance": 0.0,
+      "positive_control": "boolean false evaluates true",
+      "negative_control": "boolean true evaluates false"
+    },
+    "rules.numeric.positive.v1": {
+      "op": "positive",
+      "required_evidence": "observation",
+      "noise_tolerance": 0.0,
+      "positive_control": "value above zero evaluates true",
+      "negative_control": "non-numeric value evaluates false"
+    },
+    "rules.numeric.zero.v1": {
+      "op": "zero",
+      "required_evidence": "observation",
+      "noise_tolerance": 0.0,
+      "positive_control": "value equal to zero evaluates true",
+      "negative_control": "non-numeric value evaluates false"
+    },
+    "rules.numeric.negative.v1": {
+      "op": "negative",
+      "required_evidence": "observation",
+      "noise_tolerance": 0.0,
+      "positive_control": "value below zero evaluates true",
+      "negative_control": "non-numeric value evaluates false"
+    },
+    "rules.trend.increasing.v1": {
+      "op": "increasing",
+      "required_evidence": "trajectory",
+      "noise_tolerance": 0.0,
+      "trend_window": 1,
+      "positive_control": "delta beyond tolerance classifies increasing",
+      "negative_control": "delta within tolerance classifies stable"
+    },
+    "rules.trend.decreasing.v1": {
+      "op": "decreasing",
+      "required_evidence": "trajectory",
+      "noise_tolerance": 0.0,
+      "trend_window": 1,
+      "positive_control": "delta beyond tolerance classifies decreasing",
+      "negative_control": "delta within tolerance classifies stable"
+    },
+    "rules.trend.stable.v1": {
+      "op": "stable",
+      "required_evidence": "trajectory",
+      "noise_tolerance": 0.0,
+      "trend_window": 1,
+      "positive_control": "delta within tolerance classifies stable",
+      "negative_control": "delta beyond tolerance never classifies stable"
+    }
+  }
+}

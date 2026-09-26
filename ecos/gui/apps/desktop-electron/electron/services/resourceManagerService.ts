@@ -4644,7 +4644,6 @@ async function downloadAsset(
     await copyLocalAsset(fileUrl, destination, onProgress, signal)
     return
   }
-
   let lastError: unknown = null
   for (let attempt = 1; attempt <= DOWNLOAD_MAX_ATTEMPTS; attempt += 1) {
     throwIfAborted(signal)
@@ -4655,10 +4654,21 @@ async function downloadAsset(
     }
     try {
       const rangeRequested = existingBytes > 0
-      const response = await fetchImpl(url, {
-        signal,
-        ...(rangeRequested ? { headers: { Range: `bytes=${existingBytes}-` } } : {}),
-      })
+      let response: Response
+      try {
+        response = await fetchImpl(url, {
+          signal,
+          ...(rangeRequested ? { headers: { Range: `bytes=${existingBytes}-` } } : {}),
+        })
+      } catch (error) {
+        if (isAbortError(error) || signal?.aborted) throw error
+        const fallbackUrl = githubCodeloadArchiveUrl(url)
+        if (!fallbackUrl) throw error
+        response = await fetchImpl(fallbackUrl, {
+          signal,
+          ...(rangeRequested ? { headers: { Range: `bytes=${existingBytes}-` } } : {}),
+        })
+      }
 
       if (response.status === 416 && rangeRequested) {
         const totalBytes =
@@ -4873,6 +4883,19 @@ function assertDownloadSize(
   if (requiredSize !== null && downloadedBytes !== requiredSize) {
     throw new DownloadSizeMismatchError(url, requiredSize, downloadedBytes)
   }
+}
+
+function githubCodeloadArchiveUrl(value: string): string | null {
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    return null
+  }
+  if (url.hostname !== 'github.com') return null
+  const match = url.pathname.match(/^\/([^/]+)\/([^/]+)\/archive\/(.+)\.tar\.gz$/)
+  if (!match) return null
+  return `https://codeload.github.com/${match[1]}/${match[2]}/tar.gz/${match[3]}`
 }
 
 function isRetryableDownloadError(error: unknown): boolean {

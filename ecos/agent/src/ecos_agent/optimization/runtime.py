@@ -1,0 +1,800 @@
+"""Production assembly for one bounded optimization episode."""
+
+from __future__ import annotations
+
+import json
+import math
+import re
+import threading
+from time import monotonic as _monotonic
+from pathlib import Path
+from typing import Any, Literal, Mapping
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    StrictBool,
+    StrictInt,
+    ValidationError,
+    field_validator,
+)
+
+from ecos_agent.ecc_contracts import ECCStepName
+from ecos_agent.hashing import canonical_sha256, file_sha256
+from ecos_agent.optimization.contracts import (
+    BudgetSnapshot,
+    EpisodeBudget,
+    OptimizationObjectiveContract,
+    RoutabilityObjectiveContract,
+    TerminalObservation,
+)
+from ecos_agent.optimization.controller import (
+    OptimizationAgentMode,
+    OptimizationEpisodeController,
+)
+from ecos_agent.optimization.ecc.adapter import EccCandidateRerunAdapter
+from ecos_agent.optimization.host_transport import open_execution_adapter
+from ecos_agent.optimization.execution import (
+    CANDIDATE_END_STEP,
+    CandidateExecutionReceipt,
+)
+from ecos_agent.optimization.ledger import (
+    OptimizationLedger,
+    OptimizationOutcomeKind,
+    build_optimization_artifact_manifest,
+)
+from ecos_agent.optimization.memory import (
+    OptimizationTaskMemoryScope,
+    OptimizationTaskMemoryStore,
+    build_task_memory_scope,
+)
+from ecos_agent.optimization.observations import (
+    build_candidate_terminal_observation,
+    build_stage_observation,
+    build_terminal_observation,
+)
+from ecos_agent.optimization.objective_alignment import (
+    OptimizationObjectiveAlignment,
+    validate_objective_alignment,
+)
+from ecos_agent.optimization.knowledge.retrieval import (
+    OptimizationKnowledgeRetriever,
+    build_optimization_retrieval_request,
+)
+from ecos_agent.optimization.rules import freeze_routability_objective, geometry_constraint_error
+from ecos_agent.optimization.runner import OptimizationEpisodeRunner
+from ecos_agent.optimization.runtime_waiting import (
+    _terminal_timeout_seconds,
+    _wait_for_any_terminal_receipt,
+    _wait_for_terminal_receipt,
+)
+from ecos_agent.workspace.parameters import (
+    WorkspaceParametersError,
+    _safe_file as _safe_workspace_file,
+    read_workspace_dreamplace_seed,
+    read_workspace_parameters,
+)
+
+class OptimizationRuntimeError(ValueError):
+    """The workspace cannot be assembled into a trusted production episode."""
+
+
+# Candidate budget stages: the ECC catalog minus the synthesis entry stages
+# (candidates always start from an existing synthesized workspace) and
+# postRouteLec (skipped inside isolated candidate reruns).
+_CANDIDATE_SKIPPED_STAGES = frozenset(
+    {ECCStepName.SYNTHESIS, ECCStepName.LEC, ECCStepName.POST_ROUTE_LEC}
+)
+_OPTIMIZATION_RERUN_STAGES = tuple(
+    step.value for step in ECCStepName if step not in _CANDIDATE_SKIPPED_STAGES
+)
+assert _OPTIMIZATION_RERUN_STAGES[-1] == CANDIDATE_END_STEP
+_DESIGN_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
+
+
+class OptimizationRuntimeContext(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    session_id: str | None = None
+    episode_id: str
+    workspace: str
+    objective: OptimizationObjectiveContract
+    objective_alignment: OptimizationObjectiveAlignment
+    reference_runtime_seconds: float | int | None = None
+    agent_mode: OptimizationAgentMode = OptimizationAgentMode.FULL_AGENT
+    knowledge_case_shots: Literal[0, 3] = 0
+    knowledge_case_pool_root: str | None = None
+    receipt_aware_planning: StrictBool = True
+    seed: StrictInt = 0
+    max_in_flight_candidates: Literal[1, 2] = 2
+    trend_noise_epsilon: dict[str, float] | None = None
+    workspace_handle: str | None = None
+    expected_workspace_revision: StrictInt | None = None
+    expected_ecc_revision: str | None = None
+
+    @field_validator("session_id", "episode_id", "workspace")
+    @classmethod
+    def validate_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("runtime context text is invalid")
+        return value.strip()
+
+    @field_validator("reference_runtime_seconds", mode="before")
+    @classmethod
+    def validate_reference_runtime(cls, value: object) -> object:
+        if value is None:
+            return None
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(value)
+            or value <= 0
+        ):
+            raise ValueError("reference runtime is invalid")
+        return value
+
+
+def create_optimization_runner(
+    context: Mapping[str, Any], planner: object
+) -> OptimizationEpisodeRunner:
+    try:
+        runtime = OptimizationRuntimeContext.model_validate(context)
+    except ValidationError as exc:
+        raise OptimizationRuntimeError("optimization runtime context is invalid") from exc
+    if runtime.objective.parameter_policy is None:
+        raise OptimizationRuntimeError(
+            "legacy objective has no parameter policy; confirm a new optimization objective"
+        )
+    workspace = _workspace(runtime.workspace)
+    if (
+        runtime.trend_noise_epsilon is None
+        and runtime.agent_mode is OptimizationAgentMode.FULL_AGENT
+    ):
+        # The manifest scope gate rejects scoped full-agent episodes without a
+        # calibrated epsilon; the GUI never passes one explicitly, so load the
+        # workspace-level default-replay calibration.
+        runtime = runtime.model_copy(
+            update={"trend_noise_epsilon": _load_trend_noise_epsilon(workspace)}
+        )
+    episode_id = runtime.episode_id
+    objective = runtime.objective
+    checkpoint_id = "place"
+    knowledge_case_pool_root = _knowledge_case_pool_root(
+        runtime.knowledge_case_pool_root
+    )
+    terminal_observation = build_terminal_observation(workspace)
+    try:
+        validate_objective_alignment(
+            runtime.objective_alignment, objective, terminal_observation
+        )
+    except ValueError as exc:
+        raise OptimizationRuntimeError(
+            "authorized objective alignment does not match the current baseline"
+        ) from exc
+    _require_objective_metrics(terminal_observation, objective)
+    geometry_violation = geometry_constraint_error(objective, terminal_observation.geometry, terminal_observation)
+    if geometry_violation is not None:
+        raise OptimizationRuntimeError(geometry_violation)
+    site_width_dbu = _site_width_dbu(workspace)
+    parent_manifest = _parent_manifest_sha256(workspace, terminal_observation)
+    design_id = _design_id(workspace)
+    routability_objective = freeze_routability_objective(
+        terminal_observation,
+        objective_alignment=runtime.objective_alignment,
+    )
+    reference_runtime = runtime.reference_runtime_seconds
+    if reference_runtime is None:
+        reference_runtime = _optimization_rerun_runtime_seconds(workspace)
+    if (
+        not isinstance(reference_runtime, (int, float))
+        or isinstance(reference_runtime, bool)
+        or not math.isfinite(reference_runtime)
+        or reference_runtime <= 0
+    ):
+        raise OptimizationRuntimeError("reference runtime is invalid")
+    budget = BudgetSnapshot(
+        budget=EpisodeBudget.from_reference_rerun(float(reference_runtime))
+    )
+    ledger_root = workspace / ".agent" / "optimization" / episode_id
+    memory_scope = build_task_memory_scope(
+        workspace_manifest_sha256=parent_manifest,
+        design_id=design_id,
+        checkpoint_id=checkpoint_id,
+        episode_id=episode_id,
+        objective_contract_sha256=objective.contract_sha256,
+    )
+    memory_store = OptimizationTaskMemoryStore(ledger_root.parent, memory_scope)
+    ledger = _ledger(ledger_root)
+    executor, execution_context = open_execution_adapter(
+        runtime=runtime,
+        workspace=workspace,
+        site_width_dbu=site_width_dbu,
+        parent_manifest=parent_manifest,
+        design_id=design_id,
+    )
+    if runtime.expected_ecc_revision is not None and execution_context.get(
+        "ecc_revision"
+    ) != runtime.expected_ecc_revision:
+        executor.close()
+        raise OptimizationRuntimeError(
+            "optimization ECC revision does not match the recovered episode"
+        )
+    if objective.parameter_policy.geometry_mode == "fixed":
+        execution_context["geometry_baseline_sha256"] = canonical_sha256(
+            terminal_observation.geometry.model_dump(mode="json")
+        )
+    try:
+        controller = _recover_or_create_controller(
+            runtime=runtime,
+            planner=planner,
+            executor=executor,
+            ledger=ledger,
+            ledger_root=ledger_root,
+            memory_scope=memory_scope,
+            memory_store=memory_store,
+            budget=budget,
+            terminal_observation=terminal_observation,
+            parent_manifest=parent_manifest,
+            execution_context=execution_context,
+            knowledge_case_pool_root=knowledge_case_pool_root, design_id=design_id,
+        )
+    except Exception:
+        executor.close()
+        raise
+    return _assemble_runner(
+        runtime=runtime,
+        workspace=workspace,
+        controller=controller,
+        executor=executor,
+        routability_objective=routability_objective,
+        site_width_dbu=site_width_dbu,
+    )
+
+
+def _recover_or_create_controller(
+    *,
+    runtime: OptimizationRuntimeContext,
+    planner: object,
+    executor: EccCandidateRerunAdapter,
+    ledger: OptimizationLedger,
+    ledger_root: Path,
+    memory_scope: OptimizationTaskMemoryScope,
+    memory_store: OptimizationTaskMemoryStore,
+    budget: BudgetSnapshot,
+    terminal_observation: TerminalObservation,
+    parent_manifest: str,
+    execution_context: Mapping[str, object],
+    knowledge_case_pool_root: Path | None, design_id: str | None,
+) -> OptimizationEpisodeController:
+    state_path = ledger_root / "optimization-episode-state.v10.json"
+    legacy_state_paths = tuple(
+        ledger_root / f"optimization-episode-state.v{version}.json"
+        for version in range(2, 10)
+    )
+    if state_path.is_file():
+        return _recover_controller(
+            runtime,
+            planner,
+            executor,
+            ledger,
+            ledger_root,
+            memory_scope,
+            memory_store,
+            parent_manifest,
+            execution_context,
+            knowledge_case_pool_root, design_id,
+        )
+    if any(path.is_file() for path in legacy_state_paths):
+        raise OptimizationRuntimeError(
+            "earlier scheduling policy episode cannot be recovered; "
+            "start a new optimization episode"
+        )
+    if ledger.ledger_path.is_file() and ledger.ledger_path.stat().st_size:
+        raise OptimizationRuntimeError("optimization episode state is missing")
+    memory_store.ensure_episode_scope(ledger_root)
+    return OptimizationEpisodeController(
+        episode_id=runtime.episode_id,
+        checkpoint_id="place",
+        mode=runtime.agent_mode,
+        budget=budget,
+        planner=planner,
+        executor=executor,
+        ledger=ledger,
+        clock=_monotonic,
+        incumbent=terminal_observation,
+        parent_manifest_sha256=parent_manifest,
+        objective=runtime.objective,
+        objective_alignment=runtime.objective_alignment,
+        task_memory_scope_sha256=memory_scope.scope_sha256,
+        task_memory_supplier=memory_store.snapshot,
+        execution_context=execution_context,
+        receipt_aware_planning=runtime.receipt_aware_planning,
+        knowledge_case_shots=runtime.knowledge_case_shots,
+        knowledge_case_pool_root=knowledge_case_pool_root,
+        max_in_flight_candidates=runtime.max_in_flight_candidates,
+        design_id=design_id, trend_noise_epsilon=runtime.trend_noise_epsilon,
+    )
+
+
+def _recover_controller(
+    runtime: OptimizationRuntimeContext,
+    planner: object,
+    executor: EccCandidateRerunAdapter,
+    ledger: OptimizationLedger,
+    ledger_root: Path,
+    memory_scope: OptimizationTaskMemoryScope,
+    memory_store: OptimizationTaskMemoryStore,
+    parent_manifest: str,
+    execution_context: Mapping[str, object],
+    knowledge_case_pool_root: Path | None, design_id: str | None = None,
+) -> OptimizationEpisodeController:
+    memory_store.verify_episode_scope(ledger_root)
+    controller = OptimizationEpisodeController.recover(
+        planner=planner,
+        executor=executor,
+        ledger=ledger,
+        clock=_monotonic,
+        task_memory_scope_sha256=memory_scope.scope_sha256,
+        task_memory_supplier=memory_store.snapshot,
+        execution_context=execution_context,
+        receipt_aware_planning=runtime.receipt_aware_planning,
+        knowledge_case_shots=runtime.knowledge_case_shots,
+        knowledge_case_pool_root=knowledge_case_pool_root,
+        max_in_flight_candidates=runtime.max_in_flight_candidates,
+        design_id=design_id, trend_noise_epsilon=runtime.trend_noise_epsilon,
+    )
+    if controller.objective != runtime.objective:
+        raise OptimizationRuntimeError(
+            "optimization objective does not match the recovered episode"
+        )
+    if controller.objective_alignment != runtime.objective_alignment:
+        raise OptimizationRuntimeError(
+            "objective alignment does not match the recovered episode"
+        )
+    if controller.parent_manifest_sha256 != parent_manifest:
+        raise OptimizationRuntimeError(
+            "optimization workspace does not match the recovered episode"
+        )
+    if (
+        controller.mode != runtime.agent_mode
+        or controller.knowledge_case_shots != runtime.knowledge_case_shots
+    ):
+        raise OptimizationRuntimeError(
+            "optimization treatment does not match the recovered episode"
+        )
+    return controller
+def _require_objective_metrics(
+    observation: TerminalObservation, objective: OptimizationObjectiveContract
+) -> None:
+    available = observation.objective_metrics
+    selected = (*objective.preserve_metrics, objective.primary_metric)
+    missing = [metric.value for metric in selected if metric not in available]
+    if missing:
+        raise OptimizationRuntimeError(
+            f"baseline objective metric is unavailable: {', '.join(missing)}"
+        )
+
+def _assemble_runner(
+    *,
+    runtime: OptimizationRuntimeContext,
+    workspace: Path,
+    controller: OptimizationEpisodeController,
+    executor: EccCandidateRerunAdapter,
+    routability_objective: RoutabilityObjectiveContract,
+    site_width_dbu: int,
+) -> OptimizationEpisodeRunner:
+    retrieval = OptimizationKnowledgeRetriever()
+    stop_event = threading.Event()
+    current_values = _current_values(
+        _incumbent_workspace(workspace, controller.incumbent_candidate_root_ref),
+        site_width_dbu,
+    )
+
+    def observation_supplier(current_budget: BudgetSnapshot):
+        incumbent = _incumbent_workspace(
+            workspace, controller.incumbent_candidate_root_ref
+        )
+        observation = build_stage_observation(incumbent, ECCStepName.PLACEMENT, budget=current_budget)
+        stage = controller.planning_stage(observation, runner.current_values)
+        if stage != observation.stage.value:
+            observation = build_stage_observation(incumbent, ECCStepName(stage), budget=current_budget)
+        return observation
+
+    def retrieval_supplier(observation, previous: OptimizationOutcomeKind | None):
+        active = controller.active_objective
+        request = build_optimization_retrieval_request(
+            task_id=runtime.episode_id,
+            observation=observation,
+            previous_intervention_outcome=previous,
+            primary_metric=(
+                active.active_primary_metric
+                if active is not None
+                else runtime.objective.primary_metric
+            ),
+            preserve_metrics=(
+                active.active_preserve_metrics
+                if active is not None
+                else runtime.objective.preserve_metrics
+            ),
+        )
+        return retrieval.retrieve(request)
+
+    def terminal_waiter(execution_id: str):
+        return _wait_for_terminal_receipt(
+            executor,
+            execution_id,
+            timeout_seconds=min(
+                _terminal_timeout_seconds(),
+                controller.budget.remaining_wall_time_seconds,
+            ),
+            stop_event=stop_event,
+        )
+
+    def terminal_waiter_any(execution_ids: tuple[str, ...]):
+        return _wait_for_any_terminal_receipt(
+            executor,
+            execution_ids,
+            timeout_seconds=min(
+                _terminal_timeout_seconds(),
+                controller.budget.remaining_wall_time_seconds,
+            ),
+            stop_event=stop_event,
+        )
+
+    def terminal_observation_supplier(_observation, receipt):
+        if receipt.evidence is None:
+            raise OptimizationRuntimeError(
+                "ECC terminal receipt has no candidate evidence"
+            )
+        return build_candidate_terminal_observation(workspace, receipt.evidence)
+
+    def stage_observation_supplier(
+        primary: StageObservation, stages: tuple[str, ...]
+    ):
+        incumbent = _incumbent_workspace(
+            workspace, controller.incumbent_candidate_root_ref
+        )
+        return {
+            stage: build_stage_observation(
+                incumbent, ECCStepName(stage), budget=primary.budget
+            )
+            for stage in stages
+        }
+
+    def current_values_supplier(incumbent_root_ref: str | None):
+        return _current_values(
+            _incumbent_workspace(workspace, incumbent_root_ref),
+            site_width_dbu,
+        )
+
+    runner = OptimizationEpisodeRunner(
+        controller=controller,
+        observation_supplier=observation_supplier,
+        retrieval_supplier=retrieval_supplier,
+        current_values=current_values,
+        terminal_waiter=terminal_waiter,
+        terminal_observation_supplier=terminal_observation_supplier,
+        objective=routability_objective,
+        stop_event=stop_event,
+        site_width_dbu=site_width_dbu,
+        terminal_waiter_any=terminal_waiter_any,
+        current_values_supplier=current_values_supplier,
+        stage_observation_supplier=stage_observation_supplier,
+    )
+    register_step_events = getattr(executor, "set_event_callback", None)
+    if callable(register_step_events):
+        register_step_events(runner.emit_step_event)
+
+    return runner
+
+
+def _parent_manifest_sha256(workspace: Path, terminal: TerminalObservation) -> str:
+    parameters_ref, _parameters = _runtime_parameters(workspace)
+    checkpoint_manifest = build_optimization_artifact_manifest(
+        workspace,
+        (
+            "home/flow.json",
+            parameters_ref,
+            "place_dreamplace/analysis/qor_metrics.json",
+        ),
+    )
+    return canonical_sha256(
+        {
+            "checkpoint_manifest_sha256": checkpoint_manifest.manifest_sha256,
+            "terminal_manifest_sha256": terminal.evidence_manifest_sha256,
+        }
+    )
+
+
+def _optimization_execution_context(
+    workspace: Path,
+    site_width_dbu: int,
+    parent_manifest: str,
+    ecc_revision: str,
+    *,
+    design_id: str | None = None,
+) -> dict[str, object]:
+    """Return only immutable, reproducible inputs used by domain fingerprints."""
+    if not isinstance(ecc_revision, str) or not ecc_revision.strip():
+        raise OptimizationRuntimeError("ECC revision is invalid")
+    design_id = design_id or _design_id(workspace)
+    parameters = _runtime_parameters(workspace)[1]
+    origin = workspace / "origin"
+    input_hashes: dict[str, str] = {}
+    rtl_files = sorted(
+        path
+        for path in origin.rglob("*")
+        if path.is_file()
+        and path.name.casefold().removesuffix(".gz").endswith(
+            (".v", ".sv", ".vh", ".svh", ".vhd", ".vhdl")
+        )
+    )
+    for key, files in (
+        ("rtl_sha256", rtl_files),
+        ("sdc_sha256", sorted(origin.glob("*.sdc"))),
+    ):
+        if not files:
+            raise OptimizationRuntimeError(f"optimization {key} input is unavailable")
+        hashes = [file_sha256(path) for path in files]
+        input_hashes[key] = (
+            hashes[0] if len(hashes) == 1 else canonical_sha256({"files": hashes})
+        )
+    filelist_ref = parameters.get("file_list")
+    if filelist_ref in (None, ""):
+        filelist_ref = next(
+            (
+                str(path.relative_to(workspace))
+                for path in (origin / "filelist", origin / "filelist.f")
+                if path.exists() or path.is_symlink()
+            ),
+            None,
+        )
+    try:
+        if filelist_ref is None:
+            # Direct RTL input has no filelist; bind its workspace-relative source list.
+            input_hashes["filelist_sha256"] = canonical_sha256(
+                {"rtl_files": [path.relative_to(workspace).as_posix() for path in rtl_files]}
+            )
+        else:
+            if not isinstance(filelist_ref, str):
+                raise ValueError("filelist path must be a string")
+            path = Path(filelist_ref)
+            relative = str(path.relative_to(workspace.resolve())) if path.is_absolute() else filelist_ref
+            input_hashes["filelist_sha256"] = file_sha256(_safe_workspace_file(workspace, relative))
+    except (OSError, ValueError) as exc:
+        raise OptimizationRuntimeError(
+            "optimization filelist_sha256 input is unsafe or unavailable"
+        ) from exc
+    try:
+        pdk_root = Path(parameters["pdk_root"])
+        tech_lef = pdk_root / "prtech" / "techLEF" / "N551P6M_ecos.lef"
+        pdk_sha256 = file_sha256(tech_lef)
+    except (KeyError, OSError, TypeError, ValueError, WorkspaceParametersError) as exc:
+        raise OptimizationRuntimeError(
+            "optimization PDK evidence is unavailable"
+        ) from exc
+    design_sha256 = canonical_sha256(
+        {
+            key: input_hashes[key]
+            for key in ("rtl_sha256", "filelist_sha256", "sdc_sha256")
+        }
+    )
+    return {
+        **input_hashes,
+        "design_id": design_id,
+        "design_sha256": design_sha256,
+        "pdk_sha256": pdk_sha256,
+        "parent_lineage_sha256": file_sha256(workspace / "home" / "flow.json"),
+        "parent_manifest_sha256": parent_manifest,
+        "ecc_revision": ecc_revision,
+        "site_width_dbu": site_width_dbu,
+        "seed": read_workspace_dreamplace_seed(workspace),
+    }
+
+
+def epsilon_artifact_path(workspace: Path) -> Path:
+    return workspace / ".agent" / "optimization" / "noise-epsilon.v1.json"
+
+
+def _load_trend_noise_epsilon(workspace: Path) -> dict[str, float]:
+    """Load the workspace-level default-replay calibration, failing closed.
+
+    Trend predicates must never silently fall back to a zero tolerance, and a
+    corrupt artifact is just as silent as a missing one.
+    """
+    path = epsilon_artifact_path(workspace)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise OptimizationRuntimeError(
+            "full-agent optimization needs the calibrated trend noise epsilon "
+            "(.agent/optimization/noise-epsilon.v1.json); run: "
+            "python -m ecos_agent.optimization.calibrate_workspace "
+            f"--workspace {workspace}"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise OptimizationRuntimeError(f"noise epsilon artifact is invalid: {path}") from exc
+    epsilon_payload = payload.get("epsilon") if isinstance(payload, dict) else None
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema_version") != "ecos.noise_epsilon.v1"
+        or not isinstance(epsilon_payload, dict)
+    ):
+        raise OptimizationRuntimeError(f"noise epsilon artifact is invalid: {path}")
+    epsilon: dict[str, float] = {}
+    for key, value in epsilon_payload.items():
+        if (
+            not isinstance(key, str)
+            or not key
+            or isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise OptimizationRuntimeError(f"noise epsilon artifact is invalid: {path}")
+        epsilon[key] = float(value)
+    return epsilon
+
+
+def _workspace(value: object) -> Path:
+    if not isinstance(value, str) or not value.strip():
+        raise OptimizationRuntimeError("optimization workspace is missing")
+    path = Path(value).expanduser()
+    if not path.is_absolute() or path.is_symlink() or not path.is_dir():
+        raise OptimizationRuntimeError("optimization workspace is unavailable")
+    return path.resolve()
+
+
+def _knowledge_case_pool_root(value: object) -> Path | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise OptimizationRuntimeError("knowledge case pool root is invalid")
+    path = Path(value).expanduser()
+    if not path.is_absolute() or path.is_symlink() or not path.is_dir():
+        raise OptimizationRuntimeError("knowledge case pool root is unavailable")
+    return path.resolve()
+
+
+def _incumbent_workspace(workspace: Path, candidate_root_ref: str | None) -> Path:
+    if candidate_root_ref is None:
+        return workspace
+    parts = Path(candidate_root_ref).parts
+    if len(parts) != 3 or parts[:2] != (".agent", "candidates") or not parts[2]:
+        raise OptimizationRuntimeError("incumbent candidate workspace is invalid")
+    candidate = workspace
+    for part in parts:
+        candidate /= part
+        if candidate.is_symlink():
+            raise OptimizationRuntimeError("incumbent candidate workspace is invalid")
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(workspace)
+    except (OSError, ValueError) as exc:
+        raise OptimizationRuntimeError(
+            "incumbent candidate workspace is invalid"
+        ) from exc
+    if not resolved.is_dir():
+        raise OptimizationRuntimeError("incumbent candidate workspace is invalid")
+    return resolved
+
+
+def _design_id(workspace: Path) -> str:
+    payload = _runtime_parameters(workspace)[1]
+    value = payload.get("design")
+    if not isinstance(value, str) or not _DESIGN_ID.fullmatch(value):
+        raise OptimizationRuntimeError("workspace design identifier is invalid")
+    return value
+
+
+def _optimization_rerun_runtime_seconds(workspace: Path) -> float:
+    try:
+        payload = json.loads(
+            (workspace / "home" / "flow.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OptimizationRuntimeError(
+            "optimization rerun flow evidence is unavailable"
+        ) from exc
+    steps = payload.get("steps")
+    if not isinstance(steps, list):
+        raise OptimizationRuntimeError(
+            "optimization rerun flow completion evidence is invalid"
+        )
+    total = 0.0
+    for stage in _OPTIMIZATION_RERUN_STAGES:
+        total += _successful_flow_stage_runtime_seconds(steps, stage)
+    if total <= 0:
+        raise OptimizationRuntimeError("optimization rerun runtime evidence is invalid")
+    return total
+
+
+def _successful_flow_stage_runtime_seconds(steps: list[object], stage: str) -> float:
+    matches = [
+        item for item in steps if isinstance(item, dict) and item.get("name") == stage
+    ]
+    if len(matches) != 1 or matches[0].get("state") != "Success":
+        raise OptimizationRuntimeError(
+            "optimization rerun flow completion evidence is invalid"
+        )
+    runtime = matches[0].get("runtime")
+    if not isinstance(runtime, str):
+        raise OptimizationRuntimeError("optimization rerun runtime evidence is invalid")
+    match = re.fullmatch(r"(\d+):(\d+):(\d+)", runtime.strip())
+    if match is None:
+        raise OptimizationRuntimeError("optimization rerun runtime evidence is invalid")
+    hours, minutes, seconds = (int(part) for part in match.groups())
+    if minutes >= 60 or seconds >= 60:
+        raise OptimizationRuntimeError("place-to-Harden runtime evidence is invalid")
+    return float(hours * 3600 + minutes * 60 + seconds)
+
+
+def _current_values(
+    workspace: Path, site_width_dbu: int
+) -> dict[str, bool | int | float]:
+    try:
+        parameters = _runtime_parameters(workspace)[1]
+        dreamplace = json.loads(
+            (workspace / "config" / "dreamplace_ecc.json").read_text(encoding="utf-8")
+        )
+        values = {
+            "place.target_density": dreamplace["target_density"],
+            "place.target_overflow": dreamplace["stop_overflow"],
+            "place.cell_padding_x": dreamplace["cell_padding_x"] / site_width_dbu,
+            "place.routability_opt": bool(dreamplace["routability_opt_flag"]),
+            "place.density_weight": dreamplace["density_weight"],
+            "floorplan.core_util": parameters["core"]["utilitization"],
+            "floorplan.aspect_ratio": parameters["core"]["aspect_ratio"],
+        }
+    except (KeyError, OSError, TypeError, ValueError, WorkspaceParametersError) as exc:
+        raise OptimizationRuntimeError("optimization parameters are invalid") from exc
+    if not isinstance(values["place.target_density"], (int, float)) or isinstance(
+        values["place.target_density"], bool
+    ):
+        raise OptimizationRuntimeError("target density parameter is invalid")
+    if (
+        type(values["place.cell_padding_x"]) not in {int, float}
+        or values["place.cell_padding_x"] < 0
+    ):
+        raise OptimizationRuntimeError("cell padding parameter is invalid")
+    return values
+
+
+def _ledger(root: Path):
+    return OptimizationLedger(root)
+
+
+def _site_width_dbu(workspace: Path) -> int:
+    try:
+        params = _runtime_parameters(workspace)[1]
+        pdk_root = Path(params["pdk_root"])
+        lef = pdk_root / "prtech" / "techLEF" / "N551P6M_ecos.lef"
+        text = lef.read_text(encoding="utf-8")
+    except (KeyError, OSError, TypeError, ValueError, WorkspaceParametersError) as exc:
+        raise OptimizationRuntimeError("PDK technology LEF is unavailable") from exc
+    units_match = re.search(r"DATABASE\s+MICRONS\s+(\d+)", text, re.IGNORECASE)
+    site_match = re.search(
+        r"SITE\s+(?:core7|CoreSite)\b(?P<body>.*?)END\s+(?:core7|CoreSite)",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    size_match = re.search(
+        r"SIZE\s+([0-9]+(?:\.[0-9]+)?)\s+BY",
+        site_match.group("body") if site_match else "",
+        re.IGNORECASE,
+    )
+    if not units_match or not size_match:
+        raise OptimizationRuntimeError("PDK site width is unavailable")
+    width = round(float(units_match.group(1)) * float(size_match.group(1)))
+    if width <= 0:
+        raise OptimizationRuntimeError("PDK site width is invalid")
+    return width
+
+
+def _runtime_parameters(workspace: Path) -> tuple[str, dict[str, Any]]:
+    try:
+        return read_workspace_parameters(workspace)
+    except WorkspaceParametersError as exc:
+        raise OptimizationRuntimeError("workspace parameters are unavailable") from exc

@@ -53,6 +53,22 @@ describe('EccJsonRpcClient', () => {
     })
   })
 
+  it('rejects failed writes without leaving an orphan request timer', async () => {
+    vi.useFakeTimers()
+    const error = new Error('ECC RPC sidecar stdin is not writable.')
+    const client = new EccJsonRpcClient({
+      writeFrame: () => {
+        throw error
+      },
+    })
+    try {
+      await expect(client.call('rpc.ping')).rejects.toBe(error)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      client.rejectPending(error)
+    }
+  })
+
   it('forwards JSON-RPC notifications without treating them as responses', () => {
     const notifications: unknown[] = []
     const client = new EccJsonRpcClient({

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type {
   EccFlowRunRequest,
   EccFlowRunResult,
@@ -18,12 +18,18 @@ import type {
   EccRuntimeEvent,
   EccRuntimeOperation,
   EccRuntimeOperationRequest,
+  EccCandidateCapabilitiesRequest,
+  EccCandidateCapabilitiesResult,
+  EccCandidateResumeRequest,
+  EccCandidateRerunRequest,
   EccRuntimeStartFlowRequest,
   EccRuntimeStartStepRequest,
   EccWorkspaceCloseResult,
   EccWorkspaceConfigurationUpdateRequest,
   EccWorkspaceCreateRequest,
   EccWorkspaceCreateResult,
+  EccWorkspaceDeriveRequest,
+  EccWorkspaceDeriveResult,
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceExportSignoffResult,
   EccWorkspaceHandleRequest,
@@ -317,6 +323,36 @@ export class EccWorkspaceRuntime {
     })
   }
 
+  async deriveWorkspace(
+    request: EccWorkspaceDeriveRequest,
+  ): Promise<EccWorkspaceDeriveResult> {
+    return this.enqueue('workspace.derive', undefined, async () => {
+      const client = await this.ensureStarted()
+      const response = await client.call<EccWorkspaceSessionResult>(
+        'workspace.derive',
+        {
+          cause: request.cause ?? 'workspace.derived',
+          command_id: request.commandId ?? '',
+          directory: request.directory,
+          reset_from_step: request.resetFromStep,
+          target_directory: request.targetDirectory,
+        },
+        { timeoutMs: 0 },
+      )
+      const session = this.sessions.activate(
+        response.directory,
+        response.workspaceId,
+        response.workspaceRevision ?? 1,
+      )
+      return {
+        directory: session.directory,
+        workspaceHandle: session.workspaceHandle,
+        workspaceId: session.eccWorkspaceId ?? undefined,
+        workspaceRevision: session.workspaceRevision,
+      }
+    })
+  }
+
   hasPendingRuntimeWork(): boolean {
     return this.isActive() || this.sidecarLifecycle.hasFinalizationBlocker()
   }
@@ -583,6 +619,64 @@ export class EccWorkspaceRuntime {
     })
   }
 
+  async candidateCapabilities(
+    request: EccCandidateCapabilitiesRequest,
+  ): Promise<EccCandidateCapabilitiesResult> {
+    const client = await this.ensureStarted()
+    this.requireCandidateCapability('candidate.capabilities')
+    const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
+    const result = await client.call<Record<string, unknown>>('candidate.capabilities', {
+      workspaceId,
+    })
+    return projectCandidateCapabilities(result)
+  }
+
+  async candidateRerun(request: EccCandidateRerunRequest): Promise<EccRuntimeOperation> {
+    this.clearCrashRecoverySuppression(request.workspaceHandle)
+    const client = await this.ensureStarted()
+    this.requireCandidateCapability('candidate.rerun')
+    this.sidecar.relocateLogFileFrom?.(this.boundDirectory)
+    const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
+    const operation = await client.call<EccRuntimeOperation>('candidate.rerun', {
+      candidateId: request.candidateId,
+      contextSha256: request.contextSha256,
+      endStep: request.endStep,
+      executionScope: request.executionScope,
+      expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+      ...(request.floorplanMode ? { floorplanMode: request.floorplanMode } : {}),
+      idempotencyKey: request.idempotencyKey,
+      parameterCardSha256: request.parameterCardSha256,
+      ...(request.parentCandidateRootRef
+        ? { parentCandidateRootRef: request.parentCandidateRootRef }
+        : {}),
+      patch: request.patch,
+      seed: request.seed,
+      targetStep: request.targetStep,
+      workspaceId,
+    })
+    return this.boundCandidateOperation(request.workspaceHandle, operation)
+  }
+
+  async candidateResume(
+    request: EccCandidateResumeRequest,
+  ): Promise<EccRuntimeOperation> {
+    this.clearCrashRecoverySuppression(request.workspaceHandle)
+    const client = await this.ensureStarted()
+    this.requireCandidateCapability('candidate.resume')
+    this.sidecar.relocateLogFileFrom?.(this.boundDirectory)
+    const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
+    const operation = await client.call<EccRuntimeOperation>('candidate.resume', {
+      candidateId: request.candidateId,
+      contextSha256: request.contextSha256,
+      expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+      idempotencyKey: request.idempotencyKey,
+      parameterCardSha256: request.parameterCardSha256,
+      seed: request.seed,
+      workspaceId,
+    })
+    return this.boundCandidateOperation(request.workspaceHandle, operation)
+  }
+
   async startStepOperation(
     request: EccRuntimeStartStepRequest,
   ): Promise<EccRuntimeOperation> {
@@ -609,13 +703,17 @@ export class EccWorkspaceRuntime {
   ): Promise<EccRuntimeOperation> {
     const client = await this.ensureStarted()
     await this.resolveEccWorkspaceId(request.workspaceHandle)
-    return await client.call<EccRuntimeOperation>('operation.status', {
+    const operation = await client.call<EccRuntimeOperation>('operation.status', {
       operationId: request.operationId,
     })
+    return this.boundCandidateOperation(request.workspaceHandle, operation)
   }
 
-  waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation> {
-    return this.operationTracker.waitFor(request.operationId)
+  async waitForOperation(
+    request: EccRuntimeOperationRequest,
+  ): Promise<EccRuntimeOperation> {
+    const operation = await this.operationTracker.waitFor(request.operationId)
+    return this.boundCandidateOperation(request.workspaceHandle, operation)
   }
 
   operationLogFile(request: EccRuntimeOperationRequest): string {
@@ -824,18 +922,23 @@ export class EccWorkspaceRuntime {
     }
     if (this.ready) return client
 
-    if (this.options.managementRpc) {
-      const helloResult = await client.call<Record<string, unknown>>('rpc.hello', {
-        version: 1,
-      })
-      this.managementHelloResult = helloResult
-    }
+    const helloResult = await client.call<Record<string, unknown>>('rpc.hello', {
+      version: 1,
+    })
+    this.managementHelloResult = helloResult
     this.ready = true
     this.emit({
       type: 'runtime.ready',
       ...(this.boundDirectory ? { workspaceDirectory: this.boundDirectory } : {}),
     })
     return client
+  }
+
+  private requireCandidateCapability(method: string): void {
+    const capabilities = helloCapabilities(this.managementHelloResult)
+    if (!capabilities.includes(method)) {
+      throw new Error(`ECC Runtime is missing required capability: ${method}`)
+    }
   }
 
   private async resolveEccWorkspaceId(workspaceHandle: string): Promise<string> {
@@ -1108,6 +1211,20 @@ export class EccWorkspaceRuntime {
     }
   }
 
+  private boundCandidateOperation(
+    workspaceHandle: string,
+    operation: EccRuntimeOperation,
+  ): EccRuntimeOperation {
+    if (!operation.workspaceId.includes('::candidate::') || operation.result == null) {
+      return operation
+    }
+    const directory = this.sessions.require(workspaceHandle).directory
+    return {
+      ...operation,
+      result: boundCandidateEvidence(directory, operation.result),
+    }
+  }
+
   private commitReconciledOperation(operation: EccRuntimeOperation): void {
     if (!this.operationTracker.reconcile(operation)) return
     this.cachedSnapshot = null
@@ -1211,6 +1328,76 @@ export class EccWorkspaceRuntime {
 
 function isFlowOperationMethod(method: string): boolean {
   return method === 'flow.run' || method === 'flow.run_step'
+}
+
+function helloCapabilities(helloResult: unknown): string[] {
+  if (typeof helloResult !== 'object' || helloResult === null) return []
+  const capabilities = (helloResult as { capabilities?: unknown }).capabilities
+  return Array.isArray(capabilities)
+    ? capabilities.filter((value): value is string => typeof value === 'string')
+    : []
+}
+
+const MAX_CANDIDATE_EVIDENCE_BYTES = 256 * 1024
+const CANDIDATE_EVIDENCE_REF_KEYS = new Set([
+  'candidateManifestRef',
+  'candidateRootRef',
+  'parameterApplicationReceiptRef',
+])
+
+function boundCandidateEvidence(
+  workspaceDirectory: string,
+  result: Record<string, unknown>,
+): Record<string, unknown> {
+  const encoded = Buffer.byteLength(JSON.stringify(result), 'utf8')
+  if (encoded > MAX_CANDIDATE_EVIDENCE_BYTES) {
+    throw new Error('Candidate evidence exceeds the bounded Product Command size')
+  }
+  for (const key of CANDIDATE_EVIDENCE_REF_KEYS) {
+    const value = result[key]
+    if (typeof value === 'string')
+      requireContainedWorkspacePath(workspaceDirectory, value)
+  }
+  return result
+}
+
+function requireContainedWorkspacePath(workspaceDirectory: string, value: string): void {
+  if (!value.trim() || value.includes('\0')) {
+    throw new Error('Candidate evidence path is invalid')
+  }
+  const root = resolve(workspaceDirectory)
+  const target = isAbsolute(value) ? resolve(value) : resolve(root, value)
+  const relativePath = relative(root, target)
+  if (relativePath.startsWith('..') || relativePath.split(sep).includes('..')) {
+    throw new Error('Candidate evidence path is outside the authorized Workspace')
+  }
+}
+
+function projectCandidateCapabilities(
+  result: Record<string, unknown>,
+): EccCandidateCapabilitiesResult {
+  const schema = result.schema
+  const schemaVersion = result.schema_version ?? result.schemaVersion
+  const targets = result.targets
+  if (typeof schema !== 'string' || !schema.trim()) {
+    throw new Error('Candidate capabilities schema is invalid')
+  }
+  if (!Number.isInteger(schemaVersion)) {
+    throw new Error('Candidate capabilities schema version is invalid')
+  }
+  if (!Array.isArray(targets)) {
+    throw new Error('Candidate capabilities targets are invalid')
+  }
+  const registrySha256 = result.registry_sha256 ?? result.registrySha256
+  return {
+    schema,
+    schemaVersion: Number(schemaVersion),
+    targets: targets.filter(
+      (item): item is Record<string, unknown> =>
+        typeof item === 'object' && item !== null && !Array.isArray(item),
+    ),
+    ...(typeof registrySha256 === 'string' ? { registrySha256 } : {}),
+  }
 }
 
 function shutdownBarrierFrom(error: unknown): RuntimeShutdownBarrier | null {

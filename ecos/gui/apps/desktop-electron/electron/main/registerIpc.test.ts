@@ -82,18 +82,21 @@ vi.mock('../services/menuService', () => ({
   setMenuActionEnabled,
 }))
 
-const { executeWorkspaceRerunMock, prepareWorkspaceRerunMock } = vi.hoisted(() => ({
-  executeWorkspaceRerunMock: vi.fn(),
-  prepareWorkspaceRerunMock: vi.fn(),
-}))
+const { executeWorkspaceRerunMock, verifyWorkspaceRerunContractMock } = vi.hoisted(
+  () => ({
+    executeWorkspaceRerunMock: vi.fn(),
+    verifyWorkspaceRerunContractMock: vi.fn(),
+  }),
+)
 
 vi.mock('../services/eccRpc/workspaceRerun', () => ({
   executeWorkspaceRerun: executeWorkspaceRerunMock,
-  prepareWorkspaceRerun: prepareWorkspaceRerunMock,
+  verifyWorkspaceRerunContract: verifyWorkspaceRerunContractMock,
 }))
 
 import { registerIpc, type DesktopBridgeServices } from './registerIpc'
 import { workspaceWindowRegistry } from '../services/workspaceWindowRegistry'
+import { getAgentOperationAssociation } from '../services/agent/agentOperationAssociations'
 
 type RegisteredHandler = (event: { sender: unknown }, ...args: unknown[]) => unknown
 
@@ -224,10 +227,14 @@ function registerHandlers(
     createWindow: vi.fn(),
     eccRuntimeService: {
       cancelOperation: vi.fn(),
+      candidateCapabilities: vi.fn(),
+      candidateRerun: vi.fn(),
+      candidateResume: vi.fn(),
       cancelOperationLegacy: vi.fn(),
       closeWorkspace: vi.fn(),
       createWorkspace: vi.fn(),
       describeWorkspaceSpec: vi.fn(),
+      deriveWorkspace: vi.fn(),
       engineeringSnapshot: vi.fn(),
       exportSignoff: vi.fn(),
       onEvent: vi.fn((_listener: (event: EccRuntimeEvent) => void) => () => undefined),
@@ -377,6 +384,33 @@ function closeBackendWorkspace(
   })
 }
 
+function mockAgentWorkspaceContext(
+  services: ReturnType<typeof registerHandlers>['services'],
+  revision = 1,
+) {
+  const directories = new Map<string, string>()
+  services.eccRuntimeService.openWorkspace.mockImplementation(
+    async (request: { directory: string }) => {
+      directories.set('workspace-1', request.directory)
+      return { directory: request.directory, workspaceHandle: 'workspace-1' }
+    },
+  )
+  services.eccRuntimeService.workspaceSnapshot.mockImplementation(
+    async (request: { workspaceHandle: string }) => ({
+      configuration: {
+        workspaceSpec: { design: { name: 'gcd' }, parameters: {} },
+      },
+      directory: directories.get(request.workspaceHandle),
+      engineeringSnapshot: { workspaceRevision: revision },
+    }),
+  )
+  services.eccRuntimeService.readWorkspaceStepConfiguration.mockResolvedValue({
+    reason: 'step_configuration_unavailable',
+    status: 'unavailable',
+    step: 'place',
+  })
+}
+
 function workspaceCreateRequest(
   request: Partial<EccWorkspaceCreateRequest>,
 ): EccWorkspaceCreateRequest {
@@ -391,6 +425,11 @@ function workspaceCreateRequest(
 
 function createWindowDouble(isMaximized = false) {
   return {
+    focus: vi.fn(),
+    isDestroyed: vi.fn(() => false),
+    isMinimized: vi.fn(() => false),
+    restore: vi.fn(),
+    show: vi.fn(),
     close: vi.fn(),
     isMaximized: vi.fn(() => isMaximized),
     maximize: vi.fn(),
@@ -413,7 +452,7 @@ describe('registerIpc', () => {
     openExternal.mockReset()
     openPath.mockReset()
     executeWorkspaceRerunMock.mockReset()
-    prepareWorkspaceRerunMock.mockReset()
+    verifyWorkspaceRerunContractMock.mockReset()
     showOpenDialog.mockReset()
     showMessageBox.mockReset()
     showSaveDialog.mockReset()
@@ -552,6 +591,34 @@ describe('registerIpc', () => {
       '/projects/demo',
       '/projects/demo/ws_1',
     )
+  })
+
+  it('rejects Parent manifest deletion while an Optimization Episode guards the window Workspace', async () => {
+    const agentRuntimeService = {
+      isOptimizationParentDirectoryGuarded: vi.fn(() => true),
+      onEvent: vi.fn(() => () => undefined),
+    } as unknown as DesktopBridgeServices['agentRuntimeService']
+    const { handlers, services } = registerHandlers(agentRuntimeService)
+    const sender = { id: 7, isDestroyed: vi.fn(() => false), once: vi.fn() }
+    const window = createWindowDouble()
+    fromWebContents.mockReturnValue(window)
+    workspaceWindowRegistry.register('/runs/parent', window)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManifestMutate)?.(
+        { sender },
+        {
+          mutation: { type: 'delete-workspace', workspaceId: 'workspace-1' },
+          projectRoot: '/runs/parent',
+        },
+      ),
+    ).resolves.toMatchObject({
+      error: {
+        code: 'OPTIMIZATION_PARENT_GUARDED',
+      },
+      ok: false,
+    })
+    expect(services.projectManifestService.mutate).not.toHaveBeenCalled()
   })
 
   it('matches Renderer cleanup acknowledgements to the sending window', async () => {
@@ -866,7 +933,15 @@ describe('registerIpc', () => {
       startSession: vi.fn(async (request) => ({ sessionId: request.sessionId })),
     } as unknown as DesktopBridgeServices['agentRuntimeService']
     const { handlers, services } = registerHandlers(agentRuntimeService)
-    services.eccRuntimeService.workspaceSnapshot.mockResolvedValue({
+    let currentHandle = 'workspace-1'
+    let currentRevision = 4
+    services.eccRuntimeService.openWorkspace.mockImplementation(
+      async (request: { directory: string }) => ({
+        directory: request.directory,
+        workspaceHandle: currentHandle,
+      }),
+    )
+    services.eccRuntimeService.workspaceSnapshot.mockImplementation(async () => ({
       configuration: {
         workspaceSpec: {
           design: { name: 'gcd' },
@@ -877,14 +952,32 @@ describe('registerIpc', () => {
         },
       },
       directory: '/runs/gcd',
-      engineeringSnapshot: { workspaceRevision: 4 },
-    })
+      engineeringSnapshot: { workspaceRevision: currentRevision },
+    }))
+    services.eccRuntimeService.readWorkspaceStepConfiguration.mockImplementation(
+      async (request: { step: string }) =>
+        request.step === 'place'
+          ? {
+              parameters: [{ param: 'place.target_density', value: 0.55 }],
+              status: 'available',
+              step: 'place',
+              stepId: 'place',
+              workspaceId: 'workspace-1',
+              workspaceRevision: currentRevision,
+            }
+          : {
+              reason: 'step_configuration_unavailable',
+              status: 'unavailable',
+              step: request.step,
+            },
+    )
     const sender = {
       id: 42,
       isDestroyed: vi.fn(() => false),
       once: vi.fn(),
     }
 
+    // Renderer real shape: directory only, no workspaceId.
     await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
       { sender },
       {
@@ -892,27 +985,26 @@ describe('registerIpc', () => {
         mode: 'workspace',
         providerId: 'ecos_agent',
         sessionId: 'session-1',
-        workspaceId: 'workspace-1',
       },
     )
 
     expect(agentRuntimeService?.startSession).toHaveBeenCalledWith(
       expect.objectContaining({
+        workspaceId: 'workspace-1',
         workspaceDesignId: 'gcd',
         workspaceRevision: 4,
         workspaceParameterValues: expect.objectContaining({
-          'place.target_density': 0.4,
+          // The place Step Option overrides the workspace-wide value.
+          'place.target_density': 0.55,
           'cts.skew_bound': 0.08,
         }),
       }),
     )
     expect(
       services.eccRuntimeService.readWorkspaceStepConfiguration,
-    ).not.toHaveBeenCalled()
+    ).toHaveBeenCalledWith({ step: 'place', workspaceHandle: 'workspace-1' })
 
-    services.eccRuntimeService.workspaceSnapshot.mockResolvedValue({
-      engineeringSnapshot: { workspaceRevision: 5 },
-    })
+    currentRevision = 5
     await handlers.get(desktopApiIpcChannels.agentSendMessage)?.(
       { sender },
       {
@@ -924,6 +1016,379 @@ describe('registerIpc', () => {
     expect(agentRuntimeService?.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ workspaceRevision: 5 }),
     )
+
+    // An idle-released handle is reopened and the session rebinds to it.
+    currentHandle = 'workspace-2'
+    currentRevision = 6
+    await handlers.get(desktopApiIpcChannels.agentSendMessage)?.(
+      { sender },
+      {
+        message: 'widen the die',
+        providerId: 'ecos_agent',
+        sessionId: 'session-1',
+      },
+    )
+    expect(agentRuntimeService?.sendMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        directory: '/runs/gcd',
+        workspaceId: 'workspace-2',
+        workspaceRevision: 6,
+      }),
+    )
+    expect(services.eccRuntimeService.workspaceSnapshot).toHaveBeenLastCalledWith({
+      workspaceHandle: 'workspace-2',
+    })
+  })
+
+  it('rebinds a home or source-workspace chat to the window workspace without restarting it', async () => {
+    const agentRuntimeService = {
+      answerInteraction: vi.fn(),
+      interrupt: vi.fn(),
+      onEvent: vi.fn(() => () => undefined),
+      sendMessage: vi.fn(),
+      start: vi.fn(),
+      startSession: vi.fn(async (request) => ({ sessionId: request.sessionId })),
+    } as unknown as DesktopBridgeServices['agentRuntimeService']
+    const { handlers, services } = registerHandlers(agentRuntimeService)
+    const sender = { id: 42, isDestroyed: vi.fn(() => false), once: vi.fn() }
+    mockAgentWorkspaceContext(services, 9)
+    await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
+      { sender },
+      { mode: 'home', providerId: 'ecos_agent', sessionId: 'home-chat' },
+    )
+    await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
+      { sender },
+      {
+        directory: '/runs/source',
+        mode: 'workspace',
+        providerId: 'ecos_agent',
+        sessionId: 'source-chat',
+      },
+    )
+    const window = createWindowDouble()
+    fromWebContents.mockReturnValue(window)
+    workspaceWindowRegistry.register('/runs/created', window)
+    await handlers.get(desktopApiIpcChannels.agentAnswerInteraction)?.(
+      { sender },
+      {
+        kind: 'choice',
+        optionId: 'optimize',
+        requestId: 'choice-1',
+        providerId: 'ecos_agent',
+        sessionId: 'home-chat',
+        directory: '/runs/forged',
+        workspaceId: 'forged',
+        workspaceRevision: 999,
+      },
+    )
+    expect(agentRuntimeService?.answerInteraction).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        directory: '/runs/created',
+        workspaceId: 'workspace-1',
+        workspaceRevision: 9,
+      }),
+    )
+    expect(agentRuntimeService?.answerInteraction).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ episodeId: expect.anything() }),
+    )
+    for (const sessionId of ['home-chat', 'source-chat']) {
+      await handlers.get(desktopApiIpcChannels.agentSendMessage)?.(
+        { sender },
+        {
+          directory: '/runs/created',
+          message: 'workspace result',
+          providerId: 'ecos_agent',
+          sessionId,
+          workspaceId: 'forged-handle',
+          workspaceRevision: 999,
+        },
+      )
+      expect(agentRuntimeService?.sendMessage).toHaveBeenLastCalledWith({
+        directory: '/runs/created',
+        message: 'workspace result',
+        providerId: 'ecos_agent',
+        sessionId,
+        workspaceId: 'workspace-1',
+        workspaceRevision: 9,
+      })
+      await handlers.get(desktopApiIpcChannels.agentSendMessage)?.(
+        { sender },
+        {
+          message: 'reduce wirelength',
+          providerId: 'ecos_agent',
+          sessionId,
+        },
+      )
+      expect(agentRuntimeService?.sendMessage).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          directory: '/runs/created',
+          workspaceId: 'workspace-1',
+          workspaceRevision: 9,
+        }),
+      )
+    }
+    expect(agentRuntimeService?.startSession).toHaveBeenCalledTimes(2)
+  })
+
+  it('filters Optimization Episodes by window-owned Agent Session and rejects cross-window control', async () => {
+    const controlOptimizationEpisode = vi.fn(async () => undefined)
+    const acknowledgeOptimizationEpisodeNotification = vi.fn()
+    const agentRuntimeService = {
+      acknowledgeOptimizationEpisodeNotification,
+      controlOptimizationEpisode,
+      interrupt: vi.fn(),
+      onEvent: vi.fn(() => () => undefined),
+      onOptimizationProjectionInvalidated: vi.fn(() => () => undefined),
+      optimizationProjection: vi.fn(() => ({
+        episodes: [
+          {
+            agentSessionId: 'session-a',
+            episodeId: 'episode-a',
+            inFlightCount: 1,
+            optimization: {
+              episode_id: 'episode-a',
+              schema_version: 'ecos.optimization_status.v2',
+              state: 'running',
+            },
+            parentWorkspaceDirectory: '/runs/a',
+            providerId: 'ecos_agent',
+            startedAt: 1,
+            state: 'running',
+            turnCount: 1,
+            updatedAt: 2,
+          },
+          {
+            agentSessionId: 'session-b',
+            episodeId: 'episode-b',
+            inFlightCount: 0,
+            optimization: {
+              episode_id: 'episode-b',
+              schema_version: 'ecos.optimization_status.v2',
+              state: 'paused',
+            },
+            parentWorkspaceDirectory: '/runs/b',
+            providerId: 'ecos_agent',
+            startedAt: 3,
+            state: 'paused',
+            turnCount: 2,
+            updatedAt: 4,
+          },
+        ],
+        generation: 4,
+      })),
+      sendMessage: vi.fn(),
+      start: vi.fn(),
+      startSession: vi.fn(async (request) => ({ sessionId: request.sessionId })),
+    } as unknown as DesktopBridgeServices['agentRuntimeService']
+    const { handlers } = registerHandlers(agentRuntimeService)
+    const senderA = { id: 41, isDestroyed: vi.fn(() => false), once: vi.fn() }
+    const senderB = { id: 42, isDestroyed: vi.fn(() => false), once: vi.fn() }
+    await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
+      { sender: senderA },
+      { mode: 'home', providerId: 'ecos_agent', sessionId: 'session-a' },
+    )
+    await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
+      { sender: senderB },
+      { mode: 'home', providerId: 'ecos_agent', sessionId: 'session-b' },
+    )
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.agentOptimizationProjection)?.({
+        sender: senderA,
+      }),
+    ).resolves.toMatchObject({
+      episodes: [expect.objectContaining({ episodeId: 'episode-a' })],
+      generation: 4,
+    })
+    await expect(
+      handlers.get(desktopApiIpcChannels.agentOptimizationControl)?.(
+        { sender: senderB },
+        {
+          action: 'stop',
+          episodeId: 'episode-a',
+          providerId: 'ecos_agent',
+          sessionId: 'session-a',
+        },
+      ),
+    ).resolves.toMatchObject({ ok: false })
+    expect(controlOptimizationEpisode).not.toHaveBeenCalled()
+
+    await handlers.get(desktopApiIpcChannels.agentOptimizationControl)?.(
+      { sender: senderA },
+      {
+        action: 'retry',
+        episodeId: 'episode-a',
+        providerId: 'ecos_agent',
+        sessionId: 'session-a',
+      },
+    )
+    expect(controlOptimizationEpisode).toHaveBeenCalledWith({
+      action: 'retry',
+      episodeId: 'episode-a',
+      providerId: 'ecos_agent',
+      sessionId: 'session-a',
+    })
+    await handlers.get(desktopApiIpcChannels.agentOptimizationNotificationAck)?.(
+      { sender: senderA },
+      {
+        episodeId: 'episode-a',
+        providerId: 'ecos_agent',
+        sessionId: 'session-a',
+        state: 'completed',
+      },
+    )
+    expect(acknowledgeOptimizationEpisodeNotification).toHaveBeenCalledWith({
+      episodeId: 'episode-a',
+      providerId: 'ecos_agent',
+      sessionId: 'session-a',
+      state: 'completed',
+    })
+  })
+
+  it('discovers and claims a persisted Episode from the window Parent Workspace', async () => {
+    const controlOptimizationEpisode = vi.fn(async () => undefined)
+    const agentRuntimeService = {
+      controlOptimizationEpisode,
+      onEvent: vi.fn(() => () => undefined),
+      onOptimizationProjectionInvalidated: vi.fn(() => () => undefined),
+      optimizationProjection: vi.fn(() => ({
+        episodes: [
+          {
+            agentSessionId: 'session-restored',
+            episodeId: 'episode-restored',
+            inFlightCount: 0,
+            optimization: {
+              episode_id: 'episode-restored',
+              schema_version: 'ecos.optimization_status.v2',
+              state: 'interrupted',
+            },
+            parentWorkspaceDirectory: '/runs/current',
+            providerId: 'ecos_agent',
+            startedAt: 1,
+            state: 'interrupted',
+            turnCount: 2,
+            updatedAt: 2,
+          },
+        ],
+        generation: 1,
+      })),
+    } as unknown as DesktopBridgeServices['agentRuntimeService']
+    const { handlers, services } = registerHandlers(agentRuntimeService)
+    const sender = {
+      id: 42,
+      isDestroyed: vi.fn(() => false),
+      once: vi.fn(),
+      send: vi.fn(),
+    }
+    const window = createWindowDouble()
+    fromWebContents.mockReturnValue(window)
+    workspaceWindowRegistry.register('/runs/current', window)
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/runs/current',
+      workspaceHandle: 'workspace-restored',
+    })
+    services.eccRuntimeService.workspaceSnapshot.mockResolvedValue({
+      configuration: { workspaceSpec: {} },
+      directory: '/runs/current',
+      engineeringSnapshot: { workspaceRevision: 9 },
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.agentOptimizationProjection)?.({ sender }),
+    ).resolves.toMatchObject({
+      episodes: [expect.objectContaining({ episodeId: 'episode-restored' })],
+    })
+    await handlers.get(desktopApiIpcChannels.agentOptimizationControl)?.(
+      { sender },
+      {
+        action: 'stop',
+        episodeId: 'episode-restored',
+        providerId: 'ecos_agent',
+        sessionId: 'session-restored',
+      },
+    )
+    expect(controlOptimizationEpisode).toHaveBeenCalledOnce()
+  })
+
+  it('rejects workspace rebinding outside the directory owned by the window', async () => {
+    const agentRuntimeService = {
+      interrupt: vi.fn(),
+      onEvent: vi.fn(() => () => undefined),
+      sendMessage: vi.fn(),
+      start: vi.fn(),
+      startSession: vi.fn(async (request) => ({ sessionId: request.sessionId })),
+    } as unknown as DesktopBridgeServices['agentRuntimeService']
+    const { handlers, services } = registerHandlers(agentRuntimeService)
+    const sender = { id: 42, isDestroyed: vi.fn(() => false), once: vi.fn() }
+    await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
+      { sender },
+      { mode: 'home', providerId: 'ecos_agent', sessionId: 'chat' },
+    )
+    const window = createWindowDouble()
+    fromWebContents.mockReturnValue(window)
+    workspaceWindowRegistry.register('/runs/current', window)
+    await expect(
+      handlers.get(desktopApiIpcChannels.agentSendMessage)?.(
+        { sender },
+        {
+          directory: '/runs/unrelated',
+          message: 'optimize',
+          providerId: 'ecos_agent',
+          sessionId: 'chat',
+        },
+      ),
+    ).resolves.toMatchObject({ ok: false })
+    expect(agentRuntimeService?.sendMessage).not.toHaveBeenCalled()
+    expect(services.eccRuntimeService.openWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('records renderer-registered agent operation associations for the owning session', async () => {
+    const agentRuntimeService = {
+      interrupt: vi.fn(),
+      onEvent: vi.fn(() => () => undefined),
+      sendMessage: vi.fn(),
+      start: vi.fn(),
+      startSession: vi.fn(async (request) => ({ sessionId: request.sessionId })),
+    } as unknown as DesktopBridgeServices['agentRuntimeService']
+    const { handlers } = registerHandlers(agentRuntimeService)
+    const sender = {
+      id: 42,
+      isDestroyed: vi.fn(() => false),
+      once: vi.fn(),
+    }
+    await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
+      { sender },
+      { providerId: 'ecos_agent', sessionId: 'session-1' },
+    )
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.agentRegisterOperationAssociation)?.(
+        { sender },
+        {
+          command: 'workspace.run',
+          operationId: 'operation-1',
+          providerId: 'ecos_agent',
+          sessionId: 'session-1',
+        },
+      ),
+    ).resolves.toBeUndefined()
+    expect(
+      getAgentOperationAssociation('ecos_agent:session-1', 'operation-1'),
+    ).toMatchObject({ command: 'workspace.run' })
+    await expect(
+      handlers.get(desktopApiIpcChannels.agentRegisterOperationAssociation)?.(
+        { sender: { id: 43 } },
+        {
+          command: 'workspace.run',
+          operationId: 'operation-2',
+          providerId: 'ecos_agent',
+          sessionId: 'session-1',
+        },
+      ),
+    ).resolves.toMatchObject({
+      error: { message: 'Unknown agent session for this window.' },
+      ok: false,
+    })
   })
 
   it('binds rerun tokens to the agent window and its source workspace', async () => {
@@ -961,14 +1426,18 @@ describe('registerIpc', () => {
       knownProjects: [{ name: 'runs', path: '/runs' }],
       mode: 'workspace' as const,
     }
+    mockAgentWorkspaceContext(services)
     await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
       { sender: owner },
       session,
     )
-    expect(agentRuntimeService?.startSession).toHaveBeenCalledWith({
-      ...session,
-      directory: '/runs/other',
-    })
+    expect(agentRuntimeService?.startSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ...session,
+        directory: '/runs/other',
+        workspaceId: 'workspace-1',
+      }),
+    )
 
     await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
       { sender: owner },
@@ -978,11 +1447,14 @@ describe('registerIpc', () => {
         directory: '/runs/frozen-tab',
       },
     )
-    expect(agentRuntimeService?.startSession).toHaveBeenCalledWith({
-      ...session,
-      sessionId: 'gui-session-frozen',
-      directory: '/runs/frozen-tab',
-    })
+    expect(agentRuntimeService?.startSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ...session,
+        sessionId: 'gui-session-frozen',
+        directory: '/runs/frozen-tab',
+        workspaceId: 'workspace-1',
+      }),
+    )
 
     emitAgentEvent?.({
       ...session,
@@ -1018,7 +1490,9 @@ describe('registerIpc', () => {
       error: { message: 'Workspace rerun source is not bound to this window.' },
       ok: false,
     })
-    expect(services.eccRuntimeService.openWorkspace).not.toHaveBeenCalled()
+    expect(services.eccRuntimeService.openWorkspace).not.toHaveBeenCalledWith(
+      expect.objectContaining({ directory: '/runs/gcd' }),
+    )
   })
 
   it('keeps a rerun token usable when source workspace binding is restored', async () => {
@@ -1033,7 +1507,7 @@ describe('registerIpc', () => {
       start: vi.fn(),
       startSession: vi.fn(async (request) => ({ sessionId: request.sessionId })),
     } as unknown as DesktopBridgeServices['agentRuntimeService']
-    const { handlers } = registerHandlers(agentRuntimeService)
+    const { handlers, services } = registerHandlers(agentRuntimeService)
     const window = {
       focus: vi.fn(),
       isDestroyed: vi.fn(() => false),
@@ -1064,7 +1538,16 @@ describe('registerIpc', () => {
       target_workspace: '/runs/gcd_rerun_place',
     }
     fromWebContents.mockReturnValue(window)
-    prepareWorkspaceRerunMock.mockResolvedValue({ directory: contract.target_workspace })
+    mockAgentWorkspaceContext(services)
+    verifyWorkspaceRerunContractMock.mockResolvedValue({
+      sourceWorkspace: contract.source_workspace,
+      targetWorkspace: contract.target_workspace,
+    })
+    services.eccRuntimeService.deriveWorkspace.mockResolvedValue({
+      directory: contract.target_workspace,
+      workspaceHandle: 'derived-handle',
+      workspaceRevision: 1,
+    })
     await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
       { sender: owner },
       session,
@@ -1081,10 +1564,21 @@ describe('registerIpc', () => {
     })
 
     workspaceWindowRegistry.register(contract.source_workspace, window)
+    await openBackendWorkspace(
+      handlers,
+      { sender: owner },
+      { directory: contract.source_workspace },
+    )
     await expect(
       prepare?.({ sender: owner }, { token: forwarded.workspaceRerunToken }),
     ).resolves.toMatchObject({ directory: contract.target_workspace })
-    expect(prepareWorkspaceRerunMock).toHaveBeenCalledWith(contract)
+    expect(verifyWorkspaceRerunContractMock).toHaveBeenCalledWith(contract)
+    expect(services.eccRuntimeService.deriveWorkspace).toHaveBeenCalledWith({
+      workspaceHandle: 'workspace-1',
+      directory: contract.source_workspace,
+      targetDirectory: contract.target_workspace,
+      resetFromStep: contract.target_step,
+    })
   })
 
   it('executes a prepared rerun through the target workspace handle owned by its window', async () => {
@@ -1130,7 +1624,21 @@ describe('registerIpc', () => {
     }
     fromWebContents.mockReturnValue(window)
     workspaceWindowRegistry.register(contract.source_workspace, window)
-    prepareWorkspaceRerunMock.mockResolvedValue({ directory: contract.target_workspace })
+    mockAgentWorkspaceContext(services)
+    verifyWorkspaceRerunContractMock.mockResolvedValue({
+      sourceWorkspace: contract.source_workspace,
+      targetWorkspace: contract.target_workspace,
+    })
+    services.eccRuntimeService.deriveWorkspace.mockResolvedValue({
+      directory: contract.target_workspace,
+      workspaceHandle: 'derived-handle',
+      workspaceRevision: 1,
+    })
+    await openBackendWorkspace(
+      handlers,
+      { sender: owner },
+      { directory: contract.source_workspace },
+    )
     await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
       { sender: owner },
       session,
@@ -1225,7 +1733,21 @@ describe('registerIpc', () => {
     }
     fromWebContents.mockReturnValue(window)
     workspaceWindowRegistry.register(contract.source_workspace, window)
-    prepareWorkspaceRerunMock.mockResolvedValue({ directory: contract.target_workspace })
+    mockAgentWorkspaceContext(services)
+    verifyWorkspaceRerunContractMock.mockResolvedValue({
+      sourceWorkspace: contract.source_workspace,
+      targetWorkspace: contract.target_workspace,
+    })
+    services.eccRuntimeService.deriveWorkspace.mockResolvedValue({
+      directory: contract.target_workspace,
+      workspaceHandle: 'derived-handle',
+      workspaceRevision: 1,
+    })
+    await openBackendWorkspace(
+      handlers,
+      { sender: owner },
+      { directory: contract.source_workspace },
+    )
     await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
       { sender: owner },
       { providerId: 'ecos_agent', sessionId: 'gui-session-alias' },
@@ -2840,6 +3362,73 @@ describe('registerIpc', () => {
       error: {
         message: 'Product Command does not own this Workspace handle',
         name: 'Error',
+      },
+      ok: false,
+    })
+    expect(services.eccRuntimeService.startFlowOperation).not.toHaveBeenCalled()
+  })
+
+  it('preserves the Optimization Parent Guard domain error across IPC', async () => {
+    const agentRuntimeService = {
+      isOptimizationParentGuarded: vi.fn(() => true),
+      onEvent: vi.fn(() => () => undefined),
+    } as unknown as DesktopBridgeServices['agentRuntimeService']
+    const { handlers, services } = registerHandlers(agentRuntimeService)
+    const event = { sender: { id: 'owner' } }
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+    })
+    await openBackendWorkspace(handlers, event, { directory: '/work/demo' })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.productCommandExecute)?.(event, {
+        command: 'workspace.run',
+        payload: {
+          expectedWorkspaceRevision: 1,
+          idempotencyKey: 'command-1',
+          workspaceHandle: 'workspace-handle-1',
+        },
+      }),
+    ).resolves.toEqual({
+      error: {
+        code: 'OPTIMIZATION_PARENT_GUARDED',
+        message: 'Optimization is running in the background.',
+        name: 'Error',
+      },
+      ok: false,
+    })
+    expect(services.eccRuntimeService.startFlowOperation).not.toHaveBeenCalled()
+  })
+
+  it('preserves the Parent Guard when the runtime handle was reopened', async () => {
+    const agentRuntimeService = {
+      isOptimizationParentGuarded: vi.fn(() => false),
+      isOptimizationParentDirectoryGuarded: vi.fn(
+        (directory: string) => directory === '/work/demo',
+      ),
+      onEvent: vi.fn(() => () => undefined),
+    } as unknown as DesktopBridgeServices['agentRuntimeService']
+    const { handlers, services } = registerHandlers(agentRuntimeService)
+    const event = { sender: { id: 'owner-reopened' } }
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-reopened',
+    })
+    await openBackendWorkspace(handlers, event, { directory: '/work/demo' })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.productCommandExecute)?.(event, {
+        command: 'workspace.run',
+        payload: {
+          expectedWorkspaceRevision: 7,
+          idempotencyKey: 'command-reopened',
+          workspaceHandle: 'workspace-handle-reopened',
+        },
+      }),
+    ).resolves.toMatchObject({
+      error: {
+        code: 'OPTIMIZATION_PARENT_GUARDED',
       },
       ok: false,
     })

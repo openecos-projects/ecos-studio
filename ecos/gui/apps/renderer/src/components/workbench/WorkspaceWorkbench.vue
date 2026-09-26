@@ -87,8 +87,8 @@ const codexStatusLabel = computed(() => {
   switch (codexStatus.value?.state) {
     case 'ready':
       return codexStatus.value.binPath ? 'Codex ready' : 'Agent ready'
-    case 'installed_needs_login':
-      return 'Codex login required'
+    case 'needs_api_key':
+      return 'Codex API key required'
     case 'installing':
       return 'Codex installing'
     case 'error':
@@ -324,12 +324,12 @@ defineSlots<{
 
 .workspace-workbench-left > *,
 .workspace-workbench-right > * {
-  min-height: 0;
   min-width: 0;
 }
 
 .workspace-workbench-left > * {
   flex: 1 1 auto;
+  min-height: 0;
 }
 
 .workspace-workbench-flow-status {
@@ -340,7 +340,7 @@ defineSlots<{
 
 .workspace-workbench-right > .workspace-workbench-inspector {
   display: flex;
-  flex: 1 1 auto;
+  flex: 1 1 0px;
   height: auto !important;
   min-height: clamp(184px, 30vh, 280px);
   min-width: 0;
