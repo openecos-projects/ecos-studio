@@ -1532,7 +1532,9 @@ export function useWorkspace() {
   }
 
   /**
-   * 从磁盘读取 workspace 数据，生成项目摘要快照
+   * 生成当前 workspace 的摘要快照（backend 经 runtime overview，frontend 读
+   * flow.json/parameters.json）并持久化到 recent_projects。
+   * 触发时机：flow 到达终态、进入 Backend Design 列表、关闭 workspace。
    */
   async function snapshotCurrentProject(
     isCurrent: () => boolean = () => true,
@@ -1794,6 +1796,13 @@ export function useWorkspace() {
       onTerminal: (directory) => {
         const resolvedDirectory = directory ?? currentProject.value?.path
         if (resolvedDirectory) clearFlowExecutionActiveForWorkspace(resolvedDirectory)
+        // The final step commit precedes the terminal event on the same
+        // channel, so the overview read here observes the settled state.
+        void snapshotCurrentProject(() =>
+          workspaceLifecycle.isCurrentSession(sessionId),
+        ).catch((error) =>
+          console.warn('Failed to snapshot workspace summary on flow terminal:', error),
+        )
       },
     })
     backendRuntimeEventClient.value = client
@@ -2252,6 +2261,7 @@ export function useWorkspace() {
     newProject,
     importProject,
     closeProject,
+    snapshotCurrentProject,
     updateWindowTitle,
     runtimeEventClient,
     runtimeEvents,

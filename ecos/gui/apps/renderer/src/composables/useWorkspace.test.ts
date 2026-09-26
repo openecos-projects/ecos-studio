@@ -1286,6 +1286,56 @@ describe('useWorkspace openProject', () => {
     ])
   })
 
+  it('refreshes the Backend recent-project summary on demand without closing the workspace', async () => {
+    const workspace = useWorkspace()
+    const project: Project = {
+      id: '/work/demo',
+      name: 'demo',
+      path: '/work/demo',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    workspace.currentProject.value = project
+    workspace.recentProjects.value = [{ ...project }]
+    vi.mocked(desktopApi.backendWorkspace.getOverview).mockResolvedValueOnce({
+      generation: 0,
+      workspaceContextId: 'context-a',
+      overview: {
+        revision: {
+          status: 'ready',
+          data: { workspaceId: 'engineering-a', workspaceRevision: 9 },
+          issues: [],
+        },
+        configuration: { status: 'unavailable', issues: [] },
+        flow: {
+          status: 'ready',
+          data: {
+            steps: [
+              { name: 'synthesis', order: 0, state: 'succeeded', stepId: 'synthesis' },
+              { name: 'floorplan', order: 1, state: 'not-started', stepId: 'floorplan' },
+            ],
+          },
+          issues: [],
+        },
+        keyMetrics: { status: 'unavailable', issues: [] },
+      },
+    } as never)
+
+    await workspace.snapshotCurrentProject()
+
+    expect(workspace.currentProject.value).not.toBeNull()
+    expect(workspace.recentProjects.value[0]).toEqual(
+      expect.objectContaining({
+        path: '/work/demo',
+        status: 'in_progress',
+        totalSteps: 2,
+        completedSteps: 1,
+      }),
+    )
+    expect(settingsData.get('recent_projects')).toEqual([
+      expect.objectContaining({ path: '/work/demo', status: 'in_progress' }),
+    ])
+  })
+
   it('reads canonical die_area utilization through committed Backend facts', async () => {
     const workspace = useWorkspace()
     const project: Project = {
@@ -2353,6 +2403,43 @@ describe('useWorkspace openProject', () => {
     expect(workspace.resourceVersions.value.step).toBe(before.step + 1)
     expect(workspace.resourceVersions.value.maps).toBe(before.maps + 1)
     expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
+  })
+
+  it('persists the recent-project summary when a flow reaches a terminal state', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+    vi.mocked(desktopApi.backendWorkspace.getOverview).mockResolvedValueOnce({
+      generation: 0,
+      workspaceContextId: 'context-a',
+      overview: {
+        revision: {
+          status: 'ready',
+          data: { workspaceId: 'engineering-a', workspaceRevision: 3 },
+          issues: [],
+        },
+        configuration: { status: 'unavailable', issues: [] },
+        flow: {
+          status: 'ready',
+          data: {
+            steps: [
+              { name: 'synthesis', order: 0, state: 'succeeded', stepId: 'synthesis' },
+            ],
+          },
+          issues: [],
+        },
+        keyMetrics: { status: 'unavailable', issues: [] },
+      },
+    } as never)
+
+    onRuntimeEvent?.(
+      backendProtocolEvent('operation.completed', {}, { operationId: 'job-rtl2gds' }),
+    )
+
+    await vi.waitFor(() => {
+      expect(settingsData.get('recent_projects')).toEqual([
+        expect.objectContaining({ path: '/work/demo', status: 'success' }),
+      ])
+    })
+    expect(workspace.currentProject.value?.path).toBe('/work/demo')
   })
 
   it('requests result resource reset after ECC prepares a full-flow rerun', async () => {
