@@ -1693,9 +1693,21 @@
   gap: 8px;
   min-height: 34px;
   padding: 6px 18px;
+  flex-wrap: wrap;
 }
 
 .project-maintenance-warning > i {
   color: var(--warning-color, #b7791f);
   font-size: 16px;
+}
+
+.project-maintenance-warning .inline-action {
+  background: transparent;
+  border: 0;
+  color: var(--accent-color, #2563eb);
+  cursor: pointer;
+  font: inherit;
+  margin-left: auto;
+  padding: 2px 4px;
+  text-decoration: underline;
 }

@@ -112,7 +112,12 @@
           </span>
           <div v-if="baselineConfirmId" class="dash-baseline-confirm" role="group">
             <small>Make {{ baselineConfirmId }} the baseline?</small>
-            <button type="button" class="dash-btn primary" @click="confirmBaseline">
+            <button
+              type="button"
+              class="dash-btn primary"
+              :disabled="mutationsDisabled"
+              @click="confirmBaseline"
+            >
               Confirm
             </button>
             <button type="button" class="dash-btn" @click="baselineConfirmId = null">
@@ -123,7 +128,7 @@
             <button
               type="button"
               class="dash-btn"
-              :disabled="!canSetBaseline"
+              :disabled="mutationsDisabled || !canSetBaseline"
               :title="setBaselineTitle"
               @click="requestBaseline(selectedWorkspaceId)"
             >
@@ -574,6 +579,7 @@ const SIGNOFF_DISPLAY: Record<QorGateStatus, { label: string; tone: string }> = 
 const props = defineProps<{
   findings?: ProjectStepFindingsProjectionState
   project: ProjectManagementProject
+  mutationsDisabled?: boolean
   selectedAnalysisTab: AnalysisTab
   selectedStep: string
   selectedWorkspaceId: string
@@ -763,6 +769,7 @@ const baselineDisplayLabel = computed(() =>
 )
 const canSetBaseline = computed(
   () =>
+    !props.mutationsDisabled &&
     Boolean(props.selectedWorkspaceId) &&
     props.selectedWorkspaceId !== props.project.qorTrendSummary.baselineWorkspaceId,
 )

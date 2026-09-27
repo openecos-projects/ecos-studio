@@ -21,6 +21,7 @@ const testState = vi.hoisted(() => ({
   registerProjectReadRoot: vi.fn(async (path: string) => path),
   comparisonProjection: { data: null as unknown, status: 'idle' },
   projectManifestOverride: null as unknown,
+  mutateProjectManifest: vi.fn(),
   selectProject: vi.fn(async (_projectRoot: string) => undefined),
   pickDirectory: vi.fn(async (_options?: unknown) => '/projects/demo'),
   stepOutputs: vi.fn(
@@ -105,18 +106,6 @@ vi.mock('@/utils/projectManagementRead', () => ({
       },
   ),
 }))
-vi.mock('@/utils/projectConsistency', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/utils/projectConsistency')>()),
-  checkProjectConsistency: vi.fn(async () => ({
-    doctor: 'project' as const,
-    status: 'ok' as const,
-    projectRoot: null,
-    checked: 0,
-    inconsistent: 0,
-    findings: [],
-  })),
-  repairProjectConsistency: vi.fn(),
-}))
 vi.mock('@/stores/backendProjectComparisonSession', () => ({
   useBackendProjectComparisonSession: () => ({
     dispose: vi.fn(),
@@ -136,6 +125,9 @@ vi.mock('./project-management/frontendProjectWorkspaceData', () => ({
     flowStates: { ws_0001: { prepare: 'success' } },
     analysisInputs: { ws_0001: {} },
   })),
+}))
+vi.mock('@/api/projectManifest', () => ({
+  mutateProjectManifest: (...args: unknown[]) => testState.mutateProjectManifest(...args),
 }))
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => ({
@@ -158,16 +150,8 @@ vi.mock('@/platform/desktop', () => ({
 
 import ProjectsView from './ProjectsView.vue'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
-import { useProjectConsistencyStore } from '@/stores/projectConsistencyStore'
 import { loadProjectHistory, rememberProjectHistoryEntry } from '@/utils/projectHistory'
-import {
-  importProjectManagementWorkspace,
-  readProjectManagementManifest,
-} from '@/utils/projectManagementRead'
-import {
-  checkProjectConsistency,
-  repairProjectConsistency,
-} from '@/utils/projectConsistency'
+import { importProjectManagementWorkspace } from '@/utils/projectManagementRead'
 import { readFrontendProjectWorkspaceData } from './project-management/frontendProjectWorkspaceData'
 import {
   consumeWorkspaceWizardRequest,
@@ -208,16 +192,8 @@ describe('ProjectsView background lifecycle integration', () => {
     testState.selectProject.mockReset()
     testState.selectProject.mockImplementation(async () => undefined)
     vi.mocked(readFrontendProjectWorkspaceData).mockClear()
-    vi.mocked(checkProjectConsistency).mockReset()
-    vi.mocked(checkProjectConsistency).mockResolvedValue({
-      doctor: 'project',
-      status: 'ok',
-      projectRoot: null,
-      checked: 0,
-      inconsistent: 0,
-      findings: [],
-    })
-    vi.mocked(repairProjectConsistency).mockReset()
+    testState.mutateProjectManifest.mockReset()
+    testState.mutateProjectManifest.mockResolvedValue(null)
     testState.pickDirectory.mockReset()
     testState.pickDirectory.mockResolvedValue('/projects/demo')
   })
@@ -539,6 +515,63 @@ describe('ProjectsView background lifecycle integration', () => {
 
     expect(wrapper.findAll('.project-workspace-tree')).toHaveLength(1)
     expect(wrapper.find('.project-list-preview-toggle').exists()).toBe(false)
+  })
+
+  describe('new project dialog', () => {
+    async function openNewProjectDialog(wrapper: VueWrapper) {
+      const trigger = wrapper
+        .findAll('button')
+        .find((button) => button.text().toLowerCase().includes('new project'))
+      expect(trigger).toBeDefined()
+      await trigger!.trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.new-project-dialog').exists()).toBe(true)
+    }
+
+    it('keeps the dialog open and shows an error when project creation fails', async () => {
+      testState.mutateProjectManifest.mockRejectedValue(new Error('ecc cli unavailable'))
+      const wrapper = shallowMount(ProjectsView)
+      await flushPromises()
+      await openNewProjectDialog(wrapper)
+
+      await wrapper.get('.new-project-dialog .path-picker button').trigger('click')
+      await flushPromises()
+      await wrapper
+        .get('.new-project-dialog footer button.primary-button')
+        .trigger('click')
+      await flushPromises()
+
+      expect(testState.mutateProjectManifest).toHaveBeenCalledOnce()
+      expect(wrapper.find('.new-project-dialog').exists()).toBe(true)
+      expect(wrapper.get('.new-project-dialog .modal-error').text()).toContain(
+        'project.json could not be updated',
+      )
+    })
+
+    it('creates the project and closes the dialog', async () => {
+      const { createProjectManifestDraft } = await import('@ecos-studio/shared')
+      testState.mutateProjectManifest.mockResolvedValue(
+        createProjectManifestDraft({
+          rootPath: '/projects/demo',
+          name: 'demo',
+          designName: 'gcd',
+          projectType: 'backend',
+        }),
+      )
+      const wrapper = shallowMount(ProjectsView)
+      await flushPromises()
+      await openNewProjectDialog(wrapper)
+
+      await wrapper.get('.new-project-dialog .path-picker button').trigger('click')
+      await flushPromises()
+      await wrapper
+        .get('.new-project-dialog footer button.primary-button')
+        .trigger('click')
+      await flushPromises()
+
+      expect(testState.mutateProjectManifest).toHaveBeenCalledOnce()
+      expect(wrapper.find('.new-project-dialog').exists()).toBe(false)
+    })
   })
 
   it('exposes the field names used by Quick Start project creation', async () => {

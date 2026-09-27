@@ -14,6 +14,8 @@ use the current CLI contract without requiring users to understand the old
 - Run migration through the ECC CLI with `--yes --plain`.
 - Support projects without `project.json` and legacy manifests whose workspace
   entries still point into `runs/`.
+- Support valid manifest projects created by older GUI versions whose
+  `ecc.toml` is missing or lacks required project/design/PDK/flow identity.
 - Reload the current manifest after migration and reconcile project state.
 - Keep a failed project inspectable through a read-only legacy projection and
   expose the CLI failure for retry.
@@ -38,10 +40,18 @@ flow ranges, or active workspace execution are not silently forced. ECC returns
 structured errors; a successful migration returns the moved workspace paths and
 the resulting manifest status.
 
+For an already-valid manifest project, migration also owns compatibility repair
+of `ecc.toml`. It may create the file or fill only missing values that can be
+proved from the validated manifest. Existing non-empty values are preserved.
+Malformed TOML, symlinks, non-regular files, and semantic table/value conflicts
+fail closed as `config_migration_failed`; Electron never reconstructs the file.
+The write uses the migration lock and the standard atomic text replacement.
+
 ### Electron main process
 
 Add a project migration coordinator around project opening. It classifies the
-project using filesystem presence only to decide whether to invoke the CLI, then
+project using legacy-layout presence plus a bounded TOML syntax/required-field
+probe to decide whether to invoke the CLI, then
 executes `ecc migrate --project <root> --yes --plain` asynchronously. The
 coordinator deduplicates concurrent requests for the same canonical project
 root. After a successful migration it runs `ecc project reconcile --project
@@ -63,6 +73,12 @@ The legacy model is transient and is not written to disk. Existing `ecc status`
 and `ecc log` CLI reads may provide workspace-level status while migration is
 blocked; detailed current snapshot-dependent views remain unavailable until
 migration succeeds.
+
+The current Electron projection marks this state as
+`project_migration: { status: "legacy-readonly", reason }`. Project Management
+uses that marker to disable mutations for the affected project and exposes a
+retry through the normal manifest refresh. A successful retry removes the
+transient marker because ECC has written the canonical manifest.
 
 ## State flow
 
@@ -100,13 +116,16 @@ migration error
 | v1 manifest with direct-child workspaces | Load normally; no migration |
 | No manifest with `runs/*` workspaces | Migrate automatically |
 | Existing manifest with `runs/*` workspaces | Use tolerant migration path |
+| Valid direct-child manifest, missing/incomplete `ecc.toml` | Repair config automatically, then reconcile |
+| Valid manifest, malformed/symlink/non-regular `ecc.toml` | Keep read-only and show reason; do not overwrite |
 | Malformed flow, collision, symlink, active run | Keep read-only and show reason |
 | Missing/incomplete engineering snapshot | Migration may finish; reconcile regenerates supported snapshots, otherwise keep affected workspace unavailable |
 
 ## Tests and validation
 
 - ECC migration tests for no-manifest legacy projects, legacy manifests with
-  `runs/` paths, collisions, malformed flow, active locks, and rollback.
+  `runs/` paths, missing/partial/malformed config, collisions, malformed flow,
+  active locks, and rollback.
 - Electron tests for migration classification, request deduplication, CLI
   arguments, reconcile/reload sequencing, and failure fallback.
 - Renderer tests for disabled mutations during migration, successful reload,

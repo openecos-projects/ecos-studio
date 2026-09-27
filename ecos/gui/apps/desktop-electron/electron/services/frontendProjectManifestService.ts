@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import { open, realpath, rename, stat, unlink } from 'node:fs/promises'
+import { mkdir, open, realpath, rename, stat, unlink } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import {
   applyFrontendProjectManifestMutation,
@@ -115,7 +115,11 @@ export class FrontendProjectManifestService {
     projectRoot: string,
     mutation: ProjectManifestMutation,
   ): Promise<{ manifest: ProjectManifest; cleanupPending?: boolean }> {
-    const root = await this.scope.resolveProjectRoot(projectRoot)
+    const root =
+      mutation.type === 'create' && this.scope.resolveProjectCreationRoot
+        ? await this.scope.resolveProjectCreationRoot(projectRoot)
+        : await this.scope.resolveProjectRoot(projectRoot)
+    if (mutation.type === 'create') await mkdir(root, { recursive: true })
     const path = join(root, 'project.json')
     const existingContent = await readOptionalManifest(path)
     const existing = existingContent ? parseProjectManifest(existingContent) : null

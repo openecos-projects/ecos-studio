@@ -19,9 +19,6 @@ export CMAKE_BUILD_PARALLEL_LEVEL="$build_jobs"
 export MAKEFLAGS="-j${build_jobs}"
 export NINJAFLAGS="-j${build_jobs}"
 
-printf '[ecc-wrapper] limiting native builds to %s job(s) (%s online CPU core(s))\n' \
-  "$build_jobs" "$cpu_count" >&2
-
 if [ "${ECOS_ECC_USE_NIX:-}" = "1" ]; then
   exec nix develop "$ECC_PROJECT" --command uv run --project "$ECC_PROJECT" ecc "$@"
 fi

@@ -124,6 +124,18 @@ describe('ProjectScopeService', () => {
     ).rejects.toThrow('outside the Project root')
   })
 
+  it('canonicalizes a new project target even when the final directory is absent', async () => {
+    const parent = await createTempDir('ecos-project-creation-parent-')
+    const service = projectScopeWithManifest()
+
+    await expect(service.resolveProjectCreationRoot(join(parent, 'gcd'))).resolves.toBe(
+      join(parent, 'gcd'),
+    )
+    await expect(
+      service.resolveProjectCreationRoot(join(parent, 'nested', 'gcd')),
+    ).resolves.toBe(join(parent, 'nested', 'gcd'))
+  })
+
   it('adds the workspace parent as a read root without replacing the active root', async () => {
     const projectRoot = await createTempDir('ecos-parent-project-root-')
     const workspaceRoot = join(projectRoot, 'runs', 'ws_0004')
