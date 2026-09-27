@@ -31,14 +31,26 @@ export interface EccCliResult {
 }
 
 export class EccCliCommandError extends Error {
+  readonly code?: string
+
   constructor(
     readonly exitCode: number,
     readonly stderr: string,
     readonly stdout: string,
   ) {
-    super(stderr.trim() || `ECC CLI exited with status ${exitCode}`)
+    const message =
+      stderr.trim() || stdout.trim() || `ECC CLI exited with status ${exitCode}`
+    super(message)
     this.name = 'EccCliCommandError'
+    this.code = eccErrorCode(message)
   }
+}
+
+function eccErrorCode(message: string): string | undefined {
+  const plain = message.match(/(?:^|\n)kind=error\s+error=([a-z][a-z0-9_]*)\b/)
+  if (plain) return plain[1]
+  const pretty = message.match(/(?:^|\n)error\s*\n\s+([a-z][a-z0-9_]*)\b/)
+  return pretty?.[1]
 }
 
 export class EccCliProcess {

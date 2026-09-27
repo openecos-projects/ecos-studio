@@ -198,7 +198,15 @@ export class ProjectManagementReadService {
       join(root, 'project.json'),
       PROJECT_MANIFEST_MAX_BYTES,
     )
-    if (!content) return null
+    if (!content) {
+      // A legacy project may not have a manifest yet. Let the ECC runtime run
+      // its idempotent migration once; virgin folders still resolve to null.
+      try {
+        return await this.projectManifestReader.load(root)
+      } catch {
+        return null
+      }
+    }
     const manifest = await this.projectManifestReader.load(root)
     if (manifest.project_type === 'frontend' || !this.readWorkspaceConfiguration)
       return manifest

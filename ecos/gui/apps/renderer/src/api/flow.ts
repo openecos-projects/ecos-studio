@@ -213,11 +213,13 @@ export interface RefreshConfigRequest {
   force?: boolean
   workspaceHandle?: string
   workspace_handle?: string
+  workspaceRevision?: number
 }
 
 export interface RefreshConfigResponse {
   directory: string
   refreshed: boolean
+  workspaceRevision?: number
 }
 
 export function refreshConfigApi(request: RequestData<RefreshConfigRequest>) {
@@ -225,6 +227,9 @@ export function refreshConfigApi(request: RequestData<RefreshConfigRequest>) {
   return getDesktopApi()
     .runtime.workspace.refreshConfig({
       designTool: designToolFromData(data),
+      ...(typeof data.workspaceRevision === 'number'
+        ? { expectedWorkspaceRevision: data.workspaceRevision }
+        : {}),
       ...(data.force === true ? { force: true } : {}),
       workspaceHandle: workspaceHandleFromData(data),
     })

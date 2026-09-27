@@ -121,6 +121,12 @@ describe('project history', () => {
         path: '/projects/gcd/ws_0002',
         lastOpened: '2026-07-02T09:00:00.000Z',
       },
+      {
+        id: '/projects/gcd/runs/ws_0003',
+        name: 'gcd/runs/ws_0003',
+        path: '/projects/gcd/runs/ws_0003',
+        lastOpened: '2026-07-02T10:00:00.000Z',
+      },
     ])
 
     const history = await loadProjectHistory()
@@ -131,7 +137,7 @@ describe('project history', () => {
         id: '/projects/gcd',
         name: 'gcd',
         path: '/projects/gcd',
-        lastOpened: new Date('2026-07-02T09:00:00.000Z'),
+        lastOpened: new Date('2026-07-02T10:00:00.000Z'),
         pdk: 'ics55',
         topModule: 'gcd',
       }),
@@ -140,7 +146,7 @@ describe('project history', () => {
       expect.objectContaining({
         id: '/projects/gcd',
         path: '/projects/gcd',
-        lastOpened: '2026-07-02T09:00:00.000Z',
+        lastOpened: '2026-07-02T10:00:00.000Z',
       }),
     ])
   })

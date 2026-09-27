@@ -14,6 +14,7 @@ import type { FrontendProjectManifestService } from './frontendProjectManifestSe
 
 export interface ProjectManifestScopeProvider {
   resolveProjectRoot(path: string): Promise<string>
+  resolveProjectCreationRoot?(path: string): Promise<string>
 }
 
 export interface ProjectManifestReplacementProvider {
@@ -72,9 +73,11 @@ export class ProjectManifestService {
       throw new Error('Project manifest mutation requires a project root')
     }
     validateProjectManifestMutation(request.mutation)
-    const projectRoot = await this.projectScopeProvider.resolveProjectRoot(
-      request.projectRoot,
-    )
+    const projectRoot =
+      request.mutation.type === 'create' &&
+      this.projectScopeProvider.resolveProjectCreationRoot
+        ? await this.projectScopeProvider.resolveProjectCreationRoot(request.projectRoot)
+        : await this.projectScopeProvider.resolveProjectRoot(request.projectRoot)
     return await this.enqueue(projectRoot, async () => {
       if (
         (request.mutation.type === 'create' &&

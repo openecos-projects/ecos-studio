@@ -52,6 +52,37 @@ describe('EccCliProcess', () => {
   })
 })
 
+it('uses stdout when a plain CLI error is not written to stderr', async () => {
+  const cli = new EccCliProcess({
+    resolveLaunch: () => ({
+      command: process.execPath,
+      args: [
+        '-e',
+        'process.stdout.write("kind=error error=workspace_busy reason=busy"); process.exit(1)',
+      ],
+    }),
+  })
+  await expect(cli.run([])).rejects.toMatchObject({
+    code: 'workspace_busy',
+    message: 'kind=error error=workspace_busy reason=busy',
+  })
+})
+
+it('extracts a stable code from the default pretty error output', async () => {
+  const cli = new EccCliProcess({
+    resolveLaunch: () => ({
+      command: process.execPath,
+      args: [
+        '-e',
+        'process.stdout.write("error\\n  derived_configs_modified config files changed\\n"); process.exit(1)',
+      ],
+    }),
+  })
+  await expect(cli.run([])).rejects.toMatchObject({
+    code: 'derived_configs_modified',
+  })
+})
+
 async function waitForFile(path: string): Promise<string> {
   const deadline = Date.now() + 5_000
   while (Date.now() < deadline) {
