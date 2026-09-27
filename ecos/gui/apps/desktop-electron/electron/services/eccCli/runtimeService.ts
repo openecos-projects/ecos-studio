@@ -2001,7 +2001,72 @@ export async function resolveOperationLogPath(options: {
   if (
     options.entry &&
     options.entry.run_id === options.operationId &&
-    options.entry.log_path === operationLogPath(options.operationId)
+    typeof options.entry.log_path === 'string'
+  ) {
+    const authorized = await resolveContainedLogPath(
+      options.workspaceDirectory,
+      options.entry.log_path,
+    )
+    if (authorized) return authorized
+  }
+  return fallback
+}
+
+/**
+ * Resolve a workspace-relative manifest path to a real file path that stays
+ * inside the workspace directory. Returns null when the path is absolute,
+ * traverses outside the workspace, or crosses a symlink (either itself or an
+ * ancestor), so callers can fall back to an authorized default.
+ */
+async function resolveContainedLogPath(
+  workspaceDirectory: string,
+  relativePath: string,
+): Promise<string | null> {
+  if (isAbsolute(relativePath)) return null
+  const root = resolve(workspaceDirectory)
+  const target = resolve(root, relativePath)
+  if (!isPathWithinRoot(target, root)) return null
+  let probe = target
+  // Reject symlinked targets or symlinked ancestors; the file may not exist
+  // yet while the nearest existing ancestor still must stay inside the root.
+  while (true) {
+    try {
+      const stats = await lstat(probe)
+      if (stats.isSymbolicLink()) return null
+      break
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return null
+    }
+    const parent = dirname(probe)
+    if (parent === probe) return null
+    probe = parent
+  }
+  const [resolvedProbe, resolvedRoot] = await Promise.all([
+    realpath(probe),
+    realpath(root),
+  ])
+  return isPathWithinRoot(resolvedProbe, resolvedRoot) ? target : null
+}
+
+/**
+ * Resolve the log file for one operation. The registry log_path is advisory:
+ * only trust it while it belongs to this exact run and resolves inside the
+ * workspace without crossing symlinks; anything else falls back to the
+ * run-id-derived default path (extend_cli.md §13.2).
+ */
+export async function resolveOperationLogPath(options: {
+  workspaceDirectory: string
+  operationId: string
+  entry: { log_path?: string; run_id: string } | null | undefined
+}): Promise<string> {
+  const fallback = resolve(
+    options.workspaceDirectory,
+    operationLogPath(options.operationId),
+  )
+  if (
+    options.entry &&
+    options.entry.run_id === options.operationId &&
+    typeof options.entry.log_path === 'string'
   ) {
     const authorized = await resolveContainedLogPath(
       options.workspaceDirectory,

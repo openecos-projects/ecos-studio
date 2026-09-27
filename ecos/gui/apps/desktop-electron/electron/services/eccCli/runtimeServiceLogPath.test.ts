@@ -36,6 +36,19 @@ describe('resolveOperationLogPath', () => {
     ).resolves.toBe(join(workspace, 'log', `${runId}.log`))
   })
 
+  it('trusts a contained registry log_path for the exact run', async () => {
+    const { workspace, runId } = await writeWorkspace()
+    await writeFile(join(workspace, 'home', 'custom.log'), 'registry log\n')
+
+    await expect(
+      resolveOperationLogPath({
+        workspaceDirectory: workspace,
+        operationId: runId,
+        entry: { run_id: runId, log_path: 'home/custom.log' },
+      }),
+    ).resolves.toBe(join(workspace, 'home', 'custom.log'))
+  })
+
   it('falls back to the run-id log when the registry entry belongs to another run', async () => {
     const { workspace, runId } = await writeWorkspace()
 
