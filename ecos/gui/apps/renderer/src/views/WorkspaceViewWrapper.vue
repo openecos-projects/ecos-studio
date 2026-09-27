@@ -7,7 +7,7 @@
       <LeftSidebar v-else-if="showLeftSidebar" />
       <div class="workspace-body">
         <div class="workspace-editor">
-          <router-view class="editor-view" />
+          <router-view />
         </div>
       </div>
     </main>
@@ -124,7 +124,7 @@ onBeforeRouteLeave(() => {
   height: 100%;
 }
 
-.editor-view {
+.workspace-editor > :deep(*) {
   flex: 1 1 0%;
   min-width: 0;
   min-height: 0;
