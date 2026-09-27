@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isProjectRuntimeProcessEntry,
   normalizeProjectManifestFlowStep,
   parseProjectManifestFlowStep,
   projectManifestForPresentation,
@@ -69,6 +70,27 @@ function backendManifestWithArchivedBackup(): ProjectManifest {
 }
 
 describe('project manifest presentation', () => {
+  it('validates the durable ECC process identity contract', () => {
+    const entry = {
+      schema_version: 1 as const,
+      run_id: '7ed8d4bb-7b54-4c37-8aa3-d1a2fed9a4ee',
+      pid: 18241,
+      pgid: 18241,
+      process_start_id: '987654321',
+      boot_id: 'boot-id',
+      host_id: 'host-id',
+      workspace_path: 'runs/ws_0001',
+      started_at: 1_710_000_000,
+      runtime_id: 'ecc-linux-x86_64-1.8.0+17',
+      log_path: 'home/run-logs/7ed8d4bb-7b54-4c37-8aa3-d1a2fed9a4ee.log',
+    }
+    expect(isProjectRuntimeProcessEntry(entry)).toBe(true)
+    expect(isProjectRuntimeProcessEntry({ ...entry, pgid: 1 })).toBe(false)
+    expect(isProjectRuntimeProcessEntry({ ...entry, workspace_path: '../escape' })).toBe(
+      false,
+    )
+  })
+
   it('keeps the canonical flow order and legacy display aliases', () => {
     expect(projectManifestFlowSteps).toEqual([
       'Synth',

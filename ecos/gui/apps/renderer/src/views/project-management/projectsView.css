@@ -1682,3 +1682,20 @@
     flex-direction: column;
   }
 }
+.project-maintenance-warning {
+  align-items: center;
+  background: color-mix(in srgb, var(--warning-color, #b7791f) 12%, var(--bg-secondary));
+  border-block: 1px solid
+    color-mix(in srgb, var(--warning-color, #b7791f) 45%, transparent);
+  color: var(--text-primary);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 18px;
+}
+
+.project-maintenance-warning > i {
+  color: var(--warning-color, #b7791f);
+  font-size: 16px;
+}

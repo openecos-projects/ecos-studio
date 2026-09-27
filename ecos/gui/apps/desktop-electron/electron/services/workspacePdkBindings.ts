@@ -1,10 +1,9 @@
-import { basename, resolve } from 'node:path'
+import { basename, dirname, resolve } from 'node:path'
 import {
   createProjectManifestDraft,
   serializeProjectManifest,
   type EccWorkspaceCreateRequest,
   type EccWorkspaceOpenRequest,
-  type EccWorkspacePdkConfigPersist,
   type MpcSpecReadResult,
   type PdkBindRequest,
   type PdkBinding,
@@ -33,20 +32,15 @@ export interface WorkspacePdkBindingDependencies {
     readManifest(projectRoot: string): Promise<ProjectManifest | null>
   }
   eccRuntimeService?: {
-    callRuntime?<T>(method: string, params: Record<string, unknown>): Promise<T>
+    discoverProject(directory: string): Promise<{
+      projectId: string
+      projectRoot: string
+    } | null>
+    readWorkspaceBindingRequirement(directory: string): Promise<Record<string, unknown>>
   }
   resourceManagerService?: {
     getResource(resourceId: string): Promise<unknown>
     readMpcSpec(resourceId: string): Promise<MpcSpecReadResult>
-  }
-  projectEccConfigService?: {
-    write(request: {
-      projectRoot: string
-      pdkRoot?: string
-      pdkName?: string
-      externalPaths?: string[]
-      overrides?: EccWorkspacePdkConfigPersist['overrides']
-    }): Promise<unknown>
   }
 }
 
@@ -151,7 +145,7 @@ export async function prepareWorkspaceCreateBinding(
         ...(requirement.version ? { version: requirement.version } : {}),
         ...manualPdkFiles(specPdk, requirement, installation.root),
       },
-      ...(mpcBinding ? { mpc: mpcBinding } : {}),
+      ...(mpcBinding ? { mpc: { template: mpcBinding.template } } : {}),
     },
     workspaceSpec: {
       ...request.workspaceSpec,
@@ -161,6 +155,7 @@ export async function prepareWorkspaceCreateBinding(
         ...(requirement.version ? { version: requirement.version } : {}),
       },
     },
+    ...(mpcBinding ? { projectMpc: mpcBinding.projectMpc } : {}),
   }
 }
 
@@ -169,18 +164,13 @@ export async function prepareWorkspaceOpenBinding(
   directory: string,
 ): Promise<EccWorkspaceOpenRequest> {
   const bindingRequirement = await dependencies.eccRuntimeService
-    ?.callRuntime?.<Record<string, unknown>>('workspace.binding_requirement', {
-      directory,
-    })
+    ?.readWorkspaceBindingRequirement(directory)
     .catch(() => null)
   const pdk = bindingRequirement
   if (!pdk || typeof pdk.familyId !== 'string') return { directory }
 
   const project = await dependencies.eccRuntimeService
-    ?.callRuntime?.<{ projectId: string; projectRoot: string } | null>(
-      'project.discover',
-      { directory },
-    )
+    ?.discoverProject(directory)
     .catch(() => null)
   if (!project) return { directory }
   const { projectId, projectRoot } = project
@@ -206,7 +196,7 @@ export async function prepareWorkspaceOpenBinding(
           ...(installation.version ? { version: installation.version } : {}),
           ...manualPdkFiles(pdk, pdkRequirement, installation.root),
         },
-        ...(mpcBinding ? { mpc: mpcBinding } : {}),
+        ...(mpcBinding ? { mpc: { template: mpcBinding.template } } : {}),
       },
     }
   } catch {
@@ -239,7 +229,10 @@ function manualPdkConfig(pdk: Record<string, unknown>): PdkRequirement['manualCo
 async function resolveMpcBinding(
   dependencies: WorkspacePdkBindingDependencies,
   value: unknown,
-): Promise<{ template: Record<string, unknown> } | null> {
+): Promise<{
+  projectMpc: NonNullable<EccWorkspaceCreateRequest['projectMpc']>
+  template: Record<string, unknown>
+} | null> {
   if (!isRecord(value) || !dependencies.resourceManagerService) return null
   const resourceId = value.resourceId
   const version = value.version
@@ -262,10 +255,21 @@ async function resolveMpcBinding(
     }
     const result = await dependencies.resourceManagerService.readMpcSpec(resourceId)
     const spec = validateMpcSpec(result.spec)
-    const design = spec.designs.find(
+    const designIndex = spec.designs.findIndex(
       (candidate) => candidate.design.design_name === designId,
     )
-    return design ? { template: design.coreTemplate } : null
+    const design = spec.designs[designIndex]
+    if (!design) return null
+    return {
+      projectMpc: {
+        designIndex,
+        displayName: resourceId.replace(/^mpc:/, ''),
+        resourceId,
+        root: dirname(dirname(result.spec_path)),
+        version,
+      },
+      template: design.coreTemplate,
+    }
   } catch {
     return null
   }
@@ -305,48 +309,4 @@ function manualPdkFiles(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-/**
- * Persist the wizard's ecc.toml PDK declarations (`[pdk] external_paths`
- * and `[pdk.overrides]`) when a workspace create/update carries them. Runs
- * inside the prepare step so a write failure aborts the create cleanly,
- * and the persistence payload never leaks into the ECC runtime request.
- */
-export async function persistEccPdkConfigFromCreate(
-  dependencies: WorkspacePdkBindingDependencies,
-  runtimeRequest: Omit<EccWorkspaceCreateRequest, 'eccPdkConfig'>,
-  persistConfig: EccWorkspacePdkConfigPersist | undefined,
-): Promise<void> {
-  if (!persistConfig) return
-  const hasExternalPaths = (persistConfig.externalPaths?.length ?? 0) > 0
-  const hasOverrides = persistConfig.overrides !== undefined
-  if (!hasExternalPaths && !hasOverrides) return
-  if (!dependencies.projectEccConfigService) {
-    throw new Error('Project ecc.toml persistence is unavailable')
-  }
-  if (!runtimeRequest.projectRoot) {
-    // ecc.toml is a project declaration; without a project root there is
-    // nothing sensible to persist against (renderer requests always carry
-    // one — standalone workspaces use the target directory itself).
-    throw new Error('ecc.toml persistence requires a project root')
-  }
-
-  const projectRoot = runtimeRequest.projectRoot
-  const bindingPdk = isRecord(runtimeRequest.workspaceBindings.pdk)
-    ? runtimeRequest.workspaceBindings.pdk
-    : {}
-  const specPdk = isRecord(runtimeRequest.workspaceSpec.pdk)
-    ? runtimeRequest.workspaceSpec.pdk
-    : {}
-  await dependencies.projectEccConfigService.write({
-    projectRoot,
-    ...(typeof bindingPdk.root === 'string' && bindingPdk.root
-      ? { pdkRoot: bindingPdk.root }
-      : {}),
-    ...(typeof specPdk.familyId === 'string' && specPdk.familyId
-      ? { pdkName: specPdk.familyId }
-      : {}),
-    ...persistConfig,
-  })
 }

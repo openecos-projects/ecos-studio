@@ -1,5 +1,5 @@
 import type { EccRuntimeEvent } from '@ecos-studio/shared'
-import type { EccRpcRuntimeService } from './eccRpc/runtimeService'
+import type { EccRpcRuntimeService } from './frontendRpc/runtimeService'
 import { describe, expect, it, vi } from 'vitest'
 
 import { FrontendRpcRuntimeService } from './frontendRpcRuntimeService'

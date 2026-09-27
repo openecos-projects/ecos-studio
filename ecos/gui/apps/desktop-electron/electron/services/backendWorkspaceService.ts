@@ -68,6 +68,9 @@ interface BackendWorkspaceServiceOptions {
   snapshotWatcherFactory?: (
     callbacks: ProjectComparisonFileWatcherCallbacks,
   ) => ProjectComparisonFileWatcher
+  runtimeStateProvider?: {
+    isWorkspaceRuntimeActive(directory: string): boolean
+  }
 }
 
 interface WorkspaceContext {
@@ -810,7 +813,10 @@ export class BackendWorkspaceService {
     watchedRoots: string[],
   ): void {
     const createWatcher = this.options.snapshotWatcherFactory
-    const watchKey = watchedRoots
+    const snapshotRoots = watchedRoots.filter(
+      (root) => !this.options.runtimeStateProvider?.isWorkspaceRuntimeActive(root),
+    )
+    const watchKey = snapshotRoots
       .map((root) => resolve(root))
       .sort()
       .join('\0')
@@ -828,10 +834,10 @@ export class BackendWorkspaceService {
     })
     context.watcher = watcher
     context.watchKey = watchKey
-    context.watchedRoots = watchedRoots
+    context.watchedRoots = snapshotRoots
     void Promise.all([
       watcher.startProject(dirname(workspaceRoot)),
-      watcher.reconcile(dirname(workspaceRoot), watchedRoots),
+      watcher.reconcile(dirname(workspaceRoot), snapshotRoots),
     ]).catch((error) => {
       if (context.watcher === watcher) {
         context.watcher = undefined

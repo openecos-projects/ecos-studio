@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { createEccRuntimeEnv } from './eccRpc/runtimeEnv'
+import { createEccRuntimeEnv } from './eccCli/runtimeEnv'
 import { ChipViewerService } from './chipViewerService'
 
 describe('development wrappers', () => {

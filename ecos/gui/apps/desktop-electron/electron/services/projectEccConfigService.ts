@@ -1,11 +1,11 @@
 /**
- * Reads and writes the PDK section of a project's ecc.toml.
+ * Reads the PDK section of a project's ecc.toml and submits writes to ECC CLI.
  *
  * The wizard records external PDK directories (macro LEF/lib pools outside
  * the imported PDK root) as `[pdk] external_paths` and the manual resource
- * selection as `[pdk.overrides] tech/lefs/libs`. Edits go through the
- * layout-preserving eccTomlEdit helpers so ECC CLI comments, ordering, and
- * unknown keys survive every GUI write.
+ * selection as `[pdk.overrides] tech/lefs/libs`. The GUI validates selected
+ * filesystem resources, then submits one atomic `ecc project apply` mutation.
+ * ECC remains the only writer of project configuration.
  *
  * Authorization model: the target is always `<projectRoot>/ecc.toml` where
  * projectRoot is the user-selected project directory (explicit wizard
@@ -15,7 +15,7 @@
  * rejects anything that is not an existing directory.
  */
 
-import { readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { basename, isAbsolute, join, relative, sep } from 'node:path'
 import { realpath } from 'node:fs/promises'
 import { parse as parseToml } from 'smol-toml'
@@ -24,13 +24,9 @@ import type {
   ProjectEccPdkConfigReadResult,
   ProjectEccPdkConfigWriteRequest,
 } from '@ecos-studio/shared'
-import { removeScopedKey, setScopedKey } from './eccTomlEdit'
 
 const OVERRIDE_KEYS = ['tech', 'lefs', 'libs'] as const
 type OverrideKey = (typeof OVERRIDE_KEYS)[number]
-
-const PDK_TABLE = 'pdk'
-const PDK_OVERRIDES_TABLE = 'pdk.overrides'
 
 /** Serialized per ecc.toml so read-modify-write cycles never interleave. */
 const writeChains = new Map<string, Promise<unknown>>()
@@ -90,6 +86,14 @@ function pdkTableOf(document: Record<string, unknown>): Record<string, unknown> 
 }
 
 export class ProjectEccConfigService {
+  constructor(
+    private readonly applyProject: (
+      projectRoot: string,
+      sets: readonly string[],
+      unsets: readonly string[],
+    ) => Promise<void>,
+  ) {}
+
   async read(projectRoot: string): Promise<ProjectEccPdkConfigReadResult> {
     const eccTomlPath = await resolveProjectEccTomlPath(projectRoot)
     let text: string
@@ -133,45 +137,28 @@ export class ProjectEccConfigService {
   ): Promise<ProjectEccPdkConfigReadResult> {
     const externalPaths = await this.resolveExternalPaths(request)
     const overrides = await this.resolveOverrides(request)
-    let text = await this.readCurrentText(eccTomlPath)
-    if (text === null) {
-      text = this.newDocument(request)
+    const sets: string[] = []
+    const unsets: string[] = []
+    const setOrUnset = (key: string, value: string | string[] | undefined) => {
+      if (value === undefined) return
+      if (value === '' || (Array.isArray(value) && value.length === 0)) {
+        unsets.push(key)
+      } else {
+        sets.push(`${key}=${Array.isArray(value) ? JSON.stringify(value) : value}`)
+      }
     }
-
-    if (request.externalPaths) {
-      text = externalPaths.length
-        ? setScopedKey(text, PDK_TABLE, 'external_paths', externalPaths)
-        : (removeScopedKey(text, PDK_TABLE, 'external_paths') ?? text)
+    setOrUnset('pdk.name', request.pdkName)
+    setOrUnset('pdk.root', request.pdkRoot)
+    if (request.externalPaths !== undefined) {
+      setOrUnset('pdk.external_paths', externalPaths)
     }
     for (const key of OVERRIDE_KEYS) {
-      const value = overrides[key]
-      if (value === undefined) continue
-      const isEmpty = Array.isArray(value) ? value.length === 0 : !value
-      text = isEmpty
-        ? (removeScopedKey(text, PDK_OVERRIDES_TABLE, key) ?? text)
-        : setScopedKey(text, PDK_OVERRIDES_TABLE, key, value)
+      setOrUnset(`pdk.overrides.${key}`, overrides[key])
     }
-
-    await this.writeAtomic(eccTomlPath, text)
+    if (sets.length || unsets.length) {
+      await this.applyProject(request.projectRoot, sets, unsets)
+    }
     return this.read(request.projectRoot)
-  }
-
-  private async readCurrentText(eccTomlPath: string): Promise<string | null> {
-    try {
-      return await readFile(eccTomlPath, 'utf-8')
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
-      throw error
-    }
-  }
-
-  private newDocument(request: ProjectEccPdkConfigWriteRequest): string {
-    const lines = ['[pdk]']
-    if (request.pdkName?.trim())
-      lines.push(`name = ${JSON.stringify(request.pdkName.trim())}`)
-    if (request.pdkRoot?.trim())
-      lines.push(`root = ${JSON.stringify(request.pdkRoot.trim())}`)
-    return `${lines.join('\n')}\n`
   }
 
   private async resolveExternalPaths(
@@ -252,21 +239,5 @@ export class ProjectEccConfigService {
       if (code === 'ENOENT') throw new Error(`${label} does not exist: ${path}`)
       throw error
     }
-  }
-
-  private async writeAtomic(eccTomlPath: string, text: string): Promise<void> {
-    const temporaryPath = `${eccTomlPath}.tmp`
-    let previousMode: number | undefined
-    try {
-      previousMode = (await stat(eccTomlPath)).mode & 0o777
-    } catch {
-      // New file; keep default permissions.
-    }
-    await writeFile(
-      temporaryPath,
-      text,
-      previousMode === undefined ? {} : { mode: previousMode },
-    )
-    await rename(temporaryPath, eccTomlPath)
   }
 }

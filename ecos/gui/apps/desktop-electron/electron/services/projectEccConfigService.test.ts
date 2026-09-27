@@ -1,8 +1,9 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
+import { removeScopedKey, setScopedKey } from './eccTomlEdit'
 import { ProjectEccConfigService } from './projectEccConfigService'
 
 const CLI_ECC_TOML = `# preset: rtl2gds | pdk: ics55
@@ -24,6 +25,7 @@ describe('ProjectEccConfigService', () => {
   let pdkRoot: string
   let externalRoot: string
   let service: ProjectEccConfigService
+  const applyProject = vi.fn()
 
   const eccTomlPath = () => join(projectRoot, 'ecc.toml')
 
@@ -31,7 +33,27 @@ describe('ProjectEccConfigService', () => {
     projectRoot = await mkdtemp(join(tmpdir(), 'ecc-config-project-'))
     pdkRoot = await mkdtemp(join(tmpdir(), 'ecc-config-pdk-'))
     externalRoot = await mkdtemp(join(tmpdir(), 'ecc-config-macros-'))
-    service = new ProjectEccConfigService()
+    applyProject.mockImplementation(
+      async (root: string, sets: readonly string[], unsets: readonly string[]) => {
+        const target = join(root, 'ecc.toml')
+        let text = await readFile(target, 'utf-8').catch(() => '[pdk]\n')
+        for (const assignment of sets) {
+          const separator = assignment.indexOf('=')
+          const path = assignment.slice(0, separator)
+          const raw = assignment.slice(separator + 1)
+          const split = path.lastIndexOf('.')
+          const value = raw.startsWith('[') ? JSON.parse(raw) : raw
+          text = setScopedKey(text, path.slice(0, split), path.slice(split + 1), value)
+        }
+        for (const path of unsets) {
+          const split = path.lastIndexOf('.')
+          text =
+            removeScopedKey(text, path.slice(0, split), path.slice(split + 1)) ?? text
+        }
+        await writeFile(target, text, 'utf-8')
+      },
+    )
+    service = new ProjectEccConfigService(applyProject)
     await mkdir(join(pdkRoot, 'lef'), { recursive: true })
     await writeFile(join(pdkRoot, 'lef', 'tech.lef'), 'tech\n')
     await writeFile(join(pdkRoot, 'lef', 'std.lef'), 'std\n')
@@ -92,7 +114,7 @@ describe('ProjectEccConfigService', () => {
 
     expect(result.exists).toBe(true)
     expect(result.pdkName).toBe('ics55')
-    expect(result.pdkRoot).toBe('/nonexistent/pdk')
+    expect(result.pdkRoot).toBe(pdkRoot)
     expect(result.externalPaths).toEqual([externalRoot])
     // In-root entries relativize; external macro files stay absolute.
     expect(result.overrides).toEqual({
@@ -107,6 +129,14 @@ describe('ProjectEccConfigService', () => {
     expect(text).toContain('target_density = 0.2')
     expect(text).toContain(`external_paths = ["${externalRoot}"]`)
     expect(text).toContain(`lefs = ["lef/std.lef", "${join(externalRoot, 'sram.lef')}"]`)
+    expect(applyProject).toHaveBeenLastCalledWith(
+      projectRoot,
+      expect.arrayContaining([
+        `pdk.external_paths=["${externalRoot}"]`,
+        'pdk.overrides.tech=lef/tech.lef',
+      ]),
+      [],
+    )
   })
 
   it('clears external paths and override keys on empty writes', async () => {

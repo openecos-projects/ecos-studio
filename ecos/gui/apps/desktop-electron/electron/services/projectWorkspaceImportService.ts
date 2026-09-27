@@ -6,7 +6,7 @@ import type {
   ProjectManifest,
   ProjectManifestMutationRequest,
 } from '@ecos-studio/shared'
-import { EccJsonRpcError } from './eccRpc/jsonRpcClient'
+import { EccJsonRpcError } from './frontendRpc/jsonRpcClient'
 import { isPathWithinRoot } from './pathScope'
 
 export class ProjectWorkspaceImportError extends Error {

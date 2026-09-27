@@ -24,12 +24,20 @@ function createService(
   callRuntime = vi.fn(),
   replacement?: ProjectManifestReplacementProvider,
 ) {
+  const runtime = {
+    discoverProject: (directory: string) =>
+      callRuntime('project.discover', { directory }),
+    loadProjectManifest: (root: string) =>
+      callRuntime('project.manifest.load', { projectRoot: root }),
+    mutateProjectManifest: (root: string, mutation: unknown) =>
+      callRuntime('project.manifest.mutate', { projectRoot: root, mutation }),
+  }
   return {
     callRuntime,
     service: new ProjectManifestService(
       { resolveProjectRoot: async (path) => path },
       replacement,
-      { callRuntime },
+      runtime,
     ),
   }
 }
@@ -164,7 +172,7 @@ describe('ProjectManifestService', () => {
     ).rejects.toThrow('registration changed')
   })
 
-  it('keeps directory replacement in Electron and Manifest mutation in ECC', async () => {
+  it('delegates backend directory deletion entirely to ECC CLI', async () => {
     const callRuntime = vi
       .fn()
       .mockResolvedValueOnce({
@@ -198,7 +206,7 @@ describe('ProjectManifestService', () => {
 
     expect(
       replacement.prepareManagedProjectWorkspaceDirectoryReplacement,
-    ).toHaveBeenCalledWith(projectRoot, 'ws-1', `${projectRoot}/ws-1`)
+    ).not.toHaveBeenCalled()
     expect(callRuntime).toHaveBeenLastCalledWith('project.manifest.mutate', {
       projectRoot,
       mutation: {
@@ -207,8 +215,6 @@ describe('ProjectManifestService', () => {
         deleteDirectory: true,
       },
     })
-    expect(replacement.finalizeProjectDirectoryReplacement).toHaveBeenCalledWith(
-      'replace-1',
-    )
+    expect(replacement.finalizeProjectDirectoryReplacement).not.toHaveBeenCalled()
   })
 })
