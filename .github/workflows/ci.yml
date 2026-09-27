@@ -108,6 +108,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Checkout ECC submodule
+        # packages/shared snapshot contract tests read the canonical fixtures
+        # from ecc/test/formal/fixtures/snapshot (ADR-0005); only ecc is needed.
+        run: git submodule update --init ecc
+
       - name: Install Linux GUI dependencies
         uses: ./.github/actions/install-gui-linux-deps
         with:
