@@ -333,6 +333,7 @@ export interface DesktopBridgeServices {
       maxBytes: number,
     ): Promise<DesktopProjectTextFileChunk | null>
     listPendingExternalReadRoots?(): Promise<string[]>
+    registerProjectManagementReadRoot(path: string): Promise<string>
     registerProjectReadRoot(path: string): Promise<string>
     registerProjectRoot(path: string): Promise<string>
     requestProjectPathAccess(path: string): Promise<string>
@@ -1660,13 +1661,24 @@ export function registerIpc(
           )
         }
         if (!projectRoot) {
-          projectRoot = await services.workspaceService.registerProjectReadRoot(
-            request.projectRootLocator,
-          )
+          try {
+            projectRoot = await services.workspaceService.registerProjectReadRoot(
+              request.projectRootLocator,
+            )
+          } catch {
+            // Project Management browses projects independently of the active
+            // workspace, so fall back to a dedicated read scope when the
+            // selected project does not declare the active workspace.
+            projectRoot =
+              await services.workspaceService.registerProjectManagementReadRoot(
+                request.projectRootLocator,
+              )
+          }
         }
       } catch (error) {
-        // A project unrelated to the active workspace cannot be granted a read
-        // root; surface that as a selection result instead of an IPC failure.
+        // Neither read scope grant succeeded (for example the project manifest
+        // is invalid); surface that as a selection result instead of an IPC
+        // failure.
         return {
           ok: false,
           code: 'invalid-project',

@@ -160,6 +160,7 @@ function registerHandlers(
       readOptionalProjectTextFileTail: vi.fn(),
       readProjectTextFile: vi.fn(),
       readProjectTextFileTail: vi.fn(),
+      registerProjectManagementReadRoot: vi.fn(),
       registerProjectReadRoot: vi.fn(),
       registerProjectRoot: vi.fn(),
       listProjectDirectory: vi.fn(),
@@ -700,10 +701,50 @@ describe('registerIpc', () => {
     )
   })
 
-  it('returns a structured result when a Project read root cannot be granted', async () => {
+  it('falls back to a Project Management read scope for unrelated projects', async () => {
+    const { handlers, services } = registerHandlers()
+    services.workspaceService.getProjectRoot.mockResolvedValue('/work/demo/ws_0001')
+    services.workspaceService.registerProjectReadRoot.mockRejectedValue(
+      new Error('Project read root manifest does not declare the active workspace'),
+    )
+    services.workspaceService.registerProjectManagementReadRoot.mockResolvedValue(
+      '/projects/canonical',
+    )
+    services.backendProjectComparisonService.selectProject.mockResolvedValue({
+      generation: 0,
+      ok: true,
+      projectComparisonContextId: 'context-1',
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.backendProjectComparisonSelectProject)?.(
+        { sender: { id: 7 } },
+        { projectRootLocator: '/projects/requested' },
+      ),
+    ).resolves.toEqual({
+      generation: 0,
+      ok: true,
+      projectComparisonContextId: 'context-1',
+    })
+    expect(services.workspaceService.registerProjectReadRoot).toHaveBeenCalledWith(
+      '/projects/requested',
+    )
+    expect(
+      services.workspaceService.registerProjectManagementReadRoot,
+    ).toHaveBeenCalledWith('/projects/requested')
+    expect(services.backendProjectComparisonService.selectProject).toHaveBeenCalledWith(
+      7,
+      { projectRootLocator: '/projects/canonical' },
+    )
+  })
+
+  it('returns a structured result when no Project read scope can be granted', async () => {
     const { handlers, services } = registerHandlers()
     services.workspaceService.registerProjectReadRoot.mockRejectedValue(
       new Error('Project read root manifest does not declare the active workspace'),
+    )
+    services.workspaceService.registerProjectManagementReadRoot.mockRejectedValue(
+      new Error('Project read root must have a valid project.json: missing manifest'),
     )
 
     await expect(
@@ -714,7 +755,7 @@ describe('registerIpc', () => {
     ).resolves.toEqual({
       ok: false,
       code: 'invalid-project',
-      detail: 'Project read root manifest does not declare the active workspace',
+      detail: 'Project read root must have a valid project.json: missing manifest',
     })
     expect(services.backendProjectComparisonService.selectProject).not.toHaveBeenCalled()
     expect(electronLogger.warn).not.toHaveBeenCalled()

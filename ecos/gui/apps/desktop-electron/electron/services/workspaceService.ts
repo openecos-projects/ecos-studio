@@ -46,6 +46,7 @@ export interface ProjectScopeProvider {
   listPendingExternalReadRoots?(): Promise<string[]>
   requestProjectPathAccess(path: string): Promise<string>
   requestWritableProjectPathAccess(path: string): Promise<string>
+  registerProjectManagementReadRoot(path: string): Promise<string>
   registerProjectReadRoot(path: string): Promise<string>
   registerProjectRoot(path: string): Promise<string>
   scanPdkDirectory(path: string): Promise<ScannedPdkDirectory>
@@ -384,6 +385,10 @@ export class WorkspaceService {
 
   async registerProjectReadRoot(path: string): Promise<string> {
     return await this.projectScopeProvider.registerProjectReadRoot(path)
+  }
+
+  async registerProjectManagementReadRoot(path: string): Promise<string> {
+    return await this.projectScopeProvider.registerProjectManagementReadRoot(path)
   }
 
   async clearProjectRoot(): Promise<void> {
