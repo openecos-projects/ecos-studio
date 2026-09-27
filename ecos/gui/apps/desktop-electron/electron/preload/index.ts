@@ -94,6 +94,8 @@ const desktopApi: DesktopApi = {
     setZoomFactor: (factor) =>
       invokeDesktop(desktopApiIpcChannels.windowSetZoomFactor, factor),
     create: (options) => invokeDesktop(desktopApiIpcChannels.windowCreate, options),
+    setLeftPanelExtension: (widthPx) =>
+      invokeDesktop(desktopApiIpcChannels.windowSetLeftPanelExtension, widthPx),
     onResized: (listener) =>
       subscribeToDesktopEvent(desktopApiEventChannels.windowResized, () => {
         listener()

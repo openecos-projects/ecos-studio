@@ -81,6 +81,17 @@
       >
         <i class="ri-sparkling-2-line text-base" aria-hidden="true"></i>
       </button>
+      <button
+        type="button"
+        class="window-btn"
+        :class="{ active: userGuideOpen }"
+        title="User Guide"
+        aria-label="User Guide"
+        :aria-pressed="userGuideOpen"
+        @click="handleUserGuideClick"
+      >
+        <i class="ri-book-open-line text-base" aria-hidden="true"></i>
+      </button>
       <BackgroundTasksButton />
       <ShutdownStatusButton />
       <NotificationCenter />
@@ -201,6 +212,7 @@ import { ref, onMounted, onUnmounted, computed, nextTick, toRef } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useThemeStore } from '@/stores/themeStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
+import { useUserGuideStore } from '@/stores/userGuideStore'
 import { useRoute, useRouter } from 'vue-router'
 import { getDesktopApi } from '@/platform/desktop'
 import NotificationCenter from '@/components/NotificationCenter.vue'
@@ -259,7 +271,9 @@ const workspaceFocusId = computed(
 
 const themeStore = useThemeStore()
 const agentShell = useAgentShellStore()
+const userGuide = useUserGuideStore()
 const { homeAgentOpen } = storeToRefs(agentShell)
+const { open: userGuideOpen } = storeToRefs(userGuide)
 const isDark = computed(() => themeStore.themeName === 'dark')
 const chatButtonActive = computed(() => homeAgentOpen.value)
 const desktopApi = getDesktopApi()
@@ -274,6 +288,12 @@ function handleAgentChatClick(): void {
   activeMenu.value = null
   quickMenuOpen.value = false
   agentShell.toggleHomeAgent()
+}
+
+function handleUserGuideClick(): void {
+  activeMenu.value = null
+  quickMenuOpen.value = false
+  userGuide.togglePanel()
 }
 
 const handleGoHome = () => {

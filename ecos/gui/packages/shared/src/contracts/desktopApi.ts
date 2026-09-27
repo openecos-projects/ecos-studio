@@ -279,6 +279,13 @@ export interface DesktopApi {
     isMaximized(): Promise<boolean>
     setZoomFactor(factor: number): Promise<void>
     create(options?: { initialRoute?: string }): Promise<void>
+    /**
+     * Grow (widthPx > 0) or shrink (0) the window width to make room for a
+     * left-docked panel while keeping the app content width unchanged.
+     * Returns the applied extension in px — 0 when the window is maximized or
+     * already touches the screen edge.
+     */
+    setLeftPanelExtension(widthPx: number): Promise<number>
     onResized(listener: () => void): DesktopEventUnsubscribe
     onMaximizedChanged(listener: (isMaximized: boolean) => void): DesktopEventUnsubscribe
   }

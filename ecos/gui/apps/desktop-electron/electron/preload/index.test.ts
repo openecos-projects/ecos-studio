@@ -92,6 +92,9 @@ async function loadDesktopBridge() {
     menu: {
       setActionEnabled(action: string, enabled: boolean): Promise<void>
     }
+    window: {
+      setLeftPanelExtension(widthPx: number): Promise<number>
+    }
     projectManagement: {
       importWorkspace(projectRoot: string): Promise<unknown>
       checkConsistency(projectRoot: string): Promise<unknown>
@@ -156,6 +159,17 @@ describe('preload desktop bridge contract', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
       desktopApiIpcChannels.backendProjectComparisonCloseProject,
       request,
+    )
+  })
+
+  it('routes the left panel extension through its typed IPC channel', async () => {
+    const bridge = await loadDesktopBridge()
+    ipcRenderer.invoke.mockResolvedValueOnce(440)
+
+    await expect(bridge.window.setLeftPanelExtension(440)).resolves.toBe(440)
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.windowSetLeftPanelExtension,
+      440,
     )
   })
 

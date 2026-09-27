@@ -22,6 +22,7 @@
             : undefined
         "
       >
+        <UserGuidePanel />
         <div
           class="app-content"
           :class="{ 'app-content--terminal-safe-area': terminalExpanded }"
@@ -243,6 +244,7 @@ import { getDesktopApi } from '@/platform/desktop'
 
 import TopBar from '@/components/TopBar.vue'
 import HomeAgentDrawer from '@/components/HomeAgentDrawer.vue'
+import UserGuidePanel from '@/components/UserGuidePanel.vue'
 import StatusBar from '@/components/StatusBar.vue'
 import ECOSTerminal from '@/components/ECOSTerminal.vue'
 import AboutDialog from '@/components/AboutDialog.vue'
@@ -1143,11 +1145,14 @@ body.window-maximized .app-container {
   min-height: 0;
   position: relative;
   overflow: hidden;
+  display: flex;
+  flex-direction: row;
   background: var(--bg-primary);
 }
 
 .app-content {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   height: 100%;
   min-height: 0;
   overflow: auto;

@@ -20,6 +20,7 @@ interface MockBrowserWindow {
 const {
   fromWebContents,
   getAllWindows,
+  getDisplayMatching,
   openExternal,
   openPath,
   showMessageBox,
@@ -30,6 +31,9 @@ const {
 } = vi.hoisted(() => ({
   fromWebContents: vi.fn(),
   getAllWindows: vi.fn<() => MockBrowserWindow[]>(() => []),
+  getDisplayMatching: vi.fn(() => ({
+    workArea: { x: 0, y: 0, width: 2560, height: 1440 },
+  })),
   mkdirMock: vi.fn(),
   openExternal: vi.fn(),
   openPath: vi.fn(),
@@ -60,6 +64,9 @@ vi.mock('electron', () => ({
   },
   ipcMain: {
     handle: vi.fn(),
+  },
+  screen: {
+    getDisplayMatching,
   },
   shell: {
     openExternal,
@@ -397,11 +404,17 @@ function workspaceCreateRequest(
 }
 
 function createWindowDouble(isMaximized = false) {
+  const bounds = { x: 0, y: 0, width: 1280, height: 800 }
   return {
     close: vi.fn(),
+    getBounds: vi.fn(() => ({ ...bounds })),
     isMaximized: vi.fn(() => isMaximized),
     maximize: vi.fn(),
     minimize: vi.fn(),
+    setSize: vi.fn((width: number, height: number) => {
+      bounds.width = width
+      bounds.height = height
+    }),
     setTitle: vi.fn(),
     webContents: {
       setZoomFactor: vi.fn(),
@@ -2101,6 +2114,65 @@ describe('registerIpc', () => {
       ok: false,
     })
     expect(windowDouble.webContents.setZoomFactor).toHaveBeenCalledTimes(1)
+  })
+
+  it('extends the window for a left panel and shrinks back on close', async () => {
+    const { handlers } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const windowDouble = createWindowDouble()
+    fromWebContents.mockReturnValue(windowDouble)
+    const handler = handlers.get(desktopApiIpcChannels.windowSetLeftPanelExtension)
+
+    await expect(handler?.(event, 400)).resolves.toBe(400)
+    expect(windowDouble.setSize).toHaveBeenCalledWith(1680, 800)
+
+    await expect(handler?.(event, 0)).resolves.toBe(0)
+    expect(windowDouble.setSize).toHaveBeenLastCalledWith(1280, 800)
+  })
+
+  it('caps left panel growth at the right edge of the work area', async () => {
+    const { handlers } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const windowDouble = createWindowDouble()
+    fromWebContents.mockReturnValue(windowDouble)
+    getDisplayMatching.mockReturnValueOnce({
+      workArea: { x: 0, y: 0, width: 1500, height: 900 },
+    })
+    const handler = handlers.get(desktopApiIpcChannels.windowSetLeftPanelExtension)
+
+    await expect(handler?.(event, 400)).resolves.toBe(220)
+    expect(windowDouble.setSize).toHaveBeenCalledWith(1500, 800)
+  })
+
+  it('leaves maximized windows untouched when setting the left panel extension', async () => {
+    const { handlers } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    fromWebContents.mockReturnValue(createWindowDouble(true))
+    const handler = handlers.get(desktopApiIpcChannels.windowSetLeftPanelExtension)
+
+    await expect(handler?.(event, 400)).resolves.toBe(0)
+  })
+
+  it('rejects invalid left panel extension values', async () => {
+    const { handlers } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    fromWebContents.mockReturnValue(createWindowDouble())
+    const handler = handlers.get(desktopApiIpcChannels.windowSetLeftPanelExtension)
+
+    await expect(handler?.(event, -1)).resolves.toEqual({
+      error: {
+        message: 'Left panel extension must be a number between 0 and 1200',
+        name: 'Error',
+      },
+      ok: false,
+    })
+    await expect(handler?.(event, 5000)).resolves.toEqual({
+      error: {
+        message: 'Left panel extension must be a number between 0 and 1200',
+        name: 'Error',
+      },
+      ok: false,
+    })
   })
 
   it('toggles maximize by maximizing a normal window and restoring a maximized one', async () => {

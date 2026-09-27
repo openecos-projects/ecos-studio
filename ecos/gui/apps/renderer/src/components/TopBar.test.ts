@@ -26,6 +26,12 @@ vi.mock('@/stores/themeStore', () => ({
 vi.mock('@/stores/agentShellStore', () => ({
   useAgentShellStore: () => ({ homeAgentOpen: false, toggleHomeAgent: vi.fn() }),
 }))
+vi.mock('@/stores/userGuideStore', async () => {
+  const { ref } = await import('vue')
+  return {
+    useUserGuideStore: () => ({ open: ref(false), togglePanel: vi.fn() }),
+  }
+})
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => testState.desktopApi,
 }))
