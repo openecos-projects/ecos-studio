@@ -62,7 +62,9 @@ from ecos_agent.optimization.experiments.knowledge_treatments import (
 from ecos_agent.optimization.experiments.closed_loop_driver import load_design
 from ecos_agent.optimization.knowledge.compiler import (
     KnowledgeSupportCatalog,
+    KnowledgeMatch,
     OptimizationStateEvidenceRequest,
+    SupportedKnowledgeAction,
     StateEvidenceFeature,
     SupportedActionView,
     compile_supported_action_view,
@@ -299,6 +301,100 @@ def apply_treatment(
         )
         return replace(context, supported_action_view=ungated)
     raise ValueError(f"offline pilot treatment agent mode is invalid: {agent_mode}")
+
+
+def apply_same_gate_no_semantic_guidance(
+    context: OptimizationPlanningContext,
+) -> OptimizationPlanningContext:
+    """Keep the Dual gate/action scaffold while replacing knowledge semantics.
+
+    The sham retains the state evidence, legal action cardinality, knob and
+    direction affordances, and effective domains.  Claim identities, text,
+    binding metadata, and parameter cards are replaced by inert placeholders,
+    so this arm is a scaffold diagnostic rather than an activation arm.
+    """
+    view = context.supported_action_view
+    if view is None:
+        raise ValueError("same-gate sham requires a supported action view")
+
+    def sham_ref(index: int) -> KnowledgeReference:
+        return KnowledgeReference(
+            entity_id=f"sham.placeholder.claim.{index}",
+            chunk_sha256="0" * 64,
+        )
+
+    def sham_hash(kind: str, index: int) -> str:
+        return canonical_sha256({"kind": kind, "index": index})
+
+    original_refs = list(view.candidate_refs)
+    ref_map = {
+        (ref.entity_id, ref.chunk_sha256): sham_ref(index)
+        for index, ref in enumerate(original_refs)
+    }
+
+    def mapped(ref: KnowledgeReference) -> KnowledgeReference:
+        return ref_map[(ref.entity_id, ref.chunk_sha256)]
+
+    matches = tuple(
+        KnowledgeMatch.model_validate(
+            {
+                **match.model_dump(mode="json"),
+                "claim_ref": mapped(match.claim_ref),
+                "claim_sha256": sham_hash("match", index),
+                "reason_codes": ("sham_placeholder",),
+            }
+        )
+        for index, match in enumerate(view.matches)
+    )
+    actions = tuple(
+        SupportedKnowledgeAction.model_validate(
+            {
+                **action.model_dump(mode="json"),
+                "claim_ref": mapped(action.claim_ref),
+                "claim_sha256": sham_hash("action-claim", index),
+                "reason_codes": ("sham_placeholder",),
+                "binding_id": f"sham.placeholder.binding.{index}",
+                "binding_sha256": sham_hash("binding", index),
+                "evidence_kind": "source_derived_hypothesis",
+                "limitations": "",
+                "parameter_card_ref": None,
+                "parameter_card_sha256": None,
+                "consumer_ids": (),
+                "activation_predicate_ids": (),
+                "expected_effects": (),
+                "guardrails": (),
+                "anti_conditions": (),
+            }
+        )
+        for index, action in enumerate(view.actions)
+    )
+    sham_view = SupportedActionView.model_validate(
+        {
+            **view.model_dump(mode="json"),
+            "candidate_refs": tuple(
+                mapped(ref) for ref in view.candidate_refs
+            ),
+            "retrieval_ranked_refs": tuple(
+                mapped(ref) for ref in view.retrieval_ranked_refs
+            ),
+            "exposed_claim_refs": tuple(
+                mapped(ref) for ref in view.exposed_claim_refs
+            ),
+            "truncated_claim_refs": tuple(
+                mapped(ref) for ref in view.truncated_claim_refs
+            ),
+            "matches": matches,
+            "actions": actions,
+        }
+    )
+    return replace(
+        context,
+        knowledge_refs=(),
+        knowledge_chunks=(),
+        supported_action_view=sham_view,
+        parameter_knowledge=(),
+        active_strategy=None,
+    )
 
 
 def derive_bank_contexts(

@@ -51,8 +51,11 @@ from ecos_agent.optimization.experiments.rq2_adaptive_runner import (
     run_rq2_adaptive_group,
 )
 from ecos_agent.optimization.experiments.rq2_order_balanced_runner import (
+    build_same_gate_sham_schedule,
     build_order_balanced_schedule,
+    run_same_gate_sham_worker,
     run_order_balanced_worker,
+    validate_same_gate_sham_schedule,
     validate_order_balanced_schedule,
 )
 from tests.optimization.support import support_catalog
@@ -763,3 +766,64 @@ def test_order_balanced_schedule_and_worker_are_registered_and_resumable() -> No
     assert summary["ecc_executions"] == 0
     assert [row["sequence_position"] for row in rows] == [2, 3, 4]
     assert all(isinstance(row["context_treatment_sha256"], str) for row in rows)
+
+
+def test_same_gate_sham_preserves_gate_and_action_scaffold() -> None:
+    context = _rq2_context()
+    sham = rq2_treatment_projection(
+        context, treatment="same-gate-no-semantic-guidance"
+    )
+    dual = rq2_treatment_projection(
+        context, treatment="state-conditioned-dual-layer-zero-shot"
+    )
+    sham_context = sham["planning_context"]
+    dual_context = dual["planning_context"]
+    assert sham_context.supported_action_view is not None
+    assert dual_context.supported_action_view is not None
+    assert sham_context.legal_actions == dual_context.legal_actions
+    assert sham_context.supported_action_view.state == dual_context.supported_action_view.state
+    assert len(sham_context.supported_action_view.actions) == len(
+        dual_context.supported_action_view.actions
+    )
+    assert [
+        (item.knob_id, item.direction)
+        for item in sham_context.supported_action_view.actions
+    ] == [
+        (item.knob_id, item.direction)
+        for item in dual_context.supported_action_view.actions
+    ]
+    assert sham_context.knowledge_refs == ()
+    assert sham_context.knowledge_chunks == ()
+    assert sham_context.parameter_knowledge == ()
+    assert all(
+        item.claim_ref.entity_id.startswith("sham.placeholder.claim.")
+        for item in sham_context.supported_action_view.actions
+    )
+    assert sham["treatment_diff"]["supported_action_count"] == dual["treatment_diff"][
+        "supported_action_count"
+    ]
+    assert sham["context_treatment_sha256"] != dual["context_treatment_sha256"]
+
+
+def test_same_gate_sham_schedule_is_paired_and_counterbalanced() -> None:
+    contexts = []
+    for design in ("gcd", "xtea"):
+        for index in range(1, 5):
+            context = _rq2_context()
+            context.update(
+                design=design,
+                checkpoint=f"cp{index}",
+                context_fingerprint=f"sha256:sham-{design}-{index}",
+            )
+            contexts.append(context)
+    schedule = build_same_gate_sham_schedule(
+        contexts, seed=20260927, repeats=3, workers=2
+    )
+    validate_same_gate_sham_schedule(schedule)
+    assert len(schedule["observations"]) == 2 * 4 * 3 * 2
+    for design in ("gcd", "xtea"):
+        assert sorted(
+            item["rotation"]
+            for item in schedule["assignments"]
+            if item["design"] == design
+        ) == ["S0", "S0", "S1", "S1"]

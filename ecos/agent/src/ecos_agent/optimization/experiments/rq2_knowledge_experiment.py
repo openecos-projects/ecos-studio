@@ -30,6 +30,7 @@ from ecos_agent.optimization.experiments.knowledge_metrics import (
 )
 from ecos_agent.optimization.experiments.knowledge_pilot import (
     apply_treatment,
+    apply_same_gate_no_semantic_guidance,
     rebuild_planning_context,
 )
 from ecos_agent.optimization.experiments.knowledge_protocol import (
@@ -60,6 +61,11 @@ STRATUM_ALIASES = {
 
 RQ2_TREATMENTS = tuple(
     config.treatment.value for config in ZERO_SHOT_GATE_TREATMENTS
+)
+SAME_GATE_NO_SEMANTIC_GUIDANCE = "same-gate-no-semantic-guidance"
+SHAM_TREATMENTS = (
+    "state-conditioned-dual-layer-zero-shot",
+    SAME_GATE_NO_SEMANTIC_GUIDANCE,
 )
 RQ2_TREATMENT_MODES = {
     config.treatment.value: config.agent_mode for config in ZERO_SHOT_GATE_TREATMENTS
@@ -316,14 +322,22 @@ def rq2_treatment_projection(
     trajectory snapshot, toolchain, and budgets stay frozen.  The returned
     diff is hash-bound so G1 acceptance can replay the exact projection.
     """
-    if treatment not in RQ2_TREATMENT_MODES:
+    if treatment not in (*RQ2_TREATMENT_MODES, SAME_GATE_NO_SEMANTIC_GUIDANCE):
         raise ValueError(f"unknown RQ2 treatment: {treatment}")
     base = rebuild_planning_context(context["planning_context"])
-    projected = apply_treatment(base, agent_mode=RQ2_TREATMENT_MODES[treatment])
+    projected = (
+        apply_same_gate_no_semantic_guidance(base)
+        if treatment == SAME_GATE_NO_SEMANTIC_GUIDANCE
+        else apply_treatment(base, agent_mode=RQ2_TREATMENT_MODES[treatment])
+    )
     base_view = base.supported_action_view
     diff = {
         "treatment": treatment,
-        "agent_mode": RQ2_TREATMENT_MODES[treatment],
+        "agent_mode": (
+            "same_gate_no_semantic_guidance"
+            if treatment == SAME_GATE_NO_SEMANTIC_GUIDANCE
+            else RQ2_TREATMENT_MODES[treatment]
+        ),
         "state_gated": treatment != "unconditioned-support-zero-shot",
         "knowledge_refs_count": len(projected.knowledge_refs),
         "knowledge_chunks_count": len(projected.knowledge_chunks),
@@ -346,6 +360,9 @@ def rq2_treatment_projection(
             base_view.view_sha256 if base_view is not None else None
         ),
         "correctness_role": (
+            "mechanism_only_sham"
+            if treatment == SAME_GATE_NO_SEMANTIC_GUIDANCE
+            else
             "mechanism_only"
             if treatment in MECHANISM_ONLY_TREATMENTS
             else "gate_scored"
