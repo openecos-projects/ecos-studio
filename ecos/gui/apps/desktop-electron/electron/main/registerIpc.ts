@@ -103,6 +103,7 @@ import {
 import type { AgentProviderRuntime } from '../services/agent/agentProviderContract'
 import { readAgentWorkspaceParameterValues } from '../services/agent/agentWorkspaceParameterUpdates'
 import type { ChipViewerWorkspaceRevisionNotification } from '../services/chipViewerService'
+import type { ProjectWorkspaceConfiguration } from '../services/projectManagementReadService'
 import {
   closeWindow,
   isWindowMaximized,
@@ -119,15 +120,11 @@ import {
   workspaceWindowRegistry,
   type WorkspaceWindowLike,
 } from '../services/workspaceWindowRegistry'
-import {
-  executeWorkspaceRerun,
-  prepareWorkspaceRerun,
-} from '../services/eccRpc/workspaceRerun'
+import { executeWorkspaceRerun, prepareWorkspaceRerun } from '../services/workspaceRerun'
 import { executeProductCommand } from '../services/productCommandService'
 import { buildWorkspaceCreationModel } from '../services/workspaceCreationModel'
 import { rememberWorkspaceParameterCatalog } from '../services/workspaceParameterCatalogCache'
 import {
-  persistEccPdkConfigFromCreate,
   prepareWorkspaceCreateBinding,
   prepareWorkspaceOpenBinding,
 } from '../services/workspacePdkBindings'
@@ -455,17 +452,16 @@ export interface DesktopBridgeServices {
     workspaceInfo(workspaceHandle: string, step: string, id: string): Promise<unknown>
   }
   eccRuntimeService: {
-    callRuntime?<T>(
-      method: string,
-      params?: Record<string, unknown>,
-      options?: { timeoutMs?: number },
-    ): Promise<T>
     cancelOperation(request: EccRuntimeOperationRequest): Promise<unknown>
     cancelOperationLegacy(
       operationId?: string,
     ): Promise<{ cancelled: boolean; operationId?: string }>
     closeWorkspace(request: EccWorkspaceHandleRequest): Promise<unknown>
     createWorkspace(request: EccWorkspaceCreateRequest): Promise<unknown>
+    discoverProject(directory: string): Promise<{
+      projectId: string
+      projectRoot: string
+    } | null>
     describeWorkspaceSpec(): Promise<unknown>
     exportSignoff(request: EccWorkspaceExportSignoffRequest): Promise<unknown>
     engineeringSnapshot(request: EccWorkspaceHandleRequest): Promise<unknown>
@@ -480,6 +476,8 @@ export interface DesktopBridgeServices {
     openWorkspace(
       request: EccWorkspaceOpenRequest,
     ): Promise<{ directory: string; workspaceHandle: string }>
+    readWorkspaceBindingRequirement(directory: string): Promise<Record<string, unknown>>
+    readWorkspaceConfiguration(directory: string): Promise<ProjectWorkspaceConfiguration>
     refreshConfig(request: EccWorkspaceHandleRequest): Promise<unknown>
     releaseWorkspace(
       request: EccWorkspaceHandleRequest,
@@ -2555,10 +2553,7 @@ export function registerIpc(
         services.backendProjectComparisonService.invalidateWorkspace(workspaceDirectory)
       },
       prepareCreate: async (createRequest) => {
-        const prepared = await prepareWorkspaceCreateBinding(services, createRequest)
-        const { eccPdkConfig: persistConfig, ...runtimeRequest } = prepared
-        await persistEccPdkConfigFromCreate(services, runtimeRequest, persistConfig)
-        return runtimeRequest
+        return await prepareWorkspaceCreateBinding(services, createRequest)
       },
       runtime: services.eccRuntimeService,
       trackCreateResult: (result) => {

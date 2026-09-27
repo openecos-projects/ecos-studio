@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  persistEccPdkConfigFromCreate,
   prepareWorkspaceCreateBinding,
   prepareWorkspaceOpenBinding,
 } from './workspacePdkBindings'
@@ -30,7 +29,12 @@ function createDependencies(
   return {
     callRuntime,
     dependencies: {
-      eccRuntimeService: { callRuntime },
+      eccRuntimeService: {
+        discoverProject: (directory: string) =>
+          callRuntime('project.discover', { directory }),
+        readWorkspaceBindingRequirement: (directory: string) =>
+          callRuntime('workspace.binding_requirement', { directory }),
+      },
       pdkInventoryService: {
         bindInstallation: vi.fn(),
         resolveBinding: vi.fn(),
@@ -244,6 +248,13 @@ describe('prepareWorkspaceCreateBinding', () => {
     expect(result.workspaceBindings.mpc).toEqual({
       template: { name: 'frame', minimum_area: 100 },
     })
+    expect(result.projectMpc).toEqual({
+      designIndex: 0,
+      displayName: 'frame',
+      resourceId: 'mpc:frame',
+      root: '/mpcs/frame/2.0.0',
+      version: '2.0.0',
+    })
   })
 
   it('rejects creation when the portable MPC requirement is not installed', async () => {
@@ -318,71 +329,5 @@ describe('manual external PDK resources', () => {
       },
       root: '/pdks/ics55',
     })
-  })
-})
-
-describe('persistEccPdkConfigFromCreate', () => {
-  it('writes external paths and overrides with binding-derived PDK context', async () => {
-    const write = vi.fn()
-    const runtimeRequest = {
-      commandId: 'create-1',
-      projectRoot: '/projects/demo',
-      targetDirectory: '/projects/demo/runs/workspace',
-      workspaceBindings: { pdk: { root: '/pdks/ics55' } },
-      workspaceSpec: { pdk: { familyId: 'ics55' } },
-    }
-
-    await persistEccPdkConfigFromCreate(
-      { ...createDependencies().dependencies, projectEccConfigService: { write } },
-      runtimeRequest,
-      {
-        externalPaths: ['/macros/sram'],
-        overrides: { lefs: ['/pdks/ics55/IP/lef/std.lef', '/macros/sram/sram.lef'] },
-      },
-    )
-
-    expect(write).toHaveBeenCalledWith({
-      projectRoot: '/projects/demo',
-      pdkRoot: '/pdks/ics55',
-      pdkName: 'ics55',
-      externalPaths: ['/macros/sram'],
-      overrides: { lefs: ['/pdks/ics55/IP/lef/std.lef', '/macros/sram/sram.lef'] },
-    })
-  })
-
-  it('derives the project root from the target directory and skips empty payloads', async () => {
-    const write = vi.fn()
-    const dependencies = {
-      ...createDependencies().dependencies,
-      projectEccConfigService: { write },
-    }
-    const runtimeRequest = {
-      commandId: 'create-2',
-      projectRoot: '/projects/demo',
-      targetDirectory: '/projects/demo/runs/workspace',
-      workspaceBindings: {},
-      workspaceSpec: {},
-    }
-
-    await persistEccPdkConfigFromCreate(dependencies, runtimeRequest, undefined)
-    await persistEccPdkConfigFromCreate(dependencies, runtimeRequest, {
-      externalPaths: [],
-    })
-    expect(write).not.toHaveBeenCalled()
-
-    await persistEccPdkConfigFromCreate(dependencies, runtimeRequest, {
-      externalPaths: ['/macros/sram'],
-    })
-    expect(write).toHaveBeenCalledWith(
-      expect.objectContaining({ projectRoot: '/projects/demo' }),
-    )
-
-    await expect(
-      persistEccPdkConfigFromCreate(
-        dependencies,
-        { ...runtimeRequest, projectRoot: undefined },
-        { externalPaths: ['/macros/sram'] },
-      ),
-    ).rejects.toThrow('requires a project root')
   })
 })

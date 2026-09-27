@@ -43,6 +43,15 @@
         </div>
       </header>
 
+      <div
+        v-if="selectedProjectRuntimeIssues.length"
+        class="project-maintenance-warning"
+        role="status"
+      >
+        <i class="ri-error-warning-line" aria-hidden="true"></i>
+        <span>Project runtime registry needs maintenance.</span>
+      </div>
+
       <div class="manager-grid">
         <aside class="manager-sidebar" aria-label="Projects">
           <div class="project-list-panel" aria-label="Projects">
@@ -1195,6 +1204,9 @@ const selectedProject = computed<ProjectManagementProject>(() => {
     selected?.model ?? projectCards.value[0]?.model ?? buildProjectManagementProject(null)
   )
 })
+const selectedProjectRuntimeIssues = computed(
+  () => projectManifests.value[selectedProject.value.path]?.runtime_process_issues ?? [],
+)
 
 const selectedWorkspace = computed<ProjectWorkspace | null>(() => {
   return (
@@ -2570,12 +2582,9 @@ function projectFromManifest(manifest: ProjectManifest, fallbackRoot: string): P
 }
 
 function projectStatusFromManifest(manifest: ProjectManifest): ProjectStatus {
-  if (manifest.workspaces.some((workspace) => workspace.status === 'running'))
-    return 'running'
+  if (Object.keys(manifest.runtime_processes ?? {}).length > 0) return 'running'
   if (manifest.workspaces.some((workspace) => workspace.status === 'failed'))
     return 'failed'
-  if (manifest.workspaces.some((workspace) => workspace.status === 'in_progress'))
-    return 'in_progress'
   if (
     manifest.workspaces.length > 0 &&
     manifest.workspaces.every((workspace) =>
@@ -2585,7 +2594,7 @@ function projectStatusFromManifest(manifest: ProjectManifest): ProjectStatus {
     return manifest.workspaces.some((workspace) => workspace.status === 'warning')
       ? 'warning'
       : 'success'
-  return manifest.workspaces.length > 0 ? 'in_progress' : 'not_started'
+  return 'not_started'
 }
 
 function normalizePath(path: string): string {

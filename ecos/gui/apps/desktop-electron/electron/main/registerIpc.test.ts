@@ -94,7 +94,7 @@ const { executeWorkspaceRerunMock, prepareWorkspaceRerunMock } = vi.hoisted(() =
   prepareWorkspaceRerunMock: vi.fn(),
 }))
 
-vi.mock('../services/eccRpc/workspaceRerun', () => ({
+vi.mock('../services/workspaceRerun', () => ({
   executeWorkspaceRerun: executeWorkspaceRerunMock,
   prepareWorkspaceRerun: prepareWorkspaceRerunMock,
 }))
@@ -123,7 +123,7 @@ function registerHandlers(
       repair: vi.fn(),
     },
     projectManagementReadService: {
-      discoverProject: vi.fn(),
+      discoverProject: vi.fn().mockResolvedValue(null),
       readManifest: vi.fn(),
       listProjectEntries: vi.fn(),
       readWorkspaceStepConfiguration: vi.fn(),
@@ -242,6 +242,7 @@ function registerHandlers(
       cancelOperationLegacy: vi.fn(),
       closeWorkspace: vi.fn(),
       createWorkspace: vi.fn(),
+      discoverProject: vi.fn(),
       describeWorkspaceSpec: vi.fn(),
       engineeringSnapshot: vi.fn(),
       exportSignoff: vi.fn(),
@@ -265,6 +266,8 @@ function registerHandlers(
       operationStatus: vi.fn(),
       waitForOperation: vi.fn(),
       openWorkspace: vi.fn(),
+      readWorkspaceBindingRequirement: vi.fn().mockResolvedValue({}),
+      readWorkspaceConfiguration: vi.fn().mockResolvedValue({}),
       refreshConfig: vi.fn(),
       releaseWorkspace: vi.fn().mockResolvedValue({ ok: true }),
       retryFinalSnapshot: vi.fn(),
@@ -1803,7 +1806,7 @@ describe('registerIpc', () => {
     expect(services.eccRuntimeService.createWorkspace).not.toHaveBeenCalled()
   })
 
-  it('persists eccPdkConfig to ecc.toml and strips it from the runtime request', async () => {
+  it('passes eccPdkConfig to the runtime Project apply transaction', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
     services.pdkInventoryService.resolveBinding.mockResolvedValue(null)
@@ -1848,13 +1851,8 @@ describe('registerIpc', () => {
     ).resolves.toMatchObject({ workspaceHandle: 'workspace-handle' })
 
     const runtimeCall = services.eccRuntimeService.createWorkspace.mock.calls[0][0]
-    expect(runtimeCall).not.toHaveProperty('eccPdkConfig')
-    expect(services.projectEccConfigService.write).toHaveBeenCalledWith({
-      projectRoot: '/tmp/project',
-      pdkRoot: '/canonical/pdk',
-      pdkName: 'ics55',
-      ...eccPdkConfig,
-    })
+    expect(runtimeCall).toMatchObject({ eccPdkConfig })
+    expect(services.projectEccConfigService.write).not.toHaveBeenCalled()
   })
 
   it('skips ecc.toml persistence when the create carries no eccPdkConfig', async () => {

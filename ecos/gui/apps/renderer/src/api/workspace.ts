@@ -210,7 +210,19 @@ export function backendWorkspaceOptions(
       projectIdFromName(
         projectContext?.project_name || targetDirectory.split('/').pop() || '',
       ),
+    projectMode: projectContext?.mode,
+    projectName: projectContext?.project_name,
     projectRoot: projectContext?.project_root || targetDirectory,
+    ...(config.source_context?.workspaceId
+      ? {
+          deriveFrom: {
+            workspaceId: config.source_context.workspaceId,
+            ...(config.source_context.step
+              ? { sourceStep: config.source_context.step }
+              : {}),
+          },
+        }
+      : {}),
     workspaceSpec: {
       schemaVersion: 1,
       design: {

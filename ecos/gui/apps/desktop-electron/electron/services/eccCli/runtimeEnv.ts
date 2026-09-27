@@ -238,6 +238,28 @@ export function resolveEccExecutable(options: EccRuntimeEnvOptions): string | nu
   return existsSync(candidate) ? candidate : null
 }
 
+/** Resolve an ECC binary whose installation survives the Electron process. */
+export function resolveDurableEccExecutable(
+  options: EccRuntimeEnvOptions,
+): string | null {
+  const executableName = packagedEccExecutableName(options.platform)
+  const externalBin = resolveExternalRuntimeBin(options)
+  if (externalBin) return join(externalBin, executableName)
+  if (!options.isPackaged) return resolveEccExecutable(options)
+
+  const bundleHomeBin = resolveBundleHomeRuntimeBin(options)
+  if (bundleHomeBin) return join(bundleHomeBin, executableName)
+  const packagedCandidate = join(resolvePackagedBinariesPath(options), executableName)
+  if (!existsSync(packagedCandidate) || isTemporaryAppImagePath(packagedCandidate)) {
+    return null
+  }
+  return packagedCandidate
+}
+
+function isTemporaryAppImagePath(path: string): boolean {
+  return /(?:^|\/)\.mount_[^/]+(?:\/|$)/.test(path) || path.startsWith('/tmp/.mount_')
+}
+
 /**
  * Directory that wins the ECC runtime resolution (external override,
  * packaged binaries, bundle home, or the development runtime-bin shim), or
@@ -259,7 +281,7 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
   if (options.isPackaged) {
     const packagedRuntimeBin = resolvePackagedRuntimeBin(options)
     const bundleHomeRuntimeBin = resolveBundleHomeRuntimeBin(options)
-    const runtimeBin = externalRuntimeBin ?? packagedRuntimeBin ?? bundleHomeRuntimeBin
+    const runtimeBin = externalRuntimeBin ?? bundleHomeRuntimeBin ?? packagedRuntimeBin
     const libraryBinariesPath = runtimeBin ?? resolvePackagedBinariesPath(options)
     const resourcesPath = resolvePackagedResourcesPath(options)
     const {

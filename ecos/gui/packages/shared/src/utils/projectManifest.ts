@@ -136,6 +136,8 @@ export interface ProjectManifest {
   design_name: string
   description: string
   root_path: string
+  /** Presentation-only warnings for invalid registry entries ignored by the GUI. */
+  runtime_process_issues?: string[]
   created_at: string
   updated_at: string
   base_design: ProjectManifestBaseDesign
@@ -153,6 +155,130 @@ export interface ProjectManifest {
     workspace_id: string
     reason: string
   } | null
+  runtime_processes?: Record<string, ProjectRuntimeProcessEntry>
+}
+
+export interface ProjectRuntimeProcessEntry {
+  schema_version: 1
+  run_id: string
+  pid: number
+  pgid: number
+  process_start_id: string
+  boot_id: string
+  host_id: string
+  workspace_path: string
+  started_at: number
+  runtime_id: string
+  log_path: string
+}
+
+const RUNTIME_TOKEN = /^[A-Za-z0-9._:@+-]{1,128}$/
+const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
+export function isProjectRuntimeProcessEntry(
+  value: unknown,
+): value is ProjectRuntimeProcessEntry {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const entry = value as Record<string, unknown>
+  return (
+    entry.schema_version === 1 &&
+    typeof entry.run_id === 'string' &&
+    RUN_ID.test(entry.run_id) &&
+    positiveSafeInteger(entry.pid) &&
+    entry.pgid === entry.pid &&
+    runtimeToken(entry.process_start_id) &&
+    runtimeToken(entry.boot_id) &&
+    runtimeToken(entry.host_id) &&
+    safeWorkspacePath(entry.workspace_path) &&
+    typeof entry.started_at === 'number' &&
+    Number.isFinite(entry.started_at) &&
+    entry.started_at > 0 &&
+    runtimeToken(entry.runtime_id) &&
+    safeRelativePath(entry.log_path)
+  )
+}
+
+export function projectRuntimeProcesses(
+  value: unknown,
+): Record<string, ProjectRuntimeProcessEntry> {
+  if (value === undefined) return {}
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Project runtime process registry is invalid.')
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length > 4096) {
+    throw new Error('Project runtime process registry is too large.')
+  }
+  const result: Record<string, ProjectRuntimeProcessEntry> = {}
+  for (const [workspaceId, entry] of entries) {
+    if (!runtimeToken(workspaceId) || !isProjectRuntimeProcessEntry(entry)) {
+      throw new Error(`Project runtime process entry is invalid: ${workspaceId}`)
+    }
+    result[workspaceId] = entry
+  }
+  return result
+}
+
+function projectRuntimeProcessProjection(value: unknown): {
+  issues: string[]
+  processes: Record<string, ProjectRuntimeProcessEntry>
+} {
+  if (value === undefined) return { issues: [], processes: {} }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { issues: ['Project runtime process registry is invalid.'], processes: {} }
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length > 4096) {
+    return { issues: ['Project runtime process registry is too large.'], processes: {} }
+  }
+  const issues: string[] = []
+  const processes: Record<string, ProjectRuntimeProcessEntry> = {}
+  for (const [workspaceId, entry] of entries) {
+    if (!runtimeToken(workspaceId) || !isProjectRuntimeProcessEntry(entry)) {
+      issues.push(`Project runtime process entry is invalid: ${workspaceId}`)
+      continue
+    }
+    processes[workspaceId] = entry
+  }
+  return { issues, processes }
+}
+
+function positiveSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) > 0
+}
+
+function runtimeToken(value: unknown): value is string {
+  return typeof value === 'string' && RUNTIME_TOKEN.test(value)
+}
+
+function safeRelativePath(value: unknown): value is string {
+  if (
+    typeof value !== 'string' ||
+    !value ||
+    value.length > 4096 ||
+    value.includes('\\')
+  ) {
+    return false
+  }
+  if (value.startsWith('/') || value.includes('\0')) return false
+  return value.split('/').every((part) => part !== '' && part !== '.' && part !== '..')
+}
+
+function safeWorkspacePath(value: unknown): value is string {
+  if (
+    typeof value !== 'string' ||
+    !value ||
+    value.length > 4096 ||
+    value.includes('\\')
+  ) {
+    return false
+  }
+  if (value.includes('\0')) return false
+  const path = value.startsWith('/') ? value.slice(1) : value
+  return (
+    Boolean(path) &&
+    path.split('/').every((part) => part !== '' && part !== '.' && part !== '..')
+  )
 }
 
 export type EccProjectManifestWorkspace = ProjectManifestWorkspace
@@ -237,17 +363,37 @@ export function projectManifestForPresentation(
 ): ProjectManifest {
   const rootPath = normalizeProjectManifestPath(containingProjectRoot)
   if (!rootPath) throw new Error('Project root is required.')
+  const projection = projectRuntimeProcessProjection(source.runtime_processes)
+  const runtimeProcesses = { ...projection.processes }
+  const workspaces = source.workspaces.map((workspace) => ({
+    ...workspace,
+    workspace_path: resolveProjectManifestWorkspacePath(
+      rootPath,
+      workspace.workspace_path,
+    ),
+  }))
+  for (const [workspaceId, process] of Object.entries(runtimeProcesses)) {
+    const workspace = workspaces.find(
+      (candidate) => candidate.workspace_id === workspaceId,
+    )
+    const processWorkspacePath = resolveProjectManifestWorkspacePath(
+      rootPath,
+      process.workspace_path,
+    )
+    if (!workspace || workspace.workspace_path !== processWorkspacePath) {
+      projection.issues.push(
+        `Project runtime process Workspace does not match: ${workspaceId}`,
+      )
+      delete runtimeProcesses[workspaceId]
+    }
+  }
   return {
     ...source,
     project_type: source.project_type ?? 'backend',
+    runtime_processes: runtimeProcesses,
+    ...(projection.issues.length ? { runtime_process_issues: projection.issues } : {}),
     root_path: normalizeProjectManifestPath(rootPath),
-    workspaces: source.workspaces.map((workspace) => ({
-      ...workspace,
-      workspace_path: resolveProjectManifestWorkspacePath(
-        rootPath,
-        workspace.workspace_path,
-      ),
-    })),
+    workspaces,
   }
 }
 

@@ -30,12 +30,15 @@ async function createServices() {
   const scope = { resolveProjectRoot: realpath }
   const frontend = new FrontendProjectManifestService(scope)
   const callRuntime = vi.fn().mockRejectedValue(new Error('backend RPC was not expected'))
-  const manifestService = new ProjectManifestService(
-    scope,
-    undefined,
-    { callRuntime },
-    frontend,
-  )
+  const runtime = {
+    discoverProject: (directory: string) =>
+      callRuntime('project.discover', { directory }),
+    loadProjectManifest: (projectRoot: string) =>
+      callRuntime('project.manifest.load', { projectRoot }),
+    mutateProjectManifest: (projectRoot: string, mutation: unknown) =>
+      callRuntime('project.manifest.mutate', { projectRoot, mutation }),
+  }
+  const manifestService = new ProjectManifestService(scope, undefined, runtime, frontend)
   const readService = new ProjectManagementReadService(manifestService)
   return { root, frontend, manifestService, readService, callRuntime }
 }
