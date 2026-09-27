@@ -9,7 +9,9 @@ import {
   projectManifestCreateArgs,
   projectSettingsArgs,
   workspaceCreateCommands,
+  workspaceParameterValue,
   workspaceRefreshArgs,
+  registeredRunMatches,
   declaredWorkspaceForDirectory,
   EccCliRuntimeService,
 } from './runtimeService'
@@ -358,7 +360,70 @@ describe('ECC CLI Workspace configuration boundary', () => {
   })
 })
 
+describe('ECC CLI Workspace parameter projection', () => {
+  it('reads legacy flat Snapshot values through the catalog mapping', () => {
+    expect(
+      workspaceParameterValue(
+        { frequency_max: 125 },
+        {
+          backendMapping: 'frequency_max',
+          default: 100,
+          display_key: 'frequency_max',
+          id: 'design.frequency_mhz',
+        },
+      ),
+    ).toBe(125)
+  })
+
+  it('reads nested Snapshot values through object mappings', () => {
+    expect(
+      workspaceParameterValue(
+        { core: { utilitization: 0.63 } },
+        {
+          backendMapping: { core: 'utilitization' },
+          default: 0.4,
+          id: 'floorplan.core_util',
+        },
+      ),
+    ).toBe(0.63)
+  })
+})
+
+describe('ECC CLI run registration handshake', () => {
+  const entry = {
+    run_id: 'run-1',
+    runtime_id: 'runtime-1',
+    pid: 222,
+  } as import('@ecos-studio/shared').ProjectRuntimeProcessEntry
+
+  it('accepts the registered ECC child when a launcher owns a different PID', () => {
+    expect(registeredRunMatches(entry, 'run-1', 'runtime-1')).toBe(true)
+  })
+
+  it('rejects entries from another run or runtime', () => {
+    expect(registeredRunMatches(entry, 'run-2', 'runtime-1')).toBe(false)
+    expect(registeredRunMatches(entry, 'run-1', 'runtime-2')).toBe(false)
+  })
+})
+
 describe('ECC CLI Workspace discovery', () => {
+  it('treats a legacy path moved during migration as no direct match', async () => {
+    const project = await mkdtemp(join(tmpdir(), 'ecc-runtime-project-'))
+    temporaryDirectories.push(project)
+    const manifest = {
+      workspaces: [
+        {
+          workspace_id: 'ws_migrated',
+          workspace_path: join(project, 'ws_migrated'),
+        },
+      ],
+    } as unknown as import('@ecos-studio/shared').ProjectManifest
+
+    await expect(
+      declaredWorkspaceForDirectory(manifest, join(project, 'runs', 'ws_migrated')),
+    ).resolves.toBeNull()
+  })
+
   it('accepts the exact external Workspace path declared by the Project manifest', async () => {
     const project = await mkdtemp(join(tmpdir(), 'ecc-runtime-project-'))
     const externalWorkspace = await mkdtemp(join(tmpdir(), 'ecc-runtime-external-'))
