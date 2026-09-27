@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { open, realpath, stat } from 'node:fs/promises'
-import { basename, join, resolve } from 'node:path'
-import { watch, type FSWatcher } from 'chokidar'
+import { lstat, open, realpath, stat } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import type {
   EccBackgroundOperationLogResult,
   EccBackgroundOperationProjection,
@@ -44,6 +43,7 @@ import type {
   ProjectRuntimeProcessEntry,
 } from '@ecos-studio/shared'
 import { electronLogger } from '../logger'
+import { isPathWithinRoot } from '../pathScope'
 import { normalizeWorkspacePath } from '../workspacePath'
 import { readPersistedEngineeringSnapshot } from './engineeringSnapshotReader'
 import {
@@ -60,6 +60,10 @@ import {
   workspaceEntryForDirectory,
   type PersistedFlow,
 } from './persistedState'
+import {
+  watchWorkspaceOperationFiles,
+  type OperationFileWatcher,
+} from './workspaceFileWatcher'
 
 const HANDSHAKE_TIMEOUT_MS = 30_000
 const WATCH_DEBOUNCE_MS = 75
@@ -80,7 +84,7 @@ interface TrackedOperation {
   session: WorkspaceSession
   requestedCancel: boolean
   poller: ReturnType<typeof setInterval> | null
-  watcher: FSWatcher | null
+  watcher: OperationFileWatcher | null
   waiters: Array<(operation: EccRuntimeOperation) => void>
 }
 
@@ -746,11 +750,11 @@ export class EccCliRuntimeService {
   ): Promise<EccBackgroundOperationLogResult> {
     const tracked = this.requireOperation(request)
     const manifest = await readProjectManifest(tracked.projectRoot)
-    const entry = manifest.runtime_processes?.[tracked.session.workspaceId]
-    const path = resolve(
-      tracked.session.directory,
-      entry?.log_path ?? operationLogPath(request.operationId),
-    )
+    const path = await resolveOperationLogPath({
+      workspaceDirectory: tracked.session.directory,
+      operationId: tracked.operation.operationId,
+      entry: manifest.runtime_processes?.[tracked.session.workspaceId],
+    })
     const info = await stat(path)
     const maxBytes = 64 * 1024
     const offset = Math.max(0, info.size - maxBytes)
@@ -977,23 +981,15 @@ export class EccCliRuntimeService {
     await this.refreshOperation(tracked)
   }
 
-  private watchOperation(tracked: TrackedOperation): FSWatcher {
-    const watcher = watch(
-      [
-        join(tracked.projectRoot, 'project.json'),
-        join(tracked.session.directory, 'home', 'flow.json'),
-      ],
-      { followSymlinks: false, ignoreInitial: true, persistent: false },
-    )
-    let timer: ReturnType<typeof setTimeout> | null = null
-    watcher.on('all', () => {
-      if (timer) clearTimeout(timer)
-      timer = setTimeout(() => void this.refreshOperation(tracked), WATCH_DEBOUNCE_MS)
+  private watchOperation(tracked: TrackedOperation): OperationFileWatcher {
+    return watchWorkspaceOperationFiles({
+      projectRoot: tracked.projectRoot,
+      workspaceDirectory: tracked.session.directory,
+      debounceMs: WATCH_DEBOUNCE_MS,
+      onTrigger: () => void this.refreshOperation(tracked),
+      onError: (error) =>
+        electronLogger.error('[runtime] ECC CLI state watcher failed: %s', error),
     })
-    watcher.on('error', (error) =>
-      electronLogger.error('[runtime] ECC CLI state watcher failed: %s', error),
-    )
-    return watcher
   }
 
   private pollOperation(tracked: TrackedOperation): ReturnType<typeof setInterval> {
@@ -1187,8 +1183,9 @@ export class EccCliRuntimeService {
   }
 
   private ensureContract(): Promise<void> {
-    this.contractCheck ??= this.cli
-      .run(['version', '--json'])
+    this.contractCheck ??= Promise.resolve()
+      .then(() => assertEccCliPlatformSupported())
+      .then(() => this.cli.run(['version', '--json']))
       .then(({ stdout }) => {
         const value = JSON.parse(stdout)
         if (
@@ -1602,6 +1599,71 @@ function operationLogPath(runId: string): string {
   return `home/run-logs/${runId}.log`
 }
 
+/**
+ * Resolve the log file for one operation. The registry log_path is advisory:
+ * only trust it while it belongs to this exact run and resolves inside the
+ * workspace without crossing symlinks; anything else falls back to the
+ * run-id-derived default path (extend_cli.md §13.2).
+ */
+export async function resolveOperationLogPath(options: {
+  workspaceDirectory: string
+  operationId: string
+  entry: { log_path?: string; run_id: string } | null | undefined
+}): Promise<string> {
+  const fallback = resolve(
+    options.workspaceDirectory,
+    operationLogPath(options.operationId),
+  )
+  if (
+    options.entry &&
+    options.entry.run_id === options.operationId &&
+    typeof options.entry.log_path === 'string'
+  ) {
+    const authorized = await resolveContainedLogPath(
+      options.workspaceDirectory,
+      options.entry.log_path,
+    )
+    if (authorized) return authorized
+  }
+  return fallback
+}
+
+/**
+ * Resolve a workspace-relative manifest path to a real file path that stays
+ * inside the workspace directory. Returns null when the path is absolute,
+ * traverses outside the workspace, or crosses a symlink (either itself or an
+ * ancestor), so callers can fall back to an authorized default.
+ */
+async function resolveContainedLogPath(
+  workspaceDirectory: string,
+  relativePath: string,
+): Promise<string | null> {
+  if (isAbsolute(relativePath)) return null
+  const root = resolve(workspaceDirectory)
+  const target = resolve(root, relativePath)
+  if (!isPathWithinRoot(target, root)) return null
+  let probe = target
+  // Reject symlinked targets or symlinked ancestors; the file may not exist
+  // yet while the nearest existing ancestor still must stay inside the root.
+  while (true) {
+    try {
+      const stats = await lstat(probe)
+      if (stats.isSymbolicLink()) return null
+      break
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return null
+    }
+    const parent = dirname(probe)
+    if (parent === probe) return null
+    probe = parent
+  }
+  const [resolvedProbe, resolvedRoot] = await Promise.all([
+    realpath(probe),
+    realpath(root),
+  ])
+  return isPathWithinRoot(resolvedProbe, resolvedRoot) ? target : null
+}
+
 function runtimeResourceId(runtimeId: string): string | null {
   if (!runtimeId.startsWith('tool:')) return null
   return runtimeId.split('@', 1)[0] ?? null
@@ -1732,6 +1794,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function codedError(message: string, code: string): Error {
   return Object.assign(new Error(message), { code })
+}
+
+/**
+ * The CLI contract 1 process identity (pidfd, signals, detached lifecycle)
+ * is Linux-only; every other platform must fail closed before any backend
+ * ECC operation (gui_in_cli.md §12.4, extend_cli.md §16/§21.4).
+ */
+export function assertEccCliPlatformSupported(
+  platform: NodeJS.Platform = process.platform,
+): void {
+  if (platform === 'linux') return
+  throw codedError(
+    `ECC CLI backend is only supported on Linux, not on ${platform}.`,
+    'ECC_CLI_PLATFORM_UNSUPPORTED',
+  )
 }
 
 function now(): number {

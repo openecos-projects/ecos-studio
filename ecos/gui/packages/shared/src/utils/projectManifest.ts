@@ -198,27 +198,6 @@ export function isProjectRuntimeProcessEntry(
   )
 }
 
-export function projectRuntimeProcesses(
-  value: unknown,
-): Record<string, ProjectRuntimeProcessEntry> {
-  if (value === undefined) return {}
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('Project runtime process registry is invalid.')
-  }
-  const entries = Object.entries(value as Record<string, unknown>)
-  if (entries.length > 4096) {
-    throw new Error('Project runtime process registry is too large.')
-  }
-  const result: Record<string, ProjectRuntimeProcessEntry> = {}
-  for (const [workspaceId, entry] of entries) {
-    if (!runtimeToken(workspaceId) || !isProjectRuntimeProcessEntry(entry)) {
-      throw new Error(`Project runtime process entry is invalid: ${workspaceId}`)
-    }
-    result[workspaceId] = entry
-  }
-  return result
-}
-
 function projectRuntimeProcessProjection(value: unknown): {
   issues: string[]
   processes: Record<string, ProjectRuntimeProcessEntry>

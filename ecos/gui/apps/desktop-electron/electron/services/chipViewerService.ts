@@ -689,8 +689,8 @@ export class ChipViewerService {
     this.closeLogFile = options.closeLogFile ?? closeSync
     this.ensureDirectory = options.ensureDirectory ?? defaultEnsureDirectory
     // Snapshot and image generation use native ECC binaries. They need the
-    // same packaged runtime-library environment as the ECC sidecar, including
-    // LD_LIBRARY_PATH for ecc_tools_bin.
+    // same packaged runtime-library environment as the ECC CLI backend
+    // runtime, including LD_LIBRARY_PATH for ecc_tools_bin.
     this.execFile =
       options.execFile ?? ((file, args) => defaultExecFile(file, args, this.env))
     this.fileExists = options.fileExists ?? existsSync
@@ -921,7 +921,7 @@ export class ChipViewerService {
     const outputDirectory = dirname(defPath)
     const workspaceStepDirectory = dirname(outputDirectory)
     const geometryDir = join(outputDirectory, 'geometry')
-    // Geometry is atomically replaced by layout.edit.save. Keep the live
+    // Geometry is atomically replaced by ECC flow step runs. Keep the live
     // command/result transport outside that published artifact tree.
     const editDirectory = join(workspaceStepDirectory, '.chip-viewer', 'layout-edit')
     const drcStatisPath = join(workspaceStepDirectory, 'analysis', 'drc_statis.csv')

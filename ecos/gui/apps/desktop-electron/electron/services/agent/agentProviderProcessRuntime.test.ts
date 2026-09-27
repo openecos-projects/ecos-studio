@@ -1601,7 +1601,7 @@ describe('AgentProviderProcessRuntime', () => {
     })
   })
 
-  it('forwards a workspace rerun confirmed through the interaction API', () => {
+  it('accepts rerun steps that are not in the legacy catalog', () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({
       manifest: {
@@ -1619,18 +1619,18 @@ describe('AgentProviderProcessRuntime', () => {
     void runtime.startSession({ providerId: 'local', sessionId: 'session-1' })
     const workspaceRerun = {
       design_id: 'gcd',
-      end_step: 'place',
+      end_step: 'powerGrid',
       execution_scope: 'single_step',
-      parameter_patch: [{ knob_id: 'place.target_density', value: 0.55 }],
+      parameter_patch: [],
       requires_gui_review: true,
-      rerun_id: 'gcd_rerun_place',
+      rerun_id: 'gcd_rerun_powergrid',
       schema_version: 'flow-agent.workspace_rerun_contract.v1',
-      source_stage_artifact: 'place_dreamplace/output/gcd_place.def.gz',
+      source_stage_artifact: 'powerGrid_ipw/output/gcd_powerGrid.def.gz',
       source_flow_json_sha256: `sha256:${'a'.repeat(64)}`,
       source_stage_artifact_sha256: `sha256:${'b'.repeat(64)}`,
       source_workspace: '/runs/gcd',
-      target_step: 'place',
-      target_workspace: '/runs/gcd_rerun_place',
+      target_step: 'powerGrid',
+      target_workspace: '/runs/gcd_rerun_powergrid',
     }
     harness.children[0].stdout.emit(
       'data',
@@ -1649,35 +1649,12 @@ describe('AgentProviderProcessRuntime', () => {
         type: 'event',
       })}\n`,
     )
+    const confirmationToken = listener.mock.calls[0][0].contract.confirmation_token
     listener.mockClear()
-    harness.children[0].stdout.emit(
-      'data',
-      `${JSON.stringify({
-        event: {
-          interaction: {
-            interaction: {
-              cancel: { id: 'cancel', label: 'Cancel' },
-              confirm: { id: 'confirm', label: 'Confirm and start' },
-              kind: 'confirm',
-            },
-            kind: 'confirm',
-            purpose: 'execution',
-            requestId: 'confirm-1',
-            schema_version: 'flow-agent.interaction_request.v1',
-            status: 'pending',
-            title: 'Confirm execution',
-          },
-          sessionId: 'session-1',
-          type: 'interaction',
-        },
-        type: 'event',
-      })}\n`,
-    )
-    void runtime.answerInteraction({
-      kind: 'confirm',
-      optionId: 'confirm',
+    void runtime.sendMessage({
+      confirmationToken,
+      message: '1',
       providerId: 'local',
-      requestId: 'confirm-1',
       sessionId: 'session-1',
     })
     harness.children[0].stdout.emit(
@@ -1686,7 +1663,7 @@ describe('AgentProviderProcessRuntime', () => {
         event: {
           sessionId: 'session-1',
           type: 'workspace_rerun',
-          workspaceRerun: workspaceRerun,
+          workspaceRerun,
         },
         type: 'event',
       })}\n`,
@@ -1696,7 +1673,12 @@ describe('AgentProviderProcessRuntime', () => {
       providerId: 'local',
       sessionId: 'session-1',
       type: 'workspace_rerun',
-      workspaceRerun: expect.objectContaining({ rerun_id: 'gcd_rerun_place' }),
+      workspaceRerun: expect.objectContaining({
+        rerun_id: 'gcd_rerun_powergrid',
+        end_step: 'powerGrid',
+        step_configurations: [],
+        workspace_parameters: {},
+      }),
     })
   })
 
