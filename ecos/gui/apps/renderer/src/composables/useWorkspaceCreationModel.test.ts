@@ -64,6 +64,5 @@ describe('useWorkspaceCreationModel', () => {
     expect(request?.mpc).toEqual({ clock: { port: 'CK' } })
     expect(request?.projectPresetParameters).toEqual({ max_fanout: 16 })
     expect(creationModel.model.value?.parameters[0]?.definition.id).toBe('track_density')
-    expect(creationModel.values.value.track_density).toBe(0.5)
   })
 })

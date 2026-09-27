@@ -1491,11 +1491,6 @@
                         class="w-full rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
                       />
                     </div>
-                    <WorkspaceCatalogParameters
-                      :parameters="extraCreationParameters"
-                      :values="catalogParameterValues"
-                      @update="setCatalogParameterValue"
-                    />
                   </div>
 
                   <div
@@ -1747,7 +1742,6 @@ import {
 import DesignFileTransfer from './DesignFileTransfer.vue'
 import PdkResourcePickerDialog from './PdkResourcePickerDialog.vue'
 import TopModuleField from './TopModuleField.vue'
-import WorkspaceCatalogParameters from './WorkspaceCatalogParameters.vue'
 import {
   canSubmitTopModule,
   designInputFingerprint,
@@ -1913,28 +1907,22 @@ const initialDesignInputFingerprint = designInputFingerprint({
   startsFromSynthesis:
     (props.initialConfig?.flow_config?.start_step ?? 'Synthesis') === 'Synthesis',
 })
-const {
-  explicitValues: explicitCatalogParameterValues,
-  model: workspaceCreationModel,
-  parameters: extraCreationParameters,
-  refresh: refreshWorkspaceCreationModel,
-  setValue: setCatalogParameterValue,
-  values: catalogParameterValues,
-} = useWorkspaceCreationModel({
-  designTool: () => props.initialConfig?.designTool,
-  flowId: wizardFlowId,
-  inputMode: () => (startsFromSynthesis.value ? 'rtl' : 'postSynthesis'),
-  mpc: () => projectMpc.value as Record<string, unknown> | null,
-  pdk: () =>
-    config.value.pdk
-      ? {
-          familyId: config.value.pdk,
-          mode: pdkConfigMode.value,
-          version: selectedPdk.value?.version ?? null,
-        }
-      : null,
-  projectPresetParameters: () => projectPresetParameters.value,
-})
+const { model: workspaceCreationModel, refresh: refreshWorkspaceCreationModel } =
+  useWorkspaceCreationModel({
+    designTool: () => props.initialConfig?.designTool,
+    flowId: wizardFlowId,
+    inputMode: () => (startsFromSynthesis.value ? 'rtl' : 'postSynthesis'),
+    mpc: () => projectMpc.value as Record<string, unknown> | null,
+    pdk: () =>
+      config.value.pdk
+        ? {
+            familyId: config.value.pdk,
+            mode: pdkConfigMode.value,
+            version: selectedPdk.value?.version ?? null,
+          }
+        : null,
+    projectPresetParameters: () => projectPresetParameters.value,
+  })
 const isDraggingFiles = ref(false)
 const isScanningDirectory = ref(false)
 const directoryScanError = ref('')
@@ -4121,7 +4109,6 @@ function syncWorkspaceConfig() {
   config.value.sdc = sdcPath.value
   config.value.pdk_config_mode = pdkConfigMode.value
   config.value.parameters.die_area_mode = dieAreaMode.value
-  Object.assign(config.value.parameters, explicitCatalogParameterValues())
   if (projectDesignName.value) {
     config.value.parameters.design = projectDesignName.value
   }
