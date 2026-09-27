@@ -22,6 +22,15 @@ from ecos_agent.optimization.experiments.knowledge_metrics import (
 PROMOTING_DECISIONS = frozenset(
     {"initialized", "candidate_better", "recovery_progress", "parity_objective_improved"}
 )
+EXPECTED_CONSUMED_SOURCES = {
+    "floorplan.aspect_ratio": "floorplan.init_fp.config",
+    "floorplan.core_util": "floorplan.init_fp.config",
+    "place.cell_padding_x": "DREAMPlace.placedb.cell_padding_x",
+    "place.density_weight": "DREAMPlace.params.density_weight",
+    "place.routability_opt": "DREAMPlace.params.routability_opt_flag",
+    "place.target_density": "DREAMPlace.params.target_density",
+    "place.target_overflow": "DREAMPlace.params.stop_overflow",
+}
 
 
 def _read_rows(path: Path) -> list[dict]:
@@ -86,7 +95,8 @@ def episode_activation_record(
             "intervention_id"
         ):
             outcomes[str(payload["intervention_id"])] = payload
-    source_backed = []
+    native_activations = []
+    native_activation_failures: Counter[str] = Counter()
     for call in claim_bound:
         intervention_id = str(call.get("intervention_id") or "")
         outcome = outcomes.get(intervention_id)
@@ -94,22 +104,26 @@ def episode_activation_record(
         parameter = dict(receipt.get("parameter") or {})
         consumed = dict(parameter.get("consumed") or {})
         application = dict(receipt.get("application") or {})
-        mediation_complete = (
-            call.get("counts_toward_knowledge_attribution") is True
-            and call.get("application_status") == "applied"
-            and call.get("terminal_delta_vs_epsilon") in terminal_verdicts
-            and bool(call.get("promotion_decision"))
-        )
-        receipt_complete = (
-            application.get("status") == "applied"
-            and parameter.get("knob_id") == call.get("knob")
-            and consumed.get("value") is not None
-            and bool(consumed.get("unit"))
-            and bool(consumed.get("source"))
-            and bool(receipt.get("evidence_sha256"))
-        )
-        if intervention_id and mediation_complete and receipt_complete:
-            source_backed.append(intervention_id)
+        knob = str(call.get("knob") or "")
+        expected_source = EXPECTED_CONSUMED_SOURCES.get(knob)
+        if not intervention_id:
+            native_activation_failures["not_selected"] += 1
+        elif outcome is None:
+            native_activation_failures["authoritative_receipt_missing"] += 1
+        elif application.get("status") != "applied":
+            native_activation_failures["application_not_applied"] += 1
+        elif parameter.get("knob_id") != knob:
+            native_activation_failures["receipt_knob_mismatch"] += 1
+        elif consumed.get("value") is None:
+            native_activation_failures["consumed_value_missing"] += 1
+        elif not consumed.get("unit"):
+            native_activation_failures["consumed_unit_missing"] += 1
+        elif expected_source is None or consumed.get("source") != expected_source:
+            native_activation_failures["consumer_source_mismatch"] += 1
+        elif not receipt.get("evidence_sha256"):
+            native_activation_failures["receipt_evidence_hash_missing"] += 1
+        else:
+            native_activations.append(intervention_id)
 
     expected_effects = dict(
         audit.get("decision_level_endpoints", {}).get(
@@ -118,20 +132,26 @@ def episode_activation_record(
     )
     expected_effects["role"] = "diagnostic_only"
     return {
-        "schema_version": "ecos.rq2_episode_activation.v2",
+        "schema_version": "ecos.rq2_episode_activation.v3",
         "design": design,
         "episode_id": episode_id,
         "treatment": treatment,
         "planning_rows": len(calls),
         "proposals": len(proposals),
         "claim_bound_proposals": len(claim_bound),
-        "claim_bound_source_backed_activation": len(source_backed),
-        "claim_bound_source_backed_intervention_ids": source_backed,
+        "native_activation": len(native_activations),
+        "native_activation_intervention_ids": native_activations,
+        "native_activation_failure_reasons": dict(
+            sorted(native_activation_failures.items())
+        ),
+        "claim_bound_source_backed_activation": len(native_activations),
+        "claim_bound_source_backed_intervention_ids": native_activations,
         "executed": len(executed),
         "receipts": len(receipts),
         "verified_applied": len(verified_applied),
         "terminal_joined": len(terminal_joined),
         "promotion_joined": len(promotion_joined),
+        "terminal_promotion_complete_chain": len(complete_chain),
         "complete_attribution_chain": len(complete_chain),
         "application_status_counts": dict(
             sorted(
@@ -172,7 +192,15 @@ def aggregate_activation(
         planning_rows = _total("planning_rows")
         complete = _total("complete_attribution_chain")
         claim_bound = _total("claim_bound_proposals")
-        source_backed = _total("claim_bound_source_backed_activation")
+        source_backed = sum(
+            int(
+                item.get(
+                    "native_activation",
+                    item.get("claim_bound_source_backed_activation") or 0,
+                )
+            )
+            for item in group
+        )
         expected_effects = {
             "role": "diagnostic_only",
             "realized": sum(
@@ -214,6 +242,26 @@ def aggregate_activation(
                 ),
                 "designs_total": len(group),
             },
+            "conditional_native_activation": {
+                **wilson_score_interval(source_backed, claim_bound),
+                "numerator": source_backed,
+                "denominator": claim_bound,
+                "designs_with_activation": sum(
+                    bool(
+                        item.get(
+                            "native_activation",
+                            item.get("claim_bound_source_backed_activation"),
+                        )
+                    )
+                    for item in group
+                ),
+                "designs_total": len(group),
+            },
+            "knowledge_bound_selection": {
+                **wilson_score_interval(claim_bound, proposals),
+                "numerator": claim_bound,
+                "denominator": proposals,
+            },
             "selected_to_executed": {
                 **wilson_score_interval(executed, proposals),
                 "numerator": executed,
@@ -235,6 +283,14 @@ def aggregate_activation(
                 "numerator": complete,
                 "denominator": proposals,
             },
+            "terminal_promotion_complete_chain_rate": {
+                **wilson_score_interval(complete, proposals),
+                "numerator": complete,
+                "denominator": proposals,
+            },
+            "native_activation_failure_reasons": _merge_counts(
+                group, "native_activation_failure_reasons"
+            ),
             "application_status_counts": _merge_counts(
                 group, "application_status_counts"
             ),
@@ -256,14 +312,36 @@ def aggregate_activation(
             "claim_bound_source_backed_activation": record.get(
                 "claim_bound_source_backed_activation", 0
             ),
+            "native_activation": record.get(
+                "native_activation",
+                record.get("claim_bound_source_backed_activation", 0),
+            ),
             "executed": record["executed"],
             "verified_applied": record["verified_applied"],
             "complete_attribution_chain": record["complete_attribution_chain"],
+            "terminal_promotion_complete_chain": record.get(
+                "terminal_promotion_complete_chain",
+                record["complete_attribution_chain"],
+            ),
             "application_status_counts": record["application_status_counts"],
             "expected_effect_realization": record["expected_effect_realization"],
         }
     return {
-        "schema_version": "ecos.rq2_activation_chain.v2",
+        "schema_version": "ecos.rq2_activation_chain.v3",
+        "native_activation_contract": {
+            "required": [
+                "claim_bound",
+                "selected_intervention_id",
+                "authoritative_receipt",
+                "application.status=applied",
+                "receipt_knob_match",
+                "consumed_value_and_unit",
+                "registered_consumer_source_match",
+                "receipt_evidence_sha256",
+            ],
+            "terminal_or_promotion_required": False,
+            "expected_consumed_sources": EXPECTED_CONSUMED_SOURCES,
+        },
         "by_treatment": by_treatment,
         "by_design_treatment": design_treatment,
     }

@@ -13,9 +13,14 @@ from ecos_agent.optimization.experiments.rq2_analysis import (
     policy_posterior,
     policy_shift,
 )
+from ecos_agent.optimization.experiments.rq2_behavior_analysis import (
+    stratified_behavior_analysis,
+)
 
 DUAL = "state-conditioned-dual-layer-zero-shot"
 NOKNOW = "llm-no-knowledge"
+RAWRAG = "current-metric-id-raw-rag"
+UNCOND = "unconditioned-support-zero-shot"
 
 
 def _row(
@@ -25,6 +30,7 @@ def _row(
     signature: str,
     repeat: int,
     status: str = "valid",
+    stratum: str = "knowledge_opportunity",
 ) -> dict:
     if signature.startswith("propose:"):
         parts = signature.split(":")
@@ -34,10 +40,11 @@ def _row(
         levels = {"L0": "propose", "L1": l1, "L2": l2, "L3": l3}
     else:
         levels = {level: signature for level in ("L0", "L1", "L2", "L3")}
+        levels["evidence_status"] = "abstain"
     return {
         "design": "gcd",
         "checkpoint": "cp1",
-        "state_stratum": "knowledge_opportunity",
+        "state_stratum": stratum,
         "context_fingerprint": fingerprint,
         "treatment": treatment,
         "repeat": repeat,
@@ -46,11 +53,13 @@ def _row(
     }
 
 
-def _context(fingerprint: str = "cf-a") -> dict:
+def _context(
+    fingerprint: str = "cf-a", *, stratum: str = "knowledge_opportunity"
+) -> dict:
     return {
         "design": "gcd",
         "checkpoint": "cp1",
-        "state_stratum": "knowledge_opportunity",
+        "state_stratum": stratum,
         "context_fingerprint": fingerprint,
         "planning_context": {
             "legal_actions": [
@@ -163,6 +172,61 @@ def test_fixed_alphabet_and_matched_context_permutation() -> None:
     assert shift["material_probability_role"] == "descriptive_only_uncalibrated"
 
 
+def test_stratified_behavior_separates_provider_output_from_gate_conformance() -> None:
+    contexts = [_context("cf-op"), _context("cf-neg", stratum="stale_binding")]
+    rows = []
+    signatures = {
+        DUAL: "propose:place.target_density:increase",
+        NOKNOW: "continue",
+        RAWRAG: "propose:place.target_density:decrease",
+        UNCOND: "continue",
+    }
+    for treatment, signature in signatures.items():
+        for repeat in range(1, 6):
+            rows.append(
+                _row(
+                    fingerprint="cf-op",
+                    treatment=treatment,
+                    signature=signature,
+                    repeat=repeat,
+                )
+            )
+    for repeat in range(1, 4):
+        rows.append(
+            _row(
+                fingerprint="cf-neg",
+                treatment=DUAL,
+                signature="continue",
+                repeat=repeat,
+                stratum="stale_binding",
+            )
+        )
+
+    result = stratified_behavior_analysis(
+        rows,
+        contexts=contexts,
+        draws=20,
+        permutations=20,
+        bootstrap_draws=20,
+    )
+
+    assert result["provider_generated_behavior"]["contexts"] == 1
+    assert result["provider_generated_behavior"]["cells"] == 4
+    assert result["fixed_depth_sensitivity"]["first_3"]["contexts"] == 1
+    assert result["fixed_depth_sensitivity"]["first_5"]["contexts"] == 1
+    assert result["fixed_depth_sensitivity"]["first_3"]["observations"] == 12
+    assert result["fixed_depth_sensitivity"]["first_5"]["observations"] == 20
+    gate = result["state_gate_conformance"]["by_stratum"]["stale_binding"]
+    assert gate["dual"]["conformant_contexts"] == 1
+    assert gate["dual"]["contexts"] == 1
+    mass = result["provider_generated_behavior"]["action_mass_changes"]
+    pair = f"{DUAL}||{NOKNOW}"
+    assert mass[pair]["L2"]["changes"][0]["signature"] in {
+        "continue",
+        "propose:place.target_density:increase",
+    }
+
+
 def test_activation_uses_proposal_denominator_and_exact_count_merge() -> None:
     records = [
         {
@@ -228,8 +292,6 @@ def test_episode_activation_joins_source_backed_receipt(tmp_path) -> None:
                         "intervention_id": "intervention-1",
                         "application_status": "applied",
                         "consumed_value": 0.7,
-                        "terminal_delta_vs_epsilon": "outside",
-                        "promotion_decision": "candidate_better",
                         "counts_toward_knowledge_attribution": True,
                     }
                 ],
@@ -277,3 +339,68 @@ def test_episode_activation_joins_source_backed_receipt(tmp_path) -> None:
 
     assert record["claim_bound_proposals"] == 1
     assert record["claim_bound_source_backed_activation"] == 1
+    assert record["native_activation"] == 1
+    assert record["terminal_promotion_complete_chain"] == 0
+
+
+def test_episode_activation_rejects_unregistered_consumer_source(tmp_path) -> None:
+    episode = tmp_path / "report"
+    episode.mkdir()
+    (episode / "knowledge-mediation-audit.v1.json").write_text(
+        json.dumps(
+            {
+                "calls": [
+                    {
+                        "knob": "place.target_density",
+                        "direction": "increase",
+                        "claim_bound": True,
+                        "intervention_id": "intervention-1",
+                        "application_status": "applied",
+                        "consumed_value": 0.7,
+                    }
+                ],
+                "decision_level_endpoints": {"expected_effect_realization": {}},
+                "missing_evidence_reason_counts": {},
+                "state_match": {},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    outcomes = tmp_path / "optimization-outcomes.v1.jsonl"
+    outcomes.write_text(
+        json.dumps(
+            {
+                "payload": {
+                    "record_type": "terminal_outcome",
+                    "intervention_id": "intervention-1",
+                    "parameter_application_receipt": {
+                        "application": {"status": "applied"},
+                        "evidence_sha256": "sha256:receipt",
+                        "parameter": {
+                            "knob_id": "place.target_density",
+                            "consumed": {
+                                "value": 0.7,
+                                "unit": "ratio",
+                                "source": "wrong.nonempty.source",
+                            },
+                        },
+                    },
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    record = episode_activation_record(
+        episode_root=episode,
+        design="gcd",
+        episode_id="ep",
+        treatment=DUAL,
+        outcomes_path=outcomes,
+    )
+
+    assert record["claim_bound_proposals"] == 1
+    assert record["native_activation"] == 0
+    assert record["native_activation_failure_reasons"] == {"consumer_source_mismatch": 1}
