@@ -69,7 +69,7 @@ import { mapStepConfigurationReadResult } from './stepConfigurationResult'
 import {
   hasPersistedWorkspace,
   readPersistedEngineeringSnapshot,
-} from './engineeringSnapshotReader'
+} from '../eccCli/engineeringSnapshotReader'
 
 export type { EccRpcRuntimeClient, EccRpcRuntimeSidecar }
 

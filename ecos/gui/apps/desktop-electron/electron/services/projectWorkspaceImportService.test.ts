@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { ProjectManifest } from '@ecos-studio/shared'
-import { EccJsonRpcError } from './eccRpc/jsonRpcClient'
+import { EccJsonRpcError } from './frontendRpc/jsonRpcClient'
 import {
   ProjectWorkspaceImportService,
   projectWorkspaceImportFailure,

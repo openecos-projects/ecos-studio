@@ -189,7 +189,6 @@ export function backendWorkspaceOptions(
   const mpc = config.mpc as ProjectManifestMpc | null | undefined
   const projectContext = config.project_context
 
-  const projectRoot = projectContext?.project_root
   return {
     designTool: 'backend',
     targetDirectory,
@@ -211,7 +210,19 @@ export function backendWorkspaceOptions(
       projectIdFromName(
         projectContext?.project_name || targetDirectory.split('/').pop() || '',
       ),
-    ...(projectRoot ? { projectRoot } : {}),
+    projectMode: projectContext?.mode,
+    projectName: projectContext?.project_name,
+    projectRoot: projectContext?.project_root || targetDirectory,
+    ...(config.source_context?.workspaceId
+      ? {
+          deriveFrom: {
+            workspaceId: config.source_context.workspaceId,
+            ...(config.source_context.step
+              ? { sourceStep: config.source_context.step }
+              : {}),
+          },
+        }
+      : {}),
     workspaceSpec: {
       schemaVersion: 1,
       design: {

@@ -15,7 +15,7 @@ export interface AppInfoServiceOptions {
 }
 
 const UNKNOWN_VERSION = 'unknown'
-const DEFAULT_RUNTIME = 'ECC RPC'
+const DEFAULT_RUNTIME = 'ECC CLI'
 
 function dataToString(data: unknown): string {
   return Buffer.isBuffer(data) ? data.toString('utf8') : String(data)

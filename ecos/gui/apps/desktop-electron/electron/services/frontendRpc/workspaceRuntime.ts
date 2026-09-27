@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type {
   EccFlowRunRequest,
   EccFlowRunResult,
@@ -52,7 +52,7 @@ import type {
 } from '@ecos-studio/shared'
 import { validateEngineeringSnapshot } from '@ecos-studio/shared'
 
-import { normalizeRuntimeError } from './errors'
+import { EccRuntimeServiceError, normalizeRuntimeError } from './errors'
 import { electronLogger } from '../logger'
 import type { JsonRpcNotificationPayload } from './jsonRpcClient'
 import {
@@ -74,7 +74,10 @@ import {
 } from './workspaceRuntimeCommands'
 import { WorkspaceSessionRegistry } from './workspaceSessions'
 import { WorkspaceStepConfigurationCache } from './workspaceStepConfigurationCache'
-import { readPersistedEngineeringSnapshot } from './engineeringSnapshotReader'
+import {
+  findPersistedArtifactDrift,
+  readPersistedEngineeringSnapshot,
+} from '../eccCli/engineeringSnapshotReader'
 
 export type { EccRpcRuntimeClient, EccRpcRuntimeSidecar } from './runtimeClient'
 
@@ -527,7 +530,22 @@ export class EccWorkspaceRuntime {
   exportSignoff(
     request: EccWorkspaceExportSignoffRequest,
   ): Promise<EccWorkspaceExportSignoffResult> {
-    return this.commands.exportSignoff(request)
+    return this.commands.exportSignoff(request, async () => {
+      const session = this.sessions.require(request.workspaceHandle)
+      const snapshotPath = join(session.directory, 'home', 'engineering-snapshot.json')
+      if (!existsSync(snapshotPath)) return
+      const snapshot = await readPersistedEngineeringSnapshot(
+        session.directory,
+        session.eccWorkspaceId ?? undefined,
+      )
+      const drifted = await findPersistedArtifactDrift(session.directory, snapshot)
+      if (drifted.length === 0) return
+      throw new EccRuntimeServiceError({
+        code: 'SIGNOFF_ARTIFACT_REVISION_MISMATCH',
+        details: { references: drifted },
+        message: `Signoff export blocked: committed artifact files changed (${drifted.join(', ')})`,
+      })
+    })
   }
 
   layoutEditBegin(request: EccLayoutEditBeginRequest): Promise<EccLayoutEditBeginResult> {
@@ -765,39 +783,19 @@ export class EccWorkspaceRuntime {
     )
     const validated = validateEngineeringSnapshot(snapshot, workspaceId ?? undefined)
     if (!validated.ok) throw new Error(validated.issue.code)
-    const {
-      artifacts,
-      checklist,
-      flow,
-      hotspotPreview,
-      metrics,
-      signoff,
-      timingPreview,
-      qorSnapshotExtension,
-    } = validated.sections
+    const { artifacts, flow, qor, signoff } = validated.sections
     if (artifacts.status !== 'ready') throw new Error(artifacts.issues[0]?.code)
-    if (checklist.status !== 'ready') throw new Error(checklist.issues[0]?.code)
     if (flow.status !== 'ready') throw new Error(flow.issues[0]?.code)
-    if (hotspotPreview.status !== 'ready') {
-      throw new Error(hotspotPreview.issues[0]?.code)
-    }
-    if (metrics.status !== 'ready') throw new Error(metrics.issues[0]?.code)
+    if (qor.status !== 'ready') throw new Error(qor.issues[0]?.code)
     if (signoff.status !== 'ready') throw new Error(signoff.issues[0]?.code)
-    if (timingPreview.status !== 'ready') {
-      throw new Error(timingPreview.issues[0]?.code)
-    }
     return {
       ...validated.snapshot,
+      analysis: qor.data.analysis,
       artifacts: artifacts.data,
-      checklist: checklist.data,
       flow: flow.data,
-      hotspotPreview: hotspotPreview.data,
-      metrics: metrics.data,
-      ...(qorSnapshotExtension.status === 'ready'
-        ? { qorSnapshotExtension: qorSnapshotExtension.data }
-        : {}),
+      metrics: qor.data.metrics,
+      qorAssessment: qor.data.qorAssessment,
       signoffAssessment: signoff.data,
-      timingPreview: timingPreview.data,
     }
   }
 

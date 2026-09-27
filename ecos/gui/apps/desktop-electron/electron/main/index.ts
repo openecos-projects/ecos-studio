@@ -23,13 +23,15 @@ import { BackendProjectComparisonService } from '../services/backendProjectCompa
 import { prepareDesktopLogs } from '../services/desktopLogPaths'
 import {
   createEccRuntimeEnv,
+  resolveDurableEccExecutable,
   resolveEccExecutable,
   resolveExternalEccBinDir,
-} from '../services/eccRpc/runtimeEnv'
-import type { EccRuntimeEnvOptions } from '../services/eccRpc/runtimeEnv'
-import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
-import { resolveEccSidecarLogDirectory } from '../services/eccRpc/sidecarLogDirectory'
-import { EccRpcSidecarProcess } from '../services/eccRpc/sidecarProcess'
+} from '../services/eccCli/runtimeEnv'
+import type { EccRuntimeEnvOptions } from '../services/eccCli/runtimeEnv'
+import { EccRpcRuntimeService } from '../services/frontendRpc/runtimeService'
+import { resolveEccSidecarLogDirectory } from '../services/frontendRpc/sidecarLogDirectory'
+import { EccRpcSidecarProcess } from '../services/frontendRpc/sidecarProcess'
+import { EccCliRuntimeService } from '../services/eccCli/runtimeService'
 import {
   createFrontendRpcLaunchResolver,
   frontendRuntimeEventFromNotification,
@@ -98,7 +100,7 @@ let services: {
   backendProjectComparisonService: BackendProjectComparisonService
   cliInstallerService: CliInstallerService
   codexDependencyService: CodexDependencyService
-  eccRuntimeService: EccRpcRuntimeService
+  eccRuntimeService: EccCliRuntimeService
   frontendRpcRuntimeService: FrontendRpcRuntimeService
   modelProfileService: ModelProfileService
   projectManagementReadService: ProjectManagementReadService
@@ -139,7 +141,7 @@ configureGpuMode({
 const { mainLogFile, sessionDirectory: logSessionDirectory } = prepareDesktopLogs()
 configureElectronLoggerFile(mainLogFile)
 electronLogger.status('[desktop] Logs: %s', mainLogFile)
-electronLogger.status('[runtime] Runtime: ECC RPC + frontend RPC')
+electronLogger.status('[runtime] Runtime: ECC CLI + frontend RPC (ECC-FE only)')
 registerSurferProtocolSchemes(protocol)
 
 if (process.env.ECOS_ELECTRON_SMOKE === '1') {
@@ -188,9 +190,14 @@ function getDesktopServices() {
     appVersionProvider: () => app.getVersion(),
     env: runtimeEnv,
   })
-  const resourceManagerService = new ResourceManagerService()
+  let eccRuntimeService: EccCliRuntimeService | undefined
+  const runtimeInUse = () =>
+    eccRuntimeService?.isRuntimeResourceInUse('tool:ecc') ?? false
+  const resourceManagerService = new ResourceManagerService({
+    resourceInUse: (resourceId) =>
+      eccRuntimeService?.isRuntimeResourceInUse(resourceId) ?? false,
+  })
   const pdkInventoryService = resourceManagerService.getPdkInventoryService()
-  const projectEccConfigService = new ProjectEccConfigService()
   const cliInstallerService = new CliInstallerService({
     resourceManager: resourceManagerService,
     env: process.env,
@@ -200,6 +207,7 @@ function getDesktopServices() {
     resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
     userDataPath: app.getPath('userData'),
     externalBinDir: resolveExternalEccOverride(),
+    runtimeInUse,
   })
   const runtimeEnvProvider = () => {
     // Rebuild the base env on every resolution so a bundle acquired (or
@@ -211,40 +219,26 @@ function getDesktopServices() {
       platform: process.platform,
     })
   }
-  const eccRuntimeService = new EccRpcRuntimeService({
-    createSidecar: (_directory, onEvent, onNotification) =>
-      new EccRpcSidecarProcess({
-        // Re-resolve the executable on every start so a bundle downloaded by
-        // the CLI installer (or refreshed by drift sync) is picked up without
-        // an app restart. While first-use acquisition is still running there
-        // is deliberately no PATH fallback: launching a wrong/unavailable
-        // binary would be harder to diagnose than a clear error.
-        resolveLaunch: async () => {
-          const executable = resolveEccExecutable(eccRuntimeOptions)
-          if (!executable) {
-            throw new Error(
-              'The ECC core component is not ready yet. Wait for the first-use download to finish (see Command line tools) and try again.',
-            )
-          }
-          return {
-            command: executable,
-            args: ['rpc', 'serve', '--stdio', '--persistent-db'],
-          }
-        },
-        env: runtimeEnv,
-        envProvider: runtimeEnvProvider,
-        logDirectoryProvider: () => resolveEccSidecarLogDirectory(logSessionDirectory),
-        onEvent,
-        onNotification,
-      }),
-    lazyWorkspaceOpen: false,
+  eccRuntimeService = new EccCliRuntimeService({
+    envProvider: runtimeEnvProvider,
+    resolveLaunch: async () => {
+      const executable = resolveDurableEccExecutable(eccRuntimeOptions)
+      if (!executable) {
+        throw new Error(
+          'The ECC core component is not ready yet. Wait for the first-use download to finish (see Command line tools) and try again.',
+        )
+      }
+      return { command: executable }
+    },
   })
+  const projectEccConfigService = new ProjectEccConfigService(
+    (projectRoot, sets, unsets) =>
+      eccRuntimeService.applyProjectSettings(projectRoot, sets, unsets),
+  )
   projectScopeService = new ProjectScopeService({
     loadProjectManifest: async (projectRoot) =>
       projectManifestForPresentation(
-        await eccRuntimeService.callRuntime<EccProjectManifest>('project.manifest.load', {
-          projectRoot,
-        }),
+        (await eccRuntimeService.loadProjectManifest(projectRoot)) as EccProjectManifest,
         projectRoot,
       ),
     readGrantProvider: projectReadGrantStore,
@@ -327,10 +321,9 @@ function getDesktopServices() {
     (directory, step) =>
       eccRuntimeService.readWorkspaceStepConfigurationForDirectory(directory, step),
     (directory) =>
-      eccRuntimeService.callRuntime<ProjectWorkspaceConfiguration>(
-        'workspace.configuration.read',
-        { directory },
-      ),
+      eccRuntimeService.readWorkspaceConfiguration(
+        directory,
+      ) as Promise<ProjectWorkspaceConfiguration>,
     (path) => projectScopeService!.requestProjectPathAccess(path),
   )
   const backendProjectComparisonService = new BackendProjectComparisonService(
@@ -340,6 +333,7 @@ function getDesktopServices() {
   )
   const backendWorkspaceService = new BackendWorkspaceService({
     projectManagementReadService,
+    runtimeStateProvider: eccRuntimeService,
     snapshotWatcherFactory: (callbacks) => new ProjectComparisonFileWatcher(callbacks),
     workspaceRootProvider: projectScopeService,
   })

@@ -611,6 +611,15 @@ describe('ResourceManagerService', () => {
     await rm(isolatedXdgRoot, { force: true, recursive: true })
   })
 
+  it('blocks resource removal while an active ECC run holds its runtime lease', async () => {
+    const service = new ResourceManagerService({
+      resourceInUse: (resourceId) => resourceId === 'tool:ecc',
+    })
+
+    await expect(service.uninstallResource('tool:ecc')).rejects.toThrow(
+      'in use by an active ECC run',
+    )
+  })
   afterEach(async () => {
     await Promise.all(
       tempDirectories

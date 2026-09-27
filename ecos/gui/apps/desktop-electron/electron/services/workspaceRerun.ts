@@ -8,7 +8,7 @@ import {
   ECC_FLOW_STEP_SET as FLOW_STEPS,
   type DesktopAgentWorkspaceRerunContract,
 } from '@ecos-studio/shared'
-import { isPathWithinRoot, isRelativePathOutsideRoot } from '../pathScope'
+import { isPathWithinRoot, isRelativePathOutsideRoot } from './pathScope'
 import {
   executeWorkspaceRerunDomain,
   hasValidWorkspaceRerunDomainUpdates,
