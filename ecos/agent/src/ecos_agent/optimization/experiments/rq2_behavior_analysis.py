@@ -306,4 +306,3 @@ def stratified_behavior_analysis(
             },
         },
     }
-
