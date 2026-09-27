@@ -558,6 +558,87 @@ describe('AgentProviderProcessRuntime', () => {
     })
   })
 
+  it('accepts rerun steps that are not in the legacy catalog', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.startSession({ providerId: 'local', sessionId: 'session-1' })
+    const workspaceRerun = {
+      design_id: 'gcd',
+      end_step: 'powerGrid',
+      execution_scope: 'single_step',
+      parameter_patch: [],
+      requires_gui_review: true,
+      rerun_id: 'gcd_rerun_powergrid',
+      schema_version: 'flow-agent.workspace_rerun_contract.v1',
+      source_stage_artifact: 'powerGrid_ipw/output/gcd_powerGrid.def.gz',
+      source_flow_json_sha256: `sha256:${'a'.repeat(64)}`,
+      source_stage_artifact_sha256: `sha256:${'b'.repeat(64)}`,
+      source_workspace: '/runs/gcd',
+      target_step: 'powerGrid',
+      target_workspace: '/runs/gcd_rerun_powergrid',
+    }
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          contract: {
+            fields: [{ label: 'ignored', value: 'ignored' }],
+            presentation: 'workspace_rerun',
+            schema_version: 'flow-agent.resolved_execution_contract.v1',
+            title: 'Workspace rerun plan',
+            workspace_rerun: workspaceRerun,
+          },
+          sessionId: 'session-1',
+          type: 'contract',
+        },
+        type: 'event',
+      })}\n`,
+    )
+    const confirmationToken = listener.mock.calls[0][0].contract.confirmation_token
+    listener.mockClear()
+    void runtime.sendMessage({
+      confirmationToken,
+      message: '1',
+      providerId: 'local',
+      sessionId: 'session-1',
+    })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          sessionId: 'session-1',
+          type: 'workspace_rerun',
+          workspaceRerun,
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith({
+      providerId: 'local',
+      sessionId: 'session-1',
+      type: 'workspace_rerun',
+      workspaceRerun: expect.objectContaining({
+        rerun_id: 'gcd_rerun_powergrid',
+        end_step: 'powerGrid',
+        step_configurations: [],
+        workspace_parameters: {},
+      }),
+    })
+  })
+
   const parameterUpdateEvent = (overrides: Record<string, unknown> = {}): string =>
     `${JSON.stringify({
       event: {

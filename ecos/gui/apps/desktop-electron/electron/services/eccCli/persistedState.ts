@@ -8,6 +8,10 @@ import {
 
 const PROJECT_MAX_BYTES = 4 * 1024 * 1024
 const FLOW_MAX_BYTES = 4 * 1024 * 1024
+// ECC publishes JSON via a same-directory temp file + atomic rename, so a
+// read can briefly race the replacement and observe ENOENT on the old path.
+const ENOENT_RETRY_ATTEMPTS = 2
+const ENOENT_RETRY_DELAY_MS = 75
 
 export interface PersistedFlowStep {
   name: string
@@ -125,6 +129,24 @@ export function workspaceDirectoryForId(
 }
 
 async function readBoundedJson(path: string, maxBytes: number): Promise<unknown> {
+  let attempt = 0
+  while (true) {
+    try {
+      return await readBoundedJsonOnce(path, maxBytes)
+    } catch (error) {
+      if (
+        (error as NodeJS.ErrnoException).code !== 'ENOENT' ||
+        attempt >= ENOENT_RETRY_ATTEMPTS
+      ) {
+        throw error
+      }
+      attempt += 1
+      await delay(ENOENT_RETRY_DELAY_MS)
+    }
+  }
+}
+
+async function readBoundedJsonOnce(path: string, maxBytes: number): Promise<unknown> {
   const handle = await open(path, 'r')
   try {
     const info = await handle.stat()
@@ -136,6 +158,10 @@ async function readBoundedJson(path: string, maxBytes: number): Promise<unknown>
   } finally {
     await handle.close()
   }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
 function isProjectManifest(value: unknown): value is EccProjectManifest {

@@ -46,7 +46,6 @@ export function isWorkspaceRerunParameterValue(value: unknown): boolean {
 
 export function hasValidWorkspaceRerunDomainUpdates(
   contract: DesktopAgentWorkspaceRerunContract,
-  flowSteps: ReadonlySet<string>,
 ): boolean {
   if (
     !contract.workspace_parameters ||
@@ -65,11 +64,7 @@ export function hasValidWorkspaceRerunDomainUpdates(
         !['__proto__', 'prototype', 'constructor'].includes(key) && validOptions(entry),
     )
   }
-  return (
-    validOptions(contract.workspace_parameters) &&
-    flowSteps.has(contract.target_step) &&
-    contract.step_configurations.length === 0
-  )
+  return validOptions(contract.workspace_parameters)
 }
 
 export async function executeWorkspaceRerunDomain(
@@ -77,9 +72,8 @@ export async function executeWorkspaceRerunDomain(
   runtime: WorkspaceRerunRuntime,
   workspaceHandle: string,
   initialWorkspaceRevision: number | undefined,
-  flowSteps: ReadonlySet<string>,
 ): Promise<void> {
-  if (!hasValidWorkspaceRerunDomainUpdates(contract, flowSteps)) {
+  if (!hasValidWorkspaceRerunDomainUpdates(contract)) {
     throw new Error('Workspace rerun contract is invalid.')
   }
   if (!Number.isInteger(initialWorkspaceRevision)) {

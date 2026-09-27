@@ -126,7 +126,6 @@ function pathIsWithin(path: string, directory: string): boolean {
 export class EccRpcSidecarProcess {
   private child: SpawnedEccRpcSidecar | null = null
   private client: EccJsonRpcClient | null = null
-  private readonly command: string
   private readonly env: NodeJS.ProcessEnv
   private readonly forceKillTimeoutMs: number
   private readonly shutdownTimeoutMs: number
@@ -141,7 +140,6 @@ export class EccRpcSidecarProcess {
   logFile: string | null = null
 
   constructor(private readonly options: EccRpcSidecarProcessOptions = {}) {
-    this.command = options.command ?? 'ecc'
     this.env = { ...(options.env ?? process.env) }
     this.forceKillTimeoutMs = 1000
     this.shutdownTimeoutMs = options.shutdownTimeoutMs ?? 3000
@@ -153,15 +151,7 @@ export class EccRpcSidecarProcess {
     const baseEnv = await this.resolveEnv()
     const launch = this.options.resolveLaunch
       ? await this.options.resolveLaunch(baseEnv)
-      : {
-          args: this.options.commandArgs ?? [
-            'rpc',
-            'serve',
-            '--stdio',
-            '--persistent-db',
-          ],
-          command: this.command,
-        }
+      : this.explicitLaunch()
     const env = launch.env ?? baseEnv
     const launchKey = JSON.stringify([launch.command, launch.args])
     if (
@@ -277,6 +267,21 @@ export class EccRpcSidecarProcess {
     })
 
     return client
+  }
+
+  /**
+   * Explicit non-resolver launch. There is deliberately no default command:
+   * the deleted backend `ecc rpc serve` entrypoint must never be spawned
+   * implicitly: production always supplies `resolveLaunch` for the ECC-FE
+   * frontend runtime.
+   */
+  private explicitLaunch(): EccRpcSidecarLaunch {
+    if (!this.options.command) {
+      throw new Error(
+        'ECC-FE sidecar launch is not configured: provide resolveLaunch or an explicit command and commandArgs.',
+      )
+    }
+    return { args: this.options.commandArgs ?? [], command: this.options.command }
   }
 
   async shutdown(): Promise<void> {

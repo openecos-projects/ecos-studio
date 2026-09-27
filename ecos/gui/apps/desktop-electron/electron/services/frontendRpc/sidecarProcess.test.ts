@@ -51,13 +51,18 @@ class FakeChild extends EventEmitter implements SpawnedEccRpcSidecar {
   }
 }
 
+const explicitFrontendLaunch = {
+  command: '/runtime/ecc-fe/bin/python3',
+  commandArgs: ['-m', 'fecompiler.cli.main', 'rpc', 'serve', '--stdio'],
+}
+
 describe('EccRpcSidecarProcess', () => {
   afterEach(() => {
     vi.useRealTimers()
     electronLogger.error.mockReset()
   })
 
-  it('spawns ECC with persistent DB support for GUI edit sessions', async () => {
+  it('rejects startup without resolveLaunch or an explicit command', async () => {
     const child = new FakeChild()
     const spawn = vi.fn(() => child)
     const sidecar = new EccRpcSidecarProcess({
@@ -65,16 +70,10 @@ describe('EccRpcSidecarProcess', () => {
       spawn,
     })
 
-    await sidecar.start()
-
-    expect(spawn).toHaveBeenCalledWith(
-      'ecc',
-      ['rpc', 'serve', '--stdio', '--persistent-db'],
-      {
-        env: { PATH: '/bin' },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      },
+    await expect(sidecar.start()).rejects.toThrow(
+      'ECC-FE sidecar launch is not configured',
     )
+    expect(spawn).not.toHaveBeenCalled()
   })
 
   it('uses a runtime-specific launch resolver', async () => {
@@ -104,11 +103,12 @@ describe('EccRpcSidecarProcess', () => {
     )
   })
 
-  it('spawns the resolved absolute ECC executable when provided', async () => {
+  it('spawns the resolved absolute ECC-FE executable when provided', async () => {
     const child = new FakeChild()
     const spawn = vi.fn(() => child)
     const sidecar = new EccRpcSidecarProcess({
-      command: '/tmp/packaged/binaries/ecc',
+      ...explicitFrontendLaunch,
+      ...explicitFrontendLaunch,
       env: { PATH: '/home/ecos/.local/bin:/bin' },
       spawn,
     })
@@ -116,8 +116,8 @@ describe('EccRpcSidecarProcess', () => {
     await sidecar.start()
 
     expect(spawn).toHaveBeenCalledWith(
-      '/tmp/packaged/binaries/ecc',
-      ['rpc', 'serve', '--stdio', '--persistent-db'],
+      explicitFrontendLaunch.command,
+      explicitFrontendLaunch.commandArgs,
       {
         env: { PATH: '/home/ecos/.local/bin:/bin' },
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -132,7 +132,11 @@ describe('EccRpcSidecarProcess', () => {
       .fn<() => Promise<NodeJS.ProcessEnv>>()
       .mockResolvedValueOnce({ PATH: '/bin', TOOL_ROOT: '/tools' })
       .mockResolvedValueOnce({ TOOL_ROOT: '/tools', PATH: '/bin' })
-    const sidecar = new EccRpcSidecarProcess({ envProvider, spawn })
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      envProvider,
+      spawn,
+    })
 
     const firstClient = await sidecar.start()
     const secondClient = await sidecar.start()
@@ -149,6 +153,7 @@ describe('EccRpcSidecarProcess', () => {
     const spawn = vi.fn(() => children.shift()!)
     let runtimeEnv: NodeJS.ProcessEnv = { PATH: '/tools/v1/bin' }
     const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
       managementRpc: true,
       envProvider: async () => runtimeEnv,
       spawn,
@@ -170,8 +175,8 @@ describe('EccRpcSidecarProcess', () => {
     expect(secondClient).not.toBe(firstClient)
     expect(spawn).toHaveBeenCalledTimes(2)
     expect(spawn).toHaveBeenLastCalledWith(
-      'ecc',
-      ['rpc', 'serve', '--stdio', '--persistent-db'],
+      explicitFrontendLaunch.command,
+      explicitFrontendLaunch.commandArgs,
       {
         env: { PATH: '/tools/v2/bin' },
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -189,6 +194,7 @@ describe('EccRpcSidecarProcess', () => {
       .mockResolvedValueOnce({ PATH: '/tools/bin' })
       .mockRejectedValueOnce(new Error('manifest unavailable'))
     const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
       env: { PATH: '/base/bin' },
       envProvider,
       spawn,
@@ -224,6 +230,7 @@ describe('EccRpcSidecarProcess', () => {
     const spawn = vi.fn(() => child)
     let runtimeEnv: NodeJS.ProcessEnv = { PATH: '/tools/v1/bin' }
     const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
       managementRpc: true,
       envProvider: async () => runtimeEnv,
       shutdownTimeoutMs: 25,
@@ -256,6 +263,7 @@ describe('EccRpcSidecarProcess', () => {
     const child = new FakeChild()
     let runtimeEnv: NodeJS.ProcessEnv = { PATH: '/tools/v1/bin' }
     const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
       managementRpc: true,
       envProvider: async () => runtimeEnv,
       shutdownTimeoutMs: 25,
@@ -280,7 +288,10 @@ describe('EccRpcSidecarProcess', () => {
 
   it('connects stdout responses to the JSON-RPC client', async () => {
     const child = new FakeChild()
-    const sidecar = new EccRpcSidecarProcess({ spawn: () => child })
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      spawn: () => child,
+    })
     const client = await sidecar.start()
 
     const promise = client.call<{ ok: boolean }>('rpc.ping')
@@ -295,6 +306,7 @@ describe('EccRpcSidecarProcess', () => {
     const child = new FakeChild()
     const events: unknown[] = []
     const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
       onEvent: (event) => events.push(event),
       spawn: () => child,
     })
@@ -320,6 +332,7 @@ describe('EccRpcSidecarProcess', () => {
   it('does not signal a sidecar when ECC defers shutdown for an active operation', async () => {
     const child = new FakeChild()
     const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
       managementRpc: true,
       spawn: () => child,
     })
@@ -342,6 +355,7 @@ describe('EccRpcSidecarProcess', () => {
   it('waits for the sidecar process to exit after rpc.shutdown is acknowledged', async () => {
     const child = new FakeChild()
     const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
       managementRpc: true,
       spawn: () => child,
     })
@@ -366,7 +380,10 @@ describe('EccRpcSidecarProcess', () => {
 
   it('terminates the backend runtime without a management RPC', async () => {
     const child = new FakeChild()
-    const sidecar = new EccRpcSidecarProcess({ spawn: () => child })
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      spawn: () => child,
+    })
     await sidecar.start()
 
     const shutdown = sidecar.shutdown()
@@ -383,6 +400,7 @@ describe('EccRpcSidecarProcess', () => {
     const child = new FakeChild()
     const notifications: unknown[] = []
     const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
       onNotification: (notification) => notifications.push(notification),
       spawn: () => child,
     })
@@ -408,6 +426,7 @@ describe('EccRpcSidecarProcess', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'ecc-rpc-sidecar-'))
     const events: unknown[] = []
     const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
       onEvent: (event) => events.push(event),
       spawn: () => child,
       tempDir,
@@ -430,11 +449,13 @@ describe('EccRpcSidecarProcess', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'ecc-rpc-sidecar-'))
     const desktopLogDirectory = join(tempDir, 'desktop-logs')
     const first = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
       logDirectoryProvider: () => desktopLogDirectory,
       spawn: () => new FakeChild(),
       tempDir,
     })
     const second = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
       logDirectoryProvider: () => desktopLogDirectory,
       spawn: () => new FakeChild(),
       tempDir,
@@ -458,6 +479,7 @@ describe('EccRpcSidecarProcess', () => {
     writeFileSync(legacyLogFile, 'before rerun\n')
 
     const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
       logDirectoryProvider: () => desktopLogDirectory,
       spawn: () => child,
       tempDir,
@@ -477,6 +499,7 @@ describe('EccRpcSidecarProcess', () => {
     const child = new FakeChild()
     const events: unknown[] = []
     const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
       onEvent: (event) => events.push(event),
       spawn: () => child,
     })
@@ -502,6 +525,7 @@ describe('EccRpcSidecarProcess', () => {
     const child = new FakeChild()
     const events: unknown[] = []
     const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
       onEvent: (event) => events.push(event),
       spawn: () => child,
     })
@@ -527,6 +551,7 @@ describe('EccRpcSidecarProcess', () => {
     vi.useFakeTimers()
     const child = new FakeChild()
     const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
       managementRpc: true,
       shutdownTimeoutMs: 25,
       spawn: () => child,
@@ -548,7 +573,10 @@ describe('EccRpcSidecarProcess', () => {
 
   it('force terminates the running sidecar with SIGKILL', async () => {
     const child = new FakeChild()
-    const sidecar = new EccRpcSidecarProcess({ spawn: () => child })
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      spawn: () => child,
+    })
     await sidecar.start()
 
     await sidecar.forceShutdown()

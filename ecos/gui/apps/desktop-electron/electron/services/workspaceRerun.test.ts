@@ -427,7 +427,7 @@ describe('prepareWorkspaceRerun', () => {
     )
   })
 
-  it('rejects a full-flow end step that is not the catalog terminus', async () => {
+  it('rejects a full-flow end step that is not the flow terminus', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = {
       ...contractFor(source, flow, artifact),
@@ -436,11 +436,11 @@ describe('prepareWorkspaceRerun', () => {
     }
 
     await expect(prepareWorkspaceRerun(contract)).rejects.toThrow(
-      'full-flow end step must be the catalog terminus',
+      'full-flow end step must be the flow terminus',
     )
   })
 
-  it('extends a short source flow to the catalog terminus for full_flow', async () => {
+  it('extends a short source flow to the flow terminus for full_flow', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = {
       ...contractFor(source, flow, artifact),
@@ -470,6 +470,143 @@ describe('prepareWorkspaceRerun', () => {
     ])
     expect(targetFlow.steps.find((step) => step.name === 'place')?.state).toBe('Unstart')
     expect(targetFlow.steps.find((step) => step.name === 'Harden')?.state).toBe('Unstart')
+  })
+
+  async function writeDynamicSourceWorkspace(): Promise<{
+    artifact: Buffer
+    flow: string
+    source: string
+  }> {
+    const root = await mkdtemp(join(tmpdir(), 'ecos-workspace-rerun-dynamic-'))
+    temporaryRoots.push(root)
+    const source = join(root, 'gcd')
+    const flow = JSON.stringify({
+      steps: [
+        { name: 'place', state: 'Success', tool: 'dreamplace' },
+        { name: 'powerGrid', state: 'Success', tool: 'ipw' },
+        { name: 'CTS', state: 'Unstart', tool: 'ecc' },
+      ],
+    })
+    const artifact = Buffer.from('power-grid-def')
+    await mkdir(join(source, 'home'), { recursive: true })
+    await mkdir(join(source, 'place_dreamplace', 'output'), { recursive: true })
+    await mkdir(join(source, 'powerGrid_ipw', 'output'), { recursive: true })
+    await mkdir(join(source, 'CTS_ecc', 'output'), { recursive: true })
+    await writeFile(join(source, 'home', 'flow.json'), flow)
+    await writeFile(
+      join(source, 'powerGrid_ipw', 'output', 'gcd_powerGrid.def.gz'),
+      artifact,
+    )
+    return { artifact, flow, source }
+  }
+
+  function dynamicContractFor(
+    source: string,
+    flow: string,
+    artifact: Buffer,
+  ): DesktopAgentWorkspaceRerunContract {
+    return {
+      design_id: 'gcd',
+      end_step: 'powerGrid',
+      execution_scope: 'single_step',
+      parameter_patch: [],
+      requires_gui_review: true,
+      rerun_id: 'gcd_rerun_powergrid',
+      schema_version: 'flow-agent.workspace_rerun_contract.v1',
+      source_stage_artifact: 'powerGrid_ipw/output/gcd_powerGrid.def.gz',
+      source_flow_json_sha256: sha256(flow),
+      source_stage_artifact_sha256: sha256(artifact),
+      source_workspace: source,
+      target_step: 'powerGrid',
+      target_workspace: `${source}_rerun_powergrid`,
+      step_configurations: [],
+      workspace_parameters: {},
+    }
+  }
+
+  it('reruns a step whose id is unknown to the legacy flow catalog', async () => {
+    const { artifact, flow, source } = await writeDynamicSourceWorkspace()
+    const contract = dynamicContractFor(source, flow, artifact)
+
+    await expect(prepareWorkspaceRerun(contract)).resolves.toEqual({
+      directory: contract.target_workspace,
+    })
+
+    const targetFlow = JSON.parse(
+      await readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
+    ) as { steps: Array<{ name: string; state: string; tool: string; runtime?: string }> }
+    expect(targetFlow.steps).toEqual([
+      { name: 'place', state: 'Success', tool: 'dreamplace' },
+      { name: 'powerGrid', state: 'Unstart', tool: 'ipw', runtime: '' },
+      { name: 'CTS', state: 'Unstart', tool: 'ecc', runtime: '' },
+    ])
+  })
+
+  it('assigns the generic tool to dynamic steps that name no tool in flow.json', async () => {
+    const { artifact, source } = await writeDynamicSourceWorkspace()
+    const flowWithoutTool = JSON.stringify({
+      steps: [
+        { name: 'place', state: 'Success', tool: 'dreamplace' },
+        { name: 'powerGrid', state: 'Success' },
+        { name: 'CTS', state: 'Unstart', tool: 'ecc' },
+      ],
+    })
+    await writeFile(join(source, 'home', 'flow.json'), flowWithoutTool)
+    const contract = {
+      ...dynamicContractFor(source, flowWithoutTool, artifact),
+      source_stage_artifact: 'powerGrid_ecc/output/gcd_powerGrid.def.gz',
+    }
+    await rm(join(source, 'powerGrid_ipw'), { force: true, recursive: true })
+    await mkdir(join(source, 'powerGrid_ecc', 'output'), { recursive: true })
+    await writeFile(
+      join(source, 'powerGrid_ecc', 'output', 'gcd_powerGrid.def.gz'),
+      artifact,
+    )
+
+    await expect(prepareWorkspaceRerun(contract)).resolves.toEqual({
+      directory: contract.target_workspace,
+    })
+    const targetFlow = JSON.parse(
+      await readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
+    ) as { steps: Array<{ name: string; tool: string }> }
+    expect(targetFlow.steps.find((step) => step.name === 'powerGrid')?.tool).toBe('ecc')
+  })
+
+  it('uses the dynamic flow terminus instead of a fixed end step', async () => {
+    const { artifact, flow, source } = await writeDynamicSourceWorkspace()
+    const accepted = {
+      ...dynamicContractFor(source, flow, artifact),
+      end_step: 'CTS',
+      execution_scope: 'full_flow' as const,
+    }
+
+    await expect(prepareWorkspaceRerun(accepted)).resolves.toEqual({
+      directory: accepted.target_workspace,
+    })
+    const targetFlow = JSON.parse(
+      await readFile(`${accepted.target_workspace}/home/flow.json`, 'utf8'),
+    ) as { steps: Array<{ name: string; state: string }> }
+    expect(targetFlow.steps.map((step) => step.name)).toEqual([
+      'place',
+      'powerGrid',
+      'CTS',
+    ])
+    expect(targetFlow.steps.map((step) => step.state)).toEqual([
+      'Success',
+      'Unstart',
+      'Unstart',
+    ])
+
+    const rejected = {
+      ...dynamicContractFor(source, flow, artifact),
+      end_step: 'Harden',
+      execution_scope: 'full_flow' as const,
+      rerun_id: 'gcd_rerun_powergrid_0001',
+      target_workspace: `${source}_rerun_powergrid_0001`,
+    }
+    await expect(prepareWorkspaceRerun(rejected)).rejects.toThrow(
+      'full-flow end step must be the flow terminus (CTS)',
+    )
   })
 
   it.each([

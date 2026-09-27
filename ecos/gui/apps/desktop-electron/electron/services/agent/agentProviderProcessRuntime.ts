@@ -630,22 +630,10 @@ function readAgentRunStatus(value: unknown): DesktopAgentEvent['status'] | null 
     : null
 }
 
-const workspaceSetupFlowSteps = [
-  'Synthesis',
-  'Floorplan',
-  'place',
-  'CTS',
-  'legalization',
-  'Timing optimization',
-  'route',
-  'drc',
-  'lvs',
-  'filler',
-  'postRouteLec',
-  'RCX',
-  'sta',
-  'Harden',
-]
+// Step IDs are dynamic (flow.json is authoritative, e.g. iPW power flows);
+// this parser only checks shape. Range/membership validation against the
+// workspace's own flow.json happens fail-closed in prepareWorkspaceRerun.
+const rerunStepPattern = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,127}$/
 
 function readWorkspaceRerunContract(
   value: unknown,
@@ -673,13 +661,11 @@ function readWorkspaceRerunContract(
     !rerunId ||
     !designId ||
     typeof targetStep !== 'string' ||
-    !workspaceSetupFlowSteps.includes(targetStep) ||
+    !rerunStepPattern.test(targetStep) ||
     typeof endStep !== 'string' ||
-    !workspaceSetupFlowSteps.includes(endStep) ||
+    !rerunStepPattern.test(endStep) ||
     (executionScope !== 'single_step' && executionScope !== 'full_flow') ||
     (executionScope === 'single_step' && endStep !== targetStep) ||
-    workspaceSetupFlowSteps.indexOf(endStep) <
-      workspaceSetupFlowSteps.indexOf(targetStep) ||
     !patch ||
     !derivedUpdates ||
     'workspace_parameters' in record ||
@@ -849,17 +835,20 @@ function readWorkspaceSetupFlowConfig(
   const start = typeof record.start_step === 'string' ? record.start_step : ''
   const end = typeof record.end_step === 'string' ? record.end_step : ''
   const steps = Array.isArray(record.steps) ? record.steps : []
-  const startIndex = workspaceSetupFlowSteps.indexOf(start)
-  const endIndex = workspaceSetupFlowSteps.indexOf(end)
+  // Step IDs are dynamic (flow.json is authoritative, e.g. iPW power flows);
+  // this parser only checks shape. Range/membership validation against the
+  // workspace's own flow.json happens fail-closed downstream.
   if (
-    startIndex < 0 ||
-    endIndex < startIndex ||
-    steps.length !== endIndex - startIndex + 1 ||
-    steps.some((step, index) => step !== workspaceSetupFlowSteps[startIndex + index])
+    steps.length === 0 ||
+    steps.length > 128 ||
+    steps.some((step) => typeof step !== 'string' || !rerunStepPattern.test(step)) ||
+    new Set(steps).size !== steps.length ||
+    start !== steps[0] ||
+    end !== steps[steps.length - 1]
   ) {
     return null
   }
-  return { end_step: end, start_step: start, steps }
+  return { end_step: end, start_step: start, steps: [...steps] as string[] }
 }
 
 function readWorkspaceSetupPath(value: unknown): string | null {

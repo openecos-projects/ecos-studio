@@ -470,7 +470,6 @@ export {
   normalizeProjectManifestFlowStep,
   normalizeProjectManifestStage,
   parseProjectManifestFlowStep,
-  projectRuntimeProcesses,
   projectManifestForPresentation,
   projectIdFromName,
   projectManifestFlowSteps,

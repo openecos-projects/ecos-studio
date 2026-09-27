@@ -22,7 +22,15 @@ import {
   type WorkspaceRerunRuntime,
 } from './workspaceRerunDomain'
 
-const FLOW_STEP_SEQUENCE = [
+/**
+ * Well-known legacy rtl2gds step order and the tool each inserted step uses.
+ * This is ONLY a compatibility shim for legacy flow.json files written before
+ * a step was inserted into the rtl2gds flow: a full-flow rerun of such a
+ * workspace regains the missing known steps. Rerun validation, wiping, and
+ * ordering are always derived from the workspace's own flow.json so dynamic
+ * flows (e.g. iPW power flows) and unknown/new step IDs keep working.
+ */
+const LEGACY_STEP_SEQUENCE = [
   'Synthesis',
   'Floorplan',
   'place',
@@ -38,11 +46,11 @@ const FLOW_STEP_SEQUENCE = [
   'sta',
   'Harden',
 ] as const
-const FLOW_STEPS: Set<string> = new Set(FLOW_STEP_SEQUENCE)
-const CATALOG_END_STEP = FLOW_STEP_SEQUENCE[FLOW_STEP_SEQUENCE.length - 1]!
-const LEGACY_HOME_FILES = ['home.json', 'home.json.lock'] as const
-/** Default tool names when extending a short source flow to the catalog end. */
-const DEFAULT_STEP_TOOLS: Record<(typeof FLOW_STEP_SEQUENCE)[number], string> = {
+const LEGACY_STEP_INDEX: ReadonlyMap<string, number> = new Map(
+  LEGACY_STEP_SEQUENCE.map((name, index) => [name, index]),
+)
+const GENERIC_STEP_TOOL = 'ecc'
+const LEGACY_STEP_TOOLS: Record<string, string> = {
   Synthesis: 'yosys',
   Floorplan: 'ecc',
   place: 'dreamplace',
@@ -57,6 +65,12 @@ const DEFAULT_STEP_TOOLS: Record<(typeof FLOW_STEP_SEQUENCE)[number], string> = 
   RCX: 'ecc',
   sta: 'ecc',
   Harden: 'ecc',
+}
+const LEGACY_HOME_FILES = ['home.json', 'home.json.lock'] as const
+
+/** Tool for steps flow.json does not name explicitly: known map, else generic. */
+function defaultStepTool(stepName: string): string {
+  return LEGACY_STEP_TOOLS[stepName] ?? GENERIC_STEP_TOOL
 }
 const STAGE_OUTPUT_SUFFIXES = ['.def.gz', '.v.gz', '.gds']
 
@@ -221,7 +235,6 @@ export async function executeWorkspaceRerun(
     runtime,
     workspaceHandle,
     initialWorkspaceRevision,
-    FLOW_STEPS,
   )
 }
 
@@ -234,8 +247,6 @@ async function verifyWorkspaceRerunContract(
   if (
     contract.schema_version !== 'flow-agent.workspace_rerun_contract.v1' ||
     contract.requires_gui_review !== true ||
-    !FLOW_STEPS.has(contract.target_step) ||
-    !FLOW_STEPS.has(contract.end_step) ||
     !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(contract.design_id) ||
     !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(contract.rerun_id) ||
     !/^[a-f0-9]{64}$/.test(contract.source_flow_json_sha256) ||
@@ -244,11 +255,10 @@ async function verifyWorkspaceRerunContract(
     !isAbsolute(contract.source_workspace) ||
     !isAbsolute(contract.target_workspace) ||
     !hasValidParameterPatch(contract.parameter_patch) ||
-    !hasValidWorkspaceRerunDomainUpdates(contract, FLOW_STEPS) ||
+    !hasValidWorkspaceRerunDomainUpdates(contract) ||
     !hasAuthorizedParameterPatch(contract.target_step, contract.parameter_patch) ||
     (contract.execution_scope !== 'single_step' &&
-      contract.execution_scope !== 'full_flow') ||
-    !isValidRerunRange(contract.target_step, contract.end_step, contract.execution_scope)
+      contract.execution_scope !== 'full_flow')
   ) {
     throw new Error('Workspace rerun contract is invalid.')
   }
@@ -287,15 +297,22 @@ async function verifyWorkspaceRerunContract(
   if (sha256(flowText) !== contract.source_flow_json_sha256) {
     throw new Error('Workspace rerun source flow evidence is stale.')
   }
-  if (
-    contract.execution_scope === 'full_flow' &&
-    contract.end_step !== CATALOG_END_STEP
-  ) {
-    throw new Error(
-      `Workspace rerun full-flow end step must be the catalog terminus (${CATALOG_END_STEP}).`,
-    )
+  const parsedFlow = parseWorkspaceFlow(flowText)
+  const flowStepNames = parsedFlow.steps.map((step) => step.name)
+  if (!flowStepNames.includes(contract.target_step)) {
+    throw new Error('Workspace rerun contract is invalid.')
   }
-  const targetTool = completedStepTool(flowText, contract.target_step)
+  if (contract.execution_scope === 'full_flow') {
+    const terminus = rerunFlowTerminus(flowStepNames)
+    if (contract.end_step !== terminus) {
+      throw new Error(
+        `Workspace rerun full-flow end step must be the flow terminus (${terminus}).`,
+      )
+    }
+  } else if (contract.end_step !== contract.target_step) {
+    throw new Error('Workspace rerun contract is invalid.')
+  }
+  const targetTool = completedStepTool(parsedFlow.steps, contract.target_step)
   if (!targetTool) {
     throw new Error('Workspace rerun target step is not completed in the source flow.')
   }
@@ -326,22 +343,27 @@ async function verifyWorkspaceRerunContract(
   return { sourceWorkspace, targetWorkspace }
 }
 
-function isValidRerunRange(
-  targetStep: string,
-  endStep: string,
-  executionScope: 'single_step' | 'full_flow',
-): boolean {
-  const targetIndex = FLOW_STEP_SEQUENCE.indexOf(
-    targetStep as (typeof FLOW_STEP_SEQUENCE)[number],
-  )
-  const endIndex = FLOW_STEP_SEQUENCE.indexOf(
-    endStep as (typeof FLOW_STEP_SEQUENCE)[number],
-  )
-  return (
-    targetIndex >= 0 &&
-    endIndex >= targetIndex &&
-    (executionScope === 'full_flow' || targetStep === endStep)
-  )
+/**
+ * Whether every step of the parsed flow is a well-known legacy rtl2gds step.
+ * Only such flows are eligible for the legacy missing-step extension.
+ */
+function isLegacyStepSet(stepNames: string[]): boolean {
+  return stepNames.length > 0 && stepNames.every((name) => LEGACY_STEP_INDEX.has(name))
+}
+
+/**
+ * Effective step order used to place the wipe boundary and the full-flow
+ * terminus: legacy flows gain known steps inserted since their flow.json was
+ * written; every other flow keeps its own flow.json order verbatim.
+ */
+function rerunFlowLayout(stepNames: string[]): string[] {
+  return isLegacyStepSet(stepNames) ? [...LEGACY_STEP_SEQUENCE] : [...stepNames]
+}
+
+/** Last step of the effective flow order; full-flow reruns must end there. */
+function rerunFlowTerminus(stepNames: string[]): string | undefined {
+  const layout = rerunFlowLayout(stepNames)
+  return layout[layout.length - 1]
 }
 
 function isWorkspaceArtifactReference(value: string): boolean {
@@ -482,23 +504,12 @@ function isSafeParameterString(value: string): boolean {
   )
 }
 
-function completedStepTool(flowText: string, targetStep: string): string | null {
-  try {
-    const flow = JSON.parse(flowText) as { steps?: unknown }
-    if (!Array.isArray(flow.steps)) return null
-    const step = flow.steps.find(
-      (item) =>
-        typeof item === 'object' &&
-        item !== null &&
-        (item as { name?: unknown; state?: unknown }).name === targetStep &&
-        (item as { state?: unknown }).state === 'Success',
-    )
-    const tool =
-      typeof step === 'object' && step !== null && (step as { tool?: unknown }).tool
-    return typeof tool === 'string' && /^[A-Za-z0-9_-]+$/.test(tool) ? tool : null
-  } catch {
-    return null
-  }
+function completedStepTool(
+  steps: WorkspaceFlowStep[],
+  targetStep: string,
+): string | null {
+  const step = steps.find((item) => item.name === targetStep && item.state === 'Success')
+  return step && /^[A-Za-z0-9_-]+$/.test(step.tool) ? step.tool : null
 }
 
 async function prepareWorkspaceRerunFlow(
@@ -518,51 +529,56 @@ async function prepareWorkspaceRerunFlow(
     'rerun flow',
   )
   const flow = parseWorkspaceFlow(await readFile(flowPath, 'utf8'))
-  const targetIndex = FLOW_STEP_SEQUENCE.indexOf(
-    targetStep as (typeof FLOW_STEP_SEQUENCE)[number],
-  )
-  const endIndex = FLOW_STEP_SEQUENCE.indexOf(
-    endStep as (typeof FLOW_STEP_SEQUENCE)[number],
-  )
-  if (targetIndex < 0 || endIndex < targetIndex) {
+  const flowStepNames = flow.steps.map((step) => step.name)
+  const targetIndex = flowStepNames.indexOf(targetStep)
+  if (targetIndex < 0) {
     throw new Error('Workspace rerun flow range is invalid.')
   }
 
-  if (executionScope === 'full_flow') {
-    const present = new Set(flow.steps.map((step) => step.name))
-    // Fill missing catalog steps throughout the rerun range: flows created
+  let orderedSteps = flow.steps
+  if (executionScope === 'full_flow' && isLegacyStepSet(flowStepNames)) {
+    // Fill missing known steps throughout the rerun range: flows created
     // before a step was inserted (e.g. Timing Opt, postRouteLec) still gain
-    // it on a full-flow rerun instead of silently skipping the gate.
-    for (let index = targetIndex; index <= endIndex; index += 1) {
-      const name = FLOW_STEP_SEQUENCE[index]!
-      if (present.has(name)) continue
-      flow.steps.push({
-        name,
-        tool: DEFAULT_STEP_TOOLS[name],
-        state: 'Unstart',
-        runtime: '',
-      })
-      present.add(name)
+    // it on a full-flow rerun instead of silently skipping the gate. The
+    // known list is only consulted here because every step of this flow is
+    // known; dynamic flows keep their own order and step set.
+    const firstIndex = LEGACY_STEP_INDEX.get(targetStep)!
+    const lastIndex = LEGACY_STEP_INDEX.get(endStep) ?? LEGACY_STEP_SEQUENCE.length - 1
+    const present = new Map(flow.steps.map((step) => [step.name, step]))
+    const retained: WorkspaceFlowStep[] = flow.steps
+      .filter((step) => (LEGACY_STEP_INDEX.get(step.name) ?? -1) < firstIndex)
+      .sort(
+        (left, right) =>
+          (LEGACY_STEP_INDEX.get(left.name) ?? -1) -
+          (LEGACY_STEP_INDEX.get(right.name) ?? -1),
+      )
+    orderedSteps = []
+    for (let index = firstIndex; index <= lastIndex; index += 1) {
+      const name = LEGACY_STEP_SEQUENCE[index]!
+      orderedSteps.push(
+        present.get(name) ?? {
+          name,
+          tool: defaultStepTool(name),
+          state: 'Unstart',
+          runtime: '',
+        },
+      )
     }
-    flow.steps.sort(
-      (left, right) =>
-        FLOW_STEP_SEQUENCE.indexOf(left.name as (typeof FLOW_STEP_SEQUENCE)[number]) -
-        FLOW_STEP_SEQUENCE.indexOf(right.name as (typeof FLOW_STEP_SEQUENCE)[number]),
-    )
-    flow.data.steps = flow.steps
+    orderedSteps = [...retained, ...orderedSteps]
   }
 
   // Always wipe from the start stage through the end of the prepared flow so
   // single-step reruns do not leave stale dependent outputs from later stages.
-  for (const step of flow.steps) {
-    const stepIndex = FLOW_STEP_SEQUENCE.indexOf(
-      step.name as (typeof FLOW_STEP_SEQUENCE)[number],
-    )
-    if (stepIndex < targetIndex) continue
+  const wipeStart = orderedSteps.findIndex((step) => step.name === targetStep)
+  if (wipeStart < 0) {
+    throw new Error('Workspace rerun flow range is invalid.')
+  }
+  for (const step of orderedSteps.slice(wipeStart)) {
     await emptyWorkspaceStepDirectory(workspace, step)
     step.state = 'Unstart'
     step.runtime = ''
   }
+  flow.data.steps = orderedSteps
   await writeFile(flowPath, `${JSON.stringify(flow.data, null, 2)}\n`, 'utf8')
 }
 
@@ -581,15 +597,23 @@ async function prepareWorkspaceRerunMetadata(options: {
   await removeLegacyWorkspaceHomeFiles(home)
   await rewriteWorkspaceHomeFilePaths(home, options)
 
-  const targetIndex = FLOW_STEP_SEQUENCE.indexOf(
-    options.targetStep as (typeof FLOW_STEP_SEQUENCE)[number],
+  const flowPath = await resolvePathWithinWorkspace(
+    options.stagedWorkspace,
+    join(options.stagedWorkspace, 'home', 'flow.json'),
+    'rerun flow',
   )
+  const flow = parseWorkspaceFlow(await readFile(flowPath, 'utf8'))
+  const flowStepNames = flow.steps.map((step) => step.name)
+  const targetIndex = flowStepNames.indexOf(options.targetStep)
   if (targetIndex < 0) {
     throw new Error('Workspace rerun metadata prune target is invalid.')
   }
 
-  const wipedStageNames = new Set<string>(FLOW_STEP_SEQUENCE.slice(targetIndex))
-  await pruneWorkspaceRerunChecklistJson(join(home, 'checklist.json'), wipedStageNames)
+  await pruneWorkspaceRerunChecklistJson(
+    join(home, 'checklist.json'),
+    flowStepNames,
+    targetIndex,
+  )
 }
 
 async function removeLegacyWorkspaceHomeFiles(homeDirectory: string): Promise<void> {
@@ -820,7 +844,8 @@ function uniquePathPrefixes(values: string[]): string[] {
 
 async function pruneWorkspaceRerunChecklistJson(
   checklistPath: string,
-  wipedStageNames: Set<string>,
+  flowStepNames: string[],
+  targetIndex: number,
 ): Promise<void> {
   let raw: string
   try {
@@ -841,10 +866,12 @@ async function pruneWorkspaceRerunChecklistJson(
   const kept = items.filter((item) => {
     if (!item || typeof item !== 'object') return true
     const step = (item as { step?: unknown }).step
-    return (
-      typeof step !== 'string' ||
-      (!isObsoleteFlowStep(step) && !wipedStageNames.has(step))
-    )
+    if (typeof step !== 'string') return true
+    // Entries for obsolete steps or steps outside this workspace flow are
+    // dangling; steps at or after the rerun target are being reset.
+    if (isObsoleteFlowStep(step)) return false
+    const stepIndex = flowStepNames.indexOf(step)
+    return stepIndex >= 0 && stepIndex < targetIndex
   })
 
   let passed = 0
@@ -909,6 +936,10 @@ interface WorkspaceFlowStep {
   runtime?: string
 }
 
+function isSafeFlowStepName(name: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9 _-]{0,127}$/.test(name)
+}
+
 function parseWorkspaceFlow(flowText: string): {
   data: { steps: WorkspaceFlowStep[] }
   steps: WorkspaceFlowStep[]
@@ -924,17 +955,31 @@ function parseWorkspaceFlow(flowText: string): {
           !isObsoleteFlowStep(String((value as { name?: unknown }).name ?? '')),
       )
       .map((value) => {
-        if (
-          typeof value !== 'object' ||
-          value === null ||
-          !FLOW_STEPS.has((value as { name?: unknown }).name as string) ||
-          typeof (value as { tool?: unknown }).tool !== 'string' ||
-          !/^[A-Za-z0-9_-]+$/.test((value as { tool: string }).tool) ||
-          typeof (value as { state?: unknown }).state !== 'string'
-        ) {
+        if (typeof value !== 'object' || value === null) {
           throw new Error('step is invalid')
         }
-        return value as WorkspaceFlowStep
+        const record = value as {
+          name?: unknown
+          tool?: unknown
+          state?: unknown
+          runtime?: unknown
+        }
+        if (typeof record.name !== 'string' || !isSafeFlowStepName(record.name)) {
+          throw new Error('step is invalid')
+        }
+        if (typeof record.state !== 'string') {
+          throw new Error('step is invalid')
+        }
+        const step: WorkspaceFlowStep = {
+          name: record.name,
+          tool:
+            typeof record.tool === 'string' && /^[A-Za-z0-9_-]+$/.test(record.tool)
+              ? record.tool
+              : defaultStepTool(record.name),
+          state: record.state,
+        }
+        if (typeof record.runtime === 'string') step.runtime = record.runtime
+        return step
       })
     if (new Set(steps.map((step) => step.name)).size !== steps.length) {
       throw new Error('step names are duplicated')
