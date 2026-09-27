@@ -1027,8 +1027,6 @@ function buildStepCell(
     // A partially written flow.json is authoritative for execution state.
     // Steps absent from it have not run in this workspace yet.
     status = 'skipped'
-  } else if (workspace.status === 'running') {
-    status = 'running'
   } else if (workspace.status === 'failed' && stepIndex === endIndex) {
     status = 'failed'
   } else if (workspace.status === 'not_started') {

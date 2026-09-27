@@ -1,11 +1,40 @@
 import type { EccWorkspaceCreateRequest } from '@ecos-studio/shared'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  assertEccCliPlatformSupported,
   projectInitArgs,
   projectManifestCreateArgs,
   projectSettingsArgs,
   workspaceCreateCommands,
+  EccCliRuntimeService,
 } from './runtimeService'
+
+afterEach(() => {
+  Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
+})
+
+describe('ECC CLI platform gate', () => {
+  it('allows the Linux platform', () => {
+    expect(() => assertEccCliPlatformSupported('linux')).not.toThrow()
+  })
+
+  it.each(['darwin', 'win32', 'freebsd'] as const)(
+    'throws a coded error on unsupported platform %s before any CLI operation',
+    async (platform) => {
+      expect(() => assertEccCliPlatformSupported(platform)).toThrow(
+        expect.objectContaining({ code: 'ECC_CLI_PLATFORM_UNSUPPORTED' }),
+      )
+
+      const resolveLaunch = vi.fn()
+      Object.defineProperty(process, 'platform', { value: platform, configurable: true })
+      const service = new EccCliRuntimeService({ resolveLaunch })
+      await expect(service.loadProjectManifest('/projects/demo')).rejects.toMatchObject({
+        code: 'ECC_CLI_PLATFORM_UNSUPPORTED',
+      })
+      expect(resolveLaunch).not.toHaveBeenCalled()
+    },
+  )
+})
 
 function request(
   overrides: Partial<EccWorkspaceCreateRequest> = {},

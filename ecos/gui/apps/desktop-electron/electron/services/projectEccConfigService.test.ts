@@ -3,8 +3,80 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
-import { removeScopedKey, setScopedKey } from './eccTomlEdit'
 import { ProjectEccConfigService } from './projectEccConfigService'
+
+/**
+ * Minimal `ecc project apply` stand-in for the tests: applies --set/--unset
+ * assignments to simple `[table]` / `key = value` documents while preserving
+ * unrelated lines such as comments.
+ */
+function formatTomlValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => JSON.stringify(entry)).join(', ')}]`
+  }
+  return JSON.stringify(value)
+}
+
+function setScopedKeyText(
+  text: string,
+  table: string,
+  key: string,
+  value: unknown,
+): string {
+  const lines = text.split('\n')
+  const header = `[${table}]`
+  const assignment = `${key} = ${formatTomlValue(value)}`
+  let tableStart = -1
+  let insertAt = -1
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!.trim()
+    if (line === header) {
+      tableStart = index
+      insertAt = index + 1
+      continue
+    }
+    if (tableStart >= 0) {
+      if (line.startsWith('[') && line.endsWith(']')) break
+      if (line.startsWith(`${key} =`)) {
+        lines[index] = assignment
+        return lines.join('\n')
+      }
+      insertAt = index + 1
+    }
+  }
+  if (tableStart < 0) {
+    if (lines[lines.length - 1]?.trim() !== '') lines.push('')
+    lines.push(header, assignment)
+  } else {
+    lines.splice(insertAt, 0, assignment)
+  }
+  return lines.join('\n')
+}
+
+function removeScopedKeyText(text: string, table: string, key: string): string {
+  const lines = text.split('\n')
+  const kept: string[] = []
+  let inTable = false
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      inTable = trimmed === `[${table}]`
+      kept.push(line)
+      continue
+    }
+    if (inTable && trimmed.startsWith(`${key} =`)) continue
+    kept.push(line)
+  }
+  // Drop table headers whose body became empty.
+  return kept
+    .filter((line, index) => {
+      const trimmed = line.trim()
+      if (!(trimmed.startsWith('[') && trimmed.endsWith(']'))) return true
+      const next = kept.slice(index + 1).find((candidate) => candidate.trim() !== '')
+      return Boolean(next && !(next.trim().startsWith('[') && next.trim().endsWith(']')))
+    })
+    .join('\n')
+}
 
 const CLI_ECC_TOML = `# preset: rtl2gds | pdk: ics55
 [design]
@@ -43,12 +115,17 @@ describe('ProjectEccConfigService', () => {
           const raw = assignment.slice(separator + 1)
           const split = path.lastIndexOf('.')
           const value = raw.startsWith('[') ? JSON.parse(raw) : raw
-          text = setScopedKey(text, path.slice(0, split), path.slice(split + 1), value)
+          text = setScopedKeyText(
+            text,
+            path.slice(0, split),
+            path.slice(split + 1),
+            value,
+          )
         }
         for (const path of unsets) {
           const split = path.lastIndexOf('.')
           text =
-            removeScopedKey(text, path.slice(0, split), path.slice(split + 1)) ?? text
+            removeScopedKeyText(text, path.slice(0, split), path.slice(split + 1)) ?? text
         }
         await writeFile(target, text, 'utf-8')
       },

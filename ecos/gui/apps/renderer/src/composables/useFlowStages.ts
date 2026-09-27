@@ -164,8 +164,6 @@ export function useFlowStages() {
   const dynamicFlowStages = ref<FlowStage[]>([])
   const isLoading = ref(false)
   const error = ref<string | null>(null)
-  let unwatchFlowJsonFile: (() => void) | null = null
-  let unregisterFlowJsonLifecycleCleanup: (() => void) | null = null
   let unregisterHomeRunArtifactReset: (() => void) | null = null
   let unregisterWorkspaceRerunPrepared: (() => void) | null = null
   // Resource invalidations can arrive in bursts during a frontend rerun. Keep
@@ -361,13 +359,6 @@ export function useFlowStages() {
     }
   }
 
-  function cleanupFlowJsonWatch(): void {
-    unregisterFlowJsonLifecycleCleanup?.()
-    unregisterFlowJsonLifecycleCleanup = null
-    unwatchFlowJsonFile?.()
-    unwatchFlowJsonFile = null
-  }
-
   function resetRunStagesForRerun(affectedSteps: readonly string[] = []): void {
     invalidateFlowStageLoads()
     if (affectedSteps.length === 0) {
@@ -471,12 +462,6 @@ export function useFlowStages() {
     pendingRerunFlowStartProjectPath = ''
     consumePendingHomeRunArtifactReset(projectPath)
     return true
-  }
-
-  async function startFlowJsonWatchForCurrentProject(): Promise<void> {
-    cleanupFlowJsonWatch()
-    // Runtime event invalidation calls loadFlowStages(); no renderer watcher is
-    // allowed to poll or watch flow.json on a potentially slow NFS mount.
   }
 
   /**
@@ -585,9 +570,7 @@ export function useFlowStages() {
           runtimeOverrideWorkspaceKey = nextWorkspaceKey
         }
         await loadFlowStages()
-        await startFlowJsonWatchForCurrentProject()
       } else {
-        cleanupFlowJsonWatch()
         clearFlowStages()
       }
     },
@@ -655,7 +638,6 @@ export function useFlowStages() {
 
   if (getCurrentInstance()) {
     onUnmounted(() => {
-      cleanupFlowJsonWatch()
       unregisterHomeRunArtifactReset?.()
       unregisterHomeRunArtifactReset = null
       unregisterWorkspaceRerunPrepared?.()

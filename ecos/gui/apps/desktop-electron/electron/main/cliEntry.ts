@@ -88,9 +88,9 @@ function exitCodeForSignal(signal: string | null): number {
 export interface CliRunDependencies {
   env: NodeJS.ProcessEnv
   platform: NodeJS.Platform
-  /** Resolved exactly like the ECC RPC sidecar resolves its executable. */
+  /** Resolved exactly like the ECC CLI backend runtime resolves its executable. */
   resolveExecutable: () => string | null
-  /** Built exactly like the ECC RPC sidecar's spawn env. */
+  /** Built exactly like the ECC CLI backend runtime's spawn env. */
   buildRuntimeEnv: () => Promise<NodeJS.ProcessEnv>
   spawn?: typeof spawn
   log?: (message: string) => void

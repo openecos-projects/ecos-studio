@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rename, rm, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -68,5 +68,36 @@ describe('readWorkspaceFlow', () => {
     await expect(readWorkspaceFlow(root)).rejects.toThrow(
       'Workspace flow step is invalid',
     )
+  })
+
+  it('retries across an atomic flow.json replacement racing the read', async () => {
+    const root = await writeFlow({ schema_version: 1, steps: [] })
+    const flowPath = join(root, 'home', 'flow.json')
+    const replacement = JSON.stringify({
+      schema_version: 1,
+      steps: [{ name: 'route', state: 'Ongoing', tool: 'ecc' }],
+    })
+    // Simulate the ECC publish (temp file + rename) landing between the
+    // unlink and the read's retry window.
+    await unlink(flowPath)
+    const publish = (async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      const temporary = join(root, 'home', 'flow.json.tmp')
+      await writeFile(temporary, replacement)
+      await rename(temporary, flowPath)
+    })()
+
+    await expect(readWorkspaceFlow(root)).resolves.toEqual({
+      steps: [
+        { name: 'route', peakMemory: 0, runtime: '', state: 'Ongoing', tool: 'ecc' },
+      ],
+    })
+    await publish
+  })
+
+  it('gives up with ENOENT when the flow file stays missing', async () => {
+    const root = await writeFlow({ schema_version: 1, steps: [] })
+    await rm(join(root, 'home', 'flow.json'))
+    await expect(readWorkspaceFlow(root)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
