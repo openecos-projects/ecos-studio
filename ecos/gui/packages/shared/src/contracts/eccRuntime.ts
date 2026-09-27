@@ -232,6 +232,7 @@ export interface EccWorkspaceInfoResult {
 export interface EccWorkspaceRefreshConfigResult {
   directory: string
   refreshed: boolean
+  workspaceRevision?: number
 }
 
 export interface EccWorkspaceResetFlowResult {
@@ -743,6 +744,7 @@ export type EccRuntimeEvent =
       type: 'operation.completed'
       workspaceDirectory?: string
       workspaceHandle?: string
+      workspaceRevision?: number
     }
   | {
       data?: Record<string, unknown>
@@ -769,6 +771,7 @@ export type EccRuntimeEvent =
       type: 'operation.failed'
       workspaceDirectory?: string
       workspaceHandle?: string
+      workspaceRevision?: number
     }
   | {
       logFile?: string
@@ -779,6 +782,7 @@ export type EccRuntimeEvent =
       type: 'operation.cancelled'
       workspaceDirectory?: string
       workspaceHandle?: string
+      workspaceRevision?: number
     }
 
 export interface EccRuntimeApi {

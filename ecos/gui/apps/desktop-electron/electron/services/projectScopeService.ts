@@ -1,5 +1,5 @@
 import { readFile, readdir, realpath, stat } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, resolve, win32 } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, win32 } from 'node:path'
 import {
   type PdkDetectedFiles,
   type ProjectManifest,
@@ -201,6 +201,18 @@ function isPdkResourceFile(path: string): boolean {
 }
 
 async function isProjectDirectoryCandidate(path: string): Promise<boolean> {
+  try {
+    if ((await stat(`${path}/project.json`)).isFile()) return true
+  } catch {
+    // Continue checking the historical workspace shape below.
+  }
+
+  try {
+    if ((await stat(`${path}/runs`)).isDirectory()) return true
+  } catch {
+    // Continue checking the current workspace shape below.
+  }
+
   const homeDirectory = `${path}/home`
 
   try {
@@ -267,6 +279,40 @@ export class ProjectScopeService {
 
   async resolveProjectRoot(path: string): Promise<string> {
     return await canonicalizeExistingDirectory(path)
+  }
+
+  async resolveProjectCreationRoot(path: string): Promise<string> {
+    const requested = resolve(path)
+    try {
+      return await canonicalizeExistingDirectory(requested)
+    } catch (error) {
+      if (!isNodeErrorWithCode(error, 'ENOENT')) throw error
+    }
+
+    const missingSegments: string[] = []
+    let candidate = requested
+    let existingRoot: string
+    while (true) {
+      try {
+        existingRoot = await canonicalizeExistingDirectory(candidate)
+        break
+      } catch (error) {
+        if (!isNodeErrorWithCode(error, 'ENOENT')) throw error
+        const parent = dirname(candidate)
+        if (parent === candidate) throw error
+        missingSegments.unshift(basename(candidate))
+        candidate = parent
+      }
+    }
+
+    const canonicalTarget = await canonicalizePotentialPathWithinRoot(
+      join(existingRoot, ...missingSegments),
+      existingRoot,
+    )
+    if (!isPathWithinRoot(canonicalTarget, existingRoot)) {
+      throw projectPathAccessDeniedError(canonicalTarget, 'root')
+    }
+    return canonicalTarget
   }
 
   async canonicalizeProjectTarget(

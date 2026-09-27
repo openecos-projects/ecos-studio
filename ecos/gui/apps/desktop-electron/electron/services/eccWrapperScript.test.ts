@@ -74,7 +74,7 @@ describe('ecc-wrapper.sh', () => {
           UV_CAPTURE_FILE: uvCapture,
         },
       })
-      expect(result.stderr).toContain('[ecc-wrapper]')
+      expect(result.stderr).toBe('')
       expect(result.status).toBe(0)
 
       const [capturedCwd, ...capturedArgs] = readFileSync(uvCapture, 'utf8')
@@ -113,7 +113,7 @@ describe('ecc-wrapper.sh', () => {
           PATH: `${binDir}:/usr/bin:/bin`,
         },
       })
-      expect(result.stderr).toContain('[ecc-wrapper]')
+      expect(result.stderr).toBe('')
       expect(result.status).toBe(0)
 
       const [capturedCwd, ...capturedArgs] = readFileSync(nixCapture, 'utf8')

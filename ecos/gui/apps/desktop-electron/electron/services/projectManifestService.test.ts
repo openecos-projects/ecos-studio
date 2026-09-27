@@ -82,6 +82,34 @@ describe('ProjectManifestService', () => {
     })
   })
 
+  it('resolves a new project through the creation path without requiring the directory', async () => {
+    const callRuntime = vi.fn().mockResolvedValue(emptyManifest)
+    const resolveProjectRoot = vi.fn(async (path: string) => path)
+    const resolveProjectCreationRoot = vi.fn(async (path: string) => `${path}/canonical`)
+    const service = new ProjectManifestService(
+      { resolveProjectRoot, resolveProjectCreationRoot },
+      undefined,
+      {
+        discoverProject: vi.fn(),
+        loadProjectManifest: vi.fn(),
+        mutateProjectManifest: (root, mutation) =>
+          callRuntime('project.manifest.mutate', { projectRoot: root, mutation }),
+      },
+    )
+
+    await service.mutate({
+      projectRoot: '/projects/new-gcd',
+      mutation: { type: 'create', name: 'new-gcd', designName: 'gcd' },
+    })
+
+    expect(resolveProjectCreationRoot).toHaveBeenCalledWith('/projects/new-gcd')
+    expect(resolveProjectRoot).not.toHaveBeenCalled()
+    expect(callRuntime).toHaveBeenCalledWith('project.manifest.mutate', {
+      projectRoot: '/projects/new-gcd/canonical',
+      mutation: { type: 'create', name: 'new-gcd', designName: 'gcd' },
+    })
+  })
+
   it('registers a missing Workspace through the ECC Runtime', async () => {
     const registered = {
       ...emptyManifest,

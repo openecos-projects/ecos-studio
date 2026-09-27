@@ -26,6 +26,32 @@ describe('executeProductCommand Workspace creation', () => {
     expect(updateWorkspaceConfiguration).toHaveBeenCalledWith(payload)
   })
 
+  it('keeps Project configuration fields visible to the Runtime boundary', async () => {
+    const updateWorkspaceConfiguration = vi.fn().mockRejectedValue(
+      Object.assign(new Error('Project-level configuration requires project apply'), {
+        code: 'PROJECT_CONFIGURATION_SCOPE',
+      }),
+    )
+    const payload = {
+      commandId: 'configuration-1',
+      configuration: {
+        design: { topModule: 'new_top' },
+        parameters: {},
+        pdk: {},
+      },
+      expectedWorkspaceRevision: 1,
+      workspaceHandle: 'handle-1',
+    }
+
+    await expect(
+      executeProductCommand({ command: 'workspace.updateConfiguration', payload }, {
+        ownsWorkspaceHandle: () => true,
+        runtime: { updateWorkspaceConfiguration } as never,
+      } as never),
+    ).rejects.toMatchObject({ code: 'PROJECT_CONFIGURATION_SCOPE' })
+    expect(updateWorkspaceConfiguration).toHaveBeenCalledWith(payload)
+  })
+
   it('routes Step Parameters without exposing a configuration path', async () => {
     const updateWorkspaceStepConfiguration = vi.fn().mockResolvedValue({
       workspaceRevision: 2,

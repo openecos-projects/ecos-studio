@@ -21,6 +21,7 @@ const testState = vi.hoisted(() => ({
   registerProjectReadRoot: vi.fn(async (path: string) => path),
   comparisonProjection: { data: null as unknown, status: 'idle' },
   projectManifestOverride: null as unknown,
+  mutateProjectManifest: vi.fn(),
   selectProject: vi.fn(async (_projectRoot: string) => undefined),
   pickDirectory: vi.fn(async (_options?: unknown) => '/projects/demo'),
   stepOutputs: vi.fn(
@@ -105,18 +106,6 @@ vi.mock('@/utils/projectManagementRead', () => ({
       },
   ),
 }))
-vi.mock('@/utils/projectConsistency', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/utils/projectConsistency')>()),
-  checkProjectConsistency: vi.fn(async () => ({
-    doctor: 'project' as const,
-    status: 'ok' as const,
-    projectRoot: null,
-    checked: 0,
-    inconsistent: 0,
-    findings: [],
-  })),
-  repairProjectConsistency: vi.fn(),
-}))
 vi.mock('@/stores/backendProjectComparisonSession', () => ({
   useBackendProjectComparisonSession: () => ({
     dispose: vi.fn(),
@@ -136,6 +125,9 @@ vi.mock('./project-management/frontendProjectWorkspaceData', () => ({
     flowStates: { ws_0001: { prepare: 'success' } },
     analysisInputs: { ws_0001: {} },
   })),
+}))
+vi.mock('@/api/projectManifest', () => ({
+  mutateProjectManifest: (...args: unknown[]) => testState.mutateProjectManifest(...args),
 }))
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => ({
@@ -157,16 +149,8 @@ vi.mock('@/platform/desktop', () => ({
 
 import ProjectsView from './ProjectsView.vue'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
-import { useProjectConsistencyStore } from '@/stores/projectConsistencyStore'
 import { loadProjectHistory, rememberProjectHistoryEntry } from '@/utils/projectHistory'
-import {
-  importProjectManagementWorkspace,
-  readProjectManagementManifest,
-} from '@/utils/projectManagementRead'
-import {
-  checkProjectConsistency,
-  repairProjectConsistency,
-} from '@/utils/projectConsistency'
+import { importProjectManagementWorkspace } from '@/utils/projectManagementRead'
 import { readFrontendProjectWorkspaceData } from './project-management/frontendProjectWorkspaceData'
 import {
   consumeWorkspaceWizardRequest,
@@ -206,16 +190,8 @@ describe('ProjectsView background lifecycle integration', () => {
     testState.selectProject.mockReset()
     testState.selectProject.mockImplementation(async () => undefined)
     vi.mocked(readFrontendProjectWorkspaceData).mockClear()
-    vi.mocked(checkProjectConsistency).mockReset()
-    vi.mocked(checkProjectConsistency).mockResolvedValue({
-      doctor: 'project',
-      status: 'ok',
-      projectRoot: null,
-      checked: 0,
-      inconsistent: 0,
-      findings: [],
-    })
-    vi.mocked(repairProjectConsistency).mockReset()
+    testState.mutateProjectManifest.mockReset()
+    testState.mutateProjectManifest.mockResolvedValue(null)
     testState.pickDirectory.mockReset()
     testState.pickDirectory.mockResolvedValue('/projects/demo')
   })
@@ -523,77 +499,60 @@ describe('ProjectsView background lifecycle integration', () => {
     expect(wrapper.find('.project-list-preview-toggle').exists()).toBe(false)
   })
 
-  describe('project consistency repair', () => {
-    const inconsistentReport = {
-      doctor: 'project' as const,
-      status: 'failed' as const,
-      projectRoot: '/projects/demo',
-      checked: 2,
-      inconsistent: 1,
-      findings: [
-        {
-          check: 'missing-directory' as const,
-          status: 'fail' as const,
-          workspace_id: 'ws_0002',
-          workspace: '/projects/demo/ws_0002',
-          detail: 'workspace directory does not exist',
-        },
-      ],
+  describe('new project dialog', () => {
+    async function openNewProjectDialog(wrapper: VueWrapper) {
+      const trigger = wrapper
+        .findAll('button')
+        .find((button) => button.text().toLowerCase().includes('new project'))
+      expect(trigger).toBeDefined()
+      await trigger!.trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.new-project-dialog').exists()).toBe(true)
     }
 
-    it('checks backend projects on load and surfaces findings on the project card', async () => {
-      vi.mocked(checkProjectConsistency).mockResolvedValue(inconsistentReport)
-
+    it('keeps the dialog open and shows an error when project creation fails', async () => {
+      testState.mutateProjectManifest.mockRejectedValue(new Error('ecc cli unavailable'))
       const wrapper = shallowMount(ProjectsView)
       await flushPromises()
+      await openNewProjectDialog(wrapper)
 
-      expect(checkProjectConsistency).toHaveBeenCalledWith('/projects/demo')
-      expect(useProjectConsistencyStore().inconsistentProjects).toHaveLength(1)
-      expect(
-        wrapper.findComponent({ name: 'ProjectConsistencyRepairStrip' }).exists(),
-      ).toBe(true)
-    })
-
-    it('refreshes the displayed project data after a repair', async () => {
-      vi.mocked(checkProjectConsistency).mockResolvedValue(inconsistentReport)
-      const wrapper = shallowMount(ProjectsView)
+      await wrapper.get('.new-project-dialog .path-picker button').trigger('click')
       await flushPromises()
-      vi.mocked(readProjectManagementManifest).mockClear()
-
-      wrapper
-        .findComponent({ name: 'ProjectConsistencyRepairStrip' })
-        .vm.$emit('repaired', '/projects/demo')
+      await wrapper
+        .get('.new-project-dialog footer button.primary-button')
+        .trigger('click')
       await flushPromises()
 
-      expect(readProjectManagementManifest).toHaveBeenCalledWith('/projects/demo')
-    })
-
-    it('never checks frontend projects for backend manifest consistency', async () => {
-      vi.mocked(loadProjectHistory).mockResolvedValueOnce([
-        {
-          id: '/projects/cpu',
-          name: 'cpu',
-          path: '/projects/cpu',
-          projectType: 'frontend' as const,
-          lastOpened: new Date(),
-        },
-      ])
-
-      shallowMount(ProjectsView)
-      await flushPromises()
-
-      expect(checkProjectConsistency).not.toHaveBeenCalled()
-    })
-
-    it('stays silent when the runtime does not support the consistency check', async () => {
-      vi.mocked(checkProjectConsistency).mockRejectedValue(
-        new Error('unknown method: project.doctor.check'),
+      expect(testState.mutateProjectManifest).toHaveBeenCalledOnce()
+      expect(wrapper.find('.new-project-dialog').exists()).toBe(true)
+      expect(wrapper.get('.new-project-dialog .modal-error').text()).toContain(
+        'project.json could not be updated',
       )
+    })
 
-      shallowMount(ProjectsView)
+    it('creates the project and closes the dialog', async () => {
+      const { createProjectManifestDraft } = await import('@ecos-studio/shared')
+      testState.mutateProjectManifest.mockResolvedValue(
+        createProjectManifestDraft({
+          rootPath: '/projects/demo',
+          name: 'demo',
+          designName: 'gcd',
+          projectType: 'backend',
+        }),
+      )
+      const wrapper = shallowMount(ProjectsView)
+      await flushPromises()
+      await openNewProjectDialog(wrapper)
+
+      await wrapper.get('.new-project-dialog .path-picker button').trigger('click')
+      await flushPromises()
+      await wrapper
+        .get('.new-project-dialog footer button.primary-button')
+        .trigger('click')
       await flushPromises()
 
-      expect(useProjectConsistencyStore().inconsistentProjects).toHaveLength(0)
+      expect(testState.mutateProjectManifest).toHaveBeenCalledOnce()
+      expect(wrapper.find('.new-project-dialog').exists()).toBe(false)
     })
   })
 

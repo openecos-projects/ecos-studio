@@ -203,6 +203,24 @@ describe('connectBackendRuntimeEventSession', () => {
     expect(sink.invalidations).toEqual([])
   })
 
+  it('forwards the committed revision from a terminal CLI operation', () => {
+    const sink = createSink()
+    connectBackendRuntimeEventSession('workspace-handle', '/work/gcd', sink)
+
+    bridge.emit({
+      designTool: 'backend',
+      method: 'flow.run',
+      operationId: 'operation-1',
+      type: 'operation.completed',
+      workspaceDirectory: '/work/gcd',
+      workspaceHandle: 'workspace-handle',
+      workspaceRevision: 7,
+    })
+
+    expect(sink.onRevision).toHaveBeenCalledWith(7)
+    expect(sink.onTerminal).toHaveBeenCalledWith('/work/gcd')
+  })
+
   it('still reports a flow.run failure as a Flow failure', () => {
     const sink = createSink()
     connectBackendRuntimeEventSession('workspace-handle', '/work/gcd', sink)

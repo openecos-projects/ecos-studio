@@ -159,7 +159,8 @@ async function migrateLegacyWorkspaceHistory(values: unknown[]): Promise<Project
 function projectRootCandidates(workspacePath: string): string[] {
   const normalizedPath = normalizePath(workspacePath)
   const parentPath = parentLocalPath(normalizedPath)
-  return [...new Set([normalizedPath, parentPath].filter(Boolean))]
+  const legacyRunsRoot = parentPath.endsWith('/runs') ? parentLocalPath(parentPath) : ''
+  return [...new Set([normalizedPath, parentPath, legacyRunsRoot].filter(Boolean))]
 }
 
 function parentLocalPath(path: string): string {

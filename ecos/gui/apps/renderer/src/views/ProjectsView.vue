@@ -52,6 +52,18 @@
         <span>Project runtime registry needs maintenance.</span>
       </div>
 
+      <div
+        v-if="selectedProjectMigration"
+        class="project-maintenance-warning"
+        role="alert"
+      >
+        <i class="ri-lock-line" aria-hidden="true"></i>
+        <span>Legacy project is read-only: {{ selectedProjectMigration.reason }}</span>
+        <button type="button" class="inline-action" @click="refreshProjectManifests">
+          Retry migration
+        </button>
+      </div>
+
       <div class="manager-grid">
         <aside class="manager-sidebar" aria-label="Projects">
           <div class="project-list-panel" aria-label="Projects">
@@ -161,7 +173,7 @@
                     <button
                       type="button"
                       class="row-primary-action"
-                      :disabled="mutationsDisabled"
+                      :disabled="projectMutationsDisabled(project.model)"
                       :aria-label="`New workspace in ${project.model.name}`"
                       @click="createWorkspaceForProject(project.model)"
                     >
@@ -187,7 +199,7 @@
                       <button
                         type="button"
                         class="row-action-menu-item"
-                        :disabled="mutationsDisabled"
+                        :disabled="projectMutationsDisabled(project.model)"
                         @click="importWorkspaceIntoProject(project.model)"
                       >
                         <i class="ri-file-add-line" aria-hidden="true"></i>
@@ -331,7 +343,7 @@
                           <button
                             type="button"
                             class="row-action-menu-item danger"
-                            :disabled="mutationsDisabled"
+                            :disabled="projectMutationsDisabled(project.model)"
                             @click="
                               requestDeleteWorkspace(project.model.id, workspace.id)
                             "
@@ -449,7 +461,7 @@
                     <button
                       type="button"
                       class="empty-state-action primary"
-                      :disabled="mutationsDisabled"
+                      :disabled="projectMutationsDisabled(project.model)"
                       @click="createWorkspaceForProject(project.model)"
                     >
                       New workspace
@@ -457,7 +469,7 @@
                     <button
                       type="button"
                       class="empty-state-action"
-                      :disabled="mutationsDisabled"
+                      :disabled="projectMutationsDisabled(project.model)"
                       @click="importWorkspaceIntoProject(project.model)"
                     >
                       Import workspace
@@ -555,6 +567,7 @@
             <ProjectAnalysisPanel
               :findings="projectComparisonSession.findings"
               :project="selectedProject"
+              :mutations-disabled="selectedProjectMutationsDisabled"
               :selected-analysis-tab="selectedAnalysisTab"
               :selected-step="selectedStep"
               :selected-workspace-id="selectedWorkspaceId"
@@ -833,7 +846,7 @@
           <button
             type="button"
             class="secondary-button danger"
-            :disabled="mutationsDisabled"
+            :disabled="selectedProjectMutationsDisabled"
             @click="confirmDeleteWorkspace"
           >
             <i class="ri-delete-bin-line"></i>
@@ -880,7 +893,7 @@
           <button
             type="button"
             class="secondary-button danger"
-            :disabled="mutationsDisabled"
+            :disabled="selectedProjectMutationsDisabled"
             @click="confirmDeleteProject"
           >
             <i class="ri-subtract-line"></i>
@@ -1207,6 +1220,19 @@ const selectedProject = computed<ProjectManagementProject>(() => {
 const selectedProjectRuntimeIssues = computed(
   () => projectManifests.value[selectedProject.value.path]?.runtime_process_issues ?? [],
 )
+const selectedProjectMigration = computed(
+  () => projectManifests.value[selectedProject.value.path]?.project_migration ?? null,
+)
+const selectedProjectMutationsDisabled = computed(
+  () => mutationsDisabled.value || Boolean(selectedProjectMigration.value),
+)
+
+function projectMutationsDisabled(project: ProjectManagementProject): boolean {
+  return (
+    mutationsDisabled.value ||
+    Boolean(projectManifests.value[project.path]?.project_migration)
+  )
+}
 
 const selectedWorkspace = computed<ProjectWorkspace | null>(() => {
   return (
@@ -2435,14 +2461,25 @@ async function createProjectFolderDraft() {
 
   const name = projectRootDraft.value.name.trim() || basenamePath(directory) || 'project'
   const designName = projectRootDraft.value.designName.trim() || name
-  const manifest = await mutateProjectManifest(directory, {
-    type: 'create',
-    name,
-    designName,
-    projectType: projectRootDraft.value.projectType,
-    mpc: selectedProjectMpc.value,
-  })
-  await applyProjectManifestForProject(manifest, manifest.root_path)
+  let manifest: ProjectManifest
+  try {
+    manifest = await mutateProjectManifest(directory, {
+      type: 'create',
+      name,
+      designName,
+      projectType: projectRootDraft.value.projectType,
+      mpc: selectedProjectMpc.value,
+    })
+  } catch (error) {
+    console.warn('Failed to create project.', error)
+    projectRootError.value = writeFailureDetail('project.json', error)
+    return
+  }
+  try {
+    await applyProjectManifestForProject(manifest, manifest.root_path)
+  } catch (error) {
+    console.warn('Project created but the project cache refresh failed.', error)
+  }
   selectProject(manifest.root_path)
   closeNewProjectDialog()
 }

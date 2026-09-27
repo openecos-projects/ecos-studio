@@ -156,6 +156,11 @@ export interface ProjectManifest {
     reason: string
   } | null
   runtime_processes?: Record<string, ProjectRuntimeProcessEntry>
+  /** Transient compatibility state; never persisted by ECC. */
+  project_migration?: {
+    status: 'legacy-readonly'
+    reason: string
+  }
 }
 
 export interface ProjectRuntimeProcessEntry {

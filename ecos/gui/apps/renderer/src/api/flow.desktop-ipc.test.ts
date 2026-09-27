@@ -111,6 +111,7 @@ describe('flow API desktop bridge payloads', () => {
         data: {
           directory: '/work/demo',
           workspaceHandle: 'workspace-handle-1',
+          workspaceRevision: 4,
         },
       }),
     )
@@ -138,6 +139,7 @@ describe('flow API desktop bridge payloads', () => {
     })
     expect(refreshConfig).toHaveBeenCalledWith({
       designTool: 'backend',
+      expectedWorkspaceRevision: 4,
       workspaceHandle: 'workspace-handle-1',
     })
   })

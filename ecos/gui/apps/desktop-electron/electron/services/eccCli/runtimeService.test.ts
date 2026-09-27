@@ -1,16 +1,33 @@
 import type { EccWorkspaceCreateRequest } from '@ecos-studio/shared'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import {
   assertEccCliPlatformSupported,
   projectInitArgs,
   projectManifestCreateArgs,
   projectSettingsArgs,
   workspaceCreateCommands,
+  workspaceRefreshArgs,
+  declaredWorkspaceForDirectory,
   EccCliRuntimeService,
 } from './runtimeService'
+import { EccCliCommandError, EccCliProcess } from './cliProcess'
+
+const temporaryDirectories: string[] = []
 
 afterEach(() => {
   Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
+  vi.restoreAllMocks()
+})
+
+afterEach(async () => {
+  await Promise.all(
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { force: true, recursive: true })),
+  )
 })
 
 describe('ECC CLI platform gate', () => {
@@ -34,6 +51,53 @@ describe('ECC CLI platform gate', () => {
       expect(resolveLaunch).not.toHaveBeenCalled()
     },
   )
+})
+
+describe('legacy project migration', () => {
+  it('returns a transient read-only projection when ECC migration is blocked', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ecc-runtime-legacy-'))
+    temporaryDirectories.push(root)
+    const workspace = join(root, 'runs', 'exp1')
+    await mkdir(join(workspace, 'home'), { recursive: true })
+    await writeFile(
+      join(workspace, 'home', 'flow.json'),
+      JSON.stringify({ steps: [{ name: 'Synth', state: 'Ongoing' }] }),
+    )
+    const run = vi
+      .spyOn(EccCliProcess.prototype, 'run')
+      .mockImplementation(async (args) => {
+        if (args[0] === 'version') {
+          return {
+            exitCode: 0,
+            stderr: '',
+            stdout: JSON.stringify({
+              schema_version: 2,
+              runtime: 'ECC CLI',
+              cli_contract: 1,
+            }),
+          }
+        }
+        if (args[0] === 'migrate') {
+          throw new EccCliCommandError(21, 'workspace is active', '')
+        }
+        throw new Error(`unexpected command: ${args.join(' ')}`)
+      })
+    const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
+
+    await expect(service.loadProjectManifest(root)).resolves.toMatchObject({
+      project_migration: { status: 'legacy-readonly' },
+      workspaces: [{ workspace_id: 'exp1', status: 'running' }],
+    })
+    await expect(
+      service.mutateProjectManifest(root, {
+        type: 'delete-workspace',
+        workspaceId: 'exp1',
+      }),
+    ).rejects.toThrow('read-only')
+    expect(run).toHaveBeenCalledWith(['migrate', '--project', root, '--yes', '--plain'], {
+      cwd: root,
+    })
+  })
 })
 
 function request(
@@ -189,6 +253,30 @@ describe('ECC CLI workspace command planning', () => {
     ])
   })
 
+  it('maps a managed refresh to the public revision-checked CLI command', () => {
+    expect(
+      workspaceRefreshArgs({
+        commandId: 'refresh-1',
+        expectedWorkspaceRevision: 4,
+        force: true,
+        projectRoot: '/projects/demo',
+        workspaceId: 'ws_1',
+      }),
+    ).toEqual([
+      'workspace',
+      'refresh',
+      'ws_1',
+      '--project',
+      '/projects/demo',
+      '--expected-revision',
+      '4',
+      '--command-id',
+      'refresh-1',
+      '--no-wait',
+      '--force',
+    ])
+  })
+
   it('maps Project Management MPC creation to the public init options', () => {
     expect(
       projectManifestCreateArgs('/projects/demo', {
@@ -221,5 +309,75 @@ describe('ECC CLI workspace command planning', () => {
       '--mpc-design-index',
       '1',
     ])
+  })
+})
+
+describe('ECC CLI Workspace configuration boundary', () => {
+  function serviceWithSession() {
+    const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
+    ;(service as any).sessions.set('handle-1', {
+      directory: '/projects/demo/ws_1',
+      handle: 'handle-1',
+      projectRoot: '/projects/demo',
+      workspaceId: 'ws_1',
+      workspaceRevision: 4,
+    })
+    return service
+  }
+
+  it('rejects Project fields instead of silently dropping them', async () => {
+    const service = serviceWithSession()
+
+    await expect(
+      service.updateWorkspaceConfiguration({
+        commandId: 'config-1',
+        configuration: {
+          design: { topModule: 'new_top' },
+          parameters: {},
+          pdk: {},
+        },
+        expectedWorkspaceRevision: 4,
+        workspaceHandle: 'handle-1',
+      }),
+    ).rejects.toMatchObject({ code: 'PROJECT_CONFIGURATION_SCOPE' })
+  })
+
+  it('returns the current revision without starting an empty param transaction', async () => {
+    const run = vi.spyOn(EccCliProcess.prototype, 'run')
+    const service = serviceWithSession()
+
+    await expect(
+      service.updateWorkspaceConfiguration({
+        commandId: 'config-1',
+        configuration: { design: {}, parameters: {}, pdk: {} },
+        expectedWorkspaceRevision: 4,
+        workspaceHandle: 'handle-1',
+      }),
+    ).resolves.toMatchObject({ workspaceId: 'ws_1', workspaceRevision: 4 })
+    expect(run).not.toHaveBeenCalled()
+  })
+})
+
+describe('ECC CLI Workspace discovery', () => {
+  it('accepts the exact external Workspace path declared by the Project manifest', async () => {
+    const project = await mkdtemp(join(tmpdir(), 'ecc-runtime-project-'))
+    const externalWorkspace = await mkdtemp(join(tmpdir(), 'ecc-runtime-external-'))
+    temporaryDirectories.push(project, externalWorkspace)
+    const manifest = {
+      workspaces: [
+        {
+          workspace_id: 'ws_external',
+          workspace_path: externalWorkspace,
+        },
+      ],
+    } as unknown as import('@ecos-studio/shared').ProjectManifest
+
+    await expect(
+      declaredWorkspaceForDirectory(manifest, externalWorkspace),
+    ).resolves.toMatchObject({
+      directory: externalWorkspace,
+      entry: { workspace_id: 'ws_external' },
+    })
+    await expect(declaredWorkspaceForDirectory(manifest, project)).resolves.toBeNull()
   })
 })
