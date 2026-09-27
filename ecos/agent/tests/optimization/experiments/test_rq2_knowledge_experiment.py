@@ -50,6 +50,11 @@ from ecos_agent.optimization.parameters.effective_domain import (
 from ecos_agent.optimization.experiments.rq2_adaptive_runner import (
     run_rq2_adaptive_group,
 )
+from ecos_agent.optimization.experiments.rq2_order_balanced_runner import (
+    build_order_balanced_schedule,
+    run_order_balanced_worker,
+    validate_order_balanced_schedule,
+)
 from tests.optimization.support import support_catalog
 
 HASH = "sha256:" + "a" * 64
@@ -691,3 +696,70 @@ def test_analysis_noise_floor_posterior_and_shift() -> None:
     # Dual outcomes, giving TV=1/4 against the three identical NoKnow calls.
     assert abs(summary["matched_context_tv_mean"] - (1.0 + 0.25) / 2.0) < 1e-9
     assert summary["permutation"]["draws"] == 100
+
+
+def test_order_balanced_schedule_and_worker_are_registered_and_resumable() -> None:
+    contexts = []
+    for design in ("gcd", "xtea"):
+        for index in range(1, 5):
+            context = _rq2_context()
+            context.update(
+                design=design,
+                checkpoint=f"cp{index}",
+                context_fingerprint=f"sha256:{design}-{index}",
+            )
+            contexts.append(context)
+    schedule = build_order_balanced_schedule(
+        contexts, seed=20260927, repeats=3, workers=4
+    )
+    validate_order_balanced_schedule(schedule)
+    assert len(schedule["observations"]) == 2 * 4 * 3 * len(RQ2_TREATMENTS)
+    for design in ("gcd", "xtea"):
+        assignments = [
+            item for item in schedule["assignments"] if item["design"] == design
+        ]
+        assert {item["rotation"] for item in assignments} == {"R0", "R1", "R2", "R3"}
+        for treatment in RQ2_TREATMENTS:
+            assert sorted(
+                item["treatments"].index(treatment) + 1 for item in assignments
+            ) == [1, 2, 3, 4]
+
+    worker_contexts = []
+    for index in range(1, 5):
+        context = _rq2_context()
+        context.update(
+            checkpoint=f"cp{index}",
+            context_fingerprint=f"sha256:worker-{index}",
+        )
+        worker_contexts.append(context)
+    worker_schedule = build_order_balanced_schedule(
+        worker_contexts, seed=20260927, repeats=1, workers=1
+    )
+    first_sequence = worker_schedule["observations"][0]["sequence_id"]
+    run_ids = {
+        row["observation_id"]
+        for row in worker_schedule["observations"]
+        if row["sequence_id"] == first_sequence
+        and row["sequence_position"] in {2, 3, 4}
+    }
+    completed = {
+        row["observation_id"]
+        for row in worker_schedule["observations"]
+        if row["observation_id"] not in run_ids
+    }
+    rows = []
+    summary = run_order_balanced_worker(
+        worker_contexts,
+        schedule=worker_schedule,
+        worker_index=0,
+        provider_factory=_ScriptedProvider,
+        config=AdaptiveConfig(levels=(1,), draws=20),
+        completed_observation_ids=completed,
+        on_observation=rows.append,
+    )
+    assert summary["planned"] == 16
+    assert summary["produced"] == 3
+    assert summary["continued"] == 13
+    assert summary["ecc_executions"] == 0
+    assert [row["sequence_position"] for row in rows] == [2, 3, 4]
+    assert all(isinstance(row["context_treatment_sha256"], str) for row in rows)
