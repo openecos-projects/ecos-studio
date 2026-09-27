@@ -138,12 +138,15 @@ export class EccCliRuntimeService {
     return () => this.releasedListeners.delete(listener)
   }
 
-  async loadProjectManifest(projectRoot: string): Promise<ProjectManifest> {
+  async loadProjectManifest(
+    projectRoot: string,
+    forceLegacyRunsMigration = false,
+  ): Promise<ProjectManifest> {
     await this.ensureContract()
     const root = await realpath(projectRoot)
     this.knownProjectRoots.add(root)
     try {
-      await this.migrateLegacyProjectIfNeeded(root)
+      await this.migrateLegacyProjectIfNeeded(root, forceLegacyRunsMigration)
     } catch (error) {
       const fallback = await readLegacyProjectManifest(
         root,
@@ -172,8 +175,12 @@ export class EccCliRuntimeService {
       })
   }
 
-  private async migrateLegacyProjectIfNeeded(projectRoot: string): Promise<void> {
-    if (!(await projectNeedsCliMigration(projectRoot))) return
+  private async migrateLegacyProjectIfNeeded(
+    projectRoot: string,
+    forceLegacyRunsMigration = false,
+  ): Promise<void> {
+    if (!forceLegacyRunsMigration && !(await projectNeedsCliMigration(projectRoot)))
+      return
     const existing = this.projectMigrations.get(projectRoot)
     if (existing) return await existing
 
@@ -206,7 +213,7 @@ export class EccCliRuntimeService {
       legacyWorkspace?.projectRoot ??
       ((await hasLegacyRunsLayout(target)) ? target : null)
     if (!legacyRoot) return null
-    const manifest = await this.loadProjectManifest(legacyRoot)
+    const manifest = await this.loadProjectManifest(legacyRoot, true)
     this.knownProjectRoots.add(legacyRoot)
     return { projectId: manifest.project_id, projectRoot: legacyRoot }
   }
@@ -389,7 +396,10 @@ export class EccCliRuntimeService {
       return { ...(await this.workspaceSession(existingHandle)), reused: true }
     const discovered = await this.discoverProject(directory)
     if (!discovered) throw new Error('Workspace is not declared by a Project Manifest.')
-    const manifest = await this.loadProjectManifest(discovered.projectRoot)
+    const manifest = await this.loadProjectManifest(
+      discovered.projectRoot,
+      legacyWorkspace?.projectRoot === discovered.projectRoot,
+    )
     const declared = await declaredWorkspaceForDirectory(manifest, directory)
     const entry =
       declared?.entry ??
@@ -570,9 +580,7 @@ export class EccCliRuntimeService {
           range: Array.isArray(entry.range) ? entry.range : undefined,
           type: typeof entry.type === 'string' ? entry.type : '',
           unit: typeof entry.unit === 'string' ? entry.unit : undefined,
-          value: Object.hasOwn(snapshot.parameters, entry.id)
-            ? snapshot.parameters[entry.id]
-            : entry.default,
+          value: workspaceParameterValue(snapshot.parameters, entry),
         },
       ]
     })
@@ -1009,11 +1017,7 @@ export class EccCliRuntimeService {
         async () => {
           const manifest = await readProjectManifest(session.projectRoot)
           const entry = manifest.runtime_processes?.[session.workspaceId]
-          return (
-            entry?.run_id === runId &&
-            entry.pid === child.pid &&
-            entry.runtime_id === this.runtimeId()
-          )
+          return registeredRunMatches(entry, runId, this.runtimeId())
         },
         HANDSHAKE_TIMEOUT_MS,
         () => childExited !== null,
@@ -1103,7 +1107,8 @@ export class EccCliRuntimeService {
       const manifest = await readProjectManifest(tracked.projectRoot)
       const entry = manifest.runtime_processes?.[tracked.session.workspaceId]
       if (tracked.registrationPending) {
-        if (entry?.run_id !== tracked.operation.operationId) return
+        if (!registeredRunMatches(entry, tracked.operation.operationId, this.runtimeId()))
+          return
         tracked.registrationPending = false
         this.invalidate()
       }
@@ -1396,7 +1401,15 @@ export async function declaredWorkspaceForDirectory(
   directory: string
   entry: ProjectManifest['workspaces'][number]
 } | null> {
-  const target = normalizeWorkspacePath(await realpath(directory))
+  let target: string
+  try {
+    target = normalizeWorkspacePath(await realpath(directory))
+  } catch {
+    // Automatic legacy migration can move runs/<id> between discovery and
+    // this comparison. The caller still has the stable Workspace ID and can
+    // resolve the manifest's newly canonical path.
+    return null
+  }
   for (const entry of manifest.workspaces) {
     let declared: string
     try {
@@ -1457,6 +1470,16 @@ function terminalState(
     return 'succeeded'
   }
   return 'interrupted'
+}
+
+export function registeredRunMatches(
+  entry: ProjectRuntimeProcessEntry | undefined,
+  runId: string,
+  runtimeId: string,
+): boolean {
+  // The launch command may be a process supervisor such as `uv run`, so its
+  // PID can differ from the ECC process that owns and registers the run.
+  return entry?.run_id === runId && entry.runtime_id === runtimeId
 }
 
 function isTerminal(state: EccRuntimeOperation['state']): boolean {
@@ -1751,6 +1774,27 @@ function parameterAppliesToStep(applies: string, step: string): boolean {
   if (applies === 'all') return true
   const normalize = (value: string) => value.toLowerCase().replace(/[\s_-]/g, '')
   return normalize(applies) === normalize(step)
+}
+
+export function workspaceParameterValue(
+  parameters: Record<string, unknown>,
+  entry: Record<string, unknown>,
+): unknown {
+  const directKeys = [entry.id, entry.backendMapping, entry.display_key]
+  for (const key of directKeys) {
+    if (typeof key === 'string' && Object.hasOwn(parameters, key)) {
+      return parameters[key]
+    }
+  }
+  if (isRecord(entry.backendMapping)) {
+    for (const [section, key] of Object.entries(entry.backendMapping)) {
+      const values = parameters[section]
+      if (typeof key === 'string' && isRecord(values) && Object.hasOwn(values, key)) {
+        return values[key]
+      }
+    }
+  }
+  return entry.default
 }
 
 function operationLogPath(runId: string): string {

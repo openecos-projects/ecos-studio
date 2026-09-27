@@ -378,16 +378,22 @@ the wizard is prefilled:
 
 ### Updating a Workspace
 
-**File → Update Workspace** re-opens the wizard for the *current* workspace so
-you can change flow range, design files, PDK, or parameters. Before updating
-you choose how to treat the existing data:
+For a backend ECC workspace, **File → Update Workspace** applies the current
+Project design inputs, PDK, and flow selection through `ecc workspace refresh`.
+Workspace-local parameter overrides are preserved; edit them separately in the
+parameter UI. If ECC detects manually changed derived configuration files, the
+app asks before retrying with overwrite enabled. The operation is disabled
+while a flow is running.
+
+For a frontend workspace, **File → Update Workspace** re-opens the workspace
+wizard. Before replacing it you choose how to treat the existing data:
 
 - **Cancel** — abort.
 - **Do Not Backup** — replace directly.
 - **Backup Original** — keep a full backup in Project Management before the
   update replaces flow state, results, artifacts, logs, and user files.
 
-Update is disabled while a flow is running.
+Frontend update is also disabled while a flow is running.
 
 ---
 
