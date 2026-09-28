@@ -68,7 +68,7 @@ import {
 } from './persistedState'
 import {
   watchWorkspaceOperationFiles,
-  type OperationFileWatcher,
+  type WorkspaceOperationFileWatcher,
 } from './workspaceFileWatcher'
 
 const HANDSHAKE_TIMEOUT_MS = 30_000
@@ -90,7 +90,8 @@ interface TrackedOperation {
   session: WorkspaceSession
   requestedCancel: boolean
   poller: ReturnType<typeof setInterval> | null
-  watcher: OperationFileWatcher | null
+  refreshSequence: number
+  watcher: WorkspaceOperationFileWatcher | null
   waiters: Array<(operation: EccRuntimeOperation) => void>
 }
 
@@ -997,6 +998,7 @@ export class EccCliRuntimeService {
       registrationPending: true,
       requestedCancel: false,
       poller: null,
+      refreshSequence: 0,
       session,
       waiters: [],
       watcher: null,
@@ -1036,10 +1038,15 @@ export class EccCliRuntimeService {
         error instanceof Error ? error.message : String(error),
       )
     }
-    tracked.watcher = this.watchOperation(tracked)
+    const watcher = this.watchOperation(tracked)
+    tracked.watcher = watcher
     tracked.poller = this.pollOperation(tracked)
-    this.invalidate()
-    this.emitOperationEvent(tracked, 'operation.progress')
+    await watcher.ready
+    if (tracked.watcher === watcher) await this.refreshOperation(tracked)
+    if (!tracked.operation.flow && !isTerminal(tracked.operation.state)) {
+      this.invalidate()
+      this.emitOperationEvent(tracked, 'operation.progress')
+    }
     return { ...tracked.operation }
   }
 
@@ -1072,17 +1079,20 @@ export class EccCliRuntimeService {
       registrationPending: false,
       requestedCancel: false,
       poller: null,
+      refreshSequence: 0,
       session,
       waiters: [],
       watcher: null,
     }
     this.operations.set(entry.run_id, tracked)
-    tracked.watcher = this.watchOperation(tracked)
+    const watcher = this.watchOperation(tracked)
+    tracked.watcher = watcher
     tracked.poller = this.pollOperation(tracked)
-    await this.refreshOperation(tracked)
+    await watcher.ready
+    if (tracked.watcher === watcher) await this.refreshOperation(tracked)
   }
 
-  private watchOperation(tracked: TrackedOperation): OperationFileWatcher {
+  private watchOperation(tracked: TrackedOperation): WorkspaceOperationFileWatcher {
     return watchWorkspaceOperationFiles({
       projectRoot: tracked.projectRoot,
       workspaceDirectory: tracked.session.directory,
@@ -1116,7 +1126,10 @@ export class EccCliRuntimeService {
         await this.refreshOperation(tracked)
         return
       }
-      if (await this.processIsAlive(tracked.session, entry)) return
+      if (await this.processIsAlive(tracked.session, entry)) {
+        await this.refreshOperation(tracked)
+        return
+      }
       await this.cli
         .run([
           'process',
@@ -1140,6 +1153,7 @@ export class EccCliRuntimeService {
 
   private async refreshOperation(tracked: TrackedOperation): Promise<void> {
     if (isTerminal(tracked.operation.state)) return
+    const refreshSequence = ++tracked.refreshSequence
     let manifest: ProjectManifest
     let flow: PersistedFlow
     try {
@@ -1150,16 +1164,33 @@ export class EccCliRuntimeService {
     } catch {
       return
     }
+    if (
+      refreshSequence !== tracked.refreshSequence ||
+      isTerminal(tracked.operation.state)
+    ) {
+      return
+    }
     const current = manifest.runtime_processes?.[tracked.session.workspaceId]
     const ongoing = flow.steps.find((step) => step.state === 'Ongoing')
-    tracked.operation = {
-      ...tracked.operation,
-      currentStep: ongoing?.name ?? tracked.operation.currentStep,
-      currentTool: ongoing?.tool ?? tracked.operation.currentTool,
-      updatedAt: now(),
+    const currentStep = ongoing?.name ?? tracked.operation.currentStep
+    const currentTool = ongoing?.tool ?? tracked.operation.currentTool
+    const projectionChanged =
+      currentStep !== tracked.operation.currentStep ||
+      currentTool !== tracked.operation.currentTool ||
+      !operationFlowMatches(tracked.operation.flow, flow)
+    if (projectionChanged) {
+      tracked.operation = {
+        ...tracked.operation,
+        currentStep,
+        currentTool,
+        flow,
+        updatedAt: now(),
+      }
     }
     if (current?.run_id === tracked.operation.operationId) {
+      const registrationChanged = tracked.registrationPending
       tracked.registrationPending = false
+      if (!projectionChanged && !registrationChanged) return
       this.invalidate()
       this.emitOperationEvent(tracked, 'operation.progress')
       return
@@ -1172,6 +1203,7 @@ export class EccCliRuntimeService {
         terminal === 'failed'
           ? { code: 'flow_failed', message: 'ECC flow failed.' }
           : null,
+      flow,
       state: terminal,
       updatedAt: now(),
     }
@@ -1448,6 +1480,24 @@ function operationSnapshot(
     workspaceId: session.workspaceId,
     workspaceRevision: session.workspaceRevision,
   }
+}
+
+export function operationFlowMatches(
+  current: EccRuntimeOperation['flow'],
+  next: PersistedFlow,
+): boolean {
+  if (!current || current.steps.length !== next.steps.length) return false
+  return current.steps.every((step, index) => {
+    const candidate = next.steps[index]
+    return (
+      candidate !== undefined &&
+      step.name === candidate.name &&
+      step.tool === candidate.tool &&
+      step.state === candidate.state &&
+      step.runtime === candidate.runtime &&
+      step.peakMemory === candidate.peakMemory
+    )
+  })
 }
 
 function terminalState(

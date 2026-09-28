@@ -159,9 +159,16 @@ const logTitle = computed(() =>
 
 function startLiveClock(): void {
   if (liveClockTimer) return
+  refreshSelectedLiveLog()
   liveClockTimer = setInterval(() => {
     liveClockTick.value += 1
+    refreshSelectedLiveLog()
   }, 1000)
+}
+
+function refreshSelectedLiveLog(): void {
+  const segment = selectedSegment.value
+  if (segment?.live) void props.ensureContent(segment)
 }
 
 function stopLiveClock(): void {
@@ -248,7 +255,9 @@ watch(
 watch(
   selectedSegment,
   (segment) => {
-    if (segment) void props.ensureContent(segment)
+    if (segment && (!segment.live || expanded.value || dialogVisible.value)) {
+      void props.ensureContent(segment)
+    }
   },
   { immediate: true },
 )
@@ -257,7 +266,8 @@ watch(
   () =>
     Boolean(
       selectedSegment.value?.live &&
-      typeof selectedSegment.value.startedAtMs === 'number',
+      typeof selectedSegment.value.startedAtMs === 'number' &&
+      (expanded.value || dialogVisible.value),
     ),
   (timing) => {
     if (timing) startLiveClock()

@@ -4352,6 +4352,18 @@ describe('registerIpc', () => {
     ).toHaveBeenCalledWith('/work/demo')
   })
 
+  it('invalidates Project execution snapshots when the CLI operation projection changes', () => {
+    const { services } = registerHandlers()
+    const listener =
+      services.eccRuntimeService.onOperationProjectionInvalidated.mock.calls[1]?.[0]
+
+    listener?.(2)
+
+    expect(
+      services.backendProjectComparisonService.invalidateExecution,
+    ).toHaveBeenCalledOnce()
+  })
+
   it('invalidates Project execution snapshots for step progress without repeating duplicates', () => {
     const { services } = registerHandlers()
     const listener = services.eccRuntimeService.onEvent.mock.calls[0]?.[0]

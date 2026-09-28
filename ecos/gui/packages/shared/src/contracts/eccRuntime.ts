@@ -345,6 +345,7 @@ export interface EccRuntimeOperation {
   currentStep: string
   currentTool: string
   error: { code: string; message: string } | null
+  flow?: { steps: EccRuntimeStepSnapshot[] }
   interruptibility?: EccRuntimeInterruptibility
   kind: EccRuntimeOperationKind
   operationId: string
