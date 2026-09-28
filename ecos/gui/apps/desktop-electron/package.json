@@ -11,7 +11,7 @@
   "type": "module",
   "main": "./dist/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "ELECTRON_RUN_AS_NODE= electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "package": "pnpm run build && rm -rf release && electron-builder --config electron-builder.yml",
