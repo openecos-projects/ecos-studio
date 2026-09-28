@@ -5938,6 +5938,99 @@ describe('ResourceManagerService', () => {
     expect(onRegistryChanged).not.toHaveBeenCalled()
   })
 
+  it('retries the background registry refresh on the next listing after a failure', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const cacheDir = join(root, 'cache')
+    const registryUrl = 'https://example.com/registry.json'
+    const registryV1 = {
+      schema_version: 2,
+      tools: [
+        {
+          name: 'cached-yosys',
+          display_name: 'Cached Yosys',
+          description: 'Cached synthesis tool',
+          category: 'synthesis',
+          homepage: '',
+          versions: [
+            {
+              version: '0.61',
+              platforms: {
+                'all-platform': {
+                  url: 'file:///tmp/cached-yosys.tar',
+                  sha256: 'fixture-sha',
+                  size: 9,
+                },
+              },
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }
+    const registryV2 = {
+      ...registryV1,
+      tools: [
+        {
+          ...registryV1.tools[0],
+          versions: [
+            {
+              version: '0.62',
+              platforms: registryV1.tools[0].versions[0].platforms,
+            },
+          ],
+        },
+      ],
+    }
+    await mkdir(cacheDir, { recursive: true })
+    await writeFile(
+      testRegistryCachePath(cacheDir, registryUrl),
+      JSON.stringify(registryV1),
+      'utf8',
+    )
+    const first = deferred<Response>()
+    const second = deferred<Response>()
+    const fetchImpl = vi
+      .fn()
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise)
+    const service = new ResourceManagerService({
+      registryUrl,
+      ...testResourceDirs(root),
+      cacheDir,
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+    const onRegistryChanged = vi.fn()
+    service.onRegistryChanged(onRegistryChanged)
+
+    const cached = await service.listResources()
+    expect(
+      cached.resources.find((resource) => resource.id === 'tool:cached-yosys')
+        ?.available_versions,
+    ).toEqual(['0.61'])
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(fetchImpl.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal)
+
+    first.reject(new Error('network down'))
+    // Let the failed background refresh settle and release the in-flight guard.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(onRegistryChanged).not.toHaveBeenCalled()
+
+    await service.listResources()
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+
+    second.resolve(new Response(JSON.stringify(registryV2)))
+    await vi.waitFor(() => {
+      expect(onRegistryChanged).toHaveBeenCalledTimes(1)
+    })
+
+    const refreshed = await service.listResources()
+    expect(
+      refreshed.resources.find((resource) => resource.id === 'tool:cached-yosys')
+        ?.available_versions,
+    ).toEqual(['0.62'])
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+
   it('installs a managed registry PDK with strip prefix and post-install steps', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createPdkArchive(root)

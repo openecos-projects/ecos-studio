@@ -68,6 +68,7 @@ const PDK_RESOURCE_FILE_EXTENSIONS = ['.lef', '.lib', '.liberty']
 const REGISTRY_CACHE_VERSION = 1
 const DOWNLOAD_MAX_ATTEMPTS = 3
 const DOWNLOAD_RETRY_DELAY_MS = 250
+const REGISTRY_BACKGROUND_REFRESH_TIMEOUT_MS = 30_000
 
 type ResourceInventoryEntry = ToolInventoryEntry | PdkInventoryEntry | MpcInventoryEntry
 type ArchiveExtractor = (
@@ -426,6 +427,7 @@ export class ResourceManagerService {
 
   private registryMemory: ResourceRegistry | null = null
   private registryRefreshPromise: Promise<void> | null = null
+  private registrySyncedAt = 0
   private updateCheckMemory: ResourceUpdateCheckCache | null = null
   private updateCheckPromise: Promise<ResourceUpdateCheckResult> | null = null
   private readonly installCoordinator = new ResourceInstallCoordinator<
@@ -2535,11 +2537,17 @@ export class ResourceManagerService {
     signal?: AbortSignal,
   ): Promise<RegistryState> {
     throwIfAborted(signal)
+    const cacheFile = registryCachePath(this.cacheDir, this.registryUrl)
     if (this.registryMemory && !force) {
+      // Memory hits normally serve as-is, but when this session never
+      // completed a remote sync (for example the startup background refresh
+      // failed), retry in the background so the listing can still recover.
+      if (this.registrySyncedAt === 0) {
+        this.refreshRegistryInBackground(cacheFile)
+      }
       return { registry: this.registryMemory, diagnostics: [] }
     }
 
-    const cacheFile = registryCachePath(this.cacheDir, this.registryUrl)
     if (!force) {
       const cached = await this.readCachedRegistry(cacheFile)
       if (cached.registry) {
@@ -2560,6 +2568,7 @@ export class ResourceManagerService {
       await mkdir(dirname(cacheFile), { recursive: true })
       await writeFile(cacheFile, serializeRegistryCache(remoteRegistry), 'utf8')
       this.registryMemory = registry
+      this.registrySyncedAt = Date.now()
       return { registry, diagnostics }
     } catch (error) {
       if (signal?.aborted || isAbortError(error)) throw error
@@ -2610,15 +2619,20 @@ export class ResourceManagerService {
     if (this.registryRefreshPromise) return
     this.registryRefreshPromise = (async () => {
       try {
-        const remoteRegistry = await readRegistryFromUrl(this.registryUrl, this.fetchImpl)
+        const remoteRegistry = await readRegistryFromUrl(
+          this.registryUrl,
+          this.fetchImpl,
+          AbortSignal.timeout(REGISTRY_BACKGROUND_REFRESH_TIMEOUT_MS),
+        )
         const registry = withBuiltinMpcs(remoteRegistry, this.registryUrl)
         await mkdir(dirname(cacheFile), { recursive: true })
         await writeFile(cacheFile, serializeRegistryCache(remoteRegistry), 'utf8')
         const changed = JSON.stringify(this.registryMemory) !== JSON.stringify(registry)
         this.registryMemory = registry
+        this.registrySyncedAt = Date.now()
         if (changed) this.notifyRegistryChanged()
       } catch (error) {
-        electronLogger.debug(
+        electronLogger.warn(
           '[resources] Background registry refresh failed: %s',
           error instanceof Error ? error.message : String(error),
         )
