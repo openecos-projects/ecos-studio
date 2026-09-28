@@ -108,21 +108,28 @@ function projectOperation(
   ) {
     return []
   }
-  const step = parseProjectManifestFlowStep(operation.currentStep || operation.step)
+  const ongoingStep = operation.flow?.steps.find((candidate) =>
+    ['ongoing', 'running'].includes(candidate.state.trim().toLowerCase()),
+  )
+  const step = parseProjectManifestFlowStep(
+    ongoingStep?.name || operation.currentStep || operation.step,
+  )
   const committedStep = step ? workspace.stepStatuses[step] : undefined
   return [
     {
       cancelRequested: Boolean(operation.cancelRequested),
       engineeringWorkspaceId: operation.workspaceId,
+      ...(operation.flow ? { flow: operation.flow } : {}),
       kind: operation.kind,
       operationId: operation.operationId,
       projectWorkspaceId: workspace.projectWorkspaceId,
       rerun: operation.rerun,
       state: operation.state,
       step:
-        committedStep === 'success' ||
-        committedStep === 'reused' ||
-        committedStep === 'skipped'
+        !ongoingStep &&
+        (committedStep === 'success' ||
+          committedStep === 'reused' ||
+          committedStep === 'skipped')
           ? null
           : step,
       updatedAt: operation.updatedAt,

@@ -141,6 +141,24 @@ describe('useBackendFlowStages runtime projection', () => {
       currentStep: 'place',
       currentTool: 'openroad',
       error: null,
+      flow: {
+        steps: [
+          {
+            name: 'Synthesis',
+            peakMemory: 68.3,
+            runtime: '0:0:19',
+            state: 'Success',
+            tool: 'yosys',
+          },
+          {
+            name: 'place',
+            peakMemory: 0,
+            runtime: '',
+            state: 'Ongoing',
+            tool: 'openroad',
+          },
+        ],
+      },
       kind: 'flow',
       operationId: 'operation-background',
       origin: 'gui',
@@ -160,6 +178,12 @@ describe('useBackendFlowStages runtime projection', () => {
     expect(
       flow.dynamicFlowStages.value.filter((step) => step.state === 'Ongoing'),
     ).toEqual([expect.objectContaining({ label: 'Place', tool: 'openroad' })])
+    expect(flow.dynamicFlowStages.value[0]).toMatchObject({
+      label: 'Synthesis',
+      'peak memory (mb)': 68.3,
+      runtime: '00:00:19',
+      state: 'Success',
+    })
   })
 
   it('keeps the three ECC Floorplan stages as separate sidebar entries', () => {

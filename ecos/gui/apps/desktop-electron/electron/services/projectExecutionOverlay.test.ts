@@ -52,7 +52,18 @@ function overlayFixture(
 
 describe('ProjectExecutionOverlay', () => {
   it('projects an operation whose revision matches the committed snapshot', () => {
-    const overlay = overlayFixture([activeOperation()])
+    const flow = {
+      steps: [
+        {
+          name: 'Route',
+          peakMemory: 128,
+          runtime: '00:00:04',
+          state: 'Ongoing',
+          tool: 'openroad',
+        },
+      ],
+    }
+    const overlay = overlayFixture([activeOperation({ flow })])
     const result = overlay.get(11, 'context-1')
     expect(result).toEqual({
       ok: true,
@@ -63,6 +74,7 @@ describe('ProjectExecutionOverlay', () => {
           expect.objectContaining({
             operationId: 'operation-1',
             projectWorkspaceId: 'ws_1',
+            flow,
             step: 'Route',
             workspaceRevision: 2,
           }),
@@ -114,6 +126,31 @@ describe('ProjectExecutionOverlay', () => {
     const result = overlay.get(11, 'context-1')
     expect(result.ok && result.data.operations).toEqual([
       expect.objectContaining({ operationId: 'operation-1', step: null }),
+    ])
+  })
+
+  it('keeps the live rerun step when the committed step previously completed', () => {
+    const overlay = overlayFixture(
+      [
+        activeOperation({
+          flow: {
+            steps: [
+              {
+                name: 'Route',
+                peakMemory: 128,
+                runtime: '',
+                state: 'Ongoing',
+                tool: 'openroad',
+              },
+            ],
+          },
+        }),
+      ],
+      [committedWorkspace({ stepStatuses: { Route: 'success' } })],
+    )
+    const result = overlay.get(11, 'context-1')
+    expect(result.ok && result.data.operations).toEqual([
+      expect.objectContaining({ operationId: 'operation-1', step: 'Route' }),
     ])
   })
 
