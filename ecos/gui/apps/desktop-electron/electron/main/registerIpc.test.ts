@@ -1765,7 +1765,16 @@ describe('registerIpc', () => {
         manualConfig: null,
       },
     })
-    expect(services.pdkInventoryService.bindInstallation).not.toHaveBeenCalled()
+    expect(services.pdkInventoryService.bindInstallation).toHaveBeenCalledWith({
+      installationId: 'pdk-installation:ics55',
+      requirement: {
+        familyId: 'ics55',
+        version: null,
+        manualConfig: null,
+      },
+      projectId: 'proj_demo',
+      projectRoot: '/tmp/project',
+    })
     expect(services.eccRuntimeService.createWorkspace).not.toHaveBeenCalled()
   })
 
@@ -1946,11 +1955,7 @@ describe('registerIpc', () => {
       projectId: payload.projectId,
       projectRoot: payload.projectRoot,
     })
-    expect(services.pdkInventoryService.resolveBinding).toHaveBeenCalledWith({
-      projectId: payload.projectId,
-      projectRoot: payload.projectRoot,
-      requirement: persistedRequirement,
-    })
+    expect(services.pdkInventoryService.resolveBinding).not.toHaveBeenCalled()
     expect(services.pdkInventoryService.validateWorkspace).toHaveBeenCalledWith({
       projectId: payload.projectId,
       projectRoot: payload.projectRoot,
