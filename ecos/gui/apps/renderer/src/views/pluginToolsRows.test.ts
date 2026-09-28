@@ -154,11 +154,12 @@ describe('pluginToolsRows', () => {
       phase: 'downloading',
       progress: 0.5,
       message:
-        'Downloading ICsprout 55nm PDK post-install asset 1/7: ics55_LLSC_H7CH_liberty.tar.bz2',
+        'Downloading ICsprout 55nm PDK package 1/7: ics55_LLSC_H7CH_liberty.tar.bz2',
     })
 
     expect(row.statusKind).toBe('installing')
-    expect(row.statusText).toBe('Downloading')
+    expect(row.statusText).toBe('Downloading 50%')
+    expect(row.statusTitle).toContain('package 1/7')
     expect(row).not.toHaveProperty('statusIcon')
     expect(row.progressPercent).toBe(50)
   })

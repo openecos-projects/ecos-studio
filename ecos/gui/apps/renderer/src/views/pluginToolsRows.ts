@@ -231,8 +231,10 @@ function rowDescription(resource: ResourceItem): { text: string; title: string }
 
 function progressStatusText(progress: InstallProgress | undefined): string {
   switch (progress?.phase) {
-    case 'downloading':
-      return 'Downloading'
+    case 'downloading': {
+      const percent = progressPercentFor(progress)
+      return percent === null ? 'Downloading' : `Downloading ${percent}%`
+    }
     case 'verifying':
       return 'Verifying'
     case 'extracting':
@@ -426,7 +428,7 @@ export function resourceToRow(
     sizeMb: size.sizeMb,
     platform: resource.platform || (resource.source === 'local' ? 'Local' : ''),
     statusText: status.text,
-    statusTitle: status.kind === 'error' ? resource.error || '' : '',
+    statusTitle: status.kind === 'error' ? resource.error || '' : progress?.message || '',
     statusKind: status.kind,
     icon: iconFor(resource),
     accent: accentFor(resource),
