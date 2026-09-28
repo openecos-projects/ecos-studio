@@ -120,6 +120,28 @@ export class EccCliRuntimeService {
     this.cli = new EccCliProcess(options)
   }
 
+  /** Compatibility bridge for the project doctor IPC surface. The operation
+   * itself is still executed by the ECC CLI; no runtime RPC is involved. */
+  async callRuntime<T = unknown>(method: string, params?: unknown): Promise<T> {
+    if (method !== 'project.doctor.check' && method !== 'project.doctor.repair') {
+      throw new Error(`Unsupported ECC CLI runtime method: ${method}`)
+    }
+    await this.ensureContract()
+    const projectDir =
+      isRecord(params) && typeof params.projectDir === 'string' ? params.projectDir : ''
+    if (!projectDir) throw new Error('Project doctor requires a project directory.')
+    const args = ['project', 'doctor', '--project', resolve(projectDir), '--plain']
+    if (method === 'project.doctor.repair') args.push('--fix')
+    let output = ''
+    try {
+      output = (await this.cli.run(args, { cwd: resolve(projectDir) })).stdout
+    } catch (error) {
+      if (!(error instanceof EccCliCommandError)) throw error
+      output = error.stdout || error.stderr
+    }
+    return projectDoctorResult(output) as T
+  }
+
   get activeWorkspaceDirectory(): string | null {
     return this.sessions.values().next().value?.directory ?? null
   }
@@ -613,7 +635,7 @@ export class EccCliRuntimeService {
     const snapshot = await readPersistedEngineeringSnapshot(
       this.requireSession(request.workspaceHandle).directory,
     )
-    const analysisStep = snapshot.analysis.steps.find(
+    const analysisStep = snapshot.analysis?.steps.find(
       (step) => step.stepId === request.step,
     )
     const info = analysisStep
@@ -2001,6 +2023,28 @@ function writeTarOctal(
 function requireRecordKind(record: Record<string, string>, expected: string): void {
   if (record.record !== expected)
     throw new Error(`Unexpected ECC catalog record: ${record.record}`)
+}
+
+function projectDoctorResult(output: string): Record<string, unknown> {
+  const lines = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  if (lines.length === 0) return { doctor: 'project', status: 'not_applicable' }
+  const records = parseEccLineRecords(
+    lines.map((line) => `record=project_doctor ${line}`).join('\n'),
+  )
+  const primary = records.find((record) => record.doctor === 'project')
+  if (!primary) return { doctor: 'project', status: 'not_applicable' }
+  const findings = records.filter((record) => record.check)
+  return {
+    doctor: 'project',
+    status: primary.status,
+    checked: primary.checked ? parseInteger(primary.checked) : 0,
+    inconsistent: primary.inconsistent ? parseInteger(primary.inconsistent) : 0,
+    ...(primary.fixed ? { fixed: parseInteger(primary.fixed) } : {}),
+    findings,
+  }
 }
 
 function parseInteger(value: unknown): number {

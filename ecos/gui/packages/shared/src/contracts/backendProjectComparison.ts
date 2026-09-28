@@ -237,6 +237,7 @@ export interface ProjectQorTrendSummary {
   trendPoints: ProjectQorTrendPoint[]
   baselineWorkspaceId: string | null
   baselineLabel: string
+  scoreThreshold?: number
   regressions: ProjectQorRegression[]
   improvements: ProjectQorDelta[]
   risks: ProjectQorRisk[]
