@@ -6,12 +6,10 @@ import {
   joinLocalPath,
   parsePowerRpt,
   parseQorSummaryRpt,
-  parseProjectManifestFlowStep,
   projectManagementWorkspaceStepAnalysisSpecs,
   type DesignReportData,
   type DesignReportExportOptions,
   type DesignReportFormat,
-  type EccEngineeringAnalysis,
   type WorkspaceResourceIndex,
 } from '@ecos-studio/shared'
 import { getDesktopApi } from '@/platform/desktop'
@@ -53,46 +51,6 @@ interface UseDesignReportExportDependencies {
 
 function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-function analysisFileData(
-  file: { status: string; data: Record<string, unknown> | null } | null | undefined,
-): Record<string, unknown> | null {
-  return file?.status === 'available' && file.data ? file.data : null
-}
-
-function reportDataFromEngineeringAnalysis(analysis: EccEngineeringAnalysis): {
-  stepMetrics: Record<string, unknown>
-  stepSummaries: Record<string, unknown>
-  stepHotspots: Record<string, unknown>
-  staTimingIssues: Record<string, unknown> | null
-} {
-  const stepMetrics: Record<string, unknown> = {}
-  const stepSummaries: Record<string, unknown> = {}
-  const stepHotspots: Record<string, unknown> = {}
-  let staTimingIssues: Record<string, unknown> | null = null
-  for (const step of analysis.steps) {
-    const canonical =
-      parseProjectManifestFlowStep(step.stepId) ?? canonicalizeStageName(step.stepId)
-    const metrics = analysisFileData(step.metrics)
-    const summary = analysisFileData(step.summary)
-    const hotspots = analysisFileData(step.hotspots)
-    if (metrics) {
-      stepMetrics[step.stepId] = metrics
-      stepMetrics[canonical] = metrics
-    }
-    if (summary) {
-      stepSummaries[step.stepId] = summary
-      stepSummaries[canonical] = summary
-    }
-    if (hotspots) {
-      stepHotspots[step.stepId] = hotspots
-      stepHotspots[canonical] = hotspots
-    }
-    const timingIssues = analysisFileData(step.timingIssues)
-    if (timingIssues) staTimingIssues = timingIssues
-  }
-  return { stepMetrics, stepSummaries, stepHotspots, staTimingIssues }
 }
 
 function formatFileExtension(format: DesignReportFormat): string {
@@ -311,29 +269,8 @@ export function useDesignReportExport({
         currentProject.value?.name ||
         'gcd'
 
-      if (runtimeSnapshot?.engineeringSnapshot) {
-        const analysis = reportDataFromEngineeringAnalysis(
-          runtimeSnapshot.engineeringSnapshot.analysis,
-        )
-        if (unmounted || generation !== loadGeneration) return
-        reportData.value = extractDesignReportData({
-          workspacePath,
-          workspaceName: currentProject.value?.name,
-          designName: currentProject.value?.topModule,
-          topModule,
-          pdk: currentProject.value?.pdk,
-          frequencyTarget: currentProject.value?.frequencyTarget,
-          parameters,
-          flow,
-          projectMetadata,
-          ...analysis,
-          versionInfo,
-        })
-        loading.value = false
-        return
-      }
-
-      // Frontend still collects step metrics from the resource index and step directories.
+      // v6 snapshots carry no inlined analysis payloads; backend workspaces use
+      // the same bounded artifact-path scanning as frontend workspaces below.
       const stepMetrics: Record<string, unknown> = {}
       const stepSummaries: Record<string, unknown> = {}
       const stepHotspots: Record<string, unknown> = {}

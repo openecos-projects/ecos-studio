@@ -196,6 +196,12 @@
                   </div>
                 </div>
 
+                <ProjectConsistencyRepairStrip
+                  v-if="inconsistentProjectRoots.has(project.source.path)"
+                  :project-root="project.source.path"
+                  @repaired="handleProjectConsistencyRepaired"
+                />
+
                 <div
                   v-if="
                     projectWorkspaceListExpanded(project.model.id) &&
@@ -892,6 +898,7 @@ import ProjectExecutionStatus from './project-management/ProjectExecutionStatus.
 import ProjectResultStatus from './project-management/ProjectResultStatus.vue'
 import ProjectBackgroundOperationPanel from './project-management/ProjectBackgroundOperationPanel.vue'
 import ProjectCreationRecoveryPanel from './project-management/ProjectCreationRecoveryPanel.vue'
+import ProjectConsistencyRepairStrip from './project-management/ProjectConsistencyRepairStrip.vue'
 import MpcTemplatePreview from '@/components/MpcTemplatePreview.vue'
 import { previewList } from './project-management/projectListPreview'
 import { resolveProjectManagementRouteFocus } from './project-management/projectRouteFocus'
@@ -931,6 +938,7 @@ import {
   isShutdownInProgress,
   useBackgroundOperationStore,
 } from '@/stores/backgroundOperationStore'
+import { useProjectConsistencyStore } from '@/stores/projectConsistencyStore'
 import {
   createProjectManifestMpcSnapshot,
   parseMpcSpecDesigns,
@@ -961,6 +969,15 @@ const router = useRouter()
 const { openProject, showToast, currentProject } = useWorkspace()
 const projectComparisonSession = useBackendProjectComparisonSession()
 const backgroundOperations = useBackgroundOperationStore()
+const projectConsistency = useProjectConsistencyStore()
+const inconsistentProjectRoots = computed(
+  () =>
+    new Set(
+      Object.entries(projectConsistency.reports)
+        .filter(([, report]) => report.findings.length > 0)
+        .map(([root]) => root),
+    ),
+)
 const mutationsDisabled = computed(() =>
   isShutdownInProgress(backgroundOperations.shutdownStatus.state),
 )
@@ -1985,7 +2002,24 @@ async function refreshProjectManifestsNow() {
   workspaceFlowStates.value = Object.fromEntries(
     entries.map(([path]) => [path, workspaceFlowStates.value[path] ?? {}]),
   )
+  void projectConsistency.refresh(projectSources.value)
   void loadSelectedProjectWorkspaceData()
+}
+
+async function handleProjectConsistencyRepaired(projectRoot: string) {
+  // Repair rewrites project.json through ECC; reload it through the same
+  // manifest-apply path project mutations use so the display matches the
+  // directory facts again.
+  try {
+    const manifest = await readProjectManagementManifest(projectRoot)
+    if (manifest) {
+      await applyProjectManifestForProject(manifest, projectRoot)
+      return
+    }
+  } catch (error) {
+    console.warn(`Failed to reload the repaired project manifest: ${projectRoot}`, error)
+  }
+  await refreshProjectManifests()
 }
 
 async function loadSelectedProjectWorkspaceData() {

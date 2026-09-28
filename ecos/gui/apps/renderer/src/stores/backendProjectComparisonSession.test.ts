@@ -42,7 +42,6 @@ function comparison(projectName: string, contextId = 'context-1', generation = 0
         trendPoints: [],
         baselineWorkspaceId: null,
         baselineLabel: 'No baseline',
-        scoreThreshold: 60,
         regressions: [],
         improvements: [],
         risks: [],
@@ -259,7 +258,7 @@ describe('backendProjectComparisonSession', () => {
     api.getStepFindings.mockResolvedValue({
       ...findings('ws_1', 'Route'),
       freshness: 'last-committed',
-      issue: { code: 'ARTIFACT_REVISION_MISMATCH' },
+      issue: { code: 'FINDINGS_READ_FAILED' },
     })
     const session = useBackendProjectComparisonSession()
     await session.selectProject('/projects/a')
@@ -269,7 +268,7 @@ describe('backendProjectComparisonSession', () => {
     expect(session.findings).toMatchObject({
       status: 'stale',
       data: { projectWorkspaceId: 'ws_1', step: 'Route' },
-      issue: { code: 'ARTIFACT_REVISION_MISMATCH' },
+      issue: { code: 'FINDINGS_READ_FAILED' },
     })
   })
 })

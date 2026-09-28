@@ -788,7 +788,7 @@ describe('ProjectStepAnalysisPanel', () => {
           step: 'Route',
           workspaceRevision: 4,
         },
-        issue: { code: 'ARTIFACT_REVISION_MISMATCH' },
+        issue: { code: 'FINDINGS_READ_FAILED' },
       },
     })
 

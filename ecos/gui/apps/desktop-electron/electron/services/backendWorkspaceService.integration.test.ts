@@ -36,65 +36,16 @@ function metric(id: string, value: number): EccEngineeringMetric {
 function snapshot(workspaceId: string, revision: number, value: number) {
   const metrics = [metric('instance_count', value), metric('core_area', 6400)]
   return {
-    analysis: {
-      steps: [
-        {
-          stepId: 'Place',
-          toolId: 'ecc',
-          order: 1,
-          flowState: 'Success',
-          metrics: {
-            artifactId: 'place-metrics',
-            status: 'available',
-            data: {
-              schema_version: 3,
-              metrics,
-              details: [
-                {
-                  id: 'database_facts',
-                  summary: {
-                    layout: { core_area: 6400 },
-                    statistics: { instances: value },
-                    instance_classes: [],
-                    instance_total: { count: value, area: null, pin_count: null },
-                    pin_distribution: [],
-                    cut_layers: [],
-                    routing_layers: [],
-                    wire_length: null,
-                    via_count: null,
-                  },
-                },
-              ],
-            },
-          },
-          summary: {
-            artifactId: 'place-summary',
-            status: 'missing',
-            reasonCode: 'ANALYSIS_FILE_MISSING',
-            data: null,
-          },
-          hotspots: {
-            artifactId: 'place-hotspots',
-            status: 'missing',
-            reasonCode: 'ANALYSIS_FILE_MISSING',
-            data: null,
-          },
-          timingIssues: null,
-          subflow: {
-            status: 'available',
-            steps: [{ name: 'placement', state: 'Success' }],
-          },
-        },
-      ],
-    },
     artifacts: [],
-    checklist: { checklist: [] },
+    cause: 'flow_step.success',
+    checklist: { items: [] },
     flow: {
       steps: [
         { name: 'Synthesis', tool: 'yosys', state: 'Success', runtime: '0:0:1' },
         { name: 'Place', tool: 'ecc', state: 'Success' },
       ],
     },
+    hotspotPreview: { hotspotCount: 0, hotspots: [], hotspotsTruncated: false },
     metrics,
     parameters: {
       PDK: 'ics55',
@@ -102,22 +53,9 @@ function snapshot(workspaceId: string, revision: number, value: number) {
       'Top module': 'gcd',
       'Max fanout': 32,
     },
-    qorAssessment: {
-      status: 'ready',
-      metrics,
-      score: { value: 70, threshold: 60, gate: 'pass' },
-      steps: [
-        {
-          stepId: 'Place',
-          name: 'Place',
-          order: 1,
-          status: 'pass',
-          summaryMetricCount: 2,
-        },
-      ],
-    },
-    schemaVersion: 2,
+    schemaVersion: 6,
     signoffAssessment: { status: 'ready', groups: [], risks: [] },
+    timingPreview: { issueCount: 0, issues: [], issuesTruncated: false },
     workspaceId,
     workspaceRevision: revision,
   } satisfies EccPersistedEngineeringSnapshot
@@ -246,10 +184,14 @@ describe('BackendWorkspaceService persisted integration', () => {
       unit: 'um2',
       value: 6400,
     })
+    // v6 flat metrics carry no step attribution, so per-step trend points stay
+    // null until the step-aware projection returns (T06-T08).
     expect(flowInsights.data.trends).toContainEqual(
       expect.objectContaining({
         id: 'instance_count',
-        points: expect.arrayContaining([expect.objectContaining({ value: 450 })]),
+        points: expect.arrayContaining([
+          expect.objectContaining({ stepId: 'Place', value: null }),
+        ]),
       }),
     )
 
@@ -260,13 +202,15 @@ describe('BackendWorkspaceService persisted integration', () => {
         workspaceRevision: 7,
       }),
     )
+    // v6 snapshots carry no inlined per-step analysis payloads; database facts
+    // and subflow detail return through the artifact channel in a follow-up.
     expect(detail).toMatchObject({
       workspaceRevision: 7,
       detail: {
         status: 'ready',
         data: {
-          analysis: { database: { layout: { coreArea: 6400 } } },
-          subflow: { status: 'available', steps: [{ name: 'placement' }] },
+          analysis: { database: null },
+          subflow: { status: 'missing', steps: [] },
         },
       },
     })

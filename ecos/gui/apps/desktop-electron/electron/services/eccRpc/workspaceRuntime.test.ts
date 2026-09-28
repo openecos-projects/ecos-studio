@@ -164,6 +164,65 @@ describe('EccWorkspaceRuntime', () => {
     expect(service.workspaceSession(opened.workspaceHandle).workspaceRevision).toBe(2)
   })
 
+  it('forwards retainBackup on workspace updates only when set', async () => {
+    const { client, service } = createService()
+    client.responses.push({
+      directory: '/work/demo',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 1,
+    })
+    const opened = await service.openWorkspace({ directory: '/work/demo' })
+    client.responses.push({
+      backupDirectory: '/work/.demo.replace-backup-1',
+      directory: '/work/demo',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 2,
+    })
+
+    await expect(
+      service.updateWorkspace({
+        commandId: 'update-1',
+        expectedWorkspaceRevision: 1,
+        retainBackup: true,
+        workspaceBindings: { pdk: { root: '/pdks/ics55' } },
+        workspaceHandle: opened.workspaceHandle,
+        workspaceSpec: { design: { name: 'gcd' } },
+      }),
+    ).resolves.toMatchObject({
+      backupDirectory: '/work/.demo.replace-backup-1',
+      workspaceRevision: 2,
+    })
+
+    expect(client.calls.at(-1)).toMatchObject({
+      method: 'workspace.update',
+      params: {
+        commandId: 'update-1',
+        expectedWorkspaceRevision: 1,
+        retainBackup: true,
+        workspaceBindings: { pdk: { root: '/pdks/ics55' } },
+        workspaceId: 'workspace-1',
+        workspaceSpec: { design: { name: 'gcd' } },
+      },
+    })
+    expect(service.workspaceSession(opened.workspaceHandle).workspaceRevision).toBe(2)
+
+    // Permanent replacement omits the flag so older ECC sidecars accept it.
+    client.responses.push({
+      directory: '/work/demo',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 3,
+    })
+    await service.updateWorkspace({
+      commandId: 'update-2',
+      expectedWorkspaceRevision: 2,
+      workspaceBindings: { pdk: { root: '/pdks/ics55' } },
+      workspaceHandle: opened.workspaceHandle,
+      workspaceSpec: { design: { name: 'gcd' } },
+    })
+    expect(client.calls.at(-1)).toMatchObject({ method: 'workspace.update' })
+    expect(client.calls.at(-1)?.params).not.toHaveProperty('retainBackup')
+  })
+
   it('reads Step Configuration without entering the operation queue', async () => {
     const { client, service, events } = createService()
     client.responses.push({
@@ -1203,7 +1262,9 @@ describe('EccWorkspaceRuntime', () => {
     })
   })
 
-  it('blocks signoff export when a committed artifact fingerprint has drifted', async () => {
+  it('exports signoff when a committed artifact file changed after the snapshot commit', async () => {
+    // Regression: layout_edit_save commits the Snapshot before the layout PNG is
+    // regenerated, so a legacy fingerprint record can never match the file again.
     const directory = mkdtempSync(join(tmpdir(), 'ecc-runtime-signoff-'))
     mkdirSync(join(directory, 'home'), { recursive: true })
     const reference = 'reports/qor.json'
@@ -1211,7 +1272,6 @@ describe('EccWorkspaceRuntime', () => {
     mkdirSync(join(directory, 'reports'), { recursive: true })
     writeFileSync(join(directory, reference), committed)
     const snapshot: EccPersistedEngineeringSnapshot = {
-      analysis: { steps: [] },
       artifacts: [
         {
           artifactId: 'artifact-qor',
@@ -1219,33 +1279,39 @@ describe('EccWorkspaceRuntime', () => {
           kind: 'report_text',
           name: 'qor.json',
           reference,
-          sha256: createHash('sha256').update(committed).digest('hex'),
-          sizeBytes: Buffer.byteLength(committed),
           stepId: 'STA',
         },
       ],
-      checklist: { checklist: [] },
+      cause: 'workspace.created',
+      checklist: { items: [] },
       flow: { steps: [] },
+      hotspotPreview: { hotspotCount: 0, hotspots: [], hotspotsTruncated: false },
       metrics: [],
       parameters: {},
-      qorAssessment: {
-        metrics: [],
-        score: { gate: 'pass', threshold: 60, value: 73.5 },
-        status: 'ready',
-        steps: [],
-      },
-      schemaVersion: 1,
+      schemaVersion: 6,
       signoffAssessment: { groups: [], risks: [], status: 'ready' },
+      timingPreview: { issueCount: 0, issues: [], issuesTruncated: false },
       workspaceId: 'workspace-1',
       workspaceRevision: 1,
     }
+    const legacySnapshot = {
+      ...snapshot,
+      artifacts: snapshot.artifacts.map((artifact) => ({
+        ...artifact,
+        sha256: createHash('sha256').update(committed).digest('hex'),
+        sizeBytes: Buffer.byteLength(committed),
+      })),
+    }
     writeFileSync(
       join(directory, 'home', 'engineering-snapshot.json'),
-      JSON.stringify(snapshot),
+      JSON.stringify(legacySnapshot),
     )
     writeFileSync(join(directory, reference), '{"status":"changed"}')
     const { client, service } = createService(directory)
-    client.responses.push({ directory, workspaceId: 'workspace-1', workspaceRevision: 1 })
+    client.responses.push(
+      { directory, workspaceId: 'workspace-1', workspaceRevision: 1 },
+      { outputPath: '/exports/custom package.tar.gz' },
+    )
     const workspace = await service.openWorkspace({ directory })
 
     await expect(
@@ -1253,11 +1319,15 @@ describe('EccWorkspaceRuntime', () => {
         outputPath: '/exports/custom package.tar.gz',
         workspaceHandle: workspace.workspaceHandle,
       }),
-    ).rejects.toMatchObject({
-      code: 'SIGNOFF_ARTIFACT_REVISION_MISMATCH',
-      details: { references: [reference] },
+    ).resolves.toEqual({ outputPath: '/exports/custom package.tar.gz' })
+    expect(client.calls.at(-1)).toEqual({
+      method: 'workspace.export_signoff',
+      options: { timeoutMs: 0 },
+      params: {
+        outputPath: '/exports/custom package.tar.gz',
+        workspaceId: 'workspace-1',
+      },
     })
-    expect(client.calls).toHaveLength(1)
     rmSync(directory, { force: true, recursive: true })
   })
 

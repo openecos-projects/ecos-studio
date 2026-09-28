@@ -10,46 +10,32 @@ function readResult(
   revision: number,
   stalePredecessor?: { workspaceRevision: number; invalidatedStepIds: string[] },
 ) {
-  const qor = {
-    analysis: { steps: [] },
-    metrics: [],
-    qorAssessment: {
-      status: 'ready',
-      metrics: [],
-      score: { gate: 'incomplete', threshold: 60, value: null },
-      steps:
-        revision === 1
-          ? [
-              {
-                stepId: 'Route',
-                name: 'Route',
-                order: 0,
-                status: 'pass',
-                summaryMetricCount: 0,
-              },
-            ]
-          : [],
-    },
-  }
   return {
-    ok: true,
+    ok: true as const,
     readBytes: 1,
     snapshot: {
-      checklist: {},
+      cause: 'flow_step.success',
       parameters: {},
-      schemaVersion: 3,
+      schemaVersion: 6 as const,
       workspaceId: 'workspace-1',
       workspaceRevision: revision,
       ...(stalePredecessor ? { stalePredecessor } : {}),
     },
     sections: {
       artifacts: section([]),
+      checklist: section({ items: [] }),
       flow: section({ steps: [] }),
-      qor: section(qor),
-      qorSnapshotExtension: section({ status: 'available' }),
+      hotspotPreview: section({
+        hotspotCount: 0,
+        hotspots: [],
+        hotspotsTruncated: false,
+      }),
+      metrics: section([]),
+      qorSnapshotExtension: { status: 'unavailable' as const, issues: [] },
       signoff: section({ groups: [], risks: [], status: 'ready' }),
+      timingPreview: section({ issueCount: 0, issues: [], issuesTruncated: false }),
     },
-  } as unknown as ProjectEngineeringSnapshotReadResult
+  }
 }
 
 describe('projectWorkspaceResults', () => {
@@ -58,7 +44,7 @@ describe('projectWorkspaceResults', () => {
     const result = projectWorkspaceResults({
       ...current,
       staleSnapshot: readResult(1),
-    } as Extract<ProjectEngineeringSnapshotReadResult, { ok: true }>)
+    } as unknown as Extract<ProjectEngineeringSnapshotReadResult, { ok: true }>)
 
     expect(result.freshness.status).toBe('stale')
     expect(result.snapshot.sections.qorSnapshotExtension).toEqual({

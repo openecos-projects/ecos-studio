@@ -173,7 +173,7 @@ describe('buildDashboardHealth', () => {
 })
 
 describe('buildDashboardRecommendation', () => {
-  it('reports the QoR best workspace with its score and threshold standing', () => {
+  it('reports the QoR best workspace with its score and qor-v3 band standing', () => {
     const recommendation = buildDashboardRecommendation(
       trendSummaryWithScoresFixture(),
       'ws_b',
@@ -183,9 +183,9 @@ describe('buildDashboardRecommendation', () => {
     expect(recommendation).toMatchObject({
       workspaceId: 'ws_b',
       score: '74.2',
-      scoreTone: 'good',
+      scoreTone: 'warn',
       signoff: 'pass',
-      scoreNote: 'Meets the 60 analysis threshold',
+      scoreNote: 'QoR v3 YELLOW band',
     })
   })
 
@@ -206,17 +206,17 @@ describe('buildDashboardRecommendation', () => {
     ).toBe('Only workspace with a complete run')
   })
 
-  it('warns when the leading workspace is still under the analysis threshold', () => {
+  it('flags the leading workspace when its score sits in the RED band', () => {
     expect(
       buildDashboardRecommendation(trendSummaryWithScoresFixture(), 'ws_a', 'reason'),
-    ).toMatchObject({ score: '58.4', scoreTone: 'warn' })
+    ).toMatchObject({ score: '58.4', scoreTone: 'bad' })
   })
 
-  it('says the threshold does not gate signoff when a passing workspace scores low', () => {
+  it('says the RED band does not gate signoff when a passing workspace scores low', () => {
     expect(
       buildDashboardRecommendation(trendSummaryWithScoresFixture(), 'ws_a', 'reason')
         ?.scoreNote,
-    ).toBe('Below the 60 analysis threshold, which does not gate signoff')
+    ).toBe('QoR v3 RED band, which does not gate signoff')
   })
 
   it('explains an unrated score instead of naming a threshold', () => {
@@ -239,6 +239,9 @@ describe('buildDashboardQorInsights', () => {
 
     expect(buildDashboardQorInsights(summary, 'ws_b')).toEqual({
       status: 'available',
+      score: 74.2,
+      scalarStatus: 'GREEN',
+      scoreTone: 'good',
       dimensions: [
         {
           key: 'timing',
@@ -286,6 +289,9 @@ describe('buildDashboardQorInsights', () => {
   it('returns unavailable when the selected workspace has no committed extension', () => {
     expect(buildDashboardQorInsights(trendSummaryWithScoresFixture(), 'ws_b')).toEqual({
       status: 'unavailable',
+      score: null,
+      scalarStatus: 'NOT_RATED',
+      scoreTone: 'neutral',
       dimensions: [],
       diagnoses: [],
       evidence: null,

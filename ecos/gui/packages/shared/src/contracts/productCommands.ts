@@ -26,6 +26,8 @@ export type ProductCommandRequest =
         draft: Omit<EccWorkspaceCreateRequest, 'commandId'>
         commandId: string
         expectedWorkspaceRevision: number
+        /** Forwarded to ECC; omitted/false means permanent replacement. */
+        retainBackup?: boolean
         workspaceHandle: string
       }
     }

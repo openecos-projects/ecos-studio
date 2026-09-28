@@ -9,6 +9,7 @@
  * - 拥塞/密度图：step.directory/feature/<map_dir>/<step>_<kind>.{png,csv} + layout.csv
  * - STA corner：step.resources.report.sta（嵌套 corner 目录中的 qor_summary.json）
  */
+import { flowStepRegistry } from '@ecos-studio/shared'
 
 export type FlowInsightTone = 'good' | 'warn' | 'bad' | 'neutral'
 export type MetricDeltaState =
@@ -454,7 +455,9 @@ const DB_METRIC_DEFINITIONS: DbMetricDefinition[] = [
 
 /** 增长超过该比例且发生在 filler/rcx/harden 的 step 视为结构性变化（filler 插入等）。 */
 const STRUCTURAL_JUMP_RATIO = 0.5
-const STRUCTURAL_STEP_KEYS = new Set(['Filler', 'RCX', 'Harden'])
+const STRUCTURAL_STEP_KEYS: ReadonlySet<string> = new Set(
+  flowStepRegistry.filter((step) => step.structural).map((step) => step.id),
+)
 
 function deltaStateFor(
   polarity: DbTrendMetricRow['polarity'],
@@ -1164,6 +1167,13 @@ export interface StaCriticalPath {
 export interface StaCriticalPathsModel {
   setup: StaCriticalPath[]
   hold: StaCriticalPath[]
+  /**
+   * Total committed STA timing issues when the model is the bounded
+   * timingPreview projection; undefined for lazily loaded full path data.
+   */
+  issueCount?: number | null
+  /** True when setup/hold above are only the projection's top-N head. */
+  issuesTruncated?: boolean
 }
 
 function analysisTypeOf(value: unknown): StaCriticalPath['analysisType'] {

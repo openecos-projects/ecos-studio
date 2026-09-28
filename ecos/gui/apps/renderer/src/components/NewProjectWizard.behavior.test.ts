@@ -5,53 +5,88 @@ import { describe, expect, it, vi } from 'vitest'
 import NewProjectWizard from './NewProjectWizard.vue'
 import PdkResourcePickerDialog from './PdkResourcePickerDialog.vue'
 
-const wizardMocks = vi.hoisted(() => ({
-  importedPdks: { value: [] as Array<Record<string, unknown>> },
-  loadPdks: vi.fn(async () => undefined),
-  importPdk: vi.fn(),
-  removePdk: vi.fn(),
-  validatePdk: vi.fn(),
-  locatePdk: vi.fn(),
-  showToast: vi.fn(),
-  loadProjectHistory: vi.fn(async () => []),
-  readProjectManagementManifest: vi.fn<() => Promise<ProjectManifest | null>>(
-    async () => null,
-  ),
-  resolveBinding: vi.fn(),
-  readProjectEccPdkConfig: vi.fn<() => Promise<ProjectEccPdkConfigReadResult>>(
-    async () => ({
-      exists: false,
-      pdkName: '',
-      pdkRoot: '',
-      externalPaths: [],
-      overrides: {},
-    }),
-  ),
-  writeProjectEccPdkConfig: vi.fn(),
-  scanPdkDirectory: vi.fn(),
-  pickFiles: vi.fn(),
-  discoverHdlModules: vi.fn(async (request: { rtlPaths?: string[] }) => {
-    if (request.rtlPaths?.includes('/rtl/empty.v')) {
-      return { candidates: [], status: 'complete', suggested: '' }
-    }
-    return {
-      candidates: ['gcd_top', 'child'],
-      status: 'complete',
-      suggested: 'gcd_top',
-    }
-  }),
-  getWorkspaceCreationModel: vi.fn(async () => ({
+const wizardMocks = vi.hoisted(() => {
+  // Mirrors the live ECC rtl2gds discovery payload
+  // (ecc chipcompiler/engine/workspace_spec.py describe_workspace_spec).
+  const rtl2gdsStepIds = [
+    'Synthesis',
+    'lec',
+    'preFloorplan',
+    'macroPlacement',
+    'postFloorplan',
+    'place',
+    'CTS',
+    'legalization',
+    'Timing optimization',
+    'route',
+    'filler',
+    'RCX',
+    'sta',
+    'powerAnalysis',
+    'lvs',
+    'postRouteLec',
+    'drc',
+    'Harden',
+  ]
+  const defaultWorkspaceCreationModel = () => ({
     controls: {
       flowBoundaries: true,
       manualPdkFiles: true,
       mpc: true,
       pdkVersion: true,
     },
-    discovery: {},
+    discovery: {
+      flowDefinitions: [
+        {
+          flowId: 'rtl2gds',
+          stepIds: rtl2gdsStepIds,
+          skippableStepIds: ['lec', 'Timing optimization', 'postRouteLec'],
+          defaultSkippedStepIds: ['lec'],
+        },
+      ],
+    },
     parameters: [],
     pdkInstallations: [],
-  })),
-}))
+  })
+  return {
+    defaultWorkspaceCreationModel,
+    importedPdks: { value: [] as Array<Record<string, unknown>> },
+    loadPdks: vi.fn(async () => undefined),
+    importPdk: vi.fn(),
+    removePdk: vi.fn(),
+    validatePdk: vi.fn(),
+    locatePdk: vi.fn(),
+    showToast: vi.fn(),
+    loadProjectHistory: vi.fn(async () => []),
+    readProjectManagementManifest: vi.fn<() => Promise<ProjectManifest | null>>(
+      async () => null,
+    ),
+    resolveBinding: vi.fn(),
+    readProjectEccPdkConfig: vi.fn<() => Promise<ProjectEccPdkConfigReadResult>>(
+      async () => ({
+        exists: false,
+        pdkName: '',
+        pdkRoot: '',
+        externalPaths: [],
+        overrides: {},
+      }),
+    ),
+    writeProjectEccPdkConfig: vi.fn(),
+    scanPdkDirectory: vi.fn(),
+    pickFiles: vi.fn(),
+    discoverHdlModules: vi.fn(async (request: { rtlPaths?: string[] }) => {
+      if (request.rtlPaths?.includes('/rtl/empty.v')) {
+        return { candidates: [], status: 'complete', suggested: '' }
+      }
+      return {
+        candidates: ['gcd_top', 'child'],
+        status: 'complete',
+        suggested: 'gcd_top',
+      }
+    }),
+    getWorkspaceCreationModel: vi.fn(async () => defaultWorkspaceCreationModel()),
+  }
+})
 
 vi.mock('../composables/usePdkManager', () => ({
   usePdkManager: () => wizardMocks,
@@ -1247,7 +1282,19 @@ describe('NewProjectWizard behavior', () => {
     wrapper.unmount()
   })
 
-  it('falls back to the canonical ECC chain when discovery has no flow definitions', async () => {
+  it('leaves flow steps unavailable when discovery has no flow definitions', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue({
+      controls: {
+        flowBoundaries: true,
+        manualPdkFiles: true,
+        mpc: true,
+        pdkVersion: true,
+      },
+      discovery: { flowDefinitions: [] },
+      parameters: [],
+      pdkInstallations: [],
+    })
     const wrapper = mount(NewProjectWizard, {
       props: { initialConfig: { standaloneWorkspace: true } },
       global: {
@@ -1266,28 +1313,17 @@ describe('NewProjectWizard behavior', () => {
     wizard.currentStep = 3
     await flushPromises()
 
-    expect(wizard.flowStepOptions.map((step) => step.name)).toEqual([
-      'Synthesis',
-      'lec',
-      'preFloorplan',
-      'macroPlacement',
-      'postFloorplan',
-      'place',
-      'CTS',
-      'legalization',
-      'Timing optimization',
-      'route',
-      'filler',
-      'RCX',
-      'sta',
-      'lvs',
-      'postRouteLec',
-      'drc',
-      'Harden',
-    ])
-    expect(wrapper.text()).toContain('preFloorplan')
-    expect(wrapper.text()).toContain('macroPlacement')
+    expect(wizard.flowStepOptions).toEqual([])
+    expect(wrapper.text()).toContain('Flow steps are unavailable')
+    expect(wrapper.text()).not.toContain('preFloorplan')
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('no usable flow definition'),
+    )
+    warn.mockRestore()
     wrapper.unmount()
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue(
+      wizardMocks.defaultWorkspaceCreationModel(),
+    )
   })
 
   it('prefers the flow definition matching the current flowId', async () => {
@@ -1303,8 +1339,15 @@ describe('NewProjectWizard behavior', () => {
           {
             flowId: 'rtl2gds',
             stepIds: ['Synthesis', 'preFloorplan', 'macroPlacement', 'Harden'],
+            skippableStepIds: [],
+            defaultSkippedStepIds: [],
           },
-          { flowId: 'harden', stepIds: ['Synthesis', 'customStep', 'Harden'] },
+          {
+            flowId: 'harden',
+            stepIds: ['Synthesis', 'customStep', 'Harden'],
+            skippableStepIds: [],
+            defaultSkippedStepIds: [],
+          },
         ],
       },
       parameters: [],
@@ -1335,17 +1378,9 @@ describe('NewProjectWizard behavior', () => {
     ])
     expect(wrapper.text()).toContain('customStep step.')
     wrapper.unmount()
-    wizardMocks.getWorkspaceCreationModel.mockResolvedValue({
-      controls: {
-        flowBoundaries: true,
-        manualPdkFiles: true,
-        mpc: true,
-        pdkVersion: true,
-      },
-      discovery: {},
-      parameters: [],
-      pdkInstallations: [],
-    })
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue(
+      wizardMocks.defaultWorkspaceCreationModel(),
+    )
   })
 
   it('marks steps reported as skippable by the flow definition', async () => {
@@ -1416,17 +1451,9 @@ describe('NewProjectWizard behavior', () => {
     const skippableCheckbox = skippableCards[0].find('input[type="checkbox"]')
     expect((skippableCheckbox.element as HTMLInputElement).checked).toBe(true)
     wrapper.unmount()
-    wizardMocks.getWorkspaceCreationModel.mockResolvedValue({
-      controls: {
-        flowBoundaries: true,
-        manualPdkFiles: true,
-        mpc: true,
-        pdkVersion: true,
-      },
-      discovery: {},
-      parameters: [],
-      pdkInstallations: [],
-    })
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue(
+      wizardMocks.defaultWorkspaceCreationModel(),
+    )
   })
 
   it('uses the rtl2gds definition for legacy preset flowIds and resets stale boundaries', async () => {
@@ -1439,7 +1466,12 @@ describe('NewProjectWizard behavior', () => {
       },
       discovery: {
         flowDefinitions: [
-          { flowId: 'rtl2gds', stepIds: ['Synthesis', 'preFloorplan', 'place', 'sta'] },
+          {
+            flowId: 'rtl2gds',
+            stepIds: ['Synthesis', 'preFloorplan', 'place', 'sta'],
+            skippableStepIds: [],
+            defaultSkippedStepIds: [],
+          },
         ],
       },
       parameters: [],
@@ -1475,17 +1507,9 @@ describe('NewProjectWizard behavior', () => {
     expect(wizard.flowEndStep).toBe('sta')
     expect(wrapper.text()).toContain('preFloorplan')
     wrapper.unmount()
-    wizardMocks.getWorkspaceCreationModel.mockResolvedValue({
-      controls: {
-        flowBoundaries: true,
-        manualPdkFiles: true,
-        mpc: true,
-        pdkVersion: true,
-      },
-      discovery: {},
-      parameters: [],
-      pdkInstallations: [],
-    })
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue(
+      wizardMocks.defaultWorkspaceCreationModel(),
+    )
   })
 
   it("maps a persisted 'Floorplan' start step to preFloorplan", async () => {

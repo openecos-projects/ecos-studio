@@ -12,26 +12,14 @@
         aria-label="Workspace dashboard"
       >
         <div
-          v-if="staleResultNotice || externallyModifiedLayoutCount > 0"
+          v-if="staleResultNotice"
           class="home-dashboard-stale"
           role="status"
-          :title="artifactDriftNoticeDetail"
-          :aria-description="artifactDriftNoticeDetail"
+          :title="staleResultNotice.detail"
+          :aria-description="staleResultNotice.detail"
         >
-          <i
-            :class="
-              externallyModifiedLayoutCount > 0 ? 'ri-alert-line' : 'ri-history-line'
-            "
-            aria-hidden="true"
-          />
-          <span v-if="staleResultNotice">{{ staleResultNotice.message }}</span>
-          <span v-if="externallyModifiedLayoutCount > 0">
-            {{ externallyModifiedLayoutCount }} layout artifact{{
-              externallyModifiedLayoutCount === 1 ? '' : 's'
-            }}
-            changed since the committed snapshot. They remain viewable, but are not
-            trusted signoff evidence.
-          </span>
+          <i class="ri-history-line" aria-hidden="true" />
+          <span>{{ staleResultNotice.message }}</span>
         </div>
         <div class="home-dashboard-row home-dashboard-top">
           <section class="dashboard-section chip-card">
@@ -194,21 +182,21 @@
                   class="qor-score-hero is-baseline"
                   :class="`is-${qorBaselineScoreTone}`"
                 >
-                  <span>Baseline QoR score</span>
+                  <span>Baseline QoR v3 score</span>
                   <small :title="qorComparisonState.baselineWorkspaceName ?? undefined">
                     {{ qorComparisonState.baselineWorkspaceName ?? 'Baseline workspace' }}
                   </small>
                   <div>
                     <strong>{{ qorBaselineScoreValue }}</strong>
-                    <small v-if="qorBaselineScoreValue !== 'N/A'">/ 100</small>
+                    <small v-if="qorBaselineScoreValue !== 'NR'">/ 100</small>
                   </div>
                 </div>
                 <span class="qor-score-versus" aria-hidden="true">VS</span>
                 <div class="qor-score-hero" :class="`is-${qorScoreTone}`">
-                  <span>QoR score</span>
+                  <span>QoR v3 score</span>
                   <div>
                     <strong>{{ qorScoreValue }}</strong>
-                    <small v-if="qorScoreValue !== 'N/A'">/ 100</small>
+                    <small v-if="qorScoreValue !== 'NR'">/ 100</small>
                   </div>
                   <em>{{ qorScoreStatusLabel }}</em>
                 </div>
@@ -390,6 +378,7 @@
               :sta="flowInsightSta"
               :sta-critical-paths="flowInsightStaPaths"
               :sta-convergence="flowInsightStaConvergence"
+              :timing-issues-artifact="flowInsightTimingIssuesArtifact"
               :loading="flowInsightsLoading"
               :load-congestion="loadFlowInsightCongestion"
             />
@@ -463,7 +452,26 @@
           ><span>{{ item.step }}</span>
         </div>
         <p>{{ item.summary }}</p>
-        <code>{{ sourcePath(item.source) }}</code>
+        <p v-if="item.reconciled" class="checklist-reconciled">
+          Reconciled with the committed flow: {{ item.reconciled.previousState }} → pass
+          ({{ item.reconciled.committedFlowState }})
+        </p>
+        <button
+          type="button"
+          class="checklist-evidence-toggle"
+          @click="toggleChecklistEvidence(item.id)"
+        >
+          {{ expandedEvidenceId === item.id ? 'Hide evidence' : 'View evidence' }}
+        </button>
+        <template v-if="expandedEvidenceId === item.id">
+          <pre v-if="evidenceText(item.id) !== null" class="checklist-evidence-record">{{
+            evidenceText(item.id)
+          }}</pre>
+          <p v-else-if="evidenceErrorLabel(item.id)" class="dialog-empty">
+            {{ evidenceErrorLabel(item.id) }}
+          </p>
+          <p v-else class="dialog-empty">Loading evidence…</p>
+        </template>
       </section>
     </div>
     <p v-else class="dialog-empty">No checklist detail is available.</p>
@@ -494,10 +502,15 @@ import {
   workspaceResultFreshnessNotice,
 } from '@/components/home/dashboardData'
 import {
+  checklistEvidenceLabel,
+  useChecklistEvidence,
+} from '@/composables/useChecklistEvidence'
+import {
   buildHomeQorDetailModel,
   formatQorScore,
   homeQorFlowStepForLabel,
   qorScoreTone as getQorScoreTone,
+  qorStepRouteTarget,
   summarizeHomeQorComparison,
 } from '@/components/home/qorComparisonData'
 import { useDashboardOverview } from '@/composables/useDashboardOverview'
@@ -516,6 +529,7 @@ import {
   buildChipViewerOpenRequest,
   canOpenChipViewer,
 } from '@/components/drawingAreaChipViewer'
+import { qorScalarStatusLabel } from '@ecos-studio/shared'
 
 const router = useRouter()
 const route = useRoute()
@@ -575,20 +589,6 @@ const checklistItems = computed(() => {
     : []
 })
 const { layoutThumbnails } = useHomeSnapshots()
-const externallyModifiedLayoutCount = computed(
-  () =>
-    layoutThumbnails.value.filter(
-      (thumbnail) => thumbnail.integrity === 'externally-modified',
-    ).length,
-)
-const artifactDriftNoticeDetail = computed(() => {
-  const stale = staleResultNotice.value?.detail ?? ''
-  const drift =
-    externallyModifiedLayoutCount.value > 0
-      ? `${externallyModifiedLayoutCount.value} layout artifact(s) changed since the committed snapshot.`
-      : ''
-  return [stale, drift].filter(Boolean).join(' ')
-})
 const {
   stepResources: flowInsightResources,
   dbTrends: flowInsightDbTrends,
@@ -599,6 +599,7 @@ const {
   drcRelated: flowInsightDrcRelated,
   sta: flowInsightSta,
   staCriticalPaths: flowInsightStaPaths,
+  timingIssuesArtifact: flowInsightTimingIssuesArtifact,
   loading: flowInsightsLoading,
   loadCongestion: loadFlowInsightCongestion,
 } = useFlowInsights()
@@ -635,6 +636,21 @@ const flowNodes = computed<FlowStatusNode[]>(() =>
     })),
 )
 const resolvedChecklistItems = checklistItems
+const {
+  expandedFindingId: expandedEvidenceId,
+  evidenceState,
+  toggleFinding: toggleChecklistEvidence,
+} = useChecklistEvidence()
+
+function evidenceText(findingId: string): string | null {
+  const state = evidenceState(findingId)
+  return state?.status === 'ready' ? state.text : null
+}
+
+function evidenceErrorLabel(findingId: string): string | null {
+  const state = evidenceState(findingId)
+  return state?.status === 'unavailable' ? checklistEvidenceLabel(state.code) : null
+}
 const checklistSlices = computed(() => checklistPieSlices(resolvedChecklistItems.value))
 const checklistSummary = computed(() =>
   checklistStatusSummary(resolvedChecklistItems.value),
@@ -715,19 +731,18 @@ const qorScoreValue = computed(() => {
 const qorBaselineScoreValue = computed(() =>
   formatQorScore(qorComparisonState.value.comparison?.baselineScore),
 )
-const qorScoreTone = computed<'pass' | 'fail' | 'unrated'>(() => {
+const qorScoreTone = computed<'green' | 'yellow' | 'orange' | 'red' | 'unrated'>(() => {
   const comparison = qorComparisonState.value.comparison
-  return getQorScoreTone(comparison?.score, comparison?.scoreThreshold)
+  return getQorScoreTone(comparison?.scalarStatus)
 })
-const qorBaselineScoreTone = computed<'pass' | 'fail' | 'unrated'>(() => {
-  const comparison = qorComparisonState.value.comparison
-  return getQorScoreTone(comparison?.baselineScore, comparison?.scoreThreshold)
-})
+const qorBaselineScoreTone = computed<'green' | 'yellow' | 'orange' | 'red' | 'unrated'>(
+  () => {
+    const comparison = qorComparisonState.value.comparison
+    return getQorScoreTone(comparison?.baselineScalarStatus)
+  },
+)
 const qorScoreStatusLabel = computed(() => {
-  if (qorScoreTone.value === 'unrated') return 'Not rated'
-  const threshold = qorComparisonState.value.comparison?.scoreThreshold
-  if (threshold === undefined) return 'Not rated'
-  return qorScoreTone.value === 'pass' ? `PASS >= ${threshold}` : `FAIL < ${threshold}`
+  return qorScalarStatusLabel(qorComparisonState.value.comparison?.scalarStatus)
 })
 const qorSummaryLabel = computed(() => {
   const state = qorComparisonState.value
@@ -852,10 +867,6 @@ function frequencyOrNA(value: number): string {
   return Number.isFinite(value) && value > 0 ? `${value} MHz` : 'N/A'
 }
 
-function sourcePath(value: Record<string, unknown>): string {
-  return typeof value.path === 'string' ? value.path : '--'
-}
-
 function statusTone(summary: {
   total: number
   blocked: number
@@ -870,9 +881,12 @@ function statusTone(summary: {
 }
 
 function openStepQorAnalysis(step: string): void {
+  const flowStepIds = flowStages.value
+    .filter((stage) => stage.group === 'run')
+    .map((stage) => stage.path)
   void router.push({
     name: ':step',
-    params: { step },
+    params: { step: qorStepRouteTarget(step, flowStepIds) },
     query: { ...route.query, panel: 'analysis' },
   })
 }
@@ -901,27 +915,13 @@ function layoutThumbnailTitle(thumbnail: HomeLayoutThumbnail): string {
   if (!thumbnail.hasGeometry) {
     return `${thumbnail.label}: saved layout data is unavailable.`
   }
-  if (thumbnail.integrity === 'externally-modified') {
-    const sizeDetail =
-      thumbnail.recordedSizeBytes !== undefined && thumbnail.actualSizeBytes !== undefined
-        ? ` Recorded ${formatArtifactSize(thumbnail.recordedSizeBytes)}; current ${formatArtifactSize(thumbnail.actualSizeBytes)}.`
-        : ''
-    return `${thumbnail.label}: the preview file changed since the committed snapshot.${sizeDetail} Open in Chip Viewer to inspect the current file.`
-  }
   return `Open ${thumbnail.label} in Chip Viewer`
-}
-
-function formatArtifactSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
 }
 
 function homeArtifactPlaceholderLabel(thumbnail: HomeLayoutThumbnail): string {
   const reason = thumbnail.reason?.toUpperCase() ?? ''
   if (reason.includes('TOO_LARGE')) return 'Too large'
   if (reason.includes('INVALID')) return 'Invalid'
-  if (reason.includes('MODIFIED') || reason.includes('MISMATCH')) return 'Changed'
   return thumbnail.availability === 'stale' ? 'Stale' : 'Missing'
 }
 
@@ -1423,13 +1423,23 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   font-size: 11px;
 }
 
-.qor-score-hero.is-pass strong,
-.qor-score-hero.is-pass em {
+.qor-score-hero.is-green strong,
+.qor-score-hero.is-green em {
   color: var(--success-color);
 }
 
-.qor-score-hero.is-fail strong,
-.qor-score-hero.is-fail em {
+.qor-score-hero.is-yellow strong,
+.qor-score-hero.is-yellow em {
+  color: var(--warn-color);
+}
+
+.qor-score-hero.is-orange strong,
+.qor-score-hero.is-orange em {
+  color: color-mix(in srgb, var(--warn-color) 50%, var(--danger-color));
+}
+
+.qor-score-hero.is-red strong,
+.qor-score-hero.is-red em {
   color: var(--danger-color);
 }
 
@@ -1788,6 +1798,30 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 }
 .checklist-detail-list code {
   overflow-wrap: anywhere;
+}
+.checklist-reconciled {
+  font-style: italic;
+}
+.checklist-evidence-toggle {
+  background: none;
+  border: none;
+  color: var(--primary-color, var(--text-secondary));
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+  text-decoration: underline;
+}
+.checklist-evidence-record {
+  background: var(--surface-ground, transparent);
+  border: 1px solid var(--surface-border, var(--text-secondary));
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin: 4px 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: 8px;
+  white-space: pre-wrap;
 }
 
 @media (max-width: 1180px) {

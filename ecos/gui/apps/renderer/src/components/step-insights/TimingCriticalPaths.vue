@@ -7,6 +7,10 @@
       <h3>Critical Paths</h3>
       <span class="timing-hint">worst slack first · stage delay waterfall</span>
     </header>
+    <p v-if="truncationNote" class="timing-truncation-note">
+      <i class="ri-information-line" aria-hidden="true" />
+      <span>{{ truncationNote }}</span>
+    </p>
     <div v-for="group in pathGroups" :key="group.id" class="timing-path-group">
       <h4>{{ group.title }}</h4>
       <article v-for="path in group.paths" :key="path.id" class="timing-path-card">
@@ -74,6 +78,18 @@ const pathGroups = computed<
   return groups
 })
 
+// Projection truncation truth: the preview carries issueCount/issuesTruncated;
+// the GUI states the bound instead of assuming a tool-side path limit.
+const truncationNote = computed(() => {
+  const model = props.criticalPaths
+  if (!model?.issuesTruncated) return ''
+  const shown = model.setup.length + model.hold.length
+  const total = model.issueCount
+  return typeof total === 'number' && total > shown
+    ? `Showing the ${shown} worst-slack issues of ${total} committed. The full list loads on demand from the STA timing issues artifact.`
+    : `Showing the ${shown} worst-slack issues. The full list loads on demand from the STA timing issues artifact.`
+})
+
 function stageTitle(stage: StaPathStage, index: number): string {
   const pin = stage.pin || `stage ${index + 1}`
   const cell = stage.cell ? ` · ${stage.cell}` : ''
@@ -109,6 +125,19 @@ function stageTitle(stage: StaPathStage, index: number): string {
 .timing-hint {
   color: var(--text-secondary);
   font-size: 9px;
+}
+
+.timing-truncation-note {
+  align-items: center;
+  background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-color) 30%, transparent);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  display: flex;
+  font-size: 10px;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 8px;
 }
 
 .timing-path-group {

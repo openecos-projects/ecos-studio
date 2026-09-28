@@ -14,6 +14,7 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import type { DesktopAgentWorkspaceRerunContract } from '@ecos-studio/shared'
+import { isObsoleteFlowStepName } from '@ecos-studio/shared'
 import { isPathWithinRoot, isRelativePathOutsideRoot } from '../pathScope'
 import {
   executeWorkspaceRerunDomain,
@@ -36,11 +37,17 @@ const FLOW_STEP_SEQUENCE = [
   'postRouteLec',
   'RCX',
   'sta',
+  'powerAnalysis',
   'Harden',
 ] as const
 const FLOW_STEPS: Set<string> = new Set(FLOW_STEP_SEQUENCE)
 const CATALOG_END_STEP = FLOW_STEP_SEQUENCE[FLOW_STEP_SEQUENCE.length - 1]!
 const LEGACY_HOME_FILES = ['home.json', 'home.json.lock'] as const
+// Inherited from the staged copy of the source workspace: the snapshot carries
+// the source workspace identity and schema version, and the runtime fails
+// closed on a foreign or incompatible snapshot instead of rebuilding. Dropping
+// it lets the runtime commit a fresh snapshot on first open.
+const INHERITED_SNAPSHOT_FILES = ['engineering-snapshot.json'] as const
 /** Default tool names when extending a short source flow to the catalog end. */
 const DEFAULT_STEP_TOOLS: Record<(typeof FLOW_STEP_SEQUENCE)[number], string> = {
   Synthesis: 'yosys',
@@ -56,6 +63,7 @@ const DEFAULT_STEP_TOOLS: Record<(typeof FLOW_STEP_SEQUENCE)[number], string> = 
   postRouteLec: 'yosys_lec',
   RCX: 'ecc',
   sta: 'ecc',
+  powerAnalysis: 'ecc',
   Harden: 'ecc',
 }
 const STAGE_OUTPUT_SUFFIXES = ['.def.gz', '.v.gz', '.gds']
@@ -77,9 +85,6 @@ function rerunStepSlug(stepName: string): string {
   return stepName.trim().split(/\s+/).join('_').toLowerCase()
 }
 
-function isObsoleteFlowStep(stepName: string): boolean {
-  return stepName.toLowerCase().replace(/[\s_-]/g, '') === 'fixfanout'
-}
 const AUTHORIZED_KNOBS = {
   place: new Set([
     'place.target_density',
@@ -594,7 +599,7 @@ async function prepareWorkspaceRerunMetadata(options: {
 
 async function removeLegacyWorkspaceHomeFiles(homeDirectory: string): Promise<void> {
   const removals: string[] = []
-  for (const filename of LEGACY_HOME_FILES) {
+  for (const filename of [...LEGACY_HOME_FILES, ...INHERITED_SNAPSHOT_FILES]) {
     const path = join(homeDirectory, filename)
     try {
       const stats = await lstat(path)
@@ -843,7 +848,7 @@ async function pruneWorkspaceRerunChecklistJson(
     const step = (item as { step?: unknown }).step
     return (
       typeof step !== 'string' ||
-      (!isObsoleteFlowStep(step) && !wipedStageNames.has(step))
+      (!isObsoleteFlowStepName(step) && !wipedStageNames.has(step))
     )
   })
 
@@ -921,7 +926,7 @@ function parseWorkspaceFlow(flowText: string): {
         (value) =>
           typeof value !== 'object' ||
           value === null ||
-          !isObsoleteFlowStep(String((value as { name?: unknown }).name ?? '')),
+          !isObsoleteFlowStepName(String((value as { name?: unknown }).name ?? '')),
       )
       .map((value) => {
         if (

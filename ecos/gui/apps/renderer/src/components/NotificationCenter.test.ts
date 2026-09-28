@@ -25,6 +25,23 @@ describe('NotificationCenter', () => {
     wrapper.unmount()
   })
 
+  it('closes the notification panel on outside click but keeps it open on inside click', async () => {
+    const wrapper = mount(NotificationCenter, { attachTo: document.body })
+    await wrapper.get('.notification-trigger').trigger('click')
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
+
+    wrapper
+      .get('.notification-panel')
+      .element.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
+
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('marks all notifications as read without clearing the list', async () => {
     const store = useNotificationStore()
     store.addNotification({

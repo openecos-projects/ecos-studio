@@ -204,6 +204,9 @@ export class ProjectManifestService {
     let mutation: ProjectManifestMutation | Record<string, unknown> = requestedMutation
     let directoryReplacement: WorkspaceDirectoryReplacement | null = null
     if (requestedMutation.type === 'record-replacement-backup') {
+      // Compat path: backend updates no longer send this mutation (ECC's
+      // in-place update registers the retained backup itself); the rewrite
+      // stays for older renderers paired with a prepared replacement journal.
       const replacement = this.requireProjectReplacement(
         requestedMutation.input.replacementId,
         projectRoot,

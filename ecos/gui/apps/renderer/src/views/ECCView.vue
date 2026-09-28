@@ -242,6 +242,7 @@ const {
   newProject,
   loadRecentProjects,
   removeRecentProject,
+  snapshotCurrentProject,
   showToast,
 } = useWorkspace()
 
@@ -261,6 +262,11 @@ const displayedProjects = computed(() => {
 
 onMounted(async () => {
   await loadRecentProjects()
+  // The workspace left via "Back to Home" is still bound; refresh its
+  // persisted summary so the status badge does not wait for window close.
+  void snapshotCurrentProject().catch((error) =>
+    console.warn('Failed to refresh workspace summary:', error),
+  )
   await prefillWorkspaceDirectory()
 })
 

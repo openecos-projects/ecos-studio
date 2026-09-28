@@ -5,6 +5,7 @@
       <!-- 全局顶部菜单栏 -->
       <TopBar
         :project-name="isWelcome ? null : currentProject?.name"
+        :workspace-path="currentProject?.path ?? null"
         :has-workspace="Boolean(currentProject?.path)"
         :mutations-disabled="mutationsDisabled"
         :signoff-export-disabled="currentWorkspaceFlowActive"
@@ -21,6 +22,7 @@
             : undefined
         "
       >
+        <UserGuidePanel />
         <div
           class="app-content"
           :class="{ 'app-content--terminal-safe-area': terminalExpanded }"
@@ -134,6 +136,8 @@
 
     <DesignFilesManageDialog v-model="showManageDialog" />
 
+    <WorkspaceSnapshotRecoveryDialog />
+
     <Dialog
       :visible="pdkNameDialogVisible"
       modal
@@ -240,6 +244,7 @@ import { getDesktopApi } from '@/platform/desktop'
 
 import TopBar from '@/components/TopBar.vue'
 import HomeAgentDrawer from '@/components/HomeAgentDrawer.vue'
+import UserGuidePanel from '@/components/UserGuidePanel.vue'
 import StatusBar from '@/components/StatusBar.vue'
 import ECOSTerminal from '@/components/ECOSTerminal.vue'
 import AboutDialog from '@/components/AboutDialog.vue'
@@ -250,6 +255,7 @@ import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import NewProjectWizard from '@/components/NewProjectWizard.vue'
 import DesignFilesManageDialog from '@/components/DesignFilesManageDialog.vue'
+import WorkspaceSnapshotRecoveryDialog from '@/components/WorkspaceSnapshotRecoveryDialog.vue'
 import WorkspaceStepConfigDialog from '@/components/WorkspaceStepConfigDialog.vue'
 import type { WorkspaceConfig } from '@/types'
 import { setWindowResizing } from '@/composables/useWindowResizeState'
@@ -1139,11 +1145,14 @@ body.window-maximized .app-container {
   min-height: 0;
   position: relative;
   overflow: hidden;
+  display: flex;
+  flex-direction: row;
   background: var(--bg-primary);
 }
 
 .app-content {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   height: 100%;
   min-height: 0;
   overflow: auto;

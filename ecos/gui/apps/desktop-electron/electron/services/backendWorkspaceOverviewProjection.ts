@@ -1,5 +1,6 @@
 import { relative, resolve } from 'node:path'
 import {
+  isObsoleteFlowStepName,
   parseRuntimeSeconds,
   type ChecklistFinding,
   type FlowStepState,
@@ -181,7 +182,7 @@ export function flowSection(
       steps: steps.flatMap((value, order) => {
         const step = record(value)
         if (!step || typeof step.name !== 'string') return []
-        if (step.name.toLowerCase().replace(/[\s_-]/g, '') === 'fixfanout') return []
+        if (isObsoleteFlowStepName(step.name)) return []
         const runtimeSeconds = parseRuntimeSeconds(String(step.runtime ?? ''))
         const peakMemoryMb = finiteNumber(
           step['peak memory (mb)'] ?? record(step.info)?.['peak memory (mb)'],
@@ -203,37 +204,26 @@ export function flowSection(
   }
 }
 
-function checklistFinding(value: unknown): ChecklistFinding | null {
-  const item = record(value)
-  if (!item) return null
-  const requiredStrings = [
-    'id',
-    'step',
-    'category',
-    'owner',
-    'policy',
-    'state',
-    'title',
-    'summary',
-  ] as const
-  if (requiredStrings.some((key) => typeof item[key] !== 'string')) return null
-  if (typeof item.blocked !== 'boolean') return null
-  const source = record(item.source)
-  if (!source || !Array.isArray(item.evidence)) return null
+function checklistFinding(item: {
+  id: string
+  title: string
+  state: string
+  blocked: boolean
+  step: string
+  category: string
+  summary: string
+}): ChecklistFinding {
+  // The v6 checklist projection carries display fields only; evidence and
+  // source stay in the workspace checklist.json and load through the artifact
+  // channel on demand.
   return {
-    id: item.id as string,
-    step: item.step as string,
-    category: item.category as string,
-    owner: item.owner as string,
-    policy: item.policy as string,
-    state: item.state as string,
+    id: item.id,
+    step: item.step,
+    category: item.category,
+    state: item.state,
     blocked: item.blocked,
-    title: item.title as string,
-    summary: item.summary as string,
-    source,
-    evidence: item.evidence.filter(
-      (entry): entry is Record<string, unknown> => record(entry) !== null,
-    ),
+    title: item.title,
+    summary: item.summary,
   }
 }
 
@@ -252,14 +242,10 @@ function reconcileFinding(
     ...finding,
     blocked: false,
     state: 'pass',
-    evidence: [
-      ...finding.evidence,
-      {
-        kind: 'flow-checklist-reconciliation',
-        previousState: 'failed',
-        committedFlowState: 'Success',
-      },
-    ],
+    reconciled: {
+      previousState: 'failed',
+      committedFlowState: 'Success',
+    },
   }
 }
 
@@ -273,34 +259,24 @@ export function checklistSection(
       issues: [snapshot?.issue ?? { code: 'WORKSPACE_CHECKLIST_UNAVAILABLE' }],
     }
   }
-  const root = record(snapshot.snapshot.checklist)
-  if (!root || !Array.isArray(root.checklist)) {
+  const section = snapshot.sections.checklist
+  if (section.status !== 'ready' && section.status !== 'partial') {
     return { status: 'error', issues: [{ code: 'WORKSPACE_CHECKLIST_INVALID' }] }
   }
-  const findings = root.checklist.map(checklistFinding)
-  const invalidCount = findings.filter((finding) => finding === null).length
   const successfulSteps = new Set(
     (flow.status === 'ready' || flow.status === 'partial' ? flow.data.steps : [])
       .filter((step) => step.state === 'succeeded')
       .map((step) => step.name.trim().toLowerCase()),
   )
-  const data = {
-    findings: findings
-      .filter((finding): finding is ChecklistFinding => finding !== null)
-      .map((finding) => reconcileFinding(finding, successfulSteps)),
+  return {
+    status: 'ready',
+    data: {
+      findings: section.data.items.map((item) =>
+        reconcileFinding(checklistFinding(item), successfulSteps),
+      ),
+    },
+    issues: [],
   }
-  return invalidCount
-    ? {
-        status: 'partial',
-        data,
-        issues: [
-          {
-            code: 'WORKSPACE_CHECKLIST_ITEM_INVALID',
-            detail: `${invalidCount} invalid checklist item(s)`,
-          },
-        ],
-      }
-    : { status: 'ready', data, issues: [] }
 }
 
 export function identityFromManifest(

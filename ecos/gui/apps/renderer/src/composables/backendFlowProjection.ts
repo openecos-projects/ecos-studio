@@ -1,7 +1,8 @@
-import type {
-  DesignRuntimeEvent,
-  FlowStepState,
-  FlowStepSummary,
+import {
+  isObsoleteFlowStepName,
+  type DesignRuntimeEvent,
+  type FlowStepState,
+  type FlowStepSummary,
 } from '@ecos-studio/shared'
 
 function normalizeState(value: unknown, fallback: FlowStepState): FlowStepState {
@@ -46,7 +47,7 @@ function stepKey(value: string): string {
 }
 
 export function isObsoleteBackendFlowStep(value: string): boolean {
-  return value.toLowerCase().replace(/[\s_-]/g, '') === 'fixfanout'
+  return isObsoleteFlowStepName(value)
 }
 
 export function projectBackendFlowSteps(
