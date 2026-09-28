@@ -12,6 +12,7 @@ import {
   removePdkInstallationApi,
   resourceListToTools,
   subscribeResourceProgress,
+  subscribeResourcesChanged,
   uninstallResourceApi,
   updateResourceApi,
   validatePdkApi,
@@ -35,6 +36,8 @@ export const usePluginStore = defineStore('plugin', () => {
   const _pendingProgress = new Map<string, InstallProgress>()
   const _progressTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const _cancelledResources = new Set<string>()
+  let _resourcesChangedSubscribed = false
+  let _resourcesChangedUnsubscribe: (() => void) | null = null
   let _fetchSequence = 0
   let _visibleFetchCount = 0
 
@@ -168,7 +171,19 @@ export const usePluginStore = defineStore('plugin', () => {
     _syncLegacyTools()
   }
 
+  function _ensureResourcesChangedSubscription(): void {
+    if (_resourcesChangedSubscribed) return
+    _resourcesChangedSubscribed = true
+    // Listings are served cache-first; when the background registry refresh
+    // lands, re-fetch silently so fresh resources appear without a manual
+    // refresh.
+    _resourcesChangedUnsubscribe = subscribeResourcesChanged(() => {
+      void fetchTools({ silent: true })
+    })
+  }
+
   async function fetchTools(options?: { silent?: boolean }): Promise<void> {
+    _ensureResourcesChangedSubscription()
     const silent = options?.silent === true
     const fetchSequence = ++_fetchSequence
     if (!silent) {
@@ -398,6 +413,9 @@ export const usePluginStore = defineStore('plugin', () => {
   }
 
   function cleanup(): void {
+    _resourcesChangedUnsubscribe?.()
+    _resourcesChangedUnsubscribe = null
+    _resourcesChangedSubscribed = false
     for (const conn of _sseConnections.values()) {
       conn.close()
     }

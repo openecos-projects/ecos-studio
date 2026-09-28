@@ -415,6 +415,11 @@ export interface DesktopApi {
       refreshRegistry?: boolean
     }): Promise<ResourceUpdateCheckResult>
     onProgress(listener: (event: ResourceJob) => void): DesktopEventUnsubscribe
+    /**
+     * Fired when a background registry refresh completes with changed data,
+     * so listings rendered from the cache can be re-fetched silently.
+     */
+    onChanged(listener: () => void): DesktopEventUnsubscribe
   }
   pdkInventory: {
     list(): Promise<PdkInstallationSnapshot[]>

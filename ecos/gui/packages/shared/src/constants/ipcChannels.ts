@@ -162,6 +162,7 @@ export const desktopApiEventChannels = {
   shutdownStatusChanged: 'shutdown:status-changed',
   shutdownCleanupRequested: 'shutdown:cleanup-requested',
   resourcesProgress: 'resources:progress',
+  resourcesChanged: 'resources:changed',
   designRuntimeEvent: 'design-runtime:event',
   eccRuntimeOperationProjectionInvalidated:
     'ecc:runtime-operation-projection-invalidated',

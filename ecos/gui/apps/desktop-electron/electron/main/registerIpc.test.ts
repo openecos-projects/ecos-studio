@@ -214,6 +214,7 @@ function registerHandlers(
       updateResource: vi.fn(),
       validatePdk: vi.fn(),
       validatePdkRootForWorkspace: vi.fn(),
+      onRegistryChanged: vi.fn(),
     },
     pdkInventoryService: {
       bindInstallation: vi.fn(),
@@ -2053,6 +2054,23 @@ describe('registerIpc', () => {
       message: 'Downloading...',
       error: null,
     })
+  })
+
+  it('broadcasts registry changes to all live windows after a background refresh', () => {
+    const { services } = registerHandlers()
+    const send = vi.fn()
+    const destroyedSend = vi.fn()
+    getAllWindows.mockReturnValue([
+      { isDestroyed: () => false, webContents: { send } },
+      { isDestroyed: () => true, webContents: { send: destroyedSend } },
+    ])
+
+    const listener = services.resourceManagerService.onRegistryChanged.mock.calls[0]?.[0]
+    expect(listener).toBeTypeOf('function')
+    listener()
+
+    expect(send).toHaveBeenCalledWith(desktopApiEventChannels.resourcesChanged)
+    expect(destroyedSend).not.toHaveBeenCalled()
   })
 
   it('logs unexpected handler errors and returns an IPC error result', async () => {

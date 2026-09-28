@@ -92,6 +92,9 @@ async function loadDesktopBridge() {
     menu: {
       setActionEnabled(action: string, enabled: boolean): Promise<void>
     }
+    resources: {
+      onChanged(listener: () => void): () => void
+    }
     window: {
       setLeftPanelExtension(widthPx: number): Promise<number>
     }
@@ -635,6 +638,28 @@ describe('preload desktop bridge contract', () => {
       phase: 'downloading',
       progress: 0.2,
     })
+  })
+
+  it('routes resource registry change notifications through the shared event channel', async () => {
+    const bridge = await loadDesktopBridge()
+    const listener = vi.fn()
+
+    const unsubscribe = bridge.resources.onChanged(listener)
+    const eventListener = ipcRenderer.on.mock.calls.at(-1)?.[1] as
+      | ((event: unknown) => void)
+      | undefined
+    eventListener?.({})
+    unsubscribe()
+
+    expect(ipcRenderer.on).toHaveBeenCalledWith(
+      desktopApiEventChannels.resourcesChanged,
+      expect.any(Function),
+    )
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
+      desktopApiEventChannels.resourcesChanged,
+      eventListener,
+    )
   })
 
   it('routes Engineering Snapshot reads through the shared IPC channel constant', async () => {
