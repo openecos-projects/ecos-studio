@@ -4,11 +4,12 @@ import type {
   ProjectDoctorFixRecord,
   ProjectDoctorRepairResult,
 } from '@ecos-studio/shared'
-import type {
-  ProjectManifestRuntime,
-  ProjectManifestScopeProvider,
-} from './projectManifestService'
+import type { ProjectManifestScopeProvider } from './projectManifestService'
 import type { FrontendProjectManifestService } from './frontendProjectManifestService'
+
+interface ProjectDoctorRuntime {
+  callRuntime<T = unknown>(method: string, params?: unknown): Promise<T>
+}
 
 const DOCTOR_CHECK_CLASSES = new Set([
   'derived-field-mismatch',
@@ -25,7 +26,7 @@ const DOCTOR_CHECK_CLASSES = new Set([
 export class ProjectDoctorService {
   constructor(
     private readonly projectScopeProvider: ProjectManifestScopeProvider,
-    private readonly runtime: ProjectManifestRuntime,
+    private readonly runtime: ProjectDoctorRuntime,
     private readonly frontend?: FrontendProjectManifestService,
   ) {}
 
