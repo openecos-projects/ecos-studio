@@ -44,6 +44,7 @@ const LEGACY_STEP_SEQUENCE = [
   'postRouteLec',
   'RCX',
   'sta',
+  'powerAnalysis',
   'Harden',
 ] as const
 const LEGACY_STEP_INDEX: ReadonlyMap<string, number> = new Map(
@@ -64,9 +65,14 @@ const LEGACY_STEP_TOOLS: Record<string, string> = {
   postRouteLec: 'yosys_lec',
   RCX: 'ecc',
   sta: 'ecc',
+  powerAnalysis: 'ecc',
   Harden: 'ecc',
 }
-const LEGACY_HOME_FILES = ['home.json', 'home.json.lock'] as const
+const LEGACY_HOME_FILES = [
+  'home.json',
+  'home.json.lock',
+  'engineering-snapshot.json',
+] as const
 
 /** Tool for steps flow.json does not name explicitly: known map, else generic. */
 function defaultStepTool(stepName: string): string {

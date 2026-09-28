@@ -59,6 +59,7 @@ export type ProjectQorBaselineSource = 'selected' | 'default'
 export interface ProjectQorBaselineResolution {
   workspaceId: string
   source: ProjectQorBaselineSource
+  archivedLabel: string | null
 }
 
 export interface ProjectStepCell {
@@ -288,28 +289,44 @@ export function resolveProjectQorBaselineWorkspace(
   const selectedId = manifest.qor_baseline?.workspace_id
   if (
     selectedId &&
-    manifest.workspaces.some(
-      (workspace) =>
-        workspace.workspace_id === selectedId && workspace.status !== 'archived',
-    )
+    manifest.workspaces.some((workspace) => workspace.workspace_id === selectedId)
   ) {
-    return { workspaceId: selectedId, source: 'selected' }
+    const selected = manifest.workspaces.find(
+      (workspace) => workspace.workspace_id === selectedId,
+    )!
+    return {
+      workspaceId: selectedId,
+      source: 'selected',
+      archivedLabel: archivedBaselineLabel(selected),
+    }
   }
 
   const defaultWorkspace = manifest.workspaces.find(
-    (workspace) =>
-      workspace.workspace_id !== currentWorkspaceId && workspace.status !== 'archived',
+    (workspace) => workspace.workspace_id !== currentWorkspaceId,
   )
   if (defaultWorkspace) {
-    return { workspaceId: defaultWorkspace.workspace_id, source: 'default' }
+    return {
+      workspaceId: defaultWorkspace.workspace_id,
+      source: 'default',
+      archivedLabel: archivedBaselineLabel(defaultWorkspace),
+    }
   }
 
   const currentWorkspace = manifest.workspaces.find(
-    (workspace) =>
-      workspace.workspace_id === currentWorkspaceId && workspace.status !== 'archived',
+    (workspace) => workspace.workspace_id === currentWorkspaceId,
   )
   return currentWorkspace
-    ? { workspaceId: currentWorkspace.workspace_id, source: 'default' }
+    ? {
+        workspaceId: currentWorkspace.workspace_id,
+        source: 'default',
+        archivedLabel: archivedBaselineLabel(currentWorkspace),
+      }
+    : null
+}
+
+function archivedBaselineLabel(workspace: ProjectManifestWorkspace): string | null {
+  return workspace.status === 'archived'
+    ? `Archived backup of ${workspace.source_workspace_id || workspace.workspace_id}`
     : null
 }
 
@@ -342,6 +359,15 @@ export function buildProjectManagementProject(
     )
   })
   const qorTrendSummary = sectionData(comparison?.trend) ?? emptyProjectQorTrendSummary()
+  const baselineResolution = manifest
+    ? resolveProjectQorBaselineWorkspace(manifest, '')
+    : null
+  if (
+    baselineResolution?.archivedLabel &&
+    baselineResolution.workspaceId === qorTrendSummary.baselineWorkspaceId
+  ) {
+    qorTrendSummary.baselineLabel = baselineResolution.archivedLabel
+  }
   const stepComparisons = sectionData(comparison?.stepComparisons)?.steps ?? []
   const snapshots = new Map(
     (sectionData(comparison?.workspaceSnapshots)?.items ?? []).map((snapshot) => [
@@ -868,7 +894,13 @@ function buildProjectWorkspace(
     startStep,
     endStep,
     depth,
-    flowStatusHint: buildFlowStatusHint(steps, startStep, endStep, flowStateMap),
+    flowStatusHint: projectFlowStatusHint(
+      workspace.status,
+      steps,
+      startStep,
+      endStep,
+      flowStateMap,
+    ),
     steps,
   }
 }
@@ -878,6 +910,7 @@ export function workspaceStatusFromFlow(
   flowStates: ProjectWorkspaceFlowStateMap,
 ): ProjectWorkspaceStatus {
   if (manifestStatus === 'archived') return 'archived'
+  if (manifestStatus === 'failed') return 'failed'
   const states = Object.values(flowStates)
   if (states.length === 0) {
     return manifestStatus === 'running' || manifestStatus === 'in_progress'
@@ -885,11 +918,30 @@ export function workspaceStatusFromFlow(
       : manifestStatus
   }
   if (states.includes('failed')) return 'failed'
+  if (manifestStatus === 'warning') return 'warning'
   if (states.includes('running')) return 'running'
   if (states.includes('unstart')) return 'in_progress'
   if (states.includes('warning')) return 'warning'
   if (states.some((state) => state === 'success' || state === 'reused')) return 'success'
   return manifestStatus
+}
+
+function projectFlowStatusHint(
+  workspaceStatus: ProjectWorkspaceStatus,
+  steps: ProjectStepCell[],
+  startStep: FlowStep,
+  endStep: FlowStep,
+  flowStateMap: ProjectWorkspaceFlowStateMap,
+): ProjectFlowStatusHint {
+  const flowHint = buildFlowStatusHint(steps, startStep, endStep, flowStateMap)
+  const hasRecordedFailure = Object.values(flowStateMap).includes('failed')
+  if (workspaceStatus === 'failed' && !hasRecordedFailure) {
+    return { state: 'failed', label: 'Failed' }
+  }
+  if (workspaceStatus === 'warning' && flowHint.state === 'success') {
+    return { state: 'warning', label: 'Completed with warnings' }
+  }
+  return flowHint
 }
 
 function workspaceDisplayName(workspace: ProjectManifestWorkspace): string {
@@ -1233,6 +1285,7 @@ function detailHintForStep(step: FlowStep): string {
     Legal: 'Open workspace Legalization for placement cleanup details.',
     'Timing Opt': 'Open workspace Timing Optimization for timing repair details.',
     Route: 'Open workspace Route for route iterations and layer pressure.',
+    'Power Analysis': 'Open workspace Power Analysis for power and budget details.',
     DRC: 'Open workspace DRC for rule/layer heatmaps and violation maps.',
     LVS: 'Open workspace LVS for netlist-to-layout connectivity and violation count.',
     Filler: 'Open workspace Filler for final filler impact details.',
