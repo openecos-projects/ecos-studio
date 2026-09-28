@@ -1,8 +1,8 @@
-import {
-  isObsoleteFlowStepName,
-  type DesignRuntimeEvent,
-  type FlowStepState,
-  type FlowStepSummary,
+import type {
+  DesignRuntimeEvent,
+  EccRuntimeStepSnapshot,
+  FlowStepState,
+  FlowStepSummary,
 } from '@ecos-studio/shared'
 
 function normalizeState(value: unknown, fallback: FlowStepState): FlowStepState {
@@ -47,7 +47,36 @@ function stepKey(value: string): string {
 }
 
 export function isObsoleteBackendFlowStep(value: string): boolean {
-  return isObsoleteFlowStepName(value)
+  return value.toLowerCase().replace(/[\s_-]/g, '') === 'fixfanout'
+}
+
+export function projectRuntimeFlowSteps(
+  runtimeSteps: readonly EccRuntimeStepSnapshot[],
+): FlowStepSummary[] {
+  return runtimeSteps.flatMap((step, order) => {
+    if (isObsoleteBackendFlowStep(step.name)) return []
+    const runtimeSeconds = parseRuntimeSeconds(step.runtime)
+    return [
+      {
+        name: step.name,
+        order,
+        peakMemoryMb: step.peakMemory,
+        ...(runtimeSeconds === null ? {} : { runtimeSeconds }),
+        state: normalizeState(step.state, 'unknown'),
+        stepId: step.name,
+        ...(step.tool ? { toolId: step.tool } : {}),
+      },
+    ]
+  })
+}
+
+function parseRuntimeSeconds(runtime: string): number | null {
+  if (!runtime) return null
+  const parts = runtime.split(':').map(Number)
+  if (parts.some((part) => !Number.isFinite(part))) return null
+  if (parts.length === 3) return parts[0]! * 3600 + parts[1]! * 60 + parts[2]!
+  if (parts.length === 2) return parts[0]! * 60 + parts[1]!
+  return parts.length === 1 ? parts[0]! : null
 }
 
 export function projectBackendFlowSteps(

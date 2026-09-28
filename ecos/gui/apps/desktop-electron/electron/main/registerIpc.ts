@@ -1060,6 +1060,9 @@ export function registerIpc(
     runtime: services.eccRuntimeService,
     shutdown: services.shutdownCoordinator,
   })
+  services.eccRuntimeService.onOperationProjectionInvalidated(() => {
+    services.backendProjectComparisonService.invalidateExecution()
+  })
   services.eccRuntimeService.onWorkspaceReleased?.((workspaceHandle) => {
     services.shutdownCoordinator?.untrackWorkspaceHandle(workspaceHandle)
     const subscription = workspaceHandleSubscriptions.get(workspaceHandle)

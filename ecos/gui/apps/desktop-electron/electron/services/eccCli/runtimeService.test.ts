@@ -11,11 +11,13 @@ import {
   workspaceCreateCommands,
   workspaceParameterValue,
   workspaceRefreshArgs,
+  operationFlowMatches,
   registeredRunMatches,
   declaredWorkspaceForDirectory,
   EccCliRuntimeService,
 } from './runtimeService'
 import { EccCliCommandError, EccCliProcess } from './cliProcess'
+import { readProjectManifest } from './persistedState'
 
 const temporaryDirectories: string[] = []
 
@@ -403,6 +405,187 @@ describe('ECC CLI run registration handshake', () => {
   it('rejects entries from another run or runtime', () => {
     expect(registeredRunMatches(entry, 'run-2', 'runtime-1')).toBe(false)
     expect(registeredRunMatches(entry, 'run-1', 'runtime-2')).toBe(false)
+  })
+})
+
+describe('ECC CLI live flow projection', () => {
+  const flow = {
+    steps: [
+      {
+        name: 'Synthesis',
+        peakMemory: 68.3,
+        runtime: '0:0:19',
+        state: 'Success',
+        tool: 'yosys',
+      },
+      {
+        name: 'place',
+        peakMemory: 0,
+        runtime: '',
+        state: 'Ongoing',
+        tool: 'dreamplace',
+      },
+    ],
+  }
+
+  it('does not invalidate an unchanged parsed flow', () => {
+    expect(operationFlowMatches(flow, flow)).toBe(true)
+  })
+
+  it('detects step state and runtime changes', () => {
+    expect(
+      operationFlowMatches(flow, {
+        steps: flow.steps.map((step) =>
+          step.name === 'place'
+            ? { ...step, peakMemory: 190.2, runtime: '0:0:48', state: 'Success' }
+            : step,
+        ),
+      }),
+    ).toBe(false)
+  })
+
+  it('refreshes after watcher readiness and through process polling fallback', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ecc-runtime-live-flow-'))
+    temporaryDirectories.push(projectRoot)
+    const workspaceDirectory = join(projectRoot, 'ws_1')
+    await mkdir(join(workspaceDirectory, 'home'), { recursive: true })
+    const runId = '11111111-1111-4111-8111-111111111111'
+    const now = '2026-09-28T00:00:00.000Z'
+    await writeFile(
+      join(projectRoot, 'project.json'),
+      JSON.stringify({
+        schema_version: 1,
+        project_id: 'project-1',
+        name: 'Demo',
+        design_name: 'gcd',
+        description: '',
+        root_path: projectRoot,
+        created_at: now,
+        updated_at: now,
+        base_design: {},
+        objectives: { primary: '', directions: {} },
+        workspaces: [
+          {
+            workspace_id: 'ws_1',
+            name: 'ws_1',
+            workspace_path: workspaceDirectory,
+            source_workspace_id: null,
+            branch_from: null,
+            start_step: 'Synth',
+            end_step: 'Harden',
+            status: 'running',
+            created_at: now,
+            updated_at: now,
+            parameter_patch: {},
+          },
+        ],
+        mpc: null,
+        best_workspace: null,
+        qor_baseline: null,
+        runtime_processes: {
+          ws_1: {
+            schema_version: 1,
+            run_id: runId,
+            pid: 1234,
+            pgid: 1234,
+            process_start_id: 'start-1',
+            boot_id: 'boot-1',
+            host_id: 'host-1',
+            workspace_path: workspaceDirectory,
+            started_at: 1,
+            runtime_id: 'runtime-1',
+            log_path: `home/run-logs/${runId}.log`,
+          },
+        },
+      }),
+    )
+    const writeFlow = (steps: unknown[]) =>
+      writeFile(
+        join(workspaceDirectory, 'home', 'flow.json'),
+        JSON.stringify({ schema_version: 1, steps }),
+      )
+    await writeFlow([
+      {
+        name: 'Synthesis',
+        state: 'Ongoing',
+        tool: 'yosys',
+        runtime: '',
+        'peak memory (mb)': 64,
+      },
+    ])
+    vi.spyOn(EccCliProcess.prototype, 'run').mockResolvedValue({
+      exitCode: 0,
+      stderr: '',
+      stdout: '',
+    })
+    const service = new EccCliRuntimeService({
+      resolveLaunch: vi.fn(),
+      runtimeId: 'runtime-1',
+    })
+    const session = {
+      directory: workspaceDirectory,
+      handle: 'handle-1',
+      projectRoot,
+      workspaceId: 'ws_1',
+      workspaceRevision: 1,
+    }
+
+    await (service as any).restoreRegisteredOperation(
+      session,
+      await readProjectManifest(projectRoot),
+    )
+    expect(service.operationProjection().operations).toEqual([
+      expect.objectContaining({
+        currentStep: 'Synthesis',
+        flow: {
+          steps: [
+            expect.objectContaining({
+              name: 'Synthesis',
+              peakMemory: 64,
+              state: 'Ongoing',
+            }),
+          ],
+        },
+      }),
+    ])
+
+    const tracked = (service as any).operations.get(runId)
+    await tracked.watcher.close()
+    tracked.watcher = null
+    await writeFlow([
+      {
+        name: 'Synthesis',
+        state: 'Success',
+        tool: 'yosys',
+        runtime: '00:00:03',
+        'peak memory (mb)': 68,
+      },
+      {
+        name: 'place',
+        state: 'Ongoing',
+        tool: 'dreamplace',
+        runtime: '',
+        'peak memory (mb)': 120,
+      },
+    ])
+
+    await (service as any).inspectTrackedProcess(tracked)
+    expect(service.operationProjection().operations).toEqual([
+      expect.objectContaining({
+        currentStep: 'place',
+        flow: {
+          steps: [
+            expect.objectContaining({ name: 'Synthesis', state: 'Success' }),
+            expect.objectContaining({
+              name: 'place',
+              peakMemory: 120,
+              state: 'Ongoing',
+            }),
+          ],
+        },
+      }),
+    ])
+    await service.shutdown()
   })
 })
 

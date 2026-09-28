@@ -955,6 +955,8 @@ import {
   buildProjectManagementProject,
   createWorkspaceBranchDraft,
   isCompletedStepStatus,
+  projectComparisonWorkspaceFlowStates,
+  projectWorkspaceFlowStatesWithRuntime,
   type ProjectManifestMpcCandidate,
   projectMpcOptionFromResource,
   resolveProjectSelectionUpdate,
@@ -1151,7 +1153,15 @@ const projectCards = computed<ProjectCard[]>(() => {
       model: buildProjectManagementProject(
         project,
         projectManifests.value[project.path] ?? null,
-        workspaceFlowStates.value[project.path] ?? {},
+        projectWorkspaceFlowStatesWithRuntime(
+          projectComparisonWorkspaceFlowStates(
+            projectComparisonForProject(project.path),
+            workspaceFlowStates.value[project.path] ?? {},
+          ),
+          comparisonProjectRoot.value === project.path
+            ? projectComparisonSession.execution.operations
+            : [],
+        ),
         project.projectType === 'frontend'
           ? null
           : projectComparisonForProject(project.path),

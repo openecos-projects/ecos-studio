@@ -4,7 +4,7 @@ import { getStepMetadata, STEP_METADATA } from '@/api/type'
 import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
 import { useWorkspace } from './useWorkspace'
-import { projectBackendFlowSteps } from './backendFlowProjection'
+import { projectBackendFlowSteps, projectRuntimeFlowSteps } from './backendFlowProjection'
 
 export interface BackendFlowStage {
   label: string
@@ -74,10 +74,6 @@ export function useBackendFlowStages() {
       : []
   })
   const projectedSteps = computed(() => {
-    const steps = projectBackendFlowSteps(
-      committedSteps.value,
-      backendRuntimeEvents.value,
-    )
     const revision = session.projection.data?.revision
     const operation =
       revision?.status === 'ready'
@@ -86,6 +82,12 @@ export function useBackendFlowStages() {
             revision.data.workspaceRevision,
           )
         : undefined
+    const steps = projectBackendFlowSteps(
+      operation?.flow
+        ? projectRuntimeFlowSteps(operation.flow.steps)
+        : committedSteps.value,
+      backendRuntimeEvents.value,
+    )
     const operationStep = operation?.currentStep || operation?.step
     if (operationStep) {
       const key = operationStep.trim().toLowerCase()
