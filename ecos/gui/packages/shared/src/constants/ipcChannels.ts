@@ -7,6 +7,7 @@ export const desktopApiIpcChannels = {
   windowIsMaximized: 'window:is-maximized',
   windowSetZoomFactor: 'window:set-zoom-factor',
   windowCreate: 'window:create',
+  windowSetLeftPanelExtension: 'window:set-left-panel-extension',
   shutdownGetStatus: 'shutdown:get-status',
   shutdownCancel: 'shutdown:cancel',
   shutdownReviewOptions: 'shutdown:review-options',
@@ -30,8 +31,11 @@ export const desktopApiIpcChannels = {
   projectManagementReadWorkspaceStepConfiguration:
     'project-management:read-workspace-step-configuration',
   projectManagementImportWorkspace: 'project-management:import-workspace',
+  projectManagementCheckConsistency: 'project-management:check-consistency',
+  projectManagementRepairConsistency: 'project-management:repair-consistency',
   backendWorkspaceGetOverview: 'backend-workspace:get-overview',
   backendWorkspaceGetArtifact: 'backend-workspace:get-artifact',
+  backendWorkspaceGetChecklistEvidence: 'backend-workspace:get-checklist-evidence',
   backendWorkspaceGetStepDetail: 'backend-workspace:get-step-detail',
   backendWorkspaceRefreshOverview: 'backend-workspace:refresh-overview',
   backendProjectComparisonSelectProject: 'backend-project-comparison:select-project',
@@ -65,6 +69,7 @@ export const desktopApiIpcChannels = {
   workspaceListProjectDirectory: 'workspace:list-project-directory',
   workspacePathExists: 'workspace:path-exists',
   workspaceDiscardFailedWorkspaceCreate: 'workspace:discard-failed-workspace-create',
+  workspaceDeleteEngineeringSnapshot: 'workspace:delete-engineering-snapshot',
   workspacePrepareProjectDirectoryReplacement:
     'workspace:prepare-project-directory-replacement',
   workspaceRestoreProjectDirectoryReplacement:

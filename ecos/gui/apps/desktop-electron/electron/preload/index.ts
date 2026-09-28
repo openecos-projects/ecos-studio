@@ -94,6 +94,8 @@ const desktopApi: DesktopApi = {
     setZoomFactor: (factor) =>
       invokeDesktop(desktopApiIpcChannels.windowSetZoomFactor, factor),
     create: (options) => invokeDesktop(desktopApiIpcChannels.windowCreate, options),
+    setLeftPanelExtension: (widthPx) =>
+      invokeDesktop(desktopApiIpcChannels.windowSetLeftPanelExtension, widthPx),
     onResized: (listener) =>
       subscribeToDesktopEvent(desktopApiEventChannels.windowResized, () => {
         listener()
@@ -151,6 +153,8 @@ const desktopApi: DesktopApi = {
   backendWorkspace: {
     getArtifact: (request) =>
       invokeDesktop(desktopApiIpcChannels.backendWorkspaceGetArtifact, request),
+    getChecklistEvidence: (request) =>
+      invokeDesktop(desktopApiIpcChannels.backendWorkspaceGetChecklistEvidence, request),
     getOverview: () => invokeDesktop(desktopApiIpcChannels.backendWorkspaceGetOverview),
     getStepDetail: (request) =>
       invokeDesktop(desktopApiIpcChannels.backendWorkspaceGetStepDetail, request),
@@ -220,6 +224,13 @@ const desktopApi: DesktopApi = {
       ),
     importWorkspace: (projectRoot) =>
       invokeDesktop(desktopApiIpcChannels.projectManagementImportWorkspace, projectRoot),
+    checkConsistency: (projectRoot) =>
+      invokeDesktop(desktopApiIpcChannels.projectManagementCheckConsistency, projectRoot),
+    repairConsistency: (projectRoot) =>
+      invokeDesktop(
+        desktopApiIpcChannels.projectManagementRepairConsistency,
+        projectRoot,
+      ),
   },
   dialog: {
     pickDirectory: (options?: DesktopDirectoryDialogOptions) =>
@@ -287,6 +298,8 @@ const desktopApi: DesktopApi = {
     pathExists: (path) => invokeDesktop(desktopApiIpcChannels.workspacePathExists, path),
     discardFailedWorkspaceCreate: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceDiscardFailedWorkspaceCreate, path),
+    deleteEngineeringSnapshot: (path) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceDeleteEngineeringSnapshot, path),
     prepareProjectDirectoryReplacement: (path) =>
       invokeDesktop(
         desktopApiIpcChannels.workspacePrepareProjectDirectoryReplacement,

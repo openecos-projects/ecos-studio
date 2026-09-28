@@ -40,9 +40,17 @@ export interface EccWorkspaceSpecValidationResult {
 export interface EccWorkspaceUpdateRequest
   extends EccWorkspaceMutationRequest, EccWorkspaceSpecValidationRequest {
   commandId: string
+  /**
+   * Keep the replaced Workspace generation as a sibling backup directory.
+   * Omitted when false so older ECC runtimes (which reject unknown fields)
+   * still accept the update; ECC treats a missing flag as false.
+   */
+  retainBackup?: boolean
 }
 
 export interface EccWorkspaceUpdateResult {
+  /** Retained previous-generation directory when the update kept a backup. */
+  backupDirectory?: string | null
   directory: string
   executionReadiness?: { ready: boolean; code?: string }
   workspaceId: string
@@ -449,18 +457,19 @@ export interface EccWorkspaceRuntimeSnapshot extends EccWorkspaceHandleRequest {
   runtimeInstanceId?: string
 }
 
-export interface EccArtifactRef {
+/**
+ * Snapshot v6 artifact index entry: identity, kind, workspace-relative path,
+ * and existence only — never content fingerprints (ADR-0010). `stepId` names
+ * the owning flow step; workspace-level artifacts (for example the home
+ * checklist) carry an empty `stepId`.
+ */
+export interface EccEngineeringAnalysisArtifactRef {
   artifactId: string
-  availability: 'available' | 'missing' | 'stale'
+  availability: 'available' | 'missing'
   kind: string
   name: string
-  sha256?: string
-  sizeBytes?: number
-  stepId?: string
-}
-
-export interface EccEngineeringAnalysisArtifactRef extends EccArtifactRef {
   reference: string
+  stepId: string
 }
 
 export interface EccEngineeringMetric extends Record<string, unknown> {
@@ -487,34 +496,6 @@ export interface EccEngineeringMetric extends Record<string, unknown> {
   source: Record<string, unknown>
 }
 
-export type EccEngineeringAnalysisFileStatus =
-  | 'available'
-  | 'missing'
-  | 'invalid'
-  | 'unsupported'
-  | 'unsafe'
-  | 'oversized'
-
-export interface EccEngineeringAnalysisFile {
-  artifactId: string
-  data: Record<string, unknown> | null
-  reasonCode?: string
-  status: EccEngineeringAnalysisFileStatus
-}
-
-export interface EccEngineeringAnalysisStep {
-  flowState: string
-  hotspots: EccEngineeringAnalysisFile
-  lecResult?: EccEngineeringAnalysisFile | null
-  metrics: EccEngineeringAnalysisFile
-  order: number
-  stepId: string
-  summary: EccEngineeringAnalysisFile
-  subflow?: EccEngineeringSubflowSummary
-  timingIssues: EccEngineeringAnalysisFile | null
-  toolId: string
-}
-
 export interface EccEngineeringSubflowStep {
   name: string
   state: string
@@ -525,10 +506,6 @@ export interface EccEngineeringSubflowStep {
 export interface EccEngineeringSubflowSummary {
   status: 'available' | 'missing' | 'invalid' | 'unsafe' | 'oversized'
   steps: EccEngineeringSubflowStep[]
-}
-
-export interface EccEngineeringAnalysis {
-  steps: EccEngineeringAnalysisStep[]
 }
 
 export type EccQorSnapshotDimensionState =
@@ -615,17 +592,70 @@ export interface EccQorSnapshotExtension {
   artifactIds: string[]
 }
 
+/** Snapshot v6 checklist projection item; evidence stays in checklist.json. */
+export interface EccSnapshotChecklistItem {
+  id: string
+  title: string
+  state: string
+  blocked: boolean
+  step: string
+  category: string
+  summary: string
+}
+
+/** Snapshot v6 checklist projection (bounded to 512 items by the producer). */
+export interface EccSnapshotChecklistProjection {
+  items: EccSnapshotChecklistItem[]
+}
+
+/** Scalar top-N STA timing issue preview entry (no stage lists). */
+export type EccTimingPreviewIssue = Record<string, boolean | number | string | null>
+
+export interface EccTimingPreview {
+  issues: EccTimingPreviewIssue[]
+  issueCount: number
+  issuesTruncated: boolean
+}
+
+/** Scalar top-N hotspot preview entry; `stepId` identifies the owning step. */
+export type EccHotspotPreviewEntry = Record<string, boolean | number | string | null>
+
+export interface EccHotspotPreview {
+  hotspots: EccHotspotPreviewEntry[]
+  hotspotCount: number
+  hotspotsTruncated: boolean
+}
+
+/**
+ * Snapshot v6 artifact descriptor exposed over IPC: identity, kind, and
+ * existence only. The workspace-relative `reference` stays behind the backend
+ * boundary (`EccPersistedEngineeringSnapshot`).
+ */
+export interface EccSnapshotArtifactDescriptor {
+  artifactId: string
+  availability: 'available' | 'missing'
+  kind: string
+  name: string
+  stepId: string
+}
+
+/**
+ * Engineering Snapshot v6: a bounded, regenerable commit projection. Overview
+ * data lives in the projection sections; full content is always lazy-loaded
+ * through the artifact index (ADR-0005, ADR-0007, ADR-0010).
+ */
 export interface EccEngineeringSnapshot {
-  analysis: EccEngineeringAnalysis
-  artifacts: EccArtifactRef[]
-  checklist: Record<string, unknown>
+  artifacts: EccSnapshotArtifactDescriptor[]
+  cause: string
+  checklist: EccSnapshotChecklistProjection
   flow: Record<string, unknown>
+  hotspotPreview: EccHotspotPreview
   metrics: EccEngineeringMetric[]
   parameters: Record<string, unknown>
-  qorAssessment: Record<string, unknown>
   qorSnapshotExtension?: EccQorSnapshotExtension
-  schemaVersion: 1 | 2 | 3
+  schemaVersion: 6
   signoffAssessment: EccWorkspaceInspectSignoffResult
+  timingPreview: EccTimingPreview
   workspaceId: string
   workspaceRevision: number
   stalePredecessor?: {

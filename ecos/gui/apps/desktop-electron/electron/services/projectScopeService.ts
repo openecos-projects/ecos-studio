@@ -250,6 +250,10 @@ function getPathLeafName(path: string): string | null {
 export class ProjectScopeService {
   private readonly rootsByWindowId = new Map<number, string>()
   private readonly readScopesByWindowId = new Map<number, ProjectReadScope>()
+  private readonly projectManagementReadScopesByWindowId = new Map<
+    number,
+    ProjectReadScope
+  >()
   private readonly extraRootsByWindowId = new Map<number, string[]>()
   private readonly pendingExtraRootsByWindowId = new Map<number, string[]>()
   private readonly approvedExtraRootsByProject = new Map<string, string[]>()
@@ -406,6 +410,39 @@ export class ProjectScopeService {
     return canonicalPath
   }
 
+  /**
+   * Grants Project Management read access to any selected project without
+   * requiring it to declare the active workspace. Project Management is a
+   * project browser: the selected project is independent of whichever
+   * workspace is currently open. The granted scope covers the project manifest
+   * and the workspace roots declared by that manifest, matching what the
+   * project comparison service reads.
+   */
+  async registerProjectManagementReadRoot(path: string): Promise<string> {
+    const windowId = requireWindowScopeId()
+    const canonicalPath = await this.resolveProjectRoot(path)
+    let manifest: ProjectManifest
+    try {
+      if (!this.loadProjectManifest) {
+        throw new Error('Project Manifest loader is unavailable')
+      }
+      manifest = await this.loadProjectManifest(canonicalPath)
+    } catch (error) {
+      throw new Error(
+        `Project read root must have a valid project.json: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    }
+    const workspaceRoots = await manifestWorkspaceRoots(manifest, canonicalPath)
+
+    this.projectManagementReadScopesByWindowId.set(windowId, {
+      projectRoot: canonicalPath,
+      workspaceRoots,
+    })
+    return canonicalPath
+  }
+
   async clearProjectRoot(): Promise<void> {
     const windowId = requireWindowScopeId()
     this.rootsByWindowId.delete(windowId)
@@ -419,6 +456,7 @@ export class ProjectScopeService {
     this.extraRootsByWindowId.delete(windowId)
     this.pendingExtraRootsByWindowId.delete(windowId)
     this.readScopesByWindowId.delete(windowId)
+    this.projectManagementReadScopesByWindowId.delete(windowId)
   }
 
   async requestProjectPathAccess(path: string): Promise<string> {
@@ -430,6 +468,8 @@ export class ProjectScopeService {
 
     const candidatePath = resolve(path)
     const readScope = this.readScopesByWindowId.get(windowId)
+    const projectManagementReadScope =
+      this.projectManagementReadScopesByWindowId.get(windowId)
     const extraRoots = this.extraRootsByWindowId.get(windowId) ?? []
     const roots = [activeProjectRoot, ...extraRoots]
     if (readScope) {
@@ -437,6 +477,18 @@ export class ProjectScopeService {
         roots.push(readScope.projectRoot)
       } else {
         roots.push(...readScope.workspaceRoots)
+      }
+    }
+    if (projectManagementReadScope) {
+      if (
+        pathsEqual(
+          candidatePath,
+          join(projectManagementReadScope.projectRoot, 'project.json'),
+        )
+      ) {
+        roots.push(projectManagementReadScope.projectRoot)
+      } else {
+        roots.push(...projectManagementReadScope.workspaceRoots)
       }
     }
 

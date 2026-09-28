@@ -1,42 +1,83 @@
 import type {
-  EccEngineeringAnalysis,
   EccEngineeringAnalysisArtifactRef,
-  EccEngineeringAnalysisFile,
   EccEngineeringMetric,
   EccEngineeringSnapshot,
+  EccHotspotPreview,
   EccQorSnapshotExtension,
+  EccSnapshotChecklistProjection,
+  EccTimingPreview,
   EccWorkspaceInspectSignoffResult,
 } from '../contracts/eccRuntime.ts'
 import type { ReadIssue, ReadSection } from '../contracts/backendWorkspace.ts'
 
 export const ENGINEERING_SNAPSHOT_MAX_BYTES = 16 * 1024 * 1024
+export const ENGINEERING_SNAPSHOT_SCHEMA_VERSION = 6
+export const ENGINEERING_SNAPSHOT_ARTIFACT_LIMIT = 4096
+// Mirrors the producer's hard cap (ECC `_CHECKLIST_PROJECTION_MAX_ITEMS`); an
+// over-long projection is a producer contract violation, so the section
+// degrades instead of flowing unbounded into the overview.
+export const ENGINEERING_SNAPSHOT_CHECKLIST_LIMIT = 512
+
+/** Stable open-policy classification shared with the ECC producer (ADR-0009). */
+export const SNAPSHOT_REBUILD_REQUIRED = 'snapshot_rebuild_required'
+export const SNAPSHOT_IDENTITY_MISMATCH = 'snapshot_identity_mismatch'
+
+/** Stable codes ECC puts on the wire when `workspace.open` fails closed (ADR-0009). */
+export type WorkspaceOpenSnapshotErrorCode =
+  | typeof SNAPSHOT_REBUILD_REQUIRED
+  | typeof SNAPSHOT_IDENTITY_MISMATCH
+
+/**
+ * Classify a failed `workspace.open` error by its stable ECC code. Matches the
+ * exact `code`/`message` fields only — never substrings — so unrelated runtime
+ * failures keep the generic open-failure UX.
+ */
+export function classifyWorkspaceOpenError(
+  error: unknown,
+): WorkspaceOpenSnapshotErrorCode | null {
+  if (typeof error !== 'object' || error === null) return null
+  const fields = [
+    (error as { code?: unknown }).code,
+    (error as { message?: unknown }).message,
+  ]
+  for (const field of fields) {
+    if (field === SNAPSHOT_REBUILD_REQUIRED) return SNAPSHOT_REBUILD_REQUIRED
+    if (field === SNAPSHOT_IDENTITY_MISMATCH) return SNAPSHOT_IDENTITY_MISMATCH
+  }
+  return null
+}
 
 export interface EngineeringSnapshotIssue extends ReadIssue {
   actualSizeBytes?: number
   allowedSizeBytes?: number
+  /**
+   * Present when the rejection is fail-closed and recoverable by rebuilding the
+   * snapshot: malformed content, unsupported schema versions, and unsafe
+   * artifact references (ADR-0005/ADR-0009). Absent for identity mismatches,
+   * which never offer a one-click rebuild.
+   */
+  recovery?: typeof SNAPSHOT_REBUILD_REQUIRED
 }
 
 export interface EngineeringSnapshotSections {
   artifacts: ReadSection<EccEngineeringAnalysisArtifactRef[]>
+  checklist: ReadSection<EccSnapshotChecklistProjection>
   flow: ReadSection<EccEngineeringSnapshot['flow']>
-  qor: ReadSection<Pick<EccEngineeringSnapshot, 'analysis' | 'metrics' | 'qorAssessment'>>
+  hotspotPreview: ReadSection<EccHotspotPreview>
+  metrics: ReadSection<EccEngineeringMetric[]>
   qorSnapshotExtension: ReadSection<EccQorSnapshotExtension>
   signoff: ReadSection<EccEngineeringSnapshot['signoffAssessment']>
+  timingPreview: ReadSection<EccTimingPreview>
 }
 
 export type EngineeringSnapshotEnvelope = Pick<
   EccEngineeringSnapshot,
-  | 'checklist'
+  | 'cause'
   | 'parameters'
   | 'schemaVersion'
   | 'stalePredecessor'
   | 'workspaceId'
   | 'workspaceRevision'
->
-
-type EngineeringSnapshotQor = Pick<
-  EccEngineeringSnapshot,
-  'analysis' | 'metrics' | 'qorAssessment'
 >
 
 export type EngineeringSnapshotValidationResult =
@@ -67,39 +108,47 @@ export function parseEngineeringSnapshotJson(
       JSON.parse(typeof input === 'string' ? input : new TextDecoder().decode(input)),
     )
   } catch {
-    return { ok: false, issue: { code: 'ENGINEERING_SNAPSHOT_INVALID' } }
+    return { ok: false, issue: invalidIssue() }
   }
 }
 
+/**
+ * Snapshot v6 reader: a tolerant reader for field-level evolution (unknown
+ * fields are ignored per ADR-0005) that fails closed on the envelope,
+ * container, version, identity, and artifact-reference invariants the ECC
+ * producer guarantees. Section payloads degrade independently so a malformed
+ * projection never hides the rest of the workspace overview.
+ */
 export function validateEngineeringSnapshot(
   value: unknown,
   expectedWorkspaceId?: string,
 ): EngineeringSnapshotValidationResult {
   if (!record(value)) {
-    return { ok: false, issue: { code: 'ENGINEERING_SNAPSHOT_INVALID' } }
+    return { ok: false, issue: invalidIssue() }
   }
   if (
-    value.schemaVersion !== 1 &&
-    value.schemaVersion !== 2 &&
-    value.schemaVersion !== 3
+    typeof value.schemaVersion !== 'number' ||
+    !Number.isSafeInteger(value.schemaVersion)
   ) {
+    return { ok: false, issue: invalidIssue() }
+  }
+  if (value.schemaVersion !== ENGINEERING_SNAPSHOT_SCHEMA_VERSION) {
     return {
       ok: false,
       issue: {
-        code:
-          value.schemaVersion === undefined
-            ? 'ENGINEERING_SNAPSHOT_INVALID'
-            : 'ENGINEERING_SNAPSHOT_SCHEMA_UNSUPPORTED',
+        code: 'ENGINEERING_SNAPSHOT_SCHEMA_UNSUPPORTED',
+        detail: `schemaVersion ${value.schemaVersion}`,
+        recovery: SNAPSHOT_REBUILD_REQUIRED,
       },
     }
   }
   if (
     !nonEmptyString(value.workspaceId) ||
     !positiveInteger(value.workspaceRevision) ||
-    !record(value.parameters) ||
-    !record(value.checklist)
+    !nonEmptyString(value.cause) ||
+    !record(value.parameters)
   ) {
-    return { ok: false, issue: { code: 'ENGINEERING_SNAPSHOT_INVALID' } }
+    return { ok: false, issue: invalidIssue() }
   }
   if (expectedWorkspaceId && value.workspaceId !== expectedWorkspaceId) {
     return { ok: false, issue: { code: 'ENGINEERING_WORKSPACE_ID_MISMATCH' } }
@@ -111,15 +160,40 @@ export function validateEngineeringSnapshot(
       !Array.isArray(value.stalePredecessor.invalidatedStepIds) ||
       !value.stalePredecessor.invalidatedStepIds.every(nonEmptyString))
   ) {
-    return { ok: false, issue: { code: 'ENGINEERING_SNAPSHOT_INVALID' } }
+    return { ok: false, issue: invalidIssue() }
+  }
+  // Section containers mirror the ECC reader: a wrong container type is a
+  // malformed snapshot (fail closed), not a degradable section.
+  if (
+    !record(value.flow) ||
+    !record(value.checklist) ||
+    !record(value.signoffAssessment) ||
+    !record(value.timingPreview) ||
+    !record(value.hotspotPreview) ||
+    !Array.isArray(value.metrics) ||
+    !Array.isArray(value.artifacts) ||
+    value.artifacts.length > ENGINEERING_SNAPSHOT_ARTIFACT_LIMIT
+  ) {
+    return { ok: false, issue: invalidIssue() }
+  }
+  // Artifact references are a path-safety boundary: they fail closed like the
+  // producer instead of degrading to an empty section.
+  if (!validArtifacts(value.artifacts)) {
+    return {
+      ok: false,
+      issue: {
+        code: 'ENGINEERING_ARTIFACT_INVALID',
+        recovery: SNAPSHOT_REBUILD_REQUIRED,
+      },
+    }
   }
 
   return {
     ok: true,
     snapshot: {
-      checklist: value.checklist,
+      cause: value.cause,
       parameters: value.parameters,
-      schemaVersion: value.schemaVersion,
+      schemaVersion: ENGINEERING_SNAPSHOT_SCHEMA_VERSION,
       ...(value.stalePredecessor
         ? {
             stalePredecessor: value.stalePredecessor as NonNullable<
@@ -134,13 +208,9 @@ export function validateEngineeringSnapshot(
       flow: validFlow(value.flow)
         ? ready(value.flow)
         : unavailable('ENGINEERING_FLOW_INVALID'),
-      qor: validQor(value)
-        ? ready({
-            analysis: value.analysis,
-            metrics: value.metrics,
-            qorAssessment: value.qorAssessment,
-          })
-        : unavailable('ENGINEERING_QOR_INVALID'),
+      metrics: value.metrics.every(validMetric)
+        ? ready(value.metrics)
+        : unavailable('ENGINEERING_METRICS_INVALID'),
       qorSnapshotExtension:
         value.qorSnapshotExtension === undefined
           ? { status: 'unavailable', issues: [] }
@@ -150,11 +220,22 @@ export function validateEngineeringSnapshot(
       signoff: validSignoff(value.signoffAssessment)
         ? ready(value.signoffAssessment)
         : unavailable('ENGINEERING_SIGNOFF_INVALID'),
-      artifacts: validArtifacts(value.artifacts)
-        ? ready(value.artifacts)
-        : unavailable('ENGINEERING_ARTIFACT_INVALID'),
+      checklist: validChecklist(value.checklist)
+        ? ready(value.checklist)
+        : unavailable('ENGINEERING_CHECKLIST_INVALID'),
+      timingPreview: validTimingPreview(value.timingPreview)
+        ? ready(value.timingPreview)
+        : unavailable('ENGINEERING_TIMING_PREVIEW_INVALID'),
+      hotspotPreview: validHotspotPreview(value.hotspotPreview)
+        ? ready(value.hotspotPreview)
+        : unavailable('ENGINEERING_HOTSPOT_PREVIEW_INVALID'),
+      artifacts: ready(value.artifacts),
     },
   }
+}
+
+function invalidIssue(): EngineeringSnapshotIssue {
+  return { code: 'ENGINEERING_SNAPSHOT_INVALID', recovery: SNAPSHOT_REBUILD_REQUIRED }
 }
 
 function ready<T>(data: T): ReadSection<T> {
@@ -172,37 +253,58 @@ function validFlow(value: unknown): value is EccEngineeringSnapshot['flow'] {
   )
 }
 
-function validQor(
-  snapshot: Record<string, unknown>,
-): snapshot is Record<string, unknown> & EngineeringSnapshotQor {
+function validChecklist(value: unknown): value is EccSnapshotChecklistProjection {
   if (
-    !Array.isArray(snapshot.metrics) ||
-    !snapshot.metrics.every(validMetric) ||
-    !validAnalysis(snapshot.analysis, snapshot.schemaVersion)
-  ) {
+    !record(value) ||
+    !Array.isArray(value.items) ||
+    value.items.length > ENGINEERING_SNAPSHOT_CHECKLIST_LIMIT
+  )
     return false
-  }
-  const assessment = snapshot.qorAssessment
-  if (!record(assessment) || !Array.isArray(assessment.metrics)) return false
-  if (!assessment.metrics.every(validMetric) || !Array.isArray(assessment.steps)) {
-    return false
-  }
-  const score = assessment.score
+  return value.items.every(
+    (item) =>
+      record(item) &&
+      nonEmptyString(item.id) &&
+      typeof item.title === 'string' &&
+      typeof item.state === 'string' &&
+      typeof item.blocked === 'boolean' &&
+      typeof item.step === 'string' &&
+      typeof item.category === 'string' &&
+      typeof item.summary === 'string',
+  )
+}
+
+function validTimingPreview(value: unknown): value is EccTimingPreview {
   return (
-    (assessment.status === 'ready' || assessment.status === 'unavailable') &&
-    record(score) &&
-    (score.value === null || finiteNumber(score.value)) &&
-    finiteNumber(score.threshold) &&
-    ['pass', 'blocked', 'incomplete', 'unavailable'].includes(String(score.gate)) &&
-    assessment.steps.every(
-      (step) =>
-        record(step) &&
-        nonEmptyString(step.stepId) &&
-        nonEmptyString(step.name) &&
-        nonNegativeInteger(step.order) &&
-        nonNegativeInteger(step.summaryMetricCount) &&
-        ['pass', 'blocked', 'incomplete', 'unavailable'].includes(String(step.status)),
-    )
+    record(value) &&
+    Array.isArray(value.issues) &&
+    value.issues.every(validScalarRecord) &&
+    nonNegativeInteger(value.issueCount) &&
+    typeof value.issuesTruncated === 'boolean'
+  )
+}
+
+function validHotspotPreview(value: unknown): value is EccHotspotPreview {
+  return (
+    record(value) &&
+    Array.isArray(value.hotspots) &&
+    value.hotspots.every(
+      (hotspot) => validScalarRecord(hotspot) && typeof hotspot.stepId === 'string',
+    ) &&
+    nonNegativeInteger(value.hotspotCount) &&
+    typeof value.hotspotsTruncated === 'boolean'
+  )
+}
+
+function validScalarRecord(
+  value: unknown,
+): value is Record<string, boolean | number | string | null> {
+  if (!record(value)) return false
+  return Object.values(value).every(
+    (field) =>
+      field === null ||
+      typeof field === 'string' ||
+      typeof field === 'boolean' ||
+      finiteNumber(field),
   )
 }
 
@@ -487,114 +589,6 @@ function validRating(value: unknown): boolean {
   )
 }
 
-function validAnalysis(
-  value: unknown,
-  schemaVersion: unknown,
-): value is EccEngineeringAnalysis {
-  if (!record(value) || !Array.isArray(value.steps)) return false
-  return value.steps.every(
-    (step) =>
-      record(step) &&
-      nonEmptyString(step.stepId) &&
-      nonEmptyString(step.toolId) &&
-      nonEmptyString(step.flowState) &&
-      nonNegativeInteger(step.order) &&
-      validMetricFile(step.metrics) &&
-      validSummaryFile(step.summary) &&
-      validAnalysisFile(step.hotspots, 3, 'hotspots') &&
-      (step.lecResult === undefined ||
-        step.lecResult === null ||
-        validLecResultFile(step.lecResult)) &&
-      (step.timingIssues === null || validTimingFile(step.timingIssues)) &&
-      (schemaVersion === 1 || validSubflow(step.subflow)),
-  )
-}
-
-function validLecResultFile(value: unknown): boolean {
-  return (
-    record(value) &&
-    nonEmptyString(value.artifactId) &&
-    ['available', 'missing', 'invalid', 'unsupported', 'unsafe', 'oversized'].includes(
-      String(value.status),
-    ) &&
-    (value.data === null || record(value.data))
-  )
-}
-
-function validSubflow(value: unknown): boolean {
-  if (!record(value) || !Array.isArray(value.steps)) return false
-  if (
-    !['available', 'missing', 'invalid', 'unsafe', 'oversized'].includes(
-      String(value.status),
-    )
-  ) {
-    return false
-  }
-  return value.steps.every(
-    (step) =>
-      record(step) &&
-      nonEmptyString(step.name) &&
-      typeof step.state === 'string' &&
-      (step.runtime === undefined || typeof step.runtime === 'string') &&
-      (step.peakMemoryMb === undefined || finiteNumber(step.peakMemoryMb)),
-  )
-}
-
-function validMetricFile(value: unknown): boolean {
-  if (!validAnalysisFile(value, 3, 'metrics')) return false
-  if (value.status !== 'available') return true
-  return (
-    record(value.data) &&
-    Array.isArray(value.data.metrics) &&
-    value.data.metrics.every(validMetric)
-  )
-}
-
-function validSummaryFile(value: unknown): boolean {
-  if (!validAnalysisFile(value, 4, 'gates')) return false
-  if (value.status !== 'available') return true
-  return (
-    record(value.data) &&
-    nonEmptyString(value.data.analysis_status) &&
-    nonEmptyString(value.data.quality_status) &&
-    Array.isArray(value.data.missing_metrics)
-  )
-}
-
-function validTimingFile(value: unknown): boolean {
-  if (!validAnalysisFile(value, 1, 'issues')) return false
-  if (value.status !== 'available') return true
-  return (
-    record(value.data) &&
-    finiteNumber(value.data.near_fail_slack_ns) &&
-    Array.isArray(value.data.missing_corners) &&
-    Array.isArray(value.data.artifact_paths)
-  )
-}
-
-function validAnalysisFile(
-  value: unknown,
-  schemaVersion: number,
-  arrayField: string,
-): value is EccEngineeringAnalysisFile {
-  if (!record(value) || !nonEmptyString(value.artifactId)) return false
-  if (
-    !['available', 'missing', 'invalid', 'unsupported', 'unsafe', 'oversized'].includes(
-      String(value.status),
-    )
-  ) {
-    return false
-  }
-  if (value.status !== 'available') {
-    return value.data === null && nonEmptyString(value.reasonCode)
-  }
-  return (
-    record(value.data) &&
-    value.data.schema_version === schemaVersion &&
-    Array.isArray(value.data[arrayField])
-  )
-}
-
 function validSignoff(value: unknown): value is EccWorkspaceInspectSignoffResult {
   return (
     record(value) &&
@@ -634,15 +628,9 @@ function validSignoffRisk(value: unknown): boolean {
 function validSignoffDetail(value: unknown): boolean {
   return (
     record(value) &&
-    [
-      'flow',
-      'artifact',
-      'configuration',
-      'provenance',
-      'quality_gate',
-      'report',
-      'freshness',
-    ].includes(String(value.kind)) &&
+    // The detail kind carries the checklist category verbatim; it is an open
+    // vocabulary on the producer side, so the reader accepts any label.
+    nonEmptyString(value.kind) &&
     nonEmptyString(value.label) &&
     typeof value.location === 'string' &&
     nonEmptyString(value.reason) &&
@@ -662,8 +650,7 @@ function validSignoffDetail(value: unknown): boolean {
   )
 }
 
-function validArtifacts(value: unknown): value is EccEngineeringAnalysisArtifactRef[] {
-  if (!Array.isArray(value)) return false
+function validArtifacts(value: unknown[]): value is EccEngineeringAnalysisArtifactRef[] {
   const ids = new Set<string>()
   return value.every((artifact) => {
     if (
@@ -672,19 +659,18 @@ function validArtifacts(value: unknown): value is EccEngineeringAnalysisArtifact
       ids.has(artifact.artifactId) ||
       !nonEmptyString(artifact.kind) ||
       !nonEmptyString(artifact.name) ||
-      !nonEmptyString(artifact.stepId) ||
+      // Workspace-level artifacts (e.g. the home checklist) have no owning
+      // step; the field stays a required string but may be empty.
+      typeof artifact.stepId !== 'string' ||
       !safeRelativePath(artifact.reference) ||
-      !['available', 'missing', 'stale'].includes(String(artifact.availability))
+      !['available', 'missing'].includes(String(artifact.availability))
     ) {
       return false
     }
+    // Legacy `sha256`/`sizeBytes` fields are tolerated but ignored: the artifact
+    // index only carries identity, kind, reference, and availability.
     ids.add(artifact.artifactId)
-    return (
-      artifact.availability !== 'available' ||
-      (nonNegativeInteger(artifact.sizeBytes) &&
-        typeof artifact.sha256 === 'string' &&
-        /^[a-f0-9]{64}$/.test(artifact.sha256))
-    )
+    return true
   })
 }
 

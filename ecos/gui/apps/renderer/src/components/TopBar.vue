@@ -46,7 +46,7 @@
     <div class="topbar-drag-spacer" data-window-drag-region aria-hidden="true"></div>
 
     <div class="topbar-center">
-      <span class="project-name">{{ props.projectName }}</span>
+      <span class="project-name">{{ titleLabel }}</span>
     </div>
 
     <!-- 右侧：窗口控制按钮 -->
@@ -80,6 +80,17 @@
         @click="handleAgentChatClick"
       >
         <i class="ri-sparkling-2-line text-base" aria-hidden="true"></i>
+      </button>
+      <button
+        type="button"
+        class="window-btn"
+        :class="{ active: userGuideOpen }"
+        title="User Guide"
+        aria-label="User Guide"
+        :aria-pressed="userGuideOpen"
+        @click="handleUserGuideClick"
+      >
+        <i class="ri-book-open-line text-base" aria-hidden="true"></i>
       </button>
       <BackgroundTasksButton />
       <ShutdownStatusButton />
@@ -197,16 +208,18 @@
 <script setup lang="ts">
 import type { AppMenuAction } from '@ecos-studio/shared'
 import { appMenuActionIds } from '@ecos-studio/shared'
-import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick, toRef } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useThemeStore } from '@/stores/themeStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
+import { useUserGuideStore } from '@/stores/userGuideStore'
 import { useRoute, useRouter } from 'vue-router'
 import { getDesktopApi } from '@/platform/desktop'
 import NotificationCenter from '@/components/NotificationCenter.vue'
 import BackgroundTasksButton from '@/components/BackgroundTasksButton.vue'
 import ShutdownStatusButton from '@/components/ShutdownStatusButton.vue'
 import { rememberWorkspaceManagementReturnRoute } from '@/utils/workspaceNavigation'
+import { useWorkspaceTitle } from '@/composables/useWorkspaceTitle'
 // ---- 类型定义 ----
 type TopBarMenuAction = AppMenuAction | 'step-config'
 
@@ -234,6 +247,7 @@ const workspaceProjectName = computed(() => queryString(route.query.projectName)
 // ---- Props & Emits ----
 const props = defineProps<{
   projectName?: string | null
+  workspacePath?: string | null
   hasWorkspace?: boolean
   mutationsDisabled?: boolean
   signoffExportDisabled?: boolean
@@ -245,6 +259,11 @@ const emit = defineEmits<{
   (e: 'step-config'): void
 }>()
 
+const titleLabel = useWorkspaceTitle({
+  workspacePath: toRef(props, 'workspacePath'),
+  fallbackName: toRef(props, 'projectName'),
+})
+
 const workspaceFocusId = computed(
   () =>
     queryString(route.query.workspaceId) || workspaceIdFromProjectName(props.projectName),
@@ -252,7 +271,9 @@ const workspaceFocusId = computed(
 
 const themeStore = useThemeStore()
 const agentShell = useAgentShellStore()
+const userGuide = useUserGuideStore()
 const { homeAgentOpen } = storeToRefs(agentShell)
+const { open: userGuideOpen } = storeToRefs(userGuide)
 const isDark = computed(() => themeStore.themeName === 'dark')
 const chatButtonActive = computed(() => homeAgentOpen.value)
 const desktopApi = getDesktopApi()
@@ -267,6 +288,12 @@ function handleAgentChatClick(): void {
   activeMenu.value = null
   quickMenuOpen.value = false
   agentShell.toggleHomeAgent()
+}
+
+function handleUserGuideClick(): void {
+  activeMenu.value = null
+  quickMenuOpen.value = false
+  userGuide.togglePanel()
 }
 
 const handleGoHome = () => {

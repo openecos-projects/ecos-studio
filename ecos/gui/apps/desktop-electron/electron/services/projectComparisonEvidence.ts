@@ -2,7 +2,9 @@ import {
   parseProjectManifestFlowStep,
   type ProjectAnalysisSnapshot,
   type ProjectManifest,
+  type ProjectManifestFlowStep,
   type ProjectManifestWorkspace,
+  type ProjectQorMetricRecord,
   type ProjectStepComparison,
 } from '@ecos-studio/shared'
 import type { ProjectEngineeringSnapshotReadResult } from './projectManagementReadService'
@@ -16,12 +18,24 @@ import { projectQorInputForWorkspace, workspaceFlowStates } from './workspaceQor
 type Snapshot = NonNullable<ProjectEngineeringSnapshotReadResult['staleSnapshot']>
 type CurrentSnapshot = Extract<ProjectEngineeringSnapshotReadResult, { ok: true }>
 
+function comparisonMetricsByStep(
+  records: readonly ProjectQorMetricRecord[],
+): Partial<Record<ProjectManifestFlowStep, ProjectQorMetricRecord[]>> {
+  const grouped: Partial<Record<ProjectManifestFlowStep, ProjectQorMetricRecord[]>> = {}
+  for (const record of records) {
+    const stepRecords = grouped[record.step] ?? []
+    stepRecords.push(record)
+    grouped[record.step] = stepRecords
+  }
+  return grouped
+}
+
 function result(
   snapshot: Snapshot,
   analysis: ProjectAnalysisSnapshot,
 ): CommittedFindingsResult | null {
   if (
-    snapshot.sections.qor.status !== 'ready' ||
+    snapshot.sections.metrics.status !== 'ready' ||
     snapshot.sections.artifacts.status !== 'ready'
   )
     return null
@@ -29,7 +43,6 @@ function result(
     analysis,
     comparisonMetrics: {},
     engineeringSnapshot: {
-      analysis: snapshot.sections.qor.data.analysis,
       artifacts: snapshot.sections.artifacts.data,
       workspaceId: snapshot.snapshot.workspaceId,
       workspaceRevision: snapshot.snapshot.workspaceRevision,
@@ -49,18 +62,9 @@ export function projectComparisonEvidence(
   const flowStates = workspaceFlowStates(
     snapshot.sections.flow.status === 'ready' ? snapshot.sections.flow.data : undefined,
   )
-  const completed = new Set(
-    current.engineeringSnapshot.analysis.steps.map(
-      (step) => parseProjectManifestFlowStep(step.stepId) ?? step.stepId,
-    ),
-  )
   const pendingStepIds = (snapshot.snapshot.stalePredecessor?.invalidatedStepIds ?? [])
     .map((step) => parseProjectManifestFlowStep(step) ?? step)
-    .filter(
-      (step) =>
-        !completed.has(step) &&
-        !['success', 'reused', 'skipped'].includes(flowStates[step] ?? ''),
-    )
+    .filter((step) => !['success', 'reused', 'skipped'].includes(flowStates[step] ?? ''))
   analysis.resultState = {
     workspaceRevision: snapshot.snapshot.workspaceRevision,
     pendingStepIds,
@@ -69,16 +73,13 @@ export function projectComparisonEvidence(
   const stale = snapshot.staleSnapshot
   if (
     pendingStepIds.length &&
-    stale?.sections.qor.status === 'ready' &&
+    stale?.sections.metrics.status === 'ready' &&
     stale.sections.artifacts.status === 'ready'
   ) {
     const flow =
       stale.sections.flow.status === 'ready' ? stale.sections.flow.data : undefined
-    const qor = stale.sections.qor.data
     const input = projectQorInputForWorkspace(manifest, workspace.workspace_id, {
-      analysis: qor.analysis,
-      metrics: qor.metrics,
-      qorAssessment: qor.qorAssessment,
+      metrics: stale.sections.metrics.data,
       ...(flow ? { flow } : {}),
       ...(stale.sections.signoff.status === 'ready'
         ? { signoffAssessment: stale.sections.signoff.data }
@@ -87,6 +88,13 @@ export function projectComparisonEvidence(
     if (input) {
       const oldAnalysis = buildProjectComparisonSnapshots([input])[0]!
       previous = result(stale, oldAnalysis) ?? undefined
+      if (previous) {
+        // Stale findings metrics come from the predecessor's normalized
+        // projection, grouped by the derived per-step ownership.
+        previous.comparisonMetrics = comparisonMetricsByStep(
+          input.normalizedMetrics ?? [],
+        )
+      }
       const states = Object.values(workspaceFlowStates(flow))
       analysis.resultState.previous = {
         workspaceRevision: stale.snapshot.workspaceRevision,

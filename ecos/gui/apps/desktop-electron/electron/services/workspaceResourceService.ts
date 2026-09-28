@@ -1,5 +1,6 @@
 import { open, readdir, stat } from 'node:fs/promises'
 import { join, relative } from 'node:path'
+import { isObsoleteFlowStepName } from '@ecos-studio/shared'
 import type {
   WorkspaceResourceFile,
   WorkspaceResourceIndex,
@@ -21,10 +22,6 @@ type ResourceBucketName = keyof WorkspaceStepResource['resources']
 type StepFileBuckets = WorkspaceStepResource['resources']
 
 const WORKSPACE_INDEX_JSON_MAX_BYTES = 4 * 1024 * 1024
-
-function isObsoleteFlowStep(value: string): boolean {
-  return value.toLowerCase().replace(/[\s_-]/g, '') === 'fixfanout'
-}
 
 interface WorkspaceResourceServiceOptions {
   projectScopeProvider: Pick<
@@ -173,7 +170,7 @@ export class WorkspaceResourceService {
             .map(readFlowStep)
             .filter(
               (step): step is FlowStepInput =>
-                step !== null && !isObsoleteFlowStep(step.name),
+                step !== null && !isObsoleteFlowStepName(step.name),
             )
         : []
     const flowSteps = await Promise.all(

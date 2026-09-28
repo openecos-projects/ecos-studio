@@ -92,6 +92,7 @@ export function useFlowInsights() {
     drcRelated: computed(() => data.value?.drcRelated ?? buildDrcRelatedMetrics()),
     sta: computed(() => data.value?.sta ?? null),
     staCriticalPaths: computed(() => data.value?.staCriticalPaths ?? null),
+    timingIssuesArtifact: computed(() => data.value?.timingIssuesArtifact ?? null),
     loading: computed(
       () =>
         session.projection.status === 'loading' ||

@@ -1,5 +1,5 @@
 <template>
-  <div class="notification-center">
+  <div ref="root" class="notification-center">
     <button
       type="button"
       class="notification-trigger"
@@ -105,6 +105,7 @@ import {
 } from '@/stores/notificationStore'
 
 const open = ref(false)
+const root = ref<HTMLElement | null>(null)
 const { notifications, unreadCount, markRead, markAllRead, remove, clear } =
   useNotificationStore()
 const topbarOverlayEvent = 'ecos-topbar-overlay-open'
@@ -125,15 +126,21 @@ function closeForOverlay(event: Event): void {
   if ((event as CustomEvent<string>).detail !== 'notifications') open.value = false
 }
 
+function closeFromDocument(event: MouseEvent): void {
+  if (open.value && !root.value?.contains(event.target as Node)) open.value = false
+}
+
 function handleKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape' && open.value) open.value = false
 }
 
 onMounted(() => {
+  document.addEventListener('click', closeFromDocument)
   document.addEventListener('keydown', handleKeydown)
   document.addEventListener(topbarOverlayEvent, closeForOverlay)
 })
 onUnmounted(() => {
+  document.removeEventListener('click', closeFromDocument)
   document.removeEventListener('keydown', handleKeydown)
   document.removeEventListener(topbarOverlayEvent, closeForOverlay)
 })

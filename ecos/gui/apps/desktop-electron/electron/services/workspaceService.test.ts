@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { WorkspaceService } from './workspaceService'
@@ -23,6 +31,7 @@ function createProjectScopeProvider(
     clearProjectRoot: vi.fn(),
     getProjectRoot: vi.fn().mockResolvedValue(rootPath),
     isProjectDirectory: vi.fn().mockResolvedValue(true),
+    registerProjectManagementReadRoot: vi.fn(),
     registerProjectReadRoot: vi.fn(),
     registerProjectRoot: vi.fn(),
     requestProjectPathAccess: vi.fn().mockResolvedValue(canonicalPath),
@@ -271,6 +280,73 @@ describe('WorkspaceService', () => {
     await expect(service.discardFailedWorkspaceCreate(completeWorkspace)).rejects.toThrow(
       /complete ECOS workspace/,
     )
+  })
+
+  it('deletes only the committed engineering snapshot of a real workspace', async () => {
+    const workspace = await createTempDir('ecos-workspace-service-snapshot-')
+    await mkdir(join(workspace, 'home'), { recursive: true })
+    const snapshotPath = join(workspace, 'home', 'engineering-snapshot.json')
+    await writeFile(snapshotPath, 'not json', 'utf8')
+    await writeFile(join(workspace, 'home', 'checklist.json'), '{}', 'utf8')
+
+    const { service } = createWorkspaceService(workspace, workspace)
+
+    await expect(service.deleteEngineeringSnapshot(workspace)).resolves.toBe(true)
+    await expect(service.pathExists(snapshotPath)).resolves.toBe(false)
+    await expect(
+      service.pathExists(join(workspace, 'home', 'checklist.json')),
+    ).resolves.toBe(true)
+    // Idempotent: a missing snapshot is already in the rebuilt-ready state.
+    await expect(service.deleteEngineeringSnapshot(workspace)).resolves.toBe(false)
+  })
+
+  it('refuses to delete a snapshot outside an ECOS workspace', async () => {
+    const directory = await createTempDir('ecos-workspace-service-snapshot-refuse-')
+    await mkdir(join(directory, 'home'), { recursive: true })
+    await writeFile(join(directory, 'home', 'engineering-snapshot.json'), '{}', 'utf8')
+
+    const { projectScopeProvider, service } = createWorkspaceService(directory, directory)
+    vi.mocked(projectScopeProvider.isProjectDirectory).mockResolvedValue(false)
+
+    await expect(service.deleteEngineeringSnapshot(directory)).rejects.toThrow(
+      /outside an ECOS workspace/,
+    )
+    await expect(
+      service.pathExists(join(directory, 'home', 'engineering-snapshot.json')),
+    ).resolves.toBe(true)
+  })
+
+  it('refuses to delete a snapshot while the workspace runtime is active', async () => {
+    const workspace = await createTempDir('ecos-workspace-service-snapshot-active-')
+    await mkdir(join(workspace, 'home'), { recursive: true })
+    await writeFile(join(workspace, 'home', 'engineering-snapshot.json'), '{}', 'utf8')
+
+    const { service } = createWorkspaceService(workspace, workspace, {
+      runtimeMutationGuard: { isWorkspaceRuntimeActive: vi.fn().mockResolvedValue(true) },
+    })
+
+    await expect(service.deleteEngineeringSnapshot(workspace)).rejects.toThrow(
+      /while the workspace flow is running/,
+    )
+    await expect(
+      service.pathExists(join(workspace, 'home', 'engineering-snapshot.json')),
+    ).resolves.toBe(true)
+  })
+
+  it('refuses a snapshot symlink escaping the workspace root', async () => {
+    const workspace = await createTempDir('ecos-workspace-service-snapshot-link-')
+    const outside = await createTempDir('ecos-workspace-service-snapshot-outside-')
+    const outsideTarget = join(outside, 'engineering-snapshot.json')
+    await writeFile(outsideTarget, '{}', 'utf8')
+    await mkdir(join(workspace, 'home'), { recursive: true })
+    await symlink(outsideTarget, join(workspace, 'home', 'engineering-snapshot.json'))
+
+    const { service } = createWorkspaceService(workspace, workspace)
+
+    await expect(service.deleteEngineeringSnapshot(workspace)).rejects.toThrow(
+      /outside the workspace/,
+    )
+    await expect(service.pathExists(outsideTarget)).resolves.toBe(true)
   })
 
   it('lists project-scoped directory entries through the validated canonical path', async () => {

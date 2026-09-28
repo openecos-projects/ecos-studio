@@ -3,7 +3,7 @@ import {
   type BackendProjectFindingsIssueCode,
   type BackendProjectStepFindings,
   type BackendProjectStepFindingsResult,
-  type EccEngineeringAnalysisFile,
+  type EccEngineeringAnalysisArtifactRef,
   type EccPersistedEngineeringSnapshot,
   type ProjectAnalysisSnapshot,
   type ProjectManifestFlowStep,
@@ -15,8 +15,7 @@ interface FindingsArtifactReader {
   readVerifiedArtifacts(request: {
     projectRoot: string
     workspacePath: string
-    artifacts: Array<{ reference: string; sha256: string; sizeBytes: number }>
-    allowExternallyModified?: boolean
+    artifacts: Array<{ reference: string }>
   }): Promise<VerifiedProjectArtifactsReadResult>
 }
 
@@ -25,7 +24,7 @@ export interface CommittedFindingsResult {
   comparisonMetrics: Partial<Record<ProjectManifestFlowStep, ProjectQorMetricRecord[]>>
   engineeringSnapshot: Pick<
     EccPersistedEngineeringSnapshot,
-    'analysis' | 'artifacts' | 'workspaceId' | 'workspaceRevision'
+    'artifacts' | 'workspaceId' | 'workspaceRevision'
   >
 }
 
@@ -114,16 +113,13 @@ export class ProjectStepFindingsService {
     const pending = workspace.analysis.resultState?.pendingStepIds.includes(step) ?? false
     const source =
       pending &&
-      workspace.previous?.engineeringSnapshot.analysis.steps.some(
-        (candidate) => parseProjectManifestFlowStep(candidate.stepId) === step,
-      )
+      workspace.previous &&
+      hasCommittedStepResults(workspace.previous.engineeringSnapshot, step)
         ? workspace.previous
         : workspace
-    const analysisStep = source.engineeringSnapshot.analysis.steps.find(
-      (candidate) => parseProjectManifestFlowStep(candidate.stepId) === step,
-    )
+    const hasResults = hasCommittedStepResults(source.engineeringSnapshot, step)
     const details = source.analysis.steps[step]
-    if (!details || (!analysisStep && details.flowStatus === undefined)) {
+    if (!details || (!hasResults && details.flowStatus === undefined)) {
       return { ok: false, code: 'FINDINGS_STEP_UNAVAILABLE' }
     }
     const data: BackendProjectStepFindings = {
@@ -138,11 +134,11 @@ export class ProjectStepFindingsService {
           ? 'stale'
           : pending
             ? 'pending-rerun'
-            : details.flowStatus === 'unstart' && !analysisStep
+            : details.flowStatus === 'unstart' && !hasResults
               ? 'not-started'
               : 'current',
     }
-    if (!analysisStep) {
+    if (!hasResults) {
       return {
         ok: true,
         projectComparisonContextId: request.projectComparisonContextId,
@@ -151,7 +147,7 @@ export class ProjectStepFindingsService {
         data,
       }
     }
-    const artifacts = declaredArtifacts(source.engineeringSnapshot, analysisStep, step)
+    const artifacts = declaredArtifacts(source.engineeringSnapshot, step)
     if (!artifacts.ok) return artifacts
 
     const generation = context.generation
@@ -164,7 +160,6 @@ export class ProjectStepFindingsService {
       artifacts: artifacts.data,
       projectRoot: context.projectRoot,
       workspacePath: workspace.workspacePath,
-      allowExternallyModified: source === workspace,
     })
     if (
       this.contexts.get(request.projectComparisonContextId) !== context ||
@@ -175,14 +170,8 @@ export class ProjectStepFindingsService {
     }
     if (!read.ok) return this.readFailure(read, key, context, request)
 
-    const externallyModified = Object.values(read.integrity ?? {}).some(
-      (value) => value === 'externally-modified',
-    )
     const resultData = {
       ...data,
-      ...(externallyModified
-        ? { artifactIntegrity: 'externally-modified' as const }
-        : {}),
       ...(read.issues && read.issues.length > 0
         ? {
             artifactIssues: read.issues.map((issue) => ({
@@ -236,44 +225,38 @@ export class ProjectStepFindingsService {
   }
 }
 
+function hasCommittedStepResults(
+  snapshot: Pick<EccPersistedEngineeringSnapshot, 'artifacts'>,
+  step: ProjectManifestFlowStep,
+): boolean {
+  return snapshot.artifacts.some(
+    (artifact) =>
+      artifact.kind === 'qor_metrics' &&
+      artifact.availability === 'available' &&
+      parseProjectManifestFlowStep(artifact.stepId) === step,
+  )
+}
+
 function declaredArtifacts(
   snapshot: Pick<EccPersistedEngineeringSnapshot, 'artifacts'>,
-  analysisStep: {
-    hotspots: EccEngineeringAnalysisFile
-    metrics: EccEngineeringAnalysisFile
-    summary: EccEngineeringAnalysisFile
-    timingIssues: EccEngineeringAnalysisFile | null
-  },
   step: ProjectManifestFlowStep,
 ):
-  | { ok: true; data: Array<{ reference: string; sha256: string; sizeBytes: number }> }
+  | { ok: true; data: Array<{ reference: string }> }
   | { ok: false; code: BackendProjectFindingsIssueCode } {
-  const files = [analysisStep.metrics, analysisStep.summary, analysisStep.hotspots]
-  if (step === 'STA' && analysisStep.timingIssues) files.push(analysisStep.timingIssues)
-  const artifacts = []
-  for (const file of files) {
-    if (file.status !== 'available') {
-      return { ok: false, code: 'ARTIFACT_REFERENCE_MISSING' }
-    }
+  const kinds = ['qor_metrics', 'qor_summary', 'qor_hotspots']
+  if (step === 'STA') kinds.push('sta_timing_issues')
+  const artifacts: Array<{ reference: string }> = []
+  for (const kind of kinds) {
     const artifact = snapshot.artifacts.find(
-      (candidate) =>
-        candidate.artifactId === file.artifactId &&
-        candidate.stepId !== undefined &&
+      (candidate: EccEngineeringAnalysisArtifactRef) =>
+        candidate.kind === kind &&
+        candidate.availability === 'available' &&
         parseProjectManifestFlowStep(candidate.stepId) === step,
     )
-    if (
-      !artifact ||
-      artifact.availability !== 'available' ||
-      artifact.sizeBytes === undefined ||
-      artifact.sha256 === undefined
-    ) {
+    if (!artifact) {
       return { ok: false, code: 'ARTIFACT_REFERENCE_MISSING' }
     }
-    artifacts.push({
-      reference: artifact.reference,
-      sha256: artifact.sha256,
-      sizeBytes: artifact.sizeBytes,
-    })
+    artifacts.push({ reference: artifact.reference })
   }
   return { ok: true, data: artifacts }
 }

@@ -1,8 +1,8 @@
 <template>
-  <section class="qor-score-panel" aria-label="QoR score by workspace">
+  <section class="qor-score-panel" aria-label="QoR v3 score by workspace">
     <header class="qor-score-header">
       <div class="qor-score-heading">
-        <span>QoR score by workspace</span>
+        <span>QoR v3 score by workspace</span>
         <strong v-if="highestScore !== null" class="qor-best-chip">
           {{ formatScore(highestScore) }}
           <em>best</em>
@@ -16,13 +16,13 @@
       v-if="trendPoints.length > 0"
       ref="chartViewport"
       class="qor-chart-viewport"
-      aria-label="Overall QoR score by workspace"
+      aria-label="QoR v3 score by workspace"
     >
       <svg
         class="qor-score-chart"
         :viewBox="chartViewBox"
         role="img"
-        aria-label="Overall QoR score by workspace from 0 to 100"
+        aria-label="Overall QoR v3 score by workspace from 0 to 100"
         aria-describedby="qor-chart-description"
       >
         <rect
@@ -36,7 +36,6 @@
         <g v-for="score in SCORE_TICKS" :key="score">
           <line
             class="qor-chart-gridline"
-            :class="{ threshold: score === SCORE_THRESHOLD }"
             :x1="CHART_LEFT"
             :x2="chartPlotRight"
             :y1="scoreToChartY(score)"
@@ -44,7 +43,6 @@
           />
           <text
             class="qor-chart-score-label"
-            :class="{ threshold: score === SCORE_THRESHOLD }"
             :x="CHART_LEFT - 2.4"
             :y="scoreToChartY(score)"
             text-anchor="end"
@@ -52,6 +50,15 @@
           >
             {{ score }}
           </text>
+        </g>
+        <g v-for="band in BAND_LINES" :key="band">
+          <line
+            class="qor-chart-bandline"
+            :x1="CHART_LEFT"
+            :x2="chartPlotRight"
+            :y1="scoreToChartY(band)"
+            :y2="scoreToChartY(band)"
+          />
         </g>
         <line
           class="qor-chart-axis"
@@ -170,8 +177,7 @@
         ><i class="legend-baseline" aria-hidden="true"></i>Baseline</span
       >
       <span role="listitem"
-        ><i class="legend-pass" aria-hidden="true"></i>{{ SCORE_THRESHOLD }} analysis
-        threshold</span
+        ><i class="legend-pass" aria-hidden="true"></i>QoR v3 bands 60 · 75 · 90</span
       >
       <span role="listitem"><i class="legend-nr" aria-hidden="true"></i>Not rated</span>
     </div>
@@ -181,9 +187,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { ProjectQorTrendPoint } from '@ecos-studio/shared'
+import { qorScalarStatusForScore } from '@ecos-studio/shared'
 
 const SCORE_TICKS = [0, 20, 40, 60, 80, 100] as const
-const SCORE_THRESHOLD = 60
+/** qor-v3 scalar band boundaries: ORANGE 60, YELLOW 75, GREEN 90. */
+const BAND_LINES = [60, 75, 90] as const
 const CHART_LEFT = 20
 const CHART_RIGHT = 8
 const CHART_TOP = 10
@@ -454,7 +462,7 @@ const chartCaption = computed(() => {
 
 const accessibleSummary = computed(() => {
   const rated = props.trendPoints.filter((point) => point.score !== null).length
-  return `QoR score by workspace from 0 to 100. ${rated} of ${props.trendPoints.length} workspaces are rated. The ${SCORE_THRESHOLD} line is an analysis threshold only and does not determine signoff. Baseline: ${props.baselineLabel}.`
+  return `QoR v3 score by workspace from 0 to 100. ${rated} of ${props.trendPoints.length} workspaces are rated. Dashed lines mark the qor-v3 band boundaries at 60, 75, and 90; they are informational and do not determine signoff. Baseline: ${props.baselineLabel}.`
 })
 
 function scoreToChartY(score: number): number {
@@ -480,11 +488,7 @@ function pointDescription(point: ChartPoint): string {
   if (point.score === null) {
     tags.push('not rated')
   } else {
-    tags.push(
-      point.score < SCORE_THRESHOLD
-        ? `below the ${SCORE_THRESHOLD} analysis threshold`
-        : `meets the ${SCORE_THRESHOLD} analysis threshold`,
-    )
+    tags.push(`QoR v3 ${qorScalarStatusForScore(point.score)} band`)
   }
   return `${point.label}: ${formatScore(point.score)} (${tags.join(', ')})`
 }
@@ -590,10 +594,11 @@ function formatScore(score: number | null): string {
   vector-effect: non-scaling-stroke;
 }
 
-.qor-chart-gridline.threshold {
+.qor-chart-bandline {
   stroke: color-mix(in srgb, var(--warn-color) 78%, #b45309);
   stroke-width: 1;
   stroke-dasharray: 2.8 2.2;
+  vector-effect: non-scaling-stroke;
 }
 
 .qor-chart-axis {
@@ -608,10 +613,6 @@ function formatScore(score: number | null): string {
   fill: var(--text-secondary);
   font-size: 3.5px;
   font-weight: 600;
-}
-
-.qor-chart-score-label.threshold {
-  fill: color-mix(in srgb, var(--warn-color) 86%, var(--text-secondary));
 }
 
 .qor-chart-x-tick {

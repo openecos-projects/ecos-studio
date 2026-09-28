@@ -7,6 +7,7 @@ import {
   qorMetricComparisonLabel,
   qorScoreTone,
   qorScoreComparisonLabel,
+  qorStepRouteTarget,
   summarizeHomeQorComparison,
 } from './qorComparisonData'
 import type { BackendWorkspaceQorComparison } from '@/composables/useBackendWorkspaceQor'
@@ -57,12 +58,11 @@ const comparison: BackendWorkspaceQorComparison = {
   workspaceId: 'ws_0004',
   workspaceName: 'ws_0004',
   score: 78.4,
-  scoreGate: 'pass',
-  scoreThreshold: 60,
+  scalarStatus: 'YELLOW',
   baselineWorkspaceId: 'ws_0001',
   baselineWorkspaceName: 'baseline-run',
   baselineScore: 72.5,
-  baselineScoreGate: 'pass',
+  baselineScalarStatus: 'ORANGE',
   isBaselineWorkspace: false,
   available: true,
   metrics: [
@@ -94,6 +94,45 @@ describe('Home QoR comparison data', () => {
     expect(homeQorFlowStepForLabel('LVS')).toBe('LVS')
     expect(homeQorFlowStepForLabel('lvs')).toBe('LVS')
     expect(homeQorFlowStepForLabel('unknown')).toBeNull()
+  })
+
+  it('resolves QoR step labels to persisted flow step ids for navigation', () => {
+    const flowStepIds = [
+      'Synthesis',
+      'preFloorplan',
+      'macroPlacement',
+      'postFloorplan',
+      'place',
+      'CTS',
+      'legalization',
+      'Timing optimization',
+      'route',
+      'filler',
+      'RCX',
+      'sta',
+      'powerAnalysis',
+      'lvs',
+      'postRouteLec',
+      'drc',
+      'Harden',
+    ]
+    expect(qorStepRouteTarget('Legal', flowStepIds)).toBe('legalization')
+    expect(qorStepRouteTarget('Synth', flowStepIds)).toBe('Synthesis')
+    expect(qorStepRouteTarget('Timing Opt', flowStepIds)).toBe('Timing optimization')
+    expect(qorStepRouteTarget('Power Analysis', flowStepIds)).toBe('powerAnalysis')
+    expect(qorStepRouteTarget('Post-route LEC', flowStepIds)).toBe('postRouteLec')
+    expect(qorStepRouteTarget('STA', flowStepIds)).toBe('sta')
+    expect(qorStepRouteTarget('Place', flowStepIds)).toBe('place')
+  })
+
+  it('opens the last flow step when a QoR step spans several flow steps', () => {
+    const flowStepIds = ['preFloorplan', 'macroPlacement', 'postFloorplan', 'place']
+    expect(qorStepRouteTarget('Floor', flowStepIds)).toBe('postFloorplan')
+  })
+
+  it('keeps the QoR label when no flow step matches', () => {
+    expect(qorStepRouteTarget('Legal', [])).toBe('Legal')
+    expect(qorStepRouteTarget('Legal', ['place', 'route'])).toBe('Legal')
   })
 
   it('keeps improved, regressed, unchanged, and comparable step totals distinct', () => {
@@ -165,7 +204,7 @@ describe('Home QoR comparison data', () => {
     const detail = buildHomeQorDetailModel({
       ...comparison,
       baselineScore: null,
-      baselineScoreGate: 'unavailable',
+      baselineScalarStatus: 'NOT_RATED',
       baselineWorkspaceName: null,
       available: false,
       deltas: [],
@@ -228,9 +267,13 @@ describe('Home QoR comparison data', () => {
     ).toBe('No directional QoR rule')
   })
 
-  it('uses the authoritative score threshold for the score tone', () => {
-    expect(qorScoreTone(62.1, 60)).toBe('pass')
-    expect(qorScoreTone(59.9, 60)).toBe('fail')
-    expect(qorScoreTone(null, 60)).toBe('unrated')
+  it('maps the qor-v3 scalar status to the score tone', () => {
+    expect(qorScoreTone('GREEN')).toBe('green')
+    expect(qorScoreTone('YELLOW')).toBe('yellow')
+    expect(qorScoreTone('ORANGE')).toBe('orange')
+    expect(qorScoreTone('RED')).toBe('red')
+    expect(qorScoreTone('FAIL')).toBe('red')
+    expect(qorScoreTone('NOT_RATED')).toBe('unrated')
+    expect(qorScoreTone(null)).toBe('unrated')
   })
 })

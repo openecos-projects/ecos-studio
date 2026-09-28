@@ -113,6 +113,8 @@ describe('snapshotStepDashboardData', () => {
       ],
       worstSetup: { corner: 'TT', wns: -0.2 },
       worstHold: { corner: 'TT', wns: 0.1 },
+      criticalPathIssueCount: 1,
+      criticalPathsTruncated: false,
       frequencyMhz: 750,
       setupViolationCount: 3,
       holdViolationCount: 0,

@@ -43,6 +43,7 @@ async function loadDesktopBridge() {
     }
     backendWorkspace: {
       getArtifact(request: unknown): Promise<unknown>
+      getChecklistEvidence(request: unknown): Promise<unknown>
       getOverview(): Promise<unknown>
       getStepDetail(request: unknown): Promise<unknown>
       refreshOverview(): Promise<unknown>
@@ -91,8 +92,13 @@ async function loadDesktopBridge() {
     menu: {
       setActionEnabled(action: string, enabled: boolean): Promise<void>
     }
+    window: {
+      setLeftPanelExtension(widthPx: number): Promise<number>
+    }
     projectManagement: {
       importWorkspace(projectRoot: string): Promise<unknown>
+      checkConsistency(projectRoot: string): Promise<unknown>
+      repairConsistency(projectRoot: string): Promise<unknown>
     }
     workspace: {
       openWaveformExternal(path: string): Promise<void>
@@ -153,6 +159,17 @@ describe('preload desktop bridge contract', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
       desktopApiIpcChannels.backendProjectComparisonCloseProject,
       request,
+    )
+  })
+
+  it('routes the left panel extension through its typed IPC channel', async () => {
+    const bridge = await loadDesktopBridge()
+    ipcRenderer.invoke.mockResolvedValueOnce(440)
+
+    await expect(bridge.window.setLeftPanelExtension(440)).resolves.toBe(440)
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.windowSetLeftPanelExtension,
+      440,
     )
   })
 
@@ -303,6 +320,13 @@ describe('preload desktop bridge contract', () => {
         workspaceRevision: 9,
       }),
     ).resolves.toEqual(overview)
+    await expect(
+      bridge.backendWorkspace.getChecklistEvidence({
+        findingId: 'place.drc',
+        workspaceContextId: 'workspace-context-1',
+        workspaceRevision: 9,
+      }),
+    ).resolves.toEqual(overview)
     await expect(bridge.backendWorkspace.refreshOverview()).resolves.toEqual(overview)
 
     const listener = vi.fn()
@@ -331,6 +355,15 @@ describe('preload desktop bridge contract', () => {
     )
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
       4,
+      desktopApiIpcChannels.backendWorkspaceGetChecklistEvidence,
+      {
+        findingId: 'place.drc',
+        workspaceContextId: 'workspace-context-1',
+        workspaceRevision: 9,
+      },
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      5,
       desktopApiIpcChannels.backendWorkspaceRefreshOverview,
     )
     expect(ipcRenderer.on).toHaveBeenCalledWith(
@@ -356,6 +389,42 @@ describe('preload desktop bridge contract', () => {
     })
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
       desktopApiIpcChannels.projectManagementImportWorkspace,
+      '/work/gcd',
+    )
+  })
+
+  it('routes project consistency check and repair through the project management channels', async () => {
+    const bridge = await loadDesktopBridge()
+    ipcRenderer.invoke.mockResolvedValueOnce({
+      doctor: 'project',
+      status: 'failed',
+      projectRoot: '/work/gcd',
+      checked: 2,
+      inconsistent: 1,
+      findings: [],
+    })
+    ipcRenderer.invoke.mockResolvedValueOnce({
+      doctor: 'project',
+      status: 'fixed',
+      projectRoot: '/work/gcd',
+      checked: 2,
+      inconsistent: 1,
+      fixed: 1,
+      findings: [],
+    })
+
+    await expect(bridge.projectManagement.checkConsistency('/work/gcd')).resolves.toEqual(
+      expect.objectContaining({ status: 'failed' }),
+    )
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.projectManagementCheckConsistency,
+      '/work/gcd',
+    )
+    await expect(
+      bridge.projectManagement.repairConsistency('/work/gcd'),
+    ).resolves.toEqual(expect.objectContaining({ status: 'fixed' }))
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.projectManagementRepairConsistency,
       '/work/gcd',
     )
   })

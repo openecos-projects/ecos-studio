@@ -3,6 +3,7 @@ import { desktopApiEventChannels } from '@ecos-studio/shared'
 import {
   bindWindowEvents,
   confirmWindowClose,
+  setWindowLeftPanelExtension,
   toggleMaximizeWindow,
 } from './windowService'
 
@@ -12,10 +13,13 @@ type CloseListener = (event: { preventDefault: () => void }) => void
 function createWindowDouble(isMaximized = false) {
   const listeners = new Map<string, WindowListener>()
   const closeListeners = new Map<string, CloseListener>()
+  const bounds = { x: 100, y: 80, width: 1280, height: 800 }
 
   return {
+    bounds,
     close: vi.fn(),
     closeListeners,
+    getBounds: vi.fn(() => ({ ...bounds })),
     isMaximized: vi.fn(() => isMaximized),
     listeners,
     maximize: vi.fn(),
@@ -39,6 +43,10 @@ function createWindowDouble(isMaximized = false) {
       if (listeners.get(event) === listener) {
         listeners.delete(event)
       }
+    }),
+    setSize: vi.fn((width: number, height: number) => {
+      bounds.width = width
+      bounds.height = height
     }),
     setTitle: vi.fn(),
     unmaximize: vi.fn(),
@@ -120,5 +128,74 @@ describe('windowService', () => {
     dispose()
 
     expect(windowDouble.removeListener).toHaveBeenCalledTimes(4)
+  })
+})
+
+describe('setWindowLeftPanelExtension', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('grows the window width by the requested extension', () => {
+    const windowDouble = createWindowDouble(false)
+
+    expect(setWindowLeftPanelExtension(windowDouble, 400)).toBe(400)
+    expect(windowDouble.setSize).toHaveBeenCalledWith(1680, 800)
+  })
+
+  it('shrinks the window back to its original width on reset', () => {
+    const windowDouble = createWindowDouble(false)
+
+    setWindowLeftPanelExtension(windowDouble, 400)
+    expect(setWindowLeftPanelExtension(windowDouble, 0)).toBe(0)
+    expect(windowDouble.setSize).toHaveBeenLastCalledWith(1280, 800)
+  })
+
+  it('follows panel width changes by the delta', () => {
+    const windowDouble = createWindowDouble(false)
+
+    setWindowLeftPanelExtension(windowDouble, 400)
+    expect(setWindowLeftPanelExtension(windowDouble, 520)).toBe(520)
+    expect(windowDouble.setSize).toHaveBeenLastCalledWith(1800, 800)
+  })
+
+  it('caps growth at the available window width and reports the applied value', () => {
+    const windowDouble = createWindowDouble(false)
+
+    expect(
+      setWindowLeftPanelExtension(windowDouble, 400, { maxWindowWidthPx: 1400 }),
+    ).toBe(120)
+    expect(windowDouble.setSize).toHaveBeenCalledWith(1400, 800)
+
+    // Shrink still works while capped.
+    expect(setWindowLeftPanelExtension(windowDouble, 0)).toBe(0)
+    expect(windowDouble.setSize).toHaveBeenLastCalledWith(1280, 800)
+  })
+
+  it('leaves maximized windows untouched and keeps the stored extension', () => {
+    const windowDouble = createWindowDouble(true)
+
+    expect(setWindowLeftPanelExtension(windowDouble, 400)).toBe(0)
+    expect(windowDouble.setSize).not.toHaveBeenCalled()
+  })
+
+  it('does nothing when the extension is already at the requested width', () => {
+    const windowDouble = createWindowDouble(false)
+
+    setWindowLeftPanelExtension(windowDouble, 400)
+    windowDouble.setSize.mockClear()
+
+    expect(setWindowLeftPanelExtension(windowDouble, 400)).toBe(400)
+    expect(windowDouble.setSize).not.toHaveBeenCalled()
+  })
+
+  it('clamps out-of-range widths into the supported extension range', () => {
+    const windowDouble = createWindowDouble(false)
+
+    expect(setWindowLeftPanelExtension(windowDouble, -50)).toBe(0)
+    expect(windowDouble.setSize).not.toHaveBeenCalled()
+
+    expect(setWindowLeftPanelExtension(windowDouble, 99999)).toBe(1200)
+    expect(windowDouble.setSize).toHaveBeenCalledWith(2480, 800)
   })
 })

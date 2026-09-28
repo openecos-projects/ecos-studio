@@ -1,22 +1,10 @@
 import type { PdkRequirement } from '../contracts/pdkInventory.ts'
+import {
+  flowStepCanonicalIds,
+  normalizeProjectManifestFlowStep,
+} from './flowStepRegistry.ts'
 
-export const projectManifestFlowSteps = [
-  'Synth',
-  'LEC',
-  'Floor',
-  'Place',
-  'CTS',
-  'Legal',
-  'Timing Opt',
-  'Route',
-  'Filler',
-  'RCX',
-  'STA',
-  'LVS',
-  'Post-route LEC',
-  'DRC',
-  'Harden',
-] as const
+export const projectManifestFlowSteps = flowStepCanonicalIds
 
 export type ProjectManifestFlowStep = (typeof projectManifestFlowSteps)[number]
 
@@ -239,35 +227,6 @@ export interface ProjectManifestMutationResult {
   manifest: ProjectManifest
 }
 
-const FLOW_STEP_ALIASES: Record<string, ProjectManifestFlowStep> = {
-  synthesis: 'Synth',
-  synth: 'Synth',
-  floorplan: 'Floor',
-  floor: 'Floor',
-  prefloorplan: 'Floor',
-  macroplacement: 'Floor',
-  postfloorplan: 'Floor',
-  lec: 'LEC',
-  place: 'Place',
-  placement: 'Place',
-  cts: 'CTS',
-  legalization: 'Legal',
-  legal: 'Legal',
-  timingoptimization: 'Timing Opt',
-  route: 'Route',
-  routing: 'Route',
-  drc: 'DRC',
-  lvs: 'LVS',
-  filler: 'Filler',
-  postlec: 'Post-route LEC',
-  postroutelec: 'Post-route LEC',
-  rcx: 'RCX',
-  sta: 'STA',
-  gds: 'Harden',
-  signoff: 'Harden',
-  harden: 'Harden',
-}
-
 export function projectIdFromName(name: string): string {
   return `proj_${slugify(name)}`
 }
@@ -292,11 +251,11 @@ export function projectManifestForPresentation(
   }
 }
 
-export function normalizeProjectManifestFlowStep(
-  step: ProjectManifestFlowStep | string,
-): ProjectManifestFlowStep {
-  return parseProjectManifestFlowStep(step) ?? 'Synth'
-}
+export {
+  normalizeProjectManifestFlowStep,
+  parseProjectManifestFlowStep,
+  sameProjectManifestFlowStep,
+} from './flowStepRegistry.ts'
 
 export function normalizeProjectManifestStage(
   projectType: ProjectManifestType,
@@ -307,26 +266,6 @@ export function normalizeProjectManifestStage(
   return (projectManifestFrontendFlowSteps as readonly string[]).includes(normalized)
     ? (normalized as ProjectManifestFrontendFlowStep)
     : 'prepare'
-}
-
-export function parseProjectManifestFlowStep(
-  step: ProjectManifestFlowStep | string,
-): ProjectManifestFlowStep | null {
-  if ((projectManifestFlowSteps as readonly string[]).includes(step)) {
-    return step as ProjectManifestFlowStep
-  }
-  return (
-    FLOW_STEP_ALIASES[
-      String(step)
-        .toLowerCase()
-        .replace(/[\s_-]/g, '')
-    ] ?? null
-  )
-}
-
-export function sameProjectManifestFlowStep(left: string, right: string): boolean {
-  const canonical = parseProjectManifestFlowStep(left)
-  return canonical !== null && canonical === parseProjectManifestFlowStep(right)
 }
 
 function normalizeProjectManifestPath(path: string): string {

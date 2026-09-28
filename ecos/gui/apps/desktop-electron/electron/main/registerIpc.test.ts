@@ -20,6 +20,7 @@ interface MockBrowserWindow {
 const {
   fromWebContents,
   getAllWindows,
+  getDisplayMatching,
   openExternal,
   openPath,
   showMessageBox,
@@ -30,6 +31,9 @@ const {
 } = vi.hoisted(() => ({
   fromWebContents: vi.fn(),
   getAllWindows: vi.fn<() => MockBrowserWindow[]>(() => []),
+  getDisplayMatching: vi.fn(() => ({
+    workArea: { x: 0, y: 0, width: 2560, height: 1440 },
+  })),
   mkdirMock: vi.fn(),
   openExternal: vi.fn(),
   openPath: vi.fn(),
@@ -60,6 +64,9 @@ vi.mock('electron', () => ({
   },
   ipcMain: {
     handle: vi.fn(),
+  },
+  screen: {
+    getDisplayMatching,
   },
   shell: {
     openExternal,
@@ -111,6 +118,10 @@ function registerHandlers(
     projectManifestService: {
       mutate: vi.fn(),
     },
+    projectDoctorService: {
+      check: vi.fn(),
+      repair: vi.fn(),
+    },
     projectManagementReadService: {
       discoverProject: vi.fn(),
       readManifest: vi.fn(),
@@ -120,6 +131,7 @@ function registerHandlers(
     backendWorkspaceService: {
       clearWindow: vi.fn(),
       getArtifact: vi.fn(),
+      getChecklistEvidence: vi.fn(),
       getOverview: vi.fn(),
       getStepDetail: vi.fn(),
       invalidateWindow: vi.fn(),
@@ -155,11 +167,13 @@ function registerHandlers(
       readOptionalProjectTextFileTail: vi.fn(),
       readProjectTextFile: vi.fn(),
       readProjectTextFileTail: vi.fn(),
+      registerProjectManagementReadRoot: vi.fn(),
       registerProjectReadRoot: vi.fn(),
       registerProjectRoot: vi.fn(),
       listProjectDirectory: vi.fn(),
       pathExists: vi.fn(),
       discardFailedWorkspaceCreate: vi.fn(),
+      deleteEngineeringSnapshot: vi.fn(),
       requestProjectPathAccess: vi.fn(async (path: string) => path),
       scanPdkDirectory: vi.fn(),
       scanRtlDirectory: vi.fn(),
@@ -390,11 +404,17 @@ function workspaceCreateRequest(
 }
 
 function createWindowDouble(isMaximized = false) {
+  const bounds = { x: 0, y: 0, width: 1280, height: 800 }
   return {
     close: vi.fn(),
+    getBounds: vi.fn(() => ({ ...bounds })),
     isMaximized: vi.fn(() => isMaximized),
     maximize: vi.fn(),
     minimize: vi.fn(),
+    setSize: vi.fn((width: number, height: number) => {
+      bounds.width = width
+      bounds.height = height
+    }),
     setTitle: vi.fn(),
     webContents: {
       setZoomFactor: vi.fn(),
@@ -505,6 +525,50 @@ describe('registerIpc', () => {
       ok: false,
     })
     expect(services.workspaceService.discardFailedWorkspaceCreate).not.toHaveBeenCalled()
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceDeleteEngineeringSnapshot)?.(
+        { sender: { id: 7 } },
+        '/projects/demo/ws_1',
+      ),
+    ).resolves.toMatchObject({
+      error: { code: 'SHUTDOWN_IN_PROGRESS' },
+      ok: false,
+    })
+    expect(services.workspaceService.deleteEngineeringSnapshot).not.toHaveBeenCalled()
+  })
+
+  it('delegates engineering snapshot deletion to the workspace service', async () => {
+    const { handlers, services } = registerHandlers()
+    services.workspaceService.deleteEngineeringSnapshot.mockResolvedValue(true)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceDeleteEngineeringSnapshot)?.(
+        { sender: { id: 7 } },
+        '/projects/demo/ws_1',
+      ),
+    ).resolves.toBe(true)
+    expect(services.workspaceService.deleteEngineeringSnapshot).toHaveBeenCalledWith(
+      '/projects/demo/ws_1',
+    )
+    expect(
+      services.backendProjectComparisonService.invalidateWorkspace,
+    ).toHaveBeenCalledWith('/projects/demo/ws_1')
+
+    services.workspaceService.deleteEngineeringSnapshot.mockResolvedValue(false)
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceDeleteEngineeringSnapshot)?.(
+        { sender: { id: 7 } },
+        '/projects/demo/ws_1',
+      ),
+    ).resolves.toBe(false)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceDeleteEngineeringSnapshot)?.(
+        { sender: { id: 7 } },
+        42,
+      ),
+    ).resolves.toMatchObject({ error: { message: 'Workspace path must be a string' } })
   })
 
   it('tracks an accepted mutating command until its handler settles', async () => {
@@ -650,10 +714,50 @@ describe('registerIpc', () => {
     )
   })
 
-  it('returns a structured result when a Project read root cannot be granted', async () => {
+  it('falls back to a Project Management read scope for unrelated projects', async () => {
+    const { handlers, services } = registerHandlers()
+    services.workspaceService.getProjectRoot.mockResolvedValue('/work/demo/ws_0001')
+    services.workspaceService.registerProjectReadRoot.mockRejectedValue(
+      new Error('Project read root manifest does not declare the active workspace'),
+    )
+    services.workspaceService.registerProjectManagementReadRoot.mockResolvedValue(
+      '/projects/canonical',
+    )
+    services.backendProjectComparisonService.selectProject.mockResolvedValue({
+      generation: 0,
+      ok: true,
+      projectComparisonContextId: 'context-1',
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.backendProjectComparisonSelectProject)?.(
+        { sender: { id: 7 } },
+        { projectRootLocator: '/projects/requested' },
+      ),
+    ).resolves.toEqual({
+      generation: 0,
+      ok: true,
+      projectComparisonContextId: 'context-1',
+    })
+    expect(services.workspaceService.registerProjectReadRoot).toHaveBeenCalledWith(
+      '/projects/requested',
+    )
+    expect(
+      services.workspaceService.registerProjectManagementReadRoot,
+    ).toHaveBeenCalledWith('/projects/requested')
+    expect(services.backendProjectComparisonService.selectProject).toHaveBeenCalledWith(
+      7,
+      { projectRootLocator: '/projects/canonical' },
+    )
+  })
+
+  it('returns a structured result when no Project read scope can be granted', async () => {
     const { handlers, services } = registerHandlers()
     services.workspaceService.registerProjectReadRoot.mockRejectedValue(
       new Error('Project read root manifest does not declare the active workspace'),
+    )
+    services.workspaceService.registerProjectManagementReadRoot.mockRejectedValue(
+      new Error('Project read root must have a valid project.json: missing manifest'),
     )
 
     await expect(
@@ -664,7 +768,7 @@ describe('registerIpc', () => {
     ).resolves.toEqual({
       ok: false,
       code: 'invalid-project',
-      detail: 'Project read root manifest does not declare the active workspace',
+      detail: 'Project read root must have a valid project.json: missing manifest',
     })
     expect(services.backendProjectComparisonService.selectProject).not.toHaveBeenCalled()
     expect(electronLogger.warn).not.toHaveBeenCalled()
@@ -772,6 +876,120 @@ describe('registerIpc', () => {
       ),
     ).resolves.toEqual({ status: 'cancelled' })
     expect(services.projectWorkspaceImportService.importWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('checks project consistency through the doctor service', async () => {
+    const { handlers, services } = registerHandlers()
+    const report = {
+      doctor: 'project',
+      status: 'failed',
+      projectRoot: '/tmp/project',
+      checked: 2,
+      inconsistent: 1,
+      findings: [
+        {
+          check: 'missing-directory',
+          status: 'fail',
+          workspace_id: 'ws_0002',
+          workspace: '/tmp/project/ws_0002',
+          detail: 'workspace directory does not exist',
+        },
+      ],
+    }
+    services.projectDoctorService.check.mockResolvedValueOnce(report)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementCheckConsistency)?.(
+        { sender: {} },
+        '/tmp/project',
+      ),
+    ).resolves.toEqual(report)
+    expect(services.projectDoctorService.check).toHaveBeenCalledWith('/tmp/project')
+  })
+
+  it('rejects a consistency check without a project root', async () => {
+    const { handlers, services } = registerHandlers()
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementCheckConsistency)?.(
+        { sender: {} },
+        42,
+      ),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { message: 'Project consistency check requires a project root.' },
+    })
+    expect(services.projectDoctorService.check).not.toHaveBeenCalled()
+  })
+
+  it('repairs project consistency and invalidates the affected project', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 7 } }
+    services.projectDoctorService.repair.mockResolvedValueOnce({
+      doctor: 'project',
+      status: 'fixed',
+      projectRoot: '/tmp/project',
+      checked: 2,
+      inconsistent: 1,
+      fixed: 1,
+      findings: [],
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementRepairConsistency)?.(
+        event,
+        '/tmp/project',
+      ),
+    ).resolves.toMatchObject({ status: 'fixed' })
+    expect(services.projectDoctorService.repair).toHaveBeenCalledWith('/tmp/project')
+    expect(services.backendWorkspaceService.invalidateWindow).toHaveBeenCalledWith(7)
+    expect(
+      services.backendProjectComparisonService.invalidateProject,
+    ).toHaveBeenCalledWith('/tmp/project')
+  })
+
+  it('skips invalidation when a consistency repair changed nothing', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 7 } }
+    services.projectDoctorService.repair.mockResolvedValueOnce({
+      doctor: 'project',
+      status: 'ok',
+      projectRoot: '/tmp/project',
+      checked: 1,
+      inconsistent: 0,
+      findings: [],
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementRepairConsistency)?.(
+        event,
+        '/tmp/project',
+      ),
+    ).resolves.toMatchObject({ status: 'ok' })
+    expect(services.backendWorkspaceService.invalidateWindow).not.toHaveBeenCalled()
+    expect(
+      services.backendProjectComparisonService.invalidateProject,
+    ).not.toHaveBeenCalled()
+  })
+
+  it('blocks consistency repairs while shutdown drains mutations', async () => {
+    const { handlers, services } = registerHandlers()
+    services.shutdownCoordinator.isMutationBlocked.mockReturnValue(true)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementRepairConsistency)?.(
+        { sender: { id: 7 } },
+        '/tmp/project',
+      ),
+    ).resolves.toEqual({
+      error: {
+        code: 'SHUTDOWN_IN_PROGRESS',
+        message: 'Shutdown is in progress.',
+        name: 'Error',
+      },
+      ok: false,
+    })
+    expect(services.projectDoctorService.repair).not.toHaveBeenCalled()
   })
 
   it('requires native confirmation before approving external frontend roots', async () => {
@@ -1898,6 +2116,65 @@ describe('registerIpc', () => {
     expect(windowDouble.webContents.setZoomFactor).toHaveBeenCalledTimes(1)
   })
 
+  it('extends the window for a left panel and shrinks back on close', async () => {
+    const { handlers } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const windowDouble = createWindowDouble()
+    fromWebContents.mockReturnValue(windowDouble)
+    const handler = handlers.get(desktopApiIpcChannels.windowSetLeftPanelExtension)
+
+    await expect(handler?.(event, 400)).resolves.toBe(400)
+    expect(windowDouble.setSize).toHaveBeenCalledWith(1680, 800)
+
+    await expect(handler?.(event, 0)).resolves.toBe(0)
+    expect(windowDouble.setSize).toHaveBeenLastCalledWith(1280, 800)
+  })
+
+  it('caps left panel growth at the right edge of the work area', async () => {
+    const { handlers } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const windowDouble = createWindowDouble()
+    fromWebContents.mockReturnValue(windowDouble)
+    getDisplayMatching.mockReturnValueOnce({
+      workArea: { x: 0, y: 0, width: 1500, height: 900 },
+    })
+    const handler = handlers.get(desktopApiIpcChannels.windowSetLeftPanelExtension)
+
+    await expect(handler?.(event, 400)).resolves.toBe(220)
+    expect(windowDouble.setSize).toHaveBeenCalledWith(1500, 800)
+  })
+
+  it('leaves maximized windows untouched when setting the left panel extension', async () => {
+    const { handlers } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    fromWebContents.mockReturnValue(createWindowDouble(true))
+    const handler = handlers.get(desktopApiIpcChannels.windowSetLeftPanelExtension)
+
+    await expect(handler?.(event, 400)).resolves.toBe(0)
+  })
+
+  it('rejects invalid left panel extension values', async () => {
+    const { handlers } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    fromWebContents.mockReturnValue(createWindowDouble())
+    const handler = handlers.get(desktopApiIpcChannels.windowSetLeftPanelExtension)
+
+    await expect(handler?.(event, -1)).resolves.toEqual({
+      error: {
+        message: 'Left panel extension must be a number between 0 and 1200',
+        name: 'Error',
+      },
+      ok: false,
+    })
+    await expect(handler?.(event, 5000)).resolves.toEqual({
+      error: {
+        message: 'Left panel extension must be a number between 0 and 1200',
+        name: 'Error',
+      },
+      ok: false,
+    })
+  })
+
   it('toggles maximize by maximizing a normal window and restoring a maximized one', async () => {
     const { handlers } = registerHandlers()
     const toggleHandler = handlers.get(desktopApiIpcChannels.windowToggleMaximize)
@@ -2744,6 +3021,18 @@ describe('registerIpc', () => {
         workspaceRevision: 9,
       }),
     ).resolves.toEqual(detail)
+    const evidenceRequest = {
+      findingId: 'place.drc',
+      workspaceContextId: 'workspace-context-1',
+      workspaceRevision: 9,
+    }
+    services.backendWorkspaceService.getChecklistEvidence.mockResolvedValue(detail)
+    await expect(
+      handlers.get(desktopApiIpcChannels.backendWorkspaceGetChecklistEvidence)?.(
+        event,
+        evidenceRequest,
+      ),
+    ).resolves.toEqual(detail)
     await expect(
       handlers.get(desktopApiIpcChannels.backendWorkspaceRefreshOverview)?.(event),
     ).resolves.toEqual(result)
@@ -2757,6 +3046,9 @@ describe('registerIpc', () => {
       workspaceContextId: 'workspace-context-1',
       workspaceRevision: 9,
     })
+    expect(services.backendWorkspaceService.getChecklistEvidence).toHaveBeenCalledWith(
+      evidenceRequest,
+    )
     expect(services.backendWorkspaceService.refreshOverview).toHaveBeenCalledTimes(1)
   })
 
@@ -2811,6 +3103,72 @@ describe('registerIpc', () => {
     ).resolves.toEqual(result)
 
     expect(services.eccRuntimeService.exportSignoff).toHaveBeenCalledWith(request)
+  })
+
+  it('routes workspace.update with retainBackup and invalidates workspace projections', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 11 } }
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+    })
+    await openBackendWorkspace(handlers, event, { directory: '/work/demo' })
+    services.pdkInventoryService.resolveBinding.mockResolvedValue({
+      installationId: 'pdk-installation:ics55',
+      projectId: 'proj_demo',
+      projectRoot: '/work',
+    })
+    services.pdkInventoryService.validateWorkspace.mockResolvedValue({
+      id: 'pdk-installation:ics55',
+      familyId: 'ics55',
+      displayName: 'ICS55',
+      version: null,
+      root: '/canonical/pdk',
+      ownership: 'imported',
+      readiness: 'ready',
+      reason: null,
+    })
+    services.eccRuntimeService.updateWorkspace.mockResolvedValue({
+      backupDirectory: '/work/.demo.replace-backup-1',
+      directory: '/work/demo',
+      workspaceRevision: 2,
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.productCommandExecute)?.(event, {
+        command: 'workspace.update',
+        payload: {
+          commandId: 'workspace-update-1',
+          draft: {
+            targetDirectory: '/work/demo',
+            workspaceBindings: { inputs: {}, pdk: {} },
+            workspaceSpec: { pdk: { familyId: 'ics55', mode: 'default' } },
+            pdkRequirement: { familyId: 'ics55', version: null, manualConfig: null },
+          },
+          expectedWorkspaceRevision: 1,
+          retainBackup: true,
+          workspaceHandle: 'workspace-handle-1',
+        },
+      }),
+    ).resolves.toMatchObject({
+      backupDirectory: '/work/.demo.replace-backup-1',
+      workspaceRevision: 2,
+    })
+
+    expect(services.eccRuntimeService.updateWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        commandId: 'workspace-update-1',
+        expectedWorkspaceRevision: 1,
+        retainBackup: true,
+        workspaceHandle: 'workspace-handle-1',
+      }),
+    )
+    // The in-place update replaced the journal IPC handlers that used to
+    // invalidate the Project Management and Workspace projections.
+    expect(services.backendWorkspaceService.invalidateWindow).toHaveBeenCalledWith(11)
+    expect(
+      services.backendProjectComparisonService.invalidateWorkspace,
+    ).toHaveBeenCalledWith('/work/demo')
   })
 
   it('rejects Product Commands from a Renderer that does not own the Workspace', async () => {

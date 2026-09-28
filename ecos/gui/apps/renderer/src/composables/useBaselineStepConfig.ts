@@ -191,7 +191,7 @@ export function useBaselineStepConfig(step: Ref<StepEnum | undefined>) {
       let snapshot = force ? undefined : snapshotCache.get(cacheKey)
       if (!snapshot) {
         snapshot = {
-          workspaceName: baselineWorkspace.name,
+          workspaceName: baseline.archivedLabel ?? baselineWorkspace.name,
           workspacePath: baselineWorkspace.workspace_path,
         }
         snapshotCache.set(cacheKey, snapshot)

@@ -64,6 +64,8 @@ const FLOW_STEP_ALIASES: Record<string, ProjectManifestFlowStep> = {
   postroutelec: 'Filler',
   rcx: 'RCX',
   sta: 'STA',
+  // Power Analysis runs between STA and LVS; same preceding-step rationale.
+  poweranalysis: 'STA',
   gds: 'Harden',
   signoff: 'Harden',
   harden: 'Harden',
@@ -442,9 +444,10 @@ export function setQorBaselineInManifest(
   now = new Date().toISOString(),
 ): ProjectManifest {
   if (manifest.project_type !== 'backend') return manifest
+  // Archived entries are valid targets: after a generation replacement the
+  // baseline may point at the retained archived backup of the old generation.
   const hasWorkspace = manifest.workspaces.some(
-    (workspace) =>
-      workspace.workspace_id === workspaceId && workspace.status !== 'archived',
+    (workspace) => workspace.workspace_id === workspaceId,
   )
   if (!hasWorkspace) return manifest
 
@@ -784,13 +787,12 @@ export function ensureProjectQorBaseline(
   baseline: ProjectManifest['qor_baseline'],
   workspaces: readonly { workspace_id: string; status: string }[],
 ): ProjectManifest['qor_baseline'] {
+  // An archived target is a valid baseline (a retained replace backup keeps
+  // the previous generation's artifacts), so only a dangling pointer is
+  // re-resolved to the first active workspace.
   const hasAvailableBaseline = Boolean(
     baseline &&
-    workspaces.some(
-      (workspace) =>
-        workspace.workspace_id === baseline.workspace_id &&
-        workspace.status !== 'archived',
-    ),
+    workspaces.some((workspace) => workspace.workspace_id === baseline.workspace_id),
   )
   if (hasAvailableBaseline) return baseline
 

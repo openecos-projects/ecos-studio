@@ -22,8 +22,10 @@ const viewMocks = vi.hoisted(() => ({
     cleanup: vi.fn(),
     cancelResource: vi.fn(),
     importLocalResource: vi.fn(),
+    installResource: vi.fn(),
     removePdkReference: vi.fn(),
     uninstallResource: vi.fn(),
+    updateResource: vi.fn(),
     validatePdk: vi.fn(),
   },
 }))
@@ -121,6 +123,22 @@ describe('PluginToolsView PDK behavior', () => {
     await vi.waitFor(() => expect(viewMocks.importPdk).toHaveBeenCalled())
 
     expect(wrapper.find('[data-title="Import Local"] i').classes()).not.toContain('spin')
+    wrapper.unmount()
+  })
+
+  it('retries a failed registry PDK installation', async () => {
+    viewMocks.store.resources = [
+      pdkResource({
+        status: 'error',
+        error: 'PDK validation failed for ics55 v1.10.102',
+      }),
+    ]
+    viewMocks.store.installResource.mockClear()
+    const wrapper = mount(PluginToolsView)
+
+    await wrapper.get('button.danger').trigger('click')
+
+    expect(viewMocks.store.installResource).toHaveBeenCalledWith('pdk:ics55')
     wrapper.unmount()
   })
 })

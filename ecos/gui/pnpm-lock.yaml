@@ -160,6 +160,9 @@ importers:
 
   packages/shared:
     devDependencies:
+      '@types/node':
+        specifier: ^25.0.6
+        version: 25.0.6
       typescript:
         specifier: ^5.6.0
         version: 5.9.3
