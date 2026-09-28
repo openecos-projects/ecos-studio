@@ -64,6 +64,8 @@ import {
   type ProjectRouteContext,
 } from '@/utils/projectManifestRegistration'
 import { recentProjectFreshness, recentProjectSnapshot } from './recentProjectSnapshot'
+import { classifyWorkspaceOpenError } from '@ecos-studio/shared'
+import { useSnapshotOpenRecovery } from './useSnapshotOpenRecovery'
 
 interface SerializedProject {
   id: string
@@ -648,6 +650,16 @@ export function useWorkspace() {
       } catch (error) {
         workspaceLifecycle.failSession(session.sessionId)
         console.error('Failed to reload workspace after restore:', error)
+        const snapshotOpenError = classifyWorkspaceOpenError(error)
+        if (snapshotOpenError) {
+          const { requestSnapshotOpenRecovery } = useSnapshotOpenRecovery()
+          requestSnapshotOpenRecovery({
+            code: snapshotOpenError,
+            detail: error instanceof Error ? error.message : String(error),
+            directory: normalizedBoundPath,
+            retry: () => openProject(restored),
+          })
+        }
         await router.replace('/')
       }
     } catch (error) {
@@ -706,6 +718,7 @@ export function useWorkspace() {
     const openProjectRequestId = ++openProjectRequestSequence
     const isLatestOpenProjectRequest = () =>
       openProjectRequestId === openProjectRequestSequence
+    let openTargetPath = ''
     const previousWorkspaceHandle =
       workspaceLifecycle.session.value.state === 'active'
         ? workspaceLifecycle.session.value.workspaceId
@@ -732,6 +745,7 @@ export function useWorkspace() {
         if (!isLatestOpenProjectRequest()) return false
         if (!selectedPath) return false
       }
+      openTargetPath = selectedPath
 
       if (!(await isProjectValid(selectedPath))) {
         if (!isLatestOpenProjectRequest()) return false
@@ -946,6 +960,28 @@ export function useWorkspace() {
     } catch (error) {
       if (sessionId) workspaceLifecycle.failSession(sessionId)
       console.error('Open project error:', error)
+      const snapshotOpenError = classifyWorkspaceOpenError(error)
+      if (snapshotOpenError && openTargetPath && !quiet) {
+        const { requestSnapshotOpenRecovery } = useSnapshotOpenRecovery()
+        requestSnapshotOpenRecovery({
+          code: snapshotOpenError,
+          detail: error instanceof Error ? error.message : String(error),
+          directory: openTargetPath,
+          // `project` is undefined for picker-driven opens; retry the resolved
+          // directory instead of asking the user to pick it again.
+          retry: () =>
+            openProject(
+              project ?? {
+                id: openTargetPath,
+                name: workspaceNameFromPath(openTargetPath),
+                path: openTargetPath,
+                lastOpened: new Date(),
+              },
+              options,
+            ),
+        })
+        return false
+      }
       if (!quiet) {
         showToast({
           severity: 'error',
@@ -1090,9 +1126,11 @@ export function useWorkspace() {
       ) {
         return true
       }
+      // Backend workspace updates — under either backup option — converge on
+      // ECC's in-place update; only Frontend workspaces still use the Electron
+      // directory-replacement journal below.
       const updatesCurrentBackendWorkspace = Boolean(
         config?.replaceExistingWorkspace &&
-        !config.keepReplacementBackup &&
         (config.designTool ?? 'backend') === 'backend' &&
         currentProject.value &&
         normalizePath(currentProject.value.path) === selectedPath &&
@@ -1119,6 +1157,7 @@ export function useWorkspace() {
           backendWorkspaceOptions(config!, selectedPath, parameterDisplayIndex),
           currentWorkspaceHandle,
           expectedWorkspaceRevision!,
+          { retainBackup: config!.keepReplacementBackup === true },
         )
         if (
           !('workspaceRevision' in updated) ||
@@ -1159,7 +1198,10 @@ export function useWorkspace() {
       previousCreatePath = createAffinity.previousPath
 
       let creationConfig = config
-      if (config?.replaceExistingWorkspace) {
+      // Frontend workspace replacement keeps the Electron replacement-journal
+      // path unchanged; backend updates (both backup options) already returned
+      // via the ECC in-place update above, so no backend journal is prepared.
+      if (config?.replaceExistingWorkspace && creationConfig?.designTool === 'frontend') {
         const desktopApi = getDesktopApi()
         const registeredParent = await registerProjectRoot(
           workspaceParentPath(selectedPath),
@@ -1490,7 +1532,9 @@ export function useWorkspace() {
   }
 
   /**
-   * 从磁盘读取 workspace 数据，生成项目摘要快照
+   * 生成当前 workspace 的摘要快照（backend 经 runtime overview，frontend 读
+   * flow.json/parameters.json）并持久化到 recent_projects。
+   * 触发时机：flow 到达终态、进入 Backend Design 列表、关闭 workspace。
    */
   async function snapshotCurrentProject(
     isCurrent: () => boolean = () => true,
@@ -1752,6 +1796,13 @@ export function useWorkspace() {
       onTerminal: (directory) => {
         const resolvedDirectory = directory ?? currentProject.value?.path
         if (resolvedDirectory) clearFlowExecutionActiveForWorkspace(resolvedDirectory)
+        // The final step commit precedes the terminal event on the same
+        // channel, so the overview read here observes the settled state.
+        void snapshotCurrentProject(() =>
+          workspaceLifecycle.isCurrentSession(sessionId),
+        ).catch((error) =>
+          console.warn('Failed to snapshot workspace summary on flow terminal:', error),
+        )
       },
     })
     backendRuntimeEventClient.value = client
@@ -2210,6 +2261,7 @@ export function useWorkspace() {
     newProject,
     importProject,
     closeProject,
+    snapshotCurrentProject,
     updateWindowTitle,
     runtimeEventClient,
     runtimeEvents,

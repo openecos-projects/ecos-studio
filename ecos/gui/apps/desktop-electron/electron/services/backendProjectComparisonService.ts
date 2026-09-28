@@ -51,8 +51,7 @@ interface ProjectComparisonReader {
   readVerifiedArtifacts?(request: {
     projectRoot: string
     workspacePath: string
-    artifacts: Array<{ reference: string; sha256: string; sizeBytes: number }>
-    allowExternallyModified?: boolean
+    artifacts: Array<{ reference: string }>
   }): Promise<VerifiedProjectArtifactsReadResult>
 }
 
@@ -498,17 +497,14 @@ export class BackendProjectComparisonService {
                 workspaceIssue(workspace.workspace_id, issue),
               ),
             }
-            if (snapshotResult.sections.qor.status !== 'ready') return entry
-            const qor = snapshotResult.sections.qor.data
+            if (snapshotResult.sections.metrics.status !== 'ready') return entry
             const qorSnapshotExtension =
               !snapshotResult.snapshot.stalePredecessor &&
               snapshotResult.sections.qorSnapshotExtension.status === 'ready'
                 ? snapshotResult.sections.qorSnapshotExtension.data
                 : undefined
             const engineeringFacts = {
-              analysis: qor.analysis,
-              metrics: qor.metrics,
-              qorAssessment: qor.qorAssessment,
+              metrics: snapshotResult.sections.metrics.data,
               ...(qorSnapshotExtension ? { qorSnapshotExtension } : {}),
               ...(flow ? { flow } : {}),
               ...(snapshotResult.sections.signoff.status === 'ready'

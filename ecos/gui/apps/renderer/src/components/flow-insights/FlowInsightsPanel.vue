@@ -60,6 +60,7 @@
           :model="sta"
           :critical-paths="staCriticalPaths"
           :convergence="staConvergence"
+          :timing-issues-artifact="timingIssuesArtifact"
         />
       </div>
     </Dialog>
@@ -69,6 +70,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import Dialog from 'primevue/dialog'
+import type { WorkspaceArtifactDescriptor } from '@ecos-studio/shared'
 import StepResourcesPanel from './StepResourcesPanel.vue'
 import DbTrendsPanel from './DbTrendsPanel.vue'
 import CongestionPanel from './CongestionPanel.vue'
@@ -103,6 +105,7 @@ const props = defineProps<{
   sta: StaOverviewModel | null
   staCriticalPaths?: StaCriticalPathsModel | null
   staConvergence?: StaConvergenceModel | null
+  timingIssuesArtifact?: WorkspaceArtifactDescriptor | null
   loading?: boolean
   loadCongestion?: () => void | Promise<void>
 }>()

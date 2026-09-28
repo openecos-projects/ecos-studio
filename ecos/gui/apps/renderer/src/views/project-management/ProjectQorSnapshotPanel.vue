@@ -2,7 +2,7 @@
   <section class="dash-qphys" aria-label="QoR v3 Snapshot">
     <header class="dash-section-head">
       <span>QoR record breakdown</span>
-      <small>scored by ECC</small>
+      <small :class="dashboardToneClass(insights.scoreTone)">{{ headerNote }}</small>
     </header>
     <div v-if="insights.dimensions.length > 0" class="dash-qphys-list">
       <div
@@ -86,12 +86,22 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { DashboardQorInsights } from './projectDashboard'
 import { dashboardToneClass } from './projectDashboard'
 
-defineProps<{
+const props = defineProps<{
   insights: DashboardQorInsights
 }>()
+
+const headerNote = computed(() => {
+  const { insights } = props
+  if (insights.status !== 'available') return 'QoR v3'
+  if (insights.scalarStatus === 'NOT_RATED' || insights.score === null) {
+    return 'NR · QoR v3'
+  }
+  return `${insights.score.toFixed(1)} · ${insights.scalarStatus} · QoR v3`
+})
 
 function formatIndex(value: number | null): string {
   return value === null ? 'NR' : value.toFixed(1) + '/100'

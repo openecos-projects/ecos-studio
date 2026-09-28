@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { open, readdir, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import {
@@ -37,10 +36,8 @@ export type VerifiedProjectArtifactsReadResult =
   | {
       ok: true
       texts: Record<string, string>
-      integrity?: Record<string, 'verified' | 'externally-modified'>
       issues?: Array<{
         code:
-          | 'ARTIFACT_REVISION_MISMATCH'
           | 'FINDINGS_ARTIFACT_INVALID_JSON'
           | 'FINDINGS_ARTIFACT_TOO_LARGE'
           | 'ARTIFACT_REFERENCE_MISSING'
@@ -52,7 +49,6 @@ export type VerifiedProjectArtifactsReadResult =
   | {
       ok: false
       code:
-        | 'ARTIFACT_REVISION_MISMATCH'
         | 'FINDINGS_ARTIFACT_INVALID_JSON'
         | 'FINDINGS_ARTIFACT_TOO_LARGE'
         | 'ARTIFACT_REFERENCE_MISSING'
@@ -65,9 +61,6 @@ export type VerifiedProjectArtifactReadResult =
   | {
       ok: true
       bytes: Uint8Array
-      integrity?: 'verified' | 'externally-modified'
-      recordedSizeBytes?: number
-      actualSizeBytes?: number
     }
   | Exclude<VerifiedProjectArtifactsReadResult, { ok: true }>
 
@@ -427,8 +420,7 @@ export class ProjectManagementReadService {
   async readVerifiedArtifacts(request: {
     projectRoot: string
     workspacePath: string
-    artifacts: Array<{ reference: string; sha256: string; sizeBytes: number }>
-    allowExternallyModified?: boolean
+    artifacts: Array<{ reference: string }>
   }): Promise<VerifiedProjectArtifactsReadResult> {
     if (
       request.artifacts.length < 1 ||
@@ -449,10 +441,8 @@ export class ProjectManagementReadService {
         request.workspacePath,
       )
       const texts: Record<string, string> = {}
-      const integrity: Record<string, 'verified' | 'externally-modified'> = {}
       const issues: Array<{
         code:
-          | 'ARTIFACT_REVISION_MISMATCH'
           | 'FINDINGS_ARTIFACT_INVALID_JSON'
           | 'FINDINGS_ARTIFACT_TOO_LARGE'
           | 'ARTIFACT_REFERENCE_MISSING'
@@ -463,13 +453,10 @@ export class ProjectManagementReadService {
       for (const artifact of request.artifacts) {
         const result = await readVerifiedArtifactBytes(
           workspaceRoot,
-          artifact,
+          artifact.reference,
           PROJECT_FINDINGS_ARTIFACT_MAX_BYTES,
-          !request.allowExternallyModified,
-          request.allowExternallyModified,
         )
         if (!result.ok) {
-          if (!request.allowExternallyModified) return result
           issues.push({ code: result.code, reference: result.reference })
           continue
         }
@@ -478,13 +465,6 @@ export class ProjectManagementReadService {
           text = new TextDecoder('utf-8', { fatal: true }).decode(result.bytes)
           JSON.parse(text)
         } catch {
-          if (!request.allowExternallyModified) {
-            return {
-              ok: false,
-              code: 'FINDINGS_ARTIFACT_INVALID_JSON',
-              reference: artifact.reference,
-            }
-          }
           issues.push({
             code: 'FINDINGS_ARTIFACT_INVALID_JSON',
             reference: artifact.reference,
@@ -492,12 +472,10 @@ export class ProjectManagementReadService {
           continue
         }
         texts[artifact.reference] = text
-        if (result.integrity) integrity[artifact.reference] = result.integrity
       }
       return {
         ok: true,
         texts,
-        ...(request.allowExternallyModified ? { integrity } : {}),
         ...(issues.length > 0 ? { issues } : {}),
       }
     } catch {
@@ -508,9 +486,7 @@ export class ProjectManagementReadService {
   async readVerifiedArtifact(request: {
     projectRoot: string
     workspacePath: string
-    artifact: { reference: string; sha256: string; sizeBytes: number }
-    verifyFingerprint?: boolean
-    includeIntegrity?: boolean
+    artifact: { reference: string }
   }): Promise<VerifiedProjectArtifactReadResult> {
     try {
       const project = await this.loadProject(request.projectRoot)
@@ -524,31 +500,11 @@ export class ProjectManagementReadService {
       )
       const result = await readVerifiedArtifactBytes(
         workspaceRoot,
-        request.artifact,
+        request.artifact.reference,
         PROJECT_BINARY_ARTIFACT_MAX_BYTES,
-        request.verifyFingerprint ?? true,
-        request.includeIntegrity ?? request.verifyFingerprint === false,
       )
       if (!result.ok) return result
-      const response = {
-        ok: true as const,
-        bytes: Uint8Array.from(result.bytes),
-        ...(request.verifyFingerprint === false
-          ? {
-              integrity: result.integrity,
-              recordedSizeBytes: request.artifact.sizeBytes,
-              actualSizeBytes: result.bytes.byteLength,
-            }
-          : {}),
-      }
-      if (request.includeIntegrity === undefined && request.verifyFingerprint === false) {
-        Object.defineProperties(response, {
-          integrity: { enumerable: false },
-          recordedSizeBytes: { enumerable: false },
-          actualSizeBytes: { enumerable: false },
-        })
-      }
-      return response
+      return { ok: true, bytes: Uint8Array.from(result.bytes) }
     } catch {
       return { ok: false, code: 'FINDINGS_READ_FAILED', reference: '' }
     }
@@ -599,33 +555,24 @@ export class ProjectManagementReadService {
 
 async function readVerifiedArtifactBytes(
   workspaceRoot: string,
-  artifact: { reference: string; sha256: string; sizeBytes: number },
+  reference: string,
   maxBytes: number,
-  verifyFingerprint = true,
-  includeIntegrity = false,
 ): Promise<
   | {
       ok: true
       bytes: Buffer
-      integrity?: 'verified' | 'externally-modified'
     }
   | Exclude<VerifiedProjectArtifactsReadResult, { ok: true }>
 > {
   const unsafe = (): Exclude<VerifiedProjectArtifactsReadResult, { ok: true }> => ({
     ok: false,
     code: 'ARTIFACT_REFERENCE_OUTSIDE_WORKSPACE',
-    reference: artifact.reference,
+    reference,
   })
-  if (
-    !artifact.reference ||
-    isAbsolute(artifact.reference) ||
-    !Number.isSafeInteger(artifact.sizeBytes) ||
-    artifact.sizeBytes < 0 ||
-    !/^[a-f0-9]{64}$/.test(artifact.sha256)
-  ) {
+  if (!reference || isAbsolute(reference)) {
     return unsafe()
   }
-  const candidate = resolve(workspaceRoot, artifact.reference)
+  const candidate = resolve(workspaceRoot, reference)
   if (candidate === workspaceRoot || !isPathWithinRoot(candidate, workspaceRoot)) {
     return unsafe()
   }
@@ -634,8 +581,8 @@ async function readVerifiedArtifactBytes(
     canonicalPath = await realpath(candidate)
   } catch (error) {
     return isNodeErrorWithCode(error, 'ENOENT')
-      ? { ok: false, code: 'ARTIFACT_REFERENCE_MISSING', reference: artifact.reference }
-      : { ok: false, code: 'FINDINGS_READ_FAILED', reference: artifact.reference }
+      ? { ok: false, code: 'ARTIFACT_REFERENCE_MISSING', reference }
+      : { ok: false, code: 'FINDINGS_READ_FAILED', reference }
   }
   if (!isPathWithinRoot(canonicalPath, workspaceRoot)) return unsafe()
 
@@ -646,28 +593,17 @@ async function readVerifiedArtifactBytes(
       return {
         ok: false,
         code: 'ARTIFACT_REFERENCE_MISSING',
-        reference: artifact.reference,
+        reference,
       }
     }
-    if (
-      fileStats.size > maxBytes ||
-      (verifyFingerprint && artifact.sizeBytes > maxBytes)
-    ) {
+    if (fileStats.size > maxBytes) {
       return {
         ok: false,
         code: 'FINDINGS_ARTIFACT_TOO_LARGE',
-        reference: artifact.reference,
+        reference,
       }
     }
-    if (verifyFingerprint && fileStats.size !== artifact.sizeBytes) {
-      return {
-        ok: false,
-        code: 'ARTIFACT_REVISION_MISMATCH',
-        reference: artifact.reference,
-      }
-    }
-    const expectedReadSize = verifyFingerprint ? artifact.sizeBytes : fileStats.size
-    const buffer = Buffer.alloc(expectedReadSize + 1)
+    const buffer = Buffer.alloc(fileStats.size + 1)
     let offset = 0
     while (offset < buffer.length) {
       const { bytesRead } = await handle.read(
@@ -683,34 +619,10 @@ async function readVerifiedArtifactBytes(
       return {
         ok: false,
         code: 'FINDINGS_ARTIFACT_TOO_LARGE',
-        reference: artifact.reference,
+        reference,
       }
     }
-    if (offset !== expectedReadSize) {
-      return {
-        ok: false,
-        code: 'ARTIFACT_REVISION_MISMATCH',
-        reference: artifact.reference,
-      }
-    }
-    const bytes = buffer.subarray(0, offset)
-    const fingerprintMatches =
-      fileStats.size === artifact.sizeBytes &&
-      createHash('sha256').update(bytes).digest('hex') === artifact.sha256
-    if (verifyFingerprint && !fingerprintMatches) {
-      return {
-        ok: false,
-        code: 'ARTIFACT_REVISION_MISMATCH',
-        reference: artifact.reference,
-      }
-    }
-    return {
-      ok: true,
-      bytes,
-      ...(includeIntegrity
-        ? { integrity: fingerprintMatches ? 'verified' : 'externally-modified' }
-        : {}),
-    }
+    return { ok: true, bytes: buffer.subarray(0, offset) }
   } finally {
     await handle.close()
   }

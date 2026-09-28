@@ -4,7 +4,6 @@ import {
   validateEngineeringSnapshot,
   type EccEngineeringSnapshot,
   type EccEngineeringMetric,
-  type EccPersistedEngineeringSnapshot,
   type EccRuntimeOperation,
   type ProjectManifest,
 } from '@ecos-studio/shared'
@@ -112,28 +111,16 @@ function engineeringSnapshot(
     value,
   }
   return {
-    analysis: { steps: [] },
     artifacts: [],
-    checklist: {},
+    cause: 'flow_step.success',
+    checklist: { items: [] },
     flow: { steps: [{ name: step, state: 'Success' }] },
+    hotspotPreview: { hotspotCount: 0, hotspots: [], hotspotsTruncated: false },
     metrics: [metric],
     parameters: {},
-    qorAssessment: {
-      status: 'ready',
-      metrics: [metric],
-      score: { gate: 'pass', threshold: 60, value: 80 - value / 10 },
-      steps: [
-        {
-          name: 'Route',
-          order: 6,
-          status: 'pass',
-          stepId: 'Route',
-          summaryMetricCount: 1,
-        },
-      ],
-    },
-    schemaVersion: 1,
+    schemaVersion: 6,
     signoffAssessment: { groups: [], risks: [], status: 'ready' },
+    timingPreview: { issueCount: 0, issues: [], issuesTruncated: false },
     workspaceId: workspacePath,
     workspaceRevision: 1,
   }
@@ -145,19 +132,6 @@ function snapshotResult(
   const validated = validateEngineeringSnapshot(snapshot)
   if (!validated.ok) throw new Error(validated.issue.code)
   return { ...validated, readBytes: Buffer.byteLength(JSON.stringify(snapshot)) }
-}
-
-function appendSnapshotStepMetric(
-  snapshot: EccPersistedEngineeringSnapshot,
-  stepId: string,
-  metric: EccEngineeringMetric,
-): void {
-  const metricsFile = snapshot.analysis.steps.find(
-    (step) => step.stepId === stepId,
-  )?.metrics
-  const metrics = metricsFile?.data?.metrics
-  if (!Array.isArray(metrics)) throw new Error(`missing ${stepId} Snapshot metrics`)
-  metrics.push(metric)
 }
 
 function serviceFixture() {
@@ -391,17 +365,35 @@ describe('BackendProjectComparisonService', () => {
       ws_0001: successfulFlow,
       ws_0002: successfulFlow,
     })
+    // The v6 flat metrics projection feeds the comparison directly: every
+    // record carries producer step attribution, so comparison records, data
+    // quality, and the recommendation are all rebuilt from the snapshot alone.
     expect(
       first.data.trend.data.workspaces.map((workspace) => ({
         id: workspace.workspaceId,
         score: workspace.overallScore,
         status: workspace.status,
         metrics: workspace.comparisonRecords?.length,
+        quality: workspace.dataQuality.status,
         signoff: workspace.signoffReadiness.status,
       })),
     ).toEqual([
-      { id: 'ws_0001', score: 72, status: 'Green', metrics: 168, signoff: 'pass' },
-      { id: 'ws_0002', score: 84, status: 'Green', metrics: 168, signoff: 'pass' },
+      {
+        id: 'ws_0001',
+        score: 72,
+        status: 'Orange',
+        metrics: 223,
+        quality: 'complete',
+        signoff: 'pass',
+      },
+      {
+        id: 'ws_0002',
+        score: 84,
+        status: 'Yellow',
+        metrics: 223,
+        quality: 'complete',
+        signoff: 'pass',
+      },
     ])
     expect(first.data.trend.data.workspaces[1]?.qorSnapshotExtension).toMatchObject({
       scoringEngine: 'qor-v3',
@@ -412,29 +404,18 @@ describe('BackendProjectComparisonService', () => {
       data: { workspaceId: 'ws_0002', score: 84 },
     })
     expect(first.ok && first.data.risks).toMatchObject({
-      data: {
-        items: [expect.objectContaining({ workspaceId: 'ws_0002', step: 'Route' })],
-      },
+      data: { items: [] },
     })
     expect(first.ok && first.data.timingTriage).toMatchObject({
-      data: {
-        items: [
-          expect.objectContaining({
-            workspaceId: 'ws_0002',
-            baselineWorkspaceId: 'ws_0001',
-            issueId: 'setup-main',
-            state: 'improved',
-          }),
-        ],
-      },
+      data: { items: [] },
     })
     expect(first.data.stepComparisons.data.steps).toHaveLength(
       projectManifestFlowSteps.length,
     )
     expect(first.data.workspaceSnapshots.data.items[1]?.steps.Route).toMatchObject({
       flowStatus: 'success',
-      metrics: expect.any(Array),
-      hotspots: [expect.objectContaining({ metric: 'route_congestion' })],
+      metrics: [],
+      hotspots: [],
     })
     expect(readEngineeringSnapshot).toHaveBeenCalledTimes(2)
     expect(debug).toHaveBeenCalledWith(
@@ -450,64 +431,17 @@ describe('BackendProjectComparisonService', () => {
     expect(fixture.engineeringSnapshots.ws_0001.workspaceId).not.toBe('ws_0001')
   })
 
-  it('preserves the complete Snapshot metric contract in Step Compare', async () => {
+  it('serves Step Compare metrics from the Snapshot projection without file scans', async () => {
+    // Snapshot v6 carries one flat metrics projection with producer step
+    // attribution; Step Compare reads it without touching per-step artifacts.
     const fixture = representativeProjectComparisonFixture()
-    for (const [index, workspaceId] of ['ws_0001', 'ws_0002'].entries()) {
-      const metric = {
-        analysis_group: 'route_latency',
-        category: 'runtime' as const,
-        confidence: 'medium' as const,
-        corner: 'slow',
-        corner_context: {
-          configured_role: 'route',
-          label: 'SS 1.62V 125C',
-          process_corner: 'ss',
-          rc_corner: 'rcmax',
-          temperature_c: 125,
-          voltage_v: 1.62,
-        },
-        direction: 'lower_is_better' as const,
-        display_name: 'Route Snapshot Latency',
-        id: 'snapshot_only_latency',
-        project_role: 'trend' as const,
-        rating: { gate: false, score: false, trend: true },
-        scope: 'design',
-        source: {
-          kind: 'feature',
-          path: 'feature/Route.step.json',
-          selector: '/metrics/snapshot_only_latency',
-        },
-        step_role: 'primary' as const,
-        unit: 'ms',
-        value: index === 0 ? 100 : 80,
-      }
-      appendSnapshotStepMetric(
-        fixture.engineeringSnapshots[workspaceId]!,
-        'Route',
-        metric,
-      )
-      appendSnapshotStepMetric(fixture.engineeringSnapshots[workspaceId]!, 'Route', {
-        ...metric,
-        display_name: 'Internal Route Counter',
-        id: 'snapshot_hidden_counter',
-        step_role: 'hidden',
-      })
-    }
-    const candidateRoute = fixture.engineeringSnapshots.ws_0002!.analysis.steps.find(
-      (step) => step.stepId === 'Route',
-    )
-    if (!candidateRoute) throw new Error('missing Route analysis')
-    candidateRoute.hotspots = {
-      artifactId: candidateRoute.hotspots.artifactId,
-      data: null,
-      reasonCode: 'ANALYSIS_FILE_INVALID',
-      status: 'invalid',
-    }
+    const readVerifiedArtifacts = vi.fn()
     const service = new BackendProjectComparisonService(
       {
         readEngineeringSnapshot: async ({ workspacePath }) =>
           snapshotResult(fixture.engineeringSnapshots[workspacePath.split('/').at(-1)!]!),
         readManifest: async () => fixture.manifest,
+        readVerifiedArtifacts,
         resolveProjectRoot: async (path) => path,
       },
       watcherHarness().create,
@@ -524,62 +458,34 @@ describe('BackendProjectComparisonService', () => {
     const route = result.data.stepComparisons.data.steps.find(
       (step) => step.stepId === 'Route',
     )
-    const records = route?.workspaces.map((workspace) =>
-      workspace.metrics.filter((metric) => metric.metricName.startsWith('snapshot_')),
-    )
 
-    expect(records).toEqual([
-      [
-        {
-          analysisGroup: 'route_latency',
-          baselineComparison: {
-            absoluteDelta: 0,
-            baselineValue: 100,
-            relativeDeltaPct: 0,
-            verdict: 'baseline',
-          },
-          confidence: 'medium',
-          corner: 'slow',
-          cornerContext: {
-            configuredRole: 'route',
-            label: 'SS 1.62V 125C',
-            processCorner: 'ss',
-            rcCorner: 'rcmax',
-            temperatureC: 125,
-            voltageV: 1.62,
-          },
-          dimension: 'runtime',
-          displayName: 'Route Snapshot Latency',
-          leads: false,
-          metricName: 'snapshot_only_latency',
-          polarity: 'lower_is_better',
-          projectRole: 'trend',
-          rating: { gate: false, score: false, trend: true },
-          scope: 'design',
-          sourceFile: 'feature/Route.step.json',
-          step: 'Route',
-          stepRole: 'primary',
-          unit: 'ms',
-          value: 100,
-          verdict: 'pass',
-          workspaceId: 'ws_0001',
-        },
-      ],
-      [
-        expect.objectContaining({
-          baselineComparison: {
-            absoluteDelta: -20,
-            baselineValue: 100,
-            relativeDeltaPct: -20,
-            verdict: 'improvement',
-          },
-          leads: true,
-          metricName: 'snapshot_only_latency',
-          value: 80,
-          workspaceId: 'ws_0002',
-        }),
-      ],
+    expect(route?.workspaces).toMatchObject([
+      { workspaceId: 'ws_0001', status: 'success' },
+      { workspaceId: 'ws_0002', status: 'success' },
     ])
+    expect(route?.workspaces[0]?.metrics).toHaveLength(14)
+    expect(route?.workspaces[0]?.metrics[0]).toMatchObject({
+      metricName: 'route_wirelength',
+      step: 'Route',
+      scope: 'final_route',
+      analysisGroup: 'route_metrics',
+      polarity: 'lower_is_better',
+      value: 1140,
+    })
+    // Metrics carry their corner context; the baseline workspace leads nothing
+    // it owns, and the candidate compares against it under the same context.
+    const sta = result.data.stepComparisons.data.steps.find(
+      (step) => step.stepId === 'STA',
+    )
+    expect(sta?.workspaces[1]?.metrics[0]).toMatchObject({
+      metricName: 'sta_setup_wns',
+      step: 'STA',
+      corner: 'typical',
+      cornerContext: { label: 'TT 1.8V 25C' },
+      unit: 'ns',
+      baselineComparison: { verdict: 'improvement' },
+    })
+    expect(readVerifiedArtifacts).not.toHaveBeenCalled()
   })
 
   it('keeps an invalid-QoR Workspace column but excludes it from metrics and ranking', async () => {
@@ -1029,15 +935,14 @@ describe('BackendProjectComparisonService', () => {
         projectWorkspaceId: 'ws_0002',
         step: 'Route',
         workspaceRevision: 14,
-        details: {
-          metrics: expect.arrayContaining([
-            expect.objectContaining({
-              baselineComparison: expect.objectContaining({ verdict: 'improvement' }),
-            }),
-          ]),
-        },
       },
     })
+    // Findings metrics come from the committed comparison projection, not from
+    // re-reading the step's analysis files.
+    expect(current.ok && current.data.details.metrics).toHaveLength(14)
+    expect(
+      current.ok && current.data.details.metrics.map((metric) => metric.step),
+    ).toEqual(Array.from({ length: 14 }, () => 'Route'))
     expect(
       readVerifiedArtifacts.mock.calls[0]?.[0].artifacts.map(
         (artifact: { reference: string }) => artifact.reference,
@@ -1050,7 +955,7 @@ describe('BackendProjectComparisonService', () => {
 
     readVerifiedArtifacts.mockResolvedValueOnce({
       ok: false,
-      code: 'ARTIFACT_REVISION_MISMATCH',
+      code: 'FINDINGS_READ_FAILED',
       reference: 'route_ecc/analysis/qor_metrics.json',
     })
     await expect(
@@ -1062,14 +967,14 @@ describe('BackendProjectComparisonService', () => {
     ).resolves.toMatchObject({
       ok: true,
       freshness: 'last-committed',
-      issue: { code: 'ARTIFACT_REVISION_MISMATCH' },
+      issue: { code: 'FINDINGS_READ_FAILED' },
     })
 
     fixture.engineeringSnapshots.ws_0002!.workspaceRevision = 15
     await service.refreshComparison(11, selected.projectComparisonContextId)
     readVerifiedArtifacts.mockResolvedValueOnce({
       ok: false,
-      code: 'ARTIFACT_REVISION_MISMATCH',
+      code: 'FINDINGS_READ_FAILED',
       reference: 'route_ecc/analysis/qor_metrics.json',
     })
     await expect(
@@ -1080,7 +985,7 @@ describe('BackendProjectComparisonService', () => {
       }),
     ).resolves.toEqual({
       ok: false,
-      code: 'ARTIFACT_REVISION_MISMATCH',
+      code: 'FINDINGS_READ_FAILED',
       detail: 'route_ecc/analysis/qor_metrics.json',
     })
   })
@@ -1188,24 +1093,17 @@ describe('BackendProjectComparisonService', () => {
   })
 
   it('rejects each missing Step Findings declaration without reading another detail', async () => {
-    for (const [stepId, field] of [
-      ['Route', 'metrics'],
-      ['Route', 'summary'],
-      ['Route', 'hotspots'],
-      ['STA', 'timingIssues'],
+    for (const [stepId, kind] of [
+      ['Route', 'qor_summary'],
+      ['Route', 'qor_hotspots'],
+      ['STA', 'sta_timing_issues'],
     ] as const) {
       const fixture = representativeProjectComparisonFixture()
-      const analysisStep = fixture.engineeringSnapshots.ws_0001!.analysis.steps.find(
-        (step) => step.stepId === stepId,
-      )!
-      const declared = analysisStep[field]
-      if (!declared) throw new Error(`missing ${stepId} ${field}`)
-      analysisStep[field] = {
-        artifactId: declared.artifactId,
-        data: null,
-        reasonCode: 'ANALYSIS_FILE_MISSING',
-        status: 'missing',
-      }
+      const artifact = fixture.engineeringSnapshots.ws_0001!.artifacts.find(
+        (candidate) => candidate.stepId === stepId && candidate.kind === kind,
+      )
+      if (!artifact) throw new Error(`missing ${stepId} ${kind} artifact`)
+      artifact.availability = 'missing'
       const readVerifiedArtifacts = vi.fn()
       const service = new BackendProjectComparisonService(
         {
@@ -1234,5 +1132,41 @@ describe('BackendProjectComparisonService', () => {
       ).resolves.toEqual({ ok: false, code: 'ARTIFACT_REFERENCE_MISSING' })
       expect(readVerifiedArtifacts).not.toHaveBeenCalled()
     }
+  })
+
+  it('keeps projection metrics visible when the step metrics artifact is missing', async () => {
+    const fixture = representativeProjectComparisonFixture()
+    const artifact = fixture.engineeringSnapshots.ws_0001!.artifacts.find(
+      (candidate) => candidate.stepId === 'Route' && candidate.kind === 'qor_metrics',
+    )
+    if (!artifact) throw new Error('missing Route qor_metrics artifact')
+    artifact.availability = 'missing'
+    const readVerifiedArtifacts = vi.fn()
+    const service = new BackendProjectComparisonService(
+      {
+        readEngineeringSnapshot: async ({ workspacePath }) =>
+          snapshotResult(fixture.engineeringSnapshots[workspacePath.split('/').at(-1)!]!),
+        readManifest: async () => fixture.manifest,
+        readVerifiedArtifacts,
+        resolveProjectRoot: async (path) => path,
+      },
+      watcherHarness().create,
+    )
+    const selected = await service.selectProject(11, {
+      projectRootLocator: '/projects/gcd',
+    })
+    if (!selected.ok) throw new Error('selection failed')
+    await service.getComparison(11, selected.projectComparisonContextId)
+
+    await expect(
+      service.getStepFindings(11, {
+        projectComparisonContextId: selected.projectComparisonContextId,
+        projectWorkspaceId: 'ws_0001',
+        step: 'Route',
+      }),
+    ).resolves.toMatchObject({ ok: true, data: { resultState: 'current' } })
+    // The missing metrics artifact blocks the verified detail read, but the
+    // committed comparison projection still supplies the step's metrics.
+    expect(readVerifiedArtifacts).not.toHaveBeenCalled()
   })
 })

@@ -414,6 +414,126 @@ describe('project management V3 model', () => {
     })
   })
 
+  it('floors an optimistic flow hint at a failed manifest status', () => {
+    const source = manifestWithWorkspace('ws_dirty')
+    const manifest = {
+      ...source,
+      workspaces: [{ ...source.workspaces[0]!, status: 'failed' as const }],
+    }
+
+    const model = buildProjectManagementProject(project, manifest, {
+      ws_dirty: { Synth: 'success', Harden: 'success' },
+    })
+
+    expect(model.workspaces[0]).toMatchObject({
+      status: 'failed',
+      flowStatusHint: { state: 'failed', label: 'Failed' },
+    })
+    expect(model.workspaces[0]?.flowStatusHint.step).toBeUndefined()
+    // Step cells keep the recorded flow facts; only the display reduction is floored.
+    expect(
+      model.workspaces[0]?.steps.find((step) => step.step === 'Synth'),
+    ).toMatchObject({ status: 'success' })
+    expect(model.dashboardSummary.runStateSlices).toEqual([
+      { state: 'failed', label: 'Failed', count: 1, percent: 100 },
+    ])
+  })
+
+  it('floors an all-success flow hint at a warning manifest status', () => {
+    const source = manifestWithWorkspace('ws_dirty_warning')
+    const manifest = {
+      ...source,
+      workspaces: [{ ...source.workspaces[0]!, status: 'warning' as const }],
+    }
+
+    const model = buildProjectManagementProject(project, manifest, {
+      ws_dirty_warning: { Synth: 'success', Harden: 'success' },
+    })
+
+    expect(model.workspaces[0]).toMatchObject({
+      status: 'warning',
+      flowStatusHint: { state: 'warning', label: 'Completed with warnings' },
+    })
+    expect(model.workspaces[0]?.flowStatusHint.step).toBeUndefined()
+  })
+
+  it('drops the step attribution when the floor overrides an active hint', () => {
+    const source = manifestWithWorkspace('ws_stale_running')
+    const manifest = {
+      ...source,
+      workspaces: [{ ...source.workspaces[0]!, status: 'failed' as const }],
+    }
+
+    const model = buildProjectManagementProject(project, manifest, {
+      ws_stale_running: { Synth: 'success', Place: 'running' },
+    })
+
+    expect(model.workspaces[0]).toMatchObject({
+      status: 'failed',
+      flowStatusHint: { state: 'failed', label: 'Failed' },
+    })
+    expect(model.workspaces[0]?.flowStatusHint.step).toBeUndefined()
+  })
+
+  it('does not floor flow-driven display for progress manifest statuses', () => {
+    const runningSource = manifestWithWorkspace('ws_running')
+    const runningModel = buildProjectManagementProject(
+      project,
+      {
+        ...runningSource,
+        workspaces: [{ ...runningSource.workspaces[0]!, status: 'running' as const }],
+      },
+      { ws_running: { Synth: 'success', Place: 'running' } },
+    )
+    expect(runningModel.workspaces[0]).toMatchObject({
+      status: 'running',
+      flowStatusHint: { state: 'running', step: 'Place', label: 'Place running' },
+    })
+
+    const successSource = manifestWithWorkspace('ws_success')
+    const successModel = buildProjectManagementProject(
+      project,
+      {
+        ...successSource,
+        workspaces: [{ ...successSource.workspaces[0]!, status: 'success' as const }],
+      },
+      { ws_success: { Synth: 'success', Harden: 'success' } },
+    )
+    expect(successModel.workspaces[0]).toMatchObject({
+      status: 'success',
+      flowStatusHint: { state: 'success', label: 'Success' },
+    })
+
+    // flow.json is authoritative for execution state: a recorded success flow may
+    // still display success while the manifest lags at not_started.
+    const freshModel = buildProjectManagementProject(
+      project,
+      manifestWithWorkspace('ws_fresh'),
+      { ws_fresh: { Synth: 'success', Harden: 'success' } },
+    )
+    expect(freshModel.workspaces[0]).toMatchObject({
+      status: 'success',
+      flowStatusHint: { state: 'success', label: 'Success' },
+    })
+  })
+
+  it('keeps a recorded failure visible when the manifest status is less severe', () => {
+    const source = manifestWithWorkspace('ws_failed_step')
+    const manifest = {
+      ...source,
+      workspaces: [{ ...source.workspaces[0]!, status: 'warning' as const }],
+    }
+
+    const model = buildProjectManagementProject(project, manifest, {
+      ws_failed_step: { Synth: 'failed' },
+    })
+
+    expect(model.workspaces[0]).toMatchObject({
+      status: 'failed',
+      flowStatusHint: { state: 'failed', step: 'Synth', label: 'Synth failed' },
+    })
+  })
+
   it('resolves and persists the project-local default QoR baseline rule', () => {
     const manifest = manifestWithWorkspaces(['ws_0001', 'ws_0004'])
     const legacyManifest = { ...manifest, qor_baseline: null }
@@ -421,17 +541,162 @@ describe('project management V3 model', () => {
     expect(resolveProjectQorBaselineWorkspace(legacyManifest, 'ws_0004')).toEqual({
       workspaceId: 'ws_0001',
       source: 'default',
+      archivedLabel: null,
     })
     expect(resolveProjectQorBaselineWorkspace(legacyManifest, 'ws_0001')).toEqual({
       workspaceId: 'ws_0004',
       source: 'default',
+      archivedLabel: null,
     })
     expect(
       resolveProjectQorBaselineWorkspace(manifestWithWorkspace(), 'ws_0004'),
     ).toEqual({
       workspaceId: 'ws_0004',
       source: 'selected',
+      archivedLabel: null,
     })
+  })
+
+  it('resolves a repointed baseline to the archived backup with a source label', () => {
+    const now = '2026-07-20T00:00:00.000Z'
+    const base = manifestWithWorkspaces(['ws_0001', 'ws_0002'])
+    const backupEntry = {
+      workspace_id: '.ws_0001.replace-backup-1',
+      name: '.ws_0001.replace-backup-1 backup',
+      workspace_path: '.ws_0001.replace-backup-1',
+      source_workspace_id: 'ws_0001',
+      branch_from: null,
+      start_step: 'Synth' as const,
+      end_step: 'Harden' as const,
+      status: 'archived' as const,
+      created_at: now,
+      updated_at: now,
+      parameter_patch: {},
+      metrics_summary: {},
+      step_metrics: {},
+    }
+    const manifest = {
+      ...base,
+      workspaces: [...base.workspaces, backupEntry],
+      qor_baseline: {
+        workspace_id: '.ws_0001.replace-backup-1',
+        reason: 'Default project QoR baseline',
+      },
+    }
+
+    // A baseline pointer repointed at the archived replace backup resolves to
+    // it and carries the lineage annotation for the UI.
+    expect(resolveProjectQorBaselineWorkspace(manifest, 'ws_0001')).toEqual({
+      workspaceId: '.ws_0001.replace-backup-1',
+      source: 'selected',
+      archivedLabel: 'Archived backup of ws_0001',
+    })
+
+    // Default resolution reaches archived entries too: the archived ws_0001
+    // (without recorded lineage) is the default for ws_0002, labeled by its
+    // own id.
+    const withoutSelection = {
+      ...manifest,
+      workspaces: manifest.workspaces.map((workspace) =>
+        workspace.workspace_id === 'ws_0001'
+          ? { ...workspace, status: 'archived' as const, source_workspace_id: null }
+          : workspace,
+      ),
+      qor_baseline: null,
+    }
+    expect(resolveProjectQorBaselineWorkspace(withoutSelection, 'ws_0002')).toEqual({
+      workspaceId: 'ws_0001',
+      source: 'default',
+      archivedLabel: 'Archived backup of ws_0001',
+    })
+
+    // The current-workspace fallback also accepts an archived entry.
+    const archivedCurrent = {
+      ...withoutSelection,
+      workspaces: withoutSelection.workspaces.filter(
+        (workspace) => workspace.workspace_id === 'ws_0001',
+      ),
+    }
+    expect(resolveProjectQorBaselineWorkspace(archivedCurrent, 'ws_0001')).toEqual({
+      workspaceId: 'ws_0001',
+      source: 'default',
+      archivedLabel: 'Archived backup of ws_0001',
+    })
+  })
+
+  it('annotates the trend baseline label when the baseline is an archived backup', () => {
+    const now = '2026-07-20T00:00:00.000Z'
+    const base = manifestWithWorkspaces(['ws_0001'])
+    const manifest = {
+      ...base,
+      workspaces: [
+        ...base.workspaces,
+        {
+          workspace_id: '.ws_0001.replace-backup-1',
+          name: '.ws_0001.replace-backup-1 backup',
+          workspace_path: '.ws_0001.replace-backup-1',
+          source_workspace_id: 'ws_0001',
+          branch_from: null,
+          start_step: 'Synth' as const,
+          end_step: 'Harden' as const,
+          status: 'archived' as const,
+          created_at: now,
+          updated_at: now,
+          parameter_patch: {},
+          metrics_summary: {},
+          step_metrics: {},
+        },
+      ],
+      qor_baseline: {
+        workspace_id: '.ws_0001.replace-backup-1',
+        reason: 'Default project QoR baseline',
+      },
+    }
+    const comparison: BackendProjectComparison = {
+      identity: { designName: 'gcd', projectId: 'gcd', projectName: 'gcd' },
+      refresh: { automatic: 'available' },
+      trend: {
+        data: trendSummaryFixture(
+          [{ workspaceId: 'ws_0001' }, { workspaceId: '.ws_0001.replace-backup-1' }],
+          '.ws_0001.replace-backup-1',
+        ),
+        issues: [],
+        status: 'ready',
+      },
+      workspaceSnapshots: {
+        data: { flowStates: {}, items: [] },
+        issues: [],
+        status: 'ready',
+      },
+      stepComparisons: { data: { steps: [] }, issues: [], status: 'ready' },
+      recommendation: { issues: [], status: 'unavailable' },
+      risks: { data: { items: [] }, issues: [], status: 'ready' },
+      timingTriage: { data: { items: [] }, issues: [], status: 'ready' },
+    }
+
+    const model = buildProjectManagementProject(project, manifest, {}, comparison)
+
+    // Every trend label surface reads the annotated source instead of the
+    // generated backup entry name.
+    expect(model.qorTrendSummary.baselineLabel).toBe('Archived backup of ws_0001')
+    expect(model.qorTrendSummary.baselineWorkspaceId).toBe('.ws_0001.replace-backup-1')
+
+    // An active baseline keeps its trend-computed label.
+    const activeComparison: BackendProjectComparison = {
+      ...comparison,
+      trend: {
+        data: trendSummaryFixture([{ workspaceId: 'ws_0001' }], 'ws_0001'),
+        issues: [],
+        status: 'ready',
+      },
+    }
+    const activeModel = buildProjectManagementProject(
+      project,
+      manifestWithWorkspaces(['ws_0001']),
+      {},
+      activeComparison,
+    )
+    expect(activeModel.qorTrendSummary.baselineLabel).toBe('ws_0001')
   })
 })
 

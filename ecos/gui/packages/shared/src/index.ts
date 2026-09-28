@@ -15,6 +15,15 @@ export type {
   DesktopFrontendWorkspaceTextsResult,
 } from './contracts/desktopApi.ts'
 export type {
+  ProjectDoctorCheckResult,
+  ProjectDoctorCheckStatus,
+  ProjectDoctorFinding,
+  ProjectDoctorFixAction,
+  ProjectDoctorFixRecord,
+  ProjectDoctorRepairResult,
+  ProjectDoctorRepairStatus,
+} from './contracts/projectDoctor.ts'
+export type {
   ProductCommandApi,
   ProductCommandRequest,
   ProductCommandResult,
@@ -36,6 +45,8 @@ export type {
   BackendWorkspaceArtifactContent,
   BackendWorkspaceArtifactRequest,
   BackendWorkspaceArtifactResult,
+  BackendWorkspaceChecklistEvidenceRequest,
+  BackendWorkspaceChecklistEvidenceResult,
   BackendWorkspaceInvalidatedEvent,
   BackendWorkspaceOverviewResult,
   BackendWorkspaceStepDetailRequest,
@@ -52,6 +63,7 @@ export type {
   WorkspaceBaselineComparison,
   WorkspaceArtifactDescriptor,
   WorkspaceChecklistSummary,
+  WorkspaceChecklistEvidence,
   WorkspaceConfigurationSummary,
   WorkspaceCongestionStatistic,
   WorkspaceCommittedRevision,
@@ -73,6 +85,7 @@ export type {
   WorkspaceStaCornerSummary,
   WorkspaceStaInsights,
   WorkspaceStaTimingIssue,
+  WorkspaceStaTimingIssuesDetail,
   WorkspaceStaTimingStage,
   WorkspaceTimingPathsDetail,
   WorkspaceTimingSummaryDetail,
@@ -124,8 +137,8 @@ export type {
   ProjectStepComparison,
   ProjectStepWorkspaceResult,
   ProjectStepStatus,
-  QorDimension,
   QorGateStatus,
+  QorMetricCategory,
   QorPolarity,
   QorStatus,
 } from './contracts/backendProjectComparison.ts'
@@ -216,7 +229,6 @@ export type {
   EccLayoutEditDiscardResult,
   EccLayoutEditSaveRequest,
   EccLayoutEditSaveResult,
-  EccArtifactRef,
   EccBackgroundOperation,
   EccBackgroundFinalization,
   EccBackgroundWorkspaceCreation,
@@ -225,15 +237,11 @@ export type {
   EccBackgroundOperationOutcome,
   EccBackgroundOperationProjection,
   EccBackgroundOperationRecovery,
-  EccEngineeringAnalysis,
   EccEngineeringAnalysisArtifactRef,
-  EccEngineeringAnalysisFile,
-  EccEngineeringAnalysisFileStatus,
-  EccEngineeringAnalysisStep,
-  EccEngineeringSubflowStep,
-  EccEngineeringSubflowSummary,
   EccEngineeringMetric,
   EccEngineeringSnapshot,
+  EccHotspotPreview,
+  EccHotspotPreviewEntry,
   EccQorSnapshotDiagnosis,
   EccQorSnapshotDiagnosisIntervention,
   EccQorSnapshotDimension,
@@ -241,6 +249,11 @@ export type {
   EccQorSnapshotExtension,
   EccQorSnapshotFeasibilityGate,
   EccPersistedEngineeringSnapshot,
+  EccSnapshotArtifactDescriptor,
+  EccSnapshotChecklistItem,
+  EccSnapshotChecklistProjection,
+  EccTimingPreview,
+  EccTimingPreviewIssue,
   EccRuntimeApi,
   EccRuntimeError,
   EccRuntimeEvent,
@@ -297,14 +310,30 @@ export type {
   EccWorkspaceRuntimeSnapshot,
 } from './contracts/eccRuntime.ts'
 export {
+  ENGINEERING_SNAPSHOT_ARTIFACT_LIMIT,
+  ENGINEERING_SNAPSHOT_CHECKLIST_LIMIT,
   ENGINEERING_SNAPSHOT_MAX_BYTES,
+  ENGINEERING_SNAPSHOT_SCHEMA_VERSION,
+  SNAPSHOT_IDENTITY_MISMATCH,
+  SNAPSHOT_REBUILD_REQUIRED,
+  classifyWorkspaceOpenError,
   parseEngineeringSnapshotJson,
   validateEngineeringSnapshot,
   type EngineeringSnapshotEnvelope,
   type EngineeringSnapshotIssue,
   type EngineeringSnapshotSections,
   type EngineeringSnapshotValidationResult,
+  type WorkspaceOpenSnapshotErrorCode,
 } from './utils/engineeringSnapshot.ts'
+export { engineeringSnapshotMetricStep } from './utils/engineeringMetricStep.ts'
+export {
+  QOR_SCORE_BAND_GREEN_MIN,
+  QOR_SCORE_BAND_ORANGE_MIN,
+  QOR_SCORE_BAND_YELLOW_MIN,
+  qorScalarStatusForScore,
+  qorScalarStatusLabel,
+  type QorScalarStatus,
+} from './utils/qorScoreBands.ts'
 export type {
   ResourceAction,
   ResourceImportLocalRequest,
@@ -527,6 +556,16 @@ export {
 } from './utils/projectManagementSummary.ts'
 export { validateMpcSpec } from './utils/mpcSpec.ts'
 export type { ValidatedMpcSpec, ValidatedMpcSpecDesign } from './utils/mpcSpec.ts'
+export {
+  flowStepCanonicalIds,
+  flowStepDefinition,
+  flowStepLabel,
+  flowStepRegistry,
+  isLayoutFlowStep,
+  isObsoleteFlowStepName,
+  normalizeFlowStepName,
+} from './utils/flowStepRegistry.ts'
+export type { FlowStepDefinition } from './utils/flowStepRegistry.ts'
 export {
   normalizeProjectManifestFlowStep,
   normalizeProjectManifestStage,

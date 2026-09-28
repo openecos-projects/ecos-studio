@@ -36,4 +36,10 @@ describe('desktop IPC channel constants', () => {
   it('defines a chip viewer open-status channel', () => {
     expect(desktopApiIpcChannels.chipViewerIsOpen).toBe('chip-viewer:is-open')
   })
+
+  it('defines a left panel extension channel', () => {
+    expect(desktopApiIpcChannels.windowSetLeftPanelExtension).toBe(
+      'window:set-left-panel-extension',
+    )
+  })
 })

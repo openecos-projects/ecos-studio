@@ -1,7 +1,8 @@
 import {
+  engineeringSnapshotMetricStep,
   parseProjectManifestFlowStep,
   type EccEngineeringAnalysisArtifactRef,
-  type EccEngineeringMetric,
+  type EccSnapshotChecklistProjection,
   type WorkspaceResultFreshness,
 } from '@ecos-studio/shared'
 import type { ProjectEngineeringSnapshotReadResult } from './projectManagementReadService'
@@ -13,13 +14,6 @@ export interface WorkspaceResultProjection {
   freshness: WorkspaceResultFreshness
   snapshot: ValidSnapshot
   staleArtifactIds: ReadonlySet<string>
-}
-
-interface AssessmentStep {
-  metrics: EccEngineeringMetric[]
-  order: number
-  raw: Record<string, unknown>
-  stepId: string
 }
 
 function canonicalStepIdentity(stepId: string): string {
@@ -45,96 +39,49 @@ function staleQorSnapshotExtension(): ValidSnapshot['sections']['qorSnapshotExte
   }
 }
 
-function assessmentSteps(assessment: Record<string, unknown>): AssessmentStep[] | null {
-  const steps = assessment.steps
-  const metrics = assessment.metrics
-  if (!Array.isArray(steps) || !Array.isArray(metrics)) return null
-  const result: AssessmentStep[] = []
-  let offset = 0
-  for (const value of steps) {
-    const step = record(value)
-    const stepId = typeof step?.stepId === 'string' ? step.stepId : ''
-    const count = step?.summaryMetricCount
-    const order = step?.order
-    if (!step || !stepId || !Number.isInteger(count) || !Number.isInteger(order))
-      return null
-    const nextOffset = offset + (count as number)
-    if (nextOffset > metrics.length) return null
-    result.push({
-      metrics: metrics.slice(offset, nextOffset) as EccEngineeringMetric[],
-      order: order as number,
-      raw: step,
-      stepId,
-    })
-    offset = nextOffset
-  }
-  return offset === metrics.length ? result : null
-}
-
-function mergeQor(
+// v6 metrics carry producer-assigned step attribution, so the stale merge
+// inherits exactly the predecessor metrics owned by steps without a current
+// result; a partially refreshed workspace keeps its own metrics for every
+// other step. Metrics without derivable step ownership are never resurrected
+// from the predecessor.
+function mergeMetrics(
   current: SnapshotData,
   stale: SnapshotData,
   staleSteps: ReadonlySet<string>,
-): ValidSnapshot['sections']['qor'] {
-  const currentQor = readyData(current.sections.qor)
-  const staleQor = readyData(stale.sections.qor)
-  if (!currentQor) return staleQor ? stale.sections.qor : current.sections.qor
-  if (!staleQor) return current.sections.qor
-
-  const currentAssessmentSteps = assessmentSteps(currentQor.qorAssessment)
-  const staleAssessmentSteps = assessmentSteps(staleQor.qorAssessment)
-  if (!currentAssessmentSteps) return stale.sections.qor
-  if (!staleAssessmentSteps) return current.sections.qor
-
-  const selectedSteps = [
-    ...currentAssessmentSteps,
-    ...staleAssessmentSteps.filter((step) =>
-      staleSteps.has(canonicalStepIdentity(step.stepId)),
-    ),
-  ].sort((left, right) => left.order - right.order)
-  const metrics = selectedSteps.flatMap((step) => step.metrics)
-  const analysisSteps = [
-    ...currentQor.analysis.steps,
-    ...staleQor.analysis.steps.filter((step) =>
-      staleSteps.has(canonicalStepIdentity(step.stepId)),
-    ),
-  ].sort((left, right) => left.order - right.order)
-
-  return {
-    status: 'ready',
-    data: {
-      analysis: { steps: analysisSteps },
-      metrics,
-      qorAssessment: {
-        ...staleQor.qorAssessment,
-        metrics,
-        steps: selectedSteps.map((step) => step.raw),
-      },
-    },
-    issues: [],
+): ValidSnapshot['sections']['metrics'] {
+  const currentMetrics = readyData(current.sections.metrics)
+  const staleMetrics = readyData(stale.sections.metrics)
+  if (!currentMetrics) return stale.sections.metrics
+  if (!staleMetrics) return current.sections.metrics
+  const inherited = staleMetrics.filter((metric) => {
+    const step = engineeringSnapshotMetricStep(metric)
+    return step !== null && staleSteps.has(canonicalStepIdentity(step))
+  })
+  if (!inherited.length) return current.sections.metrics
+  const section = current.sections.metrics
+  const data = [...currentMetrics, ...inherited]
+  if (section.status === 'ready') return { status: 'ready', data, issues: [] }
+  if (section.status === 'partial') {
+    return { status: 'partial', data, issues: section.issues }
   }
+  return section
 }
 
 function mergeChecklist(
   current: SnapshotData,
   stale: SnapshotData,
   staleSteps: ReadonlySet<string>,
-): Record<string, unknown> {
-  const currentChecklist = record(current.snapshot.checklist)
-  const staleChecklist = record(stale.snapshot.checklist)
-  const currentFindings = currentChecklist?.checklist
-  const staleFindings = staleChecklist?.checklist
-  if (!Array.isArray(currentFindings) || !Array.isArray(staleFindings)) {
-    return current.snapshot.checklist
+): ValidSnapshot['sections']['checklist'] {
+  const currentItems = readyData(current.sections.checklist)?.items
+  const staleItems = readyData(stale.sections.checklist)?.items
+  if (!currentItems || !staleItems) return current.sections.checklist
+  const fallback = staleItems.filter((item) =>
+    staleSteps.has(canonicalStepIdentity(item.step)),
+  )
+  const merged: EccSnapshotChecklistProjection = {
+    items: [...currentItems, ...fallback],
   }
-  const fallbackFindings = staleFindings.filter((value) => {
-    const finding = record(value)
-    return (
-      typeof finding?.step === 'string' &&
-      staleSteps.has(canonicalStepIdentity(finding.step))
-    )
-  })
-  return { ...currentChecklist, checklist: [...currentFindings, ...fallbackFindings] }
+  return { status: 'ready', data: merged, issues: [] }
 }
 
 function mergeArtifacts(
@@ -150,10 +97,8 @@ function mergeArtifacts(
   if (!staleArtifacts) {
     return { section: current.sections.artifacts, staleArtifactIds: new Set() }
   }
-  const fallback = staleArtifacts.filter(
-    (artifact) =>
-      typeof artifact.stepId === 'string' &&
-      staleSteps.has(canonicalStepIdentity(artifact.stepId)),
+  const fallback = staleArtifacts.filter((artifact) =>
+    staleSteps.has(canonicalStepIdentity(artifact.stepId)),
   ) as EccEngineeringAnalysisArtifactRef[]
   if (!currentArtifacts) {
     return {
@@ -165,6 +110,26 @@ function mergeArtifacts(
     section: { status: 'ready', data: [...currentArtifacts, ...fallback], issues: [] },
     staleArtifactIds: new Set(fallback.map((artifact) => artifact.artifactId)),
   }
+}
+
+// A step has a current result when the committed flow reports it complete; the
+// producer only projects metrics and previews from successful steps.
+function currentResultStepIds(snapshot: SnapshotData): string[] {
+  const flow = readyData(snapshot.sections.flow)
+  const steps = record(flow)?.steps
+  if (!Array.isArray(steps)) return []
+  return [
+    ...new Set(
+      steps.flatMap((value) => {
+        const step = record(value)
+        const name = typeof step?.name === 'string' ? step.name : ''
+        const state = String(step?.state ?? '')
+          .trim()
+          .toLowerCase()
+        return name && (state === 'success' || state === 'skipped') ? [name] : []
+      }),
+    ),
+  ]
 }
 
 export function projectWorkspaceResults(
@@ -185,16 +150,8 @@ export function projectWorkspaceResults(
     }
   }
 
-  const currentQor = readyData(current.sections.qor)
-  const currentAssessmentSteps = currentQor
-    ? assessmentSteps(currentQor.qorAssessment)
-    : null
-  const currentResultSteps = new Set(
-    (currentAssessmentSteps ?? []).map((step) => canonicalStepIdentity(step.stepId)),
-  )
-  const currentStepIds = [
-    ...new Set((currentAssessmentSteps ?? []).map((step) => step.stepId)),
-  ]
+  const currentStepIds = currentResultStepIds(current)
+  const currentResultSteps = new Set(currentStepIds.map(canonicalStepIdentity))
   const staleStepIds = predecessor.invalidatedStepIds.filter(
     (stepId) => !currentResultSteps.has(canonicalStepIdentity(stepId)),
   )
@@ -223,14 +180,11 @@ export function projectWorkspaceResults(
     },
     snapshot: {
       ...current,
-      snapshot: {
-        ...current.snapshot,
-        checklist: mergeChecklist(current, stale, staleSteps),
-      },
       sections: {
         ...current.sections,
         artifacts: artifacts.section,
-        qor: mergeQor(current, stale, staleSteps),
+        checklist: mergeChecklist(current, stale, staleSteps),
+        metrics: mergeMetrics(current, stale, staleSteps),
         qorSnapshotExtension: staleQorSnapshotExtension(),
       },
     },

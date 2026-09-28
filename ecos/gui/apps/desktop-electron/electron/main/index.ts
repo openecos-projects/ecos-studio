@@ -47,6 +47,7 @@ import {
 import { ProjectScopeService } from '../services/projectScopeService'
 import { ProjectReadGrantStore } from '../services/projectReadGrantStore'
 import { ProjectManifestService } from '../services/projectManifestService'
+import { ProjectDoctorService } from '../services/projectDoctorService'
 import { FrontendProjectManifestService } from '../services/frontendProjectManifestService'
 import {
   ProjectManagementReadService,
@@ -104,6 +105,7 @@ let services: {
   projectWorkspaceImportService: ProjectWorkspaceImportService
   projectManifestService: ProjectManifestService
   quickStartResourceService: QuickStartResourceService
+  projectDoctorService: ProjectDoctorService
   settingsStore: SettingsStore
   resourceManagerService: ResourceManagerService
   pdkInventoryService: PdkInventoryService
@@ -286,11 +288,20 @@ function getDesktopServices() {
         frontendRpcRuntimeService.isWorkspaceRuntimeActive(directory),
     },
   })
+  const frontendProjectManifestService = new FrontendProjectManifestService(
+    projectScopeService,
+    workspaceService,
+  )
   const projectManifestService = new ProjectManifestService(
     projectScopeService,
     workspaceService,
     eccRuntimeService,
-    new FrontendProjectManifestService(projectScopeService, workspaceService),
+    frontendProjectManifestService,
+  )
+  const projectDoctorService = new ProjectDoctorService(
+    projectScopeService,
+    eccRuntimeService,
+    frontendProjectManifestService,
   )
   const creationProjectScope = projectScopeService
   const workspaceCreationJournal = new WorkspaceCreationJournal({
@@ -389,6 +400,7 @@ function getDesktopServices() {
     projectWorkspaceImportService,
     projectManifestService,
     quickStartResourceService,
+    projectDoctorService,
     pdkInventoryService,
     projectEccConfigService,
     resourceManagerService,
@@ -489,6 +501,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       projectWorkspaceImportService: desktopServices.projectWorkspaceImportService,
       projectManifestService: desktopServices.projectManifestService,
       quickStartResourceService: desktopServices.quickStartResourceService,
+      projectDoctorService: desktopServices.projectDoctorService,
       resourceManagerService: desktopServices.resourceManagerService,
       pdkInventoryService: desktopServices.pdkInventoryService,
       projectEccConfigService: desktopServices.projectEccConfigService,

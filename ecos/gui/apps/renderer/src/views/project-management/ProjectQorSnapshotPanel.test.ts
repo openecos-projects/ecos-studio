@@ -7,6 +7,9 @@ import type { DashboardQorInsights } from './projectDashboard'
 function insights(overrides: Partial<DashboardQorInsights> = {}): DashboardQorInsights {
   return {
     status: 'available',
+    score: 74.2,
+    scalarStatus: 'YELLOW',
+    scoreTone: 'warn',
     dimensions: [
       {
         key: 'timing',
@@ -52,6 +55,7 @@ describe('ProjectQorSnapshotPanel', () => {
     expect(wrapper.get('.dash-qphys-value').text()).toBe('74.2')
     expect(wrapper.get('.dash-qphys-state').text()).toBe('PASS')
     expect(wrapper.get('.dash-qphys-bar i').attributes('style')).toContain('74.2%')
+    expect(wrapper.get('.dash-section-head small').text()).toBe('74.2 · YELLOW · QoR v3')
     expect(wrapper.get('summary').text()).toContain('timing-watch')
     expect(wrapper.get('.dash-diagnosis-evidence').text()).toContain('timing.setup')
     expect(wrapper.get('.dash-diagnosis-hypothesis').text()).toBe(
@@ -67,6 +71,9 @@ describe('ProjectQorSnapshotPanel', () => {
       props: {
         insights: insights({
           status: 'unavailable',
+          score: null,
+          scalarStatus: 'NOT_RATED',
+          scoreTone: 'neutral',
           dimensions: [],
           diagnoses: [],
           evidence: null,
@@ -77,5 +84,6 @@ describe('ProjectQorSnapshotPanel', () => {
     })
 
     expect(wrapper.get('.dash-qphys-empty').text()).toBe('QoR v3 Snapshot unavailable')
+    expect(wrapper.get('.dash-section-head small').text()).toBe('QoR v3')
   })
 })

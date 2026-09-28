@@ -26,7 +26,7 @@ const session = vi.hoisted(() => ({
               value: 5000,
             },
           ],
-          score: { gate: 'pass' as const, threshold: 60, value: 82 },
+          score: { scalarStatus: 'YELLOW' as const, value: 82 },
           steps: [],
         },
       },

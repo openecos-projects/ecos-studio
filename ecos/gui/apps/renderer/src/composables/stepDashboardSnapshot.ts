@@ -1,9 +1,10 @@
-import type {
-  WorkspaceDrcInsights,
-  WorkspaceStaInsights,
-  WorkspaceStepDetail,
-  WorkspaceTimingPathsDetail,
-  WorkspaceTimingSummaryDetail,
+import {
+  parseProjectManifestFlowStep,
+  type WorkspaceDrcInsights,
+  type WorkspaceStaInsights,
+  type WorkspaceStepDetail,
+  type WorkspaceTimingPathsDetail,
+  type WorkspaceTimingSummaryDetail,
 } from '@ecos-studio/shared'
 import {
   canonicalStepKey,
@@ -39,27 +40,13 @@ import {
 } from './snapshotFlowInsights'
 import { designStatistics, physicalInsights } from './stepDashboardPhysicalSnapshot'
 
-const FLOORPLAN_STEP_NAMES = new Set([
-  'floorplan',
-  'prefloorplan',
-  'macroplacement',
-  'postfloorplan',
-])
-
 export interface StepDashboardReport {
   artifactId: string
   directory: string
   id: string
   label: string
   relativePath: string
-  sizeBytes: number | null
   modifiedAt: number | null
-}
-
-export interface StepDashboardArtifactIntegrityWarning {
-  actualSizeBytes: number | null
-  name: string
-  recordedSizeBytes: number | null
 }
 
 export interface StepDashboardData {
@@ -92,7 +79,6 @@ export interface StepDashboardData {
   designStatis: StepDesignStatis | null
   hasGeometry: boolean
   reports: StepDashboardReport[]
-  artifactIntegrityWarnings: StepDashboardArtifactIntegrityWarning[]
   staleRevision: number | null
 }
 
@@ -317,7 +303,8 @@ export function snapshotStepDashboardData(
         truncated: false,
       },
     ),
-    floorplanInsights: FLOORPLAN_STEP_NAMES.has(normalizedStep) ? physical : null,
+    floorplanInsights:
+      parseProjectManifestFlowStep(detail.step.name) === 'Floor' ? physical : null,
     hardenInsights:
       normalizedStep === 'harden' && hardenArtifacts.length
         ? {
@@ -389,11 +376,9 @@ export function snapshotStepDashboardData(
           id: artifact.artifactId,
           label: parts[parts.length - 1] ?? artifact.name,
           relativePath: artifact.name,
-          sizeBytes: artifact.sizeBytes ?? null,
           modifiedAt: null,
         }
       }),
-    artifactIntegrityWarnings: [],
     staleRevision: staleEvidence?.workspaceRevision ?? null,
   }
 }

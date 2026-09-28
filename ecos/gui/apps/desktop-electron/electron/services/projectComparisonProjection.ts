@@ -1,4 +1,5 @@
 import {
+  isObsoleteFlowStepName,
   projectManifestFlowSteps,
   parseProjectManifestFlowStep,
   type ProjectAnalysisSnapshot,
@@ -21,7 +22,7 @@ const FLOW_STEPS = projectManifestFlowSteps
 function comparisonStepId(stepId: string): string | null {
   const canonical = parseProjectManifestFlowStep(stepId)
   if (canonical) return canonical
-  return stepId.toLowerCase().replace(/[\s_-]/g, '') === 'fixfanout' ? null : stepId
+  return isObsoleteFlowStepName(stepId) ? null : stepId
 }
 
 export type ProjectComparisonInput = NonNullable<

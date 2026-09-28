@@ -1,10 +1,7 @@
 <template>
   <main
     class="step-dashboard"
-    :class="{
-      'has-integrity-warning': data?.artifactIntegrityWarnings.length,
-      'has-stale': data?.staleRevision,
-    }"
+    :class="{ 'has-stale': data?.staleRevision }"
     aria-label="Step dashboard"
     :aria-busy="loading"
   >
@@ -35,30 +32,6 @@
         <i class="ri-history-line" aria-hidden="true" />
         Configuration changed since the last run. These step results reflect the previous
         configuration. Rerun this step to update them.
-      </div>
-      <div
-        v-if="data.artifactIntegrityWarnings.length"
-        class="step-dashboard-integrity-warning"
-        role="status"
-      >
-        <i class="ri-alert-line" aria-hidden="true" />
-        <div>
-          <strong>Artifact contents changed since the committed snapshot.</strong>
-          <ul>
-            <li v-for="warning in data.artifactIntegrityWarnings" :key="warning.name">
-              {{ warning.name
-              }}<span
-                v-if="
-                  warning.recordedSizeBytes !== null && warning.actualSizeBytes !== null
-                "
-              >
-                (recorded {{ formatArtifactSize(warning.recordedSizeBytes) }}, current
-                {{ formatArtifactSize(warning.actualSizeBytes) }})</span
-              >
-            </li>
-          </ul>
-          <span>Preview data is current, but it is not an immutable snapshot.</span>
-        </div>
       </div>
       <div class="step-dashboard-row step-dashboard-top">
         <section class="step-dashboard-card step-summary-card">
@@ -970,9 +943,7 @@
                   <template v-if="report.directory">
                     <i class="ri-folder-2-line" aria-hidden="true" />
                     {{ report.directory }}
-                    <span v-if="reportMeta(report)"> · </span>
                   </template>
-                  {{ reportMeta(report) }}
                 </small>
               </span>
               <button
@@ -1040,14 +1011,14 @@
         :class="`is-${item.state}`"
       >
         <div>
-          <span>{{
-            [item.category, item.owner, item.policy].filter(Boolean).join(' · ')
-          }}</span>
+          <span v-if="item.category">{{ item.category }}</span>
           <strong>{{ item.title }}</strong>
         </div>
         <p v-if="item.summary">{{ item.summary }}</p>
-        <code v-if="item.sourcePath">{{ item.sourcePath }}</code>
-        <small v-if="item.evidenceCount">{{ item.evidenceCount }} evidence items</small>
+        <small v-if="item.reconciled">
+          Reconciled with the committed flow: {{ item.reconciled.previousState }} → pass
+          ({{ item.reconciled.committedFlowState }})
+        </small>
       </section>
     </div>
     <p v-else class="dialog-empty">No checklist detail is available for this step.</p>
@@ -1192,12 +1163,7 @@
       <span>Loading report</span>
     </div>
     <p v-else-if="reportDialog.error" class="dialog-error">{{ reportDialog.error }}</p>
-    <div v-else>
-      <p v-if="reportDialog.warning" class="dialog-warning">
-        {{ reportDialog.warning }}
-      </p>
-      <pre class="report-code">{{ reportDialog.content }}</pre>
-    </div>
+    <pre v-else class="report-code">{{ reportDialog.content }}</pre>
   </Dialog>
 </template>
 
@@ -1205,10 +1171,7 @@
 import { computed, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import { formatStepToolName, StepEnum } from '@/api/type'
-import {
-  useStepDashboardData,
-  type StepDashboardReport,
-} from '@/composables/useStepDashboardData'
+import { useStepDashboardData } from '@/composables/useStepDashboardData'
 import { useStepConfigInfo } from '@/composables/useStepConfigInfo'
 import { useStepReportDialog } from '@/composables/useStepReportDialog'
 import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
@@ -1648,12 +1611,6 @@ async function openChipViewer(mode: 'view' | 'edit' = 'view'): Promise<void> {
   }
 }
 
-function reportMeta(report: StepDashboardReport): string {
-  return report.sizeBytes === null
-    ? ''
-    : `${Math.max(1, Math.round(report.sizeBytes / 1024))} KB`
-}
-
 interface StepConfigPreviewEntry {
   id: string
   label: string
@@ -1706,12 +1663,6 @@ function fileName(path: string): string {
   const parts = path.replace(/\\/g, '/').split('/').filter(Boolean)
   return parts[parts.length - 1] ?? ''
 }
-
-function formatArtifactSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
-}
 </script>
 
 <style scoped>
@@ -1731,14 +1682,6 @@ function formatArtifactSize(bytes: number): string {
   grid-template-rows: auto minmax(0, 2fr) minmax(0, 3fr) minmax(0, 3fr);
 }
 
-.step-dashboard.has-integrity-warning {
-  grid-template-rows: auto minmax(0, 2fr) minmax(0, 3fr) minmax(0, 3fr);
-}
-
-.step-dashboard.has-stale.has-integrity-warning {
-  grid-template-rows: auto auto minmax(0, 2fr) minmax(0, 3fr) minmax(0, 3fr);
-}
-
 .step-dashboard-stale {
   align-items: center;
   background: var(--bg-secondary);
@@ -1750,28 +1693,6 @@ function formatArtifactSize(bytes: number): string {
   gap: 8px;
   min-width: 0;
   padding: 7px 10px;
-}
-
-.step-dashboard-integrity-warning {
-  align-items: flex-start;
-  background: color-mix(in srgb, var(--warning-color, #b7791f) 12%, var(--bg-secondary));
-  border: 1px solid var(--warning-color, #b7791f);
-  border-radius: 6px;
-  color: var(--text-primary);
-  display: flex;
-  font-size: 12px;
-  gap: 8px;
-  min-width: 0;
-  padding: 7px 10px;
-}
-
-.step-dashboard-integrity-warning > div {
-  min-width: 0;
-}
-
-.step-dashboard-integrity-warning ul {
-  margin: 4px 0;
-  padding-left: 18px;
 }
 
 .step-dashboard-row {
@@ -2978,11 +2899,6 @@ function formatArtifactSize(bytes: number): string {
   font-size: 12px;
   margin: 0;
 }
-.dialog-warning {
-  color: var(--warning-color, #b7791f);
-  font-size: 12px;
-  margin: 0 0 8px;
-}
 .report-code {
   background: var(--bg-secondary);
   color: var(--text-primary);
@@ -3155,12 +3071,6 @@ function formatArtifactSize(bytes: number): string {
   }
   .step-dashboard.has-stale {
     grid-template-rows: auto repeat(3, minmax(232px, auto));
-  }
-  .step-dashboard.has-integrity-warning {
-    grid-template-rows: auto repeat(3, minmax(232px, auto));
-  }
-  .step-dashboard.has-stale.has-integrity-warning {
-    grid-template-rows: auto auto repeat(3, minmax(232px, auto));
   }
   .step-dashboard-top,
   .step-dashboard-middle,

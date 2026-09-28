@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   validateEngineeringSnapshot,
   type EccEngineeringSnapshot,
@@ -54,7 +57,7 @@ function qorSnapshotExtension(): EccQorSnapshotExtension {
     scoringEngine: 'qor-v3',
     status: 'available',
     score: 73.5,
-    scalarStatus: 'GREEN',
+    scalarStatus: 'ORANGE',
     profile: 'balanced',
     qphys: {
       timing: { value: 73.5, state: 'PASS', featureIds: ['timing.setup'] },
@@ -83,30 +86,17 @@ function qorSnapshotExtension(): EccQorSnapshotExtension {
 function engineeringSnapshot(metricValue: number): EccEngineeringSnapshot {
   const metric = JSON.parse(metricText(metricValue)).metrics[0]
   return {
-    analysis: { steps: [] },
     artifacts: [],
-    checklist: {},
+    cause: 'flow_step.success',
+    checklist: { items: [] },
     flow: { steps: [{ name: 'Route', state: 'Success' }] },
+    hotspotPreview: { hotspotCount: 0, hotspots: [], hotspotsTruncated: false },
     metrics: [metric],
     parameters: {},
-    qorAssessment: {
-      status: 'ready',
-      areaScoringStep: 'Route',
-      dimensionScores: { routability_physical: 73.5 },
-      metrics: [metric],
-      score: { gate: 'pass', threshold: 60, value: 73.5 },
-      steps: [
-        {
-          name: 'Route',
-          order: 6,
-          status: 'pass',
-          stepId: 'Route',
-          summaryMetricCount: 1,
-        },
-      ],
-    },
-    schemaVersion: 1,
+    qorSnapshotExtension: qorSnapshotExtension(),
+    schemaVersion: 6,
     signoffAssessment: { groups: [], risks: [], status: 'ready' },
+    timingPreview: { issueCount: 0, issues: [], issuesTruncated: false },
     workspaceId: 'ecc-workspace',
     workspaceRevision: 1,
   }
@@ -220,10 +210,8 @@ describe('analyzeWorkspaceQor', () => {
       engineeringSnapshot(5000),
     )
     expect(buildProjectQorTrendSummary([projectInput!]).workspaces[0]).toMatchObject({
-      areaScoringStep: 'Route',
-      dimensionScores: { routability_physical: 73.5 },
       overallScore: result.qor.status === 'ready' ? result.qor.data.score.value : null,
-      scoreThreshold: 60,
+      scalarStatus: 'ORANGE',
     })
   })
 
@@ -246,10 +234,8 @@ describe('analyzeWorkspaceQor', () => {
     expect(summary?.qorSnapshotExtension).toBe(extension)
   })
 
-  it('validates and projects a schema v3 Snapshot produced by ECC', () => {
+  it('validates and projects a schema v6 Snapshot produced by ECC', () => {
     const snapshot = engineeringSnapshot(5000)
-    snapshot.schemaVersion = 3
-    snapshot.qorSnapshotExtension = qorSnapshotExtension()
 
     const validated = validateEngineeringSnapshot(snapshot)
 
@@ -274,33 +260,20 @@ describe('analyzeWorkspaceQor', () => {
     ).toEqual(snapshot.qorSnapshotExtension)
   })
 
-  it('restores step metrics directly from an authoritative snapshot', () => {
+  it('attributes flat v6 metrics to their producing step', () => {
     const metric = JSON.parse(metricText(5000)).metrics[0]
     const snapshot: EccEngineeringSnapshot = {
-      analysis: { steps: [] },
       artifacts: [],
-      checklist: {},
+      cause: 'flow_step.success',
+      checklist: { items: [] },
       flow: { steps: [{ name: 'CustomSignoff', state: 'Success' }] },
+      hotspotPreview: { hotspotCount: 0, hotspots: [], hotspotsTruncated: false },
       metrics: [metric],
       parameters: {},
-      qorAssessment: {
-        status: 'ready',
-        areaScoringStep: null,
-        dimensionScores: { routability_physical: 73.5 },
-        metrics: [metric],
-        score: { gate: 'pass', threshold: 60, value: 73.5 },
-        steps: [
-          {
-            name: 'CustomSignoff',
-            order: 6,
-            status: 'pass',
-            stepId: 'CustomSignoff',
-            summaryMetricCount: 1,
-          },
-        ],
-      },
-      schemaVersion: 1,
+      qorSnapshotExtension: qorSnapshotExtension(),
+      schemaVersion: 6,
       signoffAssessment: { groups: [], risks: [], status: 'ready' },
+      timingPreview: { issueCount: 0, issues: [], issuesTruncated: false },
       workspaceId: 'ecc-current',
       workspaceRevision: 1,
     }
@@ -314,21 +287,139 @@ describe('analyzeWorkspaceQor', () => {
 
     const result = analyzeWorkspaceQor(manifest, 'current', { current: snapshot })
 
+    // v6 metrics are a single flat projection; per-step grouping is derived
+    // from the producer-assigned scope/group/id on each record.
     expect(result.qor).toMatchObject({
       data: {
-        metrics: [{ id: 'route_wirelength', stepId: 'CustomSignoff', value: 5000 }],
+        metrics: [{ id: 'route_wirelength', stepId: 'Route', value: 5000 }],
         score: { value: 73.5 },
+        steps: [
+          {
+            stepId: 'Route',
+            name: 'Route',
+            status: 'pass',
+            summaryMetricCount: 1,
+            metrics: [{ id: 'route_wirelength', stepId: 'Route', value: 5000 }],
+          },
+        ],
       },
       status: 'ready',
     })
+
+    const input = projectQorInputForWorkspace(manifest, 'current', snapshot)
+    expect(input?.normalizedMetrics).toMatchObject([
+      { metricName: 'route_wirelength', step: 'Route', value: 5000 },
+    ])
+  })
+
+  it('does not rank a metric against a baseline from a different corner context', () => {
+    const metric = (value: number, corner: string) => ({
+      ...JSON.parse(metricText(value)).metrics[0],
+      id: 'sta_setup_wns',
+      display_name: 'STA Setup WNS',
+      direction: 'higher_is_better',
+      scope: 'all_configured_corners',
+      corner,
+      corner_context: { configured_role: 'signoff', label: corner },
+    })
+    const snapshot = (workspaceId: string, value: number, corner: string) => ({
+      ...engineeringSnapshot(value),
+      metrics: [metric(value, corner)],
+      workspaceId,
+    })
+    const manifest = {
+      project_id: 'project-1',
+      name: 'demo',
+      design_name: 'gcd',
+      workspaces: [workspace('baseline', 'Baseline'), workspace('current', 'Current')],
+      qor_baseline: { reason: 'selected', workspace_id: 'baseline' },
+    } as ProjectManifest
+
+    const mismatched = analyzeWorkspaceQor(manifest, 'current', {
+      baseline: snapshot('ecc-baseline', -0.2, 'FF'),
+      current: snapshot('ecc-current', -0.05, 'TT'),
+    })
+    expect(mismatched.baselineComparison).toMatchObject({
+      data: { deltas: [], status: 'not-comparable' },
+      status: 'ready',
+    })
+
+    const matched = analyzeWorkspaceQor(manifest, 'current', {
+      baseline: snapshot('ecc-baseline', -0.2, 'TT'),
+      current: snapshot('ecc-current', -0.05, 'TT'),
+    })
+    expect(matched.baselineComparison).toMatchObject({
+      data: {
+        deltas: [
+          {
+            metricId: 'sta_setup_wns',
+            stepId: 'STA',
+            verdict: 'improvement',
+          },
+        ],
+        status: 'comparable',
+      },
+    })
+  })
+
+  it('projects the canonical ECC v6 fixture metrics with step attribution', () => {
+    // Canonical Engineering Snapshot fixtures are owned by the ECC repository;
+    // ecos/gui and ecc/ sit side by side in the monorepo.
+    const fixture = JSON.parse(
+      readFileSync(
+        resolve(
+          dirname(fileURLToPath(import.meta.url)),
+          '../../../../../../ecc/test/formal/fixtures/snapshot/v6-valid.json',
+        ),
+        'utf-8',
+      ),
+    ) as Record<string, unknown>
+    const validated = validateEngineeringSnapshot(fixture)
+    expect(validated.ok).toBe(true)
+    if (!validated.ok) return
+
+    const manifest = {
+      project_id: 'project-1',
+      name: 'demo',
+      design_name: 'gcd',
+      workspaces: [workspace('current', 'Current')],
+      qor_baseline: null,
+    } as ProjectManifest
+    const facts = {
+      metrics:
+        validated.sections.metrics.status === 'ready'
+          ? validated.sections.metrics.data
+          : [],
+      ...(validated.sections.flow.status === 'ready'
+        ? { flow: validated.sections.flow.data }
+        : {}),
+      ...(validated.sections.qorSnapshotExtension.status === 'ready'
+        ? { qorSnapshotExtension: validated.sections.qorSnapshotExtension.data }
+        : {}),
+      ...(validated.sections.signoff.status === 'ready'
+        ? { signoffAssessment: validated.sections.signoff.data }
+        : {}),
+    }
+    // Comparison normalization still requires per-record feature provenance;
+    // the minimal fixture records (`source: {}`) stay visible in the flat
+    // projection with their derived step ownership instead.
+    const result = analyzeWorkspaceQor(manifest, 'current', { current: facts })
     expect(
       result.qor.status === 'ready'
-        ? result.qor.data.steps.find((step) => step.stepId === 'CustomSignoff')
-        : null,
-    ).toMatchObject({
-      status: 'pass',
-      stepId: 'CustomSignoff',
-      summaryMetricCount: 1,
-    })
+        ? result.qor.data.metrics.map((metric) => [metric.stepId, metric.id])
+        : [],
+    ).toEqual([
+      ['Synth', 'synthesis_cell_area'],
+      ['Synth', 'synthesis_power_dynamic_uw'],
+      ['STA', 'sta_wns_ns'],
+    ])
+    expect(
+      result.qor.status === 'ready'
+        ? result.qor.data.steps.map((step) => [step.stepId, step.summaryMetricCount])
+        : [],
+    ).toEqual([
+      ['Synth', 2],
+      ['STA', 1],
+    ])
   })
 })
