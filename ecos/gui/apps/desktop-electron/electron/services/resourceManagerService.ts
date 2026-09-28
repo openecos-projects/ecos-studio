@@ -61,9 +61,10 @@ const COMMAND_ERROR_OUTPUT_LIMIT = 2048
 const SURFER_RELEASE_ASSET_URL =
   'https://github.com/openecos-projects/ecos-resource-assets/releases/download/v0.7.0-ecos/surfer-web-assets-0.7.0-ecos.zip'
 const PDK_RESOURCE_FILE_EXTENSIONS = ['.lef', '.lib', '.liberty']
-const REGISTRY_CACHE_VERSION = 1
+const REGISTRY_CACHE_VERSION = 2
 const DOWNLOAD_MAX_ATTEMPTS = 3
 const DOWNLOAD_RETRY_DELAY_MS = 250
+const DOWNLOAD_IDLE_TIMEOUT_MS = 30_000
 
 type ResourceInventoryEntry = ToolInventoryEntry | PdkInventoryEntry | MpcInventoryEntry
 type ArchiveExtractor = (
@@ -115,6 +116,13 @@ class DownloadSizeMismatchError extends Error {
   }
 }
 
+class DownloadIdleTimeoutError extends Error {
+  constructor(url: string) {
+    super(`Download received no data for 30 seconds: ${url}`)
+    this.name = 'DownloadIdleTimeoutError'
+  }
+}
+
 interface PlatformAsset {
   url: string
   sha256: string
@@ -122,6 +130,7 @@ interface PlatformAsset {
   size: number | null
   metadata_url?: string | null
   strip_prefix?: string | null
+  packages: RegistryPdkPackage[]
   supplemental_assets: RegistrySupplementalAsset[]
   post_install: RegistryPostInstallStep[]
 }
@@ -195,6 +204,11 @@ interface RegistrySupplementalAsset {
   size: number
 }
 
+interface RegistryPdkPackage extends RegistrySupplementalAsset {
+  cnb_url: string | null
+  dest: string
+}
+
 interface RegistryToolVersion {
   version: string
   platforms: Record<string, PlatformAsset>
@@ -262,6 +276,7 @@ const BUILTIN_MPCS: RegistryMpc[] = [
             sha256: '34c0013bb5b74876351be6b7cc3885fd5fccb66e6edf9afd15519408a52b5113',
             size: 471915,
             strip_prefix: 'mpc-frame-7555b4053816895919fb1d324d623d46d70dec3d',
+            packages: [],
             supplemental_assets: [],
             post_install: [],
           },
@@ -1740,8 +1755,10 @@ export class ResourceManagerService {
       if (!resolvedAsset.sha256) {
         throw new Error(`Missing SHA256 checksum for ${pdkId}`)
       }
+      validatePdkPackages(resolvedAsset.packages)
       const version = versionEntry.version
       const displayName = pdk.display_name || pdkId
+      const registrySha256 = pdkRegistrySha256(resolvedAsset)
       const destination = join(this.pdksDir, pdkId, version)
       const installations = await this.pdkInventoryService.listInstallations()
       const target =
@@ -1757,7 +1774,7 @@ export class ResourceManagerService {
         action === 'update' &&
         target?.version === version &&
         target?.readiness === 'ready' &&
-        target.registrySha256 === resolvedAsset.sha256.toLowerCase() &&
+        target.registrySha256 === registrySha256 &&
         (await isExistingDirectory(target.root))
       ) {
         await context.commit(async () => undefined)
@@ -1870,6 +1887,16 @@ export class ResourceManagerService {
         },
       )
       throwIfAborted(signal)
+      await this.installPdkPackages(
+        resourceId,
+        action,
+        displayName,
+        tempExtract,
+        resolvedAsset.packages,
+        listener,
+        signal,
+      )
+      throwIfAborted(signal)
       await this.downloadSupplementalAssets(
         resourceId,
         action,
@@ -1903,10 +1930,14 @@ export class ResourceManagerService {
       throwIfAborted(signal)
 
       const scanned = await scanPdkDirectory(tempExtract)
-      const health = await validateScannedPdk({ ...scanned, pdkId })
+      const scannedPdk = { ...scanned, pdkId }
+      const health = await validateScannedPdk(scannedPdk)
       throwIfAborted(signal)
       if (health !== 'ok') {
-        throw new Error(`PDK validation failed for ${pdkId} v${version}`)
+        const missing = missingRequiredPdkFiles(scannedPdk)
+        const details =
+          missing.length > 0 ? `; missing required files: ${missing.join(', ')}` : ''
+        throw new Error(`PDK validation failed for ${pdkId} v${version}${details}`)
       }
       await replaceDirectoryWithRollback(
         tempExtract,
@@ -1920,7 +1951,7 @@ export class ResourceManagerService {
                 displayName: scanned.name || displayName,
                 root: destination,
                 version,
-                registrySha256: resolvedAsset.sha256,
+                registrySha256,
               },
               signal,
             )
@@ -2191,6 +2222,139 @@ export class ResourceManagerService {
     }
   }
 
+  private async installPdkPackages(
+    resourceId: string,
+    action: ResourceAction,
+    name: string,
+    root: string,
+    packages: RegistryPdkPackage[],
+    listener?: (event: ResourceJob) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    validatePdkPackages(packages)
+    const totalBytes = packages.reduce((sum, pkg) => sum + pkg.size, 0)
+    let completedBytes = 0
+    const targets = packages.map((pkg) => {
+      return {
+        archive: resolveRegistryRelativePath(root, pkg.path, 'PDK package path'),
+        destination: resolveRegistryRelativePath(
+          root,
+          pkg.dest,
+          'PDK package destination',
+        ),
+      }
+    })
+
+    for (const [index, pkg] of packages.entries()) {
+      const target = targets[index]
+      const sources = [
+        ...new Set([pkg.url, pkg.cnb_url].filter((url): url is string => Boolean(url))),
+      ]
+      const urls =
+        sources.length > 1
+          ? Array.from({ length: DOWNLOAD_MAX_ATTEMPTS }, () => sources).flat()
+          : sources
+      let lastError: unknown = null
+      let downloaded = false
+
+      for (const [sourceIndex, url] of urls.entries()) {
+        await mkdir(dirname(target.archive), { recursive: true })
+        await rm(target.archive, { force: true })
+        this.publish(listener, {
+          resource_id: resourceId,
+          action,
+          phase: 'downloading',
+          progress: totalBytes === 0 ? 0 : completedBytes / totalBytes,
+          message: `Downloading ${name} package ${index + 1}/${packages.length}: ${pkg.path}`,
+        })
+        electronLogger.debug(
+          '[resources] Download source for %s package %d/%d: %s (%d bytes)',
+          resourceId,
+          index + 1,
+          packages.length,
+          url,
+          pkg.size,
+        )
+        try {
+          await downloadAsset(
+            url,
+            target.archive,
+            this.fetchImpl,
+            pkg.size,
+            (progress) => {
+              const overallProgress =
+                totalBytes === 0
+                  ? 0
+                  : (completedBytes + progress.downloadedBytes) / totalBytes
+              this.publish(listener, {
+                resource_id: resourceId,
+                action,
+                phase: 'downloading',
+                progress: overallProgress,
+                message: `Downloading ${name} package ${index + 1}/${packages.length}: ${pkg.path} (${formatBytes(progress.downloadedBytes)} / ${formatBytes(pkg.size)})`,
+              })
+              electronLogger.debug(
+                '[resources] Download progress for %s package %d/%d: %d/%d bytes (%d%%)',
+                resourceId,
+                index + 1,
+                packages.length,
+                progress.downloadedBytes,
+                pkg.size,
+                Math.round(progress.progress * 100),
+              )
+            },
+            signal,
+            sources.length > 1 ? 1 : DOWNLOAD_MAX_ATTEMPTS,
+          )
+          const actualSize = await stat(target.archive).then((value) => value.size)
+          if (actualSize !== pkg.size) {
+            throw new Error(
+              `PDK package size mismatch for ${pkg.path}: expected ${pkg.size}, got ${actualSize}`,
+            )
+          }
+          if (!(await this.sha256Verifier(target.archive, pkg.sha256, signal))) {
+            throw new Error(`SHA256 verification failed for PDK package ${pkg.path}`)
+          }
+          downloaded = true
+          break
+        } catch (error) {
+          if (signal?.aborted || isAbortError(error)) throw error
+          lastError = error
+          await rm(target.archive, { force: true }).catch(() => undefined)
+          if (sourceIndex + 1 < urls.length) {
+            electronLogger.warn(
+              '[resources] PDK package source failed for %s, trying alternate source: %s',
+              pkg.path,
+              error instanceof Error ? error.message : String(error),
+            )
+          }
+        }
+      }
+
+      if (!downloaded) {
+        throw new Error(
+          `Failed to download PDK package ${pkg.path}: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
+          { cause: lastError },
+        )
+      }
+
+      try {
+        throwIfAborted(signal)
+        this.publish(listener, {
+          resource_id: resourceId,
+          action,
+          phase: 'extracting',
+          progress: totalBytes === 0 ? 1 : (completedBytes + pkg.size) / totalBytes,
+          message: `Extracting ${name} package ${index + 1}/${packages.length}: ${pkg.path}`,
+        })
+        await this.archiveExtractor(target.archive, target.destination, null, signal)
+        completedBytes += pkg.size
+      } finally {
+        await rm(target.archive, { force: true }).catch(() => undefined)
+      }
+    }
+  }
+
   private async preDownloadPdkReleaseAssets(
     resourceId: string,
     action: ResourceAction,
@@ -2201,7 +2365,7 @@ export class ResourceManagerService {
     listener?: (event: ResourceJob) => void,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (asset.supplemental_assets.length > 0) return
+    if (asset.packages.length > 0 || asset.supplemental_assets.length > 0) return
     if (asset.post_install.length === 0) return
     const assetNames = await readPdkReleaseAssetNames(destination)
     const baseUrl = releaseDownloadBaseUrl(asset.url, version)
@@ -3249,8 +3413,13 @@ function serializeRegistryCache(registry: ResourceRegistry): string {
 
 function parseCachedRegistry(value: unknown, registryUrl: string): ResourceRegistry {
   const record = readRecord(value)
-  if (record.cache_version === REGISTRY_CACHE_VERSION && record.registry) {
-    return parseRegistry(record.registry)
+  if ('cache_version' in record) {
+    if (record.cache_version === REGISTRY_CACHE_VERSION && record.registry) {
+      return parseRegistry(record.registry)
+    }
+    throw new Error(
+      `Unsupported resource registry cache version: ${String(record.cache_version)}`,
+    )
   }
   return migrateLegacyBuiltinMpcs(parseRegistry(value), registryUrl)
 }
@@ -3380,7 +3549,9 @@ function registryLockForResource(
     const id = pdkIdFromResourceId(resourceId)
     const version = registry.pdks.find((pdk) => pdk.id === id)?.versions[0]
     const { asset } = version ? selectPlatformAsset(version) : { asset: null }
-    return version && asset ? { version: version.version, sha256: asset.sha256 } : null
+    return version && asset
+      ? { version: version.version, sha256: pdkRegistrySha256(asset) }
+      : null
   }
   return null
 }
@@ -3535,11 +3706,30 @@ function parsePlatformAssets(value: unknown): Record<string, PlatformAsset> {
       size: readOptionalPositiveNumber(asset.size) ?? null,
       metadata_url: readOptionalString(asset.metadata_url),
       strip_prefix: typeof asset.strip_prefix === 'string' ? asset.strip_prefix : null,
+      packages: parsePdkPackages(asset.packages),
       supplemental_assets: parseSupplementalAssets(asset.supplemental_assets),
       post_install: parsePostInstallSteps(asset.post_install),
     }
   }
   return assets
+}
+
+function parsePdkPackages(value: unknown): RegistryPdkPackage[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) {
+    throw new Error('Invalid PDK packages metadata: expected an array')
+  }
+  return value.map((item) => {
+    const record = readRecord(item)
+    return {
+      path: readString(record.path).trim(),
+      url: readString(record.url).trim(),
+      cnb_url: readOptionalString(record.cnb_url)?.trim() || null,
+      sha256: readString(record.sha256).trim().toLowerCase(),
+      size: readNumber(record.size),
+      dest: readString(record.dest).trim(),
+    }
+  })
 }
 
 function parseSupplementalAssets(value: unknown): RegistrySupplementalAsset[] {
@@ -4497,21 +4687,46 @@ function isKnownPdk(pdkId: string): boolean {
   return pdkId === 'ics55'
 }
 
+function pdkRegistrySha256(asset: PlatformAsset): string {
+  const archiveSha256 = asset.sha256.trim().toLowerCase()
+  if (asset.packages.length === 0 && asset.supplemental_assets.length === 0) {
+    return archiveSha256
+  }
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        archive_sha256: archiveSha256,
+        packages: asset.packages,
+        supplemental_assets: asset.supplemental_assets,
+      }),
+    )
+    .digest('hex')
+}
+
+const ICS55_REQUIRED_FILES = [
+  'prtech/techLEF/N551P6M_ecos.lef',
+  'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/lef/ics55_LLSC_H7CR_ecos.lef',
+  'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/lef/ics55_LLSC_H7CL_ecos.lef',
+  'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/liberty/ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
+  'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/liberty/ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
+]
+
+function missingRequiredPdkFiles(scanned: {
+  pdkId: string
+  detectedFiles: { files: string[] }
+}): string[] {
+  if (!isKnownPdk(scanned.pdkId)) return []
+  return ICS55_REQUIRED_FILES.filter(
+    (file) => !scanned.detectedFiles.files.includes(file),
+  )
+}
+
 async function validateScannedPdk(scanned: {
   pdkId: string
   detectedFiles: { directories: string[]; files: string[] }
 }): Promise<string> {
   if (!isKnownPdk(scanned.pdkId)) return 'ok'
-  const required = [
-    'prtech/techLEF/N551P6M_ecos.lef',
-    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/lef/ics55_LLSC_H7CR_ecos.lef',
-    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/lef/ics55_LLSC_H7CL_ecos.lef',
-    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/liberty/ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
-    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/liberty/ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
-  ]
-  return required.every((file) => scanned.detectedFiles.files.includes(file))
-    ? 'ok'
-    : 'invalid'
+  return missingRequiredPdkFiles(scanned).length === 0 ? 'ok' : 'invalid'
 }
 
 function mpcHealth(entry: MpcInventoryEntry): Record<string, unknown> {
@@ -4637,6 +4852,7 @@ async function downloadAsset(
   expectedSize: number | null,
   onProgress?: DownloadProgressListener,
   signal?: AbortSignal,
+  maxAttempts: number = DOWNLOAD_MAX_ATTEMPTS,
 ): Promise<void> {
   throwIfAborted(signal)
   if (url.startsWith('file://')) {
@@ -4646,19 +4862,37 @@ async function downloadAsset(
   }
 
   let lastError: unknown = null
-  for (let attempt = 1; attempt <= DOWNLOAD_MAX_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     throwIfAborted(signal)
+    const attemptController = new AbortController()
+    let idleTimer: ReturnType<typeof setTimeout> | null = null
+    let idleTimedOut = false
+    const abortAttempt = (): void => attemptController.abort()
+    const pauseIdleTimer = (): void => {
+      if (idleTimer) clearTimeout(idleTimer)
+      idleTimer = null
+    }
+    const resetIdleTimer = (): void => {
+      pauseIdleTimer()
+      idleTimer = setTimeout(() => {
+        idleTimedOut = true
+        attemptController.abort()
+      }, DOWNLOAD_IDLE_TIMEOUT_MS)
+    }
+    signal?.addEventListener('abort', abortAttempt, { once: true })
     let existingBytes = await fileSize(destination)
     if (expectedSize !== null && expectedSize > 0 && existingBytes > expectedSize) {
       await writeFile(destination, Buffer.alloc(0))
       existingBytes = 0
     }
     try {
+      resetIdleTimer()
       const rangeRequested = existingBytes > 0
       const response = await fetchImpl(url, {
-        signal,
+        signal: attemptController.signal,
         ...(rangeRequested ? { headers: { Range: `bytes=${existingBytes}-` } } : {}),
       })
+      pauseIdleTimer()
 
       if (response.status === 416 && rangeRequested) {
         const totalBytes =
@@ -4705,7 +4939,9 @@ async function downloadAsset(
         startingBytes,
       )
       if (!response.body) {
+        resetIdleTimer()
         const data = Buffer.from(await response.arrayBuffer())
+        pauseIdleTimer()
         await writeFile(destination, data, { flag: append ? 'a' : 'w' })
         const downloadedBytes = startingBytes + data.byteLength
         assertDownloadSize(url, totalBytes, expectedSize, downloadedBytes)
@@ -4720,6 +4956,7 @@ async function downloadAsset(
       try {
         while (true) {
           throwIfAborted(signal)
+          resetIdleTimer()
           let result: ReadableStreamReadResult<Uint8Array>
           try {
             result = await reader.read()
@@ -4727,6 +4964,7 @@ async function downloadAsset(
             if (isAbortError(error) || signal?.aborted) throw error
             throw new Error('Response stream interrupted', { cause: error })
           }
+          pauseIdleTimer()
           const { done, value } = result
           if (done) {
             completed = true
@@ -4748,25 +4986,29 @@ async function downloadAsset(
       publishProgress(downloadedBytes, true)
       return
     } catch (error) {
-      if (isAbortError(error) || signal?.aborted) throw error
-      lastError = error
+      const failure = idleTimedOut ? new DownloadIdleTimeoutError(url) : error
+      if (signal?.aborted || (isAbortError(failure) && !idleTimedOut)) throw failure
+      lastError = failure
       const receivedBytes = await fileSize(destination)
-      const retryable = isRetryableDownloadError(error)
-      if (!retryable || attempt === DOWNLOAD_MAX_ATTEMPTS) {
+      const retryable = isRetryableDownloadError(failure)
+      if (!retryable || attempt === maxAttempts) {
         throw new Error(
-          `Failed to download ${url}: ${formatDownloadError(error)} (after ${attempt} attempts; received ${formatBytes(receivedBytes)})`,
-          { cause: error },
+          `Failed to download ${url}: ${formatDownloadError(failure)} (after ${attempt} attempts; received ${formatBytes(receivedBytes)})`,
+          { cause: failure },
         )
       }
       electronLogger.warn(
         '[resources] Download attempt %d/%d failed for %s after %s; retrying: %s',
         attempt,
-        DOWNLOAD_MAX_ATTEMPTS,
+        maxAttempts,
         url,
         formatBytes(receivedBytes),
-        formatDownloadError(error),
+        formatDownloadError(failure),
       )
       await waitForDownloadRetry(DOWNLOAD_RETRY_DELAY_MS, signal)
+    } finally {
+      pauseIdleTimer()
+      signal?.removeEventListener('abort', abortAttempt)
     }
   }
 
@@ -5046,22 +5288,52 @@ function parseGithubArchiveUrl(
   return { owner, repo, tag }
 }
 
-function validateSupplementalAsset(asset: RegistrySupplementalAsset): void {
+function validateSupplementalAsset(
+  asset: RegistrySupplementalAsset,
+  label = 'supplemental asset',
+): void {
   if (!asset.url) {
-    throw new Error(`Missing URL for supplemental asset ${asset.path || '(unknown)'}`)
+    throw new Error(`Missing URL for ${label} ${asset.path || '(unknown)'}`)
   }
   if (!/^[0-9a-f]{64}$/.test(asset.sha256)) {
-    throw new Error(
-      `Invalid SHA256 checksum for supplemental asset ${asset.path || '(unknown)'}`,
-    )
+    throw new Error(`Invalid SHA256 checksum for ${label} ${asset.path || '(unknown)'}`)
   }
   if (!Number.isSafeInteger(asset.size) || asset.size <= 0) {
-    throw new Error(`Invalid size for supplemental asset ${asset.path || '(unknown)'}`)
+    throw new Error(`Invalid size for ${label} ${asset.path || '(unknown)'}`)
+  }
+}
+
+function validatePdkPackage(pkg: RegistryPdkPackage): void {
+  validateSupplementalAsset(pkg, 'PDK package')
+  if (!pkg.dest) {
+    throw new Error(`Missing destination for PDK package ${pkg.path || '(unknown)'}`)
+  }
+}
+
+function validatePdkPackages(packages: RegistryPdkPackage[]): void {
+  const seenPaths = new Set<string>()
+  for (const pkg of packages) {
+    validatePdkPackage(pkg)
+    validateRegistryRelativePath(pkg.path, 'PDK package path')
+    validateRegistryRelativePath(pkg.dest, 'PDK package destination')
+    if (seenPaths.has(pkg.path)) {
+      throw new Error(`Duplicate PDK package path: ${pkg.path}`)
+    }
+    seenPaths.add(pkg.path)
   }
 }
 
 function resolveSupplementalAssetTarget(root: string, assetPath: string): string {
-  const normalized = assetPath.trim()
+  return resolveRegistryRelativePath(root, assetPath, 'supplemental asset path')
+}
+
+function resolveRegistryRelativePath(root: string, value: string, label: string): string {
+  validateRegistryRelativePath(value, label)
+  return resolveInside(root, value.trim())
+}
+
+function validateRegistryRelativePath(value: string, label: string): void {
+  const normalized = value.trim()
   const parts = normalized.split('/')
   if (
     !normalized ||
@@ -5081,9 +5353,8 @@ function resolveSupplementalAssetTarget(root: string, assetPath: string): string
       )
     })
   ) {
-    throw new Error(`Invalid supplemental asset path: ${assetPath || '(empty)'}`)
+    throw new Error(`Invalid ${label}: ${value || '(empty)'}`)
   }
-  return resolveInside(root, normalized)
 }
 
 async function readMpcSpecFromDirectory(

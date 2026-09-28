@@ -171,6 +171,21 @@ async function createPdkArchive(
   }
 }
 
+async function createPdkPackageArchive(
+  root: string,
+): Promise<{ path: string; sha256: string; size: number }> {
+  const sourceDir = join(root, 'pdk-package-source')
+  const archive = join(root, 'ics55_LLSC_H7CL_liberty.tar.bz2')
+  await mkdir(join(sourceDir, 'liberty'), { recursive: true })
+  await writeFile(
+    join(sourceDir, 'liberty', 'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib'),
+    'library(test) {}\n',
+    'utf8',
+  )
+  await runFixtureCommand('tar', ['-cjf', archive, '-C', sourceDir, 'liberty'])
+  return { path: archive, ...(await archiveLock(archive)) }
+}
+
 async function createSurferAssetsZip(
   root: string,
 ): Promise<{ path: string; sha256: string; size: number }> {
@@ -655,6 +670,63 @@ describe('ResourceManagerService', () => {
     await expect(service.getResource('mpc:mpc-frame')).resolves.toMatchObject({
       available_versions: ['0.1.1'],
       description: 'Registry-managed MPC frame.',
+    })
+  })
+
+  it('refetches caches written by older registry parser versions', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const cacheDir = join(root, 'cache')
+    const registryUrl = 'https://example.com/registry.json'
+    const cachePath = testRegistryCachePath(cacheDir, registryUrl)
+    await mkdir(cacheDir, { recursive: true })
+    await writeFile(
+      cachePath,
+      JSON.stringify({
+        cache_version: 1,
+        registry: { schema_version: 2, tools: [], pdks: [], mpcs: [] },
+      }),
+      'utf8',
+    )
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            schema_version: 2,
+            tools: [
+              {
+                name: 'yosys',
+                versions: [
+                  {
+                    version: '2026-09-27',
+                    platforms: {
+                      'all-platform': {
+                        url: 'https://example.com/yosys.tar.gz',
+                        sha256: 'a'.repeat(64),
+                        size: 123,
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+            pdks: [],
+            mpcs: [],
+          }),
+        ),
+    )
+    const service = new ResourceManagerService({
+      cacheDir,
+      fetchImpl: fetchImpl as typeof fetch,
+      registryUrl,
+      ...testResourceDirs(root),
+    })
+
+    await expect(service.getResource('tool:yosys')).resolves.toMatchObject({
+      available_versions: ['2026-09-27'],
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    await expect(readFile(cachePath, 'utf8').then(JSON.parse)).resolves.toMatchObject({
+      cache_version: 2,
     })
   })
 
@@ -3325,6 +3397,23 @@ describe('ResourceManagerService', () => {
     const dirs = testResourceDirs(root)
     const registryPath = join(root, 'registry.json')
     const pdkRoot = join(dirs.pdksDir, 'ics55', '1.10.100')
+    const pdkPackage = {
+      path: 'locked.tar.bz2',
+      url: 'https://example.com/locked.tar.bz2',
+      cnb_url: 'https://mirror.example.com/locked.tar.bz2',
+      sha256: 'a'.repeat(64),
+      size: 10,
+      dest: 'IP/STD_cell',
+    }
+    const pdkRegistrySha256 = createHash('sha256')
+      .update(
+        JSON.stringify({
+          archive_sha256: 'pdk-sha',
+          packages: [pdkPackage],
+          supplemental_assets: [],
+        }),
+      )
+      .digest('hex')
     const stdCell = join(pdkRoot, 'IP', 'STD_cell', 'ics55_LLSC_H7C_V1p10C100')
     const markers = [
       join(pdkRoot, 'prtech', 'techLEF', 'N551P6M_ecos.lef'),
@@ -3376,7 +3465,11 @@ describe('ResourceManagerService', () => {
               {
                 version: '1.10.100',
                 platforms: {
-                  'all-platform': { url: 'file:///ics55.tar', sha256: 'pdk-sha' },
+                  'all-platform': {
+                    url: 'file:///ics55.tar',
+                    sha256: 'pdk-sha',
+                    packages: [pdkPackage],
+                  },
                 },
               },
             ],
@@ -3408,7 +3501,7 @@ describe('ResourceManagerService', () => {
       familyId: 'ics55',
       root: pdkRoot,
       version: '1.10.100',
-      registrySha256: 'pdk-sha',
+      registrySha256: pdkRegistrySha256,
     })
 
     yosys = (await service.listResources()).resources.find(
@@ -6317,7 +6410,7 @@ describe('ResourceManagerService', () => {
     const destination = join(dirs.pdksDir, 'ics55', '1.10.100')
 
     await expect(service.installResource('pdk:ics55:managed:1.10.100')).rejects.toThrow(
-      'PDK validation failed for ics55 v1.10.100',
+      'missing required files: IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/liberty/ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
     )
     await expect(readdir(destination)).rejects.toThrow('ENOENT')
     await expect(
@@ -6954,6 +7047,256 @@ describe('ResourceManagerService', () => {
       await readFile(join(root, 'state', 'resources', 'pdk-inventory.json'), 'utf8'),
     ) as { installations: Array<{ registrySha256: string }> }
     expect(updatedInventory.installations[0]?.registrySha256).toBe(archive.sha256)
+  })
+
+  it('installs locked PDK packages from the published registry schema', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const base = await createPdkArchive(root, {
+      makefileContent: 'RELEASE_FILE := legacy-unlocked.tar.bz2\n',
+      valid: false,
+    })
+    const baseLock = await archiveLock(base.path)
+    const pkg = await createPdkPackageArchive(root)
+    const baseBytes = await readFile(base.path)
+    const packageBytes = await readFile(pkg.path)
+    const registryPath = join(root, 'registry.json')
+    const baseUrl =
+      'https://github.com/openecos-projects/icsprout55-pdk/archive/refs/tags/v1.10.100.tar.gz'
+    const packageUrl =
+      'https://github.com/openecos-projects/icsprout55-pdk/releases/download/v1.10.100/ics55_LLSC_H7CL_liberty.tar.bz2'
+    const packageMirrorUrl =
+      'https://cnb.cool/ecoslab/icsprout55-pdk/-/releases/download/v1.10.100/ics55_LLSC_H7CL_liberty.tar.bz2'
+    const packageLock = {
+      path: 'ics55_LLSC_H7CL_liberty.tar.bz2',
+      url: packageUrl,
+      cnb_url: packageMirrorUrl,
+      sha256: pkg.sha256,
+      size: pkg.size,
+      dest: 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL',
+    }
+    const supplementalPayload = Buffer.from('locked supplemental payload')
+    const supplementalLock = {
+      path: 'locked-supplemental.tar.bz2',
+      url: 'https://example.com/locked-supplemental.tar.bz2',
+      sha256: createHash('sha256').update(supplementalPayload).digest('hex'),
+      size: supplementalPayload.byteLength,
+    }
+    const fetchedUrls: string[] = []
+    const packageRequestStarted = deferred()
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const requestUrl = String(url)
+      fetchedUrls.push(requestUrl)
+      if (requestUrl === baseUrl) return new Response(baseBytes)
+      if (requestUrl === packageUrl) {
+        packageRequestStarted.resolve()
+        return await new Promise<Response>((_resolve, reject) => {
+          const abort = (): void => {
+            reject(new DOMException('The operation was aborted.', 'AbortError'))
+          }
+          if (init?.signal?.aborted) abort()
+          else init?.signal?.addEventListener('abort', abort, { once: true })
+        })
+      }
+      if (requestUrl === packageMirrorUrl) return new Response(packageBytes)
+      if (requestUrl === supplementalLock.url) return new Response(supplementalPayload)
+      return new Response(null, { status: 404 })
+    })
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        schema_version: 2,
+        tools: [],
+        pdks: [
+          {
+            id: 'ics55',
+            display_name: 'ICsprout 55nm PDK',
+            versions: [
+              {
+                version: '1.10.100',
+                platforms: {
+                  'all-platform': {
+                    url: baseUrl,
+                    sha256: baseLock.sha256,
+                    size: baseLock.size,
+                    strip_prefix: 'icsprout55-pdk-1.10.100',
+                    packages: [packageLock],
+                    supplemental_assets: [supplementalLock],
+                    post_install: [{ command: ['true'], cwd: '.' }],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      }),
+      'utf8',
+    )
+    const commandRunner = vi.fn(async () => undefined)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      commandRunner,
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+    const progress = vi.fn()
+
+    vi.useFakeTimers()
+    try {
+      const installation = service.installResource('pdk:ics55', '1.10.100', progress)
+      await packageRequestStarted.promise
+      await vi.advanceTimersByTimeAsync(30_000)
+      await installation
+    } finally {
+      vi.useRealTimers()
+    }
+
+    const installedLib = join(
+      root,
+      'data',
+      'pdks',
+      'ics55',
+      '1.10.100',
+      'IP',
+      'STD_cell',
+      'ics55_LLSC_H7C_V1p10C100',
+      'ics55_LLSC_H7CL',
+      'liberty',
+      'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
+    )
+    await expect(readFile(installedLib, 'utf8')).resolves.toBe('library(test) {}\n')
+    expect(fetchedUrls).toEqual([
+      baseUrl,
+      packageUrl,
+      packageMirrorUrl,
+      supplementalLock.url,
+    ])
+    expect(commandRunner).toHaveBeenCalledOnce()
+    const inventory = JSON.parse(
+      await readFile(join(root, 'state', 'resources', 'pdk-inventory.json'), 'utf8'),
+    ) as { installations: Array<{ registrySha256: string }> }
+    expect(inventory.installations[0]?.registrySha256).toBe(
+      createHash('sha256')
+        .update(
+          JSON.stringify({
+            archive_sha256: baseLock.sha256,
+            packages: [packageLock],
+            supplemental_assets: [supplementalLock],
+          }),
+        )
+        .digest('hex'),
+    )
+    expect(progress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: 'downloading',
+        message: expect.stringContaining('package 1/1'),
+      }),
+    )
+    expect(progress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: 'extracting',
+        message: expect.stringContaining('package 1/1'),
+      }),
+    )
+    expect(
+      progress.mock.calls.some(
+        ([event]) =>
+          event.phase === 'post_install' && event.message.includes('package 1/1'),
+      ),
+    ).toBe(false)
+  })
+
+  it('rejects malformed PDK package metadata before downloading assets', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        schema_version: 2,
+        tools: [],
+        pdks: [
+          {
+            id: 'ics55',
+            versions: [
+              {
+                version: '1.10.100',
+                platforms: {
+                  'all-platform': {
+                    url: 'https://example.com/ics55.tar.gz',
+                    sha256: 'a'.repeat(64),
+                    packages: {},
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      }),
+      'utf8',
+    )
+    const fetchImpl = vi.fn(async () => {
+      throw new Error('unexpected asset download')
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+
+    await expect(service.installResource('pdk:ics55')).rejects.toThrow(
+      "PDK 'ics55' not found in registry",
+    )
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('validates PDK package entries before downloading the base archive', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        schema_version: 2,
+        tools: [],
+        pdks: [
+          {
+            id: 'ics55',
+            versions: [
+              {
+                version: '1.10.100',
+                platforms: {
+                  'all-platform': {
+                    url: 'https://example.com/ics55.tar.gz',
+                    sha256: 'a'.repeat(64),
+                    packages: [
+                      {
+                        path: 'package.tar.bz2',
+                        url: '',
+                        sha256: 'b'.repeat(64),
+                        size: 10,
+                        dest: 'IP/package',
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      }),
+      'utf8',
+    )
+    const fetchImpl = vi.fn(async () => {
+      throw new Error('unexpected base archive download')
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+
+    await expect(service.installResource('pdk:ics55')).rejects.toThrow(
+      'Missing URL for PDK package package.tar.bz2',
+    )
+    expect(fetchImpl).not.toHaveBeenCalled()
   })
 
   it('downloads only locked PDK supplemental assets before post-install', async () => {
