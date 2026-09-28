@@ -58,11 +58,14 @@ const runtimeEventBridge = vi.hoisted(() => {
   }
 })
 
+const routerMock = vi.hoisted(() => ({
+  isReady: vi.fn(async () => undefined),
+  currentRoute: { value: { path: '/', query: {} as Record<string, unknown> } },
+  replace: vi.fn(async () => undefined),
+}))
+
 vi.mock('vue-router', () => ({
-  useRouter: () => ({
-    isReady: vi.fn(async () => undefined),
-    currentRoute: { value: { path: '/' } },
-  }),
+  useRouter: () => routerMock,
 }))
 
 vi.mock('primevue/usetoast', () => ({
@@ -130,6 +133,7 @@ vi.mock('@/utils/projectManifestRegistration', () => ({
 
 import { useWorkspace } from './useWorkspace'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
+import { useSnapshotOpenRecovery } from './useSnapshotOpenRecovery'
 import { useNotificationStore } from '@/stores/notificationStore'
 
 type SerializedRecentProject = Omit<Project, 'lastOpened'> & { lastOpened: string }
@@ -145,6 +149,7 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       close: vi.fn(),
       setTitle: vi.fn(),
       setZoomFactor: vi.fn(),
+      setLeftPanelExtension: vi.fn(),
       isMaximized: vi.fn(),
       create: vi.fn(),
       onResized: vi.fn(),
@@ -204,6 +209,7 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       listProjectDirectory: vi.fn(),
       pathExists: vi.fn(async () => false),
       discardFailedWorkspaceCreate: vi.fn(async () => false),
+      deleteEngineeringSnapshot: vi.fn(async () => false),
       prepareProjectDirectoryReplacement: vi.fn(),
       restoreProjectDirectoryReplacement: vi.fn(),
       finalizeProjectDirectoryReplacement: vi.fn(),
@@ -316,6 +322,9 @@ describe('useWorkspace openProject', () => {
     resolveProjectRouteContextForWorkspaceMock.mockResolvedValue(null)
     settingsData.clear()
     useNotificationStore().clear()
+    useSnapshotOpenRecovery().dismissSnapshotOpenRecovery()
+    routerMock.currentRoute.value = { path: '/', query: {} }
+    routerMock.replace.mockClear()
 
     desktopApi = createDesktopApiMock()
     activeProjectRoot = null
@@ -690,6 +699,227 @@ describe('useWorkspace openProject', () => {
     expect(workspace.currentProject.value).toBeNull()
   })
 
+  it('routes a snapshot_rebuild_required open failure to the recovery dialog', async () => {
+    const workspace = useWorkspace()
+    const project: Project = {
+      id: '/work/broken',
+      name: 'broken',
+      path: '/work/broken',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    loadWorkspaceApiMock.mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          'invalid Engineering Snapshot: /work/broken/home/engineering-snapshot.json',
+        ),
+        { code: 'snapshot_rebuild_required' },
+      ),
+    )
+
+    expect(await workspace.openProject(project)).toBe(false)
+
+    const recovery = useSnapshotOpenRecovery()
+    expect(recovery.pendingRequest.value).toMatchObject({
+      code: 'snapshot_rebuild_required',
+      detail: 'invalid Engineering Snapshot: /work/broken/home/engineering-snapshot.json',
+      directory: '/work/broken',
+    })
+    expect(
+      useNotificationStore().notifications.value.some(
+        (notification) => notification.title === 'Failed to Open Project',
+      ),
+    ).toBe(false)
+  })
+
+  it('routes a snapshot_identity_mismatch open failure to the recovery dialog', async () => {
+    const workspace = useWorkspace()
+    const project: Project = {
+      id: '/work/copied',
+      name: 'copied',
+      path: '/work/copied',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    loadWorkspaceApiMock.mockRejectedValueOnce(
+      Object.assign(new Error('Engineering Snapshot workspace identity mismatch'), {
+        code: 'snapshot_identity_mismatch',
+      }),
+    )
+
+    expect(await workspace.openProject(project)).toBe(false)
+
+    expect(useSnapshotOpenRecovery().pendingRequest.value).toMatchObject({
+      code: 'snapshot_identity_mismatch',
+      directory: '/work/copied',
+    })
+    expect(
+      useNotificationStore().notifications.value.some(
+        (notification) => notification.title === 'Failed to Open Project',
+      ),
+    ).toBe(false)
+  })
+
+  it('keeps the generic error toast for unrelated open failures', async () => {
+    const workspace = useWorkspace()
+    const project: Project = {
+      id: '/work/broken',
+      name: 'broken',
+      path: '/work/broken',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    loadWorkspaceApiMock.mockRejectedValueOnce(new Error('sidecar unavailable'))
+
+    expect(await workspace.openProject(project)).toBe(false)
+
+    expect(useSnapshotOpenRecovery().pendingRequest.value).toBeNull()
+    expect(
+      useNotificationStore().notifications.value.some(
+        (notification) => notification.title === 'Failed to Open Project',
+      ),
+    ).toBe(true)
+  })
+
+  it('suppresses the recovery dialog for quiet opens', async () => {
+    const workspace = useWorkspace()
+    loadWorkspaceApiMock.mockRejectedValueOnce(
+      Object.assign(new Error('invalid Engineering Snapshot'), {
+        code: 'snapshot_rebuild_required',
+      }),
+    )
+
+    expect(
+      await workspace.openProject(
+        {
+          id: '/work/broken',
+          name: 'broken',
+          path: '/work/broken',
+          lastOpened: new Date(),
+        },
+        { quiet: true },
+      ),
+    ).toBe(false)
+    expect(useSnapshotOpenRecovery().pendingRequest.value).toBeNull()
+  })
+
+  it('opens a workspace whose snapshot ECC rebuilt transparently on open', async () => {
+    const workspace = useWorkspace()
+    const project: Project = {
+      id: '/work/fresh',
+      name: 'fresh',
+      path: '/work/fresh',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    // A missing snapshot is rebuilt by ECC inside `workspace.open`; from the
+    // GUI's perspective the open simply succeeds and no recovery UI appears.
+    loadWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/fresh',
+        workspace_handle: '/work/fresh',
+      },
+    })
+
+    expect(await workspace.openProject(project)).toBe(true)
+    expect(useSnapshotOpenRecovery().pendingRequest.value).toBeNull()
+  })
+
+  it('rebuilds the snapshot through the bounded delete channel and retries the open', async () => {
+    const workspace = useWorkspace()
+    const project: Project = {
+      id: '/work/broken',
+      name: 'broken',
+      path: '/work/broken',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    loadWorkspaceApiMock.mockRejectedValueOnce(
+      Object.assign(new Error('invalid Engineering Snapshot'), {
+        code: 'snapshot_rebuild_required',
+      }),
+    )
+
+    expect(await workspace.openProject(project)).toBe(false)
+
+    loadWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/broken',
+        workspace_handle: '/work/broken',
+      },
+    })
+    vi.mocked(desktopApi.workspace.deleteEngineeringSnapshot).mockResolvedValueOnce(true)
+
+    const recovery = useSnapshotOpenRecovery()
+    await expect(recovery.rebuildSnapshotAndRetry()).resolves.toBe(true)
+
+    expect(desktopApi.workspace.deleteEngineeringSnapshot).toHaveBeenCalledWith(
+      '/work/broken',
+    )
+    expect(loadWorkspaceApiMock).toHaveBeenCalledTimes(2)
+    expect(recovery.pendingRequest.value).toBeNull()
+    expect(workspace.currentProject.value?.path).toBe('/work/broken')
+  })
+
+  it('retries the resolved directory for picker-driven opens instead of prompting again', async () => {
+    const workspace = useWorkspace()
+    vi.mocked(desktopApi.dialog.pickDirectory).mockResolvedValueOnce('/work/broken')
+    loadWorkspaceApiMock.mockRejectedValueOnce(
+      Object.assign(new Error('invalid Engineering Snapshot'), {
+        code: 'snapshot_rebuild_required',
+      }),
+    )
+
+    expect(await workspace.openProject()).toBe(false)
+
+    loadWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/broken',
+        workspace_handle: '/work/broken',
+      },
+    })
+    vi.mocked(desktopApi.workspace.deleteEngineeringSnapshot).mockResolvedValueOnce(true)
+
+    const recovery = useSnapshotOpenRecovery()
+    await expect(recovery.rebuildSnapshotAndRetry()).resolves.toBe(true)
+
+    // The retry reopens the already-picked directory; a second prompt would
+    // resolve undefined (mockResolvedValueOnce is exhausted) and fail.
+    expect(desktopApi.dialog.pickDirectory).toHaveBeenCalledTimes(1)
+    expect(loadWorkspaceApiMock).toHaveBeenCalledTimes(2)
+    expect(loadWorkspaceApiMock).toHaveBeenLastCalledWith('/work/broken')
+    expect(workspace.currentProject.value?.path).toBe('/work/broken')
+  })
+
+  it('routes a snapshot open failure during session restore to the recovery dialog', async () => {
+    const workspace = useWorkspace()
+    routerMock.currentRoute.value = { path: '/workspace/home', query: {} }
+    vi.mocked(desktopApi.workspace.getBoundPath).mockResolvedValueOnce('/work/broken')
+    loadWorkspaceApiMock.mockRejectedValueOnce(
+      Object.assign(new Error('invalid Engineering Snapshot'), {
+        code: 'snapshot_rebuild_required',
+      }),
+    )
+
+    await workspace.loadRecentProjects()
+
+    expect(useSnapshotOpenRecovery().pendingRequest.value).toMatchObject({
+      code: 'snapshot_rebuild_required',
+      directory: '/work/broken',
+    })
+    expect(routerMock.replace).toHaveBeenCalledWith('/')
+  })
+
+  it('keeps the silent restore fallback for unrelated reload failures', async () => {
+    const workspace = useWorkspace()
+    routerMock.currentRoute.value = { path: '/workspace/home', query: {} }
+    vi.mocked(desktopApi.workspace.getBoundPath).mockResolvedValueOnce('/work/broken')
+    loadWorkspaceApiMock.mockRejectedValueOnce(new Error('sidecar unavailable'))
+
+    await workspace.loadRecentProjects()
+
+    expect(useSnapshotOpenRecovery().pendingRequest.value).toBeNull()
+    expect(routerMock.replace).toHaveBeenCalledWith('/')
+  })
+
   it('keeps Agent chat messages when a workspace opens successfully', async () => {
     const workspace = useWorkspace()
     const existingProject: Project = {
@@ -1054,6 +1284,56 @@ describe('useWorkspace openProject', () => {
         committedRevision: 9,
         committedVerifiedAt: expect.any(String),
       }),
+    ])
+  })
+
+  it('refreshes the Backend recent-project summary on demand without closing the workspace', async () => {
+    const workspace = useWorkspace()
+    const project: Project = {
+      id: '/work/demo',
+      name: 'demo',
+      path: '/work/demo',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    workspace.currentProject.value = project
+    workspace.recentProjects.value = [{ ...project }]
+    vi.mocked(desktopApi.backendWorkspace.getOverview).mockResolvedValueOnce({
+      generation: 0,
+      workspaceContextId: 'context-a',
+      overview: {
+        revision: {
+          status: 'ready',
+          data: { workspaceId: 'engineering-a', workspaceRevision: 9 },
+          issues: [],
+        },
+        configuration: { status: 'unavailable', issues: [] },
+        flow: {
+          status: 'ready',
+          data: {
+            steps: [
+              { name: 'synthesis', order: 0, state: 'succeeded', stepId: 'synthesis' },
+              { name: 'floorplan', order: 1, state: 'not-started', stepId: 'floorplan' },
+            ],
+          },
+          issues: [],
+        },
+        keyMetrics: { status: 'unavailable', issues: [] },
+      },
+    } as never)
+
+    await workspace.snapshotCurrentProject()
+
+    expect(workspace.currentProject.value).not.toBeNull()
+    expect(workspace.recentProjects.value[0]).toEqual(
+      expect.objectContaining({
+        path: '/work/demo',
+        status: 'in_progress',
+        totalSteps: 2,
+        completedSteps: 1,
+      }),
+    )
+    expect(settingsData.get('recent_projects')).toEqual([
+      expect.objectContaining({ path: '/work/demo', status: 'in_progress' }),
     ])
   })
 
@@ -2126,6 +2406,43 @@ describe('useWorkspace openProject', () => {
     expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
   })
 
+  it('persists the recent-project summary when a flow reaches a terminal state', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+    vi.mocked(desktopApi.backendWorkspace.getOverview).mockResolvedValueOnce({
+      generation: 0,
+      workspaceContextId: 'context-a',
+      overview: {
+        revision: {
+          status: 'ready',
+          data: { workspaceId: 'engineering-a', workspaceRevision: 3 },
+          issues: [],
+        },
+        configuration: { status: 'unavailable', issues: [] },
+        flow: {
+          status: 'ready',
+          data: {
+            steps: [
+              { name: 'synthesis', order: 0, state: 'succeeded', stepId: 'synthesis' },
+            ],
+          },
+          issues: [],
+        },
+        keyMetrics: { status: 'unavailable', issues: [] },
+      },
+    } as never)
+
+    onRuntimeEvent?.(
+      backendProtocolEvent('operation.completed', {}, { operationId: 'job-rtl2gds' }),
+    )
+
+    await vi.waitFor(() => {
+      expect(settingsData.get('recent_projects')).toEqual([
+        expect.objectContaining({ path: '/work/demo', status: 'success' }),
+      ])
+    })
+    expect(workspace.currentProject.value?.path).toBe('/work/demo')
+  })
+
   it('requests result resource reset after ECC prepares a full-flow rerun', async () => {
     const workspace = await openWorkspaceAndConnectRuntimeEvents()
 
@@ -2831,9 +3148,12 @@ describe('useWorkspace openProject', () => {
       expect.objectContaining({ targetDirectory: '/work/existing' }),
       'workspace-handle-1',
       1,
+      { retainBackup: false },
     )
     expect(createWorkspaceApiMock).not.toHaveBeenCalled()
     expect(desktopApi.workspace.prepareProjectDirectoryReplacement).not.toHaveBeenCalled()
+    expect(desktopApi.workspace.retainProjectDirectoryReplacement).not.toHaveBeenCalled()
+    expect(desktopApi.projectManifest.mutate).not.toHaveBeenCalled()
     expect(workspace.workspaceSession.value.sessionId).not.toBe(session.sessionId)
     expect(workspace.workspaceSession.value).toMatchObject({
       projectRoot: '/work/existing',
@@ -2881,7 +3201,7 @@ describe('useWorkspace openProject', () => {
     expect(desktopApi.workspace.prepareProjectDirectoryReplacement).not.toHaveBeenCalled()
   })
 
-  it('replaces the active backend workspace when keeping the original backup', async () => {
+  it('updates the active backend workspace in place when keeping the original backup', async () => {
     const workspace = useWorkspace()
     const lifecycle = useWorkspaceLifecycle()
     workspace.currentProject.value = {
@@ -2897,22 +3217,7 @@ describe('useWorkspace openProject', () => {
       workspaceId: 'workspace-handle-1',
       workspaceRevision: 1,
     })
-    const replacement = {
-      id: 'replacement-existing-1',
-      targetPath: '/work/existing',
-      backupPath: '/work/.existing.replace-backup-1',
-    }
-    vi.mocked(
-      desktopApi.workspace.prepareProjectDirectoryReplacement,
-    ).mockResolvedValueOnce(replacement)
-    createWorkspaceApiMock.mockResolvedValueOnce({
-      response: 'success',
-      data: {
-        directory: '/work/existing',
-        workspace_id: 'workspace-existing-new',
-      },
-      message: [],
-    })
+    const versionsBefore = { ...lifecycle.resourceVersions.value }
 
     await expect(
       workspace.newProject({
@@ -2928,14 +3233,77 @@ describe('useWorkspace openProject', () => {
       }),
     ).resolves.toBe(true)
 
-    expect(updateWorkspaceApiMock).not.toHaveBeenCalled()
-    expect(desktopApi.workspace.prepareProjectDirectoryReplacement).toHaveBeenCalledWith(
-      '/work/existing',
+    // ECC retains the backup and registers it in project.json itself: the
+    // renderer only forwards retainBackup and never touches the journal IPC.
+    expect(updateWorkspaceApiMock).toHaveBeenCalledWith(
+      expect.objectContaining({ targetDirectory: '/work/existing' }),
+      'workspace-handle-1',
+      1,
+      { retainBackup: true },
     )
-    expect(createWorkspaceApiMock).toHaveBeenCalled()
-    expect(desktopApi.workspace.retainProjectDirectoryReplacement).toHaveBeenCalledWith(
-      replacement.id,
+    expect(createWorkspaceApiMock).not.toHaveBeenCalled()
+    expect(desktopApi.workspace.prepareProjectDirectoryReplacement).not.toHaveBeenCalled()
+    expect(desktopApi.workspace.retainProjectDirectoryReplacement).not.toHaveBeenCalled()
+    expect(desktopApi.projectManifest.mutate).not.toHaveBeenCalled()
+    expect(workspace.workspaceSession.value).toMatchObject({
+      projectRoot: '/work/existing',
+      state: 'active',
+      workspaceId: 'workspace-handle-1',
+      workspaceRevision: 2,
+    })
+    // The project model is refreshed so both pages reflect the new generation
+    // (and the archived backup entry) after the update.
+    expect(lifecycle.resourceVersions.value.all).toBe(versionsBefore.all + 1)
+    expect(lifecycle.resourceVersions.value.flow).toBe(versionsBefore.flow + 1)
+  })
+
+  it('keeps the current backend workspace when the in-place update fails', async () => {
+    const workspace = useWorkspace()
+    const lifecycle = useWorkspaceLifecycle()
+    workspace.currentProject.value = {
+      id: '/work/existing',
+      name: 'existing',
+      path: '/work/existing',
+      designTool: 'backend',
+      lastOpened: new Date(),
+    }
+    const session = lifecycle.beginSession({ projectRoot: '/work/existing' })
+    lifecycle.activateSession(session.sessionId, {
+      projectRoot: '/work/existing',
+      workspaceId: 'workspace-handle-1',
+      workspaceRevision: 1,
+    })
+    updateWorkspaceApiMock.mockRejectedValueOnce(
+      new Error('Workspace Revision does not match'),
     )
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/existing',
+        replaceExistingWorkspace: true,
+        keepReplacementBackup: true,
+        pdk: 'ics55',
+        pdk_root: '/pdks/ics55',
+        parameters: { design: 'gcd', top_module: 'gcd', clock: 'clk' },
+        origin_def: '',
+        origin_verilog: '/work/gcd.v',
+        rtl_list: ['/work/gcd.v'],
+      }),
+    ).resolves.toBe(false)
+
+    expect(workspace.lastWorkspaceCreationError.value).toContain(
+      'Workspace Revision does not match',
+    )
+    expect(desktopApi.workspace.prepareProjectDirectoryReplacement).not.toHaveBeenCalled()
+    expect(desktopApi.workspace.restoreProjectDirectoryReplacement).not.toHaveBeenCalled()
+    expect(desktopApi.workspace.discardFailedWorkspaceCreate).not.toHaveBeenCalled()
+    expect(workspace.currentProject.value?.path).toBe('/work/existing')
+    expect(workspace.workspaceSession.value).toMatchObject({
+      sessionId: session.sessionId,
+      state: 'active',
+      workspaceId: 'workspace-handle-1',
+      workspaceRevision: 1,
+    })
   })
 
   it('restores the active workspace root when replacement is blocked', async () => {
@@ -2945,7 +3313,7 @@ describe('useWorkspace openProject', () => {
       id: '/work/existing',
       name: 'existing',
       path: '/work/existing',
-      designTool: 'backend',
+      designTool: 'frontend',
       lastOpened: new Date(),
     }
     activeProjectRoot = '/work/existing'
@@ -2964,14 +3332,15 @@ describe('useWorkspace openProject', () => {
     await expect(
       workspace.newProject({
         directory: '/work/existing',
+        designTool: 'frontend',
         replaceExistingWorkspace: true,
         keepReplacementBackup: true,
-        pdk: 'ics55',
-        pdk_root: '/pdks/ics55',
-        parameters: { design: 'gcd', top_module: 'gcd', clock: 'clk' },
+        pdk: '',
+        pdk_root: '',
+        parameters: { design: 'existing', top_module: 'ecos_sim_top' },
         origin_def: '',
-        origin_verilog: '/work/gcd.v',
-        rtl_list: ['/work/gcd.v'],
+        origin_verilog: '',
+        rtl_list: [],
       }),
     ).resolves.toBe(false)
 
@@ -3065,7 +3434,7 @@ describe('useWorkspace openProject', () => {
     expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-new-project', 'backend')
   })
 
-  it('replaces an existing workspace by creating from a temporary backup directory', async () => {
+  it('replaces an existing frontend workspace by creating from a temporary backup directory', async () => {
     const workspace = useWorkspace()
     const replacement = {
       id: 'replacement-demo-1',
@@ -3087,19 +3456,17 @@ describe('useWorkspace openProject', () => {
     await expect(
       workspace.newProject({
         directory: '/work/demo',
+        designTool: 'frontend',
         replaceExistingWorkspace: true,
-        pdk: 'ics55',
-        pdk_root: '/pdk/ics55',
+        pdk: '',
+        pdk_root: '',
         parameters: {
           design: 'demo',
-          top_module: 'top',
-          clock: 'clk',
+          top_module: 'ecos_sim_top',
         },
-        origin_def: '/work/demo/origin/demo.def',
-        origin_verilog: '/work/demo/origin/demo.v',
-        rtl_list: ['/work/demo/origin/demo.v'],
-        sdc: '/work/demo/origin/demo.sdc',
-        pdk_json: '/work/demo/home/pdk.json',
+        origin_def: '',
+        origin_verilog: '',
+        rtl_list: [],
       }),
     ).resolves.toBe(true)
 
@@ -3109,23 +3476,54 @@ describe('useWorkspace openProject', () => {
     )
     expect(createWorkspaceApiMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        targetDirectory: '/work/demo',
-        workspaceBindings: expect.objectContaining({
-          inputs: {
-            def: '/work/.demo.replace-backup-1/origin/demo.def',
-            'rtl-1': '/work/.demo.replace-backup-1/origin/demo.v',
-            sdc: '/work/.demo.replace-backup-1/origin/demo.sdc',
-          },
-        }),
+        designTool: 'frontend',
+        directory: '/work/demo',
       }),
     )
+    expect(updateWorkspaceApiMock).not.toHaveBeenCalled()
     expect(desktopApi.workspace.finalizeProjectDirectoryReplacement).toHaveBeenCalledWith(
       replacement.id,
     )
     expect(desktopApi.workspace.restoreProjectDirectoryReplacement).not.toHaveBeenCalled()
   })
 
-  it('keeps replacement backup and records it in project.json when requested', async () => {
+  it('never prepares a replacement journal for a backend workspace update', async () => {
+    const workspace = useWorkspace()
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'error',
+      data: {},
+      message: ['Workspace already exists: /work/demo'],
+    })
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/demo',
+        replaceExistingWorkspace: true,
+        keepReplacementBackup: true,
+        pdk: 'ics55',
+        pdk_root: '/pdk/ics55',
+        parameters: {
+          design: 'demo',
+          top_module: 'top',
+          clock: 'clk',
+        },
+        origin_def: '',
+        origin_verilog: '',
+        rtl_list: [],
+      }),
+    ).resolves.toBe(false)
+
+    // Backend updates converge on the ECC in-place path; without an active
+    // session the create RPC fails instead of journaling a replacement.
+    expect(desktopApi.workspace.prepareProjectDirectoryReplacement).not.toHaveBeenCalled()
+    expect(desktopApi.workspace.restoreProjectDirectoryReplacement).not.toHaveBeenCalled()
+    expect(updateWorkspaceApiMock).not.toHaveBeenCalled()
+    expect(workspace.lastWorkspaceCreationError.value).toContain(
+      'Workspace already exists',
+    )
+  })
+
+  it('keeps a frontend replacement backup and records it in project.json when requested', async () => {
     const workspace = useWorkspace()
     const replacement = {
       id: 'replacement-demo-1',
@@ -3166,14 +3564,14 @@ describe('useWorkspace openProject', () => {
     await expect(
       workspace.newProject({
         directory: '/work/demo',
+        designTool: 'frontend',
         replaceExistingWorkspace: true,
         keepReplacementBackup: true,
-        pdk: 'ics55',
-        pdk_root: '/pdk/ics55',
+        pdk: '',
+        pdk_root: '',
         parameters: {
           design: 'demo',
-          top_module: 'top',
-          clock: 'clk',
+          top_module: 'ecos_sim_top',
         },
         origin_def: '/work/demo/origin/demo.def',
         origin_verilog: '/work/demo/origin/demo.v',
@@ -3205,7 +3603,7 @@ describe('useWorkspace openProject', () => {
     expect(desktopApi.workspace.retainProjectDirectoryReplacement).not.toHaveBeenCalled()
   })
 
-  it('keeps a standalone workspace backup without writing project.json', async () => {
+  it('keeps a standalone frontend workspace backup without writing project.json', async () => {
     const workspace = useWorkspace()
     const replacement = {
       id: 'replacement-standalone-1',
@@ -3227,14 +3625,14 @@ describe('useWorkspace openProject', () => {
     await expect(
       workspace.newProject({
         directory: '/work/standalone',
+        designTool: 'frontend',
         replaceExistingWorkspace: true,
         keepReplacementBackup: true,
-        pdk: 'ics55',
-        pdk_root: '/pdk/ics55',
+        pdk: '',
+        pdk_root: '',
         parameters: {
           design: 'standalone',
-          top_module: 'top',
-          clock: 'clk',
+          top_module: 'ecos_sim_top',
         },
         origin_def: '',
         origin_verilog: '',
@@ -3251,7 +3649,7 @@ describe('useWorkspace openProject', () => {
     ).not.toHaveBeenCalled()
   })
 
-  it('restores the original workspace when replacement finalization fails', async () => {
+  it('restores the original frontend workspace when replacement finalization fails', async () => {
     const workspace = useWorkspace()
     const replacement = {
       id: 'replacement-demo-1',
@@ -3276,16 +3674,16 @@ describe('useWorkspace openProject', () => {
     await expect(
       workspace.newProject({
         directory: '/work/demo',
+        designTool: 'frontend',
         replaceExistingWorkspace: true,
-        pdk: 'ics55',
-        pdk_root: '/pdk/ics55',
+        pdk: '',
+        pdk_root: '',
         origin_def: '',
         origin_verilog: '',
         rtl_list: [],
         parameters: {
           design: 'demo',
-          top_module: 'top',
-          clock: 'clk',
+          top_module: 'ecos_sim_top',
         },
       }),
     ).resolves.toBe(false)
@@ -3296,7 +3694,7 @@ describe('useWorkspace openProject', () => {
     expect(workspace.currentProject.value).toBeNull()
   })
 
-  it('releases a replacement token when backup manifest recording fails', async () => {
+  it('releases a frontend replacement token when backup manifest recording fails', async () => {
     const workspace = useWorkspace()
     const replacement = {
       id: 'replacement-demo-1',
@@ -3321,14 +3719,14 @@ describe('useWorkspace openProject', () => {
     await expect(
       workspace.newProject({
         directory: '/work/demo',
+        designTool: 'frontend',
         replaceExistingWorkspace: true,
         keepReplacementBackup: true,
-        pdk: 'ics55',
-        pdk_root: '/pdk/ics55',
+        pdk: '',
+        pdk_root: '',
         parameters: {
           design: 'demo',
-          top_module: 'top',
-          clock: 'clk',
+          top_module: 'ecos_sim_top',
         },
         origin_def: '/work/demo/origin/demo.def',
         origin_verilog: '/work/demo/origin/demo.v',
@@ -3351,7 +3749,7 @@ describe('useWorkspace openProject', () => {
     ).not.toHaveBeenCalled()
   })
 
-  it('restores the original workspace when backup retention fails', async () => {
+  it('restores the original frontend workspace when backup retention fails', async () => {
     const workspace = useWorkspace()
     const replacement = {
       id: 'replacement-demo-1',
@@ -3379,17 +3777,17 @@ describe('useWorkspace openProject', () => {
     await expect(
       workspace.newProject({
         directory: '/work/demo',
+        designTool: 'frontend',
         replaceExistingWorkspace: true,
         keepReplacementBackup: true,
-        pdk: 'ics55',
-        pdk_root: '/pdk/ics55',
+        pdk: '',
+        pdk_root: '',
         origin_def: '',
         origin_verilog: '',
         rtl_list: [],
         parameters: {
           design: 'demo',
-          top_module: 'top',
-          clock: 'clk',
+          top_module: 'ecos_sim_top',
         },
         project_context: {
           mode: 'select',
@@ -3409,7 +3807,7 @@ describe('useWorkspace openProject', () => {
     expect(workspace.currentProject.value).toBeNull()
   })
 
-  it('restores the original workspace backup when replacement creation fails', async () => {
+  it('restores the original frontend workspace backup when replacement creation fails', async () => {
     const workspace = useWorkspace()
     const replacement = {
       id: 'replacement-demo-1',
@@ -3428,13 +3826,13 @@ describe('useWorkspace openProject', () => {
     await expect(
       workspace.newProject({
         directory: '/work/demo',
+        designTool: 'frontend',
         replaceExistingWorkspace: true,
-        pdk: 'ics55',
-        pdk_root: '/pdk/ics55',
+        pdk: '',
+        pdk_root: '',
         parameters: {
           design: 'demo',
-          top_module: 'top',
-          clock: 'clk',
+          top_module: 'ecos_sim_top',
         },
         origin_def: '/work/demo/origin/demo.def',
         origin_verilog: '/work/demo/origin/demo.v',

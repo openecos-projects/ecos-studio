@@ -6,6 +6,7 @@ import type {
   EccQorSnapshotExtension,
   ProjectQorTrendSummary,
   QorGateStatus,
+  QorScalarStatus,
   QorStatus,
 } from '@ecos-studio/shared'
 import type {
@@ -139,6 +140,9 @@ export interface DashboardQorDiagnosis {
 
 export interface DashboardQorInsights {
   status: 'available' | 'unavailable'
+  score: number | null
+  scalarStatus: QorScalarStatus
+  scoreTone: DashboardTone
   dimensions: DashboardQorDimension[]
   diagnoses: DashboardQorDiagnosis[]
   evidence: EccQorSnapshotExtension['evidence'] | null
@@ -288,13 +292,8 @@ export function buildDashboardRecommendation(
     workspaceId: workspace.workspaceId,
     workspaceName: workspace.workspaceName,
     score,
-    scoreTone: scoreTone(workspace.gateStatus),
-    scoreNote: buildScoreNote(
-      workspace.overallScore,
-      workspace.gateStatus,
-      signoff,
-      qorTrendSummary.scoreThreshold,
-    ),
+    scoreTone: scoreTone(workspace.scalarStatus),
+    scoreNote: buildScoreNote(workspace.overallScore, workspace.scalarStatus, signoff),
     status: workspace.status,
     signoff,
     reason: bestReason.includes(score) ? null : bestReason,
@@ -311,6 +310,9 @@ export function buildDashboardQorInsights(
   if (!extension || extension.status !== 'available') {
     return {
       status: 'unavailable',
+      score: null,
+      scalarStatus: 'NOT_RATED',
+      scoreTone: 'neutral',
       dimensions: [],
       diagnoses: [],
       evidence: null,
@@ -321,6 +323,9 @@ export function buildDashboardQorInsights(
 
   return {
     status: 'available',
+    score: extension.score,
+    scalarStatus: extension.scalarStatus,
+    scoreTone: scoreTone(extension.scalarStatus),
     dimensions: Object.entries(extension.qphys).map(([key, dimension]) => ({
       key,
       label: QOR_DIMENSION_LABELS[key] ?? key,
@@ -366,17 +371,19 @@ function diagnosisTone(state: string): DashboardTone {
 
 function buildScoreNote(
   score: number | null,
-  scoreGate: QorGateStatus,
+  scalarStatus: QorScalarStatus,
   signoff: QorGateStatus,
-  threshold: number,
 ): string {
-  if (score === null) return 'Not rated: the QoR score needs a complete analysis run'
-  if (scoreGate === 'pass') return `Meets the ${threshold} analysis threshold`
-  // A sub-threshold score next to a passing signoff tag reads as a contradiction.
-  if (signoff === 'pass') {
-    return `Below the ${threshold} analysis threshold, which does not gate signoff`
+  if (score === null) {
+    return 'Not rated: the QoR v3 score needs a complete analysis run'
   }
-  return `Below the ${threshold} analysis threshold`
+  if (scalarStatus === 'RED' || scalarStatus === 'FAIL') {
+    // A RED score next to a passing signoff tag reads as a contradiction.
+    return signoff === 'pass'
+      ? 'QoR v3 RED band, which does not gate signoff'
+      : 'QoR v3 RED band'
+  }
+  return `QoR v3 ${scalarStatus} band`
 }
 
 export function buildDashboardWorkspaceRows(
@@ -421,7 +428,7 @@ export function buildDashboardWorkspaceRows(
       stepsLabel: `${stepsDone}/${stepsTotal}`,
       stepsPercent: stepsTotal === 0 ? 0 : Math.round((stepsDone / stepsTotal) * 100),
       score: formatScore(trend?.overallScore ?? null),
-      scoreTone: scoreTone(trend?.gateStatus ?? 'unavailable'),
+      scoreTone: scoreTone(trend?.scalarStatus ?? 'NOT_RATED'),
       blockingCount: counts.blocking,
       findingCount: counts.total,
       analysisState,
@@ -605,9 +612,11 @@ function coverageTone(covered: number, total: number): DashboardTone {
   return 'warn'
 }
 
-function scoreTone(gate: QorGateStatus): DashboardTone {
-  if (gate === 'unavailable' || gate === 'incomplete') return 'neutral'
-  return gate === 'pass' ? 'good' : 'warn'
+function scoreTone(scalarStatus: QorScalarStatus): DashboardTone {
+  if (scalarStatus === 'GREEN') return 'good'
+  if (scalarStatus === 'YELLOW' || scalarStatus === 'ORANGE') return 'warn'
+  if (scalarStatus === 'RED' || scalarStatus === 'FAIL') return 'bad'
+  return 'neutral'
 }
 
 export function formatScore(score: number | null): string {

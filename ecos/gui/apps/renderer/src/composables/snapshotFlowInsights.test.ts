@@ -1,7 +1,8 @@
-import type { WorkspaceOverviewCore } from '@ecos-studio/shared'
+import type { WorkspaceOverviewCore, WorkspaceStaInsights } from '@ecos-studio/shared'
 import { describe, expect, it } from 'vitest'
 import {
   buildSnapshotFlowInsights,
+  staCriticalPathsFromSnapshot,
   staOverviewFromSnapshot,
 } from './snapshotFlowInsights'
 
@@ -178,6 +179,8 @@ describe('buildSnapshotFlowInsights', () => {
         },
       ],
       criticalPaths: [],
+      criticalPathIssueCount: 0,
+      criticalPathsTruncated: false,
       worstSetup: null,
       worstHold: null,
       frequencyMhz: null,
@@ -190,5 +193,134 @@ describe('buildSnapshotFlowInsights', () => {
       expect.objectContaining({ corner: 'SS_0p8V_125C', missing: true }),
     ])
     expect(result?.allCornersMet).toBeNull()
+  })
+
+  it('keeps the bounded preview truth and the full-list artifact handle', () => {
+    const corners = Array.from({ length: 32 }, (_, index) => `CORNER_${index}`)
+    const sta: WorkspaceStaInsights = {
+      corners: [],
+      // The projection's bounded head: the GUI must not re-slice it to a
+      // tool-side limit and must carry the truncation truth verbatim.
+      criticalPaths: corners.slice(0, 5).map((corner, index) => ({
+        issueId: `sta_timing:${corner}:setup:path-1`,
+        corner,
+        analysisType: 'setup' as const,
+        slackNs: -0.5 + index * 0.01,
+        startPoint: 'u0/Q',
+        endPoint: 'u1/D',
+        pathGroup: 'clk',
+        stages: [],
+      })),
+      criticalPathIssueCount: 640,
+      criticalPathsTruncated: true,
+      worstSetup: null,
+      worstHold: null,
+      frequencyMhz: null,
+      setupViolationCount: null,
+      holdViolationCount: null,
+      allCornersMet: null,
+    }
+    const overview = {
+      revision: {
+        status: 'ready',
+        data: { workspaceId: 'engineering-a', workspaceRevision: 9 },
+        issues: [],
+      },
+      flow: {
+        status: 'ready',
+        data: {
+          steps: [
+            {
+              name: 'STA',
+              order: 0,
+              state: 'succeeded',
+              stepId: 'STA',
+              toolId: 'ecc',
+            },
+          ],
+        },
+        issues: [],
+      },
+      artifacts: {
+        status: 'ready',
+        data: {
+          items: [
+            {
+              artifactId: 'sta-issues-missing',
+              availability: 'missing',
+              kind: 'sta_timing_issues',
+              name: 'sta_timing_issues.json',
+              stepId: 'STA',
+            },
+            {
+              artifactId: 'sta-issues',
+              availability: 'available',
+              kind: 'sta_timing_issues',
+              name: 'sta_timing_issues.json',
+              stepId: 'STA',
+            },
+          ],
+        },
+        issues: [],
+      },
+      flowInsights: {
+        status: 'ready',
+        data: {
+          trends: [],
+          composition: [],
+          congestion: [],
+          drc: { totalCount: null, hotspots: [], reportedCount: 0, truncated: false },
+          sta,
+        },
+        issues: [],
+      },
+    } as unknown as WorkspaceOverviewCore
+
+    const result = buildSnapshotFlowInsights(overview)
+
+    expect(result?.staCriticalPaths).toMatchObject({
+      setup: { length: 5 },
+      issueCount: 640,
+      issuesTruncated: true,
+    })
+    expect(result?.timingIssuesArtifact).toMatchObject({
+      artifactId: 'sta-issues',
+      kind: 'sta_timing_issues',
+    })
+  })
+
+  it('renders an untruncated small-design preview without a bound note', () => {
+    const sta: WorkspaceStaInsights = {
+      corners: [],
+      criticalPaths: [
+        {
+          issueId: 'sta_timing:TT:setup:path-1',
+          corner: 'TT',
+          analysisType: 'setup',
+          slackNs: -0.2,
+          startPoint: 'u0/Q',
+          endPoint: 'u1/D',
+          pathGroup: 'clk',
+          stages: [],
+        },
+      ],
+      criticalPathIssueCount: 1,
+      criticalPathsTruncated: false,
+      worstSetup: null,
+      worstHold: null,
+      frequencyMhz: null,
+      setupViolationCount: null,
+      holdViolationCount: null,
+      allCornersMet: null,
+    }
+
+    const model = staCriticalPathsFromSnapshot(sta)
+
+    expect(model).toMatchObject({
+      setup: { length: 1 },
+      hold: { length: 0 },
+      issueCount: 1,
+      issuesTruncated: false,
+    })
   })
 })

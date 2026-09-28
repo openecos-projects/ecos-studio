@@ -1,4 +1,4 @@
-import { sameProjectManifestFlowStep } from '@ecos-studio/shared'
+import { flowStepRegistry, sameProjectManifestFlowStep } from '@ecos-studio/shared'
 
 export enum CMDEnum {
   catalog_list = 'catalog_list',
@@ -54,6 +54,7 @@ export enum StepEnum {
   SIGNOFF = 'Signoff',
   HARDEN = 'Harden',
   STA = 'sta',
+  POWER_ANALYSIS = 'powerAnalysis',
   DRC = 'drc',
   LVS = 'lvs',
   RCX = 'RCX',
@@ -63,12 +64,13 @@ export enum StepEnum {
 /**
  * Steps that cannot start a flow: LEC compares the golden netlist against a
  * later one, so starting a workspace at it would let ECC self-compare the
- * origin netlist.
+ * origin netlist. Membership comes from the registry's flowStartDisabled flag.
  */
-export const FLOW_START_DISABLED_STEPS: ReadonlySet<string> = new Set([
-  StepEnum.LEC,
-  StepEnum.POST_ROUTE_LEC,
-])
+export const FLOW_START_DISABLED_STEPS: ReadonlySet<string> = new Set(
+  flowStepRegistry
+    .filter((step) => step.flowStartDisabled)
+    .flatMap((step) => step.eccNames),
+)
 
 /** 步骤元数据配置 */
 export interface StepMetadata {
@@ -211,6 +213,13 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
     label: 'STA',
     icon: 'ri-pulse-line',
     path: StepEnum.STA,
+    showInSidebar: true,
+    group: 'run',
+  },
+  [StepEnum.POWER_ANALYSIS.toLowerCase()]: {
+    label: 'Power Analysis',
+    icon: 'ri-flashlight-line',
+    path: StepEnum.POWER_ANALYSIS,
     showInSidebar: true,
     group: 'run',
   },

@@ -40,6 +40,10 @@ import type {
   ProjectEccPdkConfigWriteRequest,
 } from './projectEccConfig.ts'
 import type {
+  ProjectDoctorCheckResult,
+  ProjectDoctorRepairResult,
+} from './projectDoctor.ts'
+import type {
   ProjectManifest,
   ProjectManifestMutationRequest,
   ProjectManifestMutationResult,
@@ -304,6 +308,13 @@ export interface DesktopApi {
     isMaximized(): Promise<boolean>
     setZoomFactor(factor: number): Promise<void>
     create(options?: { initialRoute?: string }): Promise<void>
+    /**
+     * Grow (widthPx > 0) or shrink (0) the window width to make room for a
+     * left-docked panel while keeping the app content width unchanged.
+     * Returns the applied extension in px — 0 when the window is maximized or
+     * already touches the screen edge.
+     */
+    setLeftPanelExtension(widthPx: number): Promise<number>
     onResized(listener: () => void): DesktopEventUnsubscribe
     onMaximizedChanged(listener: (isMaximized: boolean) => void): DesktopEventUnsubscribe
   }
@@ -341,6 +352,8 @@ export interface DesktopApi {
     importWorkspace(
       projectRoot: string,
     ): Promise<DesktopProjectManagementWorkspaceImportResult>
+    checkConsistency(projectRoot: string): Promise<ProjectDoctorCheckResult>
+    repairConsistency(projectRoot: string): Promise<ProjectDoctorRepairResult>
   }
   dialog: {
     pickDirectory(options?: DesktopDirectoryDialogOptions): Promise<string | null>
@@ -385,6 +398,7 @@ export interface DesktopApi {
     listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]>
     pathExists(path: string): Promise<boolean>
     discardFailedWorkspaceCreate(path: string): Promise<boolean>
+    deleteEngineeringSnapshot(path: string): Promise<boolean>
     prepareProjectDirectoryReplacement(
       path: string,
     ): Promise<WorkspaceDirectoryReplacement | null>

@@ -9,8 +9,6 @@ describe('artifactDescriptor', () => {
       kind: 'timing_paths',
       name: 'MAX_125/RCworst/timing_paths.json',
       reference: 'sta_ecc/feature/MAX_125/RCworst/timing_paths.json',
-      sha256: 'a'.repeat(64),
-      sizeBytes: 1024,
       stepId: 'sta',
     })
 
@@ -19,7 +17,6 @@ describe('artifactDescriptor', () => {
       availability: 'available',
       kind: 'timing_paths',
       name: 'MAX_125/RCworst/timing_paths.json',
-      sizeBytes: 1024,
       stepId: 'sta',
       timingCorner: 'MAX_125/RCworst',
     })

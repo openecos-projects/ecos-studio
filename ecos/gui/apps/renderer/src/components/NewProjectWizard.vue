@@ -530,7 +530,14 @@
                     {{ sourceContext.workspaceName || sourceContext.workspaceId }}.
                   </p>
 
-                  <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                  <p
+                    v-if="flowStepOptions.length === 0"
+                    class="rounded-lg border border-(--border-color) bg-(--bg-primary)/60 px-4 py-3 text-xs text-(--text-secondary)"
+                  >
+                    Flow steps are unavailable: the ECC runtime did not provide a flow
+                    definition. Check the runtime logs and reopen this wizard.
+                  </p>
+                  <div v-else class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                     <div
                       v-for="(step, index) in flowStepOptions"
                       :key="step.name"
@@ -1488,11 +1495,6 @@
                         class="w-full rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
                       />
                     </div>
-                    <WorkspaceCatalogParameters
-                      :parameters="extraCreationParameters"
-                      :values="catalogParameterValues"
-                      @update="setCatalogParameterValue"
-                    />
                   </div>
 
                   <div
@@ -1744,7 +1746,6 @@ import {
 import DesignFileTransfer from './DesignFileTransfer.vue'
 import PdkResourcePickerDialog from './PdkResourcePickerDialog.vue'
 import TopModuleField from './TopModuleField.vue'
-import WorkspaceCatalogParameters from './WorkspaceCatalogParameters.vue'
 import {
   canSubmitTopModule,
   designInputFingerprint,
@@ -1779,51 +1780,47 @@ type ProjectMode = 'select' | 'create'
 type FlowStepName = string
 
 /**
- * Static copy of the ECC canonical rtl2gds chain
- * (ecc/chipcompiler/rtl2gds/builder.py build_rtl2gds_flow), used until the
- * workspace creation model reports the live flow definition.
+ * Name normalization for persisted flow step values; the alias values are the
+ * canonical ECC step ids. The authoritative chain itself always comes from
+ * ECC discovery — no static chain copy is kept here.
  */
-const FALLBACK_FLOW_STEPS: Array<{ name: FlowStepName; description: string }> = [
-  { name: 'Synthesis', description: 'RTL synthesis entry.' },
-  { name: 'lec', description: 'Post-synthesis logic equivalence check.' },
-  { name: 'preFloorplan', description: 'Initial floorplan and die setup.' },
-  { name: 'macroPlacement', description: 'Macro placement.' },
-  { name: 'postFloorplan', description: 'Floorplan finalization after macro placement.' },
-  { name: 'place', description: 'Standard cell placement.' },
-  { name: 'CTS', description: 'Clock tree synthesis.' },
-  { name: 'legalization', description: 'Placement legalization.' },
-  { name: 'Timing optimization', description: 'Cell sizing after legalization.' },
-  { name: 'route', description: 'Detailed routing.' },
-  { name: 'filler', description: 'Filler insertion.' },
-  { name: 'RCX', description: 'Parasitic extraction.' },
-  { name: 'sta', description: 'Static timing analysis.' },
-  { name: 'lvs', description: 'Layout versus netlist connectivity.' },
-  { name: 'postRouteLec', description: 'Post-route logic equivalence check.' },
-  { name: 'drc', description: 'Design rule checking.' },
-  { name: 'Harden', description: 'Final harden output.' },
-]
+const FLOW_STEP_NAME_ALIASES: Record<string, FlowStepName> = {
+  synth: 'Synthesis',
+  synthesis: 'Synthesis',
+  lec: 'lec',
+  // Legacy configs persist 'Floorplan' for the whole floorplan phase; its
+  // entry point in the canonical chain is preFloorplan.
+  floor: 'preFloorplan',
+  floorplan: 'preFloorplan',
+  prefloorplan: 'preFloorplan',
+  macro: 'macroPlacement',
+  macroplace: 'macroPlacement',
+  macroplacement: 'macroPlacement',
+  postfloorplan: 'postFloorplan',
+  place: 'place',
+  placement: 'place',
+  cts: 'CTS',
+  legal: 'legalization',
+  legalization: 'legalization',
+  sizer: 'Timing optimization',
+  timingopt: 'Timing optimization',
+  timingoptimization: 'Timing optimization',
+  route: 'route',
+  routing: 'route',
+  drc: 'drc',
+  lvs: 'lvs',
+  filler: 'filler',
+  postlec: 'postRouteLec',
+  postroutelec: 'postRouteLec',
+  rcx: 'RCX',
+  sta: 'sta',
+  poweranalysis: 'powerAnalysis',
+  harden: 'Harden',
+}
 const KNOWN_FLOW_STEP_NAMES: ReadonlySet<string> = new Set(
-  FALLBACK_FLOW_STEPS.map((step) => step.name),
+  Object.values(FLOW_STEP_NAME_ALIASES),
 )
-const FLOW_STEP_DESCRIPTIONS: Record<string, string> = Object.fromEntries(
-  FALLBACK_FLOW_STEPS.map((step) => [step.name, step.description]),
-)
-/**
- * Static copy of the ECC skippable steps
- * (ecc/chipcompiler/data/types.py SkippableStepEnum), used until the workspace
- * creation model reports `skippableStepIds` on the live flow definition.
- */
-const FALLBACK_SKIPPABLE_STEPS: ReadonlySet<string> = new Set([
-  'lec',
-  'postRouteLec',
-  'Timing optimization',
-])
-/**
- * Static copy of the ECC default skip policy
- * (ecc/chipcompiler/data/types.py DEFAULT_SKIP_STEPS), used until the workspace
- * creation model reports `defaultSkippedStepIds` on the live flow definition.
- */
-const FALLBACK_DEFAULT_SKIPPED_STEPS: ReadonlySet<string> = new Set(['lec'])
+const NO_FLOW_STEP_NAMES: ReadonlySet<string> = new Set()
 type DesignInputKey = 'rtl' | 'filelist' | 'def' | 'verilog' | 'sdc'
 type PdkResourceKey = 'tech_lef' | 'cell_lef' | 'liberty'
 // Canonical mode is 'utilization_margin'; the misspelled 'utilitization_margin'
@@ -1915,28 +1912,22 @@ const initialDesignInputFingerprint = designInputFingerprint({
   startsFromSynthesis:
     (props.initialConfig?.flow_config?.start_step ?? 'Synthesis') === 'Synthesis',
 })
-const {
-  explicitValues: explicitCatalogParameterValues,
-  model: workspaceCreationModel,
-  parameters: extraCreationParameters,
-  refresh: refreshWorkspaceCreationModel,
-  setValue: setCatalogParameterValue,
-  values: catalogParameterValues,
-} = useWorkspaceCreationModel({
-  designTool: () => props.initialConfig?.designTool,
-  flowId: wizardFlowId,
-  inputMode: () => (startsFromSynthesis.value ? 'rtl' : 'postSynthesis'),
-  mpc: () => projectMpc.value as Record<string, unknown> | null,
-  pdk: () =>
-    config.value.pdk
-      ? {
-          familyId: config.value.pdk,
-          mode: pdkConfigMode.value,
-          version: selectedPdk.value?.version ?? null,
-        }
-      : null,
-  projectPresetParameters: () => projectPresetParameters.value,
-})
+const { model: workspaceCreationModel, refresh: refreshWorkspaceCreationModel } =
+  useWorkspaceCreationModel({
+    designTool: () => props.initialConfig?.designTool,
+    flowId: wizardFlowId,
+    inputMode: () => (startsFromSynthesis.value ? 'rtl' : 'postSynthesis'),
+    mpc: () => projectMpc.value as Record<string, unknown> | null,
+    pdk: () =>
+      config.value.pdk
+        ? {
+            familyId: config.value.pdk,
+            mode: pdkConfigMode.value,
+            version: selectedPdk.value?.version ?? null,
+          }
+        : null,
+    projectPresetParameters: () => projectPresetParameters.value,
+  })
 const isDraggingFiles = ref(false)
 const isScanningDirectory = ref(false)
 const directoryScanError = ref('')
@@ -2047,28 +2038,42 @@ const discoveredFlowStepIds = computed<FlowStepName[] | null>(() => {
 
 const skippableFlowStepNames = computed<ReadonlySet<string>>(() => {
   const ids = discoveredFlowDefinition.value?.skippableStepIds
-  if (!Array.isArray(ids)) return FALLBACK_SKIPPABLE_STEPS
+  if (!Array.isArray(ids)) return NO_FLOW_STEP_NAMES
   return new Set(ids.filter((id): id is string => typeof id === 'string'))
 })
 
 const defaultSkippedFlowStepNames = computed<ReadonlySet<string>>(() => {
   const ids = discoveredFlowDefinition.value?.defaultSkippedStepIds
-  if (!Array.isArray(ids)) return FALLBACK_DEFAULT_SKIPPED_STEPS
+  if (!Array.isArray(ids)) return NO_FLOW_STEP_NAMES
   return new Set(ids.filter((id): id is string => typeof id === 'string'))
 })
 
 const flowStepOptions = computed<Array<{ name: FlowStepName; description: string }>>(
   () => {
     const stepIds = discoveredFlowStepIds.value
-    if (!stepIds) return FALLBACK_FLOW_STEPS
+    if (!stepIds) return []
     return stepIds.map((id) => ({ name: id, description: flowStepDescription(id) }))
   },
 )
 
-function flowStepDescription(stepId: string): string {
-  return (
-    FLOW_STEP_DESCRIPTIONS[stepId] ?? `${getStepMetadata(stepId)?.label ?? stepId} step.`
+let flowStepSourceLogged = false
+watch(workspaceCreationModel, (model) => {
+  if (flowStepSourceLogged || !model) return
+  flowStepSourceLogged = true
+  const stepIds = discoveredFlowStepIds.value
+  if (stepIds) {
+    console.info(
+      `[NewProjectWizard] Flow steps loaded from ECC discovery (${stepIds.length} steps).`,
+    )
+    return
+  }
+  console.warn(
+    '[NewProjectWizard] ECC discovery provided no usable flow definition; flow step cards are unavailable.',
   )
+})
+
+function flowStepDescription(stepId: string): string {
+  return `${getStepMetadata(stepId)?.label ?? stepId} step.`
 }
 
 const pdkWizardSteps: PdkWizardStep[] = [
@@ -2366,41 +2371,7 @@ function resolveProjectRelativePath(projectRoot: string, path: string): string {
 
 function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStepName {
   const candidate = String(value ?? '')
-  const aliases: Record<string, FlowStepName> = {
-    synth: 'Synthesis',
-    synthesis: 'Synthesis',
-    lec: 'lec',
-    // Legacy configs persist 'Floorplan' for the whole floorplan phase; its
-    // entry point in the canonical chain is preFloorplan.
-    floor: 'preFloorplan',
-    floorplan: 'preFloorplan',
-    prefloorplan: 'preFloorplan',
-    macro: 'macroPlacement',
-    macroplace: 'macroPlacement',
-    macroplacement: 'macroPlacement',
-    postfloorplan: 'postFloorplan',
-    place: 'place',
-    placement: 'place',
-    cts: 'CTS',
-    legal: 'legalization',
-    legalization: 'legalization',
-    sizer: 'Timing optimization',
-    timing_optimization: 'Timing optimization',
-    'timing optimization': 'Timing optimization',
-    timingopt: 'Timing optimization',
-    timingoptimization: 'Timing optimization',
-    route: 'route',
-    routing: 'route',
-    drc: 'drc',
-    lvs: 'lvs',
-    filler: 'filler',
-    postlec: 'postRouteLec',
-    postroutelec: 'postRouteLec',
-    rcx: 'RCX',
-    sta: 'sta',
-    harden: 'Harden',
-  }
-  const alias = aliases[candidate.toLowerCase().replace(/[_\-\s]+/g, '')]
+  const alias = FLOW_STEP_NAME_ALIASES[candidate.toLowerCase().replace(/[_\-\s]+/g, '')]
   if (alias) return alias
   return KNOWN_FLOW_STEP_NAMES.has(candidate) ? candidate : fallback
 }
@@ -4140,7 +4111,6 @@ function syncWorkspaceConfig() {
   config.value.sdc = sdcPath.value
   config.value.pdk_config_mode = pdkConfigMode.value
   config.value.parameters.die_area_mode = dieAreaMode.value
-  Object.assign(config.value.parameters, explicitCatalogParameterValues())
   if (projectDesignName.value) {
     config.value.parameters.design = projectDesignName.value
   }

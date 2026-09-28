@@ -251,6 +251,85 @@ describe('ProjectScopeService', () => {
     })
   })
 
+  it('grants a Project Management read scope for a project unrelated to the active workspace', async () => {
+    const activeWorkspaceRoot = await createTempDir('ecos-active-workspace-root-')
+    const projectRoot = await createTempDir('ecos-browsed-project-root-')
+    const workspaceRoot = join(projectRoot, 'ws_0001')
+    const manifestPath = join(projectRoot, 'project.json')
+    const workspaceFlowPath = join(workspaceRoot, 'home', 'flow.json')
+    const undeclaredPath = join(projectRoot, 'notes.txt')
+    await mkdir(join(workspaceRoot, 'home'), { recursive: true })
+    await writeProjectManifest(projectRoot, [workspaceRoot])
+    await writeFile(workspaceFlowPath, '{"steps":[]}')
+    await writeFile(undeclaredPath, 'not a workspace artifact')
+
+    const service = projectScopeWithManifest()
+    await runWithWindowScope(1, async () => {
+      await service.registerProjectRoot(activeWorkspaceRoot)
+      await expect(service.registerProjectManagementReadRoot(projectRoot)).resolves.toBe(
+        projectRoot,
+      )
+
+      await expect(service.getProjectRoot()).resolves.toBe(activeWorkspaceRoot)
+      await expect(service.requestProjectPathAccess(manifestPath)).resolves.toBe(
+        manifestPath,
+      )
+      await expect(service.requestProjectPathAccess(workspaceFlowPath)).resolves.toBe(
+        workspaceFlowPath,
+      )
+      await expect(service.requestProjectPathAccess(undeclaredPath)).rejects.toThrow(
+        'outside current project root',
+      )
+      await expect(
+        service.requestWritableProjectPathAccess(workspaceFlowPath),
+      ).rejects.toThrow('outside current project root')
+    })
+  })
+
+  it('replaces the Project Management read scope when another project is selected', async () => {
+    const activeWorkspaceRoot = await createTempDir('ecos-active-workspace-root-')
+    const firstProjectRoot = await createTempDir('ecos-first-project-root-')
+    const secondProjectRoot = await createTempDir('ecos-second-project-root-')
+    const firstWorkspaceRoot = join(firstProjectRoot, 'ws_0001')
+    const secondWorkspaceRoot = join(secondProjectRoot, 'ws_0001')
+    const firstFlowPath = join(firstWorkspaceRoot, 'home', 'flow.json')
+    const secondFlowPath = join(secondWorkspaceRoot, 'home', 'flow.json')
+    await mkdir(join(firstWorkspaceRoot, 'home'), { recursive: true })
+    await mkdir(join(secondWorkspaceRoot, 'home'), { recursive: true })
+    await writeProjectManifest(firstProjectRoot, [firstWorkspaceRoot])
+    await writeProjectManifest(secondProjectRoot, [secondWorkspaceRoot])
+    await writeFile(firstFlowPath, '{"steps":[]}')
+    await writeFile(secondFlowPath, '{"steps":[]}')
+
+    const service = projectScopeWithManifest()
+    await runWithWindowScope(1, async () => {
+      await service.registerProjectRoot(activeWorkspaceRoot)
+      await service.registerProjectManagementReadRoot(firstProjectRoot)
+      await service.registerProjectManagementReadRoot(secondProjectRoot)
+
+      await expect(service.requestProjectPathAccess(secondFlowPath)).resolves.toBe(
+        secondFlowPath,
+      )
+      await expect(service.requestProjectPathAccess(firstFlowPath)).rejects.toThrow(
+        'outside current project root',
+      )
+    })
+  })
+
+  it('rejects a Project Management read root without a valid manifest', async () => {
+    const activeWorkspaceRoot = await createTempDir('ecos-active-workspace-root-')
+    const projectRoot = await createTempDir('ecos-manifestless-project-root-')
+
+    const service = projectScopeWithManifest()
+    await runWithWindowScope(1, async () => {
+      await service.registerProjectRoot(activeWorkspaceRoot)
+
+      await expect(
+        service.registerProjectManagementReadRoot(projectRoot),
+      ).rejects.toThrow('Project read root must have a valid project.json')
+    })
+  })
+
   it('rejects paths that escape the active project root via symlinks', async () => {
     const root = await createTempDir('ecos-project-root-')
     const outside = await createTempDir('ecos-project-outside-')

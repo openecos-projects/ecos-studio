@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { buildProjectQorTrendSummary, normalizeQorMetrics } from './qorAnalysis'
+import { flowStepRegistry } from '@ecos-studio/shared'
+import {
+  buildProjectQorTrendSummary,
+  normalizeQorMetrics,
+  PROJECT_GATE_STEPS,
+} from './qorAnalysis'
 
 function routeMetricText(value: number): string {
   return JSON.stringify({
@@ -30,6 +35,13 @@ function routeMetricText(value: number): string {
 }
 
 describe('qorAnalysis', () => {
+  it('keeps project gate membership in sync with the flow step registry', () => {
+    const registryGateSteps = flowStepRegistry
+      .filter((step) => step.gate)
+      .map((step) => step.id)
+    expect([...PROJECT_GATE_STEPS].sort()).toEqual([...registryGateSteps].sort())
+  })
+
   it('normalizes metric polarity without owning the ECC scoring policy', () => {
     const records = normalizeQorMetrics({
       step: 'STA',

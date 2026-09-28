@@ -250,11 +250,11 @@ describe('useHomeSnapshots', () => {
     expect(testState.getArtifact).not.toHaveBeenCalled()
   })
 
-  it('marks a preview stale when its declared bytes fail verification', async () => {
+  it('marks a preview stale when its declared bytes cannot be read', async () => {
     testState.getArtifact.mockResolvedValue({
       artifact: {
         status: 'unavailable',
-        issues: [{ code: 'FINDINGS_ARTIFACT_HASH_MISMATCH' }],
+        issues: [{ code: 'ARTIFACT_READ_FAILED' }],
       },
       generation: 0,
       workspaceContextId: 'context-a',
@@ -267,7 +267,7 @@ describe('useHomeSnapshots', () => {
     expect(snapshots.layoutThumbnails.value).toEqual([
       expect.objectContaining({
         availability: 'stale',
-        reason: 'FINDINGS_ARTIFACT_HASH_MISMATCH',
+        reason: 'ARTIFACT_READ_FAILED',
         url: null,
       }),
     ])

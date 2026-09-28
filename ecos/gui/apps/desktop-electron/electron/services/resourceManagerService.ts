@@ -122,6 +122,7 @@ interface PlatformAsset {
   size: number | null
   metadata_url?: string | null
   strip_prefix?: string | null
+  packages: RegistryPdkPackage[]
   supplemental_assets: RegistrySupplementalAsset[]
   post_install: RegistryPostInstallStep[]
 }
@@ -195,6 +196,11 @@ interface RegistrySupplementalAsset {
   size: number
 }
 
+interface RegistryPdkPackage extends RegistrySupplementalAsset {
+  cnb_url: string
+  dest: string
+}
+
 interface RegistryToolVersion {
   version: string
   platforms: Record<string, PlatformAsset>
@@ -262,6 +268,7 @@ const BUILTIN_MPCS: RegistryMpc[] = [
             sha256: '34c0013bb5b74876351be6b7cc3885fd5fccb66e6edf9afd15519408a52b5113',
             size: 471915,
             strip_prefix: 'mpc-frame-7555b4053816895919fb1d324d623d46d70dec3d',
+            packages: [],
             supplemental_assets: [],
             post_install: [],
           },
@@ -1870,6 +1877,16 @@ export class ResourceManagerService {
         },
       )
       throwIfAborted(signal)
+      await this.installPdkPackages(
+        resourceId,
+        action,
+        displayName,
+        tempExtract,
+        resolvedAsset.packages,
+        listener,
+        signal,
+      )
+      throwIfAborted(signal)
       await this.downloadSupplementalAssets(
         resourceId,
         action,
@@ -2285,6 +2302,93 @@ export class ResourceManagerService {
         }
         throwIfAborted(signal)
         await rename(temporaryPath, targetPath)
+      } finally {
+        await rm(temporaryPath, { force: true }).catch(() => undefined)
+      }
+    }
+  }
+
+  private async installPdkPackages(
+    resourceId: string,
+    action: ResourceAction,
+    name: string,
+    destination: string,
+    packages: RegistryPdkPackage[],
+    listener?: (event: ResourceJob) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const seenPaths = new Set<string>()
+    const packageDestinations = packages.map((packageAsset) => {
+      validatePdkPackage(packageAsset)
+      if (seenPaths.has(packageAsset.path)) {
+        throw new Error(`Duplicate PDK package path: ${packageAsset.path}`)
+      }
+      seenPaths.add(packageAsset.path)
+      resolveRegistryRelativePath(destination, packageAsset.path, 'PDK package path')
+      return resolveRegistryRelativePath(
+        destination,
+        packageAsset.dest,
+        'PDK package destination',
+      )
+    })
+
+    for (const [index, packageAsset] of packages.entries()) {
+      const temporaryPath = join(
+        destination,
+        `.${basename(packageAsset.path)}.download-${randomUUID()}`,
+      )
+      this.publish(listener, {
+        resource_id: resourceId,
+        action,
+        phase: 'post_install',
+        progress: 0.98,
+        message: `Downloading ${name} package ${index + 1}/${packages.length}: ${packageAsset.path}`,
+      })
+      try {
+        try {
+          await downloadAsset(
+            packageAsset.url,
+            temporaryPath,
+            this.fetchImpl,
+            packageAsset.size,
+            undefined,
+            signal,
+          )
+        } catch (error) {
+          if (isAbortError(error) || signal?.aborted) throw error
+          await rm(temporaryPath, { force: true })
+          electronLogger.warn(
+            '[resources] Package download failed for %s; trying mirror %s: %s',
+            packageAsset.url,
+            packageAsset.cnb_url,
+            error instanceof Error ? error.message : String(error),
+          )
+          await downloadAsset(
+            packageAsset.cnb_url,
+            temporaryPath,
+            this.fetchImpl,
+            packageAsset.size,
+            undefined,
+            signal,
+          )
+        }
+        const verified = await this.sha256Verifier(
+          temporaryPath,
+          packageAsset.sha256,
+          signal,
+        )
+        if (!verified) {
+          throw new Error(
+            `SHA256 verification failed for PDK package ${packageAsset.path}`,
+          )
+        }
+        throwIfAborted(signal)
+        await this.archiveExtractor(
+          temporaryPath,
+          packageDestinations[index],
+          null,
+          signal,
+        )
       } finally {
         await rm(temporaryPath, { force: true }).catch(() => undefined)
       }
@@ -3535,11 +3639,27 @@ function parsePlatformAssets(value: unknown): Record<string, PlatformAsset> {
       size: readOptionalPositiveNumber(asset.size) ?? null,
       metadata_url: readOptionalString(asset.metadata_url),
       strip_prefix: typeof asset.strip_prefix === 'string' ? asset.strip_prefix : null,
+      packages: parsePdkPackages(asset.packages),
       supplemental_assets: parseSupplementalAssets(asset.supplemental_assets),
       post_install: parsePostInstallSteps(asset.post_install),
     }
   }
   return assets
+}
+
+function parsePdkPackages(value: unknown): RegistryPdkPackage[] {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => {
+    const record = readRecord(item)
+    return {
+      path: readString(record.path).trim(),
+      url: readString(record.url).trim(),
+      cnb_url: readString(record.cnb_url).trim(),
+      sha256: readString(record.sha256).trim().toLowerCase(),
+      size: readNumber(record.size),
+      dest: readString(record.dest).trim(),
+    }
+  })
 }
 
 function parseSupplementalAssets(value: unknown): RegistrySupplementalAsset[] {
@@ -5083,8 +5203,21 @@ function validateSupplementalAsset(asset: RegistrySupplementalAsset): void {
   }
 }
 
+function validatePdkPackage(packageAsset: RegistryPdkPackage): void {
+  validateSupplementalAsset(packageAsset)
+  if (!packageAsset.cnb_url) {
+    throw new Error(
+      `Missing mirror URL for PDK package ${packageAsset.path || '(unknown)'}`,
+    )
+  }
+}
+
 function resolveSupplementalAssetTarget(root: string, assetPath: string): string {
-  const normalized = assetPath.trim()
+  return resolveRegistryRelativePath(root, assetPath, 'supplemental asset path')
+}
+
+function resolveRegistryRelativePath(root: string, value: string, label: string): string {
+  const normalized = value.trim()
   const parts = normalized.split('/')
   if (
     !normalized ||
@@ -5104,7 +5237,7 @@ function resolveSupplementalAssetTarget(root: string, assetPath: string): string
       )
     })
   ) {
-    throw new Error(`Invalid supplemental asset path: ${assetPath || '(empty)'}`)
+    throw new Error(`Invalid ${label}: ${value || '(empty)'}`)
   }
   return resolveInside(root, normalized)
 }

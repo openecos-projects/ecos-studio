@@ -2,6 +2,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  screen,
   shell,
   type IpcMain,
   type IpcMainInvokeEvent,
@@ -58,6 +59,8 @@ import {
   type DesktopSaveFileDialogOptions,
   type DesktopRtlSourceDialogOptions,
   type PickedRtlSources,
+  type ProjectDoctorCheckResult,
+  type ProjectDoctorRepairResult,
   type ProjectManifest,
   type ProjectManifestMutationRequest,
   type ProjectManifestMutationResult,
@@ -122,6 +125,7 @@ import {
   closeWindow,
   isWindowMaximized,
   minimizeWindow,
+  setWindowLeftPanelExtension,
   setWindowTitle,
   toggleMaximizeWindow,
 } from '../services/windowService'
@@ -194,6 +198,7 @@ const acceptedWorkChannels = new Set<string>([
   desktopApiIpcChannels.workspaceExecuteFlowAgentRerun,
   desktopApiIpcChannels.workspaceWriteProjectTextFile,
   desktopApiIpcChannels.workspaceDiscardFailedWorkspaceCreate,
+  desktopApiIpcChannels.workspaceDeleteEngineeringSnapshot,
   desktopApiIpcChannels.workspacePrepareProjectDirectoryReplacement,
   desktopApiIpcChannels.workspaceRestoreProjectDirectoryReplacement,
   desktopApiIpcChannels.workspaceFinalizeProjectDirectoryReplacement,
@@ -289,6 +294,10 @@ export interface DesktopBridgeServices {
       request: ProjectManifestMutationRequest,
     ): Promise<ProjectManifestMutationResult>
   }
+  projectDoctorService?: {
+    check(projectRoot: string): Promise<ProjectDoctorCheckResult>
+    repair(projectRoot: string): Promise<ProjectDoctorRepairResult>
+  }
   projectManagementReadService?: {
     discoverProject(directory: string): Promise<ProjectManifest | null>
     readManifest(projectRoot: string): Promise<ProjectManifest | null>
@@ -305,6 +314,9 @@ export interface DesktopBridgeServices {
     getArtifact(
       request: import('@ecos-studio/shared').BackendWorkspaceArtifactRequest,
     ): Promise<import('@ecos-studio/shared').BackendWorkspaceArtifactResult>
+    getChecklistEvidence(
+      request: import('@ecos-studio/shared').BackendWorkspaceChecklistEvidenceRequest,
+    ): Promise<import('@ecos-studio/shared').BackendWorkspaceChecklistEvidenceResult>
     getOverview(): Promise<import('@ecos-studio/shared').BackendWorkspaceOverviewResult>
     getStepDetail(
       request: import('@ecos-studio/shared').BackendWorkspaceStepDetailRequest,
@@ -392,6 +404,7 @@ export interface DesktopBridgeServices {
       maxBytes: number,
     ): Promise<DesktopProjectTextFileChunk | null>
     listPendingExternalReadRoots?(): Promise<string[]>
+    registerProjectManagementReadRoot(path: string): Promise<string>
     registerProjectReadRoot(path: string): Promise<string>
     registerProjectRoot(path: string): Promise<string>
     requestProjectPathAccess(path: string): Promise<string>
@@ -420,6 +433,7 @@ export interface DesktopBridgeServices {
     listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]>
     pathExists(path: string): Promise<boolean>
     discardFailedWorkspaceCreate(path: string): Promise<boolean>
+    deleteEngineeringSnapshot(path: string): Promise<boolean>
   }
   surferProtocolService: {
     authorizeWaveform(path: string): Promise<string>
@@ -1771,6 +1785,19 @@ export function registerIpc(
     await services.createWindow({ initialRoute })
   })
 
+  handle(desktopApiIpcChannels.windowSetLeftPanelExtension, (event, widthPx) => {
+    const target = Number(widthPx)
+    if (!Number.isFinite(target) || target < 0 || target > 1200) {
+      throw new Error('Left panel extension must be a number between 0 and 1200')
+    }
+    const targetWindow = getEventWindow(event)
+    const bounds = targetWindow.getBounds()
+    const workArea = screen.getDisplayMatching(bounds).workArea
+    return setWindowLeftPanelExtension(targetWindow, target, {
+      maxWindowWidthPx: workArea.x + workArea.width - bounds.x,
+    })
+  })
+
   handle(desktopApiIpcChannels.workspaceOpenOrFocus, async (event, path) => {
     return await enqueueOpenOrFocus(async (): Promise<WorkspaceOpenOrFocusResult> => {
       if (typeof path !== 'string') {
@@ -2050,13 +2077,24 @@ export function registerIpc(
           )
         }
         if (!projectRoot) {
-          projectRoot = await services.workspaceService.registerProjectReadRoot(
-            request.projectRootLocator,
-          )
+          try {
+            projectRoot = await services.workspaceService.registerProjectReadRoot(
+              request.projectRootLocator,
+            )
+          } catch {
+            // Project Management browses projects independently of the active
+            // workspace, so fall back to a dedicated read scope when the
+            // selected project does not declare the active workspace.
+            projectRoot =
+              await services.workspaceService.registerProjectManagementReadRoot(
+                request.projectRootLocator,
+              )
+          }
         }
       } catch (error) {
-        // A project unrelated to the active workspace cannot be granted a read
-        // root; surface that as a selection result instead of an IPC failure.
+        // Neither read scope grant succeeded (for example the project manifest
+        // is invalid); surface that as a selection result instead of an IPC
+        // failure.
         return {
           ok: false,
           code: 'invalid-project',
@@ -2292,6 +2330,41 @@ export function registerIpc(
     },
   )
 
+  handle(
+    desktopApiIpcChannels.projectManagementCheckConsistency,
+    async (_event, projectRoot) => {
+      if (!services.projectDoctorService) {
+        throw new Error('Project consistency checks are unavailable.')
+      }
+      if (typeof projectRoot !== 'string' || !projectRoot.trim()) {
+        throw new Error('Project consistency check requires a project root.')
+      }
+      return await services.projectDoctorService.check(projectRoot)
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.projectManagementRepairConsistency,
+    async (event, projectRoot) => {
+      if (!services.projectDoctorService) {
+        throw new Error('Project consistency repairs are unavailable.')
+      }
+      if (typeof projectRoot !== 'string' || !projectRoot.trim()) {
+        throw new Error('Project consistency repair requires a project root.')
+      }
+      // Repair is an explicit, visible mutation of project.json.
+      requireBackendMutationAllowed(event)
+      const result = await services.projectDoctorService.repair(projectRoot)
+      if (result.status === 'fixed' || result.status === 'failed') {
+        invalidateBackendWorkspaceForSender(event.sender)
+        services.backendProjectComparisonService.invalidateProject(
+          result.projectRoot ?? projectRoot,
+        )
+      }
+      return result
+    },
+  )
+
   handle(desktopApiIpcChannels.dialogPickDirectory, async (_event, options) => {
     return await pickDirectory(options as DesktopDirectoryDialogOptions | undefined)
   })
@@ -2472,6 +2545,22 @@ export function registerIpc(
   )
 
   handle(
+    desktopApiIpcChannels.workspaceDeleteEngineeringSnapshot,
+    async (event, path) => {
+      requireBackendMutationAllowed(event)
+      if (typeof path !== 'string') {
+        throw new Error('Workspace path must be a string')
+      }
+      const deleted = await services.workspaceService.deleteEngineeringSnapshot(path)
+      if (deleted) {
+        invalidateBackendWorkspaceForSender(event.sender)
+        services.backendProjectComparisonService.invalidateWorkspace(path)
+      }
+      return deleted
+    },
+  )
+
+  handle(
     desktopApiIpcChannels.workspacePrepareProjectDirectoryReplacement,
     async (event, path) => {
       requireBackendMutationAllowed(event)
@@ -2606,6 +2695,15 @@ export function registerIpc(
       request as import('@ecos-studio/shared').BackendWorkspaceArtifactRequest,
     )
   })
+
+  handle(
+    desktopApiIpcChannels.backendWorkspaceGetChecklistEvidence,
+    async (_event, request) => {
+      return await services.backendWorkspaceService.getChecklistEvidence(
+        request as import('@ecos-studio/shared').BackendWorkspaceChecklistEvidenceRequest,
+      )
+    },
+  )
 
   handle(desktopApiIpcChannels.backendWorkspaceGetStepDetail, async (_event, request) => {
     return await services.backendWorkspaceService.getStepDetail(
@@ -2866,6 +2964,13 @@ export function registerIpc(
         workspaceHandleSubscriptions.get(workspaceHandle)?.sender === event.sender,
       isWorkspaceMutationBusy: (workspaceHandle) =>
         services.chipViewerService.isWorkspaceMutationBusy?.(workspaceHandle) ?? false,
+      // An in-place workspace update commits new workspace facts and (when a
+      // backup is retained) a new archived manifest entry, without any of the
+      // directory-replacement IPC handlers that used to trigger invalidation.
+      invalidateWorkspace: (workspaceDirectory) => {
+        invalidateBackendWorkspaceForSender(event.sender)
+        services.backendProjectComparisonService.invalidateWorkspace(workspaceDirectory)
+      },
       prepareCreate: async (createRequest) => {
         await ensureBackendProjectManifestForCreate(services, createRequest)
         const prepared = await prepareWorkspaceCreateBinding(services, createRequest)

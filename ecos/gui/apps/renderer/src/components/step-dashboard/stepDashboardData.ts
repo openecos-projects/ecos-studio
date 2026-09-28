@@ -253,10 +253,7 @@ export interface StepDashboardChecklistItem {
   state: 'pass' | 'failed' | 'warning' | 'unavailable'
   blocked: boolean
   category: string
-  owner: string
-  policy: string
-  sourcePath: string
-  evidenceCount: number
+  reconciled: { previousState: string; committedFlowState: string } | null
 }
 
 export interface StepDashboardChecklist {
@@ -1773,12 +1770,15 @@ export function prioritizeQorMetricComparisons(
 }
 
 export function checklistSummary(value: unknown): StepDashboardChecklist {
+  // Input is the bounded Snapshot checklist projection: display fields only.
+  // owner/policy/source/evidence stay in checklist.json behind the artifact
+  // channel and are never assumed here.
   const checklist = record(value)?.checklist
   const items = Array.isArray(checklist)
     ? checklist.flatMap((value, index) => {
         const item = record(value)
         if (!item) return []
-        const source = record(item.source)
+        const reconciled = record(item.reconciled)
         return [
           {
             id: typeof item.id === 'string' ? item.id : `check-${index}`,
@@ -1790,10 +1790,15 @@ export function checklistSummary(value: unknown): StepDashboardChecklist {
             state: checklistState(item.state),
             blocked: item.blocked === true,
             category: typeof item.category === 'string' ? item.category : '',
-            owner: typeof item.owner === 'string' ? item.owner : '',
-            policy: typeof item.policy === 'string' ? item.policy : '',
-            sourcePath: typeof source?.path === 'string' ? source.path : '',
-            evidenceCount: Array.isArray(item.evidence) ? item.evidence.length : 0,
+            reconciled:
+              reconciled &&
+              typeof reconciled.previousState === 'string' &&
+              typeof reconciled.committedFlowState === 'string'
+                ? {
+                    previousState: reconciled.previousState,
+                    committedFlowState: reconciled.committedFlowState,
+                  }
+                : null,
           },
         ]
       })

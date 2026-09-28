@@ -120,12 +120,12 @@ export function trendSummaryWithScoresFixture(): ProjectQorTrendSummary {
     workspaces: summary.workspaces.map((workspace) => ({
       ...workspace,
       overallScore: scores[workspace.workspaceId] ?? null,
-      gateStatus:
+      scalarStatus:
         workspace.workspaceId === 'ws_a'
-          ? 'blocked'
+          ? 'RED'
           : workspace.workspaceId === 'ws_b'
-            ? 'pass'
-            : 'unavailable',
+            ? 'YELLOW'
+            : 'NOT_RATED',
       signoffReadiness: {
         ...workspace.signoffReadiness,
         status: workspace.workspaceId === 'ws_c' ? 'incomplete' : 'pass',

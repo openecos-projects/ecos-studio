@@ -105,6 +105,18 @@ vi.mock('@/utils/projectManagementRead', () => ({
       },
   ),
 }))
+vi.mock('@/utils/projectConsistency', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/utils/projectConsistency')>()),
+  checkProjectConsistency: vi.fn(async () => ({
+    doctor: 'project' as const,
+    status: 'ok' as const,
+    projectRoot: null,
+    checked: 0,
+    inconsistent: 0,
+    findings: [],
+  })),
+  repairProjectConsistency: vi.fn(),
+}))
 vi.mock('@/stores/backendProjectComparisonSession', () => ({
   useBackendProjectComparisonSession: () => ({
     dispose: vi.fn(),
@@ -146,8 +158,16 @@ vi.mock('@/platform/desktop', () => ({
 
 import ProjectsView from './ProjectsView.vue'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
+import { useProjectConsistencyStore } from '@/stores/projectConsistencyStore'
 import { loadProjectHistory, rememberProjectHistoryEntry } from '@/utils/projectHistory'
-import { importProjectManagementWorkspace } from '@/utils/projectManagementRead'
+import {
+  importProjectManagementWorkspace,
+  readProjectManagementManifest,
+} from '@/utils/projectManagementRead'
+import {
+  checkProjectConsistency,
+  repairProjectConsistency,
+} from '@/utils/projectConsistency'
 import { readFrontendProjectWorkspaceData } from './project-management/frontendProjectWorkspaceData'
 import {
   consumeWorkspaceWizardRequest,
@@ -188,6 +208,16 @@ describe('ProjectsView background lifecycle integration', () => {
     testState.selectProject.mockReset()
     testState.selectProject.mockImplementation(async () => undefined)
     vi.mocked(readFrontendProjectWorkspaceData).mockClear()
+    vi.mocked(checkProjectConsistency).mockReset()
+    vi.mocked(checkProjectConsistency).mockResolvedValue({
+      doctor: 'project',
+      status: 'ok',
+      projectRoot: null,
+      checked: 0,
+      inconsistent: 0,
+      findings: [],
+    })
+    vi.mocked(repairProjectConsistency).mockReset()
     testState.pickDirectory.mockReset()
     testState.pickDirectory.mockResolvedValue('/projects/demo')
   })
@@ -521,6 +551,80 @@ describe('ProjectsView background lifecycle integration', () => {
     expect(wrapper.find('input[name="design-name"]').exists()).toBe(true)
     expect(wrapper.find('input[name="project-storage-location"]').exists()).toBe(true)
     expect(wrapper.find('select[name="managed-mpc"]').exists()).toBe(true)
+  })
+
+  describe('project consistency repair', () => {
+    const inconsistentReport = {
+      doctor: 'project' as const,
+      status: 'failed' as const,
+      projectRoot: '/projects/demo',
+      checked: 2,
+      inconsistent: 1,
+      findings: [
+        {
+          check: 'missing-directory' as const,
+          status: 'fail' as const,
+          workspace_id: 'ws_0002',
+          workspace: '/projects/demo/ws_0002',
+          detail: 'workspace directory does not exist',
+        },
+      ],
+    }
+
+    it('checks backend projects on load and surfaces findings on the project card', async () => {
+      vi.mocked(checkProjectConsistency).mockResolvedValue(inconsistentReport)
+
+      const wrapper = shallowMount(ProjectsView)
+      await flushPromises()
+
+      expect(checkProjectConsistency).toHaveBeenCalledWith('/projects/demo')
+      expect(useProjectConsistencyStore().inconsistentProjects).toHaveLength(1)
+      expect(
+        wrapper.findComponent({ name: 'ProjectConsistencyRepairStrip' }).exists(),
+      ).toBe(true)
+    })
+
+    it('refreshes the displayed project data after a repair', async () => {
+      vi.mocked(checkProjectConsistency).mockResolvedValue(inconsistentReport)
+      const wrapper = shallowMount(ProjectsView)
+      await flushPromises()
+      vi.mocked(readProjectManagementManifest).mockClear()
+
+      wrapper
+        .findComponent({ name: 'ProjectConsistencyRepairStrip' })
+        .vm.$emit('repaired', '/projects/demo')
+      await flushPromises()
+
+      expect(readProjectManagementManifest).toHaveBeenCalledWith('/projects/demo')
+    })
+
+    it('never checks frontend projects for backend manifest consistency', async () => {
+      vi.mocked(loadProjectHistory).mockResolvedValueOnce([
+        {
+          id: '/projects/cpu',
+          name: 'cpu',
+          path: '/projects/cpu',
+          projectType: 'frontend' as const,
+          lastOpened: new Date(),
+        },
+      ])
+
+      shallowMount(ProjectsView)
+      await flushPromises()
+
+      expect(checkProjectConsistency).not.toHaveBeenCalled()
+    })
+
+    it('stays silent when the runtime does not support the consistency check', async () => {
+      vi.mocked(checkProjectConsistency).mockRejectedValue(
+        new Error('unknown method: project.doctor.check'),
+      )
+
+      shallowMount(ProjectsView)
+      await flushPromises()
+
+      expect(useProjectConsistencyStore().inconsistentProjects).toHaveLength(0)
+    })
   })
 
   describe('workspace branch popover', () => {
