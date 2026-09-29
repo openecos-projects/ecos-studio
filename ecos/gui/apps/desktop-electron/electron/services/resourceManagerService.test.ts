@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import {
@@ -416,11 +416,13 @@ function testResourceDirs(root: string): {
   resourcesDir: string
   toolsDir: string
   pdksDir: string
+  cacheDir: string
 } {
   return {
     resourcesDir: join(root, 'state', 'resources'),
     toolsDir: join(root, 'data', 'tools'),
     pdksDir: join(root, 'data', 'pdks'),
+    cacheDir: join(root, 'cache'),
   }
 }
 
@@ -577,6 +579,38 @@ async function writeMpcRegistry(
 }
 
 describe('ResourceManagerService', () => {
+  const isolatedXdgRoot = join(tmpdir(), `ecos-resources-xdg-${process.pid}`)
+  let xdgEnvBackup: {
+    cache: string | undefined
+    state: string | undefined
+    data: string | undefined
+  }
+
+  beforeAll(() => {
+    xdgEnvBackup = {
+      cache: process.env.XDG_CACHE_HOME,
+      state: process.env.XDG_STATE_HOME,
+      data: process.env.XDG_DATA_HOME,
+    }
+    // Constructions that omit explicit dirs must never touch the developer's
+    // real XDG directories; they fall back to this isolated root instead.
+    process.env.XDG_CACHE_HOME = join(isolatedXdgRoot, 'cache')
+    process.env.XDG_STATE_HOME = join(isolatedXdgRoot, 'state')
+    process.env.XDG_DATA_HOME = join(isolatedXdgRoot, 'data')
+  })
+
+  afterAll(async () => {
+    for (const [key, value] of [
+      ['XDG_CACHE_HOME', xdgEnvBackup.cache],
+      ['XDG_STATE_HOME', xdgEnvBackup.state],
+      ['XDG_DATA_HOME', xdgEnvBackup.data],
+    ] as const) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    await rm(isolatedXdgRoot, { force: true, recursive: true })
+  })
+
   afterEach(async () => {
     await Promise.all(
       tempDirectories
