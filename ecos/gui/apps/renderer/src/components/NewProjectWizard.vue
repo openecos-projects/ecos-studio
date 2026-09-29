@@ -1754,7 +1754,8 @@ import {
   nextTopModuleSelection,
   topModuleBlockedReason,
 } from './topModuleConfirmation'
-import type { HdlModuleDiscoveryResult } from '@ecos-studio/shared'
+import type { HdlModuleDiscoveryResult, PdkRequirement } from '@ecos-studio/shared'
+import { toDesktopBridgeData } from '@/api/desktopPayload'
 
 interface Emits {
   (e: 'close'): void
@@ -3395,10 +3396,12 @@ async function loadAndSelectPdks() {
       projectIdFromName(
         projectContext.value.project_name || getFileName(projectRoot) || 'project',
       )
+    // config is reactive, so the requirement is a Proxy that the desktop bridge
+    // cannot structured-clone; send a plain copy instead.
     const binding = await getDesktopApi().pdkInventory.resolveBinding({
       projectId,
       projectRoot,
-      requirement,
+      requirement: toDesktopBridgeData({ requirement }).requirement as PdkRequirement,
     })
     const bound = importedPdks.value.find((pdk) => pdk.id === binding?.installationId)
     if (bound) {
