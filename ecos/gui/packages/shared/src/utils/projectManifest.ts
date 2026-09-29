@@ -199,7 +199,7 @@ export function isProjectRuntimeProcessEntry(
     Number.isFinite(entry.started_at) &&
     entry.started_at > 0 &&
     runtimeToken(entry.runtime_id) &&
-    safeRelativePath(entry.log_path)
+    entry.log_path === `log/${entry.run_id}.log`
   )
 }
 
@@ -233,19 +233,6 @@ function positiveSafeInteger(value: unknown): value is number {
 
 function runtimeToken(value: unknown): value is string {
   return typeof value === 'string' && RUNTIME_TOKEN.test(value)
-}
-
-function safeRelativePath(value: unknown): value is string {
-  if (
-    typeof value !== 'string' ||
-    !value ||
-    value.length > 4096 ||
-    value.includes('\\')
-  ) {
-    return false
-  }
-  if (value.startsWith('/') || value.includes('\0')) return false
-  return value.split('/').every((part) => part !== '' && part !== '.' && part !== '..')
 }
 
 function safeWorkspacePath(value: unknown): value is string {
