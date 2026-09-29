@@ -172,6 +172,7 @@ const acceptedWorkChannels = new Set<string>([
   desktopApiIpcChannels.projectManifestMutate,
   desktopApiIpcChannels.workspaceExecuteFlowAgentRerun,
   desktopApiIpcChannels.workspaceWriteProjectTextFile,
+  desktopApiIpcChannels.workspaceImportMacroLocationFile,
   desktopApiIpcChannels.workspaceDiscardFailedWorkspaceCreate,
   desktopApiIpcChannels.workspaceDeleteEngineeringSnapshot,
   desktopApiIpcChannels.workspacePrepareProjectDirectoryReplacement,
@@ -361,6 +362,7 @@ export interface DesktopBridgeServices {
     finalizeProjectDirectoryReplacement(replacementId: string): Promise<void>
     retainProjectDirectoryReplacement(replacementId: string): Promise<void>
     writeProjectTextFile(path: string, content: string): Promise<void>
+    importMacroLocationFile(sourcePath: string): Promise<void>
     listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]>
     pathExists(path: string): Promise<boolean>
     discardFailedWorkspaceCreate(path: string): Promise<boolean>
@@ -2119,6 +2121,17 @@ export function registerIpc(
       )
       invalidateBackendWorkspaceForSender(event.sender)
       services.backendProjectComparisonService.invalidateWorkspace(path as string)
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.workspaceImportMacroLocationFile,
+    async (event, sourcePath) => {
+      requireBackendMutationAllowed(event)
+      await services.workspaceService.importMacroLocationFile(sourcePath as string)
+      const workspaceRoot = await services.workspaceService.getProjectRoot()
+      invalidateBackendWorkspaceForSender(event.sender)
+      services.backendProjectComparisonService.invalidateWorkspace(workspaceRoot)
     },
   )
 

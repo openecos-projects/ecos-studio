@@ -37,28 +37,17 @@ vi.mock('@/composables/useStepConfigInfo', () => ({
   }),
 }))
 
-vi.mock('@/composables/useBaselineStepConfig', () => ({
-  useBaselineStepConfig: () => ({
-    status: ref('no-baseline'),
-    noConfigReason: ref(null),
-    baselineWorkspaceName: ref(null),
-    baselineSource: ref(null),
-    workspaceRevision: ref(null),
-    configRelativePath: ref(null),
-    configFileName: ref(null),
-    rawText: ref(null),
-    parameterDescriptions: ref({}),
-    parsed: ref(null),
-    jsonInvalid: ref(false),
-    viewDraft: ref(null),
-    error: ref(null),
-  }),
-}))
-
 vi.mock('@/components/step-config/StepConfigDynamicView.vue', () => ({
   default: {
     name: 'StepConfigDynamicView',
     template: '<div class="step-config-dynamic-view" />',
+  },
+}))
+
+vi.mock('@/components/step-config/MacroLocationFilePanel.vue', () => ({
+  default: {
+    name: 'MacroLocationFilePanel',
+    template: '<div class="macro-location-file-panel" />',
   },
 }))
 
@@ -78,5 +67,7 @@ describe('StepConfigPanel', () => {
     expect(wrapper.text()).toContain(
       'value 1.3 out of range [0.01, 1.0] for floorplan.core_util',
     )
+    expect(wrapper.find('.macro-location-file-panel').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('Baseline')
   })
 })

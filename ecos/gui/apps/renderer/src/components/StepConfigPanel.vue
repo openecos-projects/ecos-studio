@@ -97,109 +97,7 @@
 
         <!-- Resolved path + editor -->
         <template v-if="stepConfigPathResolved && !stepConfigReadError">
-          <div
-            class="sc-compare min-h-0 flex-1"
-            :class="{ 'is-split': baselineColumnVisible }"
-          >
-            <!-- Baseline column (read-only comparison) -->
-            <div
-              v-if="baselineColumnVisible"
-              class="sc-compare-col sc-compare-col--baseline"
-              role="region"
-              aria-label="Baseline configuration (read-only)"
-            >
-              <header class="topbar">
-                <div class="topbar-left">
-                  <i class="ri-history-line"></i>
-                  <span class="title">
-                    {{ baseline.configFileName.value ?? 'Baseline config' }}
-                  </span>
-                  <span class="divider">/</span>
-                  <span class="subtitle">
-                    Baseline · {{ baseline.baselineWorkspaceName.value ?? 'workspace'
-                    }}{{
-                      baseline.baselineSource.value === 'default' ? ' (default)' : ''
-                    }}
-                    · read-only
-                  </span>
-                  <span
-                    v-if="diffCount"
-                    class="sc-diff-badge"
-                    title="Changed vs baseline"
-                  >
-                    {{ diffCount }} differ
-                  </span>
-                </div>
-              </header>
-
-              <div class="sc-scroll custom-scrollbar">
-                <div
-                  v-if="baseline.status.value === 'loading'"
-                  class="flex flex-col items-center justify-center py-16"
-                >
-                  <i class="ri-loader-4-line spin text-2xl text-(--accent-color)"></i>
-                  <p class="mt-2 text-[11px] text-(--text-secondary)">
-                    Loading baseline…
-                  </p>
-                </div>
-
-                <div
-                  v-else-if="baseline.status.value === 'unavailable'"
-                  class="rounded-lg border border-amber-500/35 bg-amber-500/10 p-3"
-                >
-                  <p class="text-[11px] leading-relaxed break-words text-amber-200/95">
-                    Baseline configuration is unavailable{{
-                      baseline.error.value ? `: ${baseline.error.value}` : '.'
-                    }}
-                  </p>
-                  <button
-                    type="button"
-                    class="mt-2 cursor-pointer text-[11px] text-(--accent-color) hover:underline"
-                    @click="baseline.refresh(true)"
-                  >
-                    Retry
-                  </button>
-                </div>
-
-                <p
-                  v-else-if="baseline.status.value === 'no-config-for-step'"
-                  class="px-1 text-[11px] leading-relaxed text-(--text-secondary)"
-                >
-                  {{ baselineNoConfigMessage }}
-                </p>
-
-                <template v-else-if="baseline.status.value === 'available'">
-                  <div v-if="baseline.jsonInvalid.value" class="card mb-3">
-                    <div class="card-head">
-                      <i class="ri-alert-line c-orange"></i>
-                      <span>Baseline (invalid JSON)</span>
-                    </div>
-                    <div class="card-body">
-                      <Textarea
-                        :model-value="baseline.rawText.value ?? ''"
-                        auto-resize
-                        rows="14"
-                        readonly
-                        class="w-full font-mono text-[11px]"
-                      />
-                    </div>
-                  </div>
-                  <StepConfigDynamicView
-                    v-else-if="currentStep && baseline.viewDraft.value"
-                    :key="`${currentStep}-${baseline.configRelativePath.value}`"
-                    v-model="baseline.viewDraft.value"
-                    :step="currentStep"
-                    :parameter-descriptions="baseline.parameterDescriptions.value"
-                    readonly
-                  />
-                  <p v-else class="px-1 text-[11px] text-(--text-secondary) italic">
-                    (empty file)
-                  </p>
-                </template>
-              </div>
-            </div>
-
-            <!-- Current workspace column (editable) -->
+          <div class="sc-compare min-h-0 flex-1">
             <div
               class="sc-compare-col sc-compare-col--current sc-editor-body min-h-0 flex-1"
             >
@@ -209,7 +107,7 @@
                   <span class="title">{{ stepConfigFileLabel }}</span>
                   <span v-if="hasStepConfigChanges" class="unsaved-indicator">*</span>
                   <span class="divider">/</span>
-                  <span class="subtitle">Edit</span>
+                  <span class="subtitle">Current workspace</span>
                   <i
                     v-if="stepConfigSaveError"
                     class="ri-error-warning-line shrink-0 cursor-help text-red-400"
@@ -217,17 +115,6 @@
                   ></i>
                 </div>
                 <div class="topbar-right">
-                  <button
-                    type="button"
-                    class="btn-text"
-                    :class="{ 'is-active': baselineColumnVisible }"
-                    :disabled="!baselineComparable"
-                    :title="baselineToggleTitle"
-                    @click="showBaseline = !showBaseline"
-                  >
-                    <i class="ri-layout-column-line"></i>
-                    Baseline
-                  </button>
                   <button
                     type="button"
                     class="btn-text"
@@ -273,6 +160,11 @@
               </header>
 
               <div class="sc-scroll custom-scrollbar">
+                <MacroLocationFilePanel
+                  v-if="currentStep === StepEnum.FLOORPLAN"
+                  :disabled="isMutationLocked"
+                />
+
                 <template v-if="hasStepFileBody">
                   <div v-if="stepConfigJsonInvalid" class="card mb-3">
                     <div class="card-head">
@@ -318,20 +210,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed, provide, ref, toRef } from 'vue'
+import { computed, toRef } from 'vue'
 import Textarea from 'primevue/textarea'
-import { formatStepToolName, getStepMetadata, type StepEnum } from '@/api/type'
-import { useStepConfigInfo } from '@/composables/useStepConfigInfo'
-import { useBaselineStepConfig } from '@/composables/useBaselineStepConfig'
-import StepConfigDynamicView from '@/components/step-config/StepConfigDynamicView.vue'
 import {
-  computeStepConfigDiff,
-  stepConfigDiffKey,
-  type StepConfigDiffContext,
-} from '@/components/step-config/stepConfigDiff'
+  formatStepToolName,
+  getStepMetadata,
+  StepEnum,
+  type StepEnum as Step,
+} from '@/api/type'
+import { useStepConfigInfo } from '@/composables/useStepConfigInfo'
+import StepConfigDynamicView from '@/components/step-config/StepConfigDynamicView.vue'
+import MacroLocationFilePanel from '@/components/step-config/MacroLocationFilePanel.vue'
 
 const props = defineProps<{
-  step?: StepEnum
+  step?: Step
   tool?: string
 }>()
 
@@ -350,7 +242,6 @@ const {
   stepConfigParameterCount,
   stepConfigParameterDescriptions,
   stepConfigParameterTypes,
-  stepConfigParsed,
   stepConfigDraft,
   stepConfigTextDraft,
   hasStepConfigChanges,
@@ -362,76 +253,6 @@ const {
   resetStepConfig,
   reloadStepConfigFiles,
 } = useStepConfigInfo(toRef(props, 'step'))
-
-const baseline = useBaselineStepConfig(currentStep)
-
-// ---- Baseline comparison (left read-only column + shared diff highlighting) ----
-
-/** Statuses that still render a baseline column (with placeholder content). */
-const BASELINE_COLUMN_STATUSES = [
-  'loading',
-  'available',
-  'no-config-for-step',
-  'unavailable',
-] as const
-
-const showBaseline = ref(true)
-
-const baselineComparable = computed(() =>
-  (BASELINE_COLUMN_STATUSES as readonly string[]).includes(baseline.status.value),
-)
-
-const baselineColumnVisible = computed(
-  () =>
-    showBaseline.value &&
-    baselineComparable.value &&
-    !stepConfigJsonInvalid.value &&
-    !!stepConfigPathResolved.value &&
-    !stepConfigReadError.value &&
-    hasStepFileBody.value,
-)
-
-const baselineToggleTitle = computed(() =>
-  baselineComparable.value
-    ? 'Show the baseline workspace configuration next to the current one'
-    : 'No baseline workspace comparison available',
-)
-
-/** Diff against the live draft so highlights follow unsaved edits. */
-const diff = computed(() => {
-  if (baseline.status.value !== 'available' || baseline.parsed.value == null) return null
-  const source = stepConfigJsonInvalid.value
-    ? null
-    : (stepConfigDraft.value ?? stepConfigParsed.value)
-  if (source == null) return null
-  return computeStepConfigDiff(baseline.parsed.value, source)
-})
-
-const diffCount = computed(() => diff.value?.count ?? 0)
-
-// Stable context object whose methods read the live diff; provided once, consumed
-// by both columns' step-config views.
-provide(stepConfigDiffKey, {
-  isChanged(path: string): boolean {
-    return diff.value?.isChanged(path) ?? false
-  },
-  changedCountUnder(prefix: string): number {
-    return diff.value?.changedCountUnder(prefix) ?? 0
-  },
-} satisfies StepConfigDiffContext)
-
-const baselineNoConfigMessage = computed(() => {
-  switch (baseline.noConfigReason.value) {
-    case 'step-absent':
-      return 'The baseline workspace flow does not include this step.'
-    case 'frontend':
-      return 'Baseline comparison is not supported for frontend tool steps.'
-    case 'no-config-file':
-      return 'This step has no editable configuration file in the baseline workspace.'
-    default:
-      return 'The baseline workspace has no configuration file for this step.'
-  }
-})
 
 const stepTitle = computed(() => {
   const s = currentStep.value
@@ -463,9 +284,9 @@ async function onSaveStepConfig(): Promise<void> {
   await saveStepConfig()
 }
 
-/** Reload refreshes both the current config files and the cached baseline snapshot. */
+/** Reload the current workspace configuration. */
 async function onReloadAll(): Promise<void> {
-  await Promise.all([reloadStepConfigFiles(), baseline.refresh(true)])
+  await reloadStepConfigFiles()
 }
 
 defineExpose({
