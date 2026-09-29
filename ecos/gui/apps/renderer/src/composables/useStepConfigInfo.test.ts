@@ -221,9 +221,13 @@ describe('useStepConfigInfo', () => {
   })
 
   it('saves Step Parameters through one Product Command and advances Revision', async () => {
-    testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
-      available({ 'floorplan.ifp.thread_number': 16 }),
-    )
+    testState.readWorkspaceStepConfigurationApi.mockImplementation(async () => {
+      const revision = useWorkspaceLifecycle().session.value.workspaceRevision ?? 1
+      return {
+        ...available({ 'floorplan.ifp.thread_number': revision === 1 ? 16 : 8 }),
+        workspaceRevision: revision,
+      }
+    })
     const result = scope.run(() => useStepConfigInfo())!
     await vi.waitFor(() => expect(result.stepConfigDraft.value).not.toBeNull())
     result.stepConfigDraft.value = { 'floorplan.ifp.thread_number': 8 }
@@ -257,9 +261,16 @@ describe('useStepConfigInfo', () => {
 
   it('saves canonical CTS parameters atomically', async () => {
     testState.route.path = '/workspace/CTS'
-    testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
-      available({ 'cts.skew_bound': 0.08, 'cts.max_fanout': 32 }, 'CTS'),
-    )
+    testState.readWorkspaceStepConfigurationApi.mockImplementation(async () => {
+      const revision = useWorkspaceLifecycle().session.value.workspaceRevision ?? 1
+      return {
+        ...available(
+          { 'cts.skew_bound': 0.08, 'cts.max_fanout': revision === 1 ? 32 : 24 },
+          'CTS',
+        ),
+        workspaceRevision: revision,
+      }
+    })
 
     const result = scope.run(() => useStepConfigInfo())!
     await vi.waitFor(() => expect(result.stepConfigDraft.value).not.toBeNull())
@@ -270,12 +281,28 @@ describe('useStepConfigInfo', () => {
     expect(testState.updateWorkspaceStepConfigurationApi).toHaveBeenCalledWith({
       commandId: expect.any(String),
       expectedWorkspaceRevision: 1,
-      parameters: { 'cts.skew_bound': 0.08, 'cts.max_fanout': 24 },
+      parameters: { 'cts.max_fanout': 24 },
       stepId: 'CTS',
       workspaceHandle: 'workspace-demo',
     })
+    expect(testState.readWorkspaceStepConfigurationApi.mock.calls.length).toBeGreaterThan(
+      1,
+    )
     expect(useWorkspaceLifecycle().session.value.workspaceRevision).toBe(2)
     expect(result.hasStepConfigChanges.value).toBe(false)
+  })
+
+  it('does not issue an apply when the committed Step projection is unchanged', async () => {
+    testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
+      available({ 'floorplan.ifp.thread_number': 16 }),
+    )
+    const result = scope.run(() => useStepConfigInfo())!
+    await vi.waitFor(() => expect(result.stepConfigDraft.value).not.toBeNull())
+
+    await expect(result.saveStepConfig()).resolves.toBe(true)
+
+    expect(testState.updateWorkspaceStepConfigurationApi).not.toHaveBeenCalled()
+    expect(testState.readWorkspaceStepConfigurationApi).toHaveBeenCalledTimes(1)
   })
 
   it('keeps the editor dirty when a Step Parameter update fails', async () => {

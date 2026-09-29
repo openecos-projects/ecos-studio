@@ -17,24 +17,23 @@ async function writeWorkspace(): Promise<{ workspace: string; runId: string }> {
   roots.push(root)
   const workspace = join(root, 'ws_1')
   const runId = 'run-7ed8deadbeef'
-  await mkdir(join(workspace, 'home', 'run-logs'), { recursive: true })
-  await writeFile(join(workspace, 'home', 'run-logs', `${runId}.log`), 'fallback log\n')
+  await mkdir(join(workspace, 'log'), { recursive: true })
+  await mkdir(join(workspace, 'home'), { recursive: true })
+  await writeFile(join(workspace, 'log', `${runId}.log`), 'fallback log\n')
   return { workspace, runId }
 }
 
 describe('resolveOperationLogPath', () => {
-  it('trusts the registry log_path when it stays inside the workspace', async () => {
+  it('trusts the canonical registry log_path', async () => {
     const { workspace, runId } = await writeWorkspace()
-    await mkdir(join(workspace, 'home', 'run-logs'), { recursive: true })
-    await writeFile(join(workspace, 'home', 'custom.log'), 'registry log\n')
 
     await expect(
       resolveOperationLogPath({
         workspaceDirectory: workspace,
         operationId: runId,
-        entry: { run_id: runId, log_path: 'home/custom.log' },
+        entry: { run_id: runId, log_path: `log/${runId}.log` },
       }),
-    ).resolves.toBe(join(workspace, 'home', 'custom.log'))
+    ).resolves.toBe(join(workspace, 'log', `${runId}.log`))
   })
 
   it('falls back to the run-id log when the registry entry belongs to another run', async () => {
@@ -46,7 +45,7 @@ describe('resolveOperationLogPath', () => {
         operationId: runId,
         entry: { run_id: 'run-someoneelse', log_path: 'home/custom.log' },
       }),
-    ).resolves.toBe(join(workspace, 'home', 'run-logs', `${runId}.log`))
+    ).resolves.toBe(join(workspace, 'log', `${runId}.log`))
   })
 
   it.each([
@@ -62,7 +61,7 @@ describe('resolveOperationLogPath', () => {
         operationId: runId,
         entry: { run_id: runId, log_path: logPath(workspace) },
       }),
-    ).resolves.toBe(join(workspace, 'home', 'run-logs', `${runId}.log`))
+    ).resolves.toBe(join(workspace, 'log', `${runId}.log`))
   })
 
   it('falls back when log_path itself is a symlink', async () => {
@@ -77,7 +76,7 @@ describe('resolveOperationLogPath', () => {
         operationId: runId,
         entry: { run_id: runId, log_path: 'home/linked.log' },
       }),
-    ).resolves.toBe(join(workspace, 'home', 'run-logs', `${runId}.log`))
+    ).resolves.toBe(join(workspace, 'log', `${runId}.log`))
   })
 
   it('falls back when a log_path ancestor directory is a symlink outside the workspace', async () => {
@@ -93,7 +92,7 @@ describe('resolveOperationLogPath', () => {
         operationId: runId,
         entry: { run_id: runId, log_path: 'home/linked-dir/run.log' },
       }),
-    ).resolves.toBe(join(workspace, 'home', 'run-logs', `${runId}.log`))
+    ).resolves.toBe(join(workspace, 'log', `${runId}.log`))
   })
 
   it('rejects symlinks even when they stay inside the workspace', async () => {
@@ -110,7 +109,7 @@ describe('resolveOperationLogPath', () => {
         operationId: runId,
         entry: { run_id: runId, log_path: 'home/linked-inside.log' },
       }),
-    ).resolves.toBe(join(workspace, 'home', 'run-logs', `${runId}.log`))
+    ).resolves.toBe(join(workspace, 'log', `${runId}.log`))
   })
 
   it('resolves the fallback against the real workspace directory', async () => {
@@ -123,6 +122,6 @@ describe('resolveOperationLogPath', () => {
         operationId: runId,
         entry: null,
       }),
-    ).resolves.toBe(resolve(resolved, 'home', 'run-logs', `${runId}.log`))
+    ).resolves.toBe(resolve(resolved, 'log', `${runId}.log`))
   })
 })

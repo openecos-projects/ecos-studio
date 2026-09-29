@@ -31,7 +31,7 @@ describe('EccCliProcess', () => {
 
   it('redirects detached bootstrap output to a persistent log', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'ecc-cli-detached-'))
-    const logFile = join(directory, 'home', 'run-logs', 'run.log')
+    const logFile = join(directory, 'log', 'run.log')
     const cli = new EccCliProcess({
       resolveLaunch: () => ({
         command: process.execPath,
