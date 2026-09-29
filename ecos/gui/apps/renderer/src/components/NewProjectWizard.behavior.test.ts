@@ -861,6 +861,11 @@ describe('NewProjectWizard behavior', () => {
         manualConfig: null,
       },
     })
+    // The wizard config is reactive; the desktop bridge payload must stay
+    // structured-cloneable or ipcRenderer.invoke throws "could not be cloned".
+    expect(() =>
+      structuredClone(wizardMocks.resolveBinding.mock.calls[0]?.[0]),
+    ).not.toThrow()
     expect(wizard.selectedPdkId).toBe('pdk:vendor:local:second')
     wrapper.unmount()
   })
