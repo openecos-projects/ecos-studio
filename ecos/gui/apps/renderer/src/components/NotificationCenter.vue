@@ -65,7 +65,7 @@
           <span class="notification-status" aria-hidden="true">
             <i :class="iconFor(notification.severity)" />
           </span>
-          <div class="notification-body">
+          <div class="notification-body selectable">
             <div class="notification-item-heading">
               <strong>{{ notification.title }}</strong>
               <time :datetime="new Date(notification.createdAt).toISOString()">

@@ -377,6 +377,10 @@ const desktopApi: DesktopApi = {
           listener(payload as ResourceJob)
         },
       ),
+    onChanged: (listener) =>
+      subscribeToDesktopEvent(desktopApiEventChannels.resourcesChanged, () => {
+        listener()
+      }),
   },
   pdkInventory: {
     list: () => invokeDesktop(desktopApiIpcChannels.pdkInventoryList),

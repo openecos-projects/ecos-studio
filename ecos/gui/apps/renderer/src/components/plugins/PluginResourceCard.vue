@@ -9,11 +9,12 @@
           <small :title="metaText">{{ metaText }}</small>
         </span>
         <p
-          v-if="row.description"
+          v-if="row.progressMessage || row.description"
           class="plugin-card-description"
-          :title="row.descriptionTitle || undefined"
+          :class="{ 'is-live': row.progressMessage !== null }"
+          :title="row.progressMessage || row.descriptionTitle || undefined"
         >
-          {{ row.description }}
+          {{ row.progressMessage || row.description }}
         </p>
         <div v-if="row.flowTags.length || row.dependencyLabel" class="plugin-card-tags">
           <span v-if="row.flowTags.length" class="resource-flow-tags">
@@ -198,6 +199,10 @@ const homepageUrl = computed(() => homepageUrlFor(props.row))
   color: var(--text-secondary);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.plugin-card-description.is-live {
+  color: var(--info-color);
 }
 
 .plugin-card-tags {

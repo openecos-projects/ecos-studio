@@ -244,6 +244,10 @@ export function subscribeResourceProgress(
   }
 }
 
+export function subscribeResourcesChanged(onChanged: () => void): () => void {
+  return getDesktopApi().resources.onChanged(onChanged)
+}
+
 export function subscribePluginProgress(
   toolName: string,
   onProgress: (progress: InstallProgress) => void,

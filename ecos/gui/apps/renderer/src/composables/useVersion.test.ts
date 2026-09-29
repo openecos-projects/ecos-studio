@@ -195,6 +195,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
         resources: [],
       }),
       onProgress: () => () => undefined,
+      onChanged: () => () => undefined,
     },
     pdkInventory: {} as DesktopApi['pdkInventory'],
     projectEccConfig: {} as DesktopApi['projectEccConfig'],

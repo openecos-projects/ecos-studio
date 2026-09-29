@@ -40,6 +40,7 @@ export interface ResourceRow {
   missingRequires: string[]
   dependencyLabel: string
   progressPercent: number | null
+  progressMessage: string | null
   actions: ResourceAction[]
   resource: ResourceItem
 }
@@ -406,6 +407,7 @@ export function resourceToRow(
   progress: InstallProgress | undefined,
 ): ResourceRow {
   const progressPercent = progressPercentFor(progress)
+  const progressMessage = progress?.message.trim() ? progress.message.trim() : null
   const size = formatResourceSize(resource.size)
   const status = mapStatus(resource, progress)
   const description = rowDescription(resource)
@@ -436,6 +438,7 @@ export function resourceToRow(
     missingRequires: resource.missing_requires ?? [],
     dependencyLabel: dependencyLabel(resource),
     progressPercent,
+    progressMessage,
     actions: resource.actions,
     resource,
   }

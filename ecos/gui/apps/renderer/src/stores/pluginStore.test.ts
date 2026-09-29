@@ -65,6 +65,7 @@ vi.mock('@/api/plugin', () => {
         })),
     subscribePluginProgress: vi.fn(),
     subscribeResourceProgress: vi.fn(),
+    subscribeResourcesChanged: vi.fn(),
     uninstallResourceApi: vi.fn(),
     uninstallToolApi: vi.fn(),
     updateResourceApi: vi.fn(),
@@ -81,6 +82,7 @@ import {
   listPdkInstallationsApi,
   removePdkInstallationApi,
   subscribeResourceProgress,
+  subscribeResourcesChanged,
   uninstallResourceApi,
   updateResourceApi,
   type InstallProgress,
@@ -184,6 +186,7 @@ describe('pluginStore', () => {
     vi.mocked(listPdkInstallationsApi).mockResolvedValue([])
     vi.mocked(removePdkInstallationApi).mockReset()
     vi.mocked(subscribeResourceProgress).mockReset()
+    vi.mocked(subscribeResourcesChanged).mockReset()
     vi.mocked(uninstallResourceApi).mockReset()
     vi.mocked(updateResourceApi).mockReset()
   })
@@ -223,6 +226,37 @@ describe('pluginStore', () => {
         install_path: '/tmp/tools/yosys/0.61',
       },
     ])
+  })
+
+  it('re-fetches silently when the cached registry is refreshed in the background', async () => {
+    vi.mocked(listResourcesApi).mockResolvedValue([])
+
+    const store = usePluginStore()
+    await store.fetchTools()
+
+    expect(listResourcesApi).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(subscribeResourcesChanged)).toHaveBeenCalledTimes(1)
+
+    const onChanged = vi.mocked(subscribeResourcesChanged).mock.calls[0]?.[0]
+    expect(onChanged).toBeTypeOf('function')
+    onChanged?.()
+
+    await vi.waitFor(() => {
+      expect(listResourcesApi).toHaveBeenCalledTimes(2)
+    })
+    expect(store.loading).toBe(false)
+  })
+
+  it('stops listening for registry changes after cleanup', async () => {
+    const unsubscribe = vi.fn()
+    vi.mocked(subscribeResourcesChanged).mockReturnValue(unsubscribe)
+    vi.mocked(listResourcesApi).mockResolvedValue([])
+
+    const store = usePluginStore()
+    await store.fetchTools()
+    store.cleanup()
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   it('keeps the newest resource list when overlapping fetches resolve out of order', async () => {

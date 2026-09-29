@@ -409,6 +409,7 @@ export interface DesktopBridgeServices {
       force?: boolean
       refreshRegistry?: boolean
     }): Promise<unknown>
+    onRegistryChanged(listener: () => void): () => void
   }
   pdkInventoryService: {
     bindInstallation(request: PdkBindRequest): Promise<PdkBinding>
@@ -2410,6 +2411,16 @@ export function registerIpc(
     return await services.resourceManagerService.checkResourceUpdates(
       options as { force?: boolean; refreshRegistry?: boolean } | undefined,
     )
+  })
+
+  // Registry listings are served cache-first while a background refresh runs;
+  // broadcast a completed refresh so renderers can re-fetch stale listings.
+  services.resourceManagerService.onRegistryChanged(() => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(desktopApiEventChannels.resourcesChanged)
+      }
+    }
   })
 
   handle(desktopApiIpcChannels.pdkInventoryList, async () => {

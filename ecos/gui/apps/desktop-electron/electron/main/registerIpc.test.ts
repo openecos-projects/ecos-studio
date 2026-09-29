@@ -214,6 +214,7 @@ function registerHandlers(
       updateResource: vi.fn(),
       validatePdk: vi.fn(),
       validatePdkRootForWorkspace: vi.fn(),
+      onRegistryChanged: vi.fn(),
     },
     pdkInventoryService: {
       bindInstallation: vi.fn(),
@@ -1765,7 +1766,16 @@ describe('registerIpc', () => {
         manualConfig: null,
       },
     })
-    expect(services.pdkInventoryService.bindInstallation).not.toHaveBeenCalled()
+    expect(services.pdkInventoryService.bindInstallation).toHaveBeenCalledWith({
+      installationId: 'pdk-installation:ics55',
+      requirement: {
+        familyId: 'ics55',
+        version: null,
+        manualConfig: null,
+      },
+      projectId: 'proj_demo',
+      projectRoot: '/tmp/project',
+    })
     expect(services.eccRuntimeService.createWorkspace).not.toHaveBeenCalled()
   })
 
@@ -1946,11 +1956,7 @@ describe('registerIpc', () => {
       projectId: payload.projectId,
       projectRoot: payload.projectRoot,
     })
-    expect(services.pdkInventoryService.resolveBinding).toHaveBeenCalledWith({
-      projectId: payload.projectId,
-      projectRoot: payload.projectRoot,
-      requirement: persistedRequirement,
-    })
+    expect(services.pdkInventoryService.resolveBinding).not.toHaveBeenCalled()
     expect(services.pdkInventoryService.validateWorkspace).toHaveBeenCalledWith({
       projectId: payload.projectId,
       projectRoot: payload.projectRoot,
@@ -2048,6 +2054,23 @@ describe('registerIpc', () => {
       message: 'Downloading...',
       error: null,
     })
+  })
+
+  it('broadcasts registry changes to all live windows after a background refresh', () => {
+    const { services } = registerHandlers()
+    const send = vi.fn()
+    const destroyedSend = vi.fn()
+    getAllWindows.mockReturnValue([
+      { isDestroyed: () => false, webContents: { send } },
+      { isDestroyed: () => true, webContents: { send: destroyedSend } },
+    ])
+
+    const listener = services.resourceManagerService.onRegistryChanged.mock.calls[0]?.[0]
+    expect(listener).toBeTypeOf('function')
+    listener()
+
+    expect(send).toHaveBeenCalledWith(desktopApiEventChannels.resourcesChanged)
+    expect(destroyedSend).not.toHaveBeenCalled()
   })
 
   it('logs unexpected handler errors and returns an IPC error result', async () => {
