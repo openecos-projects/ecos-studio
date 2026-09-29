@@ -92,6 +92,7 @@ type ManifestWriter = (filePath: string, content: string) => Promise<void>
 
 interface CommandRunnerOptions {
   cwd?: string
+  env?: NodeJS.ProcessEnv
   signal?: AbortSignal
 }
 
@@ -640,6 +641,9 @@ export class ResourceManagerService {
       }
       if (runtimeTools.has('yosys')) {
         activeYosysRoot = entry.path
+      }
+      if (toolKind === 'kepler-formal') {
+        env.CHIPCOMPILER_KEPLER_FORMAL_ROOT = entry.path
       }
       const slangExecutable = runtimeTools.get('slang')
       if (slangExecutable) {
@@ -1688,6 +1692,16 @@ export class ResourceManagerService {
       const detected = await detectExecutables(tempExtract)
       const executable = selectToolExecutable(name, detected)
       await assertStagedToolHealth(name, tempExtract, detected, executable)
+      if (normalizeToolName(name) === 'kepler-formal') {
+        // Match ECC's loader environment; verify before replacing a working install.
+        const env = { ...process.env }
+        delete env.LD_LIBRARY_PATH
+        delete env.LD_PRELOAD
+        await this.commandRunner(join(tempExtract, executable), ['--version'], {
+          env,
+          signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+        })
+      }
       throwIfAborted(signal)
       const manifestEntry: ToolInventoryEntry = {
         type: 'tool',
@@ -4329,9 +4343,9 @@ function selectToolExecutable(name: string, detected: string[]): string {
   }
   const preferred = preferredExecutableNames(normalized)
   for (const candidate of preferred) {
-    const match = detected.find(
-      (entry) => entry === candidate || entry.endsWith(`/${candidate}`),
-    )
+    const match =
+      detected.find((entry) => entry === candidate) ??
+      detected.find((entry) => entry.endsWith(`/${candidate}`))
     if (match) return match
   }
   return detected[0] ?? ''
@@ -4504,7 +4518,9 @@ async function resolveRuntimeExecutable(
 ): Promise<string | null> {
   const normalized = normalizeToolName(capability ?? entry.name)
   const preferred = preferredExecutableNames(normalized)
-  const candidates = capability
+  // Older Kepler entries record bin/kepler-formal, bypassing bundled libraries.
+  const usePreferred = Boolean(capability) || normalized === 'kepler-formal'
+  const candidates = usePreferred
     ? [
         ...preferred,
         ...entry.detected_executables.filter((executable) => {
@@ -4542,6 +4558,9 @@ async function resolveRuntimeExecutable(
 }
 
 function preferredExecutableNames(normalizedName: string): string[] {
+  if (normalizedName === 'kepler-formal') {
+    return ['kepler-formal', 'bin/kepler-formal']
+  }
   if (normalizedName === 'slang') {
     return ['bin/slang', 'slang']
   }
@@ -5848,6 +5867,7 @@ async function runChildProcess(
   return await new Promise<string>((resolvePromise, reject) => {
     const child = spawn(command, args, {
       cwd: options?.cwd,
+      env: options?.env,
       detached: process.platform !== 'win32',
       stdio: 'pipe',
       windowsHide: true,
