@@ -49,7 +49,9 @@ describe('workspaceParametersFile params.toml 对拍', () => {
   it('classifies [design] and [pdk] mirror keys into the flat parameter payload', () => {
     const params = parseWorkspaceParametersText(PARAMS_TOML_SAMPLE, 'toml', '/ws/gcd')
 
-    // [params] values pass through as written (ECC persists canonical keys).
+    // Non-identity [params] values pass through as written. Identity fields
+    // may be absent here in the v2 persisted format and are reconstructed
+    // from [design]/[pdk].
     expect(params.target_density).toBe(0.2)
     expect(params.max_fanout).toBe(20)
     expect(params['place.target_overflow']).toBe(0.1)
