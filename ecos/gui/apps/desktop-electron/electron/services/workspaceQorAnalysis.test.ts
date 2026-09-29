@@ -363,12 +363,13 @@ describe('analyzeWorkspaceQor', () => {
   })
 
   it('projects the canonical ECC v6 fixture metrics with step attribution', () => {
-    // Use the same pinned ECC fixture copy as the shared validator tests.
+    // Canonical Engineering Snapshot fixtures are owned by the ECC repository;
+    // ecos/gui and ecc/ sit side by side in the monorepo.
     const fixture = JSON.parse(
       readFileSync(
         resolve(
           dirname(fileURLToPath(import.meta.url)),
-          '../../../../packages/shared/src/utils/fixtures/snapshot/v6-valid.json',
+          '../../../../../../ecc/test/formal/fixtures/snapshot/v6-valid.json',
         ),
         'utf-8',
       ),
