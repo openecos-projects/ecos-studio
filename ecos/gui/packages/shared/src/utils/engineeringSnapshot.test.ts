@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -14,24 +14,11 @@ import {
   validateEngineeringSnapshot,
 } from './engineeringSnapshot'
 
-// Canonical Engineering Snapshot fixtures are owned by the ECC repository
-// (ADR-0005) and consumed read-only through the parent monorepo checkout:
-// ecos/gui and ecc/ sit side by side, so from this file the fixture directory
-// resolves to <repo>/ecc/test/formal/fixtures/snapshot. The files are never
-// copied; when the ECC contract changes and the fixtures are regenerated,
-// these tests fail until the GUI validator follows.
-const FIXTURE_ROOT = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  '../../../../../../ecc/test/formal/fixtures/snapshot',
-)
+// Copies of the pinned ECC canonical fixtures (ADR-0005) keep GUI tests independent
+// of submodule checkout. CI's version job checks them against the ECC originals.
+const FIXTURE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures/snapshot')
 
 function fixtureText(name: string): string {
-  if (!existsSync(FIXTURE_ROOT)) {
-    throw new Error(
-      `ECC canonical snapshot fixtures not found at ${FIXTURE_ROOT}. ` +
-        'Run these tests from the ECOS Studio monorepo with the ecc/ submodule checked out.',
-    )
-  }
   return readFileSync(resolve(FIXTURE_ROOT, name), 'utf8')
 }
 

@@ -1,11 +1,4 @@
-import {
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-  existsSync,
-} from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,20 +6,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { readPersistedEngineeringSnapshot } from './engineeringSnapshotReader'
 
 // The renderer never touches snapshot files; this reader is the backend
-// boundary. It is exercised here against the ECC canonical fixtures, consumed
-// read-only from the monorepo's ecc/ submodule checkout (ADR-0005).
+// boundary. It uses the same pinned ECC fixture copies as the shared validator;
+// CI's version job checks them against the ECC originals (ADR-0005).
 const FIXTURE_ROOT = resolve(
   dirname(fileURLToPath(import.meta.url)),
-  '../../../../../../../ecc/test/formal/fixtures/snapshot',
+  '../../../../../packages/shared/src/utils/fixtures/snapshot',
 )
 
 function fixtureText(name: string): string {
-  if (!existsSync(FIXTURE_ROOT)) {
-    throw new Error(
-      `ECC canonical snapshot fixtures not found at ${FIXTURE_ROOT}. ` +
-        'Run these tests from the ECOS Studio monorepo with the ecc/ submodule checked out.',
-    )
-  }
   return readFileSync(resolve(FIXTURE_ROOT, name), 'utf8')
 }
 

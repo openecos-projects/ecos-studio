@@ -95,6 +95,19 @@ jobs:
         with:
           expected_ref: ${{ startsWith(github.ref, 'refs/heads/release/v') && github.ref || startsWith(github.base_ref, 'release/v') && github.base_ref || '' }}
 
+      - name: Check snapshot fixtures
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          source = Path('ecc/test/formal/fixtures/snapshot')
+          bundled = Path('ecos/gui/packages/shared/src/utils/fixtures/snapshot')
+          expected = {p.name: json.loads(p.read_text()) for p in source.glob('*.json')}
+          actual = {p.name: json.loads(p.read_text()) for p in bundled.glob('*.json')}
+          assert expected and actual == expected, 'Refresh GUI snapshot fixtures from the pinned ECC submodule'
+          PY
+
   gui-checks:
     name: GUI Checks
     runs-on: ubuntu-22.04
