@@ -25,6 +25,7 @@ import type {
   EccWorkspaceInfoRequest,
   EccWorkspaceInfoResult,
   EccWorkspaceOpenRequest,
+  EccWorkspaceParameterRecord,
   EccWorkspaceOpenResult,
   EccWorkspaceRefreshConfigRequest,
   EccWorkspaceRefreshConfigResult,
@@ -574,9 +575,16 @@ export class EccCliRuntimeService {
   async readWorkspaceStepConfiguration(
     request: EccWorkspaceStepConfigurationReadRequest,
   ): Promise<EccWorkspaceStepConfigurationReadResult> {
-    return await this.readWorkspaceStepConfigurationForDirectory(
-      this.requireSession(request.workspaceHandle).directory,
+    const session = this.requireSession(request.workspaceHandle)
+    const snapshot = await readPersistedEngineeringSnapshot(
+      session.directory,
+      session.workspaceId,
+    )
+    return await this.readWorkspaceStepConfigurationFromCli(
+      session.projectRoot,
+      session.workspaceId,
       request.step,
+      snapshot,
     )
   }
 
@@ -585,33 +593,57 @@ export class EccCliRuntimeService {
     step: string,
   ): Promise<EccWorkspaceStepConfigurationReadResult> {
     const snapshot = await readPersistedEngineeringSnapshot(directory)
-    const catalog = await this.describeWorkspaceSpec()
-    const entries = Array.isArray(catalog.parameterCatalog)
-      ? catalog.parameterCatalog
-      : []
-    const parameters = entries.flatMap((entry) => {
-      if (!isRecord(entry) || typeof entry.id !== 'string') return []
-      const applies = typeof entry.appliesTo === 'string' ? entry.appliesTo : 'all'
-      if (!parameterAppliesToStep(applies, step)) return []
-      return [
-        {
-          applies,
-          choices: Array.isArray(entry.choices) ? entry.choices : undefined,
-          default: entry.default,
-          description: typeof entry.description === 'string' ? entry.description : '',
-          param: entry.id,
-          range: Array.isArray(entry.range) ? entry.range : undefined,
-          type: typeof entry.type === 'string' ? entry.type : '',
-          unit: typeof entry.unit === 'string' ? entry.unit : undefined,
-          value: workspaceParameterValue(snapshot.parameters, entry),
-        },
-      ]
-    })
+    const project = await discoverProject(directory)
+    if (!project) throw new Error('Workspace project could not be discovered.')
+    return await this.readWorkspaceStepConfigurationFromCli(
+      project.projectRoot,
+      snapshot.workspaceId,
+      step,
+      snapshot,
+    )
+  }
+
+  private async readWorkspaceStepConfigurationFromCli(
+    projectRoot: string,
+    workspaceId: string,
+    step: string,
+    snapshot: EccEngineeringSnapshot,
+  ): Promise<EccWorkspaceStepConfigurationReadResult> {
+    const result = await this.cli.run(
+      [
+        'param',
+        'list',
+        '--project',
+        projectRoot,
+        '--workspace',
+        workspaceId,
+        '--step',
+        step,
+        '--all',
+        '--plain',
+      ],
+      { cwd: projectRoot },
+    )
+    const projection = parseWorkspaceParameterRecords(result.stdout)
+    const parameters = projection.parameters
+    const stepId = projection.stepId
+    if (!stepId) throw new Error('ECC workspace parameter records have no flow step.')
+    if (parameters.length === 0) {
+      return {
+        parameters: [],
+        reason: 'step_configuration_unavailable',
+        status: 'unavailable',
+        step: stepId,
+        stepId,
+        workspaceId: snapshot.workspaceId,
+        workspaceRevision: snapshot.workspaceRevision,
+      }
+    }
     return {
       parameters,
       status: 'available',
-      step,
-      stepId: step,
+      step: stepId,
+      stepId,
       workspaceId: snapshot.workspaceId,
       workspaceRevision: snapshot.workspaceRevision,
     }
@@ -1629,6 +1661,48 @@ function buildCatalog(
   return { schemaVersion: 1, parameterCatalog, flowDefinitions }
 }
 
+function parseWorkspaceParameterRecords(output: string): {
+  parameters: EccWorkspaceParameterRecord[]
+  stepId: string
+} {
+  let stepId: string | undefined
+  const parameters = parseEccLineRecords(output).flatMap((record) => {
+    const recordStepId = record.step_id
+    if (recordStepId) {
+      if (stepId && stepId !== recordStepId) {
+        throw new Error('ECC workspace parameter records disagree on the flow step.')
+      }
+      stepId = recordStepId
+    }
+    if (record.record === 'parameter_list') return []
+    requireRecordKind(record, 'parameter')
+    for (const key of ['id', 'type', 'value_literal', 'default_literal', 'applies_to']) {
+      requireString(record[key])
+    }
+    const range = record.range_literal
+      ? parseJsonLiteral(record.range_literal)
+      : undefined
+    const choices = record.choices_literal
+      ? parseJsonLiteral(record.choices_literal)
+      : undefined
+    return [
+      {
+        applies: record.applies_to!,
+        ...(Array.isArray(choices) ? { choices } : {}),
+        default: parseJsonLiteral(record.default_literal!),
+        description: record.description ?? '',
+        param: record.id!,
+        ...(Array.isArray(range) ? { range } : {}),
+        ...(record.source ? { source: record.source } : {}),
+        type: record.type!,
+        ...(record.unit ? { unit: record.unit } : {}),
+        value: parseJsonLiteral(record.value_literal!),
+      },
+    ]
+  })
+  return { parameters, stepId: stepId ?? '' }
+}
+
 function workspaceFlowArgs(spec: Record<string, unknown>): string[] {
   const flow = isRecord(spec.flow) ? spec.flow : {}
   return [
@@ -1842,12 +1916,6 @@ async function firstFlowStep(session: WorkspaceSession): Promise<string> {
   return first
 }
 
-function parameterAppliesToStep(applies: string, step: string): boolean {
-  if (applies === 'all') return true
-  const normalize = (value: string) => value.toLowerCase().replace(/[\s_-]/g, '')
-  return normalize(applies) === normalize(step)
-}
-
 export function workspaceParameterValue(
   parameters: Record<string, unknown>,
   entry: Record<string, unknown>,
@@ -1870,14 +1938,14 @@ export function workspaceParameterValue(
 }
 
 function operationLogPath(runId: string): string {
-  return `home/run-logs/${runId}.log`
+  return `log/${runId}.log`
 }
 
 /**
  * Resolve the log file for one operation. The registry log_path is advisory:
  * only trust it while it belongs to this exact run and resolves inside the
  * workspace without crossing symlinks; anything else falls back to the
- * run-id-derived default path (extend_cli.md §13.2).
+ * run-id-derived default path (the Workspace-root log contract).
  */
 export async function resolveOperationLogPath(options: {
   workspaceDirectory: string
@@ -1891,7 +1959,7 @@ export async function resolveOperationLogPath(options: {
   if (
     options.entry &&
     options.entry.run_id === options.operationId &&
-    typeof options.entry.log_path === 'string'
+    options.entry.log_path === operationLogPath(options.operationId)
   ) {
     const authorized = await resolveContainedLogPath(
       options.workspaceDirectory,

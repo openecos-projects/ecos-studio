@@ -97,6 +97,7 @@ export interface EccWorkspaceParameterRecord {
   description: string
   param: string
   range?: unknown[]
+  source?: string
   type: string
   unit?: string
   value: unknown

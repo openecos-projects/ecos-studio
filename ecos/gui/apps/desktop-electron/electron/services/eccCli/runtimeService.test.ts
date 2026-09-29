@@ -494,7 +494,7 @@ describe('ECC CLI live flow projection', () => {
             workspace_path: workspaceDirectory,
             started_at: 1,
             runtime_id: 'runtime-1',
-            log_path: `home/run-logs/${runId}.log`,
+            log_path: `log/${runId}.log`,
           },
         },
       }),
