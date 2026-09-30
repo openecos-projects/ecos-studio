@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.knowledge.bundle import KnowledgeBundle
+from ecos_agent.knowledge.stages import stage_matches_any
 from ecos_agent.optimization.contracts import (
     KnowledgeReference,
     LegalAction,
@@ -448,11 +449,13 @@ def _match_claim(
             set(state.preserve_metrics) & set(claim.objectives)
         ):
             return KnowledgeApplicability.BLOCKED, ("objective_mismatch",)
-    if state.current_stage.value.casefold() not in {
-        stage.casefold() for stage in claim.stages
-    } and not {
-        stage.casefold() for stage in state.evidence_stages
-    } & {stage.casefold() for stage in claim.stages}:
+    if not (
+        stage_matches_any(state.current_stage, claim.stages)
+        or any(
+            stage_matches_any(stage, claim.stages)
+            for stage in state.evidence_stages
+        )
+    ):
         return KnowledgeApplicability.BLOCKED, ("incompatible_stage",)
     if binding is None:
         return KnowledgeApplicability.BLOCKED, ("unsupported_action",)

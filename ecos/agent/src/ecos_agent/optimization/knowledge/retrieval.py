@@ -16,6 +16,11 @@ from ecos_agent.knowledge.retriever import (
     RetrievalConfig,
     load_production_retrieval_config,
 )
+from ecos_agent.knowledge.stages import stage_matches_any
+from ecos_agent.knowledge.step import (
+    load_default_general_knowledge_bundles,
+    load_default_step_knowledge,
+)
 from ecos_agent.optimization.contracts import (
     KnowledgeReference,
     ObjectiveMetric,
@@ -27,10 +32,6 @@ from ecos_agent.optimization.knowledge.compiler import (
     knowledge_support_catalog_from_bundles,
 )
 from ecos_agent.optimization.ledger import OptimizationOutcomeKind
-from ecos_agent.knowledge.step import (
-    load_default_general_knowledge_bundles,
-    load_default_step_knowledge,
-)
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _METRIC_ID = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -132,14 +133,13 @@ class OptimizationRetrievalResult:
         # The frozen action stages bound the candidate set; per-checkpoint
         # stage compatibility (checkpoint stage plus the supplied cross-stage
         # evidence stages) is enforced by the view compiler, not here.
-        stages = {self.request.current_stage.value.casefold()}
-        stages.update(item.casefold() for item in self.request.action_stages)
+        stages = (self.request.current_stage, *self.request.action_stages)
         return tuple(
             sorted(
                 (
                     claim.claim_ref
                     for claim in self.support_catalog.claims
-                    if stages & {item.casefold() for item in claim.stages}
+                    if any(stage_matches_any(stage, claim.stages) for stage in stages)
                 ),
                 key=lambda ref: (ref.entity_id, ref.chunk_sha256),
             )

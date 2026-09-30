@@ -5,6 +5,7 @@ from ecos_agent.optimization.knob_policy import (
     SearchLayerSignal,
     allowed_knobs,
     history_layer_signal,
+    layer_priority,
     select_search_actions,
 )
 from ecos_agent.optimization.rules import IncumbentDecision
@@ -36,6 +37,19 @@ def test_fixed_geometry_excludes_floorplan_only():
     }
 
 
+def test_default_layer_priority_starts_with_floorplan_geometry():
+    goal = objective(geometry="variable")
+    assert layer_priority(goal) == (
+        "floorplan_area",
+        "floorplan_shape",
+        "physical",
+        "convergence",
+        "strategy",
+        "advanced",
+    )
+    assert select_search_actions(goal, actions())[0] == "floorplan_area"
+
+
 def test_area_first_recommends_floorplan_area_with_increase_only_direction():
     layer, selected = select_search_actions(
         objective(ObjectiveMetric.DIE_AREA, geometry="variable"), actions(),
@@ -55,7 +69,7 @@ def test_empty_area_direction_falls_through_without_empty_planning_turn():
         objective(ObjectiveMetric.CORE_AREA, geometry="variable"),
         tuple(a for a in actions() if a.knob_id != OptimizationKnob.FLOORPLAN_CORE_UTIL),
     )
-    assert layer == "physical" and selected
+    assert layer == "floorplan_shape" and selected
 
 
 def test_feedback_retains_progressing_layer_and_advances_failed_layer():
@@ -63,7 +77,7 @@ def test_feedback_retains_progressing_layer_and_advances_failed_layer():
     history = ((OptimizationKnob.FLOORPLAN_CORE_UTIL, SearchLayerSignal.RETAIN),)
     assert select_search_actions(goal, actions(), history=history)[0] == "floorplan_area"
     history = ((OptimizationKnob.FLOORPLAN_CORE_UTIL, SearchLayerSignal.ADVANCE),)
-    assert select_search_actions(goal, actions(), history=history)[0] == "physical"
+    assert select_search_actions(goal, actions(), history=history)[0] == "floorplan_shape"
 
 
 def test_parity_objective_gain_does_not_retain_the_layer():

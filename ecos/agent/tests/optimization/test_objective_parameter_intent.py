@@ -124,7 +124,7 @@ def test_summary_discloses_outline_and_advanced_settings():
         advanced_parameters_enabled=False,
     )
     assert "可变" in message and "density_weight：禁用" in message
-    assert "主要物理参数" in message and "收敛参数" in message
+    assert "参数层优先级：Floorplan 面积、Floorplan 外形、物理、收敛、策略、高级" in message
     enabled = optimization_objective_summary_message(
         "zh", primary_metric="die_area", preserve_metrics=(), signoff_gates=(),
         rationale_summary="降低面积", objective_sha256="hash", geometry_mode="variable",

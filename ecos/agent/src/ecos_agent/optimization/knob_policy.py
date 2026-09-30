@@ -86,13 +86,13 @@ def _layer_rotation(
     recovering: bool = False,
 ) -> tuple[tuple[str, ...], int]:
     """Return the advisory layer order and its rotation start index."""
-    area_first = not recovering and objective is not None and objective.primary_metric in {
-        ObjectiveMetric.DIE_AREA, ObjectiveMetric.CORE_AREA,
-    }
+    # Geometry is the first search family for normal optimization: core area
+    # controls the floorplan span, and aspect ratio controls its shape. Recovery
+    # keeps the historical feasibility-first order.
     order = (
-        ("floorplan_area", "physical", "floorplan_shape", "convergence", "strategy", "advanced")
-        if area_first else
         ("physical", "convergence", "strategy", "floorplan_shape", "floorplan_area", "advanced")
+        if recovering else
+        ("floorplan_area", "floorplan_shape", "physical", "convergence", "strategy", "advanced")
     )
     start = 0
     if history:

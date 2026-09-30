@@ -5,10 +5,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from ecos_agent.knowledge.stages import (
+    KNOWLEDGE_PHASE_ALIASES,
+    knowledge_phase,
+)
 from ecos_agent.optimization.contracts import ObjectiveMetric
-from ecos_agent.optimization.parameters.semantics import CARD_ROOT, card_hash, load_parameter_cards
-from ecos_agent.optimization.parameters.contracts import ParameterSemanticsCard
 from ecos_agent.optimization.knowledge.compiler import GeneralDomainClaim, VersionBoundToolBinding
+from ecos_agent.optimization.parameters.contracts import ParameterSemanticsCard
+from ecos_agent.optimization.parameters.semantics import CARD_ROOT, card_hash, load_parameter_cards
 
 from .steps import (
     AGENT_ROOT,
@@ -44,12 +48,7 @@ _METRIC_OBJECTIVES = {
     "wirelength": ObjectiveMetric.ROUTE_WIRELENGTH,
 }
 _ALLOWED_STAGES = {stage.slug for stage in STAGES}
-# ECC sub-step name (casefolded) -> knowledge phase slug covering it.
-_KNOWLEDGE_PHASE = {
-    "prefloorplan": "floorplan",
-    "macroplacement": "floorplan",
-    "postfloorplan": "floorplan",
-}
+_KNOWLEDGE_PHASE = KNOWLEDGE_PHASE_ALIASES
 _CONTRACT_DIRECTION = {
     "increase": "increase",
     "decrease": "decrease",
@@ -135,7 +134,7 @@ def _strategy_entries(metric: str) -> tuple[
         # Floorplan geometry knobs bind to the postFloorplan sub-step but their
         # knowledge lives in the shared floorplan phase bundle.
         if any(
-            _KNOWLEDGE_PHASE.get(cards[action["knob_id"]].stage.casefold(), cards[action["knob_id"]].stage.casefold())
+            knowledge_phase(cards[action["knob_id"]].stage)
             not in stages
             for action in actions
         ):
