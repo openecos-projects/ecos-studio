@@ -48,6 +48,7 @@ from ecos_agent.optimization.experiments.knowledge_treatment_execution import (
     DesignSpec,
     ExperimentManifest,
     _filelist_refs,
+    _git_identity,
 )
 from ecos_agent.optimization.experiments.knowledge_mediation import (
     EPISODE_AUDIT_SCHEMA_VERSION,
@@ -75,7 +76,8 @@ from ecos_agent.optimization.objective_alignment import build_objective_alignmen
 from ecos_agent.optimization.objective_intent import OptimizationParameterPolicy
 from ecos_agent.optimization.observation_contracts import deterministic_noise_profile
 from ecos_agent.optimization.rules import freeze_optimization_objective
-from ecos_agent.optimization.runtime import create_optimization_runner
+from ecos_agent.optimization.planning_snapshots import configure_planning_snapshots
+from ecos_agent.optimization.runtime import _ecc_executable, create_optimization_runner
 
 # 频率取各设计 SDC 的原始约束 100 MHz：ECC cf5db256 起 refresh_generated_sdc 会把
 # 带 "# Auto-generated SDC file" 标记的 SDC 改写为 frequency_max 参数值，基线必须
@@ -721,6 +723,14 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
     # Keep each episode's reports isolated from later runs of the same design.
     episode_output = output / episode_id
     episode_output.mkdir(parents=True, exist_ok=True)
+    if os.environ.get("ECOS_PROVIDER_HTTP_AUDIT_DIR"):
+        # Batch processes launch many cells from one scheduler environment;
+        # the audit join keys are per episode, so bind them here, before the
+        # provider resolves the boundary. from_env re-validates the result.
+        os.environ["ECOS_PROVIDER_HTTP_AUDIT_EPISODE_ID"] = episode_id
+        os.environ.setdefault(
+            "ECOS_PROVIDER_HTTP_AUDIT_PLANNING_REQUEST_ID", f"{episode_id}-p0"
+        )
 
     replay_specs: list[dict[str, object]] | None = None
     replay_runtime: dict[str, object] = {}
@@ -794,6 +804,32 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
         }
         runtime_context.update(replay_runtime)
         runner = create_optimization_runner(runtime_context, provider)
+        if args.baseline_method is None and replay_specs is None:
+            # Every LLM candidate must leave a pre-planner snapshot; recovery
+            # with consumed planning calls cannot bootstrap one, so it fails.
+            try:
+                configure_planning_snapshots(
+                    runner.controller,
+                    root=episode_output / "planning-snapshots",
+                    source_identity={
+                        "episode_id": episode_id,
+                        "design_id": design.design_id,
+                        "model": args.model,
+                        "planning_evidence": args.planning_evidence,
+                        "agent_mode": args.agent_mode,
+                        "q": 1,
+                        "ecos_revision": _git_identity(
+                            Path(__file__).resolve().parents[6]
+                        ),
+                        "ecc_revision": _git_identity(
+                            _ecc_executable().parents[2]
+                        ),
+                        "pdk_revision": _git_identity(manifest.pdk_root),
+                    },
+                    planner_readable_roots=(workspace,),
+                )
+            except ValueError as exc:
+                raise SystemExit(f"planning snapshots unavailable: {exc}") from exc
         try:
             _run_episode_with_cap(runner, args.stop_after_started)
             budget_snapshot = {

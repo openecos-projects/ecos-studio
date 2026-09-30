@@ -160,6 +160,11 @@ class OptimizationEpisodeRunner:
         return self._controller.budget
 
     @property
+    def controller(self) -> OptimizationEpisodeController:
+        """Expose the controller for episode-scoped wiring (snapshots)."""
+        return self._controller
+
+    @property
     def incumbent_candidate_root_ref(self) -> str | None:
         return self._controller.incumbent_candidate_root_ref
 
