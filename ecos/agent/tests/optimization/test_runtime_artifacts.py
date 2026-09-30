@@ -663,7 +663,7 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
     assert state["task_memory_scope_sha256"].startswith("sha256:")
     assert state["mode"] == "llm_no_knowledge"
     assert state.get("knowledge_case_shots", 0) == 0
-    assert runner.budget.budget.wall_time_limit_seconds == 264.0
+    assert runner.budget.budget.wall_time_limit_seconds == 360.0
     runner.close()
     assert rpc.closed is True
 

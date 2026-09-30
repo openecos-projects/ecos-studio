@@ -42,11 +42,11 @@ class EqualBudgetConfig:
     candidate_limit: int = 20
     planning_call_limit: int = 60
     reference_runtime_seconds: float = 1.0
-    runtime_multiplier: float = 22.0
+    runtime_multiplier: float = 30.0
 
     def __post_init__(self) -> None:
-        if self.candidate_limit != 20 or self.planning_call_limit != 60 or self.runtime_multiplier != 22.0:
-            raise ValueError("Phase 8 budget is fixed at 20 candidates, 60 planning calls, and 22*T_d")
+        if self.candidate_limit != 20 or self.planning_call_limit != 60 or self.runtime_multiplier != 30.0:
+            raise ValueError("Phase 8 budget is fixed at 20 candidates, 60 planning calls, and 30*T_d")
         if not math.isfinite(self.reference_runtime_seconds) or self.reference_runtime_seconds <= 0:
             raise ValueError("reference runtime must be positive and finite")
 

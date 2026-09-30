@@ -13,7 +13,10 @@ class _BudgetContractModel(BaseModel):
 
 
 CANDIDATE_EXECUTION_LIMIT = 20
-WALL_TIME_LIMIT_MULTIPLIER = 22
+# User amendment 03 (2026-10-01): 30x keeps a full 20-start q=1 episode inside
+# the wall budget at the observed 330-420s per-cycle steady state; completed
+# smoke episodes keep their historical 22x budgets.
+WALL_TIME_LIMIT_MULTIPLIER = 30
 
 
 class EpisodeBudget(_BudgetContractModel):
@@ -48,7 +51,7 @@ class EpisodeBudget(_BudgetContractModel):
             rel_tol=0,
             abs_tol=1e-9,
         ):
-            raise ValueError("wall time limit must equal 22 times the reference rerun")
+            raise ValueError("wall time limit must equal 30 times the reference rerun")
         return self
 
     @classmethod

@@ -3,7 +3,7 @@
 
 Overnight driver (docs/overnight-plan-20260908.md). Reuses the Phase-8
 treatment harness building blocks; budget is enforced by the frozen
-EpisodeBudget contract (20 candidates / 60 planning calls / 22x wall time),
+EpisodeBudget contract (20 candidates / 60 planning calls / 30x wall time),
 not by this script.
 """
 
@@ -482,7 +482,7 @@ def _workspace_calibration(workspace: Path) -> tuple[float, dict[str, object]]:
     The replay runtime comes from each replay's own ``flow_tool_runtime``
     telemetry (calibrate_workspace replays carry no runtime artifact); it is
     the tool-reported duration, marginally tighter than the old wall-clock
-    replay time and honest for the 22x budget.
+    replay time and honest for the 30x budget.
 
     Batch preparation seeds ``.agent/optimization/noise-calibration/`` (two
     default replays behind replay-cache manifests) and
@@ -829,7 +829,7 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
         )
         primary_metric = _OBJECTIVES[args.objective]["primary_metric"]
         # Alignment anchors to canonical workspace evidence; replay telemetry drifts.
-        # The reference observation is used only for the 22x wall-clock budget.
+        # The reference observation is used only for the 30x wall-clock budget.
         runtime_context = {
             "workspace": str(workspace),
             "episode_id": episode_id,

@@ -108,7 +108,7 @@ def test_equal_budget_counts_application_status_and_receipts() -> None:
     assert summary.effective_rate == 0.5
     assert summary.inactive_rate == 0.5
     assert summary.receipt_missing == 1
-    assert summary.wall_time_limit_seconds == 44.0
+    assert summary.wall_time_limit_seconds == 60.0
     assert summary.peak_memory_mb == 8.0
 
 
