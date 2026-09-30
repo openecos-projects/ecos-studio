@@ -206,6 +206,7 @@ def test_convergence_evidence_is_hash_bound_and_stage_independent(frozen_workspa
         "schema_version": "tool.parameter_runtime_report.v3",
         "knob_id": "place.target_overflow",
         "tool": {"name": "DREAMPlace"},
+        "parameter": {"knob_id": "place.target_overflow"},
         "observation": {"stop_overflow": 0.1, "final_overflow": final},
     })
     expected = type(final) in (int, float) and 0 <= final < float("inf")

@@ -61,7 +61,7 @@ def _write_episode(
             terminal_success=feasible,
             terminal_utility=-3.0 if feasible else None,
             feasible=feasible,
-            parameter_status="effective" if feasible else "unknown",
+            application_status="applied" if feasible else "unknown",
         ).__dict__
     ]
     episode_dir = run_root / "reports" / design_id / episode_id
