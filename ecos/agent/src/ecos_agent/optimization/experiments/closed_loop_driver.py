@@ -786,7 +786,6 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
         runtime_context = {
             "workspace": str(workspace),
             "episode_id": episode_id,
-            "native_design_id": _native_design_id(design.design_id),
             "objective": objective.model_dump(mode="json"),
             "objective_alignment": build_objective_alignment(
                 objective, canonical
