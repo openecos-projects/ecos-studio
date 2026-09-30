@@ -83,6 +83,7 @@ class EccCandidateRerunAdapter:
         )
         if self._workspace_root is not None and not self._workspace_root.is_dir():
             raise OptimizationEccAdapterError("workspace root is unavailable")
+        self._terminal_start_by_id: dict[str, dict[str, object]] = {}
         self._binding_by_execution_id: dict[
             str, tuple[RequestedKnobValue, str, str | None, str, int]
         ] = {}
@@ -187,6 +188,12 @@ class EccCandidateRerunAdapter:
             raise
         operation_id, state = self._validate_operation(response)
         self._validate_execution_contract(response, requested)
+        # ECC may execute candidate.rerun synchronously: the start response is
+        # then already terminal and carries the only `result` payload. Cache it
+        # for wait_for_terminal — operation.status for a finished operation
+        # reports the state without the candidate result.
+        if state in _TERMINAL_STATES:
+            self._terminal_start_by_id[operation_id] = response
         evidence = self._evidence(response)
         application_receipt = self._application_receipt(
             response,
@@ -282,7 +289,11 @@ class EccCandidateRerunAdapter:
             raise OptimizationEccAdapterError("operation id is invalid")
         if type(timeout_seconds) not in {int, float} or timeout_seconds <= 0:
             raise OptimizationEccAdapterError("terminal wait timeout is invalid")
-        terminal = self._rpc.wait_for_terminal(execution_id, float(timeout_seconds))
+        cached = self._terminal_start_by_id.pop(execution_id, None)
+        if cached is not None:
+            terminal = cached
+        else:
+            terminal = self._rpc.wait_for_terminal(execution_id, float(timeout_seconds))
         if terminal is None:
             return CandidateExecutionReceipt(execution_id=execution_id, started=True)
         terminal_id, state = self._validate_operation(terminal)

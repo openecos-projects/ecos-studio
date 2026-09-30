@@ -128,3 +128,40 @@ def test_adapter_preserves_immediate_success_for_controller_validation(tmp_path:
     assert completed.outcome == OptimizationOutcomeKind.EXECUTION_SUCCEEDED
     assert completed.evidence is not None
     assert completed.parameter_application_receipt is not None
+
+
+def test_synchronous_start_response_feeds_the_terminal_wait(tmp_path) -> None:
+    """candidate.rerun that returns already-terminal carries the only result.
+
+    The real ECC operation.status for a finished operation reports the state
+    without the candidate result, so wait_for_terminal must reuse the cached
+    start response or the receipt loses its evidence (2026-10-01 gcd smoke).
+    """
+    from tests.optimization.ecc_adapter_support import (
+        _FakeEccRpc,
+        _request,
+        _running_operation,
+        _write_candidate_evidence,
+    )
+    from ecos_agent.optimization.contracts import OptimizationOutcomeKind
+    from ecos_agent.optimization.ecc.adapter import EccCandidateRerunAdapter
+
+    native, evidence, _ = _write_candidate_evidence(tmp_path)
+    start_response = {
+        "operationId": "operation-1",
+        "workspaceId": "workspace-1",
+        "state": "succeeded",
+        "result": {**evidence, "parameterApplicationReceipt": native},
+    }
+    status_only = {**_running_operation(), "state": "succeeded"}
+    rpc = _FakeEccRpc(start_response, terminal_response=status_only)
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200, workspace_root=tmp_path
+    )
+    started = adapter.start(
+        _request("place.target_density", 0.65, StrategyDirection.INCREASE)
+    )
+    waited = adapter.wait_for_terminal(started.execution_id, timeout_seconds=1.0)
+    assert waited.outcome is OptimizationOutcomeKind.EXECUTION_SUCCEEDED
+    assert waited.evidence is not None
+    assert waited.parameter_application_receipt is not None
