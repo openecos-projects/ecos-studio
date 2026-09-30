@@ -879,11 +879,11 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
         workspace=workspace,
         episode_root=episode_root,
         design_id=args.design,
-        reference_observation=reference,
+        reference_observation=canonical,
         objective_metric=primary_metric,
     )
     metric_comparison = build_metric_comparison(
-        reference,
+        canonical,
         traces,
         noise_epsilon["epsilon"] if noise_epsilon else {},
     )
