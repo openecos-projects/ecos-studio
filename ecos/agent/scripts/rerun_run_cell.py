@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -87,6 +88,12 @@ def main(argv: list[str] | None = None) -> int:
         }, sort_keys=True))
         return 0
     workspace = known.run_root.resolve() / "workspaces" / known.design
+    # Attempt-private scratch: every cell gets its own NFS temp tree so no
+    # two attempts ever share writable transient paths.
+    scratch = known.run_root.resolve() / "runtime" / "tmp"
+    scratch.mkdir(parents=True, exist_ok=True)
+    for variable in ("TMPDIR", "TMP", "TEMP"):
+        os.environ[variable] = str(scratch)
     receipt = _prepare_workspace(
         known.designs_root, known.pdk_root, known.design, workspace,
         known.prebuild_timeout_seconds,
