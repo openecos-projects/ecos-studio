@@ -185,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
                     process.wait()
                 if exit_file.is_file():
                     terminal = json.loads(exit_file.read_text())
-                    if terminal.get('logical_episode_id') != eid:
+                    if terminal.get('episode_id') != row['native_episode_id']:
                         raise ValueError('Terminal identity mismatch; stop dispatch')
                     cell.update(status='terminated', terminal=terminal, finished_at=now())
                 else:

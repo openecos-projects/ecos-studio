@@ -178,11 +178,45 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     print(f"[prebuild] mode={receipt['mode']} elapsed={receipt['elapsed_seconds']}s", flush=True)
-    # Mirror scripts/run_closed_loop_episode.py: model-routed environment,
-    # then the driver with the real app-server provider.
-    _model = runner_model_from_argv(rest)
-    print("[runner-env]", apply_runner_environment(model=_model), flush=True)
-    return driver_main(CodexAppServerProposalProvider, rest)
+
+    def _episode_id() -> str:
+        for index, arg in enumerate(rest):
+            if arg == "--episode-id":
+                return rest[index + 1]
+        return "unknown"
+
+    exit_code, error_class = 1, None
+    try:
+        # Mirror scripts/run_closed_loop_episode.py: model-routed environment,
+        # then the driver with the real app-server provider.
+        _model = runner_model_from_argv(rest)
+        print("[runner-env]", apply_runner_environment(model=_model), flush=True)
+        exit_code = driver_main(CodexAppServerProposalProvider, rest)
+    except Exception as exc:  # typed failure record; the scheduler never sees a naked exit
+        error_class = type(exc).__name__
+        print(f"[cell] failed: {error_class}: {exc}", flush=True)
+        raise
+    finally:
+        if not isinstance(exit_code, int):
+            exit_code = 1
+        known.prebuild_receipt.parent.mkdir(parents=True, exist_ok=True)
+        (known.prebuild_receipt.parent / "cell-exit.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "ecos.rerun_cell_exit.v1",
+                    "episode_id": _episode_id(),
+                    "design_id": known.design,
+                    "exit_code": exit_code,
+                    "error_class": error_class,
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    return exit_code
 
 
 if __name__ == "__main__":
