@@ -506,6 +506,20 @@ def _workspace_calibration(workspace: Path) -> tuple[float, dict[str, object]]:
             "workspace lacks the seeded default-replay calibration "
             f"(found {len(runtimes)} replays, need >= 2): {calibration_root}"
         )
+    runtime_doc_path = (
+        workspace / ".agent" / "optimization" / "reference-runtime.v1.json"
+    )
+    if not runtime_doc_path.is_file():
+        raise SystemExit("workspace lacks the seeded reference-runtime artifact")
+    runtime_doc = json.loads(runtime_doc_path.read_text(encoding="utf-8"))
+    reference_seconds = runtime_doc.get("reference_runtime_seconds")
+    if (
+        runtime_doc.get("schema_version") != "ecos.reference_runtime.v1"
+        or isinstance(reference_seconds, bool)
+        or not isinstance(reference_seconds, (int, float))
+        or reference_seconds <= 0
+    ):
+        raise SystemExit("seeded reference-runtime artifact is invalid")
     epsilon_path = epsilon_artifact_path(workspace)
     if not epsilon_path.is_file():
         raise SystemExit("workspace lacks the seeded noise-epsilon artifact")
@@ -517,7 +531,7 @@ def _workspace_calibration(workspace: Path) -> tuple[float, dict[str, object]]:
         or any(isinstance(v, bool) or not isinstance(v, (int, float)) for v in epsilon.values())
     ):
         raise SystemExit("seeded noise-epsilon artifact is invalid")
-    return statistics.median(runtimes), {
+    return float(reference_seconds), {
         "artifact": str(epsilon_path),
         "replay_count": payload.get("replay_count"),
         "epsilon": epsilon,

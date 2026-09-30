@@ -99,10 +99,11 @@ def _seed_workspace_calibration(
         epsilon_source = source / ".agent" / "optimization" / "noise-epsilon.v1.json"
         calibration_source = source / ".agent" / "optimization" / "noise-calibration"
         replays = sorted(calibration_source.glob("default-replay-*"))
-        if not epsilon_source.is_file() or len(replays) < 2:
+        runtime_source = source / ".agent" / "optimization" / "reference-runtime.v1.json"
+        if not epsilon_source.is_file() or not runtime_source.is_file() or len(replays) < 2:
             raise SystemExit(
-                f"calibration source lacks the canonical seed (epsilon + >=2 "
-                f"replays): {source}"
+                f"calibration source lacks the canonical seed (epsilon + "
+                f"reference runtime + >=2 replays): {source}"
             )
         for replay in replays:
             manifest = _load_replay_manifest(replay)
@@ -111,6 +112,9 @@ def _seed_workspace_calibration(
             _require_same_inputs(manifest, fingerprint, replay.name)
         optimization_root.mkdir(parents=True, exist_ok=True)
         shutil.copy2(epsilon_source, epsilon_target)
+        shutil.copy2(
+            runtime_source, optimization_root / "reference-runtime.v1.json"
+        )
         shutil.copytree(calibration_source, calibration_target)
         seeded = "seeded"
     replay_dirs = sorted(calibration_target.glob("default-replay-*"))
