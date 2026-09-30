@@ -62,7 +62,13 @@ def resources(root: Path, previous: tuple[int, int, int]) -> tuple[dict[str, Any
 
 def dispatch_cap(sample: dict[str, Any], *, stable_low_samples: int,
                  minimum_free_gib: float, clock: float) -> int:
-    """Conservative admission, never a claim to limit active CPU peaks."""
+    """Admission gating only; never a claim to limit active CPU peaks.
+
+    User amendment 02 (2026-09-30) raises the dispatch line to full machine
+    capacity: expand while pressure stays under 95%, hold between 95% and
+    100%, and stop new dispatch only at saturation (>=100%). Memory, NFS and
+    iowait guards are unchanged.
+    """
     values = [sample[k] for k in ('sample_monotonic', 'cpu_utilization',
               'normalized_host_load', 'memory_available_gib', 'nfs_free_gib', 'iowait')]
     if not all(math.isfinite(v) and v >= 0 for v in values):
@@ -70,11 +76,11 @@ def dispatch_cap(sample: dict[str, Any], *, stable_low_samples: int,
     if clock - sample['sample_monotonic'] > 15 or clock < sample['sample_monotonic']:
         return 0
     pressure = max(sample['cpu_utilization'], sample['normalized_host_load'])
-    if pressure >= .75 or sample['memory_available_gib'] < 256 or sample['nfs_free_gib'] < minimum_free_gib:
+    if pressure >= 1.0 or sample['memory_available_gib'] < 256 or sample['nfs_free_gib'] < minimum_free_gib:
         return 0
     if sample['memory_available_gib'] <= 512 or sample['iowait'] >= .1:
         return 2
-    return 6 if pressure < .7 and stable_low_samples >= 3 else 4
+    return 6 if pressure < .95 and stable_low_samples >= 3 else 4
 
 
 def eligible_cell(rows: list[dict[str, Any]], states: dict[str, Any], active_designs: set[str],
@@ -158,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         while True:
             time.sleep(10)
             sample, previous = resources(root, previous)
-            stable = stable + 1 if max(sample['cpu_utilization'], sample['normalized_host_load']) < .7 else 0
+            stable = stable + 1 if max(sample['cpu_utilization'], sample['normalized_host_load']) < .95 else 0
             active_designs = set()
             for row in rows:
                 eid = row['logical_episode_id']

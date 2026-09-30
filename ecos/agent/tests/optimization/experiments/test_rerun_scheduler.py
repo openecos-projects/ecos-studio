@@ -6,13 +6,16 @@ def sample(**updates):
                 memory_available_gib=900, nfs_free_gib=10000, iowait=0, **updates)
 
 
-def test_monitoring_policy_stops_dispatch_before_eighty_percent():
+def test_monitoring_policy_stops_dispatch_at_full_saturation():
+    """Amendment 02: expand under 95%, hold to 100%, stop only at saturation."""
     normal = sample()
     assert dispatch_cap(normal, stable_low_samples=0, minimum_free_gib=100, clock=110) == 4
     assert dispatch_cap(normal, stable_low_samples=3, minimum_free_gib=100, clock=110) == 6
     for key in ('cpu_utilization', 'normalized_host_load'):
-        for pressure in (.75, .8, .99):
-            assert dispatch_cap({**normal, key: pressure}, stable_low_samples=3, minimum_free_gib=100, clock=110) == 0
+        for pressure in (.75, .9, .99):
+            assert dispatch_cap({**normal, key: pressure}, stable_low_samples=3, minimum_free_gib=100, clock=110) > 0
+        assert dispatch_cap({**normal, key: 1.0}, stable_low_samples=3, minimum_free_gib=100, clock=110) == 0
+        assert dispatch_cap({**normal, key: 1.2}, stable_low_samples=3, minimum_free_gib=100, clock=110) == 0
     assert dispatch_cap(normal, stable_low_samples=3, minimum_free_gib=100, clock=116) == 0
     assert dispatch_cap({**normal, 'memory_available_gib': 300}, stable_low_samples=3, minimum_free_gib=100, clock=110) == 2
     assert dispatch_cap(normal, stable_low_samples=3, minimum_free_gib=11000, clock=110) == 0
