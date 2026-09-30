@@ -53,3 +53,31 @@ def test_real_run_requires_ecc_environment(monkeypatch, tmp_path):
         )
     assert not (tmp_path / "receipt.json").exists()
     assert "ecc" in str(error.value).lower() or "ECC" in str(error.value)
+
+
+def test_wrapper_flags_are_stripped_but_driver_flags_passthrough():
+    """Regression: parse_known_args must not swallow shared driver flags."""
+    argv = [
+        "--prebuild-receipt", "r.json",
+        "--design", "gcd",
+        "--run-root", "/tmp/run",
+        "--designs-root", "/tmp/designs",
+        "--pdk-root", "/tmp/pdk",
+        "--prebuild-timeout-seconds", "900",
+        "--model", "glm-5.3-flash",
+        "--stop-after-started", "2",
+    ]
+    own = ("--prebuild-receipt", "--prebuild-timeout-seconds")
+    rest, skip, index = [], 0, 0
+    while index < len(argv):
+        arg = argv[index]
+        if skip:
+            skip -= 1
+        elif arg in own or arg.split("=", 1)[0] in own:
+            skip = "=" not in arg
+        else:
+            rest.append(arg)
+        index += 1
+    assert "--design" in rest and rest[rest.index("--design") + 1] == "gcd"
+    assert "--model" in rest and "--stop-after-started" in rest
+    assert "--prebuild-receipt" not in rest and "900" not in rest

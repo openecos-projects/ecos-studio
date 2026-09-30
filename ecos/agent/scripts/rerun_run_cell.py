@@ -79,7 +79,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-root", type=Path, required=True)
     parser.add_argument("--designs-root", type=Path, required=True)
     parser.add_argument("--pdk-root", type=Path, required=True)
-    known, rest = parser.parse_known_args(argv)
+    known, _ = parser.parse_known_args(argv)
+    if argv is None:
+        argv = sys.argv[1:]
+    # The driver owns every remaining flag; only strip this wrapper's own two.
+    own = ("--prebuild-receipt", "--prebuild-timeout-seconds")
+    rest, skip, index = [], 0, 0
+    while index < len(argv):
+        arg = argv[index]
+        if skip:
+            skip -= 1
+        elif arg in own or arg.split("=", 1)[0] in own:
+            skip = "=" not in arg
+        else:
+            rest.append(arg)
+        index += 1
     if any(arg == "--dry-run" for arg in rest):
         print(json.dumps({
             "dispatch": "disabled", "provider": "disabled", "native": "disabled",
