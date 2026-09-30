@@ -477,7 +477,12 @@ def _native_design_id(logical_design_id: str) -> str:
 
 
 def _workspace_calibration(workspace: Path) -> tuple[float, dict[str, object]]:
-    """Median seeded replay runtime plus the frozen noise epsilon artifact.
+    """Median seeded replay tool runtime plus the frozen noise epsilon.
+
+    The replay runtime comes from each replay's own ``flow_tool_runtime``
+    telemetry (calibrate_workspace replays carry no runtime artifact); it is
+    the tool-reported duration, marginally tighter than the old wall-clock
+    replay time and honest for the 22x budget.
 
     Batch preparation seeds ``.agent/optimization/noise-calibration/`` (two
     default replays behind replay-cache manifests) and
@@ -485,11 +490,16 @@ def _workspace_calibration(workspace: Path) -> tuple[float, dict[str, object]]:
     thin calibration fails closed here; the episode itself never replays.
     """
     calibration_root = workspace / ".agent" / "optimization" / "noise-calibration"
+    replays = sorted(calibration_root.glob("default-replay-*/terminal-observation.v1.json"))
     runtimes = []
-    for path in sorted(calibration_root.glob("default-replay-*/runtime.v1.json")):
-        value = json.loads(path.read_text(encoding="utf-8"))["elapsed_seconds"]
+    for path in replays:
+        metrics = {
+            item["metric_id"]: item["value"]
+            for item in json.loads(path.read_text(encoding="utf-8"))["evaluation_metrics"]
+        }
+        value = metrics.get("flow_tool_runtime")
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
-            raise SystemExit(f"invalid calibration replay runtime: {path}")
+            raise SystemExit(f"invalid flow_tool_runtime telemetry: {path}")
         runtimes.append(float(value))
     if len(runtimes) < 2:
         raise SystemExit(
