@@ -580,7 +580,12 @@ def test_provider_errors_stay_in_the_denominator() -> None:
 
 
 def test_knowledge_treatment_flag_contract() -> None:
-    """--knowledge-treatment pins mode + receipt-aware planning, fail-closed."""
+    """--knowledge-treatment pins mode + receipt-aware planning, fail-closed.
+
+    Dual zero-shot with requested-only is the one registered exception: the
+    RO package hides receipt-derived fields while keeping the same Dual
+    knowledge (llm-rerun-implement.md §4.1).
+    """
     from ecos_agent.optimization.experiments.closed_loop_driver import main
 
     base = [
@@ -589,7 +594,7 @@ def test_knowledge_treatment_flag_contract() -> None:
         "--designs-root", "/tmp/rq2-designs",
         "--pdk-root", "/tmp/rq2-pdk",
     ]
-    with pytest.raises(SystemExit, match="receipt-aware execution contract"):
+    with pytest.raises(SystemExit, match="receipt-aware planning"):
         main(
             None,
             [

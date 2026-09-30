@@ -91,3 +91,34 @@ def test_proposal_fails_closed_after_a_repair_attempt(tmp_path: Path, monkeypatc
         )
 
     assert calls == 2
+
+
+def test_single_shot_audit_disables_schema_repair(tmp_path: Path, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    codex = tmp_path / "codex"
+    codex.write_text("#!/usr/bin/env bash\n")
+    codex.chmod(0o755)
+    provider = CodexAppServerProposalProvider(codex_bin=str(codex), cwd=tmp_path)
+    provider._request_audit = SimpleNamespace(single_shot=True)
+    calls = 0
+
+    def invalid_turn(prompt: str, schema: dict[str, object], *, tool_policy: str, effort: str | None = None) -> str:
+        nonlocal calls
+        calls += 1
+        return json.dumps({"schema_version": "flow-agent.stage_routing_slots.v1", "scope": "in_scope"})
+
+    monkeypatch.setattr(provider, "_run_turn", invalid_turn)
+    monkeypatch.setattr(provider, "_ensure_client", lambda: object())
+    monkeypatch.setattr(provider, "_ensure_thread", lambda client: "thread-test")
+
+    with pytest.raises(CodexProviderError, match="validation errors"):
+        provider.propose_stage_routing(
+            {
+                "natural_language_request": "What objective guides cell locations?",
+                "stage_catalog": [
+                    {"stage": "place", "summary": "Place movable cells.", "chunk_sha256": "a" * 64}
+                ],
+            }
+        )
+    assert calls == 1

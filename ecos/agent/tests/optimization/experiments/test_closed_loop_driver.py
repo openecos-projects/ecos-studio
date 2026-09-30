@@ -269,3 +269,119 @@ def test_episode_reports_are_isolated_per_episode_id(tmp_path: Path) -> None:
     )["episode_id"] == "closeloop-20260916T020000-gcd"
     assert (second / "knowledge-mediation-audit.v1.json").is_file()
     assert not (first / "knowledge-mediation-audit.v1.json").exists()
+
+
+def test_dual_zero_shot_requested_only_is_the_only_non_receipt_treatment():
+    from ecos_agent.optimization.experiments.closed_loop_driver import (
+        _validate_treatment_combination,
+    )
+
+    _validate_treatment_combination(
+        "state-conditioned-dual-layer-zero-shot", "requested-only"
+    )
+    with pytest.raises(SystemExit, match="receipt-aware"):
+        _validate_treatment_combination(
+            "unconditioned-support-zero-shot", "requested-only"
+        )
+
+
+def test_native_design_id_is_slash_free_and_stable():
+    from ecos_agent.optimization.experiments.closed_loop_driver import (
+        _native_design_id,
+    )
+
+    native_id = _native_design_id("logical/design")
+    assert native_id.startswith("d-")
+    assert "/" not in native_id
+    assert native_id == _native_design_id("logical/design")
+
+
+def test_stop_after_started_requests_one_collection_turn_without_third_start():
+    from ecos_agent.optimization.experiments.closed_loop_driver import (
+        _run_episode_with_cap,
+    )
+    from ecos_agent.optimization.contracts import OptimizationEpisodeState
+
+    class Budget:
+        consumed_candidates = 0
+
+    class FakeRunner:
+        state = OptimizationEpisodeState.PLANNING
+        budget = Budget()
+        calls = 0
+        stop_calls = 0
+        finalize_calls = 0
+
+        def run_turn(self):
+            self.calls += 1
+            if self.calls == 1:
+                self.budget.consumed_candidates = 2
+            else:
+                self.state = OptimizationEpisodeState.STOPPED
+
+        def request_stop(self):
+            self.stop_calls += 1
+
+        def finalize_stop(self):
+            self.finalize_calls += 1
+
+    runner = FakeRunner()
+    _run_episode_with_cap(runner, 2)
+    assert runner.calls == 2
+    assert runner.stop_calls == 1
+    assert runner.finalize_calls == 1
+    assert runner.budget.consumed_candidates == 2
+
+
+def test_stop_after_started_reaches_stopped_on_a_real_runner(tmp_path):
+    """A scripted third proposal must prove the collection turn starts nothing."""
+    from ecos_agent.optimization.contracts import OptimizationEpisodeState, StrategyDirection
+    from ecos_agent.optimization.controller import OptimizationEpisodeControllerError
+    from ecos_agent.optimization.experiments.closed_loop_driver import _run_episode_with_cap
+    from tests.optimization.test_runner_async_scheduling import (
+        _ConcurrentExecutor, _ScriptedPlanner, _controller, _runner, _terminal_receipt,
+    )
+
+    planner = _ScriptedPlanner(
+        ("place.cell_padding_x", StrategyDirection.INCREASE, 3),
+        ("place.target_density", StrategyDirection.INCREASE, 0.25),
+        ("place.target_density", StrategyDirection.DECREASE, 0.15),
+    )
+    executor = _ConcurrentExecutor({
+        "execution-1": _terminal_receipt("execution-1", "place.cell_padding_x", 3),
+        "execution-2": _terminal_receipt("execution-2", "place.target_density", 0.25),
+    })
+    controller = _controller(tmp_path / "visible", planner, executor, max_in_flight=1)
+    runner = _runner(controller, executor)
+    _run_episode_with_cap(runner, 2)
+    assert runner.state is OptimizationEpisodeState.STOPPED
+    assert runner.budget.consumed_candidates == 2
+    assert not controller._pending_executions
+    # The third script is never consumed: the stop turn only absorbs feedback.
+    assert len(planner.scripts) == 1
+    with pytest.raises(OptimizationEpisodeControllerError, match="resting"):
+        runner.finalize_stop()
+
+
+def test_dry_run_is_provider_and_native_free(capsys, tmp_path):
+    from ecos_agent.optimization.experiments.closed_loop_driver import main
+
+    assert main(
+        None,
+        [
+            "--design", "gcd",
+            "--run-root", str(tmp_path / "run"),
+            "--designs-root", str(tmp_path / "designs"),
+            "--pdk-root", str(tmp_path / "pdk"),
+            "--knowledge-treatment", "state-conditioned-dual-layer-zero-shot",
+            "--planning-evidence", "requested-only",
+            "--stop-after-started", "2",
+            "--dry-run",
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["dispatch"] == "disabled"
+    assert payload["provider"] == "disabled"
+    assert payload["native"] == "disabled"
+    assert payload["stop_after_started"] == 2
+    assert not (tmp_path / "run").exists()

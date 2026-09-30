@@ -133,7 +133,8 @@ class CodexThreadManagementMixin:
         status["runtime"] = self._runtime_status.snapshot(thread_id)
         failure: CodexProviderError | None = None
         reason = ""
-        for attempt in range(2):
+        audit = getattr(self, "_request_audit", None)
+        for attempt in range(1 if audit is not None and audit.single_shot else 2):
             if attempt == 0:
                 prompt = _build_prompt(system, user, tool_policy=tool_policy, agent_status=status)
             else:
@@ -217,6 +218,9 @@ class CodexThreadManagementMixin:
             self._client.close()
             self._client = None
             self._thread_id = None
+        audit = getattr(self, "_request_audit", None)
+        if audit is not None:
+            audit.close()
 
     def interrupt(self) -> None:
         with self._state_lock:

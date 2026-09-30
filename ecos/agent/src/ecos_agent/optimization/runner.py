@@ -188,6 +188,18 @@ class OptimizationEpisodeRunner:
     def request_stop(self) -> None:
         self._stop_event.set()
 
+    def finalize_stop(self) -> OptimizationControlResult:
+        """Typed stop once a collection-cap turn absorbed every terminal."""
+        if not self._stop_event.is_set():
+            raise OptimizationEpisodeRunnerError(
+                "finalize_stop requires request_stop first"
+            )
+        if self._controller.pending_execution_ids:
+            raise OptimizationEpisodeRunnerError(
+                "pending executions must be collected before the typed stop"
+            )
+        return self._controller.stop_after_collection()
+
     def run_turn(self, *, paused: bool = False) -> OptimizationEpisodeTurn:
         if self._controller.state not in _PLANNABLE_STATES:
             raise OptimizationEpisodeRunnerError(

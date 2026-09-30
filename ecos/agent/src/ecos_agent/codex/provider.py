@@ -72,6 +72,7 @@ from ecos_agent.codex.provider_helpers import (
     _timeout_from_env,
 )
 from ecos_agent.codex.thread_management import CodexThreadManagementMixin
+from ecos_agent.codex.request_audit import RequestAudit
 
 
 ToolPolicy = Literal["none", "read_only_workspace"]
@@ -148,9 +149,11 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
         diagnostics_path: Path | None = None,
         ephemeral: bool = True,
         planning_thread_policy: Literal["reuse", "fresh"] = "fresh",
+        request_audit: RequestAudit | None = None,
     ) -> None:
         self.cwd = Path(cwd or Path.cwd())
         self.env = dict(env or os.environ)
+        self._request_audit = request_audit or RequestAudit.from_env(self.env)
         self.timeout_seconds = timeout_seconds or _timeout_from_env(self.env)
         self.codex_bin = _resolve_codex_bin(
             codex_bin or self.env.get("ECOS_AGENT_CODEX_BIN"), self.env
@@ -181,6 +184,16 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
         self._parse_failure_excerpt: str | None = None
         self._last_thread_start_latency_ms: float | None = None
         self._last_planning_metrics: dict[str, Any] | None = None
+
+    def set_request_audit_context(
+        self, *, planning_request_id: str, episode_id: str | None = None
+    ) -> None:
+        """Update stable ledger join keys without changing the upstream provider."""
+        if self._request_audit is None:
+            return
+        self._request_audit.set_context(
+            planning_request_id=planning_request_id, episode_id=episode_id
+        )
 
     def propose_v2(
         self,
@@ -845,6 +858,11 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
 
     def _ensure_client(self) -> _JsonLineRpcProcessClient:
         if self._client is None:
+            child_env = (
+                self._request_audit.child_env(self.env)
+                if self._request_audit is not None
+                else self.env
+            )
             self._client = _JsonLineRpcProcessClient(
                 command=self.codex_bin,
                 args=[
@@ -857,7 +875,7 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
                     "stdio://",
                 ],
                 cwd=self.cwd,
-                env=self.env,
+                env=child_env,
                 timeout_seconds=self.timeout_seconds,
                 diagnostics_path=self.diagnostics_path,
                 stderr_path=(
@@ -938,6 +956,7 @@ def create_required_codex_provider(
     diagnostics_path: Path | None = None,
     ephemeral: bool = True,
     planning_thread_policy: Literal["reuse", "fresh"] = "fresh",
+    request_audit: RequestAudit | None = None,
 ) -> CodexAppServerProposalProvider:
     return CodexAppServerProposalProvider(
         cwd=cwd,
@@ -946,6 +965,7 @@ def create_required_codex_provider(
         diagnostics_path=diagnostics_path,
         ephemeral=ephemeral,
         planning_thread_policy=planning_thread_policy,
+        request_audit=request_audit,
     )
 
 

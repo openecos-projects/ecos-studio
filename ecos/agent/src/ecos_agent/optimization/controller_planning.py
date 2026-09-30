@@ -326,6 +326,13 @@ class ControllerPlanningMixin:
                 "optimization planner does not implement propose_v2",
                 failure_class="unsupported",
             )
+        snapshot_store = getattr(self, "_planning_snapshot_store", None)
+        if snapshot_store is not None:
+            try:
+                snapshot_store.capture(self, context)
+            except (OSError, ValueError, TypeError) as exc:
+                # Storage failures must not become model-visible rejection feedback.
+                raise RuntimeError("pre-planner snapshot capture failed") from exc
         raw = propose_v2(context, domains)
         try:
             parsed = OptimizationProposalV2.model_validate(raw)

@@ -406,6 +406,21 @@ class ControllerExecutionMixin:
         self._persist()
         return self._result("stop_requested_before_execution")
 
+    def stop_after_collection(self) -> OptimizationControlResult:
+        """Typed stop for a collection cap (smoke); never abandons evidence."""
+        if self._pending_executions:
+            raise OptimizationEpisodeControllerError(
+                "episode still has pending executions to collect"
+            )
+        if self._state != OptimizationEpisodeState.PLANNING:
+            raise OptimizationEpisodeControllerError(
+                "episode is not resting between planning turns"
+            )
+        self._clear_approved_proposal()
+        self._state = OptimizationEpisodeState.STOPPED
+        self._persist()
+        return self._result("stop_requested_after_collection")
+
     def complete_terminal(
         self,
         receipt: CandidateExecutionReceipt,

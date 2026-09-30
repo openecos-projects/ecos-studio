@@ -27,6 +27,7 @@ from ecos_agent.optimization.contracts import (
     TIMING_GUARDRAIL_ORDER,
     TimingMetric,
 )
+from ecos_agent.optimization.experiments.calibration_reuse import reuse_calibration
 from ecos_agent.optimization.experiments.equal_budget import (
     CandidateTrace,
     _evaluation_value,
@@ -46,8 +47,6 @@ from ecos_agent.optimization.experiments.replay_provider import (
 from ecos_agent.optimization.experiments.knowledge_treatment_execution import (
     DesignSpec,
     ExperimentManifest,
-    _calibrate,
-    _ensure_workspace,
     _filelist_refs,
 )
 from ecos_agent.optimization.experiments.knowledge_mediation import (
@@ -465,6 +464,39 @@ def _episode_exit_code(final_state: str, complete: bool) -> int:
     return int(final_state == "quarantined" or not complete)
 
 
+def _native_design_id(logical_design_id: str) -> str:
+    """Use a slash-free short native identifier; retain the logical ID in reports."""
+    return "d-" + canonical_sha256({"logical_design_id": logical_design_id})[7:19]
+
+
+def _validate_treatment_combination(
+    knowledge_treatment: str | None, planning_evidence: str,
+) -> None:
+    if knowledge_treatment is not None and planning_evidence != "receipt-aware":
+        dual = "state-conditioned-dual-layer-zero-shot"
+        if not (knowledge_treatment == dual and planning_evidence == "requested-only"):
+            raise SystemExit(
+                "RQ2 knowledge treatments require receipt-aware planning, except "
+                "Dual zero-shot with requested-only RO"
+            )
+
+
+def _run_episode_with_cap(runner: Any, stop_after_started: int | None) -> None:
+    """Stop only after a full turn absorbed its terminal feedback."""
+    while runner.state in _ACTIVE:
+        runner.run_turn()
+        if (
+            stop_after_started is not None
+            and runner.budget.consumed_candidates >= stop_after_started
+        ):
+            runner.request_stop()
+            # The second turn absorbs any in-flight terminal and prevents a
+            # third start; the shared 20-start budget remains untouched.
+            runner.run_turn()
+            runner.finalize_stop()
+            return
+
+
 def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = None) -> int:
     _self_check()
     parser = argparse.ArgumentParser(description=__doc__)
@@ -555,10 +587,29 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
     )
     parser.add_argument("--terminal-timeout-seconds", type=float, default=1800.0)
     parser.add_argument(
+        "--calibration-donor",
+        type=Path,
+        default=None,
+        help="explicit self-hashed cache-only calibration donor manifest; "
+        "missing/incompatible artifacts fail closed and never replay",
+    )
+    parser.add_argument(
+        "--stop-after-started",
+        type=int,
+        default=None,
+        help="q1 smoke cap only: after this many fully observed starts, request "
+        "stop and perform one terminal-collection turn; omitted for formal runs",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="validate CLI wiring and print dispatch-free inputs; no provider/native",
+    )
+    parser.add_argument(
         "--calibration-replays",
         type=int,
         default=3,
-        help="default replay count for calibration; 1 skips the noise-epsilon artifact",
+        help="deprecated compatibility argument; cache-only donor replay count is fixed by its manifest",
     )
     parser.add_argument(
         "--max-in-flight-candidates",
@@ -571,15 +622,24 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
     args = parser.parse_args(argv)
     if not _RUN_ID.fullmatch(args.design):
         raise SystemExit(f"design id is invalid: {args.design}")
+    if args.stop_after_started is not None and not 1 <= args.stop_after_started <= 20:
+        raise SystemExit("--stop-after-started must be between 1 and the frozen 20-start budget")
+    _validate_treatment_combination(args.knowledge_treatment, args.planning_evidence)
+    if args.dry_run:
+        print(json.dumps({
+            "dispatch": "disabled",
+            "provider": "disabled",
+            "native": "disabled",
+            "calibration_mode": "cache-only",
+            "calibration_donor": str(args.calibration_donor) if args.calibration_donor else None,
+            "stop_after_started": args.stop_after_started,
+        }, sort_keys=True))
+        return 0
     treatment_modes = {
         config.treatment.value: config.agent_mode
         for config in ZERO_SHOT_GATE_TREATMENTS
     }
     if args.knowledge_treatment is not None:
-        if args.planning_evidence != "receipt-aware":
-            raise SystemExit(
-                "RQ2 knowledge treatments share the receipt-aware execution contract"
-            )
         if args.agent_mode not in (None, treatment_modes[args.knowledge_treatment]):
             raise SystemExit(
                 "--agent-mode conflicts with the mode implied by --knowledge-treatment"
@@ -609,6 +669,7 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
                 "baseline": BASELINE,
                 "design": {
                     "design_id": design.design_id,
+                    "native_id": _native_design_id(design.design_id),
                     "top_module": design.top_module,
                     "clock": design.clock_name,
                     "rtl": [str(p) for p in design.rtl_list],
@@ -625,23 +686,18 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
         encoding="utf-8",
     )
 
-    canonical = _ensure_workspace(
-        manifest, design, workspace, args.terminal_timeout_seconds
+    if args.calibration_donor is None:
+        raise SystemExit(
+            "--calibration-donor is required: this driver is cache-only and "
+            "never falls back to default replay"
+        )
+    calibration_output = output / "calibration"
+    # Cache-only: validate the already prepared workspace and donor bytes; no
+    # _calibrate/_run_default_replay fallback exists on this path.
+    reference, reference_runtime, noise_epsilon = reuse_calibration(
+        manifest, design, workspace, args.calibration_donor.resolve(), calibration_output
     )
-    reference, reference_runtime, _calibration_epsilon = _calibrate(
-        manifest,
-        design,
-        workspace,
-        canonical,
-        output / "calibration",
-        args.terminal_timeout_seconds,
-        replays=args.calibration_replays,
-    )
-    noise_epsilon = (
-        write_noise_epsilon(output / "calibration")
-        if args.calibration_replays >= 2
-        else None
-    )
+    canonical = reference
     print(
         f"[driver] calibration done: reference_runtime={reference_runtime:.1f}s "
         + (
@@ -720,6 +776,7 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
         runtime_context = {
             "workspace": str(workspace),
             "episode_id": episode_id,
+            "native_design_id": _native_design_id(design.design_id),
             "objective": objective.model_dump(mode="json"),
             "objective_alignment": build_objective_alignment(
                 objective, canonical
@@ -738,8 +795,7 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
         runtime_context.update(replay_runtime)
         runner = create_optimization_runner(runtime_context, provider)
         try:
-            while runner.state in _ACTIVE:
-                runner.run_turn()
+            _run_episode_with_cap(runner, args.stop_after_started)
             budget_snapshot = {
                 "consumed_candidates": runner.budget.consumed_candidates,
                 "consumed_planning_calls": runner.budget.consumed_planning_calls,
@@ -786,7 +842,9 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
         "evidence_class": "engineering_pilot",
         "utility_claim": "not_assessed",
         "design_id": args.design,
+        "native_design_id": _native_design_id(args.design),
         "episode_id": episode_id,
+        "stop_after_started": args.stop_after_started,
         "objective": args.objective,
         "primary_metric": primary_metric.value,
         "goal_text": goal_text,
@@ -841,3 +899,7 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
         )
     )
     return _episode_exit_code(str(budget_snapshot["final_state"]), bool(summary["terminal_artifacts_complete"]))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(None))
