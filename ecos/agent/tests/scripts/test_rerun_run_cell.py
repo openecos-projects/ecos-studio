@@ -57,6 +57,40 @@ def test_real_run_requires_ecc_environment(monkeypatch, tmp_path):
     assert "ecc" in str(error.value).lower() or "ECC" in str(error.value)
 
 
+def test_prebuild_only_exits_before_the_driver(monkeypatch, tmp_path, capsys):
+    """Batch preparation mode: receipt written, no episode, no cell-exit record."""
+    receipt_path = tmp_path / "receipt.json"
+    monkeypatch.setattr(
+        rerun_run_cell, "_prepare_workspace",
+        lambda *a, **k: {
+            "schema_version": "ecos.rerun_prebuild_receipt.v1",
+            "mode": "create", "elapsed_seconds": 1.0,
+        },
+    )
+    monkeypatch.setattr(rerun_run_cell, "_seed_workspace_calibration", lambda *a, **k: None)
+    monkeypatch.setattr(
+        rerun_run_cell, "driver_main",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("driver must not run")),
+    )
+    exit_code = main(
+        [
+            "--prebuild-receipt", str(receipt_path),
+            "--calibration-source", str(tmp_path / "calibration"),
+            "--design", "gcd",
+            "--run-root", str(tmp_path / "run"),
+            "--designs-root", str(tmp_path / "designs"),
+            "--pdk-root", str(tmp_path / "pdk"),
+            "--model", "glm-5.3-flash",
+            "--prebuild-only",
+        ],
+    )
+    assert exit_code == 0
+    receipt = json.loads(receipt_path.read_text())
+    assert receipt["schema_version"] == "ecos.rerun_prebuild_receipt.v1"
+    assert not (receipt_path.parent / "cell-exit.json").exists()
+    assert "prebuild-only" in capsys.readouterr().out
+
+
 def test_wrapper_flags_are_stripped_but_driver_flags_passthrough():
     """Regression: parse_known_args must not swallow shared driver flags."""
     argv = [

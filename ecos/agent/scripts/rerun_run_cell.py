@@ -139,6 +139,12 @@ def main(argv: list[str] | None = None) -> int:
         help="design's canonical workspace holding the seeded default-replay "
         "calibration copied into this attempt workspace",
     )
+    parser.add_argument(
+        "--prebuild-only", action="store_true",
+        help="run the workspace prebuild (create/reuse + calibration seeding), "
+        "write the receipt and exit before the driver; a batch preparation "
+        "mode that starts no provider or episode",
+    )
     parser.add_argument("--design", required=True)
     parser.add_argument("--run-root", type=Path, required=True)
     parser.add_argument("--designs-root", type=Path, required=True)
@@ -146,15 +152,18 @@ def main(argv: list[str] | None = None) -> int:
     known, _ = parser.parse_known_args(argv)
     if argv is None:
         argv = sys.argv[1:]
-    # The driver owns every remaining flag; only strip this wrapper's own two.
-    own = ("--prebuild-receipt", "--prebuild-timeout-seconds", "--calibration-source")
+    # The driver owns every remaining flag; only strip this wrapper's own.
+    own_value = ("--prebuild-receipt", "--prebuild-timeout-seconds", "--calibration-source")
+    own_boolean = ("--prebuild-only",)
     rest, skip, index = [], 0, 0
     while index < len(argv):
         arg = argv[index]
         if skip:
             skip -= 1
-        elif arg in own or arg.split("=", 1)[0] in own:
+        elif arg in own_value or arg.split("=", 1)[0] in own_value:
             skip = "=" not in arg
+        elif arg.split("=", 1)[0] in own_boolean:
+            pass
         else:
             rest.append(arg)
         index += 1
@@ -182,6 +191,11 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     print(f"[prebuild] mode={receipt['mode']} elapsed={receipt['elapsed_seconds']}s", flush=True)
+    if known.prebuild_only:
+        # Batch preparation: workspace is ready; no episode, provider or
+        # cell-exit record. The formal start re-verifies in reuse mode.
+        print(f"[prebuild-only] workspace ready: {workspace}", flush=True)
+        return 0
 
     def _episode_id() -> str:
         for index, arg in enumerate(rest):
