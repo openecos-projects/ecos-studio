@@ -130,6 +130,11 @@ def main(argv: list[str] | None = None) -> int:
         "--prebuild-timeout-seconds", type=float, default=3600.0,
         help="ECC flow timeout for the one-time workspace creation",
     )
+    parser.add_argument(
+        "--calibration-source", type=Path, required=True,
+        help="design's canonical workspace holding the seeded default-replay "
+        "calibration copied into this attempt workspace",
+    )
     parser.add_argument("--design", required=True)
     parser.add_argument("--run-root", type=Path, required=True)
     parser.add_argument("--designs-root", type=Path, required=True)
@@ -138,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
     # The driver owns every remaining flag; only strip this wrapper's own two.
-    own = ("--prebuild-receipt", "--prebuild-timeout-seconds")
+    own = ("--prebuild-receipt", "--prebuild-timeout-seconds", "--calibration-source")
     rest, skip, index = [], 0, 0
     while index < len(argv):
         arg = argv[index]
@@ -167,6 +172,7 @@ def main(argv: list[str] | None = None) -> int:
         known.designs_root, known.pdk_root, known.design, workspace,
         known.prebuild_timeout_seconds,
     )
+    _seed_workspace_calibration(workspace, known.calibration_source.resolve(), receipt)
     known.prebuild_receipt.parent.mkdir(parents=True, exist_ok=True)
     known.prebuild_receipt.write_text(
         json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8"

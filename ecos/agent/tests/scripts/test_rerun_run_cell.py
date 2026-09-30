@@ -19,6 +19,7 @@ def test_dry_run_disables_all_dispatch(tmp_path, capsys):
     assert main(
         [
             "--prebuild-receipt", str(tmp_path / "receipt.json"),
+            "--calibration-source", str(tmp_path / "calibration"),
             "--design", "gcd",
             "--run-root", str(tmp_path / "run"),
             "--designs-root", str(tmp_path / "designs"),
@@ -45,6 +46,7 @@ def test_real_run_requires_ecc_environment(monkeypatch, tmp_path):
         main(
             [
                 "--prebuild-receipt", str(tmp_path / "receipt.json"),
+                "--calibration-source", str(tmp_path / "calibration"),
                 "--design", "gcd",
                 "--run-root", str(tmp_path / "run"),
                 "--designs-root", str(tmp_path / "designs"),
@@ -59,6 +61,7 @@ def test_wrapper_flags_are_stripped_but_driver_flags_passthrough():
     """Regression: parse_known_args must not swallow shared driver flags."""
     argv = [
         "--prebuild-receipt", "r.json",
+        "--calibration-source", "/tmp/calibration",
         "--design", "gcd",
         "--run-root", "/tmp/run",
         "--designs-root", "/tmp/designs",
@@ -80,4 +83,5 @@ def test_wrapper_flags_are_stripped_but_driver_flags_passthrough():
         index += 1
     assert "--design" in rest and rest[rest.index("--design") + 1] == "gcd"
     assert "--model" in rest and "--stop-after-started" in rest
+    assert "--calibration-source" in rest
     assert "--prebuild-receipt" not in rest and "900" not in rest
