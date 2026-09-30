@@ -256,6 +256,7 @@ const desktopBridge = {
       resources: [],
     }),
     onProgress: () => () => undefined,
+    onChanged: () => () => undefined,
   },
   pdkInventory: {
     list: listPdkInstallations,

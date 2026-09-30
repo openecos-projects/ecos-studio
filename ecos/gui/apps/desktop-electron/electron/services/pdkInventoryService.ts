@@ -186,14 +186,28 @@ export class PdkInventoryService {
         (binding) =>
           binding.projectId === projectId && binding.projectRoot === projectRoot,
       )
-      if (existing?.installationId) return publicBinding(existing)
-      if (existing && isDeepStrictEqual(existing.requirement, request.requirement)) {
-        return null
-      }
-      if (existing) {
-        inventory.bindings = inventory.bindings.filter(
-          (candidate) => candidate !== existing,
+      if (existing?.installationId) {
+        if (isDeepStrictEqual(existing.requirement, request.requirement)) {
+          return publicBinding(existing)
+        }
+        const bound = inventory.installations.find(
+          (candidate) => candidate.id === existing.installationId,
         )
+        if (bound && installationSatisfiesRequirement(bound, request.requirement)) {
+          // The Requirement drifted but the bound Installation still satisfies
+          // it; sync the stored Requirement instead of failing validation later.
+          existing.requirement = request.requirement
+          await this.writeInventory(inventory)
+          return publicBinding(existing)
+        }
+        // The bound Installation no longer satisfies the Requirement; fall
+        // through and try to re-resolve a unique replacement. The stale
+        // Binding is replaced only when exactly one match exists.
+      } else if (
+        existing &&
+        isDeepStrictEqual(existing.requirement, request.requirement)
+      ) {
+        return null
       }
 
       const matching: PdkInstallationRecord[] = []
@@ -208,6 +222,11 @@ export class PdkInventoryService {
       }
       if (matching.length !== 1) return null
 
+      if (existing) {
+        inventory.bindings = inventory.bindings.filter(
+          (candidate) => candidate !== existing,
+        )
+      }
       const binding: PdkInventoryBinding = {
         projectId,
         projectRoot,
@@ -230,7 +249,9 @@ export class PdkInventoryService {
       )
       if (!installation) throw new Error('PDK Installation was not found')
       if (!installationSatisfiesRequirement(installation, request.requirement)) {
-        throw new Error('PDK Installation does not satisfy the Project Requirement')
+        throw new Error(
+          `PDK Installation does not satisfy the Project Requirement (${describeRequirementMismatch(installation, request.requirement)})`,
+        )
       }
       const readiness = (await this.snapshot(installation)).readiness
       if (readiness !== 'ready' && readiness !== 'unverified') {
@@ -269,7 +290,9 @@ export class PdkInventoryService {
       )
       if (!installation) throw new Error('Bound PDK Installation was not found')
       if (!installationSatisfiesRequirement(installation, request.requirement)) {
-        throw new Error('Bound PDK Installation does not satisfy the Project Requirement')
+        throw new Error(
+          `Bound PDK Installation does not satisfy the Project Requirement (${describeRequirementMismatch(installation, request.requirement)})`,
+        )
       }
       const snapshot = await this.snapshot(installation)
       if (snapshot.readiness === 'missing' || snapshot.readiness === 'invalid') {
@@ -534,6 +557,15 @@ function installationSatisfiesRequirement(
     installation.familyId === requiredText(requirement.familyId, 'PDK Family ID') &&
     (!requirement.version || installation.version === requirement.version)
   )
+}
+
+function describeRequirementMismatch(
+  installation: PdkInstallationRecord,
+  requirement: PdkResolveBindingRequest['requirement'],
+): string {
+  const installed = `${installation.familyId}@${installation.version ?? 'unknown'}`
+  const required = `${requirement.familyId}@${requirement.version ?? 'any'}`
+  return `installation: ${installed}, required: ${required}`
 }
 
 function localInstallationId(familyId: string, root: string): string {

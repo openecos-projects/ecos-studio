@@ -98,21 +98,25 @@ export async function prepareWorkspaceCreateBinding(
   }
 
   const projectId = request.projectId ?? ''
-  const binding = await dependencies.pdkInventoryService.resolveBinding({
-    projectId,
-    projectRoot,
-    requirement,
-  })
-  if (!binding) {
-    if (!request.pdkInstallationId) {
-      throw new Error('Project PDK Requirement is unbound')
-    }
+  const explicitInstallationId = request.pdkInstallationId?.trim()
+  if (explicitInstallationId) {
+    // An explicit wizard selection is authoritative: it rebinds the project
+    // even when a persisted Binding points at another Installation.
     await dependencies.pdkInventoryService.bindInstallation({
-      installationId: request.pdkInstallationId,
+      installationId: explicitInstallationId,
       requirement,
       projectId,
       projectRoot,
     })
+  } else {
+    const binding = await dependencies.pdkInventoryService.resolveBinding({
+      projectId,
+      projectRoot,
+      requirement,
+    })
+    if (!binding) {
+      throw new Error('Project PDK Requirement is unbound')
+    }
   }
   const installation = await dependencies.pdkInventoryService.validateWorkspace({
     projectId,

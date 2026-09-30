@@ -196,6 +196,58 @@ describe('prepareWorkspaceCreateBinding', () => {
     })
   })
 
+  it('rebinds the explicitly selected Installation instead of reusing a stale Binding', async () => {
+    const { dependencies } = createDependencies()
+    dependencies.pdkInventoryService.resolveBinding.mockResolvedValue({
+      projectId: 'proj_demo',
+      projectRoot: '/projects/demo',
+      installationId: 'pdk:ics55:local:stale',
+    })
+
+    await prepareWorkspaceCreateBinding(dependencies, {
+      commandId: 'create-1',
+      projectId: 'proj_demo',
+      projectRoot: '/projects/demo',
+      targetDirectory: '/projects/demo/runs/workspace',
+      pdkInstallationId: 'pdk:ics55:managed:1.10.102',
+      pdkRequirement: { familyId: 'ics55', manualConfig: null, version: '1.10.102' },
+      workspaceBindings: { inputs: {}, pdk: {} },
+      workspaceSpec: { pdk: { familyId: 'ics55', mode: 'default' } },
+    })
+
+    expect(dependencies.pdkInventoryService.resolveBinding).not.toHaveBeenCalled()
+    expect(dependencies.pdkInventoryService.bindInstallation).toHaveBeenCalledWith({
+      installationId: 'pdk:ics55:managed:1.10.102',
+      requirement: { familyId: 'ics55', manualConfig: null, version: '1.10.102' },
+      projectId: 'proj_demo',
+      projectRoot: '/projects/demo',
+    })
+    expect(dependencies.pdkInventoryService.validateWorkspace).toHaveBeenCalledWith({
+      projectId: 'proj_demo',
+      projectRoot: '/projects/demo',
+      requirement: { familyId: 'ics55', manualConfig: null, version: '1.10.102' },
+    })
+  })
+
+  it('treats a blank Installation selection as no selection and requires a Binding', async () => {
+    const { dependencies } = createDependencies()
+    dependencies.pdkInventoryService.resolveBinding.mockResolvedValue(null)
+
+    await expect(
+      prepareWorkspaceCreateBinding(dependencies, {
+        commandId: 'create-1',
+        projectId: 'proj_demo',
+        projectRoot: '/projects/demo',
+        targetDirectory: '/projects/demo/runs/workspace',
+        pdkInstallationId: '   ',
+        pdkRequirement: { familyId: 'ics55', manualConfig: null, version: null },
+        workspaceBindings: { inputs: {}, pdk: {} },
+        workspaceSpec: { pdk: { familyId: 'ics55', mode: 'default' } },
+      }),
+    ).rejects.toThrow('Project PDK Requirement is unbound')
+    expect(dependencies.pdkInventoryService.bindInstallation).not.toHaveBeenCalled()
+  })
+
   it('resolves the portable MPC requirement instead of trusting presentation placeholders', async () => {
     const { dependencies } = createDependencies()
     dependencies.pdkInventoryService.resolveBinding.mockResolvedValue({})

@@ -35,6 +35,10 @@ import {
 } from './resourceInstallCoordinator'
 import { ResourceMetadataRestoreError } from './resourceInstallErrors'
 import {
+  createMirrorFallbackPreference,
+  type MirrorFallbackPreference,
+} from './mirrorFallbackPreference'
+import {
   prepareResourceArchive,
   removeCompletedResourceArchive,
 } from './resourceArchiveRecovery'
@@ -64,6 +68,7 @@ const PDK_RESOURCE_FILE_EXTENSIONS = ['.lef', '.lib', '.liberty']
 const REGISTRY_CACHE_VERSION = 1
 const DOWNLOAD_MAX_ATTEMPTS = 3
 const DOWNLOAD_RETRY_DELAY_MS = 250
+const REGISTRY_BACKGROUND_REFRESH_TIMEOUT_MS = 30_000
 
 type ResourceInventoryEntry = ToolInventoryEntry | PdkInventoryEntry | MpcInventoryEntry
 type ArchiveExtractor = (
@@ -87,6 +92,7 @@ type ManifestWriter = (filePath: string, content: string) => Promise<void>
 
 interface CommandRunnerOptions {
   cwd?: string
+  env?: NodeJS.ProcessEnv
   signal?: AbortSignal
 }
 
@@ -94,6 +100,13 @@ interface DownloadProgress {
   downloadedBytes: number
   progress: number
   totalBytes: number | null
+}
+
+interface DownloadHooks {
+  /** Fired when a failed attempt is about to be retried (attempt = failed attempt). */
+  onRetry?: (attempt: number, maxAttempts: number) => void
+  /** Fired once when the download falls back to the mirror URL. */
+  onMirrorSwitch?: (mirrorUrl: string) => void
 }
 
 class DownloadResponseError extends Error {
@@ -117,6 +130,7 @@ class DownloadSizeMismatchError extends Error {
 
 interface PlatformAsset {
   url: string
+  cnb_url?: string | null
   sha256: string
   sha256_url?: string | null
   size: number | null
@@ -366,6 +380,7 @@ export interface ResourceManagerServiceOptions {
   commandRunner?: CommandRunner
   fetchImpl?: typeof fetch
   manifestWriter?: ManifestWriter
+  mirrorFallback?: MirrorFallbackPreference
   pdkInventoryWriter?: PdkInventoryServiceOptions['jsonWriter']
   pdksDir?: string
   mpcsDir?: string
@@ -402,6 +417,7 @@ export class ResourceManagerService {
   private readonly fetchImpl: typeof fetch
   private readonly manifestPath: string
   private readonly manifestWriter: ManifestWriter
+  private readonly mirrorFallback: MirrorFallbackPreference
   private readonly mpcsDir: string
   private readonly pdksDir: string
   private readonly pdkInventoryService: PdkInventoryService
@@ -412,6 +428,7 @@ export class ResourceManagerService {
 
   private registryMemory: ResourceRegistry | null = null
   private registryRefreshPromise: Promise<void> | null = null
+  private registrySyncedAt = 0
   private updateCheckMemory: ResourceUpdateCheckCache | null = null
   private updateCheckPromise: Promise<ResourceUpdateCheckResult> | null = null
   private readonly installCoordinator = new ResourceInstallCoordinator<
@@ -421,6 +438,7 @@ export class ResourceManagerService {
   private manifestOperationPromise: Promise<void> = Promise.resolve()
   private externalDownloadPromise: Promise<void> = Promise.resolve()
   private readonly manifestChangeListeners = new Set<() => void | Promise<void>>()
+  private readonly registryChangeListeners = new Set<() => void>()
 
   constructor(options: ResourceManagerServiceOptions = {}) {
     this.resourcesDir =
@@ -444,6 +462,7 @@ export class ResourceManagerService {
     this.archiveExtractor = options.archiveExtractor ?? extractArchive
     this.sha256Verifier = options.sha256Verifier ?? verifySha256
     this.manifestWriter = options.manifestWriter ?? writeFile
+    this.mirrorFallback = options.mirrorFallback ?? createMirrorFallbackPreference()
   }
 
   getPdkInventoryService(): PdkInventoryService {
@@ -622,6 +641,9 @@ export class ResourceManagerService {
       }
       if (runtimeTools.has('yosys')) {
         activeYosysRoot = entry.path
+      }
+      if (toolKind === 'kepler-formal') {
+        env.CHIPCOMPILER_KEPLER_FORMAL_ROOT = entry.path
       }
       const slangExecutable = runtimeTools.get('slang')
       if (slangExecutable) {
@@ -1040,6 +1062,19 @@ export class ResourceManagerService {
   }
 
   /**
+   * Subscribe to registry updates applied by the cache-first background
+   * refresh. Fired only when the refreshed registry actually differs from
+   * the data previously served, so listings rendered from the cache can be
+   * re-fetched without a forced refresh. Returns an unsubscribe function.
+   */
+  onRegistryChanged(listener: () => void): () => void {
+    this.registryChangeListeners.add(listener)
+    return () => {
+      this.registryChangeListeners.delete(listener)
+    }
+  }
+
+  /**
    * Resolve the registry identity (version, sha256, size) for a tool asset
    * without downloading it. Throws when the tool or requested version is
    * missing from the registry.
@@ -1086,6 +1121,19 @@ export class ResourceManagerService {
       } catch (error) {
         electronLogger.warn(
           '[resources] Manifest change listener failed: %s',
+          error instanceof Error ? error.message : String(error),
+        )
+      }
+    }
+  }
+
+  private notifyRegistryChanged(): void {
+    for (const listener of this.registryChangeListeners) {
+      try {
+        listener()
+      } catch (error) {
+        electronLogger.warn(
+          '[resources] Registry change listener failed: %s',
           error instanceof Error ? error.message : String(error),
         )
       }
@@ -1167,8 +1215,9 @@ export class ResourceManagerService {
           message: `Downloading ${name} v${version}...`,
         })
         await mkdir(dirname(archivePath), { recursive: true })
-        await downloadAsset(
+        await downloadAssetWithMirror(
           resolvedAsset.url,
+          resolvedAsset.cnb_url,
           archivePath,
           this.fetchImpl,
           resolvedAsset.size,
@@ -1184,6 +1233,8 @@ export class ResourceManagerService {
             })
           },
           signal,
+          undefined,
+          this.mirrorFallback,
         )
         throwIfAborted(signal)
         this.publish(listener, {
@@ -1569,8 +1620,9 @@ export class ResourceManagerService {
         tempArchive,
         resolvedAsset.size,
       )
-      await downloadAsset(
+      await downloadAssetWithMirror(
         resolvedAsset.url,
+        resolvedAsset.cnb_url,
         partialArchive,
         this.fetchImpl,
         resolvedAsset.size,
@@ -1593,6 +1645,8 @@ export class ResourceManagerService {
           )
         },
         signal,
+        undefined,
+        this.mirrorFallback,
       )
       await rename(partialArchive, tempArchive)
       throwIfAborted(signal)
@@ -1638,6 +1692,16 @@ export class ResourceManagerService {
       const detected = await detectExecutables(tempExtract)
       const executable = selectToolExecutable(name, detected)
       await assertStagedToolHealth(name, tempExtract, detected, executable)
+      if (normalizeToolName(name) === 'kepler-formal') {
+        // Match ECC's loader environment; verify before replacing a working install.
+        const env = { ...process.env }
+        delete env.LD_LIBRARY_PATH
+        delete env.LD_PRELOAD
+        await this.commandRunner(join(tempExtract, executable), ['--version'], {
+          env,
+          signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+        })
+      }
       throwIfAborted(signal)
       const manifestEntry: ToolInventoryEntry = {
         type: 'tool',
@@ -1811,12 +1875,14 @@ export class ResourceManagerService {
         tempArchive,
         resolvedAsset.size,
       )
+      let archiveFraction = 0
       await downloadAsset(
         resolvedAsset.url,
         partialArchive,
         this.fetchImpl,
         resolvedAsset.size,
         (progress) => {
+          archiveFraction = progress.progress
           const totalLabel =
             progress.totalBytes === null ? '?' : formatBytes(progress.totalBytes)
           this.publish(listener, {
@@ -1835,6 +1901,17 @@ export class ResourceManagerService {
           )
         },
         signal,
+        {
+          onRetry: (attempt, maxAttempts) => {
+            this.publish(listener, {
+              resource_id: resourceId,
+              action,
+              phase: 'downloading',
+              progress: archiveFraction,
+              message: `Downloading ${displayName} v${version} (auto-retry ${attempt}/${maxAttempts})...`,
+            })
+          },
+        },
       )
       await rename(partialArchive, tempArchive)
       throwIfAborted(signal)
@@ -2228,20 +2305,34 @@ export class ResourceManagerService {
       const targetPath = join(destination, assetName)
       if (await pathExists(targetPath)) continue
       const downloadUrl = `${baseUrl}/${encodeURIComponent(assetName)}`
-      this.publish(listener, {
-        resource_id: resourceId,
-        action,
-        phase: 'post_install',
-        progress: 0.98,
-        message: `Downloading ${name} post-install asset ${index + 1}/${assetNames.length}: ${assetName}`,
-      })
+      const label = `${name} release asset ${index + 1}/${assetNames.length}: ${assetName}`
+      let assetFraction = 0
+      const publishAsset = (detail: string | null = null): void => {
+        this.publish(listener, {
+          resource_id: resourceId,
+          action,
+          phase: 'downloading',
+          progress: (index + assetFraction) / assetNames.length,
+          message: `Downloading ${label}${detail ? ` (${detail})` : ''}...`,
+        })
+      }
+      publishAsset()
       await downloadAsset(
         downloadUrl,
         targetPath,
         this.fetchImpl,
         null,
-        undefined,
+        (progress) => {
+          assetFraction = progress.progress
+          const totalLabel =
+            progress.totalBytes === null ? '?' : formatBytes(progress.totalBytes)
+          publishAsset(`${formatBytes(progress.downloadedBytes)} / ${totalLabel}`)
+        },
         signal,
+        {
+          onRetry: (attempt, maxAttempts) =>
+            publishAsset(`auto-retry ${attempt}/${maxAttempts}`),
+        },
       )
     }
   }
@@ -2272,21 +2363,35 @@ export class ResourceManagerService {
         dirname(targetPath),
         `.${basename(targetPath)}.download-${randomUUID()}`,
       )
-      this.publish(listener, {
-        resource_id: resourceId,
-        action,
-        phase: 'post_install',
-        progress: 0.98,
-        message: `Downloading ${name} supplemental asset ${index + 1}/${assets.length}: ${asset.path}`,
-      })
+      const label = `${name} supplemental asset ${index + 1}/${assets.length}: ${asset.path}`
+      let assetFraction = 0
+      const publishAsset = (detail: string | null = null): void => {
+        this.publish(listener, {
+          resource_id: resourceId,
+          action,
+          phase: 'downloading',
+          progress: (index + assetFraction) / assets.length,
+          message: `Downloading ${label}${detail ? ` (${detail})` : ''}...`,
+        })
+      }
+      publishAsset()
       try {
         await downloadAsset(
           asset.url,
           temporaryPath,
           this.fetchImpl,
           asset.size,
-          undefined,
+          (progress) => {
+            assetFraction = progress.progress
+            const totalLabel =
+              progress.totalBytes === null ? '?' : formatBytes(progress.totalBytes)
+            publishAsset(`${formatBytes(progress.downloadedBytes)} / ${totalLabel}`)
+          },
           signal,
+          {
+            onRetry: (attempt, maxAttempts) =>
+              publishAsset(`auto-retry ${attempt}/${maxAttempts}`),
+          },
         )
         const actualSize = await stat(temporaryPath).then((value) => value.size)
         if (actualSize !== asset.size) {
@@ -2337,41 +2442,42 @@ export class ResourceManagerService {
         destination,
         `.${basename(packageAsset.path)}.download-${randomUUID()}`,
       )
-      this.publish(listener, {
-        resource_id: resourceId,
-        action,
-        phase: 'post_install',
-        progress: 0.98,
-        message: `Downloading ${name} package ${index + 1}/${packages.length}: ${packageAsset.path}`,
-      })
+      const label = `${name} package ${index + 1}/${packages.length}: ${packageAsset.path}`
+      let packageFraction = 0
+      const publishPackage = (detail: string | null = null): void => {
+        this.publish(listener, {
+          resource_id: resourceId,
+          action,
+          phase: 'downloading',
+          progress: (index + packageFraction) / packages.length,
+          message: `Downloading ${label}${detail ? ` (${detail})` : ''}...`,
+        })
+      }
+      publishPackage()
       try {
-        try {
-          await downloadAsset(
-            packageAsset.url,
-            temporaryPath,
-            this.fetchImpl,
-            packageAsset.size,
-            undefined,
-            signal,
-          )
-        } catch (error) {
-          if (isAbortError(error) || signal?.aborted) throw error
-          await rm(temporaryPath, { force: true })
-          electronLogger.warn(
-            '[resources] Package download failed for %s; trying mirror %s: %s',
-            packageAsset.url,
-            packageAsset.cnb_url,
-            error instanceof Error ? error.message : String(error),
-          )
-          await downloadAsset(
-            packageAsset.cnb_url,
-            temporaryPath,
-            this.fetchImpl,
-            packageAsset.size,
-            undefined,
-            signal,
-          )
-        }
+        await downloadAssetWithMirror(
+          packageAsset.url,
+          packageAsset.cnb_url,
+          temporaryPath,
+          this.fetchImpl,
+          packageAsset.size,
+          (progress) => {
+            packageFraction = progress.progress
+            const totalLabel =
+              progress.totalBytes === null ? '?' : formatBytes(progress.totalBytes)
+            publishPackage(`${formatBytes(progress.downloadedBytes)} / ${totalLabel}`)
+          },
+          signal,
+          {
+            onRetry: (attempt, maxAttempts) =>
+              publishPackage(`auto-retry ${attempt}/${maxAttempts}`),
+            onMirrorSwitch: () => {
+              packageFraction = 0
+              publishPackage('switching to mirror')
+            },
+          },
+          this.mirrorFallback,
+        )
         const verified = await this.sha256Verifier(
           temporaryPath,
           packageAsset.sha256,
@@ -2445,11 +2551,17 @@ export class ResourceManagerService {
     signal?: AbortSignal,
   ): Promise<RegistryState> {
     throwIfAborted(signal)
+    const cacheFile = registryCachePath(this.cacheDir, this.registryUrl)
     if (this.registryMemory && !force) {
+      // Memory hits normally serve as-is, but when this session never
+      // completed a remote sync (for example the startup background refresh
+      // failed), retry in the background so the listing can still recover.
+      if (this.registrySyncedAt === 0) {
+        this.refreshRegistryInBackground(cacheFile)
+      }
       return { registry: this.registryMemory, diagnostics: [] }
     }
 
-    const cacheFile = registryCachePath(this.cacheDir, this.registryUrl)
     if (!force) {
       const cached = await this.readCachedRegistry(cacheFile)
       if (cached.registry) {
@@ -2470,6 +2582,7 @@ export class ResourceManagerService {
       await mkdir(dirname(cacheFile), { recursive: true })
       await writeFile(cacheFile, serializeRegistryCache(remoteRegistry), 'utf8')
       this.registryMemory = registry
+      this.registrySyncedAt = Date.now()
       return { registry, diagnostics }
     } catch (error) {
       if (signal?.aborted || isAbortError(error)) throw error
@@ -2520,13 +2633,20 @@ export class ResourceManagerService {
     if (this.registryRefreshPromise) return
     this.registryRefreshPromise = (async () => {
       try {
-        const remoteRegistry = await readRegistryFromUrl(this.registryUrl, this.fetchImpl)
+        const remoteRegistry = await readRegistryFromUrl(
+          this.registryUrl,
+          this.fetchImpl,
+          AbortSignal.timeout(REGISTRY_BACKGROUND_REFRESH_TIMEOUT_MS),
+        )
         const registry = withBuiltinMpcs(remoteRegistry, this.registryUrl)
         await mkdir(dirname(cacheFile), { recursive: true })
         await writeFile(cacheFile, serializeRegistryCache(remoteRegistry), 'utf8')
+        const changed = JSON.stringify(this.registryMemory) !== JSON.stringify(registry)
         this.registryMemory = registry
+        this.registrySyncedAt = Date.now()
+        if (changed) this.notifyRegistryChanged()
       } catch (error) {
-        electronLogger.debug(
+        electronLogger.warn(
           '[resources] Background registry refresh failed: %s',
           error instanceof Error ? error.message : String(error),
         )
@@ -3634,6 +3754,7 @@ function parsePlatformAssets(value: unknown): Record<string, PlatformAsset> {
     const asset = readRecord(assetValue)
     assets[platform] = {
       url: normalizeRegistryAssetUrl(readString(asset.url)),
+      cnb_url: readOptionalString(asset.cnb_url),
       sha256: readString(asset.sha256),
       sha256_url: readOptionalString(asset.sha256_url),
       size: readOptionalPositiveNumber(asset.size) ?? null,
@@ -4222,9 +4343,9 @@ function selectToolExecutable(name: string, detected: string[]): string {
   }
   const preferred = preferredExecutableNames(normalized)
   for (const candidate of preferred) {
-    const match = detected.find(
-      (entry) => entry === candidate || entry.endsWith(`/${candidate}`),
-    )
+    const match =
+      detected.find((entry) => entry === candidate) ??
+      detected.find((entry) => entry.endsWith(`/${candidate}`))
     if (match) return match
   }
   return detected[0] ?? ''
@@ -4397,7 +4518,9 @@ async function resolveRuntimeExecutable(
 ): Promise<string | null> {
   const normalized = normalizeToolName(capability ?? entry.name)
   const preferred = preferredExecutableNames(normalized)
-  const candidates = capability
+  // Older Kepler entries record bin/kepler-formal, bypassing bundled libraries.
+  const usePreferred = Boolean(capability) || normalized === 'kepler-formal'
+  const candidates = usePreferred
     ? [
         ...preferred,
         ...entry.detected_executables.filter((executable) => {
@@ -4435,6 +4558,9 @@ async function resolveRuntimeExecutable(
 }
 
 function preferredExecutableNames(normalizedName: string): string[] {
+  if (normalizedName === 'kepler-formal') {
+    return ['kepler-formal', 'bin/kepler-formal']
+  }
   if (normalizedName === 'slang') {
     return ['bin/slang', 'slang']
   }
@@ -4750,6 +4876,91 @@ function formatBytes(bytes: number): string {
   return `${bytes} B`
 }
 
+async function downloadAssetWithMirror(
+  url: string,
+  mirrorUrl: string | null | undefined,
+  destination: string,
+  fetchImpl: typeof fetch,
+  expectedSize: number | null,
+  onProgress?: DownloadProgressListener,
+  signal?: AbortSignal,
+  hooks?: DownloadHooks,
+  mirrorFallback?: MirrorFallbackPreference,
+): Promise<void> {
+  const mirror = mirrorUrl?.trim() || null
+  if (mirror && mirrorFallback?.prefersMirror(url)) {
+    electronLogger.info(
+      '[resources] Skipping primary URL %s; using mirror %s (primary host failed earlier this session)',
+      url,
+      mirror,
+    )
+    try {
+      await downloadAsset(
+        mirror,
+        destination,
+        fetchImpl,
+        expectedSize,
+        onProgress,
+        signal,
+        hooks,
+      )
+      return
+    } catch (error) {
+      if (isAbortError(error) || signal?.aborted) throw error
+      await rm(destination, { force: true })
+      electronLogger.warn(
+        '[resources] Mirror download failed for %s; retrying primary URL %s: %s',
+        mirror,
+        url,
+        error instanceof Error ? error.message : String(error),
+      )
+      await downloadAsset(
+        url,
+        destination,
+        fetchImpl,
+        expectedSize,
+        onProgress,
+        signal,
+        hooks,
+      )
+      mirrorFallback.clearFailover(url)
+      return
+    }
+  }
+  try {
+    await downloadAsset(
+      url,
+      destination,
+      fetchImpl,
+      expectedSize,
+      onProgress,
+      signal,
+      hooks,
+    )
+    mirrorFallback?.clearFailover(url)
+  } catch (error) {
+    if (isAbortError(error) || signal?.aborted || !mirror) throw error
+    await rm(destination, { force: true })
+    electronLogger.warn(
+      '[resources] Download failed for %s; trying mirror %s: %s',
+      url,
+      mirror,
+      error instanceof Error ? error.message : String(error),
+    )
+    mirrorFallback?.recordFailover(url)
+    hooks?.onMirrorSwitch?.(mirror)
+    await downloadAsset(
+      mirror,
+      destination,
+      fetchImpl,
+      expectedSize,
+      onProgress,
+      signal,
+      hooks,
+    )
+  }
+}
+
 async function downloadAsset(
   url: string,
   destination: string,
@@ -4757,6 +4968,7 @@ async function downloadAsset(
   expectedSize: number | null,
   onProgress?: DownloadProgressListener,
   signal?: AbortSignal,
+  hooks?: DownloadHooks,
 ): Promise<void> {
   throwIfAborted(signal)
   if (url.startsWith('file://')) {
@@ -4896,6 +5108,7 @@ async function downloadAsset(
         formatBytes(receivedBytes),
         formatDownloadError(error),
       )
+      hooks?.onRetry?.(attempt, DOWNLOAD_MAX_ATTEMPTS)
       await waitForDownloadRetry(DOWNLOAD_RETRY_DELAY_MS, signal)
     }
   }
@@ -5677,6 +5890,7 @@ async function runChildProcess(
   return await new Promise<string>((resolvePromise, reject) => {
     const child = spawn(command, args, {
       cwd: options?.cwd,
+      env: options?.env,
       detached: process.platform !== 'win32',
       stdio: 'pipe',
       windowsHide: true,

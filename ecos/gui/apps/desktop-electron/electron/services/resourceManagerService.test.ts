@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import {
@@ -416,11 +416,13 @@ function testResourceDirs(root: string): {
   resourcesDir: string
   toolsDir: string
   pdksDir: string
+  cacheDir: string
 } {
   return {
     resourcesDir: join(root, 'state', 'resources'),
     toolsDir: join(root, 'data', 'tools'),
     pdksDir: join(root, 'data', 'pdks'),
+    cacheDir: join(root, 'cache'),
   }
 }
 
@@ -577,6 +579,38 @@ async function writeMpcRegistry(
 }
 
 describe('ResourceManagerService', () => {
+  const isolatedXdgRoot = join(tmpdir(), `ecos-resources-xdg-${process.pid}`)
+  let xdgEnvBackup: {
+    cache: string | undefined
+    state: string | undefined
+    data: string | undefined
+  }
+
+  beforeAll(() => {
+    xdgEnvBackup = {
+      cache: process.env.XDG_CACHE_HOME,
+      state: process.env.XDG_STATE_HOME,
+      data: process.env.XDG_DATA_HOME,
+    }
+    // Constructions that omit explicit dirs must never touch the developer's
+    // real XDG directories; they fall back to this isolated root instead.
+    process.env.XDG_CACHE_HOME = join(isolatedXdgRoot, 'cache')
+    process.env.XDG_STATE_HOME = join(isolatedXdgRoot, 'state')
+    process.env.XDG_DATA_HOME = join(isolatedXdgRoot, 'data')
+  })
+
+  afterAll(async () => {
+    for (const [key, value] of [
+      ['XDG_CACHE_HOME', xdgEnvBackup.cache],
+      ['XDG_STATE_HOME', xdgEnvBackup.state],
+      ['XDG_DATA_HOME', xdgEnvBackup.data],
+    ] as const) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    await rm(isolatedXdgRoot, { force: true, recursive: true })
+  })
+
   afterEach(async () => {
     await Promise.all(
       tempDirectories
@@ -5855,6 +5889,238 @@ describe('ResourceManagerService', () => {
     )
   })
 
+  it('notifies registry change listeners when the background refresh applies new data', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const cacheDir = join(root, 'cache')
+    const registryUrl = 'https://example.com/registry.json'
+    const registryV1 = {
+      schema_version: 2,
+      tools: [
+        {
+          name: 'cached-yosys',
+          display_name: 'Cached Yosys',
+          description: 'Cached synthesis tool',
+          category: 'synthesis',
+          homepage: '',
+          versions: [
+            {
+              version: '0.61',
+              platforms: {
+                'all-platform': {
+                  url: 'file:///tmp/cached-yosys.tar',
+                  sha256: 'fixture-sha',
+                  size: 9,
+                },
+              },
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }
+    const registryV2 = {
+      ...registryV1,
+      tools: [
+        {
+          ...registryV1.tools[0],
+          versions: [
+            {
+              version: '0.62',
+              platforms: registryV1.tools[0].versions[0].platforms,
+            },
+          ],
+        },
+      ],
+    }
+    await mkdir(cacheDir, { recursive: true })
+    await writeFile(
+      testRegistryCachePath(cacheDir, registryUrl),
+      JSON.stringify(registryV1),
+      'utf8',
+    )
+    const refresh = deferred<Response>()
+    const fetchImpl = vi.fn(() => refresh.promise)
+    const service = new ResourceManagerService({
+      registryUrl,
+      ...testResourceDirs(root),
+      cacheDir,
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+    const onRegistryChanged = vi.fn()
+    service.onRegistryChanged(onRegistryChanged)
+
+    const cached = await service.listResources()
+    expect(cached.diagnostics).toContain(
+      'Using cached registry data while refreshing in background',
+    )
+    expect(
+      cached.resources.find((resource) => resource.id === 'tool:cached-yosys')
+        ?.available_versions,
+    ).toEqual(['0.61'])
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(onRegistryChanged).not.toHaveBeenCalled()
+
+    refresh.resolve(new Response(JSON.stringify(registryV2)))
+    await vi.waitFor(() => {
+      expect(onRegistryChanged).toHaveBeenCalledTimes(1)
+    })
+
+    const refreshed = await service.listResources()
+    expect(
+      refreshed.resources.find((resource) => resource.id === 'tool:cached-yosys')
+        ?.available_versions,
+    ).toEqual(['0.62'])
+  })
+
+  it('stays silent when the background registry refresh changes nothing', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const cacheDir = join(root, 'cache')
+    const registryUrl = 'https://example.com/registry.json'
+    const registry = {
+      schema_version: 2,
+      tools: [
+        {
+          name: 'cached-yosys',
+          display_name: 'Cached Yosys',
+          description: 'Cached synthesis tool',
+          category: 'synthesis',
+          homepage: '',
+          versions: [
+            {
+              version: '0.61',
+              platforms: {
+                'all-platform': {
+                  url: 'file:///tmp/cached-yosys.tar',
+                  sha256: 'fixture-sha',
+                  size: 9,
+                },
+              },
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }
+    await mkdir(cacheDir, { recursive: true })
+    const cacheFile = testRegistryCachePath(cacheDir, registryUrl)
+    await writeFile(cacheFile, JSON.stringify(registry), 'utf8')
+    const refresh = deferred<Response>()
+    const fetchImpl = vi.fn(() => refresh.promise)
+    const service = new ResourceManagerService({
+      registryUrl,
+      ...testResourceDirs(root),
+      cacheDir,
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+    const onRegistryChanged = vi.fn()
+    service.onRegistryChanged(onRegistryChanged)
+
+    await service.listResources()
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    const cacheMtimeBefore = (await stat(cacheFile)).mtimeMs
+    // Keep the refresh write strictly after the recorded mtime.
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    refresh.resolve(new Response(JSON.stringify(registry)))
+    await vi.waitFor(async () => {
+      expect((await stat(cacheFile)).mtimeMs).toBeGreaterThan(cacheMtimeBefore)
+    })
+
+    expect(onRegistryChanged).not.toHaveBeenCalled()
+  })
+
+  it('retries the background registry refresh on the next listing after a failure', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const cacheDir = join(root, 'cache')
+    const registryUrl = 'https://example.com/registry.json'
+    const registryV1 = {
+      schema_version: 2,
+      tools: [
+        {
+          name: 'cached-yosys',
+          display_name: 'Cached Yosys',
+          description: 'Cached synthesis tool',
+          category: 'synthesis',
+          homepage: '',
+          versions: [
+            {
+              version: '0.61',
+              platforms: {
+                'all-platform': {
+                  url: 'file:///tmp/cached-yosys.tar',
+                  sha256: 'fixture-sha',
+                  size: 9,
+                },
+              },
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }
+    const registryV2 = {
+      ...registryV1,
+      tools: [
+        {
+          ...registryV1.tools[0],
+          versions: [
+            {
+              version: '0.62',
+              platforms: registryV1.tools[0].versions[0].platforms,
+            },
+          ],
+        },
+      ],
+    }
+    await mkdir(cacheDir, { recursive: true })
+    await writeFile(
+      testRegistryCachePath(cacheDir, registryUrl),
+      JSON.stringify(registryV1),
+      'utf8',
+    )
+    const first = deferred<Response>()
+    const second = deferred<Response>()
+    const fetchImpl = vi
+      .fn()
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise)
+    const service = new ResourceManagerService({
+      registryUrl,
+      ...testResourceDirs(root),
+      cacheDir,
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+    const onRegistryChanged = vi.fn()
+    service.onRegistryChanged(onRegistryChanged)
+
+    const cached = await service.listResources()
+    expect(
+      cached.resources.find((resource) => resource.id === 'tool:cached-yosys')
+        ?.available_versions,
+    ).toEqual(['0.61'])
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(fetchImpl.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal)
+
+    first.reject(new Error('network down'))
+    // Let the failed background refresh settle and release the in-flight guard.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(onRegistryChanged).not.toHaveBeenCalled()
+
+    await service.listResources()
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+
+    second.resolve(new Response(JSON.stringify(registryV2)))
+    await vi.waitFor(() => {
+      expect(onRegistryChanged).toHaveBeenCalledTimes(1)
+    })
+
+    const refreshed = await service.listResources()
+    expect(
+      refreshed.resources.find((resource) => resource.id === 'tool:cached-yosys')
+        ?.available_versions,
+    ).toEqual(['0.62'])
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+
   it('installs a managed registry PDK with strip prefix and post-install steps', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createPdkArchive(root)
@@ -7202,6 +7468,285 @@ describe('ResourceManagerService', () => {
     ).resolves.toBe('library(test) {}\n')
   })
 
+  it('reports PDK package downloads as downloading with byte progress and mirror fallback', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createPdkArchive(root, { valid: false })
+    const packageRoot = join(root, 'package-source')
+    const packagePath = join(root, 'ics55_LLSC_H7CL_liberty.tar.bz2')
+    const libertyName = 'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib'
+    await mkdir(join(packageRoot, 'liberty'), { recursive: true })
+    await writeFile(join(packageRoot, 'liberty', libertyName), 'library(test) {}\n')
+    await runFixtureCommand('tar', ['-cjf', packagePath, '-C', packageRoot, 'liberty'])
+    const packageLock = await archiveLock(packagePath)
+    const packageBytes = await readFile(packagePath)
+    const primaryUrl = 'https://example.com/ics55_LLSC_H7CL_liberty.tar.bz2'
+    const mirrorUrl = 'https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2'
+    const registryPath = join(root, 'registry.json')
+    await writeIcs55Registry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+      packages: [
+        {
+          path: 'ics55_LLSC_H7CL_liberty.tar.bz2',
+          url: primaryUrl,
+          cnb_url: mirrorUrl,
+          sha256: packageLock.sha256,
+          size: packageLock.size,
+          dest: 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL',
+        },
+      ],
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      fetchImpl: vi.fn(async (url) =>
+        String(url) === mirrorUrl
+          ? new Response(packageBytes)
+          : new Response(null, { status: 404 }),
+      ) as typeof fetch,
+      sha256Verifier: async (path, expected) =>
+        expected === archive.sha256 || (await archiveLock(path)).sha256 === expected,
+    })
+    const progress = vi.fn()
+
+    await service.installResource('pdk:ics55', '1.10.100', progress)
+
+    const events = progress.mock.calls.map(([event]) => event)
+    const packageEvents = events.filter((event) =>
+      String(event.message).includes('package 1/1'),
+    )
+    expect(packageEvents.length).toBeGreaterThan(0)
+    expect(packageEvents.every((event) => event.phase === 'downloading')).toBe(true)
+    expect(
+      packageEvents.some((event) =>
+        String(event.message).includes('(switching to mirror)'),
+      ),
+    ).toBe(true)
+    expect(
+      packageEvents.some((event) =>
+        /\(\d+(?:\.\d+)? (?:B|KB|MB|GB) \/ \d+(?:\.\d+)? (?:B|KB|MB|GB)\)/.test(
+          String(event.message),
+        ),
+      ),
+    ).toBe(true)
+    expect(packageEvents.at(-1)).toMatchObject({ phase: 'downloading', progress: 1 })
+    expect(events.some((event) => event.phase === 'post_install')).toBe(false)
+  })
+
+  it('announces auto-retry when a PDK package download attempt fails and recovers', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createPdkArchive(root, { valid: false })
+    const packageRoot = join(root, 'package-source')
+    const packagePath = join(root, 'ics55_LLSC_H7CL_liberty.tar.bz2')
+    const libertyName = 'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib'
+    await mkdir(join(packageRoot, 'liberty'), { recursive: true })
+    await writeFile(join(packageRoot, 'liberty', libertyName), 'library(test) {}\n')
+    await runFixtureCommand('tar', ['-cjf', packagePath, '-C', packageRoot, 'liberty'])
+    const packageLock = await archiveLock(packagePath)
+    const packageBytes = await readFile(packagePath)
+    const primaryUrl = 'https://example.com/ics55_LLSC_H7CL_liberty.tar.bz2'
+    const mirrorUrl = 'https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2'
+    const registryPath = join(root, 'registry.json')
+    await writeIcs55Registry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+      packages: [
+        {
+          path: 'ics55_LLSC_H7CL_liberty.tar.bz2',
+          url: primaryUrl,
+          cnb_url: mirrorUrl,
+          sha256: packageLock.sha256,
+          size: packageLock.size,
+          dest: 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL',
+        },
+      ],
+    })
+    let primaryAttempts = 0
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      fetchImpl: vi.fn(async (url) => {
+        if (String(url) === primaryUrl) {
+          primaryAttempts += 1
+          if (primaryAttempts === 1) {
+            return new Response(null, { status: 500 })
+          }
+          return new Response(packageBytes)
+        }
+        return new Response(null, { status: 404 })
+      }) as typeof fetch,
+      sha256Verifier: async (path, expected) =>
+        expected === archive.sha256 || (await archiveLock(path)).sha256 === expected,
+    })
+    const progress = vi.fn()
+
+    await service.installResource('pdk:ics55', '1.10.100', progress)
+
+    expect(primaryAttempts).toBe(2)
+    const events = progress.mock.calls.map(([event]) => event)
+    const retryEvents = events.filter(
+      (event) =>
+        String(event.message).includes('package 1/1') &&
+        String(event.message).includes('auto-retry 1/3'),
+    )
+    expect(retryEvents.length).toBeGreaterThan(0)
+    expect(retryEvents.every((event) => event.phase === 'downloading')).toBe(true)
+    expect(
+      events.some((event) => String(event.message).includes('switching to mirror')),
+    ).toBe(false)
+  })
+
+  async function createLibertyPackageFixture(
+    root: string,
+    packageName: string,
+    libertyName: string,
+  ): Promise<{ bytes: Buffer<ArrayBuffer>; sha256: string; size: number }> {
+    const packageRoot = join(root, `${packageName}-source`)
+    const packagePath = join(root, packageName)
+    await mkdir(join(packageRoot, 'liberty'), { recursive: true })
+    await writeFile(join(packageRoot, 'liberty', libertyName), 'library(test) {}\n')
+    await runFixtureCommand('tar', ['-cjf', packagePath, '-C', packageRoot, 'liberty'])
+    const lock = await archiveLock(packagePath)
+    return { bytes: await readFile(packagePath), sha256: lock.sha256, size: lock.size }
+  }
+
+  it('skips the primary URL for later packages after the host fails over to the mirror', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createPdkArchive(root, { valid: false })
+    const first = await createLibertyPackageFixture(
+      root,
+      'ics55_LLSC_H7CL_liberty.tar.bz2',
+      'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
+    )
+    const second = await createLibertyPackageFixture(
+      root,
+      'ics55_LLSC_H7CH_liberty.tar.bz2',
+      'ics55_LLSC_H7CH_ss_rcworst_1p08_125_nldm.lib',
+    )
+    const registryPath = join(root, 'registry.json')
+    await writeIcs55Registry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+      packages: [
+        {
+          path: 'ics55_LLSC_H7CL_liberty.tar.bz2',
+          url: 'https://example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
+          cnb_url: 'https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
+          sha256: first.sha256,
+          size: first.size,
+          dest: 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL',
+        },
+        {
+          path: 'ics55_LLSC_H7CH_liberty.tar.bz2',
+          url: 'https://example.com/ics55_LLSC_H7CH_liberty.tar.bz2',
+          cnb_url: 'https://mirror.example.com/ics55_LLSC_H7CH_liberty.tar.bz2',
+          sha256: second.sha256,
+          size: second.size,
+          dest: 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CH',
+        },
+      ],
+    })
+    const fetchedUrls: string[] = []
+    const payloads = new Map<string, Buffer<ArrayBuffer>>([
+      ['https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2', first.bytes],
+      ['https://mirror.example.com/ics55_LLSC_H7CH_liberty.tar.bz2', second.bytes],
+    ])
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      fetchImpl: vi.fn(async (url) => {
+        const text = String(url)
+        fetchedUrls.push(text)
+        const payload = payloads.get(text)
+        return payload ? new Response(payload) : new Response(null, { status: 404 })
+      }) as typeof fetch,
+      sha256Verifier: async (path, expected) =>
+        expected === archive.sha256 || (await archiveLock(path)).sha256 === expected,
+    })
+
+    await service.installResource('pdk:ics55', '1.10.100')
+
+    expect(fetchedUrls).toEqual([
+      'https://example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
+      'https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
+      'https://mirror.example.com/ics55_LLSC_H7CH_liberty.tar.bz2',
+    ])
+  })
+
+  it('retries the primary URL when the remembered mirror fails and clears the failover', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createPdkArchive(root, { valid: false })
+    const first = await createLibertyPackageFixture(
+      root,
+      'ics55_LLSC_H7CL_liberty.tar.bz2',
+      'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
+    )
+    const second = await createLibertyPackageFixture(
+      root,
+      'ics55_LLSC_H7CH_liberty.tar.bz2',
+      'ics55_LLSC_H7CH_ss_rcworst_1p08_125_nldm.lib',
+    )
+    const third = await createLibertyPackageFixture(
+      root,
+      'ics55_LLSC_H7CR_liberty.tar.bz2',
+      'ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
+    )
+    const registryPath = join(root, 'registry.json')
+    const packageEntry = (
+      name: string,
+      fixture: { sha256: string; size: number },
+      corner: string,
+    ) => ({
+      path: name,
+      url: `https://example.com/${name}`,
+      cnb_url: `https://mirror.example.com/${name}`,
+      sha256: fixture.sha256,
+      size: fixture.size,
+      dest: `IP/STD_cell/ics55_LLSC_H7C_V1p10C100/${corner}`,
+    })
+    await writeIcs55Registry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+      packages: [
+        packageEntry('ics55_LLSC_H7CL_liberty.tar.bz2', first, 'ics55_LLSC_H7CL'),
+        packageEntry('ics55_LLSC_H7CH_liberty.tar.bz2', second, 'ics55_LLSC_H7CH'),
+        packageEntry('ics55_LLSC_H7CR_liberty.tar.bz2', third, 'ics55_LLSC_H7CR'),
+      ],
+    })
+    const fetchedUrls: string[] = []
+    const payloads = new Map<string, Buffer<ArrayBuffer>>([
+      ['https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2', first.bytes],
+      ['https://example.com/ics55_LLSC_H7CH_liberty.tar.bz2', second.bytes],
+      ['https://example.com/ics55_LLSC_H7CR_liberty.tar.bz2', third.bytes],
+    ])
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      fetchImpl: vi.fn(async (url) => {
+        const text = String(url)
+        fetchedUrls.push(text)
+        const payload = payloads.get(text)
+        return payload ? new Response(payload) : new Response(null, { status: 404 })
+      }) as typeof fetch,
+      sha256Verifier: async (path, expected) =>
+        expected === archive.sha256 || (await archiveLock(path)).sha256 === expected,
+    })
+
+    await service.installResource('pdk:ics55', '1.10.100')
+
+    expect(fetchedUrls).toEqual([
+      'https://example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
+      'https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
+      'https://mirror.example.com/ics55_LLSC_H7CH_liberty.tar.bz2',
+      'https://example.com/ics55_LLSC_H7CH_liberty.tar.bz2',
+      'https://example.com/ics55_LLSC_H7CR_liberty.tar.bz2',
+    ])
+  })
+
   it('rejects a PDK package destination outside the staged PDK', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createPdkArchive(root)
@@ -8111,6 +8656,97 @@ describe('ResourceManagerService external bundle download', () => {
     // No manifest is written for external downloads.
     await expect(stat(join(root, 'state', 'resources', 'manifest.json'))).rejects.toThrow(
       /ENOENT/,
+    )
+  })
+
+  function createMirrorDownloadService(
+    root: string,
+    archive: { path: string; sha256: string; size: number },
+    fetchedUrls: string[],
+  ): ResourceManagerService {
+    const primaryUrl = 'https://example.com/ecc-bundle.tar'
+    const mirrorUrl = 'https://mirror.example/ecc-bundle.tar'
+    const registry = {
+      schema_version: 2,
+      tools: [
+        {
+          name: 'ecc',
+          display_name: 'ECC',
+          description: 'ECC runtime bundle',
+          category: 'runtime',
+          homepage: '',
+          versions: [
+            {
+              version: '0.1.0-alpha.11',
+              platforms: {
+                'all-platform': {
+                  url: primaryUrl,
+                  cnb_url: mirrorUrl,
+                  sha256: archive.sha256,
+                  size: archive.size,
+                  strip_prefix: 'ecc-bundle-0.1.0-alpha.11',
+                },
+              },
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }
+    return new ResourceManagerService({
+      cacheDir: join(root, 'cache'),
+      registryUrl: 'https://registry.example/tool-registry.json',
+      fetchImpl: vi.fn(async (url: string | URL | Request) => {
+        const text = String(url)
+        if (text.startsWith('https://registry.example/')) {
+          return new Response(JSON.stringify(registry))
+        }
+        if (!fetchedUrls.includes(text)) fetchedUrls.push(text)
+        if (text === mirrorUrl) return new Response(await readFile(archive.path))
+        return new Response(null, { status: 404 })
+      }),
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+    })
+  }
+
+  it('falls back to the mirror URL when a tool archive download fails', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createEccBundleArchive(root)
+    const fetchedUrls: string[] = []
+    const service = createMirrorDownloadService(root, archive, fetchedUrls)
+
+    await service.installResource('tool:ecc', '0.1.0-alpha.11')
+
+    expect(fetchedUrls).toEqual([
+      'https://example.com/ecc-bundle.tar',
+      'https://mirror.example/ecc-bundle.tar',
+    ])
+    await expect(
+      readFile(join(root, 'data/tools/ecc/0.1.0-alpha.11/bin/ecc'), 'utf8'),
+    ).resolves.toBe('#!/bin/sh\n')
+  })
+
+  it('falls back to the mirror URL for external bundle downloads', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createEccBundleArchive(root)
+    const fetchedUrls: string[] = []
+    const service = createMirrorDownloadService(root, archive, fetchedUrls)
+    const destinationDir = join(root, 'bundle-home', 'binaries-root')
+
+    await service.downloadRegistryAssetToDirectory({
+      resourceId: 'tool:ecc',
+      version: '0.1.0-alpha.11',
+      destinationDir,
+    })
+
+    expect(fetchedUrls).toEqual([
+      'https://example.com/ecc-bundle.tar',
+      'https://mirror.example/ecc-bundle.tar',
+    ])
+    await expect(readFile(join(destinationDir, 'bin', 'ecc'), 'utf8')).resolves.toBe(
+      '#!/bin/sh\n',
     )
   })
 

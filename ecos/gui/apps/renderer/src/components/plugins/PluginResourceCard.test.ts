@@ -2,7 +2,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
-import type { ResourceItem } from '@/api/plugin'
+import type { InstallProgress, ResourceItem } from '@/api/plugin'
 import { resourceToRow } from '@/views/pluginToolsRows'
 import PluginResourceCard from './PluginResourceCard.vue'
 import cardSource from './PluginResourceCard.vue?raw'
@@ -114,5 +114,29 @@ describe('PluginResourceCard', () => {
 
   it('clamps long descriptions to two lines', () => {
     expect(cardSource).toContain('-webkit-line-clamp: 2')
+  })
+
+  it('shows the live backend progress message instead of the description while installing', () => {
+    const progress: InstallProgress = {
+      resourceId: 'tool:yosys',
+      resourceName: 'yosys',
+      tool: 'yosys',
+      phase: 'downloading',
+      progress: 0.36,
+      message: 'Downloading Yosys package 3/7: pkg.tar.bz2 (39.1 MB / 77.0 MB)...',
+    }
+    const row = resourceToRow(resource({ status: 'installing' }), progress)
+    const wrapper = mount(PluginResourceCard, {
+      props: { row, importing: false },
+    })
+
+    const description = wrapper.find('.plugin-card-description')
+    expect(description.text()).toBe(
+      'Downloading Yosys package 3/7: pkg.tar.bz2 (39.1 MB / 77.0 MB)...',
+    )
+    expect(description.classes()).toContain('is-live')
+    expect(description.attributes('title')).toBe(
+      'Downloading Yosys package 3/7: pkg.tar.bz2 (39.1 MB / 77.0 MB)...',
+    )
   })
 })
