@@ -142,17 +142,24 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     return getStepEnumFromPath(segment)
   })
 
+  // Floorplan is a combined Studio configuration view. ECC persists its
+  // shared parameters on the first real floorplan stage.
+  const runtimeStep = computed(() =>
+    currentStep.value === StepEnum.FLOORPLAN ? StepEnum.PRE_FLOORPLAN : currentStep.value,
+  )
+
   const hasFlowStep = computed(() => currentStep.value !== undefined)
 
   async function fetchStepConfiguration(): Promise<void> {
     const stepEnum = currentStep.value
+    const runtimeStepEnum = runtimeStep.value
     const sessionId = workspaceLifecycle.currentSessionId.value
     const refetchToken = Symbol('step-config-refetch')
     activeRefetchToken = refetchToken
     const isCurrent = () => workspaceLifecycle.isCurrentSession(sessionId)
     const isLatestRefetch = () => activeRefetchToken === refetchToken
     const canApply = () => isCurrent() && isLatestRefetch()
-    if (!stepEnum) {
+    if (!stepEnum || !runtimeStepEnum) {
       info.value = null
       error.value = null
       workspaceRevision.value = null
@@ -180,7 +187,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
           return null
         }
         return await readWorkspaceStepConfigurationApi({
-          step: stepEnum,
+          step: runtimeStepEnum,
           workspaceHandle: session.workspaceId,
         })
       })
@@ -211,7 +218,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
         return
       }
       const responseStep = response.stepId ?? response.step
-      if (!sameFlowStepName(responseStep, stepEnum)) {
+      if (!sameFlowStepName(responseStep, runtimeStepEnum)) {
         responseKind.value = 'error'
         info.value = null
         error.value = 'Step configuration response belongs to another Flow Step.'
@@ -351,7 +358,10 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     _refetchToken: symbol,
   ) {
     if (!isRecord(data.parameters)) return
-    const stepId = typeof data.stepId === 'string' ? data.stepId : currentStep.value
+    const responseStepId =
+      typeof data.stepId === 'string' ? data.stepId : currentStep.value
+    const stepId =
+      currentStep.value === StepEnum.FLOORPLAN ? StepEnum.FLOORPLAN : responseStepId
     stepConfigPathResolved.value = stepId ? `${stepId} parameters` : 'Step parameters'
     stepConfigRaw.value = JSON.stringify(data.parameters, null, 2)
     stepConfigReadError.value = null
@@ -472,6 +482,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     stepConfigSaveError.value = null
     const sessionId = workspaceLifecycle.currentSessionId.value
     const step = currentStep.value
+    const runtimeStepId = runtimeStep.value
     const saveToken = Symbol('step-config-save')
     const isCurrentSave = () => activeStepConfigSave.value === saveToken
     const canApply = () =>
@@ -482,7 +493,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
         if (!value) activeStepConfigSave.value = null
       }
     }
-    if (!stepConfigPathResolved.value || !step) {
+    if (!stepConfigPathResolved.value || !step || !runtimeStepId) {
       setStepConfigSaveError('No editable Step configuration is available')
       return false
     }
@@ -520,7 +531,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
           commandId: crypto.randomUUID(),
           expectedWorkspaceRevision,
           parameters: draftBeforeSave,
-          stepId: step,
+          stepId: runtimeStepId,
           workspaceHandle: workspaceLifecycle.session.value.workspaceId,
         }),
       )
