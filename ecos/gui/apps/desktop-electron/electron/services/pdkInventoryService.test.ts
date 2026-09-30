@@ -413,6 +413,215 @@ describe('PdkInventoryService', () => {
     ).resolves.toBeNull()
   })
 
+  it('syncs the stored Requirement when drift still satisfies the bound Installation', async () => {
+    const root = await createTempDir()
+    const pdkRoot = join(root, 'vendor-pdk')
+    const projectRoot = join(root, 'project')
+    await mkdir(pdkRoot)
+    await mkdir(projectRoot)
+    const inventoryPath = join(root, 'state', 'pdk-inventory.json')
+    const service = new PdkInventoryService({
+      inventoryPath,
+      managedRoot: join(root, 'managed-pdks'),
+    })
+    const installation = await service.importInstallation({
+      displayName: 'Vendor PDK',
+      familyId: 'vendor-pdk',
+      root: pdkRoot,
+      version: '2.0',
+    })
+    await service.resolveBinding({
+      projectId: 'proj_demo',
+      projectRoot,
+      requirement: { familyId: 'vendor-pdk', version: '2.0', manualConfig: null },
+    })
+
+    await expect(
+      service.resolveBinding({
+        projectId: 'proj_demo',
+        projectRoot,
+        requirement: { familyId: 'vendor-pdk', version: null, manualConfig: null },
+      }),
+    ).resolves.toMatchObject({ installationId: installation.id })
+
+    const inventory = JSON.parse(await readFile(inventoryPath, 'utf8')) as {
+      bindings: Array<{ installationId: string; requirement: { version: string | null } }>
+    }
+    expect(inventory.bindings).toEqual([
+      expect.objectContaining({
+        installationId: installation.id,
+        requirement: expect.objectContaining({ version: null }),
+      }),
+    ])
+  })
+
+  it('rebinds a uniquely matching Installation when drift disqualifies the bound one', async () => {
+    const root = await createTempDir()
+    const importedRoot = join(root, 'vendor-imported')
+    const projectRoot = join(root, 'project')
+    const inventoryPath = join(root, 'state', 'pdk-inventory.json')
+    const managedRoot = join(root, 'managed-pdks')
+    await mkdir(importedRoot)
+    await mkdir(projectRoot)
+    await mkdir(join(managedRoot, 'vendor-pdk', '2.0'), { recursive: true })
+    const service = new PdkInventoryService({ inventoryPath, managedRoot })
+    await service.importInstallation({
+      displayName: 'Vendor PDK',
+      familyId: 'vendor-pdk',
+      root: importedRoot,
+    })
+    await service.resolveBinding({
+      projectId: 'proj_demo',
+      projectRoot,
+      requirement: { familyId: 'vendor-pdk', version: null, manualConfig: null },
+    })
+    const managed = await service.registerManagedInstallation({
+      id: 'pdk:vendor-pdk:managed:2.0',
+      displayName: 'Vendor PDK',
+      familyId: 'vendor-pdk',
+      root: join(managedRoot, 'vendor-pdk', '2.0'),
+      version: '2.0',
+      registrySha256: 'managed-sha',
+    })
+
+    await expect(
+      service.resolveBinding({
+        projectId: 'proj_demo',
+        projectRoot,
+        requirement: { familyId: 'vendor-pdk', version: '2.0', manualConfig: null },
+      }),
+    ).resolves.toMatchObject({ installationId: managed.id })
+
+    const inventory = JSON.parse(await readFile(inventoryPath, 'utf8')) as {
+      bindings: Array<{ installationId: string | null }>
+    }
+    expect(inventory.bindings).toEqual([
+      expect.objectContaining({ installationId: managed.id }),
+    ])
+  })
+
+  it('keeps the stale Binding when a drifted Requirement has no match', async () => {
+    const root = await createTempDir()
+    const pdkRoot = join(root, 'vendor-pdk')
+    const projectRoot = join(root, 'project')
+    await mkdir(pdkRoot)
+    await mkdir(projectRoot)
+    const inventoryPath = join(root, 'state', 'pdk-inventory.json')
+    const service = new PdkInventoryService({
+      inventoryPath,
+      managedRoot: join(root, 'managed-pdks'),
+    })
+    const installation = await service.importInstallation({
+      displayName: 'Vendor PDK',
+      familyId: 'vendor-pdk',
+      root: pdkRoot,
+    })
+    await service.resolveBinding({
+      projectId: 'proj_demo',
+      projectRoot,
+      requirement: { familyId: 'vendor-pdk', version: null, manualConfig: null },
+    })
+
+    await expect(
+      service.resolveBinding({
+        projectId: 'proj_demo',
+        projectRoot,
+        requirement: { familyId: 'vendor-pdk', version: '9.9', manualConfig: null },
+      }),
+    ).resolves.toBeNull()
+
+    const inventory = JSON.parse(await readFile(inventoryPath, 'utf8')) as {
+      bindings: Array<{ installationId: string | null }>
+    }
+    expect(inventory.bindings).toEqual([
+      expect.objectContaining({ installationId: installation.id }),
+    ])
+  })
+
+  it('keeps the stale Binding when a drifted Requirement matches multiple Installations', async () => {
+    const root = await createTempDir()
+    const pdkRoot = join(root, 'vendor-pdk')
+    const firstMatchRoot = join(root, 'vendor-first')
+    const secondMatchRoot = join(root, 'vendor-second')
+    const projectRoot = join(root, 'project')
+    await mkdir(pdkRoot)
+    await mkdir(projectRoot)
+    await mkdir(firstMatchRoot)
+    await mkdir(secondMatchRoot)
+    const inventoryPath = join(root, 'state', 'pdk-inventory.json')
+    const service = new PdkInventoryService({
+      inventoryPath,
+      managedRoot: join(root, 'managed-pdks'),
+    })
+    const installation = await service.importInstallation({
+      displayName: 'Vendor PDK',
+      familyId: 'vendor-pdk',
+      root: pdkRoot,
+    })
+    await service.resolveBinding({
+      projectId: 'proj_demo',
+      projectRoot,
+      requirement: { familyId: 'vendor-pdk', version: null, manualConfig: null },
+    })
+    await service.importInstallation({
+      displayName: 'Vendor PDK First',
+      familyId: 'vendor-pdk',
+      root: firstMatchRoot,
+      version: '2.0',
+    })
+    await service.importInstallation({
+      displayName: 'Vendor PDK Second',
+      familyId: 'vendor-pdk',
+      root: secondMatchRoot,
+      version: '2.0',
+    })
+
+    await expect(
+      service.resolveBinding({
+        projectId: 'proj_demo',
+        projectRoot,
+        requirement: { familyId: 'vendor-pdk', version: '2.0', manualConfig: null },
+      }),
+    ).resolves.toBeNull()
+
+    const inventory = JSON.parse(await readFile(inventoryPath, 'utf8')) as {
+      bindings: Array<{ installationId: string | null }>
+    }
+    expect(inventory.bindings).toEqual([
+      expect.objectContaining({ installationId: installation.id }),
+    ])
+  })
+
+  it('describes the bound and required versions when validation mismatches', async () => {
+    const root = await createTempDir()
+    const pdkRoot = join(root, 'vendor-pdk')
+    const projectRoot = join(root, 'project')
+    await mkdir(pdkRoot)
+    await mkdir(projectRoot)
+    const service = new PdkInventoryService({
+      inventoryPath: join(root, 'state', 'pdk-inventory.json'),
+      managedRoot: join(root, 'managed-pdks'),
+    })
+    await service.importInstallation({
+      displayName: 'Vendor PDK',
+      familyId: 'vendor-pdk',
+      root: pdkRoot,
+    })
+    await service.resolveBinding({
+      projectId: 'proj_demo',
+      projectRoot,
+      requirement: { familyId: 'vendor-pdk', version: null, manualConfig: null },
+    })
+
+    await expect(
+      service.validateWorkspace({
+        projectId: 'proj_demo',
+        projectRoot,
+        requirement: { familyId: 'vendor-pdk', version: '1.10.102', manualConfig: null },
+      }),
+    ).rejects.toThrow('installation: vendor-pdk@unknown, required: vendor-pdk@1.10.102')
+  })
+
   it('locates a Missing Installation without changing its identity or Binding', async () => {
     const root = await createTempDir()
     const oldRoot = join(root, 'old-pdk')

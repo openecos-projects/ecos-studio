@@ -43,6 +43,7 @@ export function executableNameFor(platform: NodeJS.Platform): string {
  * describe the GUI process (e.g. ephemeral AppImage mounts) and are excluded.
  */
 export const ECC_RUNTIME_ENV_KEYS = new Set([
+  'CHIPCOMPILER_KEPLER_FORMAL_ROOT',
   'CHIPCOMPILER_OSS_CAD_DIR',
   'ECOS_FE_CLI',
   'ECOS_FE_COMPILER_ROOT',
