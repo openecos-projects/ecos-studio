@@ -2,7 +2,12 @@
 
 The scheduler never retries a cell. A stale running marker is quarantined rather
 than treated as permission to rerun. CPU policy is monitoring-only: high host
-pressure stops dispatch, not already running native tools.
+pressure stops dispatch, not already running native tools. Amendment 05
+(2026-10-01) widens the formal queue to 12 lanes with at most two concurrent
+cells per design (same-design pairs were re-validated as interaction-free:
+independent workspaces, memory and knowledge; fresh calibration QoR is
+byte-stable under load), gated by an operator-adjustable ``lane_cap`` read
+from the state file each cycle (G3 starts at 6).
 """
 from __future__ import annotations
 
@@ -61,13 +66,14 @@ def resources(root: Path, previous: tuple[int, int, int]) -> tuple[dict[str, Any
 
 
 def dispatch_cap(sample: dict[str, Any], *, stable_low_samples: int,
-                 minimum_free_gib: float, clock: float) -> int:
+                 minimum_free_gib: float, clock: float, top: int = 6) -> int:
     """Admission gating only; never a claim to limit active CPU peaks.
 
     User amendment 02 (2026-09-30) raises the dispatch line to full machine
     capacity: expand while pressure stays under 95%, hold between 95% and
     100%, and stop new dispatch only at saturation (>=100%). Memory, NFS and
-    iowait guards are unchanged.
+    iowait guards are unchanged. ``top`` is the expansion tier (6 for smoke,
+    12 for formal per amendment 05); the hold tier never exceeds 4.
     """
     values = [sample[k] for k in ('sample_monotonic', 'cpu_utilization',
               'normalized_host_load', 'memory_available_gib', 'nfs_free_gib', 'iowait')]
@@ -80,16 +86,50 @@ def dispatch_cap(sample: dict[str, Any], *, stable_low_samples: int,
         return 0
     if sample['memory_available_gib'] <= 512 or sample['iowait'] >= .1:
         return 2
-    return 6 if pressure < .95 and stable_low_samples >= 3 else 4
+    return top if pressure < .95 and stable_low_samples >= 3 else min(top, 4)
 
 
-def eligible_cell(rows: list[dict[str, Any]], states: dict[str, Any], active_designs: set[str],
-                  priority: list[str]) -> dict[str, Any] | None:
+def eligible_cell(rows: list[dict[str, Any]], states: dict[str, Any],
+                  active_per_design: dict[str, int], priority: list[str],
+                  per_design_cap: int, lanes: int) -> dict[str, Any] | None:
+    """Pick the next cell: per-design pairs first, tail exception last.
+
+    Amendment 05 allows two concurrent cells of one design. A design may only
+    exceed that cap once every other design has no registered cells left, and
+    never beyond the effective lane count.
+    """
     rank = {design: i for i, design in enumerate(priority)}
+    remaining: dict[str, int] = {}
+    for row in rows:
+        if states[row['logical_episode_id']]['status'] == 'registered':
+            remaining[row['design']] = remaining.get(row['design'], 0) + 1
     for row in sorted(rows, key=lambda r: (rank[r['design']], r['design_queue_position'])):
-        if row['design'] not in active_designs and states[row['logical_episode_id']]['status'] == 'registered':
-            return row
+        if states[row['logical_episode_id']]['status'] != 'registered':
+            continue
+        design = row['design']
+        active = active_per_design.get(design, 0)
+        others = sum(count for other, count in remaining.items() if other != design)
+        if active >= per_design_cap and (others > 0 or active >= lanes):
+            continue
+        return row
     return None
+
+
+def adopt_lane_cap(state_path: Path, state: dict[str, Any], phase: str) -> int:
+    """Take the operator-adjustable lane cap from the on-disk state file.
+
+    The scheduler persists ``lane_cap`` itself, so the operator edits the same
+    key in the state file between cycles; the fresh read below adopts the edit
+    within one 10-second cycle. Defaults: 6 for formal (G3 start), 1 for smoke.
+    """
+    try:
+        disk = json.loads(state_path.read_text())
+        if isinstance(disk.get('lane_cap'), int) and 1 <= disk['lane_cap'] <= 12:
+            state['lane_cap'] = disk['lane_cap']
+    except (OSError, ValueError):
+        pass
+    state.setdefault('lane_cap', 6 if phase == 'formal' else 1)
+    return state['lane_cap']
 
 
 def process_identity(pid: int) -> str | None:
@@ -119,8 +159,8 @@ def main(argv: list[str] | None = None) -> int:
     rows = [row for row in manifest['cells'] if row['phase'] == phase]
     if not rows or len({r['logical_episode_id'] for r in rows}) != len(rows):
         raise ValueError('Non-unique or empty cell registration')
-    if manifest['max_in_flight_candidates'] != 1 or manifest['per_design_active_episode_cap'] != 1:
-        raise ValueError('Only q=1 and per-design exclusivity are authorized')
+    if manifest['max_in_flight_candidates'] != 1 or manifest['per_design_active_episode_cap'] != 2:
+        raise ValueError('Only q=1 and the amendment-05 per-design pair cap are authorized')
     if manifest['new_default_flow_replays'] != 0:
         raise ValueError('Default replay is forbidden')
     check_sources(manifest)
@@ -165,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
             time.sleep(10)
             sample, previous = resources(root, previous)
             stable = stable + 1 if max(sample['cpu_utilization'], sample['normalized_host_load']) < .95 else 0
-            active_designs = set()
+            active_per_design: dict[str, int] = {}
             for row in rows:
                 eid = row['logical_episode_id']
                 cell = state['cells'][eid]
@@ -179,7 +219,7 @@ def main(argv: list[str] | None = None) -> int:
                 identity = process_identity(cell['pid'])
                 alive = identity is not None and identity == cell['process_start_ticks']
                 if not exited and alive:
-                    active_designs.add(row['design'])
+                    active_per_design[row['design']] = active_per_design.get(row['design'], 0) + 1
                     continue
                 if process is not None:
                     process.wait()
@@ -190,11 +230,17 @@ def main(argv: list[str] | None = None) -> int:
                     cell.update(status='terminated', terminal=terminal, finished_at=now())
                 else:
                     cell.update(status='quarantined', reason='process exited without bound terminal record', finished_at=now())
+            lane_cap = adopt_lane_cap(state_path, state, phase)
             cap = dispatch_cap(sample, stable_low_samples=stable,
-                               minimum_free_gib=manifest['minimum_free_gib'], clock=time.monotonic())
+                               minimum_free_gib=manifest['minimum_free_gib'], clock=time.monotonic(),
+                               top=12 if phase == 'formal' else 6)
+            cap = min(cap, lane_cap)
             if phase == 'smoke':
                 cap = min(cap, 1)
-            sample.update(active_designs=sorted(active_designs), active_episodes=len(active_designs), dispatch_cap=cap)
+            active_total = sum(active_per_design.values())
+            sample.update(active_designs=sorted(active_per_design),
+                          active_per_design=dict(active_per_design),
+                          active_episodes=active_total, dispatch_cap=cap, lane_cap=lane_cap)
             state.update(heartbeat=now(), resource_sample=sample)
             write_json(state_path, state)
             if time.monotonic() - last_persist >= 60:
@@ -206,9 +252,11 @@ def main(argv: list[str] | None = None) -> int:
             # Integrity failures stop new work; initial failures are retained, never replaced.
             if any(c['status'] == 'quarantined' or c.get('terminal', {}).get('evidence_integrity_failure') for c in state['cells'].values()):
                 continue
-            if len(active_designs) >= cap:
+            if active_total >= cap:
                 continue
-            row = eligible_cell(rows, state['cells'], active_designs, manifest['design_priority'])
+            row = eligible_cell(rows, state['cells'], active_per_design,
+                                manifest['design_priority'],
+                                manifest['per_design_active_episode_cap'], cap)
             if row is None:
                 continue
             check_sources(manifest)
