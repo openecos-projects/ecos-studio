@@ -93,7 +93,7 @@ export function createShutdownCoordinator(
         detail: [
           ...blockers.details,
           '',
-          'ECOS Studio can stay open until active Flows, final snapshots, and Workspace creation finish safely.',
+          'ECOS Studio can stay open until active Flows, Agent optimization, final snapshots, and Workspace creation finish safely.',
         ].join('\n'),
         message: 'Work is still in progress',
         noLink: true,

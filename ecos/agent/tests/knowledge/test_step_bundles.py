@@ -1,0 +1,371 @@
+import json
+import re
+import shutil
+import subprocess
+import zipfile
+from pathlib import Path
+
+import pytest
+
+from ecos_agent.knowledge.generation import general_details, steps
+from ecos_agent.knowledge.retriever import GlobalKnowledgeRetriever, RetrievalConfig
+from ecos_agent.gui.provider import EcosAgentProvider
+from ecos_agent.knowledge.step import (
+    STEP_KNOWLEDGE_SPECS,
+    StepKnowledge,
+    StepKnowledgeError,
+)
+from tests.paths import AGENT_ROOT
+
+KNOWLEDGE_ROOT = AGENT_ROOT / "knowledge"
+
+
+def _bundle_smoke_retriever(knowledge: StepKnowledge) -> GlobalKnowledgeRetriever:
+    return GlobalKnowledgeRetriever(
+        (knowledge,),
+        config=RetrievalConfig(max_raw_bm25=None, min_token_overlap=2),
+    )
+
+
+def test_flow_knowledge_specs_match_current_ecc_flow_order() -> None:
+    assert [spec.slug for spec in STEP_KNOWLEDGE_SPECS] == [
+        "synthesis",
+        "floorplan",
+        "place",
+        "cts",
+        "legalization",
+        "sizer",
+        "route",
+        "drc",
+        "filler",
+        "rcx",
+        "sta",
+        "harden",
+    ]
+
+
+def test_sizer_knowledge_describes_only_verified_wrapper_orchestration() -> None:
+    spec = next(item for item in STEP_KNOWLEDGE_SPECS if item.slug == "sizer")
+    root = KNOWLEDGE_ROOT / "tool" / spec.slug
+    algorithms = (root / "knowledge" / "algorithms.md").read_text(encoding="utf-8")
+
+    assert "run sizer" in algorithms
+    assert "run legalization" in algorithms
+    assert "save data" in algorithms
+    assert "sizer staging DEF and Verilog" in algorithms
+    assert "does not inspect or claim the native Sizer algorithm" in algorithms
+    catalog = json.loads((root / "catalog.json").read_text(encoding="utf-8"))
+    allowed_sources = {
+        "sizer.runner",
+        "sizer.builder",
+        "sizer.subflow",
+        "sizer.metrics",
+        "dreamplace.runner",
+        "ecc.runner",
+    }
+    for entity in catalog["entities"]:
+        if entity["kind"] == "algorithm":
+            assert {item["source_id"] for item in entity["evidence"]} <= allowed_sources
+
+
+def test_stage_generator_builds_place_through_the_single_step_dispatch(tmp_path: Path) -> None:
+    output = tmp_path / "knowledge"
+    subprocess.run(
+        ["uv", "run", "python", "scripts/build_knowledge.py", "--output", str(output)],
+        cwd=AGENT_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert sorted(path.name for path in output.iterdir() if path.is_dir()) == ["general", "tool"]
+    assert sorted(path.name for path in (output / "tool").iterdir()) == sorted(
+        spec.slug for spec in STEP_KNOWLEDGE_SPECS
+    )
+    assert sorted(path.name for path in (output / "general").iterdir()) == [
+        "congestion",
+        "wirelength",
+    ]
+    assert (output / "retrieval-config.v1.json").is_file()
+    place_catalog = json.loads((output / "tool" / "place" / "catalog.json").read_text(encoding="utf-8"))
+    assert place_catalog["schema_version"] == "ecos-place-catalog.v3"
+    general_catalog = json.loads((output / "general" / "congestion" / "catalog.json").read_text(encoding="utf-8"))
+    assert general_catalog["schema_version"] == "ecos-general-catalog.v2"
+    assert "strategy" in {entity["kind"] for entity in general_catalog["entities"]}
+    assert "strategy" not in {entity["kind"] for entity in place_catalog["entities"]}
+    assert not (AGENT_ROOT / "scripts" / "knowledge").exists()
+    assert (AGENT_ROOT / "src/ecos_agent/knowledge/generation/steps.py").is_file()
+
+
+def test_generated_floorplan_bundle_covers_current_io_and_macro_boundaries(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "knowledge"
+    subprocess.run(
+        ["uv", "run", "python", "scripts/build_knowledge.py", "--output", str(output)],
+        cwd=AGENT_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    floorplan = output / "tool" / "floorplan"
+    drc = output / "tool" / "drc"
+    algorithms = (floorplan / "knowledge" / "algorithms.md").read_text(encoding="utf-8")
+    failures = (floorplan / "knowledge" / "failures.md").read_text(encoding="utf-8")
+    parameters = (floorplan / "knowledge" / "parameters.md").read_text(encoding="utf-8")
+    drc_failures = (drc / "knowledge" / "failures.md").read_text(encoding="utf-8")
+    catalog = json.loads((floorplan / "catalog.json").read_text(encoding="utf-8"))
+    entities = {entity["id"]: entity for entity in catalog["entities"]}
+
+    parameter_ids = {
+        entity["id"] for entity in catalog["entities"] if entity["kind"] == "parameter"
+    }
+    assert "parameter.floorplan.macro_placer_macro_location_path" not in parameter_ids
+    assert "macro_location_path" not in parameters
+
+    assert "fixed handoff from the macro-placement step" in algorithms
+    assert "`tcl_save` writes the hard-macro placement commands" in algorithms
+    assert "`FPInterface::inputMacroPlacement()` parses `placeInstance`-style lines" in algorithms
+    assert "`run_simple_fp`, which runs iFP `DieBuilder` and auto IO-pin placement" in algorithms
+    assert "two-pitch spacing" in algorithms
+    assert "one-pitch spacing" in algorithms
+    assert "capacity exhaustion emits a native error" in algorithms
+    assert "native error severity" in algorithms
+    assert "GUI checklist may expose the aggregate check as a warning" in algorithms
+
+    for failure_id in (
+        "failure.floorplan.io_capacity",
+        "failure.floorplan.macro_placement",
+        "failure.floorplan.macro_core",
+    ):
+        assert "ifp.interface" in {
+            evidence["source_id"] for evidence in entities[failure_id]["evidence"]
+        }
+
+    for failure_id in (
+        "failure.floorplan.config",
+        "failure.floorplan.io_layers",
+        "failure.floorplan.io_capacity",
+        "failure.floorplan.macro_placement",
+        "failure.floorplan.macro_core",
+        "failure.floorplan.native_progress",
+    ):
+        assert f"<a id=\"{failure_id}\"></a>" in failures
+    assert "does not relocate it" in failures
+    assert "not a relocation or repair algorithm" in failures
+    assert "<a id=\"failure.drc.invalid_shape\"></a>" in drc_failures
+    assert "violation_map.json" in drc_failures
+    assert "aborts feature translation rather than being counted as zero violations" in drc_failures
+
+
+def test_build_all_uses_the_same_bundle_builder_for_every_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    built: list[tuple[str, Path]] = []
+    monkeypatch.setattr(
+        steps,
+        "_build_bundle",
+        lambda stage, output: built.append((stage.slug, output)),
+    )
+    monkeypatch.setattr(general_details, "GENERAL_KNOWLEDGE_METRICS", ())
+
+    steps.build_all(tmp_path)
+
+    assert built == [
+        (stage.slug, tmp_path / "tool" / stage.slug) for stage in steps.STAGES
+    ]
+
+
+def test_committed_stage_bundles_pass_generator_check() -> None:
+    subprocess.run(
+        ["uv", "run", "python", "scripts/build_knowledge.py", "--check"],
+        cwd=AGENT_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_generated_source_inventories_are_scoped_and_revision_free(tmp_path: Path) -> None:
+    output = tmp_path / "knowledge"
+    subprocess.run(
+        ["uv", "run", "python", "scripts/build_knowledge.py", "--output", str(output)],
+        cwd=AGENT_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    for sources_path in output.glob("**/sources.json"):
+        sources = json.loads(sources_path.read_text(encoding="utf-8"))
+        catalog = json.loads(sources_path.with_name("catalog.json").read_text(encoding="utf-8"))
+        inventory_ids = {item["id"] for item in sources["sources"]}
+        referenced_ids = {
+            evidence["source_id"]
+            for entity in catalog["entities"]
+            for evidence in entity["evidence"]
+        }
+
+        assert "repositories" not in sources
+        assert inventory_ids == referenced_ids
+
+
+def test_every_flow_step_has_a_source_audited_knowledge_bundle() -> None:
+    for spec in STEP_KNOWLEDGE_SPECS:
+        root = KNOWLEDGE_ROOT / "tool" / spec.slug
+        knowledge = StepKnowledge.from_directory(root, spec)
+        answer = _bundle_smoke_retriever(knowledge).reply(
+            f"How does the {spec.step_name} stage execute?"
+        )
+
+        assert {"algorithms.md", "artifacts.md", "failures.md", "metrics.md", "parameters.md"} <= {
+            path.name for path in (root / "knowledge").iterdir()
+        }
+        assert answer is not None
+        assert f"algorithm.{spec.slug}.execution" in answer.entity_ids
+        assert answer.contract["schema_version"] == "ecos-knowledge-answer.v2"
+        assert answer.contract["read_only"] is True
+
+
+def test_step_bundles_have_entity_level_algorithm_artifact_metric_and_failure_knowledge() -> None:
+    for spec in STEP_KNOWLEDGE_SPECS:
+        root = KNOWLEDGE_ROOT / "tool" / spec.slug
+        knowledge = StepKnowledge.from_directory(root, spec)
+        documents = {
+            name: (root / "knowledge" / name).read_text(encoding="utf-8")
+            for name in ("algorithms.md", "artifacts.md", "failures.md", "metrics.md", "parameters.md")
+        }
+        anchors = {
+            name: re.findall(r'<a id="([^"]+)"></a>', text)
+            for name, text in documents.items()
+        }
+        cases = [
+            json.loads(line)
+            for line in (root / "regression" / f"{spec.slug}_questions.jsonl").read_text(
+                encoding="utf-8"
+            ).splitlines()
+            if line
+        ]
+
+        assert len(anchors["algorithms.md"]) >= 5
+        assert len(anchors["failures.md"]) >= 3
+        assert len(cases) >= 5
+        if spec.slug != "place":
+            assert len(
+                [case for case in cases if case["entity_id"].startswith(f"algorithm.{spec.slug}.")]
+            ) >= 5
+        assert "**Meaning:**" in documents["parameters.md"]
+        assert "**Role:**" in documents["parameters.md"]
+        assert "is the normalized" not in documents["metrics.md"]
+        assert documents["metrics.md"].count("**Boundary:**") == len(anchors["metrics.md"])
+        assert all(case["entity_id"] in knowledge.entity_ids for case in cases)
+
+        if spec.slug in {"synthesis", "harden"}:
+            assert len(anchors["artifacts.md"]) >= 4
+        else:
+            assert len(anchors["artifacts.md"]) >= 10
+            assert f"artifact.{spec.slug}.output_def" in knowledge.entity_ids
+            assert f"artifact.{spec.slug}.qor_metrics" in knowledge.entity_ids
+
+
+def test_step_bundle_regression_questions_return_audited_read_only_answers() -> None:
+    for spec in STEP_KNOWLEDGE_SPECS:
+        root = KNOWLEDGE_ROOT / "tool" / spec.slug
+        knowledge = StepKnowledge.from_directory(root, spec)
+        cases = [
+            json.loads(line)
+            for line in (root / "regression" / f"{spec.slug}_questions.jsonl").read_text(
+                encoding="utf-8"
+            ).splitlines()
+            if line
+        ]
+
+        for case in cases:
+            answer = _bundle_smoke_retriever(knowledge).reply(case["question"])
+
+            assert answer is not None
+            assert case["entity_id"] in answer.entity_ids
+            assert case["required_text"] in answer.text
+            assert answer.contract["read_only"] is True
+
+
+def test_step_bundle_rejects_changed_markdown(tmp_path: Path) -> None:
+    spec = next(item for item in STEP_KNOWLEDGE_SPECS if item.slug == "cts")
+    copied_bundle = tmp_path / "cts"
+    shutil.copytree(KNOWLEDGE_ROOT / "tool" / "cts", copied_bundle)
+    algorithms = copied_bundle / "knowledge" / "algorithms.md"
+    algorithms.write_text(algorithms.read_text(encoding="utf-8") + "\nchanged", encoding="utf-8")
+
+    with pytest.raises(StepKnowledgeError, match="hash"):
+        StepKnowledge.from_directory(copied_bundle, spec)
+
+
+def test_provider_clarifies_ambiguous_cts_request_without_changing_operation_state() -> None:
+    events: list[dict[str, object]] = []
+
+    def choose_operation(_context: dict[str, object]) -> dict[str, object]:
+        return {
+            "schema_version": "flow-agent.gui_chat_response.v1",
+            "operation": "2",
+            "answer": None,
+        }
+
+    provider = EcosAgentProvider(emit=events.append, chat_response_parser=choose_operation)
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    provider.sessions[session_id].pending_interaction = None
+
+    provider.send_message({"sessionId": session_id, "message": "CTS stage execution"})
+
+    interaction = next(event for event in reversed(events) if event["type"] == "interaction")
+    assert interaction["interaction"]["purpose"] == "clarification"
+    assert interaction["interaction"]["kind"] == "choice"
+    assert provider.sessions[session_id].phase == "home_ready"
+
+
+def test_short_stage_acronyms_do_not_match_an_operation_request() -> None:
+    events: list[dict[str, object]] = []
+    contexts: list[dict[str, object]] = []
+
+    def clarify(context: dict[str, object]) -> dict[str, object]:
+        contexts.append(context)
+        return {
+            "schema_version": "flow-agent.gui_chat_response.v1",
+            "operation": None,
+            "answer": None,
+            "clarification": {
+                "title": "Which flow would you like to start?",
+                "options": [{"label": option["label"]} for option in context["allowed_operations"]],
+            },
+        }
+
+    provider = EcosAgentProvider(emit=events.append, chat_response_parser=clarify)
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    provider.sessions[session_id].pending_interaction = None
+
+    provider.send_message({"sessionId": session_id, "message": "start the flow"})
+
+    assert len(contexts) == 1
+    assert [option["id"] for option in contexts[0]["allowed_operations"]] == ["1", "2", "3"]
+    assert contexts[0]["session_state"]["phase"] == "home_ready"
+    assert provider.sessions[session_id].phase == "home_ready"
+    assert not any("contract" in event for event in events)
+
+
+def test_wheel_build_copies_external_knowledge_and_removes_legacy_paths(tmp_path: Path) -> None:
+    output = tmp_path / "dist"
+    subprocess.run(
+        ["uv", "build", "--wheel", "--out-dir", str(output)],
+        cwd=AGENT_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    with zipfile.ZipFile(next(output.glob("*.whl"))) as wheel:
+        names = wheel.namelist()
+    assert "ecos_agent/knowledge/tool/place/catalog.json" in names
+    assert not any(name.startswith("ecos_agent/knowledge/inputs/") for name in names)
+    assert "ecos_agent/place_knowledge.py" not in names
+    assert not any("_knowledge/" in name for name in names)
+    assert "graft knowledge" in (AGENT_ROOT / "MANIFEST.in").read_text(encoding="utf-8")

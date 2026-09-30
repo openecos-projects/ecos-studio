@@ -131,6 +131,9 @@ describe('workspace desktop bridge', () => {
         }),
       }),
     )
+    expect(create.mock.calls[0]?.[0]).not.toMatchObject({
+      payload: { projectRoot: expect.anything() },
+    })
   })
 
   it('maps wizard display keys onto spec keys through the parameter catalog index', async () => {

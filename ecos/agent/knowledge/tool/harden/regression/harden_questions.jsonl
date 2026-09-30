@@ -1,0 +1,9 @@
+{"entity_id": "algorithm.harden.execution", "id": "harden-execution", "question": "Explain algorithm.harden.execution", "required_text": "Execution path:"}
+{"entity_id": "algorithm.harden.delivery_input_selection", "id": "harden-delivery_input_selection", "question": "Explain harden algorithm delivery input selection.", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.harden.abstract_lef_generation", "id": "harden-abstract_lef_generation", "question": "Explain harden algorithm abstract lef generation.", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.harden.timing_model_characterization", "id": "harden-timing_model_characterization", "question": "Explain harden algorithm timing model characterization.", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.harden.hardened_gds_export", "id": "harden-hardened_gds_export", "question": "Explain harden algorithm hardened gds export.", "required_text": "Source evidence:"}
+{"entity_id": "parameter.harden.liberty", "id": "harden-parameter", "question": "Explain parameter.harden.liberty", "required_text": "**Role:**"}
+{"entity_id": "metric.harden_artifact_missing_count", "id": "harden-metric", "question": "Explain metric.harden_artifact_missing_count", "required_text": "**Calculation:**"}
+{"entity_id": "artifact.harden.outputs", "id": "harden-artifact", "question": "Explain artifact.harden.outputs", "required_text": "**Meaning:**"}
+{"entity_id": "failure.harden.preconditions", "id": "harden-failure", "question": "Explain failure.harden.preconditions", "required_text": "**Failure mode:**"}

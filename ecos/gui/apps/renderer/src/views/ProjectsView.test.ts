@@ -140,6 +140,7 @@ vi.mock('./project-management/frontendProjectWorkspaceData', () => ({
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => ({
     dialog: { pickDirectory: (options: unknown) => testState.pickDirectory(options) },
+    resources: { list: vi.fn(async () => ({ resources: [] })) },
     ecc: { runtime: undefined },
     productCommands: { execute: vi.fn() },
     runtime: {
@@ -201,6 +202,7 @@ describe('ProjectsView background lifecycle integration', () => {
     vi.mocked(rememberProjectHistoryEntry).mockReset()
     vi.mocked(rememberProjectHistoryEntry).mockResolvedValue([testState.project])
     vi.mocked(importProjectManagementWorkspace).mockClear()
+    consumeWorkspaceWizardRequest()
     testState.comparisonProjection = { data: null, status: 'idle' }
     testState.projectManifestOverride = null
     testState.selectProject.mockReset()
@@ -239,6 +241,22 @@ describe('ProjectsView background lifecycle integration', () => {
     expect(testState.showToast).not.toHaveBeenCalledWith(
       expect.objectContaining({ summary: 'Workspace not imported' }),
     )
+  })
+
+  it('requests the workspace wizard from a project row New action', async () => {
+    const wrapper = shallowMount(ProjectsView)
+    await flushPromises()
+
+    await wrapper.get('button[aria-label="New workspace in demo"]').trigger('click')
+    await flushPromises()
+
+    expect(consumeWorkspaceWizardRequest()).toEqual({
+      initialConfig: expect.objectContaining({
+        directory: '/projects/demo/ws_0002',
+        managedWorkspaceRoot: '/projects/demo',
+        lockWorkspaceDirectory: true,
+      }),
+    })
   })
 
   it('loads frontend project steps without opening a backend comparison session', async () => {
@@ -521,6 +539,18 @@ describe('ProjectsView background lifecycle integration', () => {
 
     expect(wrapper.findAll('.project-workspace-tree')).toHaveLength(1)
     expect(wrapper.find('.project-list-preview-toggle').exists()).toBe(false)
+  })
+
+  it('exposes the field names used by Quick Start project creation', async () => {
+    const wrapper = shallowMount(ProjectsView)
+    await flushPromises()
+
+    await wrapper.get('button.project-toolbar-action.primary').trigger('click')
+
+    expect(wrapper.find('input[name="project-name"]').exists()).toBe(true)
+    expect(wrapper.find('input[name="design-name"]').exists()).toBe(true)
+    expect(wrapper.find('input[name="project-storage-location"]').exists()).toBe(true)
+    expect(wrapper.find('select[name="managed-mpc"]').exists()).toBe(true)
   })
 
   describe('project consistency repair', () => {

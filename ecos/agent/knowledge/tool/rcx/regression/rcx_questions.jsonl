@@ -1,0 +1,10 @@
+{"entity_id": "algorithm.rcx.execution", "id": "rcx-execution", "question": "Explain algorithm.rcx.execution", "required_text": "Execution path:"}
+{"entity_id": "algorithm.rcx.topology_construction", "id": "rcx-topology_construction", "question": "Explain rcx algorithm topology construction.", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.rcx.environment_overlap_model", "id": "rcx-environment_overlap_model", "question": "Explain rcx algorithm environment overlap model.", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.rcx.corner_effective_geometry", "id": "rcx-corner_effective_geometry", "question": "Explain rcx algorithm corner effective geometry.", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.rcx.resistance_extraction", "id": "rcx-resistance_extraction", "question": "Explain rcx algorithm resistance extraction.", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.rcx.capacitance_and_spef", "id": "rcx-capacitance_and_spef", "question": "Explain rcx algorithm capacitance and spef.", "required_text": "Source evidence:"}
+{"entity_id": "parameter.rcx.output", "id": "rcx-parameter", "question": "Explain parameter.rcx.output", "required_text": "**Role:**"}
+{"entity_id": "metric.rcx_missing_corner_count", "id": "rcx-metric", "question": "Explain metric.rcx_missing_corner_count", "required_text": "**Calculation:**"}
+{"entity_id": "artifact.rcx.outputs", "id": "rcx-artifact", "question": "Explain artifact.rcx.outputs", "required_text": "**Meaning:**"}
+{"entity_id": "failure.rcx.preconditions", "id": "rcx-failure", "question": "Explain failure.rcx.preconditions", "required_text": "**Failure mode:**"}

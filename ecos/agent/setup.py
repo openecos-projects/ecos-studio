@@ -1,5 +1,5 @@
 from pathlib import Path
-from shutil import copytree, rmtree
+from shutil import copytree, ignore_patterns, rmtree
 
 from setuptools import setup
 from setuptools.command.build_py import build_py as BuildPy
@@ -17,7 +17,7 @@ class BuildKnowledge(BuildPy):
         source = Path(__file__).parent / "knowledge"
         target = package / "knowledge"
         rmtree(target, ignore_errors=True)
-        copytree(source, target)
+        copytree(source, target, ignore=ignore_patterns("inputs"))
 
 
 setup(cmdclass={"build_py": BuildKnowledge})

@@ -2,5 +2,5 @@
   "providerId": "ecos_agent",
   "displayName": "ECOS Agent",
   "command": "./ecos-agent",
-  "protocolVersion": 1
+  "protocolVersion": 2
 }

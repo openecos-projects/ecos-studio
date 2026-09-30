@@ -1,0 +1,723 @@
+from __future__ import annotations
+
+import json
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+
+from .support import (
+    CURRENT_VALUES,
+    HASH,
+    _AuditedFakeCodex,
+    _Clock,
+    _FakeCodex,
+    _FakeEcc,
+    _budget,
+    _controller,
+    _eligible_terminal,
+    _execution_context,
+    _native_receipt,
+    _objective,
+    _observation,
+    _proposal,
+    _retrieval,
+    _started,
+)
+
+from ecos_agent.codex.rpc import CodexProviderError
+from ecos_agent.ecc_contracts import ECCStepName
+from ecos_agent.optimization.contracts import (
+    BudgetSnapshot,
+    EpisodeBudget,
+    ObservationReference,
+    OptimizationDecision,
+    OptimizationEpisodeState,
+    OptimizationKnob,
+    ProposalReason,
+    RequestedKnobValue,
+    StrategyDirection,
+)
+from ecos_agent.optimization.controller import (
+    CandidateExecutionReceipt,
+    OptimizationEpisodeController,
+)
+from ecos_agent.optimization.decision_audit import OptimizationDecisionAudit
+from ecos_agent.optimization.knowledge.cases import EmpiricalCaseAuditStore
+from ecos_agent.optimization.ledger import (
+    OptimizationOutcomeKind,
+    OptimizationPlanningAudit,
+)
+from ecos_agent.optimization.parameters.semantics import load_parameter_cards
+
+
+def test_budget_exhaustion_stops_without_calling_fake_codex(tmp_path: Path) -> None:
+    codex = _FakeCodex(_proposal)
+    controller = _controller(tmp_path, codex, _FakeEcc(), budget=_budget(candidates=20))
+
+    stopped = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert stopped.state == OptimizationEpisodeState.STOPPED
+    assert codex.contexts == []
+
+
+@pytest.mark.parametrize(
+    ("decision", "expected_state"),
+    [
+        (OptimizationDecision.CONTINUE, OptimizationEpisodeState.PLANNING),
+        (OptimizationDecision.STOP, OptimizationEpisodeState.PLANNING),
+        (OptimizationDecision.ESCALATE, OptimizationEpisodeState.ESCALATED),
+    ],
+)
+def test_non_action_decisions_never_reach_fake_ecc(
+    tmp_path: Path,
+    decision: OptimizationDecision,
+    expected_state: OptimizationEpisodeState,
+) -> None:
+    def response(context: object) -> dict[str, object]:
+        proposal = _proposal(context)
+        proposal["decision"] = decision
+        proposal.pop("action")
+        return proposal
+
+    ecc = _FakeEcc()
+    controller = _controller(tmp_path, _FakeCodex(response), ecc)
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert result.state == expected_state
+    assert result.proposal is not None
+    assert ecc.start_calls == []
+
+
+def test_controller_defers_early_stop_then_escalates_without_selecting_value(tmp_path: Path) -> None:
+    def stop(context: object) -> dict[str, object]:
+        proposal = _proposal(context)
+        proposal.update(
+            decision=OptimizationDecision.STOP,
+            reason_code=ProposalReason.NO_LEGAL_CANDIDATE,
+            rationale_summary="No evidence-backed action remains.",
+        )
+        proposal.pop("action")
+        return proposal
+
+    pinned = BudgetSnapshot(
+        budget=EpisodeBudget.from_reference_rerun(11.0).model_copy(
+            update={"max_planning_only_turns": 2}
+        )
+    )
+    controller = _controller(
+        tmp_path, _FakeCodex(stop, stop), _FakeEcc(_started()), budget=pinned
+    )
+
+    first = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    second = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert first.state == OptimizationEpisodeState.PLANNING
+    assert first.rejection_reason == "minimum_candidates_not_met"
+    assert second.state == OptimizationEpisodeState.ESCALATED
+    assert second.requested is None
+    assert second.rejection_reason == "minimum_candidates_not_met"
+
+
+def test_bare_continue_still_escalates_at_the_default_stall_limit(
+    tmp_path: Path,
+) -> None:
+    def continue_turn(context: object) -> dict[str, object]:
+        proposal = _proposal(context)
+        proposal.update(
+            decision=OptimizationDecision.CONTINUE,
+            reason_code=ProposalReason.INSUFFICIENT_EVIDENCE,
+            rationale_summary="Waiting for more evidence.",
+        )
+        proposal.pop("action")
+        return proposal
+
+    controller = _controller(
+        tmp_path,
+        _FakeCodex(*[continue_turn] * 4),
+        _FakeEcc(_started()),
+    )
+
+    results = [
+        controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+        for _ in range(4)
+    ]
+
+    assert controller.budget.budget.max_planning_only_turns == 4
+    assert [result.state for result in results[:3]] == [
+        OptimizationEpisodeState.PLANNING
+    ] * 3
+    assert results[3].state == OptimizationEpisodeState.ESCALATED
+
+
+def test_controller_escalates_after_codex_parse_and_repair_errors(tmp_path: Path) -> None:
+    controller = _controller(
+        tmp_path,
+        _AuditedFakeCodex(
+            lambda context: _proposal(
+                context,
+                observation_refs=[
+                    context.observation_ref.model_dump(),
+                    ObservationReference(
+                        observation_id="terminal-Harden", sha256=HASH
+                    ).model_dump(),
+                ],
+            ),
+            CodexProviderError("schema validation", failure_class="parse_error"),
+            CodexProviderError("schema validation", failure_class="parse_error"),
+        ),
+        _FakeEcc(_started()),
+    )
+
+    first = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    second = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert first.rejection_reason == "observation_reference"
+    assert second.state == OptimizationEpisodeState.ESCALATED
+    assert second.requested is None
+    assert second.rejection_reason == "proposal_repair_failed"
+
+
+class _V2FakeCodex(_FakeCodex):
+    def __init__(self, *responses: object) -> None:
+        super().__init__()
+        self.v2_responses = list(responses)
+        self.v2_calls = []
+
+    def propose_v2(self, context: object, domain: object) -> object:
+        self.v2_calls.append((context, domain))
+        response = self.v2_responses.pop(0)
+        return response(context, domain) if callable(response) else response
+
+
+def _v2_proposal(
+    context: object, domain: object, *, value: object = None
+) -> dict[str, object]:
+    supported = next(
+        item for item in context.supported_action_view.actions
+        if any(
+            action.knob_id == item.knob_id and action.direction == item.direction
+            for action in context.legal_actions
+        )
+    )
+    action = supported
+    if isinstance(domain, tuple):
+        domain = next(item for item in domain if item.knob_id == action.knob_id)
+    proposal = _proposal(
+        context,
+        knob_id=action.knob_id.value,
+        direction=action.direction,
+        requested_value=value,
+    )
+    proposal["action"].update(
+        {
+            "claim_id": supported.claim_ref.entity_id,
+            "claim_sha256": supported.claim_sha256,
+            "binding_id": supported.binding_id,
+            "binding_sha256": supported.binding_sha256,
+        }
+    )
+    return proposal
+
+
+def test_full_agent_v2_rejects_mismatched_compiled_binding(
+    tmp_path: Path,
+) -> None:
+
+    def mismatched(context: object, domains: object) -> dict[str, object]:
+        proposal = _v2_proposal(context, domains)
+        proposal["action"]["binding_id"] = "binding.stale.v1"
+        return proposal
+
+    controller = _controller(
+        tmp_path,
+        _V2FakeCodex(mismatched, mismatched),
+        _FakeEcc(),
+    )
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert result.rejection_reason == "proposal_repair_failed"
+
+
+def test_controller_uses_exact_v2_value_by_default(
+    tmp_path: Path,
+) -> None:
+    planner = _V2FakeCodex(_v2_proposal)
+    executor = _FakeEcc(_started())
+    controller = _controller(tmp_path, planner, executor)
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    context, domain = planner.v2_calls[0]
+    assert result.requested is not None
+    assert len(domain) > 1
+    selected_domain = next(
+        item for item in domain if item.knob_id == result.requested.knob_id
+    )
+    assert selected_domain.accepts(result.requested.value)
+    assert result.requested.knob_id == context.supported_action_view.actions[0].knob_id
+    assert result.planner_source == "llm"
+
+    controller.execute()
+    selected_domain = next(
+        item
+        for item in context.effective_domains
+        if item.knob_id == result.requested.knob_id
+    )
+    assert executor.start_calls[0].context_sha256 == selected_domain.context_sha256
+    assert executor.start_calls[0].seed == 0
+
+
+def test_controller_executes_exact_llm_probe_without_a_knowledge_claim(tmp_path: Path) -> None:
+    planner = _FakeCodex(
+        lambda context: _proposal(
+            context,
+            knob_id="place.target_density",
+            requested_value=0.731234,
+            knowledge_refs=[],
+        )
+    )
+    executor = _FakeEcc(_started())
+    controller = _controller(tmp_path, planner, executor)
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert result.state == OptimizationEpisodeState.AWAITING_EXECUTION
+    assert result.requested == RequestedKnobValue(
+        knob_id="place.target_density", value=0.731234
+    )
+    controller.execute()
+    assert executor.start_calls[0].requested == result.requested
+
+
+def test_v2_terminal_case_is_persisted_and_injected_on_next_turn(
+    tmp_path: Path,
+) -> None:
+    planner = _V2FakeCodex(_v2_proposal, _v2_proposal)
+    controller = _controller(
+        tmp_path,
+        planner,
+        _FakeEcc(_started()),
+        knowledge_case_shots=3,
+    )
+    retrieval = _retrieval()
+    card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
+    binding = retrieval.support_catalog.bindings[0].model_copy(
+        update={"toolchain_ref": card.tool.source_sha256}
+    )
+    retrieval = replace(
+        retrieval,
+        support_catalog=retrieval.support_catalog.model_copy(
+            update={"bindings": (binding,)}
+        ),
+    )
+    planned = controller.plan(_observation(), retrieval, CURRENT_VALUES)
+    assert planned.requested is not None
+    controller.execute()
+    native = _native_receipt(planned.requested)
+
+    controller.complete_terminal(
+        CandidateExecutionReceipt(
+            execution_id="execution-1",
+            started=True,
+            outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
+            parameter_application_receipt=native,
+        ),
+        _eligible_terminal(),
+        outcome=OptimizationOutcomeKind.IMPROVED,
+    )
+    replay = EmpiricalCaseAuditStore(tmp_path / "episode").verify()
+
+    assert len(replay.cases) == 1
+    assert replay.cases == controller._case_pool.verify().cases
+    controller.plan(_observation(), retrieval, CURRENT_VALUES)
+    assert planner.v2_calls[-1][0].empirical_cases == replay.cases
+    assert planner.v2_calls[-1][0].empirical_case_audit is not None
+
+
+@pytest.mark.parametrize("schema_version", ["ecos.optimization_proposal.v1", "ecos.optimization_proposal.v2"])
+def test_controller_rejects_old_proposal_schemas(
+    tmp_path: Path, schema_version: str,
+) -> None:
+    def old_proposal(context: object) -> dict[str, object]:
+        proposal = _proposal(context)
+        proposal["schema_version"] = schema_version
+        return proposal
+
+    controller = _controller(tmp_path, _FakeCodex(old_proposal, old_proposal), _FakeEcc())
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    assert result.state == OptimizationEpisodeState.ESCALATED
+    assert result.requested is None
+    assert result.rejection_reason == "proposal_repair_failed"
+
+
+def test_controller_fails_closed_when_default_v2_planner_lacks_interface(
+    tmp_path: Path,
+) -> None:
+
+    class MissingV2Planner:
+        def propose(self, context: object) -> object:
+            raise AssertionError("v1 planner must not be used by default")
+
+    controller = _controller(tmp_path, MissingV2Planner(), _FakeEcc())
+
+    with pytest.raises(CodexProviderError, match="does not implement propose_v2"):
+        controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+
+def test_controller_accepts_llm_selected_non_first_knob(
+    tmp_path: Path,
+) -> None:
+
+    def choose_aspect_ratio(
+        context: object, domains: tuple[object, ...]
+    ) -> dict[str, object]:
+        proposal = _v2_proposal(context, domains)
+        domain = next(
+            item for item in domains if item.knob_id.value == "floorplan.aspect_ratio"
+        )
+        proposal["action"] = {
+            **proposal["action"],
+            "knob_id": "floorplan.aspect_ratio",
+            "direction": "decrease",
+            "requested_value": 0.75,
+            "effective_domain_sha256": domain.snapshot_sha256,
+        }
+        return proposal
+
+    planner = _V2FakeCodex(choose_aspect_ratio)
+    controller = _controller(tmp_path, planner, _FakeEcc())
+
+    observation = _observation().model_copy(
+        update={
+            "observation_id": "observation-floorplan",
+            "stage": ECCStepName.POST_FLOORPLAN,
+            "metrics": {"core_area": 2500.0, "die_area": 3000.0},
+        }
+    )
+    retrieval = _retrieval()
+    retrieval = replace(
+        retrieval,
+        request=retrieval.request.model_copy(
+            update={
+                "current_stage": ECCStepName.POST_FLOORPLAN,
+                "observed_metric_ids": ("core_area", "die_area"),
+            }
+        ),
+        support_catalog=retrieval.support_catalog.model_copy(
+            update={
+                "claims": (
+                    retrieval.support_catalog.claims[0].model_copy(
+                        update={"stages": ("postFloorplan",), "state_predicates": ()}
+                    ),
+                )
+            }
+        ),
+    )
+
+    result = controller.plan(observation, retrieval, CURRENT_VALUES)
+
+    assert result.planner_source == "llm"
+    assert result.requested == RequestedKnobValue(
+        knob_id="floorplan.aspect_ratio", value=0.75
+    )
+
+
+def test_controller_repairs_one_invalid_v2_response_before_accepting_exact_value(
+    tmp_path: Path,
+) -> None:
+
+    def invalid(context: object, domain: object) -> dict[str, object]:
+        return _v2_proposal(context, domain, value=999)
+
+    planner = _V2FakeCodex(invalid, _v2_proposal)
+    controller = _controller(tmp_path, planner, _FakeEcc())
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert len(planner.v2_calls) == 2
+    assert controller.budget.consumed_planning_calls == 2
+    assert result.requested is not None
+    assert result.planner_source == "repair"
+    planning = OptimizationPlanningAudit(tmp_path / "episode").replay().entries
+    decisions = OptimizationDecisionAudit(tmp_path / "episode").replay().entries
+    assert len(planning) == 2
+    assert len(decisions) == 2
+    assert decisions[0].validation_result == "rejected"
+    assert decisions[0].rejection_reason == "proposal value is outside the legal bounds or type"
+    feedback = planner.v2_calls[1][0].planning_feedback
+    assert len(feedback) == 1
+    assert feedback[0].source.value == "rejection"
+    assert feedback[0].reason_code == "parameter_domain"
+    assert feedback[0].summary == (
+        "proposal value is outside the legal bounds or type"
+    )
+    assert feedback[0].recovery_hints
+    assert decisions[0].planning_entry_sha256 == planning[0].entry_sha256
+    assert decisions[-1].planner_source == "repair"
+    assert decisions[-1].planning_entry_sha256 == planning[-1].entry_sha256
+
+
+def test_v2_repair_refreshes_wall_time_and_planning_context(
+    tmp_path: Path,
+) -> None:
+    clock = _Clock()
+
+    def invalid(context: object, domain: object) -> dict[str, object]:
+        clock.now = 5.0
+        return _v2_proposal(context, domain, value=999)
+
+    planner = _V2FakeCodex(invalid, _v2_proposal)
+    controller = _controller(tmp_path, planner, _FakeEcc(), clock=clock)
+
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    first_context, _ = planner.v2_calls[0]
+    repair_context, _ = planner.v2_calls[1]
+    assert first_context.budget.elapsed_wall_time_seconds == 0
+    assert repair_context.budget.elapsed_wall_time_seconds == 5
+    assert repair_context.budget.consumed_planning_calls == 2
+    assert controller.budget.elapsed_wall_time_seconds == 5
+
+
+def test_v2_repair_does_not_exceed_planning_call_budget(
+    tmp_path: Path,
+) -> None:
+    planner = _V2FakeCodex(
+        lambda context, domain: _v2_proposal(context, domain, value=999)
+    )
+    controller = _controller(
+        tmp_path,
+        planner,
+        _FakeEcc(),
+        budget=_budget(planning=59),
+    )
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert len(planner.v2_calls) == 1
+    assert controller.budget.consumed_planning_calls == 60
+    assert result.rejection_reason == "planning_budget_exhausted"
+    assert len(OptimizationPlanningAudit(tmp_path / "episode").replay().entries) == 1
+
+
+def test_controller_escalates_immediately_after_v2_repair_failure(
+    tmp_path: Path,
+) -> None:
+    planner = _V2FakeCodex(
+        lambda context, domain: _v2_proposal(context, domain, value=999),
+        lambda context, domain: _v2_proposal(context, domain, value=999),
+    )
+    controller = _controller(tmp_path, planner, _FakeEcc())
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert result.state == OptimizationEpisodeState.ESCALATED
+    assert result.requested is None
+    assert result.rejection_reason == "proposal_repair_failed"
+    assert result.planner_source == "repair"
+    decision = OptimizationDecisionAudit(tmp_path / "episode").replay().entries[-1]
+    assert decision.planner_source == "repair"
+    decisions = OptimizationDecisionAudit(tmp_path / "episode").replay().entries
+    assert [entry.planner_source for entry in decisions] == [
+        "llm",
+        "repair",
+    ]
+    assert [entry.validation_result for entry in decisions] == [
+        "rejected",
+        "rejected",
+    ]
+
+
+def test_stop_is_deferred_until_fixed_candidate_budget_is_exhausted(
+    tmp_path: Path,
+) -> None:
+    def stop(context: object) -> dict[str, object]:
+        proposal = _proposal(context)
+        proposal.update(
+            decision=OptimizationDecision.STOP,
+            reason_code=ProposalReason.OBSERVATION,
+            rationale_summary="The bounded search is complete.",
+        )
+        proposal.pop("action")
+        return proposal
+
+    controller = _controller(
+        tmp_path,
+        _FakeCodex(stop),
+        _FakeEcc(),
+        budget=_budget(candidates=2),
+    )
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert result.state == OptimizationEpisodeState.PLANNING
+    assert result.rejection_reason == "minimum_candidates_not_met"
+
+
+def test_planning_decisions_are_hash_bound_and_replayable(tmp_path: Path) -> None:
+    controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc(_started()))
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    entries = OptimizationDecisionAudit(tmp_path / "episode").replay().entries
+    assert len(entries) == 1
+    assert entries[0].proposal == result.proposal
+    assert entries[0].validation_result == "accepted"
+    assert entries[0].requested == result.requested
+
+
+def test_objective_is_bound_to_planning_state_decision_and_execution(
+    tmp_path: Path,
+) -> None:
+    objective = _objective()
+    codex = _FakeCodex(_proposal)
+    controller = _controller(
+        tmp_path,
+        codex,
+        _FakeEcc(_started()),
+        objective=objective,
+        incumbent=_eligible_terminal(),
+    )
+
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    controller.execute()
+
+    assert codex.contexts[0].objective == objective
+    state = json.loads(controller.state_path.read_text(encoding="utf-8"))
+    assert state["objective"] == objective.model_dump(mode="json")
+    start = controller.ledger.replay().entries[0].payload
+    assert start.objective_contract_sha256 == objective.contract_sha256
+    decision = OptimizationDecisionAudit(tmp_path / "episode").replay().entries[0]
+    assert decision.objective_contract_sha256 == objective.contract_sha256
+
+
+def test_recovery_preserves_the_frozen_objective(tmp_path: Path) -> None:
+    objective = _objective()
+    controller = _controller(
+        tmp_path,
+        _FakeCodex(_proposal),
+        _FakeEcc(_started()),
+        objective=objective,
+        incumbent=_eligible_terminal(),
+    )
+
+    recovered = OptimizationEpisodeController.recover(
+        planner=_FakeCodex(_proposal),
+        executor=_FakeEcc(),
+        ledger=controller.ledger,
+        clock=_Clock(),
+        execution_context=_execution_context(),
+    )
+
+    assert recovered.objective == objective
+
+
+def test_empirical_archive_separates_objective_gain_from_hypothesis_support() -> None:
+    """Promotion is not hypothesis support; signoff stays a separate verdict."""
+    from ecos_agent.optimization.controller_cases import ControllerCaseRecordingMixin
+    from ecos_agent.optimization.knowledge.cases import EmpiricalOutcome
+    from ecos_agent.optimization.parameters.contracts import ExpectedEffectV2
+    from ecos_agent.optimization.contracts import GateResult, ObjectiveMetric
+
+    requested = RequestedKnobValue(
+        knob_id=OptimizationKnob.TARGET_DENSITY, value=0.65
+    )
+    receipt = _native_receipt(requested)
+    incumbent = _eligible_terminal("terminal-incumbent").model_copy(
+        update={
+            "metrics": {
+                **_eligible_terminal().metrics,
+                ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: 10.0,
+            }
+        }
+    )
+    expected_effects = (
+        ExpectedEffectV2(
+            metric_id=ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW, direction="decrease"
+        ),
+    )
+    wirelength_gain_only = _eligible_terminal("terminal-candidate").model_copy(
+        update={
+            "metrics": {
+                **incumbent.metrics,
+                ObjectiveMetric.ROUTE_WIRELENGTH: 90.0,
+            }
+        }
+    )
+    realized = _eligible_terminal("terminal-candidate").model_copy(
+        update={
+            "metrics": {
+                **incumbent.metrics,
+                ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: 5.0,
+                ObjectiveMetric.ROUTE_WIRELENGTH: 90.0,
+            }
+        }
+    )
+
+    assert ControllerCaseRecordingMixin._empirical_outcome(
+        OptimizationOutcomeKind.IMPROVED,
+        receipt,
+        wirelength_gain_only,
+        incumbent=incumbent,
+        expected_effects=expected_effects,
+    ) is EmpiricalOutcome.CONTRADICTED
+    assert ControllerCaseRecordingMixin._empirical_outcome(
+        OptimizationOutcomeKind.IMPROVED,
+        receipt,
+        realized,
+        incumbent=incumbent,
+        expected_effects=expected_effects,
+    ) is EmpiricalOutcome.SUPPORTED
+    # An unsigned candidate (final DRC still open) never becomes a supported
+    # case, even when the declared effect was observed.
+    unsigned = realized.model_copy(
+        update={
+            "evaluation_metrics": tuple(
+                item.model_copy(update={"value": 1})
+                if item.metric_id == "drc_count"
+                else item
+                for item in realized.evaluation_metrics
+            ),
+            "signoff_gates": realized.signoff_gates.model_copy(
+                update={"drc_clean": GateResult.FAIL}
+            ),
+        }
+    )
+    assert ControllerCaseRecordingMixin._empirical_outcome(
+        OptimizationOutcomeKind.IMPROVED,
+        receipt,
+        unsigned,
+        incumbent=incumbent,
+        expected_effects=expected_effects,
+    ) is EmpiricalOutcome.GUARDRAIL_FAILURE
+
+
+def test_controller_records_schema_violation_detail_for_feedback(
+    tmp_path: Path,
+) -> None:
+    violation = ValueError("action.expected_effects: Field required")
+    planner = _FakeCodex(violation, violation)
+    controller = _controller(tmp_path, planner, _FakeEcc())
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert result.state == OptimizationEpisodeState.ESCALATED
+    assert result.rejection_reason == "proposal_repair_failed"
+    decisions = OptimizationDecisionAudit(tmp_path / "episode").replay().entries
+    assert decisions[0].rejection_reason == (
+        "proposal_schema: action.expected_effects: Field required"
+    )
+    assert decisions[0].attribution is not None
+    assert decisions[0].attribution.source.value == "rejection"
+    assert decisions[0].attribution.reason_code == "proposal_schema"
+    feedback = planner.contexts[1].planning_feedback
+    assert len(feedback) == 1
+    assert feedback[0].reason_code == "proposal_schema"
+    assert feedback[0].summary == (
+        "proposal_schema: action.expected_effects: Field required"
+    )
+    assert feedback[0].recovery_hints

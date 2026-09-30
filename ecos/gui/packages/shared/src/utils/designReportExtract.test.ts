@@ -16,6 +16,8 @@ describe('designReportExtract', () => {
       expect(canonicalizeStageName('Floorplan_ecc')).toBe('Floor')
       expect(canonicalizeStageName('place_dreamplace')).toBe('Place')
       expect(canonicalizeStageName('CTS_ecc')).toBe('CTS')
+      expect(canonicalizeStageName('Timing optimization')).toBe('Sizer')
+      expect(canonicalizeStageName('timing_optimization_sizer')).toBe('Sizer')
       expect(canonicalizeStageName('route_ecc')).toBe('Route')
       expect(canonicalizeStageName('drc_ecc')).toBe('DRC')
       expect(canonicalizeStageName('lvs_ecc')).toBe('LVS')
@@ -134,6 +136,13 @@ Summary                  16.882        0.0       0     321MHz      0.256        
               state: 'Success',
               runtime: '0:0:45',
               'peak memory (mb)': 310,
+            },
+            {
+              name: 'Timing optimization',
+              tool: 'sizer',
+              state: 'Success',
+              runtime: '0:0:10',
+              'peak memory (mb)': 330,
             },
             {
               name: 'route_ecc',
@@ -343,10 +352,11 @@ Summary                  16.882        0.0       0     321MHz      0.256        
       expect(result.verification.lvsMismatchCount).toBe(0)
 
       // Execution
-      expect(result.execution.totalRuntimeSeconds).toBe(380)
-      expect(result.execution.totalRuntimeFormatted).toBe('6m 20s')
+      expect(result.execution.totalRuntimeSeconds).toBe(390)
+      expect(result.execution.totalRuntimeFormatted).toBe('6m 30s')
       expect(result.execution.peakMemoryMb).toBe(600)
-      expect(result.execution.stages).toHaveLength(9)
+      expect(result.execution.stages).toHaveLength(10)
+      expect(result.execution.stages.map((stage) => stage.stage)).toContain('Sizer')
 
       // Provenance
       expect(result.provenance.length).toBeGreaterThan(10)

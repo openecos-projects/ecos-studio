@@ -1,0 +1,683 @@
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from ecos_agent.optimization.parameters.effective_domain import EffectiveDomainSnapshot
+from ecos_agent.hashing import canonical_sha256
+from ecos_agent.optimization.contracts import (
+    BudgetSnapshot,
+    EpisodeBudget,
+    KnowledgeReference,
+    LegalAction,
+    ObjectiveMetric,
+    StageEvidenceFeature,
+    StageObservation,
+)
+from ecos_agent.optimization.knowledge.compiler import (
+    BoundKnowledgeAction,
+    GeneralDomainClaim,
+    KnowledgeApplicability,
+    KnowledgeSupportCatalog,
+    STATE_RULE_MANIFEST_PATH,
+    StateEvidenceFeature,
+    StatePredicate,
+    StateRuleManifest,
+    VersionBoundToolBinding,
+    _validate_parameter_card_bindings,
+    build_state_evidence_request,
+    compile_supported_action_view,
+    load_state_rule_manifest,
+)
+
+HASH = "sha256:" + "a" * 64
+CHUNK_HASH = "b" * 64
+TOOLCHAIN = "sha256:" + "d" * 64
+
+
+def _domain() -> EffectiveDomainSnapshot:
+    payload = {
+        "schema_version": "ecos.effective_domain.v4",
+        "knob_id": "place.target_density",
+        "context_sha256": HASH,
+        "current_coordinate": {"surface_value": 0.85},
+        "value_bounds": {
+            "type": "number",
+            "minimum": 0.05,
+            "maximum": 0.95,
+            "exclusive_minimum": False,
+            "exclusive_maximum": False,
+        },
+        "attempted_values": (),
+    }
+    return EffectiveDomainSnapshot(
+        **payload, snapshot_sha256=canonical_sha256(payload)
+    )
+
+
+def _observation() -> StageObservation:
+    return StageObservation(
+        observation_id="observation-place",
+        stage="place",
+        evidence_manifest_sha256=HASH,
+        metrics={"route_la_total_overflow": 12.0},
+        budget=BudgetSnapshot(budget=EpisodeBudget.from_reference_rerun(11.0)),
+    )
+
+
+def _catalog(*, binding_claim_sha256: str = HASH) -> KnowledgeSupportCatalog:
+    claim = GeneralDomainClaim(
+        claim_ref=KnowledgeReference(
+            entity_id="strategy.congestion.local_density_spreading.v1",
+            chunk_sha256=CHUNK_HASH,
+        ),
+        claim_sha256=HASH,
+        stages=("place",),
+        state_predicates=(
+            StatePredicate(
+                feature_id="route_la_total_overflow",
+                op="positive",
+                rule_ref="rules.numeric.positive.v1",
+            ),
+            StatePredicate(
+                feature_id="local_cell_density_hotspot",
+                op="present",
+                rule_ref="rules.evidence.present.v1",
+            ),
+        ),
+        anti_predicates=(
+            StatePredicate(
+                feature_id="long_net_pressure_dominant",
+                op="true",
+                rule_ref="rules.boolean.true.v1",
+            ),
+        ),
+        expected_effects=("route_la_total_overflow:decrease",),
+        guardrails=("route_wirelength",),
+    )
+    binding = VersionBoundToolBinding(
+        binding_id="ecos.place.target_density.decrease.v1",
+        binding_sha256="sha256:" + "c" * 64,
+        claim_id=claim.claim_ref.entity_id,
+        claim_sha256=binding_claim_sha256,
+        toolchain_ref=TOOLCHAIN,
+        actions=(
+            BoundKnowledgeAction(
+                knob_id="place.target_density",
+                direction="decrease",
+            ),
+        ),
+    )
+    return KnowledgeSupportCatalog(
+        catalog_sha256="sha256:" + "e" * 64,
+        claims=(claim,),
+        bindings=(binding,),
+    )
+
+
+def _compile(
+    *features: StateEvidenceFeature,
+    catalog=None,
+    toolchain: str | None = TOOLCHAIN,
+    **state_kwargs,
+):
+    catalog = catalog or _catalog()
+    state = build_state_evidence_request(
+        task_id="task-1",
+        retrieval_request_sha256=HASH,
+        observation=_observation(),
+        current_values={"place.target_density": 0.85},
+        toolchain_sha256=toolchain,
+        extra_features=features,
+        **state_kwargs,
+    )
+    return compile_supported_action_view(
+        state=state,
+        catalog=catalog,
+        candidate_refs=tuple(claim.claim_ref for claim in catalog.claims),
+        retrieval_ranked_refs=tuple(claim.claim_ref for claim in catalog.claims[:3]),
+        legal_actions=(
+            LegalAction(knob_id="place.target_density", direction="decrease"),
+        ),
+        effective_domains=(_domain(),),
+    )
+
+
+def _multi_claim_catalog(*, count: int, matched_from: int = 0) -> KnowledgeSupportCatalog:
+    base = _catalog()
+    claims = []
+    bindings = []
+    for index in range(count):
+        suffix = str(index + 1)
+        reference = KnowledgeReference(
+            entity_id=f"strategy.congestion.candidate_{suffix}.v1",
+            chunk_sha256=suffix * 64,
+        )
+        claim_hash = f"sha256:{suffix * 64}"
+        feature_id = (
+            "route_la_total_overflow" if index >= matched_from else f"missing_{suffix}"
+        )
+        claim = base.claims[0].model_copy(
+            update={
+                "claim_ref": reference,
+                "claim_sha256": claim_hash,
+                "state_predicates": (
+                    StatePredicate(
+                        feature_id=feature_id,
+                        op="positive",
+                        rule_ref="rules.numeric.positive.v1",
+                    ),
+                ),
+                "anti_predicates": (),
+            }
+        )
+        binding = base.bindings[0].model_copy(
+            update={
+                "binding_id": f"binding.candidate_{suffix}.v1",
+                "binding_sha256": claim_hash,
+                "claim_id": reference.entity_id,
+                "claim_sha256": claim_hash,
+            }
+        )
+        claims.append(claim)
+        bindings.append(binding)
+    return KnowledgeSupportCatalog(
+        catalog_sha256="sha256:" + "e" * 64,
+        claims=tuple(claims),
+        bindings=tuple(bindings),
+    )
+
+
+def test_compiler_matches_current_metric_and_spatial_evidence() -> None:
+    view = _compile(
+        StateEvidenceFeature(
+            feature_id="local_cell_density_hotspot",
+            value=True,
+            evidence_sha256="sha256:" + "f" * 64,
+        ),
+        StateEvidenceFeature(
+            feature_id="long_net_pressure_dominant",
+            value=False,
+            evidence_sha256="sha256:" + "1" * 64,
+        ),
+    )
+
+    assert view.state.schema_version == "ecos.optimization_state_evidence_request.v1"
+    assert view.schema_version == "ecos.supported_action_view.v3"
+    assert view.actions[0].applicability == KnowledgeApplicability.PASS
+    assert view.actions[0].knob_id == "place.target_density"
+    assert view.actions[0].direction == "decrease"
+    assert view.actions[0].effective_domain_sha256 == _domain().snapshot_sha256
+    bounds = view.actions[0].requested_value_bounds
+    assert bounds.json_schema() == {
+        "type": "number", "minimum": 0.05, "maximum": 0.95
+    }
+    assert bounds.contains(0.7778)
+    assert bounds.contains(0.1)
+    assert _domain().direction_schema(view.actions[0].direction) == {
+        "type": "number", "minimum": 0.05, "exclusiveMaximum": 0.85
+    }
+    assert view.actions[0].claim_sha256 == HASH
+    assert view.view_sha256.startswith("sha256:")
+
+
+def test_planner_keeps_source_hypothesis_and_analog_limits() -> None:
+    base = _catalog()
+    catalog = base.model_copy(update={
+        "claims": (base.claims[0].model_copy(update={
+            "evidence_kind": "source_derived_hypothesis",
+        }),),
+        "bindings": (base.bindings[0].model_copy(update={
+            "analog_quality": "coarse", "limitations": "No guaranteed QoR improvement.",
+        }),),
+    })
+    view = _compile(
+        StateEvidenceFeature(feature_id="local_cell_density_hotspot", value=True, evidence_sha256=HASH),
+        StateEvidenceFeature(feature_id="long_net_pressure_dominant", value=False, evidence_sha256=HASH),
+        catalog=catalog,
+    )
+    action = view.planner_payload()["actions"][0]
+    assert action["evidence_kind"] == "source_derived_hypothesis"
+    assert action["analog_quality"] == "coarse"
+    assert action["limitations"] == "No guaranteed QoR improvement."
+
+
+def test_compiler_fails_closed_on_missing_and_anti_condition_evidence() -> None:
+    missing = _compile()
+    blocked = _compile(
+        StateEvidenceFeature(
+            feature_id="local_cell_density_hotspot",
+            value=True,
+            evidence_sha256="sha256:" + "f" * 64,
+        ),
+        StateEvidenceFeature(
+            feature_id="long_net_pressure_dominant",
+            value=True,
+            evidence_sha256="sha256:" + "1" * 64,
+        ),
+    )
+
+    assert missing.actions == ()
+    assert missing.matches[0].applicability == KnowledgeApplicability.UNKNOWN
+    assert "missing_observation" in missing.matches[0].reason_codes
+    assert blocked.actions == ()
+    assert blocked.matches[0].applicability == KnowledgeApplicability.BLOCKED
+    assert "anti_condition" in blocked.matches[0].reason_codes
+    blocked_payload = blocked.planner_payload()
+    assert [
+        (item["applicability"], list(item["reason_codes"]))
+        for item in blocked_payload["inactionable_matches"]
+    ] == [("blocked", ["anti_condition"])]
+    missing_payload = missing.planner_payload()
+    assert missing_payload["inactionable_matches"][0]["applicability"] == "unknown"
+    assert (
+        "missing_observation"
+        in missing_payload["inactionable_matches"][0]["reason_codes"]
+    )
+
+
+def test_compiler_rejects_stale_binding_and_unsupported_legal_action() -> None:
+    stale = _compile(
+        StateEvidenceFeature(
+            feature_id="local_cell_density_hotspot",
+            value=True,
+            evidence_sha256="sha256:" + "f" * 64,
+        ),
+        StateEvidenceFeature(
+            feature_id="long_net_pressure_dominant",
+            value=False,
+            evidence_sha256="sha256:" + "1" * 64,
+        ),
+        catalog=_catalog(binding_claim_sha256="sha256:" + "9" * 64),
+    )
+    state = stale.state
+    unsupported = compile_supported_action_view(
+        state=state,
+        catalog=_catalog(),
+        candidate_refs=(_catalog().claims[0].claim_ref,),
+        retrieval_ranked_refs=(_catalog().claims[0].claim_ref,),
+        legal_actions=(
+            LegalAction(knob_id="place.target_density", direction="increase"),
+        ),
+        effective_domains=(_domain(),),
+    )
+
+    assert stale.actions == ()
+    assert stale.matches[0].applicability == KnowledgeApplicability.BLOCKED
+    assert "stale_binding" in stale.matches[0].reason_codes
+    assert unsupported.actions == ()
+    assert "unsupported_action" in unsupported.matches[0].reason_codes
+
+
+def test_compiler_state_matches_claim_beyond_raw_top_three() -> None:
+    catalog = _multi_claim_catalog(count=4, matched_from=3)
+    state = build_state_evidence_request(
+        task_id="task-1",
+        retrieval_request_sha256=HASH,
+        observation=_observation(),
+        current_values={"place.target_density": 0.85},
+    )
+
+    view = compile_supported_action_view(
+        state=state,
+        catalog=catalog,
+        candidate_refs=tuple(claim.claim_ref for claim in catalog.claims),
+        retrieval_ranked_refs=tuple(claim.claim_ref for claim in catalog.claims[:3]),
+        legal_actions=(
+            LegalAction(knob_id="place.target_density", direction="decrease"),
+        ),
+        effective_domains=(_domain(),),
+    )
+
+    assert view.candidate_count == 4
+    assert len(view.matches) == 4
+    assert view.exposed_claim_refs == (catalog.claims[3].claim_ref,)
+    assert view.actions[0].claim_ref == catalog.claims[3].claim_ref
+    assert view.truncated_claim_refs == ()
+
+
+def test_compiler_exposes_only_three_state_matched_claims_with_audit() -> None:
+    catalog = _multi_claim_catalog(count=5)
+    ranked = tuple(claim.claim_ref for claim in reversed(catalog.claims[2:5]))
+    state = build_state_evidence_request(
+        task_id="task-1",
+        retrieval_request_sha256=HASH,
+        observation=_observation(),
+        current_values={"place.target_density": 0.85},
+    )
+
+    view = compile_supported_action_view(
+        state=state,
+        catalog=catalog,
+        candidate_refs=tuple(claim.claim_ref for claim in catalog.claims),
+        retrieval_ranked_refs=ranked,
+        legal_actions=(
+            LegalAction(knob_id="place.target_density", direction="decrease"),
+        ),
+        effective_domains=(_domain(),),
+    )
+
+    assert len(view.matches) == 5
+    assert view.exposed_claim_refs == ranked
+    assert len({action.claim_ref.entity_id for action in view.actions}) == 3
+    assert view.truncated_claim_refs == tuple(
+        claim.claim_ref for claim in catalog.claims[:2]
+    )
+    planner_payload = view.planner_payload()
+    planner_json = json.dumps(planner_payload, sort_keys=True)
+    assert all(ref.entity_id in planner_json for ref in view.exposed_claim_refs)
+    assert all(ref.entity_id not in planner_json for ref in view.truncated_claim_refs)
+    assert planner_payload["candidate_count"] == 5
+    assert planner_payload["audit_sha256"] == view.view_sha256
+    assert "candidate_refs" not in planner_payload
+    assert "truncated_claim_refs" not in planner_payload
+
+
+def test_state_evidence_derives_reference_delta_and_history_trend() -> None:
+    state = build_state_evidence_request(
+        task_id="task-1",
+        retrieval_request_sha256=HASH,
+        observation=_observation(),
+        current_values={"place.target_density": 0.85},
+        reference_metrics={"route_la_total_overflow": 10.0},
+        reference_sha256="sha256:" + "2" * 64,
+        historical_metrics=({"route_la_total_overflow": 8.0},),
+    )
+    features = {item.feature_id: item.value for item in state.features}
+
+    assert features["delta.route_la_total_overflow"] == 2.0
+    assert features["trend.route_la_total_overflow"] == "increasing"
+
+
+def test_state_evidence_distinguishes_configured_controls_from_runtime_use() -> None:
+    state = build_state_evidence_request(
+        task_id="task-1", retrieval_request_sha256=HASH,
+        observation=_observation(), current_values={
+            "floorplan.aspect_ratio": 1.5,
+            "place.cell_padding_x": 2,
+            "place.routability_opt": False,
+        },
+    )
+    features = {item.feature_id: item.value for item in state.features}
+    assert features["floorplan_aspect_ratio_offset"] == 0.5
+    assert features["routability_relief_configured"] is True
+    assert not any(key.startswith("parameter_effective") for key in features)
+    incomplete = build_state_evidence_request(
+        task_id="task-1", retrieval_request_sha256=HASH,
+        observation=_observation(), current_values={"place.routability_opt": False},
+    )
+    assert "routability_relief_configured" not in {item.feature_id for item in incomplete.features}
+
+
+def test_state_predicate_rejects_unknown_or_mismatched_frozen_rule() -> None:
+    with pytest.raises(ValueError, match="rule"):
+        StatePredicate(
+            feature_id="overflow_map",
+            op="present",
+            rule_ref="rules.unregistered.v1",
+        )
+    with pytest.raises(ValueError, match="rule"):
+        StatePredicate(
+            feature_id="overflow_map",
+            op="positive",
+            rule_ref="rules.evidence.present.v1",
+        )
+
+
+def test_claim_requires_predicates_for_all_required_evidence() -> None:
+    with pytest.raises(ValueError, match="required evidence"):
+        GeneralDomainClaim(
+            claim_ref=KnowledgeReference(entity_id="claim.test", chunk_sha256=CHUNK_HASH),
+            claim_sha256=HASH,
+            stages=("place",),
+            state_predicates=(
+                StatePredicate(
+                    feature_id="overflow_map",
+                    op="present",
+                    rule_ref="rules.evidence.present.v1",
+                ),
+            ),
+            required_evidence=("overflow_map", "cell_density_map"),
+        )
+
+
+def test_parameter_card_binding_rejects_tampered_hash() -> None:
+    action = BoundKnowledgeAction(
+        knob_id="place.target_density",
+        direction="decrease",
+        parameter_card_ref="knowledge/optimization/place.target_density.json",
+        parameter_card_sha256=HASH,
+        consumer_ids=("dreamplace.density_objective",),
+        activation_predicate_ids=("dreamplace.density_objective",),
+    )
+    binding = VersionBoundToolBinding(
+        binding_id="binding.test.v1",
+        binding_sha256=HASH,
+        claim_id="claim.test.v1",
+        claim_sha256=HASH,
+        toolchain_ref=HASH,
+        actions=(action,),
+        consumer_ids=action.consumer_ids,
+        activation_predicate_ids=action.activation_predicate_ids,
+    )
+
+    with pytest.raises(ValueError, match="parameter card"):
+        _validate_parameter_card_bindings(binding)
+
+
+def test_state_evidence_reference_must_be_safe_and_relative() -> None:
+    feature = StateEvidenceFeature(
+        feature_id="overflow_map",
+        value=True,
+        evidence_ref="artifacts/overflow-map.json",
+        evidence_sha256=HASH,
+    )
+    assert feature.evidence_ref == "artifacts/overflow-map.json"
+    with pytest.raises(ValueError, match="reference"):
+        StateEvidenceFeature(
+            feature_id="overflow_map",
+            value=True,
+            evidence_ref="../overflow-map.json",
+            evidence_sha256=HASH,
+        )
+
+
+def test_state_evidence_request_preserves_observation_feature_reference() -> None:
+    observation = _observation().model_copy(
+        update={
+            "state_evidence": (
+                StageEvidenceFeature(
+                    feature_id="local_cell_density_hotspot",
+                    value=True,
+                    evidence_ref="place/analysis/qor_hotspots.json#/hotspots/0",
+                    evidence_sha256="sha256:" + "7" * 64,
+                ),
+            )
+        }
+    )
+    state = build_state_evidence_request(
+        task_id="task-1",
+        retrieval_request_sha256=HASH,
+        observation=observation,
+        current_values={"place.target_density": 0.85},
+    )
+    feature = next(
+        item for item in state.features if item.feature_id == "local_cell_density_hotspot"
+    )
+    assert feature.evidence_ref == "place/analysis/qor_hotspots.json#/hotspots/0"
+    assert feature.evidence_sha256 == "sha256:" + "7" * 64
+
+
+def test_compiler_keeps_multiple_bindings_for_one_claim() -> None:
+    base = _catalog()
+    second = base.bindings[0].model_copy(
+        update={
+            "binding_id": "ecos.place.target_density.decrease.alternate.v1",
+            "binding_sha256": "sha256:" + "8" * 64,
+        }
+    )
+    catalog = base.model_copy(update={"bindings": (*base.bindings, second)})
+    view = _compile(
+        StateEvidenceFeature(
+            feature_id="local_cell_density_hotspot",
+            value=True,
+            evidence_sha256="sha256:" + "f" * 64,
+        ),
+        StateEvidenceFeature(
+            feature_id="long_net_pressure_dominant",
+            value=False,
+            evidence_sha256="sha256:" + "1" * 64,
+        ),
+        catalog=catalog,
+    )
+
+    assert {action.binding_id for action in view.actions} == {
+        base.bindings[0].binding_id,
+        second.binding_id,
+    }
+
+
+def _hotspot_feature() -> tuple[StateEvidenceFeature, ...]:
+    return (
+        StateEvidenceFeature(
+            feature_id="local_cell_density_hotspot",
+            value=True,
+            evidence_sha256=HASH,
+        ),
+        StateEvidenceFeature(
+            feature_id="long_net_pressure_dominant",
+            value=False,
+            evidence_sha256="sha256:" + "1" * 64,
+        ),
+    )
+
+
+def test_state_rule_manifest_freezes_registry_and_hash() -> None:
+    manifest = load_state_rule_manifest()
+    assert manifest.manifest_sha256 == load_state_rule_manifest().manifest_sha256
+    assert manifest.trend_noise_tolerance == 0.0
+    with pytest.raises(ValueError, match="outside the frozen manifest"):
+        manifest.require_known_rule("rules.unknown.v1")
+
+
+def test_state_rule_manifest_rejects_registry_drift(tmp_path) -> None:
+    payload = json.loads(STATE_RULE_MANIFEST_PATH.read_text(encoding="utf-8"))
+    del payload["rules"]["rules.numeric.zero.v1"]
+    path = tmp_path / "state-rule-manifest.v1.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="exactly the rule registry"):
+        load_state_rule_manifest(path)
+    payload = json.loads(STATE_RULE_MANIFEST_PATH.read_text(encoding="utf-8"))
+    payload["rules"]["rules.numeric.zero.v1"]["op"] = "positive"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="op mismatch"):
+        load_state_rule_manifest(path)
+
+
+def test_state_rule_manifest_hash_binds_scope() -> None:
+    manifest = load_state_rule_manifest()
+    drifted = StateRuleManifest.model_validate(
+        {**manifest.model_dump(mode="json"), "scope": ["other-design"]}
+    )
+    assert drifted.manifest_sha256 != manifest.manifest_sha256
+
+
+def test_compiler_blocks_objective_mismatch_and_unverified_objective() -> None:
+    base = _catalog()
+    claim = base.claims[0].model_copy(
+        update={"objectives": (ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,)}
+    )
+    catalog = KnowledgeSupportCatalog(
+        catalog_sha256=base.catalog_sha256, claims=(claim,), bindings=base.bindings
+    )
+    aligned = _compile(
+        *_hotspot_feature(),
+        catalog=catalog,
+        primary_metric=ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
+    )
+    assert aligned.matches[0].applicability == KnowledgeApplicability.PASS
+    preserved = _compile(
+        *_hotspot_feature(),
+        catalog=catalog,
+        primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+        preserve_metrics=(ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,),
+    )
+    assert preserved.matches[0].applicability == KnowledgeApplicability.PASS
+    mismatched = _compile(
+        catalog=catalog, primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH
+    )
+    assert mismatched.matches[0].applicability == KnowledgeApplicability.BLOCKED
+    assert mismatched.matches[0].reason_codes == ("objective_mismatch",)
+    unverified = _compile(catalog=catalog)
+    assert unverified.matches[0].applicability == KnowledgeApplicability.BLOCKED
+    assert unverified.matches[0].reason_codes == ("objective_unverified",)
+
+
+def test_compiler_blocks_toolchain_mismatch_and_flags_unverified() -> None:
+    mismatched = _compile(*_hotspot_feature(), toolchain="sha256:" + "9" * 64)
+    assert mismatched.matches[0].applicability == KnowledgeApplicability.BLOCKED
+    assert mismatched.matches[0].reason_codes == ("toolchain_mismatch",)
+    view = _compile(*_hotspot_feature(), toolchain=None)
+    assert view.matches[0].applicability == KnowledgeApplicability.WEAK
+    assert view.matches[0].reason_codes == ("toolchain_unverified",)
+    assert view.actions[0].reason_codes == ("toolchain_unverified",)
+
+
+def test_state_evidence_trend_uses_frozen_epsilon_for_noise_ties() -> None:
+    history = ({"route_la_total_overflow": 11.6},)
+    tolerant = build_state_evidence_request(
+        task_id="task-1",
+        retrieval_request_sha256=HASH,
+        observation=_observation(),
+        current_values={},
+        historical_metrics=history,
+        trend_epsilon=0.5,
+    )
+    features = {item.feature_id: item.value for item in tolerant.features}
+    assert features["trend.route_la_total_overflow"] == "stable"
+    strict = build_state_evidence_request(
+        task_id="task-1",
+        retrieval_request_sha256=HASH,
+        observation=_observation(),
+        current_values={},
+        historical_metrics=history,
+    )
+    features = {item.feature_id: item.value for item in strict.features}
+    assert features["trend.route_la_total_overflow"] == "increasing"
+    history = ({"route_la_total_overflow": 13.0},)
+    decreased = build_state_evidence_request(
+        task_id="task-1",
+        retrieval_request_sha256=HASH,
+        observation=_observation(),
+        current_values={},
+        historical_metrics=history,
+        trend_epsilon=0.5,
+    )
+    features = {item.feature_id: item.value for item in decreased.features}
+    assert features["trend.route_la_total_overflow"] == "decreasing"
+
+
+def test_compile_rejects_stale_state_rule_manifest_binding() -> None:
+    with pytest.raises(ValueError, match="stale state-rule manifest"):
+        _compile(
+            *_hotspot_feature(),
+            state_rule_manifest_sha256="sha256:" + "7" * 64,
+        )
+
+
+def test_same_context_compiles_replay_stable_view() -> None:
+    first = _compile(*_hotspot_feature())
+    second = _compile(*_hotspot_feature())
+    assert first.view_sha256 == second.view_sha256
+    pinned = _compile(
+        *_hotspot_feature(),
+        state_rule_manifest_sha256=load_state_rule_manifest().manifest_sha256,
+    )
+    assert (
+        pinned.view_sha256
+        == _compile(
+            *_hotspot_feature(),
+            state_rule_manifest_sha256=load_state_rule_manifest().manifest_sha256,
+        ).view_sha256
+    )

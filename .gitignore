@@ -4,6 +4,7 @@ ecos/chip-viewer/target/
 .pnpm-store
 .vscode
 .setup-done
+.codegraph/
 # Nix result
 result
 

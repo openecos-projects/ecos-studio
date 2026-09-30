@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 export type AppNotificationSeverity = 'error' | 'warn' | 'info'
 
 export interface AppNotification {
+  agentSessionId?: string
   id: string
   severity: AppNotificationSeverity
   title: string

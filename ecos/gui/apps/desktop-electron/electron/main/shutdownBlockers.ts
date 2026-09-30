@@ -1,4 +1,5 @@
 import type {
+  DesktopAgentOptimizationEpisodeSummary,
   DesktopShutdownStatus,
   EccBackgroundOperationProjection,
   EccBackgroundWorkspaceCreation,
@@ -11,6 +12,7 @@ export interface ShutdownScope {
 
 export interface ShutdownBlockerSummary {
   activeFlows: number
+  activeOptimizations: number
   details: string[]
   finalizations: number
   pendingCommands: number
@@ -25,6 +27,7 @@ export function boundedShutdownIssue(value: string): string {
 export function idleShutdownStatus(): DesktopShutdownStatus {
   return {
     activeFlows: 0,
+    activeOptimizations: 0,
     attemptId: null,
     finalizations: 0,
     forceEligible: false,
@@ -39,6 +42,7 @@ export function idleShutdownStatus(): DesktopShutdownStatus {
 export function emptyShutdownBlockers(): ShutdownBlockerSummary {
   return {
     activeFlows: 0,
+    activeOptimizations: 0,
     details: [],
     finalizations: 0,
     pendingCommands: 0,
@@ -52,6 +56,7 @@ export function buildShutdownBlockers(options: {
   creations: EccBackgroundWorkspaceCreation[]
   handleOwners: ReadonlyMap<string, number>
   projection: EccBackgroundOperationProjection
+  optimizationEpisodes?: DesktopAgentOptimizationEpisodeSummary[]
   scope: ShutdownScope
 }): ShutdownBlockerSummary {
   const { projection, scope } = options
@@ -74,8 +79,16 @@ export function buildShutdownBlockers(options: {
       total + (scope.kind === 'application' || scope.windowId === windowId ? count : 0),
     0,
   )
+  const activeOptimizations = (options.optimizationEpisodes ?? []).filter(
+    (episode) =>
+      inScope(episode.parentWorkspaceId ?? '') &&
+      ['starting', 'calibrating', 'running', 'paused', 'stopping'].includes(
+        episode.state,
+      ),
+  )
   return {
     activeFlows: operations.length,
+    activeOptimizations: activeOptimizations.length,
     details: boundedDetails([
       ...operations.map(
         (operation) =>
@@ -86,6 +99,10 @@ export function buildShutdownBlockers(options: {
       ),
       ...pendingCreations.map(
         (item) => `${workspaceName(item.targetDirectory ?? '')}: creating Workspace`,
+      ),
+      ...activeOptimizations.map(
+        (episode) =>
+          `${workspaceName(episode.parentWorkspaceDirectory)}: Agent optimization ${episode.state}`,
       ),
       ...(pendingCommands
         ? [`${pendingCommands} accepted backend command(s) finishing`]
@@ -102,6 +119,7 @@ export function buildShutdownBlockers(options: {
 export function hasShutdownBlockers(blockers: ShutdownBlockerSummary): boolean {
   return (
     blockers.activeFlows +
+      blockers.activeOptimizations +
       blockers.finalizations +
       blockers.pendingCommands +
       blockers.pendingCreations +

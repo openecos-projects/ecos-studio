@@ -26,7 +26,7 @@ interface CreationJournal {
 }
 
 interface ShutdownBridge {
-  cancelShutdown(): void
+  cancelShutdown(): void | Promise<void>
   completeRendererCleanup(
     attemptId: string,
     windowId: number,
@@ -115,7 +115,7 @@ export function registerBackgroundLifecycleIpc(options: {
   )
   options.handle(desktopApiIpcChannels.shutdownCancel, async (event) => {
     if (options.shutdown?.statusForWindow(event.sender.id).attemptId) {
-      options.shutdown.cancelShutdown()
+      await options.shutdown.cancelShutdown()
     }
   })
   options.handle(desktopApiIpcChannels.shutdownReviewOptions, async (event) => {

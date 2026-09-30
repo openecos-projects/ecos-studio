@@ -29,6 +29,8 @@ export interface DesktopAgentStartSessionRequest extends DesktopAgentProviderReq
   knownProjects?: DesktopAgentKnownProject[]
   mode?: DesktopAgentSessionMode
   projectRoot?: string
+  /** Rebind a restarted provider without replaying first-session UI messages. */
+  reconnect?: boolean
   sessionId?: string
   workspaceId?: string
   /** Electron-populated canonical context; renderer values are ignored. */
@@ -39,14 +41,18 @@ export interface DesktopAgentStartSessionRequest extends DesktopAgentProviderReq
 
 export interface DesktopAgentStartSessionResponse {
   sessionId: string
+  pendingInteraction?: DesktopAgentInteractionRequest
 }
 
 export interface DesktopAgentSendMessageRequest extends DesktopAgentProviderRequest {
+  /** Explicit rebind target; Electron requires it to match the window's Workspace. */
+  directory?: string
   /** Electron-issued token returned only when the user confirms an execution card. */
   confirmationToken?: string
   message: string
   sessionId: string
   /** Electron-populated canonical context; renderer values are ignored. */
+  workspaceId?: string
   workspaceRevision?: number
 }
 
@@ -55,6 +61,201 @@ export interface DesktopAgentSendMessageResponse {
   sessionId: string
   text?: string
   turnId?: string
+}
+
+export type DesktopAgentOperationAssociationCommand =
+  | 'workspace.run'
+  | 'workspace.runStep'
+  | 'candidate.rerun'
+  | 'candidate.resume'
+
+export interface DesktopAgentOperationAssociationRequest extends DesktopAgentProviderRequest {
+  command: DesktopAgentOperationAssociationCommand
+  operationId: string
+  sessionId: string
+  workspaceHandle?: string
+}
+
+export type DesktopAgentReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+
+export interface DesktopAgentModelOption {
+  defaultReasoningEffort: DesktopAgentReasoningEffort
+  displayName: string
+  model: string
+  supportedReasoningEfforts: DesktopAgentReasoningEffort[]
+}
+
+export interface DesktopAgentModelSettingsRequest extends DesktopAgentProviderRequest {
+  sessionId: string
+}
+
+export interface DesktopAgentSetModelSettingsRequest extends DesktopAgentModelSettingsRequest {
+  model?: string
+  reasoningEffort?: DesktopAgentReasoningEffort
+}
+
+export interface DesktopAgentModelSettings {
+  displayName: string
+  model: string
+  models: DesktopAgentModelOption[]
+  reasoningEffort: DesktopAgentReasoningEffort
+}
+
+export type DesktopAgentInteractionPurpose = 'execution' | 'clarification'
+export type DesktopAgentInteractionKind = 'choice' | 'confirm' | 'form'
+export type DesktopAgentInteractionStatus =
+  | 'pending'
+  | 'answered'
+  | 'cancelled'
+  | 'expired'
+  | 'superseded'
+
+export interface DesktopAgentInteractionOption {
+  id: string
+  label: string
+}
+
+export interface DesktopAgentChoiceInteraction {
+  kind: 'choice'
+  options: DesktopAgentInteractionOption[]
+  variant: 'buttons' | 'list'
+}
+
+export interface DesktopAgentConfirmInteraction {
+  cancel: DesktopAgentInteractionOption
+  confirm: DesktopAgentInteractionOption
+  kind: 'confirm'
+}
+
+export interface DesktopAgentTextField {
+  defaultValue?: string
+  id: string
+  kind: 'text'
+  label: string
+  required?: boolean
+}
+
+export interface DesktopAgentNumberField {
+  defaultValue?: number
+  id: string
+  kind: 'number'
+  label: string
+  max?: number
+  min?: number
+  required?: boolean
+}
+
+export interface DesktopAgentPathField {
+  defaultValue?: string
+  extensions?: string[]
+  id: string
+  kind: 'path'
+  label: string
+  required?: boolean
+}
+
+export interface DesktopAgentSelectField {
+  defaultValue?: string
+  id: string
+  kind: 'select'
+  label: string
+  options: DesktopAgentInteractionOption[]
+  required?: boolean
+}
+
+export type DesktopAgentInteractionField =
+  | DesktopAgentTextField
+  | DesktopAgentNumberField
+  | DesktopAgentPathField
+  | DesktopAgentSelectField
+
+export interface DesktopAgentFormInteraction {
+  fields: DesktopAgentInteractionField[]
+  kind: 'form'
+}
+
+export type DesktopAgentInteractionPayload =
+  | DesktopAgentChoiceInteraction
+  | DesktopAgentConfirmInteraction
+  | DesktopAgentFormInteraction
+
+export interface DesktopAgentInteractionRequest {
+  canUndo?: boolean
+  description?: string
+  interaction: DesktopAgentInteractionPayload
+  kind: DesktopAgentInteractionKind
+  optimizationAuthorization?: {
+    schema_version: 'ecos.optimization_authorization.v2'
+    workspace: string
+    objective_sha256: string
+    alignment_sha256: string
+    original_objective: Record<string, unknown>
+    original_primary_metric: string
+    active_primary_metric: string
+    active_preserve_metrics: string[]
+    violation_counts: {
+      drc_count: number
+      sta_setup_violation_count: number
+      sta_hold_violation_count: number
+    }
+    recovery_stage: string
+    requires_confirmation: true
+    execution: string
+  }
+  purpose: DesktopAgentInteractionPurpose
+  requestId: string
+  schema_version: 'flow-agent.interaction_request.v1'
+  status: DesktopAgentInteractionStatus
+  title: string
+}
+
+export type DesktopAgentInteractionAnswerRequest = DesktopAgentProviderRequest & {
+  /** Electron-populated canonical context; renderer values are ignored. */
+  directory?: string
+  workspaceId?: string
+  workspaceRevision?: number
+  /** Electron-issued only; never accepted from renderer IPC. */
+  episodeId?: string
+  kind: DesktopAgentInteractionKind
+  requestId: string
+  sessionId: string
+} & (
+    | {
+        undo: true
+        optionId?: never
+        text?: never
+        values?: never
+      }
+    | {
+        kind: 'choice' | 'confirm'
+        undo?: never
+        optionId: string
+        text?: never
+        values?: never
+      }
+    | {
+        kind: 'choice' | 'confirm'
+        undo?: never
+        optionId?: never
+        text: string
+        values?: never
+      }
+    | {
+        kind: 'form'
+        undo?: never
+        optionId?: never
+        text?: never
+        values: Record<string, string | number | null>
+      }
+  )
+
+export interface DesktopAgentInteractionAnswerResponse {
+  accepted: true
+  admissionConflict?: { episodeId: string }
+  canUndo?: boolean
+  requestId: string
+  sessionId: string
+  undoneRequestId?: string
 }
 
 export interface DesktopAgentStatus {
@@ -91,11 +292,17 @@ export interface DesktopAgentResumeSessionRequest extends DesktopAgentProviderRe
 
 export interface DesktopAgentResumeSessionResponse {
   sessionId: string
+  pendingInteraction?: DesktopAgentInteractionRequest
 }
 
 export interface DesktopAgentContractField {
   label: string
   value: string
+}
+
+export interface DesktopAgentStepConfigurationUpdate {
+  options: Record<string, unknown>
+  step_id: string
 }
 
 export interface DesktopAgentExecutionContract {
@@ -118,19 +325,57 @@ export interface DesktopAgentWorkspaceContinueContract {
   workspace: string
 }
 
-export interface DesktopAgentStepConfigurationUpdate {
-  options: Record<string, unknown>
-  step_id: string
+export type DesktopAgentWorkspaceSignoffAction = 'inspect' | 'export'
+
+export interface DesktopAgentWorkspaceSignoffContract {
+  action: DesktopAgentWorkspaceSignoffAction
+  schema_version: 'flow-agent.workspace_signoff_contract.v1'
+  signoff_id: string
+  workspace: string
+}
+
+/**
+ * Workspace files the Agent may write a parameter into. The workspace
+ * configuration (`home/params.toml`, or `home/parameters.json` when that is
+ * the on-disk format) is authoritative; ECC regenerates the `config/*.json`
+ * step configs from it.
+ */
+export const desktopAgentParameterWriteFiles = [
+  'home/params.toml',
+  'home/parameters.json',
+  'config/dreamplace_ecc.json',
+  'config/cts_ecc.json',
+  'config/route_ecc.json',
+] as const
+
+export type DesktopAgentParameterWriteFile =
+  (typeof desktopAgentParameterWriteFiles)[number]
+
+export type DesktopAgentParameterWriteSurface = 'parameters' | 'step_config'
+
+/**
+ * A resolved write instruction. The Agent owns the knob-to-location mapping and
+ * emits it with the contract, so the GUI executes rather than re-deriving it.
+ */
+export interface DesktopAgentWorkspaceParameterWrite {
+  file: DesktopAgentParameterWriteFile
+  json_path: (string | number)[]
+  knob_id: string
+  surface: DesktopAgentParameterWriteSurface
+  value: DesktopAgentWorkspaceRerunParameterValue
 }
 
 export interface DesktopAgentWorkspaceParameterUpdateContract {
   parameter_patch: DesktopAgentWorkspaceRerunParameterPatch[]
-  schema_version: 'flow-agent.workspace_parameter_update_contract.v3'
+  schema_version:
+    | 'flow-agent.workspace_parameter_update_contract.v2'
+    | 'flow-agent.workspace_parameter_update_contract.v3'
   step_configurations: DesktopAgentStepConfigurationUpdate[]
   update_id: string
   workspace: string
   workspace_parameters: Record<string, unknown>
   workspace_revision?: number
+  writes?: DesktopAgentWorkspaceParameterWrite[]
 }
 
 export interface DesktopAgentWorkspaceSetupParameters {
@@ -183,6 +428,10 @@ export interface DesktopAgentWorkspaceSetupContract {
   setup_id: string
   sdc?: string
   title: string
+  /** Whether the state machine selected SoC-MPC for this workspace. */
+  mpc_enabled?: boolean
+  /** Optional project-managed SoC-MPC snapshot selected by the GUI reviewer. */
+  mpc?: import('../utils/projectManifest').ProjectManifestMpc | null
 }
 
 export type DesktopAgentWorkspaceRerunParameterValue =
@@ -202,8 +451,10 @@ export interface DesktopAgentWorkspaceRerunContract {
   end_step: string
   execution_scope: 'single_step' | 'full_flow'
   parameter_patch: DesktopAgentWorkspaceRerunParameterPatch[]
-  step_configurations: DesktopAgentStepConfigurationUpdate[]
-  workspace_parameters: Record<string, unknown>
+  step_configurations?: DesktopAgentStepConfigurationUpdate[]
+  workspace_parameters?: Record<string, unknown>
+  /** Optional only for pre-write-contract Agent providers; nonempty patches fail closed. */
+  writes?: DesktopAgentWorkspaceParameterWrite[]
   requires_gui_review: true
   rerun_id: string
   schema_version: 'flow-agent.workspace_rerun_contract.v1'
@@ -233,41 +484,208 @@ export type DesktopAgentEventType =
   | 'session'
   | 'message'
   | 'tool'
-  | 'choice'
+  | 'activity'
+  | 'interaction'
+  | 'unsupported_interaction'
   | 'contract'
   | 'workspace_setup'
   | 'workspace_create'
   | 'workspace_rerun'
   | 'workspace_continue'
   | 'workspace_parameter_update'
+  | 'workspace_signoff'
+  | 'optimization'
   | 'error'
 
 export type DesktopAgentRunStatus =
   | 'idle'
   | 'running'
-  | 'awaiting_choice'
+  | 'awaiting_interaction'
   | 'interrupted'
   | 'error'
 
-export interface DesktopAgentChoiceOption {
-  id: string
-  label: string
-  value: string
+export interface DesktopAgentOptimizationPayload {
+  active_preserve_metrics?: string[]
+  active_primary_metric?: string
+  action?: { direction: string; knob_id: string } | null
+  alignment_sha256?: string
+  calibration_completed?: number
+  calibration_required?: number
+  decisive_metric?: string | null
+  episode_id: string
+  execution_state?: string | null
+  in_flight?: number
+  incumbent_candidate_root_ref?: string | null
+  incumbent_decision?: string | null
+  kind?: string
+  objective_sha256?: string
+  original_objective?: Record<string, unknown>
+  original_primary_metric?: string
+  outcome?: string | null
+  phase?: string
+  planning_state?: string | null
+  primary_metric?: string
+  proposal_decision?: string | null
+  proposal_reason?: string | null
+  rationale_summary?: string
+  rejection_reason?: string | null
+  requested?: { knob_id: string; value: boolean | number } | null
+  recovery_incomplete?: boolean
+  recovery_stage?: string
+  recovery_transition?: string | null
+  schema_version: string
+  state?: string
+  turn_count?: number
+  turn?: number
+  workspace?: string
+  violation_counts?: {
+    drc_count: number
+    sta_hold_violation_count: number
+    sta_setup_violation_count: number
+  }
 }
 
-export interface DesktopAgentChoice {
-  promptId: string
-  title: string
-  options: DesktopAgentChoiceOption[]
-  allowFreeText?: boolean
-  variant: 'buttons' | 'list'
+export type DesktopAgentOptimizationEpisodeState =
+  | 'starting'
+  | 'calibrating'
+  | 'running'
+  | 'paused'
+  | 'stopping'
+  | 'needs_attention'
+  | 'interrupted'
+  | 'completed'
+  | 'stopped'
+  | 'failed'
+
+export interface DesktopAgentOptimizationEpisodeSummary {
+  agentSessionId: string
+  episodeId: string
+  inFlightCount: number
+  optimization: DesktopAgentOptimizationPayload
+  parentWorkspaceDirectory: string
+  parentWorkspaceId?: string
+  parentWorkspaceRevision?: number
+  providerId: string
+  startedAt: number
+  state: DesktopAgentOptimizationEpisodeState
+  turnCount: number
+  updatedAt: number
+  notificationStates?: DesktopAgentOptimizationEpisodeNotificationState[]
+  cleanupState?: 'available' | 'completed'
+}
+
+export type DesktopAgentOptimizationEpisodeNotificationState =
+  | 'completed'
+  | 'needs_attention'
+  | 'interrupted'
+  | 'stopped'
+
+export interface DesktopAgentOptimizationEpisodeProjection {
+  episodes: DesktopAgentOptimizationEpisodeSummary[]
+  generation: number
+}
+
+export interface DesktopAgentOptimizationEpisodeInvalidatedEvent {
+  generation: number
+}
+
+export interface DesktopAgentOptimizationEpisodeControlRequest extends DesktopAgentProviderRequest {
+  action: 'pause' | 'resume' | 'retry' | 'stop'
+  episodeId: string
+  sessionId: string
+}
+
+export interface DesktopAgentOptimizationEpisodeNotificationAckRequest extends DesktopAgentProviderRequest {
+  episodeId: string
+  state: DesktopAgentOptimizationEpisodeNotificationState
+  sessionId: string
+}
+
+export interface DesktopAgentOptimizationEpisodeResumeRequest extends DesktopAgentProviderRequest {
+  directory: string
+  episodeId: string
+  sessionId: string
+  workspaceId: string
+  workspaceRevision: number
+}
+
+export type DesktopAgentActivityStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'declined'
+  | 'interrupted'
+
+interface DesktopAgentActivityBase {
+  durationMs?: number
+  itemId: string
+  schema_version: 'flow-agent.activity.v1'
+  startedAt: number
+  status: DesktopAgentActivityStatus
+  turnId: string
+  turnStartedAt: number
+}
+
+export interface DesktopAgentReasoningActivity extends DesktopAgentActivityBase {
+  kind: 'reasoning_summary'
+  summary: string[]
+}
+
+export interface DesktopAgentWebSearchAction {
+  kind: 'search' | 'open_page' | 'find_in_page'
+  query?: string
+  title?: string
+  url?: string
+}
+
+export interface DesktopAgentWebSearchActivity extends DesktopAgentActivityBase {
+  actions: DesktopAgentWebSearchAction[]
+  kind: 'web_search'
+  query?: string
+}
+
+export interface DesktopAgentCommandActivity extends DesktopAgentActivityBase {
+  command: string
+  cwd?: string
+  exitCode?: number
+  kind: 'command_execution'
+  label: string
+  output?: string
+  truncated?: boolean
+}
+
+export interface DesktopAgentToolCallActivity extends DesktopAgentActivityBase {
+  arguments?: string
+  error?: string
+  kind: 'tool_call'
+  progress?: string
+  result?: string
+  server?: string
+  tool: string
+  truncated?: boolean
+}
+
+export type DesktopAgentActivity =
+  | DesktopAgentReasoningActivity
+  | DesktopAgentWebSearchActivity
+  | DesktopAgentCommandActivity
+  | DesktopAgentToolCallActivity
+
+export interface DesktopAgentActivityNotice {
+  message: string
+  schema_version: 'flow-agent.activity_notice.v1'
+  turnId?: string
 }
 
 export interface DesktopAgentEvent {
-  choice?: DesktopAgentChoice
+  activity?: DesktopAgentActivity
+  activityNotice?: DesktopAgentActivityNotice
   contract?: DesktopAgentExecutionContract
   delta?: string
+  interaction?: DesktopAgentInteractionRequest
   messageId?: string
+  optimization?: DesktopAgentOptimizationPayload
   providerId?: string
   sessionId?: string
   status?: DesktopAgentRunStatus
@@ -278,5 +696,6 @@ export interface DesktopAgentEvent {
   workspaceParameterUpdate?: DesktopAgentWorkspaceParameterUpdateContract
   workspaceRerun?: DesktopAgentWorkspaceRerunContract
   workspaceRerunToken?: string
+  workspaceSignoff?: DesktopAgentWorkspaceSignoffContract
   workspaceSetup?: DesktopAgentWorkspaceSetupContract
 }

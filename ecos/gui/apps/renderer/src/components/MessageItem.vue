@@ -1,13 +1,16 @@
 <template>
   <div class="flex w-full min-w-0 justify-start">
-    <template v-if="message.type === 'choice'">
-      <AgentChoiceCard
-        v-if="message.choice && !message.answeredOptionId"
-        :choice="message.choice"
-        :disabled="!choiceInteractive || choiceDisabled"
-        @select="emit('choice', message.choice.promptId, $event)"
-      />
-    </template>
+    <AgentActivityStream
+      v-if="message.type === 'activity' && message.activity"
+      :activity="message.activity"
+      :status="message.status"
+    />
+    <AgentOptimizationCard
+      v-else-if="message.type === 'optimization' && message.optimization"
+      :optimization="message.optimization"
+      :timeline="message.optimizationTimeline ?? [message.optimization]"
+      @control="$emit('optimization-control', $event)"
+    />
     <AgentToolCard
       v-else-if="message.type === 'tool'"
       :content="message.content"
@@ -299,7 +302,7 @@
         'message-bubble group relative w-full max-w-full min-w-0 text-sm',
         message.role === 'user'
           ? 'rounded-lg border border-(--border-color) bg-(--bg-secondary) text-(--text-primary)'
-          : 'message-bubble--assistant text-(--text-primary)',
+          : 'message-bubble--assistant',
       ]"
     >
       <!-- 图片消息 -->
@@ -334,15 +337,12 @@
       </div>
 
       <!-- 文本消息 -->
-      <div
-        v-else
-        class="selectable"
-        :class="message.role === 'user' ? 'px-3 py-2' : 'py-1'"
-      >
+      <div v-else class="selectable px-3 py-2">
         <!-- 加载状态 -->
         <div
           v-if="message.status === 'loading' && !message.content"
           class="flex items-center gap-2"
+          aria-label="Waiting for response"
         >
           <div class="loading-dots flex gap-1">
             <span
@@ -358,15 +358,37 @@
               style="animation-delay: 300ms"
             ></span>
           </div>
-          <span class="text-xs opacity-70">Thinking...</span>
         </div>
+
+        <section
+          v-else-if="isQuickStartPreflightError"
+          class="quick-start-preflight-error"
+        >
+          <header class="quick-start-preflight-error__header">
+            <span class="quick-start-preflight-error__icon" aria-hidden="true">
+              <i class="ri-error-warning-line"></i>
+            </span>
+            <div>
+              <strong>Quick Start 未启动</strong>
+              <span>资源预检失败</span>
+            </div>
+          </header>
+          <p class="quick-start-preflight-error__detail">
+            {{ quickStartPreflightDetail }}
+          </p>
+          <p class="quick-start-preflight-error__hint">
+            请在 Resource Management 中确认 PDK 和 MPC 已安装且 Ready，然后重新点击 Quick
+            Start。
+          </p>
+        </section>
 
         <!-- 错误状态 -->
         <div
           v-else-if="message.status === 'error'"
-          class="flex items-center gap-2 text-(--danger-color)"
+          class="agent-error-message"
+          role="alert"
         >
-          <i class="ri-error-warning-line"></i>
+          <i class="ri-error-warning-line" aria-hidden="true"></i>
           <span>{{ message.content || 'Failed to send message' }}</span>
         </div>
 
@@ -391,30 +413,20 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import MarkdownIt from 'markdown-it'
-import type { DesktopAgentChoiceOption } from '@ecos-studio/shared'
 import type { Message } from '../types'
-import AgentChoiceCard from './AgentChoiceCard.vue'
+import AgentActivityStream from './AgentActivityStream.vue'
+import AgentOptimizationCard from './AgentOptimizationCard.vue'
 import AgentToolCard from './AgentToolCard.vue'
 import ChatArtifactLightbox from './ChatArtifactLightbox.vue'
 import { sanitizeHtml } from '@/utils/sanitizeHtml'
 import { readProjectBlobUrl } from '@/utils/projectFiles'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
 
-const props = withDefaults(
-  defineProps<{
-    choiceDisabled?: boolean
-    choiceInteractive?: boolean
-    message: Message
-  }>(),
-  {
-    choiceDisabled: false,
-    choiceInteractive: true,
-  },
-)
+const props = defineProps<{ message: Message }>()
 
 const emit = defineEmits<{
   (e: 'img-load'): void
-  (e: 'choice', promptId: string, option: DesktopAgentChoiceOption): void
+  (e: 'optimization-control', action: 'pause' | 'resume' | 'retry' | 'stop'): void
 }>()
 
 const md = new MarkdownIt({
@@ -436,6 +448,16 @@ md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
 const renderedContent = computed(() => {
   return sanitizeHtml(md.render(props.message.content))
 })
+
+const quickStartPreflightPrefix = 'Quick Start step preflight failed: '
+const isQuickStartPreflightError = computed(
+  () =>
+    props.message.status === 'error' &&
+    props.message.content.startsWith(quickStartPreflightPrefix),
+)
+const quickStartPreflightDetail = computed(() =>
+  props.message.content.slice(quickStartPreflightPrefix.length),
+)
 
 const handleImageLoad = () => {
   emit('img-load')
@@ -645,20 +667,111 @@ function csvRows(content: string): string[][] {
 </script>
 
 <style scoped>
+.message-bubble--assistant {
+  max-width: min(94%, 68rem);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-primary);
+}
+
 .message-bubble--assistant .markdown-body {
   color: var(--text-primary);
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1.65;
+  letter-spacing: 0;
+}
+
+.agent-error-message {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 0.5rem;
+  color: var(--danger-color);
+}
+
+.agent-error-message i {
+  flex: 0 0 auto;
+  margin-top: 0.2em;
+}
+
+.agent-error-message span {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.quick-start-preflight-error {
+  margin: 0.25rem 0;
+  padding: 0.75rem 0.875rem;
+  border: 1px solid color-mix(in srgb, var(--danger-color) 34%, var(--border-color));
+  border-radius: 0.625rem;
+  background: color-mix(in srgb, var(--danger-bg) 44%, var(--bg-secondary));
+  color: var(--text-primary);
+}
+
+.quick-start-preflight-error__header {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.quick-start-preflight-error__icon {
+  display: inline-flex;
+  width: 1.75rem;
+  height: 1.75rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--danger-color) 16%, transparent);
+  color: var(--danger-color);
+  font-size: 1rem;
+}
+
+.quick-start-preflight-error__header div {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.quick-start-preflight-error__header strong {
   font-size: 0.8125rem;
-  line-height: 1.55;
+  font-weight: 650;
+}
+
+.quick-start-preflight-error__header span:not(.quick-start-preflight-error__icon) {
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+}
+
+.quick-start-preflight-error__detail {
+  margin: 0.7rem 0 0;
+  padding: 0.55rem 0.625rem;
+  border-left: 2px solid var(--danger-color);
+  background: color-mix(in srgb, var(--bg-primary) 54%, transparent);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.quick-start-preflight-error__hint {
+  margin: 0.625rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  line-height: 1.45;
 }
 
 .markdown-body {
-  line-height: 1.55;
+  line-height: 1.6;
+  letter-spacing: 0;
   word-break: break-word;
   color: var(--text-primary);
 }
 
 .markdown-body :deep(p) {
-  margin-bottom: 0.5rem;
+  margin: 0 0 0.625rem;
 }
 
 .markdown-body :deep(p:last-child) {
@@ -669,15 +782,17 @@ function csvRows(content: string): string[][] {
   background-color: color-mix(in srgb, var(--border-color) 58%, transparent);
   padding: 0.2rem 0.4rem;
   border-radius: 4px;
-  font-family: monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 0.9em;
 }
 
 .markdown-body :deep(pre) {
   background-color: var(--bg-secondary);
-  padding: 1rem;
-  border-radius: 8px;
+  padding: 0.875rem;
+  border-radius: 6px;
   overflow-x: auto;
-  margin: 0.5rem 0;
+  margin: 0.75rem 0;
   border: 1px solid var(--border-color);
 }
 
@@ -690,13 +805,13 @@ function csvRows(content: string): string[][] {
 .markdown-body :deep(ul) {
   list-style-type: disc;
   padding-left: 1.5rem;
-  margin-bottom: 0.5rem;
+  margin: 0.25rem 0 0.625rem;
 }
 
 .markdown-body :deep(ol) {
   list-style-type: decimal;
   padding-left: 1.5rem;
-  margin-bottom: 0.5rem;
+  margin: 0.25rem 0 0.625rem;
 }
 
 .markdown-body :deep(li) {

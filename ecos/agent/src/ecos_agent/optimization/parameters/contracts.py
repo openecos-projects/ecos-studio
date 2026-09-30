@@ -1,0 +1,734 @@
+"""Hash-bound contracts for parameter effectiveness evidence.
+
+The module is intentionally independent from ECC implementation details.  ECC
+produces these payloads; the Agent only validates and consumes them.
+"""
+
+from __future__ import annotations
+
+import math
+import re
+from typing import Any, Literal
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
+
+from ecos_agent.hashing import canonical_sha256
+from ecos_agent.optimization.contracts import (
+    HistoryReference,
+    KnowledgeReference,
+    ObservationReference,
+    ObjectiveMetric,
+    OptimizationKnob,
+    OptimizationTaskMemoryReference,
+    ProposalContextRef,
+    StrategyDirection,
+)
+
+_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
+_SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
+Scalar = StrictBool | StrictInt | StrictFloat
+
+
+class _Model(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
+
+
+class ToolRef(_Model):
+    name: str
+    revision: str
+    source_sha256: str | None = None
+
+    @field_validator("name", "revision")
+    @classmethod
+    def text(cls, value: str) -> str:
+        if not value.strip() or len(value) > 256:
+            raise ValueError("tool reference is invalid")
+        return value.strip()
+
+    @field_validator("source_sha256")
+    @classmethod
+    def hash(cls, value: str | None) -> str | None:
+        if value is not None and not _SHA256.fullmatch(value):
+            raise ValueError("tool source hash is invalid")
+        return value
+
+
+class SurfaceRef(_Model):
+    file: str
+    json_path: tuple[str | int, ...]
+    type: Literal["bool", "int", "float", "string"]
+    unit: str
+
+    @field_validator("file")
+    @classmethod
+    def safe_file(cls, value: str) -> str:
+        if not value or value.startswith("/") or ".." in value.split("/"):
+            raise ValueError("surface file must be relative")
+        return value
+
+
+class RequestedValueBounds(_Model):
+    type: Literal["boolean", "integer", "number"]
+    minimum: StrictInt | StrictFloat | None = None
+    maximum: StrictInt | StrictFloat | None = None
+    exclusive_minimum: StrictBool = False
+    exclusive_maximum: StrictBool = False
+
+    @model_validator(mode="after")
+    def valid_bounds(self) -> "RequestedValueBounds":
+        if any(
+            type(value) is float and not math.isfinite(value)
+            for value in (self.minimum, self.maximum)
+        ):
+            raise ValueError("requested value bounds must be finite")
+        if self.type == "boolean" and (
+            self.minimum is not None or self.maximum is not None
+        ):
+            raise ValueError("boolean bounds cannot contain numeric endpoints")
+        if (self.exclusive_minimum and self.minimum is None) or (
+            self.exclusive_maximum and self.maximum is None
+        ):
+            raise ValueError("exclusive bounds require endpoints")
+        if self.minimum is not None and self.maximum is not None and (
+            self.minimum > self.maximum
+            or (
+                self.minimum == self.maximum
+                and (self.exclusive_minimum or self.exclusive_maximum)
+            )
+        ):
+            raise ValueError("requested value bounds are empty")
+        return self
+
+    def contains(self, value: Any) -> bool:
+        if self.type == "boolean":
+            return type(value) is bool
+        if type(value) not in ({int} if self.type == "integer" else {int, float}):
+            return False
+        if type(value) is float and not math.isfinite(value):
+            return False
+        if self.minimum is not None and (
+            value < self.minimum or (self.exclusive_minimum and value == self.minimum)
+        ):
+            return False
+        if self.maximum is not None and (
+            value > self.maximum or (self.exclusive_maximum and value == self.maximum)
+        ):
+            return False
+        return True
+
+    def json_schema(self) -> dict[str, Any]:
+        schema: dict[str, Any] = {"type": self.type}
+        if self.minimum is not None:
+            schema["exclusiveMinimum" if self.exclusive_minimum else "minimum"] = self.minimum
+        if self.maximum is not None:
+            schema["exclusiveMaximum" if self.exclusive_maximum else "maximum"] = self.maximum
+        return schema
+
+
+class RequestedDomain(RequestedValueBounds):
+    reference_values: tuple[Scalar, ...] = Field(
+        min_length=1,
+        description="Reviewed experiment probes, not an exhaustive list of legal requests.",
+    )
+
+    @field_validator("reference_values")
+    @classmethod
+    def finite(cls, values: tuple[Scalar, ...]) -> tuple[Scalar, ...]:
+        if len(set(values)) != len(values):
+            raise ValueError("requested domain values must be unique")
+        if any(isinstance(v, float) and not math.isfinite(v) for v in values):
+            raise ValueError("requested domain contains a non-finite value")
+        return values
+
+    @model_validator(mode="after")
+    def valid_references(self) -> "RequestedDomain":
+        if self.type != "boolean" and (self.minimum is None or self.maximum is None):
+            raise ValueError("requested domain requires explicit numeric bounds")
+        if any(not self.contains(value) for value in self.reference_values):
+            raise ValueError("reference value is outside the requested domain")
+        return self
+
+
+class CardSourceSpan(_Model):
+    span_id: str | None = None
+    role: Literal[
+        "runtime_report_producer",
+        "native_normalization",
+        "native_consumer",
+        "native_predicate",
+        "native_adaptive_update",
+    ] = "runtime_report_producer"
+    file: str
+    start: StrictInt
+    end: StrictInt
+    sha256: str
+
+    @field_validator("span_id")
+    @classmethod
+    def valid_span_id(cls, value: str | None) -> str | None:
+        if value is not None and not _ID.fullmatch(value):
+            raise ValueError("source span id is invalid")
+        return value
+
+    @field_validator("file")
+    @classmethod
+    def safe_file(cls, value: str) -> str:
+        if not value or value.startswith("/") or ".." in value.split("/"):
+            raise ValueError("source span file must be relative")
+        return value
+
+    @field_validator("sha256")
+    @classmethod
+    def valid_hash(cls, value: str) -> str:
+        if not _SHA256.fullmatch(value):
+            raise ValueError("source span hash is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def valid_range(self) -> "CardSourceSpan":
+        if self.start < 1 or self.end < self.start:
+            raise ValueError("source span range is invalid")
+        return self
+
+
+class CardEffectivenessCondition(_Model):
+    kind: str
+    predicate: str | None = None
+    source_span_ids: tuple[str, ...] = ()
+
+
+class CardConsumer(_Model):
+    consumer_id: str
+    event: Literal["entered", "evaluated", "geometry_constructed"]
+    role: str | None = None
+    source_span_ids: tuple[str, ...] = ()
+
+
+class CardMetricRelevance(_Model):
+    metric_id: str
+    relation: Literal[
+        "objective_input",
+        "stopping_predicate",
+        "geometry_input",
+        "activation_gate",
+        "runtime_observation",
+    ]
+    source_span_ids: tuple[str, ...] = Field(min_length=1)
+
+
+class CardInteraction(_Model):
+    knob_id: OptimizationKnob
+    relation: Literal[
+        "shared_objective",
+        "conditional_activation",
+        "runtime_reinitialization",
+    ]
+    source_span_ids: tuple[str, ...] = Field(min_length=1)
+
+
+class CardRuntimeSemantics(_Model):
+    mechanism: str
+    source_span_ids: tuple[str, ...] = Field(min_length=1)
+    metric_relevance: tuple[CardMetricRelevance, ...] = ()
+    interactions: tuple[CardInteraction, ...] = ()
+
+
+class ParameterSemanticsCard(_Model):
+    schema_version: Literal["ecos.parameter_semantics_card.v2"] = (
+        "ecos.parameter_semantics_card.v2"
+    )
+    knob_id: OptimizationKnob
+    tool: ToolRef
+    stage: str
+    surface: SurfaceRef
+    requested_domain: RequestedDomain
+    write_mapping: dict[str, Any]
+    effectiveness_conditions: tuple[CardEffectivenessCondition, ...] = ()
+    consumers: tuple[CardConsumer, ...] = ()
+    runtime_probe_ids: tuple[str, ...] = ()
+    source_spans: tuple[CardSourceSpan, ...] = ()
+    runtime_semantics: CardRuntimeSemantics | None = None
+    review: dict[str, Any]
+
+    @field_validator("stage")
+    @classmethod
+    def valid_stage(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("card stage is required")
+        return value
+
+    @field_validator("runtime_probe_ids")
+    @classmethod
+    def valid_probe_ids(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(values)) != len(values) or any(not _ID.fullmatch(v) for v in values):
+            raise ValueError("runtime probe ids are invalid")
+        return values
+
+    @model_validator(mode="after")
+    def source_references_exist(self) -> "ParameterSemanticsCard":
+        span_ids = [
+            span.span_id for span in self.source_spans if span.span_id is not None
+        ]
+        if len(span_ids) != len(set(span_ids)):
+            raise ValueError("parameter card source span ids must be unique")
+        references = {
+            source_id
+            for item in (*self.effectiveness_conditions, *self.consumers)
+            for source_id in item.source_span_ids
+        }
+        if self.runtime_semantics is not None:
+            references.update(self.runtime_semantics.source_span_ids)
+            for item in (
+                *self.runtime_semantics.metric_relevance,
+                *self.runtime_semantics.interactions,
+            ):
+                references.update(item.source_span_ids)
+        if references - set(span_ids):
+            raise ValueError("parameter card source reference is invalid")
+        return self
+
+
+class CardManifest(_Model):
+    schema_version: Literal["ecos.parameter_semantics_manifest.v1"] = (
+        "ecos.parameter_semantics_manifest.v1"
+    )
+    lattice_version: str
+    cards: tuple[dict[str, str], ...] = Field(min_length=7, max_length=7)
+    manifest_sha256: str
+
+    @field_validator("cards")
+    @classmethod
+    def unique_cards(
+        cls, value: tuple[dict[str, str], ...]
+    ) -> tuple[dict[str, str], ...]:
+        ids = [item.get("knob_id") for item in value]
+        if len(set(ids)) != len(ids) or any(
+            not isinstance(item.get("path"), str) for item in value
+        ):
+            raise ValueError("manifest cards must be unique and path-bound")
+        return value
+
+    @field_validator("lattice_version")
+    @classmethod
+    def valid_lattice(cls, value: str) -> str:
+        if not _ID.fullmatch(value):
+            raise ValueError("lattice version is invalid")
+        return value
+
+    @field_validator("manifest_sha256")
+    @classmethod
+    def valid_hash(cls, value: str) -> str:
+        if not _SHA256.fullmatch(value):
+            raise ValueError("manifest hash is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def verify_hash(self) -> "CardManifest":
+        expected = canonical_sha256(
+            self.model_dump(mode="json", exclude={"manifest_sha256"})
+        )
+        if expected != self.manifest_sha256:
+            raise ValueError("manifest hash does not match")
+        return self
+
+
+class MaterializationRef(_Model):
+    receipt_ref: str
+    receipt_sha256: str
+    registry_sha256: str
+    patch_sha256: str
+    candidate_ref: str
+    parent_ref: str | None = None
+    workspace_ref: str
+    target_step: str | None = None
+    config_ref: str | None = None
+    config_before_sha256: str
+    config_after_sha256: str
+    before_snapshot_ref: str | None = None
+    before_snapshot_sha256: str | None = None
+    after_snapshot_ref: str | None = None
+    after_snapshot_sha256: str | None = None
+    written_value: Scalar = Field(
+        description="The value actually written to the tool input, after unit mapping."
+    )
+    unit: str
+    parent_manifest_ref: str | None = None
+    parent_manifest_sha256: str | None = None
+    parent_state_sha256: str | None = None
+
+    @field_validator(
+        "receipt_sha256",
+        "registry_sha256",
+        "patch_sha256",
+        "config_before_sha256",
+        "config_after_sha256",
+    )
+    @classmethod
+    def hashes(cls, value: str) -> str:
+        if not _SHA256.fullmatch(value):
+            raise ValueError("materialization hash is invalid")
+        return value
+
+    @field_validator(
+        "before_snapshot_sha256",
+        "after_snapshot_sha256",
+        "parent_manifest_sha256",
+        "parent_state_sha256",
+    )
+    @classmethod
+    def optional_hashes(cls, value: str | None) -> str | None:
+        if value is not None and not _SHA256.fullmatch(value):
+            raise ValueError("materialization hash is invalid")
+        return value
+
+    @field_validator(
+        "receipt_ref",
+        "candidate_ref",
+        "workspace_ref",
+        "parent_ref",
+        "config_ref",
+        "before_snapshot_ref",
+        "after_snapshot_ref",
+        "parent_manifest_ref",
+    )
+    @classmethod
+    def refs(cls, value: str | None) -> str | None:
+        if value is not None and (
+            not value or value.startswith("/") or ".." in value.split("/")
+        ):
+            raise ValueError("materialization reference must be relative")
+        return value
+
+    @field_validator("target_step")
+    @classmethod
+    def target(cls, value: str | None) -> str | None:
+        if value is not None and not value:
+            raise ValueError("materialization target step is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def complete_binding(self) -> "MaterializationRef":
+        binding = (
+            self.target_step,
+            self.config_ref,
+            self.before_snapshot_ref,
+            self.before_snapshot_sha256,
+            self.after_snapshot_ref,
+            self.after_snapshot_sha256,
+        )
+        if any(value is not None for value in binding) and any(
+            value is None for value in binding
+        ):
+            raise ValueError("materialization config binding is incomplete")
+        parent_manifest = (self.parent_manifest_ref, self.parent_manifest_sha256)
+        if self.parent_ref is None and any(
+            value is not None for value in parent_manifest
+        ):
+            raise ValueError("materialization parent binding is unexpected")
+        if self.parent_ref is not None and (
+            any(value is None for value in parent_manifest)
+            or self.parent_state_sha256 is None
+        ):
+            raise ValueError("materialization parent binding is incomplete")
+        return self
+
+
+class ParameterApplicationReceipt(_Model):
+    """Tool-observed parameter evidence; this alone does not prove QoR improvement."""
+
+    schema_version: Literal["tool.parameter_application_receipt.v2"] = (
+        "tool.parameter_application_receipt.v2"
+    )
+    receipt_id: str
+    tool: ToolRef
+    context: dict[str, Any]
+    requested: dict[str, Any] = Field(
+        description=(
+            "The proposal intent before materialization; it does not prove what the tool used."
+        )
+    )
+    materialization: MaterializationRef
+    actual_value: Scalar | None = Field(description="Actual value in the requested unit.")
+    status: Literal["effective", "inactive", "unknown"]
+    reason: str | None = None
+    observation: dict[str, Any] = Field(default_factory=dict)
+    evidence_sha256: str
+
+    @field_validator("receipt_id")
+    @classmethod
+    def valid_id(cls, value: str) -> str:
+        if not _ID.fullmatch(value):
+            raise ValueError("receipt id is invalid")
+        return value
+
+    @field_validator("evidence_sha256")
+    @classmethod
+    def valid_evidence_hash(cls, value: str) -> str:
+        if not _SHA256.fullmatch(value):
+            raise ValueError("receipt evidence hash is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def verify_receipt(self) -> "ParameterApplicationReceipt":
+        knob = self.requested.get("knob_id")
+        if knob not in {item.value for item in OptimizationKnob}:
+            raise ValueError("receipt requested knob is invalid")
+        try:
+            from ecos_agent.optimization.contracts import RequestedKnobValue
+
+            RequestedKnobValue(knob_id=knob, value=self.requested.get("value"))
+        except (TypeError, ValueError):
+            raise ValueError("receipt requested value is outside the bounded domain")
+        if not isinstance(self.requested.get("unit"), str) or not self.requested.get(
+            "unit"
+        ):
+            raise ValueError("receipt requested unit is invalid")
+        requested = self.requested["value"]
+        written = self.materialization.written_value
+        if isinstance(written, float) and not math.isfinite(written):
+            raise ValueError("materialization written value must be finite")
+        if knob == OptimizationKnob.CELL_PADDING_X.value and (
+            isinstance(written, bool) or written < 0
+        ):
+            raise ValueError("materialization padding value is invalid")
+        if knob != OptimizationKnob.CELL_PADDING_X.value and (
+            written != requested
+            or isinstance(written, bool) != isinstance(requested, bool)
+        ):
+            raise ValueError("materialization written value does not match request")
+        if self.actual_value is not None:
+            if isinstance(self.actual_value, bool) != isinstance(requested, bool):
+                raise ValueError("actual parameter value type does not match request")
+            if isinstance(self.actual_value, float) and not math.isfinite(self.actual_value):
+                raise ValueError("actual parameter value must be finite")
+        if self.status == "effective" and self.actual_value is None:
+            raise ValueError("effective parameter requires an actual value")
+        if self.status == "unknown" and self.actual_value is not None:
+            raise ValueError("unknown parameter cannot claim an actual value")
+        if self.evidence_sha256 != canonical_sha256(
+            self.model_dump(mode="json", exclude={"evidence_sha256"})
+        ):
+            raise ValueError("receipt evidence hash does not match content")
+        return self
+
+
+class ExpectedEffectV2(_Model):
+    metric_id: ObjectiveMetric
+    direction: Literal["increase", "decrease", "unchanged", "unknown"]
+
+
+class StrategyStepCondition(_Model):
+    """One objective-metric gate a prior step's outcome must satisfy."""
+
+    metric_id: ObjectiveMetric
+    expects: Literal["improved", "degraded", "unchanged"]
+
+
+class StrategyStepV4(_Model):
+    """One declared future probe; never execution authority on its own."""
+
+    step_id: str
+    knob_id: OptimizationKnob
+    direction: StrategyDirection
+    requested_value: Scalar | None = None
+    intent: Literal["probe", "confirm", "exploit"] = "probe"
+    condition: StrategyStepCondition | None = None
+    depends_on: tuple[str, ...] = Field(default=(), max_length=5)
+    rationale: str | None = Field(default=None, max_length=280)
+
+    @field_validator("step_id")
+    @classmethod
+    def step_identifier(cls, value: str) -> str:
+        if not _ID.fullmatch(value):
+            raise ValueError("strategy step id is invalid")
+        return value
+
+    @field_validator("rationale")
+    @classmethod
+    def step_rationale(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+    @model_validator(mode="after")
+    def direction_matches_knob(self) -> "StrategyStepV4":
+        if self.knob_id == OptimizationKnob.ROUTABILITY_OPT:
+            if self.direction not in {
+                StrategyDirection.ENABLE,
+                StrategyDirection.DISABLE,
+            }:
+                raise ValueError("boolean knob requires enable or disable")
+            if self.requested_value is not None and type(self.requested_value) is not bool:
+                raise ValueError("boolean knob requires a boolean value")
+        else:
+            if self.direction not in {
+                StrategyDirection.INCREASE,
+                StrategyDirection.DECREASE,
+            }:
+                raise ValueError("numeric knob requires increase or decrease")
+            if self.requested_value is not None and (
+                isinstance(self.requested_value, bool)
+                or not isinstance(self.requested_value, (int, float))
+            ):
+                raise ValueError("numeric knob requires a numeric value")
+        return self
+
+
+class OptimizationStrategyV4(_Model):
+    """The planner's declared multi-step strategy for later turns.
+
+    Declarative guidance only: each step still passes the full per-turn
+    validation when it becomes the dispatched action, and only the single
+    ``action`` field ever dispatches in one turn.
+    """
+
+    schema_version: Literal["ecos.optimization_strategy.v1"] = (
+        "ecos.optimization_strategy.v1"
+    )
+    goal: str = Field(min_length=1, max_length=280)
+    steps: tuple[StrategyStepV4, ...] = Field(min_length=1, max_length=6)
+    supersede_of: str | None = None
+
+    @field_validator("goal")
+    @classmethod
+    def validate_goal(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("strategy goal is invalid")
+        return value
+
+    @field_validator("supersede_of")
+    @classmethod
+    def validate_supersede(cls, value: str | None) -> str | None:
+        if value is not None and not _SHA256.fullmatch(value):
+            raise ValueError("strategy supersede hash is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def validate_step_graph(self) -> "OptimizationStrategyV4":
+        ids = [step.step_id for step in self.steps]
+        if len(set(ids)) != len(ids):
+            raise ValueError("strategy step ids must be unique")
+        known = set(ids)
+        for step in self.steps:
+            if step.step_id in step.depends_on:
+                raise ValueError("strategy step cannot depend on itself")
+            unknown = set(step.depends_on) - known
+            if unknown:
+                raise ValueError("strategy step depends on an unknown step")
+        # Steps form a DAG: a cycle would make the declared order meaningless.
+        pending = {step.step_id: set(step.depends_on) for step in self.steps}
+        resolved: set[str] = set()
+        while pending:
+            ready = [
+                step_id
+                for step_id, deps in pending.items()
+                if deps <= resolved
+            ]
+            if not ready:
+                raise ValueError("strategy steps must form a dependency DAG")
+            for step_id in ready:
+                del pending[step_id]
+                resolved.add(step_id)
+        return self
+
+
+class NumericProposalActionV2(_Model):
+    claim_id: str | None = None
+    claim_sha256: str | None = None
+    binding_id: str | None = None
+    binding_sha256: str | None = None
+    knob_id: OptimizationKnob
+    direction: StrategyDirection
+    requested_value: Scalar
+    effective_domain_sha256: str
+    expected_effects: tuple[ExpectedEffectV2, ...] = Field(min_length=1, max_length=3)
+
+    @field_validator("claim_id", "binding_id")
+    @classmethod
+    def knowledge_id(cls, value: str | None) -> str | None:
+        if value is not None and not _ID.fullmatch(value):
+            raise ValueError("proposal knowledge identifier is invalid")
+        return value
+
+    @field_validator(
+        "claim_sha256", "binding_sha256", "effective_domain_sha256"
+    )
+    @classmethod
+    def knowledge_hash(cls, value: str | None) -> str | None:
+        if value is not None and not _SHA256.fullmatch(value):
+            raise ValueError("proposal knowledge or domain hash is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def direction_matches_knob(self) -> "NumericProposalActionV2":
+        knowledge_binding = (
+            self.claim_id,
+            self.claim_sha256,
+            self.binding_id,
+            self.binding_sha256,
+        )
+        if any(value is not None for value in knowledge_binding) and any(
+            value is None for value in knowledge_binding
+        ):
+            raise ValueError("proposal knowledge binding is incomplete")
+        if self.knob_id == OptimizationKnob.ROUTABILITY_OPT:
+            if self.direction not in {
+                StrategyDirection.ENABLE,
+                StrategyDirection.DISABLE,
+            }:
+                raise ValueError("boolean knob requires enable or disable")
+            if type(self.requested_value) is not bool:
+                raise ValueError("boolean knob requires a boolean value")
+        elif self.direction not in {
+            StrategyDirection.INCREASE,
+            StrategyDirection.DECREASE,
+        }:
+            raise ValueError("numeric knob requires increase or decrease")
+        return self
+
+
+class OptimizationProposalV2(_Model):
+    schema_version: Literal["ecos.optimization_proposal.v3"] = (
+        "ecos.optimization_proposal.v3"
+    )
+    context_ref: ProposalContextRef
+    decision: Literal["continue", "propose", "stop", "escalate"]
+    reason_code: str
+    rationale_summary: str = Field(min_length=1, max_length=512)
+    observation_refs: tuple[ObservationReference, ...] = Field(
+        min_length=1, max_length=13
+    )
+    history_refs: tuple[HistoryReference, ...] = ()
+    knowledge_refs: tuple[KnowledgeReference, ...] = ()
+    task_memory_refs: tuple[OptimizationTaskMemoryReference, ...] = ()
+    action: NumericProposalActionV2 | None = None
+    strategy: OptimizationStrategyV4 | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @field_validator("rationale_summary")
+    @classmethod
+    def validate_rationale(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("proposal rationale is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def action_consistency(self) -> "OptimizationProposalV2":
+        if self.decision == "propose" and self.action is None:
+            raise ValueError("v3 propose requires an action")
+        if self.decision != "propose" and self.action is not None:
+            raise ValueError("non-propose v3 decisions cannot contain an action")
+        return self

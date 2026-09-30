@@ -1,0 +1,401 @@
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+import pytest
+from pydantic import ValidationError
+
+from ecos_agent.hashing import canonical_sha256
+from ecos_agent.optimization.contracts import OptimizationKnob
+from ecos_agent.optimization.parameters.contracts import (
+    ParameterApplicationReceipt,
+    ParameterSemanticsCard,
+)
+from ecos_agent.optimization.parameters.semantics import (
+    CARD_ROOT,
+    ParameterSemanticsError,
+    card_hash,
+    load_parameter_card,
+    load_parameter_cards,
+)
+from tests.paths import AGENT_ROOT
+
+
+def test_parameter_cards_are_flat_under_optimization() -> None:
+    manifest = json.loads((CARD_ROOT / "manifest.json").read_text(encoding="utf-8"))
+
+    assert CARD_ROOT.name == "optimization"
+    assert {item["path"] for item in manifest["cards"]} == {
+        f"{knob.value}.json" for knob in OptimizationKnob
+    }
+    assert {path.name for path in CARD_ROOT.iterdir()} == {
+        "manifest.json",
+        "state-rule-manifest.v1.json",
+        *(f"{knob.value}.json" for knob in OptimizationKnob),
+    }
+
+
+def test_state_rule_manifest_scope_is_frozen_experiment_cohort() -> None:
+    from ecos_agent.optimization.knowledge.compiler import load_state_rule_manifest
+
+    manifest = load_state_rule_manifest()
+
+    assert list(manifest.scope) == [
+        "gcd",
+        "aes",
+        "PPU",
+        "y_huff",
+        "picorv32a",
+        "sha256",
+        "vm80",
+        "mos6502",
+        "dbg_bridge",
+        "s35932",
+    ]
+
+
+def test_loader_accepts_semantically_identical_json_formatting(tmp_path) -> None:
+    root = tmp_path / "cards"
+    shutil.copytree(CARD_ROOT, root)
+    card_path = root / "floorplan.aspect_ratio.json"
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    card_path.write_text(json.dumps(card, indent=2) + "\n", encoding="utf-8")
+
+    loaded = load_parameter_cards(root)
+
+    assert loaded[OptimizationKnob.FLOORPLAN_ASPECT_RATIO].knob_id == (
+        OptimizationKnob.FLOORPLAN_ASPECT_RATIO
+    )
+
+
+def test_loader_rejects_semantically_changed_card_without_manifest_update(tmp_path) -> None:
+    root = tmp_path / "cards"
+    shutil.copytree(CARD_ROOT, root)
+    card_path = root / "floorplan.aspect_ratio.json"
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    card["runtime_semantics"]["mechanism"] += " Changed."
+    card_path.write_text(json.dumps(card), encoding="utf-8")
+
+    with pytest.raises(ParameterSemanticsError, match="card hash"):
+        load_parameter_cards(root)
+
+
+def test_single_card_loader_ignores_unrelated_invalid_card(tmp_path) -> None:
+    root = tmp_path / "cards"
+    shutil.copytree(CARD_ROOT, root)
+    card_path = root / "place.target_overflow.json"
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    card["requested_domain"]["reference_values"][0] = 0.117
+    card_path.write_text(json.dumps(card), encoding="utf-8")
+    _refresh_card_manifest(root)
+
+    loaded = load_parameter_card(OptimizationKnob.TARGET_DENSITY, root)
+
+    assert loaded.knob_id is OptimizationKnob.TARGET_DENSITY
+    with pytest.raises(ParameterSemanticsError, match="lattice"):
+        load_parameter_cards(root)
+
+
+def test_parameter_receipt_schema_explains_evidence_boundaries() -> None:
+    schema = ParameterApplicationReceipt.model_json_schema()
+
+    assert schema["properties"]["requested"]["description"] == (
+        "The proposal intent before materialization; it does not prove what the tool used."
+    )
+    assert schema["$defs"]["MaterializationRef"]["properties"]["written_value"][
+        "description"
+    ] == "The value actually written to the tool input, after unit mapping."
+    assert schema["properties"]["actual_value"]["description"] == (
+        "Actual value in the requested unit."
+    )
+    assert schema["properties"]["status"]["enum"] == ["effective", "inactive", "unknown"]
+    assert not {"activation", "effective_initial", "effective_final", "transitions"} & set(
+        schema["properties"]
+    )
+    assert schema["description"] == (
+        "Tool-observed parameter evidence; this alone does not prove QoR improvement."
+    )
+
+
+def test_cards_are_exactly_the_frozen_seven() -> None:
+    cards = load_parameter_cards()
+    assert {knob.value for knob in cards} == {item.value for item in OptimizationKnob}
+    assert [len(card.requested_domain.reference_values) for card in cards.values()] == [
+        13,
+        16,
+        12,
+        18,
+        2,
+        21,
+        21,
+    ]
+
+
+def test_cards_distinguish_requested_ranges_from_reference_probes() -> None:
+    cards = load_parameter_cards()
+    density = cards[OptimizationKnob.TARGET_DENSITY]
+    overflow = cards[OptimizationKnob.TARGET_OVERFLOW]
+    padding = cards[OptimizationKnob.CELL_PADDING_X]
+
+    for card in cards.values():
+        assert card.schema_version == "ecos.parameter_semantics_card.v2"
+        assert card.effectiveness_conditions
+        assert not {"activation_conditions", "resolution_rules"} & card.model_dump().keys()
+        assert "values" not in card.requested_domain.model_dump()
+    assert 0.517 not in density.requested_domain.reference_values
+    assert density.requested_domain.contains(0.517)
+    assert overflow.requested_domain.contains(0.001)
+    assert overflow.requested_domain.contains(0.999)
+    assert not overflow.requested_domain.contains(0)
+    assert not overflow.requested_domain.contains(1)
+    assert padding.requested_domain.contains(9)
+    assert not padding.requested_domain.contains(9.5)
+    assert not padding.requested_domain.contains(True)
+
+
+def test_loader_rejects_expanded_requested_bounds(tmp_path) -> None:
+    root = tmp_path / "cards"
+    shutil.copytree(CARD_ROOT, root)
+    card_path = root / "place.target_density.json"
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    card["requested_domain"]["maximum"] = 1.0
+    card_path.write_text(json.dumps(card), encoding="utf-8")
+    _refresh_card_manifest(root)
+
+    with pytest.raises(ParameterSemanticsError, match="bounds"):
+        load_parameter_cards(root)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"minimum": None},
+        {"minimum": float("nan")},
+        {"maximum": 0.0},
+        {"reference_values": [True]},
+        {"reference_values": [0.99]},
+        {"values": [0.5]},
+    ],
+)
+def test_requested_domain_rejects_invalid_bounds_and_reference_values(change) -> None:
+    card = load_parameter_card(OptimizationKnob.TARGET_DENSITY).model_dump(mode="json")
+    card["requested_domain"].update(change)
+
+    with pytest.raises(ValidationError):
+        ParameterSemanticsCard.model_validate(card)
+
+
+def test_parameter_card_v1_requires_explicit_migration() -> None:
+    card = load_parameter_card(OptimizationKnob.TARGET_DENSITY).model_dump(mode="json")
+    card["schema_version"] = "ecos.parameter_semantics_card.v1"
+
+    with pytest.raises(ValidationError):
+        ParameterSemanticsCard.model_validate(card)
+
+
+@pytest.mark.parametrize(
+    ("knob", "json_path"),
+    [
+        (OptimizationKnob.FLOORPLAN_CORE_UTIL, ("core", "utilitization")),
+        (OptimizationKnob.FLOORPLAN_ASPECT_RATIO, ("core", "aspect_ratio")),
+    ],
+)
+def test_floorplan_cards_bind_canonical_workspace_parameters(
+    knob: OptimizationKnob, json_path: tuple[str, ...]
+) -> None:
+    card = load_parameter_cards()[knob]
+
+    assert card.surface.file == "home/params.toml"
+    assert card.surface.json_path == json_path
+
+
+def test_dreamplace_cards_bind_typed_runtime_semantics_to_native_sources() -> None:
+    cards = load_parameter_cards()
+    dreamplace_cards = [
+        card for card in cards.values() if card.tool.name == "DREAMPlace"
+    ]
+
+    assert len(dreamplace_cards) == 5
+    for card in dreamplace_cards:
+        assert card.runtime_semantics is not None
+        assert card.runtime_semantics.mechanism
+        span_ids = {span.span_id for span in card.source_spans}
+        assert None not in span_ids
+        assert {span.role for span in card.source_spans} >= {
+            "runtime_report_producer",
+            "native_consumer",
+        }
+        referenced = (
+            {
+                span_id
+                for condition in card.effectiveness_conditions
+                for span_id in condition.source_span_ids
+            }
+            | {
+                span_id
+                for consumer in card.consumers
+                for span_id in consumer.source_span_ids
+            }
+            | set(card.runtime_semantics.source_span_ids)
+        )
+        assert referenced <= span_ids
+
+
+def test_non_dreamplace_cards_bind_typed_runtime_semantics_to_native_sources() -> None:
+    cards = load_parameter_cards()
+    native_cards = [
+        card for card in cards.values() if card.tool.name != "DREAMPlace"
+    ]
+
+    assert len(native_cards) == 2
+    for card in native_cards:
+        assert card.runtime_semantics is not None
+        assert card.runtime_semantics.mechanism
+        assert all(span.span_id is not None for span in card.source_spans)
+        assert {span.role for span in card.source_spans} >= {
+            "runtime_report_producer",
+            "native_consumer",
+        }
+
+
+def test_loader_rejects_dreamplace_card_without_native_consumer_span(tmp_path) -> None:
+    root = tmp_path / "cards"
+    shutil.copytree(CARD_ROOT, root)
+    card_path = root / "place.target_density.json"
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    card["source_spans"] = [
+        span
+        for span in card["source_spans"]
+        if span.get("role") == "runtime_report_producer"
+    ]
+    report_span = card["source_spans"][0]["span_id"]
+    for item in (*card["effectiveness_conditions"], *card["consumers"]):
+        item["source_span_ids"] = [report_span]
+    semantics = card["runtime_semantics"]
+    semantics["source_span_ids"] = [report_span]
+    for key in ("metric_relevance", "interactions"):
+        for item in semantics[key]:
+            item["source_span_ids"] = [report_span]
+    card_path.write_text(json.dumps(card, separators=(",", ":")), encoding="utf-8")
+    _refresh_card_manifest(root)
+
+    with pytest.raises(ParameterSemanticsError, match="native consumer"):
+        load_parameter_cards(root)
+
+
+def test_loader_rejects_dreamplace_card_without_runtime_report_producer(
+    tmp_path,
+) -> None:
+    root = tmp_path / "cards"
+    shutil.copytree(CARD_ROOT, root)
+    card_path = root / "place.target_density.json"
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    card["tool"].pop("source_sha256", None)
+    card["source_spans"] = [
+        span
+        for span in card["source_spans"]
+        if span.get("role") != "runtime_report_producer"
+    ]
+    card_path.write_text(json.dumps(card, separators=(",", ":")), encoding="utf-8")
+    _refresh_card_manifest(root)
+
+    with pytest.raises(ParameterSemanticsError, match="runtime report producer"):
+        load_parameter_cards(root)
+
+
+def test_loader_accepts_source_span_drift_without_live_source(tmp_path) -> None:
+    root = tmp_path / "cards"
+    shutil.copytree(CARD_ROOT, root)
+    card_path = root / "place.target_density.json"
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    for span in card["source_spans"]:
+        span["start"] = 1
+        span["end"] = 1
+        span["sha256"] = "sha256:" + "0" * 64
+    card_path.write_text(json.dumps(card, separators=(",", ":")), encoding="utf-8")
+    _refresh_card_manifest(root)
+
+    loaded = load_parameter_cards(root)
+
+    assert loaded[OptimizationKnob.TARGET_DENSITY].knob_id is (
+        OptimizationKnob.TARGET_DENSITY
+    )
+
+
+def _refresh_card_manifest(root) -> None:
+    manifest_path = root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for item in manifest["cards"]:
+        card = ParameterSemanticsCard.model_validate_json(
+            (root / item["path"]).read_bytes()
+        )
+        item["sha256"] = card_hash(card)
+    manifest["manifest_sha256"] = canonical_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    manifest_path.write_text(
+        json.dumps(manifest, separators=(",", ":")), encoding="utf-8"
+    )
+
+
+def test_loader_rejects_changed_frozen_lattice(tmp_path) -> None:
+    root = tmp_path / "cards"
+    shutil.copytree(CARD_ROOT, root)
+    card_path = root / "place.target_density.json"
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    card["requested_domain"]["reference_values"][0] = 0.11
+    card_path.write_text(json.dumps(card, separators=(",", ":")), encoding="utf-8")
+    _refresh_card_manifest(root)
+
+    with pytest.raises(ParameterSemanticsError, match="lattice"):
+        load_parameter_cards(root)
+
+
+def test_loader_rejects_unregistered_runtime_probe(tmp_path) -> None:
+    root = tmp_path / "cards"
+    shutil.copytree(CARD_ROOT, root)
+    card_path = root / "place.target_density.json"
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    card["runtime_probe_ids"] = ["unknown.probe"]
+    card_path.write_text(json.dumps(card, separators=(",", ":")), encoding="utf-8")
+    _refresh_card_manifest(root)
+
+    with pytest.raises(ParameterSemanticsError, match="runtime probe"):
+        load_parameter_cards(root)
+
+
+def test_wheel_loads_cards_without_source_checkout(tmp_path) -> None:
+    wheel_dir = tmp_path / "wheel"
+    subprocess.run(
+        ["uv", "build", "--wheel", "--out-dir", str(wheel_dir)],
+        cwd=AGENT_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    wheel = next(wheel_dir.glob("*.whl"))
+    site_dir = tmp_path / "site"
+    subprocess.run(
+        ["uv", "pip", "install", "--quiet", "--target", str(site_dir), str(wheel)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    env = dict(os.environ, PYTHONPATH=str(site_dir))
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from ecos_agent.optimization.parameters.semantics import load_parameter_cards; assert len(load_parameter_cards()) == 7",
+        ],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
