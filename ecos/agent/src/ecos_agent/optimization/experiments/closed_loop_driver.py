@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import re
+import statistics
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -27,7 +28,6 @@ from ecos_agent.optimization.contracts import (
     TIMING_GUARDRAIL_ORDER,
     TimingMetric,
 )
-from ecos_agent.optimization.experiments.calibration_reuse import reuse_calibration
 from ecos_agent.optimization.experiments.equal_budget import (
     CandidateTrace,
     _evaluation_value,
@@ -47,6 +47,7 @@ from ecos_agent.optimization.experiments.replay_provider import (
 from ecos_agent.optimization.experiments.knowledge_treatment_execution import (
     DesignSpec,
     ExperimentManifest,
+    _ensure_workspace,
     _filelist_refs,
     _git_identity,
 )
@@ -77,7 +78,11 @@ from ecos_agent.optimization.objective_intent import OptimizationParameterPolicy
 from ecos_agent.optimization.observation_contracts import deterministic_noise_profile
 from ecos_agent.optimization.rules import freeze_optimization_objective
 from ecos_agent.optimization.planning_snapshots import configure_planning_snapshots
-from ecos_agent.optimization.runtime import _ecc_executable, create_optimization_runner
+from ecos_agent.optimization.runtime import (
+    _ecc_executable,
+    create_optimization_runner,
+    epsilon_artifact_path,
+)
 
 # 频率取各设计 SDC 的原始约束 100 MHz：ECC cf5db256 起 refresh_generated_sdc 会把
 # 带 "# Auto-generated SDC file" 标记的 SDC 改写为 frequency_max 参数值，基线必须
@@ -471,6 +476,47 @@ def _native_design_id(logical_design_id: str) -> str:
     return "d-" + canonical_sha256({"logical_design_id": logical_design_id})[7:19]
 
 
+def _workspace_calibration(workspace: Path) -> tuple[float, dict[str, object]]:
+    """Median seeded replay runtime plus the frozen noise epsilon artifact.
+
+    Batch preparation seeds ``.agent/optimization/noise-calibration/`` (two
+    default replays behind replay-cache manifests) and
+    ``noise-epsilon.v1.json`` in every per-attempt workspace. A missing or
+    thin calibration fails closed here; the episode itself never replays.
+    """
+    calibration_root = workspace / ".agent" / "optimization" / "noise-calibration"
+    runtimes = []
+    for path in sorted(calibration_root.glob("default-replay-*/runtime.v1.json")):
+        value = json.loads(path.read_text(encoding="utf-8"))["elapsed_seconds"]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+            raise SystemExit(f"invalid calibration replay runtime: {path}")
+        runtimes.append(float(value))
+    if len(runtimes) < 2:
+        raise SystemExit(
+            "workspace lacks the seeded default-replay calibration "
+            f"(found {len(runtimes)} replays, need >= 2): {calibration_root}"
+        )
+    epsilon_path = epsilon_artifact_path(workspace)
+    if not epsilon_path.is_file():
+        raise SystemExit("workspace lacks the seeded noise-epsilon artifact")
+    payload = json.loads(epsilon_path.read_text(encoding="utf-8"))
+    epsilon = payload.get("epsilon")
+    if (
+        payload.get("schema_version") != "ecos.noise_epsilon.v1"
+        or not isinstance(epsilon, dict)
+        or any(isinstance(v, bool) or not isinstance(v, (int, float)) for v in epsilon.values())
+    ):
+        raise SystemExit("seeded noise-epsilon artifact is invalid")
+    return statistics.median(runtimes), {
+        "artifact": str(epsilon_path),
+        "replay_count": payload.get("replay_count"),
+        "epsilon": epsilon,
+        "drifting_metric_keys": sorted(
+            key for key, value in epsilon.items() if value > 0
+        ),
+    }
+
+
 def _validate_treatment_combination(
     knowledge_treatment: str | None, planning_evidence: str,
 ) -> None:
@@ -589,13 +635,6 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
     )
     parser.add_argument("--terminal-timeout-seconds", type=float, default=1800.0)
     parser.add_argument(
-        "--calibration-donor",
-        type=Path,
-        default=None,
-        help="explicit self-hashed cache-only calibration donor manifest; "
-        "missing/incompatible artifacts fail closed and never replay",
-    )
-    parser.add_argument(
         "--stop-after-started",
         type=int,
         default=None,
@@ -606,12 +645,6 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
         "--dry-run",
         action="store_true",
         help="validate CLI wiring and print dispatch-free inputs; no provider/native",
-    )
-    parser.add_argument(
-        "--calibration-replays",
-        type=int,
-        default=3,
-        help="deprecated compatibility argument; cache-only donor replay count is fixed by its manifest",
     )
     parser.add_argument(
         "--max-in-flight-candidates",
@@ -632,8 +665,7 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
             "dispatch": "disabled",
             "provider": "disabled",
             "native": "disabled",
-            "calibration_mode": "cache-only",
-            "calibration_donor": str(args.calibration_donor) if args.calibration_donor else None,
+            "calibration_mode": "seeded-workspace-calibration",
             "stop_after_started": args.stop_after_started,
         }, sort_keys=True))
         return 0
@@ -688,25 +720,16 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
         encoding="utf-8",
     )
 
-    if args.calibration_donor is None:
-        raise SystemExit(
-            "--calibration-donor is required: this driver is cache-only and "
-            "never falls back to default replay"
-        )
-    calibration_output = output / "calibration"
-    # Cache-only: validate the already prepared workspace and donor bytes; no
-    # _calibrate/_run_default_replay fallback exists on this path.
-    reference, reference_runtime, noise_epsilon = reuse_calibration(
-        manifest, design, workspace, args.calibration_donor.resolve(), calibration_output
-    )
-    canonical = reference
+    # The workspace arrives with its default-replay calibration seeded by the
+    # batch preparation (one canonical run per design; two replays behind
+    # replay-cache manifests). This driver never replays the flow itself: it
+    # verifies the workspace, reads the seeded calibration, and fails closed
+    # when either is missing.
+    canonical = _ensure_workspace(manifest, design, workspace, args.terminal_timeout_seconds)
+    reference_runtime, noise_epsilon = _workspace_calibration(workspace)
     print(
         f"[driver] calibration done: reference_runtime={reference_runtime:.1f}s "
-        + (
-            f"noise_epsilon_drifting_keys={len(noise_epsilon['drifting_metric_keys'])}"
-            if noise_epsilon
-            else "noise_epsilon=skipped"
-        ),
+        f"noise_epsilon_drifting_keys={len(noise_epsilon['drifting_metric_keys'])}",
         flush=True,
     )
 

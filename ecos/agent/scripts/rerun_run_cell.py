@@ -15,8 +15,10 @@ audit variables) is inherited unchanged from the frozen scheduler process.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import shutil
 import sys
 import time
 from datetime import datetime, timezone
@@ -66,6 +68,59 @@ def _prepare_workspace(
     receipt["elapsed_seconds"] = round(time.monotonic() - started, 3)
     receipt["finished_at"] = datetime.now(timezone.utc).isoformat()
     return receipt
+
+
+def _seed_workspace_calibration(
+    workspace: Path, source: Path, receipt: dict[str, object]
+) -> None:
+    """Copy the design's canonical replay calibration into this workspace.
+
+    The source is the batch's per-design canonical workspace calibrated by
+    ``ecos_agent.optimization.calibrate_workspace`` (two default replays with
+    replay-cache manifests plus the frozen noise epsilon). Each replay cache
+    manifest is re-validated against THIS workspace's environment fingerprint,
+    so any toolchain, PDK, origin-input or parameter drift fails closed
+    instead of seeding with stale calibration. Seeding is idempotent: an
+    already seeded workspace is only re-verified, never overwritten.
+    """
+    from ecos_agent.optimization.calibrate_workspace import (
+        _environment_fingerprint,
+        _load_replay_manifest,
+        _require_same_inputs,
+    )
+
+    optimization_root = workspace / ".agent" / "optimization"
+    epsilon_target = optimization_root / "noise-epsilon.v1.json"
+    calibration_target = optimization_root / "noise-calibration"
+    fingerprint = _environment_fingerprint(workspace)
+    if epsilon_target.is_file():
+        seeded = "already-seeded"
+    else:
+        epsilon_source = source / ".agent" / "optimization" / "noise-epsilon.v1.json"
+        calibration_source = source / ".agent" / "optimization" / "noise-calibration"
+        replays = sorted(calibration_source.glob("default-replay-*"))
+        if not epsilon_source.is_file() or len(replays) < 2:
+            raise SystemExit(
+                f"calibration source lacks the canonical seed (epsilon + >=2 "
+                f"replays): {source}"
+            )
+        for replay in replays:
+            manifest = _load_replay_manifest(replay)
+            if manifest is None:
+                raise SystemExit(f"replay cache manifest missing: {replay}")
+            _require_same_inputs(manifest, fingerprint, replay.name)
+        optimization_root.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(epsilon_source, epsilon_target)
+        shutil.copytree(calibration_source, calibration_target)
+        seeded = "seeded"
+    replay_dirs = sorted(calibration_target.glob("default-replay-*"))
+    receipt["calibration"] = {
+        "status": seeded,
+        "source": str(source),
+        "seeded_replays": [path.name for path in replay_dirs],
+        "epsilon_sha256": "sha256:" + hashlib.sha256(epsilon_target.read_bytes()).hexdigest(),
+        "environment_fingerprint": dict(fingerprint),
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
