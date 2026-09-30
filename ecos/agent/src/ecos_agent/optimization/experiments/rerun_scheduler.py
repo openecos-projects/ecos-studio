@@ -149,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
     manifest_hash = sha256(args.manifest)
     if state_path.exists():
         state = json.loads(state_path.read_text())
-        if state['manifest_sha256'] != manifest_hash:
+        if state['manifest_sha256'].removeprefix('sha256:') != manifest_hash:
             raise ValueError('Cannot resume under a different manifest')
     else:
         state = {'manifest_sha256': manifest_hash, 'phase': phase,
