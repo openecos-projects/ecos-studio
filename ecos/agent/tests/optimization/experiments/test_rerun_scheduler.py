@@ -71,11 +71,24 @@ def test_same_design_pair_is_allowed_but_third_waits_for_other_designs():
     assert eligible_cell(rows, state, {'a': 1}, ['a', 'b'], 2, 6)['logical_episode_id'] == 'a2'
     state['a2']['status'] = 'running'
     assert eligible_cell(rows, state, {'a': 2}, ['a', 'b'], 2, 6)['logical_episode_id'] == 'b1'
-    # Tail exception: once 'b' has no registered cells left (its last cell may
+    # Tail exception: once 'b' has no work left anywhere (its last cell may
     # still be running), design 'a' may rise toward the effective lane count.
     state['b1']['status'] = 'running'
     assert eligible_cell(rows, state, {'a': 2}, ['a', 'b'], 2, 6)['logical_episode_id'] == 'a3'
     assert eligible_cell(rows, state, {'a': 6}, ['a', 'b'], 2, 6) is None
+
+
+def test_tail_exception_requires_other_designs_to_be_idle_not_just_unregistered():
+    """Regression (2026-10-01 i2c breach): active episodes elsewhere count as
+    remaining work — the pair cap must hold while another design still runs."""
+    rows = rows_for([('a', 3), ('b', 1)])
+    state = {r['logical_episode_id']: {'status': 'registered'} for r in rows}
+    state['a1']['status'] = state['a2']['status'] = 'running'
+    state['b1']['status'] = 'running'
+    # 'b' has no registered cells but its episode is active: no tail yet.
+    assert eligible_cell(rows, state, {'a': 2, 'b': 1}, ['a', 'b'], 2, 6) is None
+    state['b1']['status'] = 'terminated'
+    assert eligible_cell(rows, state, {'a': 2}, ['a', 'b'], 2, 6)['logical_episode_id'] == 'a3'
 
 
 def test_lane_cap_is_adopted_from_the_state_file_with_safe_defaults(tmp_path):

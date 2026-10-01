@@ -95,8 +95,9 @@ def eligible_cell(rows: list[dict[str, Any]], states: dict[str, Any],
     """Pick the next cell: per-design pairs first, tail exception last.
 
     Amendment 05 allows two concurrent cells of one design. A design may only
-    exceed that cap once every other design has no registered cells left, and
-    never beyond the effective lane count.
+    exceed that cap once every other design has no work left — neither
+    registered cells nor active episodes — and never beyond the effective
+    lane count.
     """
     rank = {design: i for i, design in enumerate(priority)}
     remaining: dict[str, int] = {}
@@ -108,8 +109,10 @@ def eligible_cell(rows: list[dict[str, Any]], states: dict[str, Any],
             continue
         design = row['design']
         active = active_per_design.get(design, 0)
-        others = sum(count for other, count in remaining.items() if other != design)
-        if active >= per_design_cap and (others > 0 or active >= lanes):
+        busy_elsewhere = (sum(remaining.get(other, 0) for other in rank if other != design)
+                          + sum(count for other, count in active_per_design.items()
+                                if other != design))
+        if active >= per_design_cap and (busy_elsewhere > 0 or active >= lanes):
             continue
         return row
     return None
