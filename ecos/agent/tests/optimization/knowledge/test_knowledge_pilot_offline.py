@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from dataclasses import replace
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
@@ -13,6 +14,7 @@ from ecos_agent.optimization.contracts import (
     LegalAction,
     StageObservation,
 )
+from ecos_agent.optimization.parameters.semantics import load_parameter_cards
 from ecos_agent.optimization.experiments.knowledge_pilot import (
     apply_treatment,
     freeze_planning_context,
@@ -218,6 +220,25 @@ def test_apply_treatment_derives_knowledge_payloads() -> None:
     assert apply_treatment(context, agent_mode="full_agent") is context
     with pytest.raises(ValueError, match="agent mode"):
         apply_treatment(context, agent_mode="rule_guided")
+
+
+def test_no_knowledge_projection_clears_parameter_semantics_cards() -> None:
+    """The native LLM_NO_KNOWLEDGE mode carries no parameter-semantics
+    cards (controller_context builds them for every other mode); the
+    offline projection must match that exactly."""
+    context = _planning_context()
+    cards = tuple(load_parameter_cards().values())
+    assert cards, "the card store must provide parameter-semantics cards"
+    context = replace(context, parameter_knowledge=cards)
+    no_knowledge = apply_treatment(context, agent_mode="llm_no_knowledge")
+    assert no_knowledge.parameter_knowledge == ()
+    # raw_rag / full_agent keep the shared cards; unconditioned_support
+    # rebuilds its view from the default catalog and is bound to fixture
+    # catalogs that match it (see apply_treatment's drift guard), but its
+    # projection replaces only supported_action_view, so the cards pass
+    # through untouched by construction.
+    for mode in ("raw_rag", "full_agent"):
+        assert apply_treatment(context, agent_mode=mode).parameter_knowledge == cards
 
 
 def test_offline_pilot_runs_treatments_and_passes_gate() -> None:

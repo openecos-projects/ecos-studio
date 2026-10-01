@@ -262,11 +262,15 @@ def apply_treatment(
 ) -> OptimizationPlanningContext:
     """Derive the treatment's planner input from the frozen dual-layer context."""
     if agent_mode == "llm_no_knowledge":
+        # The native LLM_NO_KNOWLEDGE mode carries no parameter-semantics
+        # cards either (controller_context builds them for every mode except
+        # LLM_NO_KNOWLEDGE); the projection must match that exactly.
         return replace(
             context,
             knowledge_refs=(),
             knowledge_chunks=(),
             supported_action_view=None,
+            parameter_knowledge=(),
         )
     if agent_mode == "raw_rag":
         return replace(context, supported_action_view=None)
