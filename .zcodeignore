@@ -1,0 +1,79 @@
+ws
+build
+ecos/chip-viewer/target/
+.pnpm-store
+.vscode
+.setup-done
+.codegraph/
+# Nix result
+result
+
+# direnv
+.direnv/
+
+.vscode/
+# Claude Code
+.claude/
+.trellis/
+.humanize*
+.humanize/
+/docs/
+.superpowers/
+.worktrees/
+
+# Local development journal
+/dev_log.md
+
+# Resource Manager runtime cache and manifests
+*.json.bak
+resource-registry.json
+resource-manifest.json
+resources/manifest.json
+tools/manifest.json
+manifest.json
+
+# Simulator disassembly traces
+trace_hart_*.dasm
+
+# Simulator waveform dumps
+*.vcd
+*.vcd.gz
+*.fst
+*.fsdb
+*.vpd
+*.ghw
+*.wlf
+*.lxt
+*.lxt2
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+node_modules/
+bower_components/
+jspm_packages/
+__pycache__/
+site-packages/
+venv/
+coverage/
+htmlcov/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.egg-info/
+*.dist-info/
+eggs/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）
