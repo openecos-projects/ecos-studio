@@ -88,6 +88,8 @@ interface DirectoryReplacementJournalRecord {
 }
 
 const UTF8_MAX_BYTES_PER_CODE_UNIT = 4
+const MAX_MACRO_LOCATION_BYTES = 4 * 1024 * 1024
+const MACRO_LOCATION_TARGET = 'config/macro_location.tcl'
 const WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE =
   'Cannot save workspace configuration while the workspace flow is running. Wait for it to finish before editing parameters or step config.'
 const WORKSPACE_CONFIGURATION_WRITE_BLOCKED_MESSAGE =
@@ -232,7 +234,10 @@ function protectedWorkspaceRoot(canonicalPath: string): string | null {
   ) {
     return dirname(parent)
   }
-  return directory === 'config' && filename.endsWith('.json') ? dirname(parent) : null
+  return directory === 'config' &&
+    (filename.endsWith('.json') || filename === 'macro_location.tcl')
+    ? dirname(parent)
+    : null
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -515,6 +520,43 @@ export class WorkspaceService {
       await this.projectScopeProvider.requestWritableProjectPathAccess(path)
     await this.assertCanWriteProjectTextFile(canonicalPath)
     await writeFile(canonicalPath, content, 'utf8')
+  }
+
+  async importMacroLocationFile(sourcePath: string): Promise<void> {
+    if (typeof sourcePath !== 'string' || !isAbsolute(sourcePath)) {
+      throw new Error('Macro location source path must be absolute.')
+    }
+    if (!sourcePath.toLowerCase().endsWith('.tcl')) {
+      throw new Error('Macro location file must use the .tcl extension.')
+    }
+
+    const sourceStat = await stat(sourcePath)
+    if (!sourceStat.isFile()) {
+      throw new Error('Macro location source must be a regular file.')
+    }
+    if (sourceStat.size > MAX_MACRO_LOCATION_BYTES) {
+      throw new Error('Macro location file is too large (maximum 4 MiB).')
+    }
+
+    const content = await readFile(sourcePath, 'utf8')
+    if (Buffer.byteLength(content, 'utf8') > MAX_MACRO_LOCATION_BYTES) {
+      throw new Error('Macro location file is too large (maximum 4 MiB).')
+    }
+    const projectRoot = await this.projectScopeProvider.getProjectRoot()
+    const targetPath = await this.projectScopeProvider.requestWritableProjectPathAccess(
+      join(projectRoot, MACRO_LOCATION_TARGET),
+    )
+    await this.assertWorkspaceRuntimeIdle(targetPath)
+    await mkdir(dirname(targetPath), { recursive: true })
+
+    const temporaryPath = `${targetPath}.tmp-${randomUUID()}`
+    try {
+      await writeFile(temporaryPath, content, 'utf8')
+      await rename(temporaryPath, targetPath)
+    } catch (error) {
+      await rm(temporaryPath, { force: true })
+      throw error
+    }
   }
 
   async listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]> {
@@ -930,7 +972,15 @@ export class WorkspaceService {
       throw new Error(WORKSPACE_CONFIGURATION_WRITE_BLOCKED_MESSAGE)
     }
 
-    if (await this.runtimeMutationGuard?.isWorkspaceRuntimeActive(workspaceRoot)) {
+    await this.assertWorkspaceRuntimeIdle(canonicalPath)
+  }
+
+  private async assertWorkspaceRuntimeIdle(canonicalPath: string): Promise<void> {
+    const workspaceRoot = protectedWorkspaceRoot(canonicalPath)
+    if (
+      workspaceRoot &&
+      (await this.runtimeMutationGuard?.isWorkspaceRuntimeActive(workspaceRoot))
+    ) {
       throw new Error(WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE)
     }
   }

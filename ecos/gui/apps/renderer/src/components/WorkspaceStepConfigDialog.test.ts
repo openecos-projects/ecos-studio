@@ -72,7 +72,7 @@ describe('WorkspaceStepConfigDialog', () => {
       wrapper.findAll('.workspace-step-config-list button').map((item) => item.text()),
     ).toEqual([
       'SynthesisYosys · 2 params',
-      'Pre FloorplanECC · 2 params',
+      'FloorplanECC · 2 params',
       'PlaceDreamPlace · 1 param',
       'CTSECC · 1 param',
       'RouteECC · 1 param',

@@ -257,6 +257,64 @@ describe('WorkspaceService', () => {
     )
   })
 
+  it('imports macro location Tcl to the fixed workspace target', async () => {
+    const workspace = await createTempDir('ecos-workspace-service-macro-import-')
+    const sourceRoot = await createTempDir('ecos-workspace-service-macro-source-')
+    const sourcePath = join(sourceRoot, 'custom-placement.tcl')
+    const targetPath = join(workspace, 'config', 'macro_location.tcl')
+    await writeFile(sourcePath, 'placeInstance MACRO 10 20 R0\n', 'utf8')
+
+    const { projectScopeProvider, service } = createWorkspaceService(
+      workspace,
+      targetPath,
+    )
+
+    await expect(service.importMacroLocationFile(sourcePath)).resolves.toBeUndefined()
+
+    await expect(readFile(targetPath, 'utf8')).resolves.toBe(
+      'placeInstance MACRO 10 20 R0\n',
+    )
+    expect(projectScopeProvider.requestWritableProjectPathAccess).toHaveBeenCalledWith(
+      join(workspace, 'config', 'macro_location.tcl'),
+    )
+  })
+
+  it('rejects non-Tcl macro location sources without touching the target', async () => {
+    const workspace = await createTempDir('ecos-workspace-service-macro-invalid-')
+    const sourceRoot = await createTempDir('ecos-workspace-service-macro-invalid-source-')
+    const sourcePath = join(sourceRoot, 'placement.txt')
+    const targetPath = join(workspace, 'config', 'macro_location.tcl')
+    await mkdir(join(workspace, 'config'), { recursive: true })
+    await writeFile(targetPath, 'existing\n', 'utf8')
+    await writeFile(sourcePath, 'replacement\n', 'utf8')
+
+    const { service } = createWorkspaceService(workspace, targetPath)
+
+    await expect(service.importMacroLocationFile(sourcePath)).rejects.toThrow(
+      '.tcl extension',
+    )
+    await expect(readFile(targetPath, 'utf8')).resolves.toBe('existing\n')
+  })
+
+  it('rejects macro location imports while the workspace runtime is active', async () => {
+    const workspace = await createTempDir('ecos-workspace-service-macro-active-')
+    const sourceRoot = await createTempDir('ecos-workspace-service-macro-active-source-')
+    const sourcePath = join(sourceRoot, 'placement.tcl')
+    const targetPath = join(workspace, 'config', 'macro_location.tcl')
+    await writeFile(sourcePath, 'replacement\n', 'utf8')
+    await mkdir(join(workspace, 'home'), { recursive: true })
+    await writeFile(join(workspace, 'home', 'workspace.toml'), '', 'utf8')
+
+    const { service } = createWorkspaceService(workspace, targetPath, {
+      runtimeMutationGuard: { isWorkspaceRuntimeActive: vi.fn().mockResolvedValue(true) },
+    })
+
+    await expect(service.importMacroLocationFile(sourcePath)).rejects.toThrow(
+      /while the workspace flow is running/,
+    )
+    await expect(readFile(targetPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   it('discards an incomplete failed workspace create but refuses complete workspaces', async () => {
     const projectRoot = await createTempDir('ecos-workspace-service-discard-root-')
     const failedWorkspace = join(projectRoot, 'ws_0036')

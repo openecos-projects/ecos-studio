@@ -178,6 +178,7 @@ const desktopBridge = {
     readProjectTextFileTail: async () => null,
     readProjectBinaryFile: async () => new Uint8Array(),
     writeProjectTextFile: async () => undefined,
+    importMacroLocationFile: async () => undefined,
     listProjectDirectory: async () => [],
     pathExists: async () => false,
     discardFailedWorkspaceCreate: async () => false,
