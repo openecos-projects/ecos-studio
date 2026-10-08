@@ -16,11 +16,12 @@ export const ECC_FLOW_STEPS = [
   'Timing optimization',
   'route',
   'filler',
+  'lvs',
+  'drc',
+  'postRouteLec',
   'RCX',
   'sta',
-  'lvs',
-  'postRouteLec',
-  'drc',
+  'powerAnalysis',
   'Harden',
 ] as const
 
@@ -48,5 +49,6 @@ export const ECC_DEFAULT_STEP_TOOLS: Record<EccFlowStep, string> = {
   postRouteLec: 'yosys_lec',
   RCX: 'ecc',
   sta: 'ecc',
+  powerAnalysis: 'ecc',
   Harden: 'ecc',
 }

@@ -8,12 +8,12 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, Stri
 class ECCStepName(StrEnum):
     """Canonical ECC flow step catalog.
 
-    The order matches the flow ECC actually writes to ``home/flow.json``
-    (verified against ECC a4ac15e6): the floorplan phase runs as the three
-    sub-steps ``preFloorplan, macroPlacement, postFloorplan`` sharing the
-    ``Floorplan`` configuration, and after ``route`` the tail runs
-    ``filler, RCX, sta, lvs, postRouteLec, drc``. Isolated floorplan-geometry
-    candidates still target the RPC-level ``Floorplan`` step name.
+    The order matches the flow ECC actually writes to ``home/flow.json``:
+    the floorplan phase runs as the three sub-steps ``preFloorplan,
+    macroPlacement, postFloorplan`` sharing the ``Floorplan`` configuration,
+    and after ``route`` the tail runs ``filler, lvs, drc, postRouteLec, RCX,
+    sta, powerAnalysis``. Isolated floorplan-geometry candidates still target
+    the RPC-level ``Floorplan`` step name.
 
     The Electron counterpart is `ECC_FLOW_STEPS`
     (ecos/gui/packages/shared/src/contracts/eccFlowSteps.ts) — keep entries and
@@ -31,11 +31,12 @@ class ECCStepName(StrEnum):
     TIMING_OPT = "Timing optimization"
     ROUTING = "route"
     FILLER = "filler"
+    LVS = "lvs"
+    DRC = "drc"
+    POST_ROUTE_LEC = "postRouteLec"
     RCX = "RCX"
     STA = "sta"
-    LVS = "lvs"
-    POST_ROUTE_LEC = "postRouteLec"
-    DRC = "drc"
+    POWER_ANALYSIS = "powerAnalysis"
     HARDEN = "Harden"
 
 

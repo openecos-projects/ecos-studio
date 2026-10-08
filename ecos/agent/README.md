@@ -125,6 +125,10 @@ Management、创建 Project 和 Workspace、切换到新 Workspace，并启动�
 - 只重跑所选阶段后停止；或
 - 从所选阶段继续到标准终点（当前为 Harden），而不是 source workspace 原先的终点。
 
+新建默认流程及隔离重跑补齐后的布线后顺序为 `route → filler → lvs → drc →
+postRouteLec → RCX → sta → powerAnalysis → Harden`。源 workspace 不会被重排；
+继续已有 flow 时仍按其持久化步骤顺序执行。
+
 “继续未完成 flow”经确认后在当前 workspace 原地执行
 `runAllFlow({ rerun: false })`，不会创建隔离 target。重跑或继续到 Harden 后同样进入
 signoff checklist 检查与可选导出。

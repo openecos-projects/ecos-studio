@@ -53,11 +53,12 @@ _STAGES = (
     "legalization",
     "Timing optimization",
     "route",
-    "drc",
-    "lvs",
     "filler",
+    "lvs",
+    "drc",
     "RCX",
     "sta",
+    "powerAnalysis",
     "Harden",
 )
 _HASH = "sha256:" + "a" * 64
@@ -121,7 +122,7 @@ def _alignment(
 def test_optimization_runtime_uses_the_earliest_rerun_stage(tmp_path: Path) -> None:
     _write_flow(tmp_path)
 
-    assert _optimization_rerun_runtime_seconds(tmp_path) == sum(range(15))
+    assert _optimization_rerun_runtime_seconds(tmp_path) == sum(range(16))
 
 
 def test_optimization_runtime_fails_closed_on_incomplete_stage(tmp_path: Path) -> None:

@@ -23,11 +23,12 @@ def test_gui_workspace_flow_steps_are_the_ecc_catalog_in_order() -> None:
         "Timing optimization",
         "route",
         "filler",
+        "lvs",
+        "drc",
+        "postRouteLec",
         "RCX",
         "sta",
-        "lvs",
-        "postRouteLec",
-        "drc",
+        "powerAnalysis",
         "Harden",
     )
 

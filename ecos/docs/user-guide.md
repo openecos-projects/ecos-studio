@@ -566,6 +566,11 @@ The Home page aggregates the whole flow:
 
 ## Running the RTL-to-GDS Flow
 
+New default workspaces use the post-route sequence `route → filler → lvs → drc
+→ postRouteLec → RCX → sta → powerAnalysis → Harden`. Isolated full-flow reruns
+extend their target workspace in this order without changing the source.
+Continuing an existing workspace retains its persisted flow order.
+
 ### Starting and Re-running
 
 The **▶ Run** button lives in the right-hand column:
