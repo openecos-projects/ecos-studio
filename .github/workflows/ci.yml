@@ -6,6 +6,9 @@ on:
       - main
       - 'release/v*'
   pull_request:
+    # edited is included so Check Commit Messages re-lints the PR title; the
+    # heavy jobs guard on github.event.action != 'edited' and skip it.
+    types: [opened, synchronize, reopened, ready_for_review, edited]
   workflow_dispatch:
   # Nightly on main: the e2e-product matrix runs the full design set
   # (including aes) and catches drift in the unpinned inputs
@@ -115,12 +118,13 @@ jobs:
     needs: changes
     if: >-
       ${{
-        startsWith(github.ref, 'refs/heads/release/v') ||
+        github.event.action != 'edited' &&
+        (startsWith(github.ref, 'refs/heads/release/v') ||
         startsWith(github.base_ref, 'release/v') ||
         needs.changes.outputs.gui == 'true' ||
         needs.changes.outputs.version == 'true' ||
         needs.changes.outputs.build == 'true' ||
-        needs.changes.outputs.ci == 'true'
+        needs.changes.outputs.ci == 'true')
       }}
     steps:
       - name: Checkout
@@ -140,7 +144,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     needs: changes
-    if: ${{ needs.changes.outputs.gui == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
+    if: ${{ github.event.action != 'edited' && (needs.changes.outputs.gui == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true') }}
     defaults:
       run:
         working-directory: ecos/gui
@@ -190,7 +194,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     needs: changes
-    if: ${{ needs.changes.outputs.chip_viewer == 'true' || needs.changes.outputs.ci == 'true' }}
+    if: ${{ github.event.action != 'edited' && (needs.changes.outputs.chip_viewer == 'true' || needs.changes.outputs.ci == 'true') }}
     defaults:
       run:
         working-directory: ecos/chip-viewer
@@ -247,10 +251,11 @@ jobs:
       ${{
         github.event_name == 'workflow_dispatch' ||
         github.event_name == 'schedule' ||
-        needs.changes.outputs.gui == 'true' ||
-        needs.changes.outputs.version == 'true' ||
-        needs.changes.outputs.e2e == 'true' ||
-        needs.changes.outputs.ci == 'true'
+        (github.event.action != 'edited' &&
+         (needs.changes.outputs.gui == 'true' ||
+          needs.changes.outputs.version == 'true' ||
+          needs.changes.outputs.e2e == 'true' ||
+          needs.changes.outputs.ci == 'true'))
       }}
     runs-on: ubuntu-22.04
     timeout-minutes: 90
@@ -428,6 +433,7 @@ jobs:
     if: >-
       ${{
         always() &&
+        github.event.action != 'edited' &&
         (needs.changes.outputs.gui == 'true' ||
          needs.changes.outputs.chip_viewer == 'true' ||
          needs.changes.outputs.version == 'true' ||
@@ -514,6 +520,7 @@ jobs:
     if: >-
       ${{
         always() &&
+        github.event.action != 'edited' &&
         (needs.changes.outputs.gui == 'true' ||
          needs.changes.outputs.chip_viewer == 'true' ||
          needs.changes.outputs.version == 'true' ||
@@ -595,6 +602,7 @@ jobs:
     if: >-
       ${{
         always() &&
+        github.event.action != 'edited' &&
         (needs.changes.outputs.gui == 'true' ||
          needs.changes.outputs.chip_viewer == 'true' ||
          needs.changes.outputs.version == 'true' ||
