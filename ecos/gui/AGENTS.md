@@ -65,6 +65,19 @@ pnpm --filter @ecos-studio/desktop-electron exec vitest run electron/path/to/fil
 - Build: `pnpm run build`
 - Environment diagnostics: `pnpm run doctor`
 - Electron smoke: `pnpm run desktop:build && pnpm run desktop:smoke`
+- Product e2e (real app journey against the built app; requires the local EDA
+  toolchain and PDK, see below): `pnpm run desktop:build && pnpm run desktop:e2e`
+
+The product e2e suite under `apps/desktop-electron/e2e/` drives the real
+application through the preload bridge: it creates a project and workspace and
+runs the full rtl2gds flow, then gates the produced workspace with ECC's
+signoff-lit suite. It needs a working toolchain environment
+(`CHIPCOMPILER_OSS_CAD_DIR`, `CHIPCOMPILER_ECC_SIZER_ROOT`,
+`CHIPCOMPILER_KEPLER_FORMAL_ROOT`) and an unzipped ICS55 PDK. Useful overrides:
+`ECOS_E2E_OUT` (evidence directory), `ECOS_E2E_DESIGN_DIR` (an ecc-ci-designs
+style project; defaults to the gcd example), `ECOS_E2E_LIT_SUITE` (lit suite
+checkout; skips the gate when unset), `ECOS_E2E_PDK_ROOT`,
+`ECOS_E2E_ECC_BIN_DIR` (external ECC bundle instead of the repo dev runtime).
 
 Before publishing GUI source or configuration changes, run `pnpm run check`.
 Also run the production build when changing build configuration, preload/main
