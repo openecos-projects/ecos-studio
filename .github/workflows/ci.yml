@@ -21,8 +21,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Edited-event runs (PR title/body lint) get their own group and never
+  # cancel others, so a metadata edit cannot kill an in-progress full run.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event_name == 'pull_request' && github.event.action == 'edited' && '-edited' || '' }}
+  cancel-in-progress: ${{ github.event.action != 'edited' }}
 
 jobs:
   changes:
