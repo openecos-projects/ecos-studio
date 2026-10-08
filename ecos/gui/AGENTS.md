@@ -83,8 +83,11 @@ instead of the repo dev runtime).
 
 In CI the `e2e-product` job fans out over the rtl2gds-capable ecc-ci-designs
 (the list is derived upstream each run; gcd_icg and xtea are excluded, aes is
-excluded on pull requests). The usb leg additionally runs the flow-cancel and
-missing-Sizer control cases; every other leg runs only the rtl2gds journey
+excluded on pull requests). The job also runs on the nightly schedule, which
+is the main coverage for aes and for drift in the unpinned inputs (daily
+oss-cad-suite builds, the ecc-ci-designs default branch). The usb leg
+additionally runs the flow-cancel and missing-Sizer control cases; every
+other leg runs only the rtl2gds journey
 (`vitest run --config vitest.e2e.config.ts rtl2gds`). Each leg uploads its own
 `product-e2e-evidence-<design>` artifact.
 

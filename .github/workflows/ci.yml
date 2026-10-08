@@ -7,6 +7,12 @@ on:
       - 'release/v*'
   pull_request:
   workflow_dispatch:
+  # Nightly on main: the e2e-product matrix runs the full design set
+  # (including aes) and catches drift in the unpinned inputs
+  # (daily oss-cad-suite builds, the ecc-ci-designs default branch)
+  # before it ambushes an unrelated PR.
+  schedule:
+    - cron: "43 19 * * *"
 
 permissions:
   contents: read
@@ -193,7 +199,8 @@ jobs:
         run: |
           # gcd_icg is a gate-level syn_sta fixture, not an rtl2gds journey.
           # xtea is red upstream (hold WNS < 0). aes is ~50min of flow:
-          # excluded on pull requests, covered on main pushes and manual runs.
+          # excluded on pull requests, covered on main pushes, nightly,
+          # and manual runs.
           excludes=(gcd_icg xtea)
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             excludes+=(aes)
@@ -209,6 +216,7 @@ jobs:
     if: >-
       ${{
         github.event_name == 'workflow_dispatch' ||
+        github.event_name == 'schedule' ||
         needs.changes.outputs.gui == 'true' ||
         needs.changes.outputs.version == 'true' ||
         needs.changes.outputs.e2e == 'true' ||

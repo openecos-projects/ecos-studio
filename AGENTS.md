@@ -42,8 +42,9 @@ and [CONTRIBUTING.md](CONTRIBUTING.md) for setup and development workflows.
   This includes the `e2e-product` job, which runs the product e2e suite
   (`ecos/gui/apps/desktop-electron/e2e/`, invoked via `pnpm run desktop:e2e`)
   across a matrix of ecc-ci-designs rtl2gds designs against the pinned ECC
-  runtime artifacts; see `ecos/gui/AGENTS.md` for the local environment
-  requirements.
+  runtime artifacts (also on the nightly schedule, which covers the full
+  design set including aes); see `ecos/gui/AGENTS.md` for the local
+  environment requirements.
 - Run the narrowest relevant check while iterating, then run the local equivalent
   of every non-packaging CI job enabled by the changed paths. Use the commands in
   the affected component's scoped instructions.
