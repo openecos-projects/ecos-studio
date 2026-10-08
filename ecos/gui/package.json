@@ -22,6 +22,7 @@
     "desktop:preview": "pnpm --filter @ecos-studio/desktop-electron run preview",
     "desktop:package": "pnpm --filter @ecos-studio/desktop-electron run package",
     "desktop:smoke": "pnpm --filter @ecos-studio/desktop-electron run smoke",
+    "desktop:e2e": "pnpm --filter @ecos-studio/desktop-electron run e2e",
     "desktop:test": "pnpm --filter @ecos-studio/desktop-electron run test",
     "desktop:typecheck": "pnpm --filter @ecos-studio/desktop-electron run typecheck",
     "renderer:dev": "pnpm --filter @ecos-studio/renderer run dev",
