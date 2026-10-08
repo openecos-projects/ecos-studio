@@ -44,3 +44,5 @@ trace_hart_*.dasm
 *.wlf
 *.lxt
 *.lxt2
+
+.scratch
