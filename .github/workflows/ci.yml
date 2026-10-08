@@ -429,6 +429,33 @@ jobs:
           retention-days: 14
           path: ${{ runner.temp }}/e2e-out
 
+  # Fan-in: one stable check name covering the whole design matrix, so branch
+  # rulesets can require "Product E2E" without naming every dynamic matrix leg.
+  e2e-product-summary:
+    name: Product E2E
+    needs: [changes, e2e-designs, e2e-product]
+    # Mirrors e2e-product's gate so a skipped matrix yields a skipped summary
+    # (neutral for rulesets); always() lets it run to report leg failures.
+    if: >-
+      ${{
+        always() &&
+        (github.event_name == 'workflow_dispatch' ||
+         github.event_name == 'schedule' ||
+         (github.event.action != 'edited' &&
+          (needs.changes.outputs.gui == 'true' ||
+           needs.changes.outputs.version == 'true' ||
+           needs.changes.outputs.e2e == 'true' ||
+           needs.changes.outputs.ci == 'true')))
+      }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Aggregate Matrix Results
+        run: |
+          result="${{ needs.e2e-product.result }}"
+          echo "e2e-product matrix result: ${result}"
+          [ "${result}" = "success" ]
+
   build-appimage:
     name: Build Linux AppImage
     needs: [changes, check-version, gui-checks, chip-viewer-rust]

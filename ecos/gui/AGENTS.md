@@ -89,7 +89,9 @@ oss-cad-suite builds, the ecc-ci-designs default branch). The usb leg
 additionally runs the flow-cancel and missing-Sizer control cases; every
 other leg runs only the rtl2gds journey
 (`vitest run --config vitest.e2e.config.ts rtl2gds`). Each leg uploads its own
-`product-e2e-evidence-<design>` artifact.
+`product-e2e-evidence-<design>` artifact. A fan-in `Product E2E` job
+aggregates the matrix into a single stable check name that branch rulesets
+require.
 
 Before publishing GUI source or configuration changes, run `pnpm run check`.
 Also run the production build when changing build configuration, preload/main
