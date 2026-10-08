@@ -81,6 +81,13 @@ CI-tracked design), `ECOS_E2E_LIT_SUITE` (lit suite checkout; skips the gate
 when unset), `ECOS_E2E_PDK_ROOT`, `ECOS_E2E_ECC_BIN_DIR` (external ECC bundle
 instead of the repo dev runtime).
 
+In CI the `e2e-product` job fans out over the rtl2gds-capable ecc-ci-designs
+(the list is derived upstream each run; gcd_icg and xtea are excluded, aes is
+excluded on pull requests). The usb leg additionally runs the flow-cancel and
+missing-Sizer control cases; every other leg runs only the rtl2gds journey
+(`vitest run --config vitest.e2e.config.ts rtl2gds`). Each leg uploads its own
+`product-e2e-evidence-<design>` artifact.
+
 Before publishing GUI source or configuration changes, run `pnpm run check`.
 Also run the production build when changing build configuration, preload/main
 bundling, package resources, or shared workspace resolution. Run the Electron

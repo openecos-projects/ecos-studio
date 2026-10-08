@@ -173,11 +173,42 @@ jobs:
       - name: Run Rust tests
         run: cargo test --workspace
 
+  # Mirror ECC CI's e2e-designs listing so the product matrix tracks the
+  # upstream design set automatically.
+  e2e-designs:
+    name: List product e2e designs
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    outputs:
+      designs: ${{ steps.list.outputs.designs }}
+    steps:
+      - name: Checkout designs
+        uses: actions/checkout@v4
+        with:
+          repository: openecos-projects/ecc-ci-designs
+          path: designs
+
+      - name: List rtl2gds-capable designs
+        id: list
+        run: |
+          # gcd_icg is a gate-level syn_sta fixture, not an rtl2gds journey.
+          # xtea is red upstream (hold WNS < 0). aes is ~50min of flow:
+          # excluded on pull requests, covered on main pushes and manual runs.
+          excludes=(gcd_icg xtea)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            excludes+=(aes)
+          fi
+          designs="$(find designs -mindepth 2 -maxdepth 2 -name ecc.toml -printf '%h\n' \
+            | xargs -n1 basename | grep -vxFf <(printf '%s\n' "${excludes[@]}") \
+            | jq -R . | jq -cs .)"
+          echo "designs=$designs" >> "$GITHUB_OUTPUT"
+
   e2e-product:
-    name: Product E2E (rtl2gds / usb)
-    needs: changes
+    name: Product E2E (rtl2gds / ${{ matrix.design }})
+    needs: [changes, e2e-designs]
     if: >-
       ${{
+        github.event_name == 'workflow_dispatch' ||
         needs.changes.outputs.gui == 'true' ||
         needs.changes.outputs.version == 'true' ||
         needs.changes.outputs.e2e == 'true' ||
@@ -185,6 +216,10 @@ jobs:
       }}
     runs-on: ubuntu-22.04
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        design: ${{ fromJSON(needs.e2e-designs.outputs.designs) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -322,21 +357,29 @@ jobs:
           repository: openecos-projects/ecc-ci-designs
           path: .scratch/ecc-ci-designs
 
-      - name: Run product e2e (usb rtl2gds + signoff-lit gate)
+      - name: Run product e2e (rtl2gds journey + signoff-lit gate)
         working-directory: ecos/gui
         env:
           ELECTRON_DISABLE_SANDBOX: '1'
           ECOS_ELECTRON_DISABLE_GPU: '1'
           ECOS_E2E_OUT: ${{ runner.temp }}/e2e-out
-          ECOS_E2E_DESIGN_DIR: ${{ github.workspace }}/.scratch/ecc-ci-designs/usb
+          ECOS_E2E_DESIGN_DIR: ${{ github.workspace }}/.scratch/ecc-ci-designs/${{ matrix.design }}
           ECOS_E2E_LIT_SUITE: ${{ github.workspace }}/.scratch/ecc-ci-designs
-        run: xvfb-run --auto-servernum pnpm run desktop:e2e
+        run: |
+          if [ "${{ matrix.design }}" = "usb" ]; then
+            # The usb leg is the fast one; it also carries the flow-cancel and
+            # missing-Sizer control cases so big designs stay journey-only.
+            xvfb-run --auto-servernum pnpm run desktop:e2e
+          else
+            xvfb-run --auto-servernum pnpm --filter @ecos-studio/desktop-electron \
+              exec vitest run --config vitest.e2e.config.ts rtl2gds
+          fi
 
       - name: Upload e2e evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: product-e2e-evidence
+          name: product-e2e-evidence-${{ matrix.design }}
           if-no-files-found: ignore
           retention-days: 14
           path: ${{ runner.temp }}/e2e-out
