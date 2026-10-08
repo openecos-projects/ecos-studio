@@ -430,7 +430,7 @@ jobs:
           path: ${{ runner.temp }}/e2e-out
 
   build-appimage:
-    name: Build AppImage
+    name: Build Linux AppImage
     needs: [changes, check-version, gui-checks, chip-viewer-rust]
     if: >-
       ${{
