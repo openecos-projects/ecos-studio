@@ -40,7 +40,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Classify changed files
+      - name: Classify Changed Files
         id: filter
         uses: dorny/paths-filter@v3
         with:
@@ -78,6 +78,36 @@ jobs:
               - 'ecos/README.md'
               - 'ecos/docs/**'
 
+  # PR-only lint: every commit in the PR range plus the PR title must satisfy
+  # the conventional-commit rules (commitlint.config.cjs), mirroring what the
+  # local lefthook commit-msg hook enforces.
+  commit-message:
+    name: Check Commit Messages
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set Up Node.js
+        uses: ./.github/actions/setup-node-pnpm
+
+      - name: Install Dependencies
+        working-directory: ecos/gui
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint Commit Messages and PR Title
+        working-directory: ecos/gui
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          pnpm exec commitlint --from "$PR_BASE" --to HEAD
+          printf '%s\n' "$PR_TITLE" | pnpm exec commitlint
+
   check-version:
     name: Check Version Consistency
     runs-on: ubuntu-22.04
@@ -100,7 +130,7 @@ jobs:
           # pinned ecc submodule, so its content must be present.
           submodules: recursive
 
-      - name: Check version
+      - name: Check Version
         uses: ./.github/actions/check-version
         with:
           expected_ref: ${{ startsWith(github.ref, 'refs/heads/release/v') && github.ref || startsWith(github.base_ref, 'release/v') && github.base_ref || '' }}
@@ -118,38 +148,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Checkout ECC submodule
+      - name: Checkout ECC Submodule
         # packages/shared snapshot contract tests read the canonical fixtures
         # from ecc/test/formal/fixtures/snapshot (ADR-0005); only ecc is needed.
         run: git -C "${{ github.workspace }}" submodule update --init ecc
 
-      - name: Install Linux GUI dependencies
+      - name: Install Linux GUI Dependencies
         uses: ./.github/actions/install-gui-linux-deps
         with:
           extra-packages: xvfb libasound2
 
-      - name: Setup Node.js
+      - name: Set Up Node.js
         uses: ./.github/actions/setup-node-pnpm
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run GUI typecheck
+      - name: Run GUI Typecheck
         run: pnpm run typecheck
 
-      - name: Run GUI lint
+      - name: Run GUI Lint
         run: pnpm run lint
 
-      - name: Check GUI formatting
+      - name: Check GUI Formatting
         run: pnpm run fmt:check
 
-      - name: Run GUI tests
+      - name: Run GUI Tests
         run: pnpm run test
 
-      - name: Build Electron bundles
+      - name: Build Electron Bundles
         run: pnpm run desktop:build
 
-      - name: Run Electron smoke
+      - name: Run Electron Smoke
         env:
           ELECTRON_DISABLE_SANDBOX: '1'
           ECOS_ELECTRON_DISABLE_GPU: '1'
@@ -168,33 +198,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Rust
+      - name: Set Up Rust
         uses: ./.github/actions/setup-rust-cache
         with:
           workspaces: ecos/chip-viewer
 
-      - name: Check formatting
+      - name: Check Rust Formatting
         run: cargo fmt --all -- --check
 
-      - name: Run Rust tests
+      - name: Run Rust Tests
         run: cargo test --workspace
 
   # Mirror ECC CI's e2e-designs listing so the product matrix tracks the
   # upstream design set automatically.
   e2e-designs:
-    name: List product e2e designs
+    name: List Product E2E Designs
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     outputs:
       designs: ${{ steps.list.outputs.designs }}
     steps:
-      - name: Checkout designs
+      - name: Checkout Designs
         uses: actions/checkout@v4
         with:
           repository: openecos-projects/ecc-ci-designs
           path: designs
 
-      - name: List rtl2gds-capable designs
+      - name: List rtl2gds-Capable Designs
         id: list
         run: |
           # gcd_icg is a gate-level syn_sta fixture, not an rtl2gds journey.
@@ -232,41 +262,41 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Checkout ECC submodule
+      - name: Checkout ECC Submodule
         # The version assertion compares the app-reported ECC version against
         # ecc/pyproject.toml, and the signoff gate reuses
         # ecc/nix/scripts/signoff-lit.sh; only ecc is needed.
         run: git -C "${{ github.workspace }}" submodule update --init ecc
 
-      - name: Install Linux GUI dependencies
+      - name: Install Linux GUI Dependencies
         uses: ./.github/actions/install-gui-linux-deps
         with:
           extra-packages: xvfb libasound2 jq
 
-      - name: Setup Node.js
+      - name: Set Up Node.js
         uses: ./.github/actions/setup-node-pnpm
 
-      - name: Setup uv
+      - name: Set Up uv
         uses: astral-sh/setup-uv@v5
         with:
           version: 0.11.12
 
-      - name: Install dependencies
+      - name: Install Dependencies
         working-directory: ecos/gui
         run: pnpm install --frozen-lockfile
 
-      - name: Build Electron bundles
+      - name: Build Electron Bundles
         working-directory: ecos/gui
         run: pnpm run desktop:build
 
-      - name: Install lit signoff tools
+      - name: Install Signoff Tools
         run: |
           uv venv "$RUNNER_TEMP/lit-tools"
           # ecc-ci-designs uses ShTest(execute_external=True), rejected by lit>=23.
           uv pip install --python "$RUNNER_TEMP/lit-tools/bin/python" 'lit<23' filecheck
           echo "$RUNNER_TEMP/lit-tools/bin" >> "$GITHUB_PATH"
 
-      - name: Download ECC runtime artifacts for the pinned submodule
+      - name: Download ECC Runtime Artifacts for the Pinned Submodule
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -288,7 +318,7 @@ jobs:
               --dir "$RUNNER_TEMP/artifacts/$name"
           done
 
-      - name: Extract ECC runtime bundle
+      - name: Extract ECC Runtime Bundle
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/ecc-bundle"
@@ -314,7 +344,7 @@ jobs:
           echo "$RUNNER_TEMP/ecc-sizer/bin" >> "$GITHUB_PATH"
           echo "CHIPCOMPILER_ECC_SIZER_ROOT=$RUNNER_TEMP/ecc-sizer" >> "$GITHUB_ENV"
 
-      - name: Setup kepler-formal
+      - name: Set Up kepler-formal
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -349,23 +379,23 @@ jobs:
           echo "${tool_root}/bin" >> "$GITHUB_PATH"
           echo "CHIPCOMPILER_KEPLER_FORMAL_ROOT=${tool_root}" >> "$GITHUB_ENV"
 
-      - name: Setup OSS CAD Suite
+      - name: Set Up OSS CAD Suite
         uses: YosysHQ/setup-oss-cad-suite@v4
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Point ECC at the OSS CAD Suite
+      - name: Point ECC at OSS CAD Suite
         run: >-
           echo "CHIPCOMPILER_OSS_CAD_DIR=$(dirname "$(dirname "$(readlink -f "$(command -v yosys)")")")"
           >> "$GITHUB_ENV"
 
-      - name: Checkout e2e designs
+      - name: Checkout E2E Designs
         uses: actions/checkout@v4
         with:
           repository: openecos-projects/ecc-ci-designs
           path: .scratch/ecc-ci-designs
 
-      - name: Run product e2e (rtl2gds journey + signoff-lit gate)
+      - name: Run Product E2E (rtl2gds Journey + Signoff-lit Gate)
         working-directory: ecos/gui
         env:
           ELECTRON_DISABLE_SANDBOX: '1'
@@ -383,7 +413,7 @@ jobs:
               exec vitest run --config vitest.e2e.config.ts rtl2gds
           fi
 
-      - name: Upload e2e evidence
+      - name: Upload E2E Evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -416,7 +446,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Install Linux GUI dependencies
+      - name: Install Linux GUI Dependencies
         uses: ./.github/actions/install-gui-linux-deps
         with:
           extra-packages: >-
@@ -428,34 +458,34 @@ jobs:
             libhwloc-dev libcurl4-openssl-dev libtbb-dev
             patchelf jq wget
 
-      - name: Setup Node.js
+      - name: Set Up Node.js
         uses: ./.github/actions/setup-node-pnpm
 
-      - name: Setup Rust
+      - name: Set Up Rust
         uses: ./.github/actions/setup-rust-cache
         with:
           workspaces: ecos/chip-viewer
 
-      - name: Setup Python
+      - name: Set Up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Setup uv
+      - name: Set Up uv
         uses: astral-sh/setup-uv@v5
         with:
           version: 0.11.12
           enable-cache: true
 
-      - name: Prepare repository
+      - name: Prepare Repository
         run: make setup
 
-      - name: Build Electron release bundle
+      - name: Build Electron Release Bundle
         env:
           GH_TOKEN: ${{ github.token }}
         run: make build
 
-      - name: Verify AppImage artifact
+      - name: Verify AppImage Artifact
         run: |
           find -L build -type f -name '*.AppImage' | sort > /tmp/ecos-appimage-files.txt
 
@@ -469,7 +499,7 @@ jobs:
           echo "Found AppImage artifact:"
           cat /tmp/ecos-appimage-files.txt
 
-      - name: Upload CI AppImage artifact
+      - name: Upload CI AppImage Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ecos-studio-appimage-${{ github.run_number }}
@@ -499,20 +529,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Set Up Node.js
         uses: ./.github/actions/setup-node-pnpm
 
-      - name: Setup Rust
+      - name: Set Up Rust
         uses: ./.github/actions/setup-rust-cache
         with:
           workspaces: ecos/chip-viewer
 
-      - name: Setup Python
+      - name: Set Up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Setup uv
+      - name: Set Up uv
         uses: astral-sh/setup-uv@v5
         with:
           version: 0.11.12
@@ -525,7 +555,7 @@ jobs:
       - name: Build Agent
         run: ./.github/scripts/build-agent.sh
 
-      - name: Stage resources
+      - name: Stage Resources
         run: |
           mkdir -p ecos/gui/apps/desktop-electron/resources/binaries
           mkdir -p ecos/gui/apps/desktop-electron/resources/agent
@@ -536,22 +566,22 @@ jobs:
           cp ecos/agent/agent-provider.packaged.json \
              ecos/gui/apps/desktop-electron/resources/agent/agent-provider.json
 
-      - name: Install GUI dependencies
+      - name: Install GUI Dependencies
         working-directory: ecos/gui
         run: pnpm install --frozen-lockfile
 
-      - name: Build renderer
+      - name: Build Renderer
         working-directory: ecos/gui
         run: pnpm --filter @ecos-studio/desktop-electron run build
 
-      - name: Package macOS app
+      - name: Package macOS App
         working-directory: ecos/gui/apps/desktop-electron
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           GH_TOKEN: ${{ github.token }}
         run: pnpm exec electron-builder --config electron-builder.yml
 
-      - name: Upload CI macOS artifact
+      - name: Upload CI macOS Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ecos-studio-macos-${{ github.run_number }}
@@ -580,20 +610,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Set Up Node.js
         uses: ./.github/actions/setup-node-pnpm
 
-      - name: Setup Rust
+      - name: Set Up Rust
         uses: ./.github/actions/setup-rust-cache
         with:
           workspaces: ecos/chip-viewer
 
-      - name: Setup Python
+      - name: Set Up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Setup uv
+      - name: Set Up uv
         uses: astral-sh/setup-uv@v5
         with:
           version: 0.11.12
@@ -607,7 +637,7 @@ jobs:
         shell: bash
         run: ./.github/scripts/build-agent.sh
 
-      - name: Stage resources
+      - name: Stage Resources
         shell: bash
         run: |
           mkdir -p ecos/gui/apps/desktop-electron/resources/binaries
@@ -619,21 +649,21 @@ jobs:
           cp ecos/agent/agent-provider.packaged.json \
              ecos/gui/apps/desktop-electron/resources/agent/agent-provider.json
 
-      - name: Install GUI dependencies
+      - name: Install GUI Dependencies
         working-directory: ecos/gui
         run: pnpm install --frozen-lockfile
 
-      - name: Build renderer
+      - name: Build Renderer
         working-directory: ecos/gui
         run: pnpm --filter @ecos-studio/desktop-electron run build
 
-      - name: Package Windows app
+      - name: Package Windows App
         working-directory: ecos/gui/apps/desktop-electron
         env:
           GH_TOKEN: ${{ github.token }}
         run: pnpm exec electron-builder --config electron-builder.yml
 
-      - name: Upload CI Windows artifact
+      - name: Upload CI Windows Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ecos-studio-windows-${{ github.run_number }}
