@@ -28,6 +28,7 @@ jobs:
       chip_viewer: ${{ steps.filter.outputs.chip_viewer }}
       build: ${{ steps.filter.outputs.build }}
       ci: ${{ steps.filter.outputs.ci }}
+      e2e: ${{ steps.filter.outputs.e2e }}
       docs_only: ${{ steps.filter.outputs.docs_only }}
     steps:
       - name: Checkout
@@ -62,6 +63,9 @@ jobs:
               - '.github/scripts/**'
             ci:
               - '.github/workflows/**'
+            e2e:
+              - 'ecos/gui/apps/desktop-electron/e2e/**'
+              - 'ecos/gui/apps/desktop-electron/vitest.e2e.config.ts'
             docs_only:
               - 'README.md'
               - 'docs/**'
@@ -168,6 +172,175 @@ jobs:
 
       - name: Run Rust tests
         run: cargo test --workspace
+
+  e2e-product:
+    name: Product E2E (rtl2gds / usb)
+    needs: changes
+    if: >-
+      ${{
+        needs.changes.outputs.gui == 'true' ||
+        needs.changes.outputs.version == 'true' ||
+        needs.changes.outputs.e2e == 'true' ||
+        needs.changes.outputs.ci == 'true'
+      }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      ECOS_E2E_OUT: ${{ runner.temp }}/e2e-out
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout ECC submodule
+        # The version assertion compares the app-reported ECC version against
+        # ecc/pyproject.toml, and the signoff gate reuses
+        # ecc/nix/scripts/signoff-lit.sh; only ecc is needed.
+        run: git -C "${{ github.workspace }}" submodule update --init ecc
+
+      - name: Install Linux GUI dependencies
+        uses: ./.github/actions/install-gui-linux-deps
+        with:
+          extra-packages: xvfb libasound2 jq
+
+      - name: Setup Node.js
+        uses: ./.github/actions/setup-node-pnpm
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 0.11.12
+
+      - name: Install dependencies
+        working-directory: ecos/gui
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Electron bundles
+        working-directory: ecos/gui
+        run: pnpm run desktop:build
+
+      - name: Install lit signoff tools
+        run: |
+          uv venv "$RUNNER_TEMP/lit-tools"
+          # ecc-ci-designs uses ShTest(execute_external=True), rejected by lit>=23.
+          uv pip install --python "$RUNNER_TEMP/lit-tools/bin/python" 'lit<23' filecheck
+          echo "$RUNNER_TEMP/lit-tools/bin" >> "$GITHUB_PATH"
+
+      - name: Download ECC runtime artifacts for the pinned submodule
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD:ecc)"
+          run_id="$(
+            gh api "repos/openecos-projects/ecc/actions/workflows/ci.yml/runs?head_sha=${sha}&status=success&per_page=1" \
+              --jq '[.workflow_runs[] | select(.conclusion == "success") | .id][0] // empty'
+          )"
+          if [ -z "$run_id" ]; then
+            echo "::error::No successful ECC CI run found for pinned ecc ${sha}"
+            exit 1
+          fi
+          echo "Using ECC CI run ${run_id} for pinned ecc ${sha}"
+          for name in ecc-cli-linux-x86_64 icsprout55-pdk ecc-sizer; do
+            gh run download "$run_id" \
+              --repo openecos-projects/ecc \
+              --name "$name" \
+              --dir "$RUNNER_TEMP/artifacts/$name"
+          done
+
+      - name: Extract ECC runtime bundle
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ecc-bundle"
+          tar -xf "$RUNNER_TEMP/artifacts/ecc-cli-linux-x86_64/ecc.tar" -C "$RUNNER_TEMP/ecc-bundle"
+          test -x "$RUNNER_TEMP/ecc-bundle/ecc"
+          echo "ECOS_E2E_ECC_BIN_DIR=$RUNNER_TEMP/ecc-bundle" >> "$GITHUB_ENV"
+
+      - name: Extract PDK
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pdk/icsprout55-pdk"
+          tar -xzf "$RUNNER_TEMP/artifacts/icsprout55-pdk/icsprout55-pdk.tar.gz" \
+            -C "$RUNNER_TEMP/pdk/icsprout55-pdk"
+          test -s "$RUNNER_TEMP/pdk/icsprout55-pdk/techfile/icsprout55.layermap"
+          echo "ECOS_E2E_PDK_ROOT=$RUNNER_TEMP/pdk/icsprout55-pdk" >> "$GITHUB_ENV"
+
+      - name: Extract Sizer
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ecc-sizer"
+          tar -xzf "$RUNNER_TEMP/artifacts/ecc-sizer/ecc-sizer.tar.gz" -C "$RUNNER_TEMP/ecc-sizer"
+          test -x "$RUNNER_TEMP/ecc-sizer/bin/Sizer"
+          echo "$RUNNER_TEMP/ecc-sizer/bin" >> "$GITHUB_PATH"
+          echo "CHIPCOMPILER_ECC_SIZER_ROOT=$RUNNER_TEMP/ecc-sizer" >> "$GITHUB_ENV"
+
+      - name: Setup kepler-formal
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_id=""
+          # TODO: drop the fallback once the kepler-formal package workflow
+          # publishes successful runs on main (mirrors ECC CI).
+          for branch in main emin/add-ci-pkgs; do
+            run_id="$(
+              gh api "repos/openecos-projects/kepler-formal/actions/workflows/package.yml/runs?branch=${branch}&status=success&per_page=1" \
+                --jq '[.workflow_runs[] | select(.conclusion == "success") | .id][0] // empty'
+            )"
+            [ -n "$run_id" ] && break
+          done
+          if [ -z "$run_id" ]; then
+            echo "::error::No successful kepler-formal package run found"
+            exit 1
+          fi
+          install_root="$RUNNER_TEMP/kepler-formal"
+          mkdir -p "$install_root"
+          gh run download "$run_id" \
+            --repo openecos-projects/kepler-formal \
+            --name kepler-formal-linux-x64 \
+            --dir "$install_root"
+          tar -xzf "$install_root/kepler-formal-linux-x64.tar.gz" -C "$install_root"
+          marker="$(find "$install_root" -type f -path '*/bin/kepler-formal' -print -quit)"
+          if [ -z "$marker" ]; then
+            echo "::error::Extracted kepler-formal is missing bin/kepler-formal"
+            exit 1
+          fi
+          tool_root="${marker%/bin/kepler-formal}"
+          echo "${tool_root}/bin" >> "$GITHUB_PATH"
+          echo "CHIPCOMPILER_KEPLER_FORMAL_ROOT=${tool_root}" >> "$GITHUB_ENV"
+
+      - name: Setup OSS CAD Suite
+        uses: YosysHQ/setup-oss-cad-suite@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Point ECC at the OSS CAD Suite
+        run: >-
+          echo "CHIPCOMPILER_OSS_CAD_DIR=$(dirname "$(dirname "$(readlink -f "$(command -v yosys)")")")"
+          >> "$GITHUB_ENV"
+
+      - name: Checkout e2e designs
+        uses: actions/checkout@v4
+        with:
+          repository: openecos-projects/ecc-ci-designs
+          path: .scratch/ecc-ci-designs
+
+      - name: Run product e2e (usb rtl2gds + signoff-lit gate)
+        working-directory: ecos/gui
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+          ECOS_ELECTRON_DISABLE_GPU: '1'
+          ECOS_E2E_DESIGN_DIR: ${{ github.workspace }}/.scratch/ecc-ci-designs/usb
+          ECOS_E2E_LIT_SUITE: ${{ github.workspace }}/.scratch/ecc-ci-designs
+        run: xvfb-run --auto-servernum pnpm run desktop:e2e
+
+      - name: Upload e2e evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: product-e2e-evidence
+          if-no-files-found: ignore
+          retention-days: 14
+          path: ${{ runner.temp }}/e2e-out
 
   build-appimage:
     name: Build AppImage
