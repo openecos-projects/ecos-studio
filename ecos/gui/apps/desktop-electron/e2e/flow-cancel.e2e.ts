@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { launchE2EApp, repoRoot, resolveOutDir, type E2EApp } from './support/launch'
-import { prepareGcdProject, type E2EDesign } from './support/design'
+import { prepareDesign, type E2EDesign } from './support/design'
 import { createMilestoneShots } from './support/screenshots'
 import {
   cancelFlow,
@@ -26,7 +26,7 @@ describe('product e2e: cancelling a running flow', () => {
   beforeAll(async () => {
     const outDir = await resolveOutDir('flow-cancel')
     await mkdir(join(outDir, 'work'), { recursive: true })
-    design = await prepareGcdProject(join(outDir, 'work'))
+    design = await prepareDesign(join(outDir, 'work'))
     launched = await launchE2EApp(outDir)
     shot = createMilestoneShots(launched.page, outDir)
     console.log(`e2e output directory: ${outDir}; design: ${design.name}`)

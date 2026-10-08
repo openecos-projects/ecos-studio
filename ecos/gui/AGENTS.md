@@ -75,9 +75,11 @@ signoff-lit suite. It needs a working toolchain environment
 (`CHIPCOMPILER_OSS_CAD_DIR`, `CHIPCOMPILER_ECC_SIZER_ROOT`,
 `CHIPCOMPILER_KEPLER_FORMAL_ROOT`) and an unzipped ICS55 PDK. Useful overrides:
 `ECOS_E2E_OUT` (evidence directory), `ECOS_E2E_DESIGN_DIR` (an ecc-ci-designs
-style project; defaults to the gcd example), `ECOS_E2E_LIT_SUITE` (lit suite
-checkout; skips the gate when unset), `ECOS_E2E_PDK_ROOT`,
-`ECOS_E2E_ECC_BIN_DIR` (external ECC bundle instead of the repo dev runtime).
+style project used by the journey and the control cases; defaults to the gcd
+example, which currently fails at place on ecc-dreamplace 9a50193 — prefer a
+CI-tracked design), `ECOS_E2E_LIT_SUITE` (lit suite checkout; skips the gate
+when unset), `ECOS_E2E_PDK_ROOT`, `ECOS_E2E_ECC_BIN_DIR` (external ECC bundle
+instead of the repo dev runtime).
 
 Before publishing GUI source or configuration changes, run `pnpm run check`.
 Also run the production build when changing build configuration, preload/main
