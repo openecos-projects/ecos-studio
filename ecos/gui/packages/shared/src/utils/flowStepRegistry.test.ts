@@ -17,6 +17,21 @@ describe('flow step registry', () => {
     expect(flowStepRegistry.map((step) => step.id)).toEqual([...flowStepCanonicalIds])
   })
 
+  it('mirrors the default ECC post-route sequence', () => {
+    const names = flowStepRegistry.flatMap((step) => step.eccNames)
+    expect(names.slice(names.indexOf('route'))).toEqual([
+      'route',
+      'filler',
+      'lvs',
+      'drc',
+      'postRouteLec',
+      'RCX',
+      'sta',
+      'powerAnalysis',
+      'Harden',
+    ])
+  })
+
   it('gives every step a label, persisted names, and a default tool', () => {
     for (const step of flowStepRegistry) {
       expect(step.label.trim()).not.toBe('')
@@ -56,7 +71,7 @@ describe('flow step registry', () => {
     const by = (
       flag: 'layout' | 'gate' | 'structural' | 'skippable' | 'flowStartDisabled',
     ) => flowStepRegistry.filter((step) => step[flag]).map((step) => step.id)
-    expect(by('gate')).toEqual(['RCX', 'STA', 'LVS', 'DRC'])
+    expect(by('gate')).toEqual(['LVS', 'DRC', 'RCX', 'STA'])
     expect(by('structural')).toEqual(['Filler', 'RCX', 'Harden'])
     expect(by('skippable')).toEqual(['LEC', 'Timing Opt', 'Post-route LEC'])
     expect(by('flowStartDisabled')).toEqual(['LEC', 'Post-route LEC'])
@@ -68,10 +83,10 @@ describe('flow step registry', () => {
       'Timing Opt',
       'Route',
       'Filler',
-      'RCX',
-      'STA',
       'LVS',
       'DRC',
+      'RCX',
+      'STA',
       'Harden',
     ])
   })

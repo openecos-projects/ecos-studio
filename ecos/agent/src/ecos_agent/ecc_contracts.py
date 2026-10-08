@@ -13,12 +13,13 @@ class ECCStepName(StrEnum):
     LEGALIZATION = "legalization"
     TIMING_OPT = "Timing optimization"
     ROUTING = "route"
-    DRC = "drc"
-    LVS = "lvs"
     FILLER = "filler"
+    LVS = "lvs"
+    DRC = "drc"
     POST_ROUTE_LEC = "postRouteLec"
     RCX = "RCX"
     STA = "sta"
+    POWER_ANALYSIS = "powerAnalysis"
     HARDEN = "Harden"
 
 

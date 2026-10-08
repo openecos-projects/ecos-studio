@@ -459,9 +459,9 @@ describe('prepareWorkspaceRerun', () => {
       'legalization',
       'Timing optimization',
       'route',
-      'drc',
-      'lvs',
       'filler',
+      'lvs',
+      'drc',
       'postRouteLec',
       'RCX',
       'sta',
@@ -470,6 +470,58 @@ describe('prepareWorkspaceRerun', () => {
     ])
     expect(targetFlow.steps.find((step) => step.name === 'place')?.state).toBe('Unstart')
     expect(targetFlow.steps.find((step) => step.name === 'Harden')?.state).toBe('Unstart')
+  })
+
+  it('reorders only the isolated full-flow target of a legacy workspace', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    const sourceFlow = JSON.parse(flow) as {
+      steps: Array<{ name: string; state: string; tool: string }>
+    }
+    sourceFlow.steps.push(
+      ...[
+        'route',
+        'filler',
+        'RCX',
+        'sta',
+        'powerAnalysis',
+        'lvs',
+        'postRouteLec',
+        'drc',
+        'Harden',
+      ].map((name) => ({
+        name,
+        state: 'Success',
+        tool: name === 'postRouteLec' ? 'yosys_lec' : 'ecc',
+      })),
+    )
+    const legacyFlow = JSON.stringify(sourceFlow)
+    await writeFile(join(source, 'home', 'flow.json'), legacyFlow)
+    const contract = {
+      ...contractFor(source, legacyFlow, artifact),
+      end_step: 'Harden',
+      execution_scope: 'full_flow' as const,
+    }
+
+    await prepareWorkspaceRerun(contract)
+
+    const targetFlow = JSON.parse(
+      await readFile(join(contract.target_workspace, 'home', 'flow.json'), 'utf8'),
+    ) as { steps: Array<{ name: string }> }
+    const names = targetFlow.steps.map((step) => step.name)
+    expect(names.slice(names.indexOf('route'))).toEqual([
+      'route',
+      'filler',
+      'lvs',
+      'drc',
+      'postRouteLec',
+      'RCX',
+      'sta',
+      'powerAnalysis',
+      'Harden',
+    ])
+    await expect(readFile(join(source, 'home', 'flow.json'), 'utf8')).resolves.toBe(
+      legacyFlow,
+    )
   })
 
   it.each([

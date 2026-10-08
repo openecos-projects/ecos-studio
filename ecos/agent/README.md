@@ -119,6 +119,10 @@ workspace 中重跑。原始 workspace 不会被覆盖。
 
 ### 3. Workspace：继续未完成 flow
 
+新建默认流程及隔离重跑补齐后的布线后顺序为 `route → filler → lvs → drc →
+postRouteLec → RCX → sta → powerAnalysis → Harden`。源 workspace 不会被重排；
+继续已有 flow 时仍按其持久化步骤顺序执行。
+
 对齐 Agent 接入前的 GUI：在当前 workspace 原地执行 `runAllFlow({ rerun: false })`。
 确认合同后不会创建隔离 target。
 
