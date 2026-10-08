@@ -26,6 +26,10 @@ export interface E2EBridge {
   productCommands: {
     execute(request: { command: string; payload: unknown }): Promise<unknown>
   }
+  settings: {
+    get(key: string): Promise<unknown>
+    set(key: string, value: unknown): Promise<void>
+  }
   workspace: {
     registerProjectRoot(path: string): Promise<string>
   }

@@ -12,6 +12,7 @@ import {
   createDefaultWorkspace,
   getVersions,
   importExternalPdk,
+  openWorkspaceInUi,
   readOperationLog,
   readOverviewStepStates,
   registerWorkspaceRoot,
@@ -122,6 +123,7 @@ describe('product e2e: backend rtl2gds journey', () => {
     })
     expect(workspace.workspaceDir).toBe(join(design.projectRoot, 'default'))
     await registerWorkspaceRoot(page, workspace.workspaceDir)
+    await openWorkspaceInUi(page, workspace)
     await shot('workspace-created', '#/projects')
   }, 180_000)
 
