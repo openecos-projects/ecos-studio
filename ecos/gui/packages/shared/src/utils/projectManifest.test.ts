@@ -80,12 +80,12 @@ describe('project manifest presentation', () => {
       'Timing Opt',
       'Route',
       'Filler',
+      'LVS',
+      'DRC',
+      'Post-route LEC',
       'RCX',
       'STA',
       'Power Analysis',
-      'LVS',
-      'Post-route LEC',
-      'DRC',
       'Harden',
     ])
     expect(normalizeProjectManifestFlowStep('lvs')).toBe('LVS')

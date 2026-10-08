@@ -638,12 +638,13 @@ const workspaceSetupFlowSteps = [
   'legalization',
   'Timing optimization',
   'route',
-  'drc',
-  'lvs',
   'filler',
+  'lvs',
+  'drc',
   'postRouteLec',
   'RCX',
   'sta',
+  'powerAnalysis',
   'Harden',
 ]
 

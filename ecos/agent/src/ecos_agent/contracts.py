@@ -13,12 +13,13 @@ GUI_WORKSPACE_FLOW_STEPS = (
     "legalization",
     "Timing optimization",
     "route",
-    "drc",
-    "lvs",
     "filler",
+    "lvs",
+    "drc",
     "postRouteLec",
     "RCX",
     "sta",
+    "powerAnalysis",
     "Harden",
 )
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
