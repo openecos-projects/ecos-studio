@@ -185,8 +185,6 @@ jobs:
       }}
     runs-on: ubuntu-22.04
     timeout-minutes: 90
-    env:
-      ECOS_E2E_OUT: ${{ runner.temp }}/e2e-out
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -329,6 +327,7 @@ jobs:
         env:
           ELECTRON_DISABLE_SANDBOX: '1'
           ECOS_ELECTRON_DISABLE_GPU: '1'
+          ECOS_E2E_OUT: ${{ runner.temp }}/e2e-out
           ECOS_E2E_DESIGN_DIR: ${{ github.workspace }}/.scratch/ecc-ci-designs/usb
           ECOS_E2E_LIT_SUITE: ${{ github.workspace }}/.scratch/ecc-ci-designs
         run: xvfb-run --auto-servernum pnpm run desktop:e2e
