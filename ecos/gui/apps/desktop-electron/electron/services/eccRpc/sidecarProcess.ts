@@ -136,6 +136,7 @@ export class EccRpcSidecarProcess {
   private shuttingDown = false
   private spawnEnv: NodeJS.ProcessEnv | null = null
   private spawnLaunchKey: string | null = null
+  private stopInFlight: Promise<void> | null = null
   private outputTail = ''
   private launchError: string | null = null
   logFile: string | null = null
@@ -150,6 +151,15 @@ export class EccRpcSidecarProcess {
   }
 
   async start(): Promise<EccJsonRpcClient> {
+    const stopInFlight = this.stopInFlight
+    if (stopInFlight) {
+      try {
+        await stopInFlight
+      } catch (error) {
+        // A deferred stop leaves the previous sidecar running; reuse it below.
+        if (!(error instanceof EccRpcShutdownDeferredError)) throw error
+      }
+    }
     const baseEnv = await this.resolveEnv()
     const launch = this.options.resolveLaunch
       ? await this.options.resolveLaunch(baseEnv)
@@ -174,7 +184,7 @@ export class EccRpcSidecarProcess {
     if (this.client) {
       const child = this.child
       if (child) {
-        await this.stopForRestart(child)
+        await this.stopAndTrack(child)
       }
     }
 
@@ -289,7 +299,7 @@ export class EccRpcSidecarProcess {
     if (!child) {
       return
     }
-    await this.stopForRestart(child)
+    await this.stopAndTrack(child)
   }
 
   async forceShutdown(): Promise<void> {
@@ -329,6 +339,22 @@ export class EccRpcSidecarProcess {
       unlinkSync(nextLogFile)
       throw error
     }
+  }
+
+  private stopAndTrack(child: SpawnedEccRpcSidecar): Promise<void> {
+    if (!this.stopInFlight) {
+      const stop = this.stopForRestart(child)
+      this.stopInFlight = stop
+      stop.then(
+        () => {
+          if (this.stopInFlight === stop) this.stopInFlight = null
+        },
+        () => {
+          if (this.stopInFlight === stop) this.stopInFlight = null
+        },
+      )
+    }
+    return this.stopInFlight
   }
 
   private async stopForRestart(child: SpawnedEccRpcSidecar): Promise<void> {
