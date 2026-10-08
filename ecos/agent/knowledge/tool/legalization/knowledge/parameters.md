@@ -34,12 +34,21 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.adjust_gpugr_area_flag"></a>
+## parameter.legalization.adjust_gpugr_area_flag
+
+**Meaning:** The GPUGR area-adjustment switch.
+
+**Role:** It selects GPUGR global routing as the congestion-map source for routability-driven node-area adjustment and takes precedence over the NCTUgr and RUDY map sources.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.adjust_nctugr_area_flag"></a>
 ## parameter.legalization.adjust_nctugr_area_flag
 
-**Meaning:** The EGR area-adjustment switch.
+**Meaning:** The legacy EGR area-adjustment switch.
 
-**Role:** It uses EGR congestion information to adjust node area.
+**Role:** It selects the ECC/iRT EGR congestion map for node-area adjustment without invoking NCTUgr itself; the GPUGR switch takes precedence when both are set.
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
@@ -120,7 +129,7 @@
 
 **Meaning:** The standard-cell padding along X, in sites.
 
-**Role:** DREAMPlace quantizes and may cap the padding before expanding movable-cell and pin geometry. A requested zero is effective when confirmed as zero; a positive request clipped to zero is inactive. The actual value remains the placement padding in sites, not the geometry restored for legalization.
+**Role:** The legalization runner zeroes the configured padding, then resets it to the placement site width for the standalone legalization step.
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
@@ -165,7 +174,7 @@
 
 **Meaning:** The detailed-placement enable flag.
 
-**Role:** It marks detailed placement; the current ECOS default flow does not execute that stage.
+**Role:** The legalization runner forces it to `0` for the standalone legalization step, so no detailed refinement follows legalization there.
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
@@ -304,6 +313,33 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.gpugr_area_adjust_congestion_mode"></a>
+## parameter.legalization.gpugr_area_adjust_congestion_mode
+
+**Meaning:** The GPUGR overflow aggregation mode for area adjustment.
+
+**Role:** It selects the GPUGR overflow map converted into the routing-utilization map: `union` overflow or the per-direction maximum of raw (`max_hv`) or effective (`max_hv_effective`) overflow; other values are rejected during parameter normalization.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.gpugr_area_adjust_rrr_iters"></a>
+## parameter.legalization.gpugr_area_adjust_rrr_iters
+
+**Meaning:** The rip-up-and-reroute iteration count for GPUGR area-adjustment runs.
+
+**Role:** `0` evaluates congestion from a single GPUGR routing pass; positive values request rip-up-and-reroute rounds and are rejected by the CPU backends.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.gpugr_backend"></a>
+## parameter.legalization.gpugr_backend
+
+**Meaning:** The GPUGR backend selection.
+
+**Role:** `auto` resolves to `cuda` when CUDA is available and the GPUGR extension has CUDA support, otherwise to `cpu_pr_mt`; an explicit `cuda` request without CUDA support fails, and the CPU backends reject positive RRR iteration counts.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.ignore_net_degree"></a>
 ## parameter.legalization.ignore_net_degree
 
@@ -337,6 +373,24 @@
 **Meaning:** The Y percentage of the initial location.
 
 **Role:** It defines the Y coordinate of random-center initialization relative to the layout boundary.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.l_shape_routability_flag"></a>
+## parameter.legalization.l_shape_routability_flag
+
+**Meaning:** The L-shape routability-objective switch.
+
+**Role:** Together with `routability_opt_flag` it arms the L-shape routability density objective, which activates once density overflow falls below its threshold and adds GGR-topology L-direction supply/demand terms to the placement objective; enabling it fills conservative L-shape defaults for unset keys.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.l_shape_update_interval"></a>
+## parameter.legalization.l_shape_update_interval
+
+**Meaning:** The L-shape topology refresh interval in optimizer iterations.
+
+**Role:** While the L-shape objective is active, Steiner topologies, L-directions, and supply/demand targets are rebuilt every this many iterations; the value must normalize to a positive integer.
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 

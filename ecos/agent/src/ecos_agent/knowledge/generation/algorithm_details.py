@@ -18,7 +18,7 @@ SOURCE_PATHS = {
     "ifp.macro_placer": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iFP/source/module/macro_placer/MacroPlacer.cpp",
     "ifp.pdn": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iFP/source/module/pdn_generator/PDNGenerator.cpp",
     "ifp.phy_placer": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iFP/source/module/phy_placer/PhyPlacer.cpp",
-    "izh.filler": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iZH/source/module/filler_inserter/FillerInserter.cpp",
+    "imj.filler": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iMJ/source/module/filler_inserter/FillerInserter.cpp",
     "icts.api": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iCTS/interface/CTSAPI.cc",
     "icts.synthesis": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iCTS/source/module/synthesis/Synthesis.cc",
     "icts.topology": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iCTS/source/module/synthesis/topology/Topology.cc",
@@ -106,13 +106,13 @@ ALGORITHM_DETAILS: dict[str, tuple[AlgorithmDetail, ...]] = {
         (
             "io_pin_placement",
             ("floorplan io pin placement", "io placer edge distribution"),
-            "**Input and state:** `IOPlacer` consumes the configured layer-name list, each layer's preferred direction, minimum width, preferred track offset/pitch, die/core bounds, and the IO-pin list. `placeAuto()` (used by `runSimpleFP`) always runs automatic placement on the layer list; `place()` (used by `runFP`) reads `io_placer.file_path` in `file` mode and otherwise falls back to the same automatic path.\n\n**Algorithm:** Automatic placement chooses the first valid horizontal and vertical layers, derives pin depths as four times the perpendicular track pitch, and enumerates track-aligned legal slots on all four die edges. Slots are first sampled at two-pitch spacing; if that cannot fit all pins, it retries at one-pitch spacing. It ranks slots by distance from the die center plus a perpendicular-span tie-breaker, keeps the best slots, then restores edge/coordinate order while assigning them to the original IO-pin order. File mode requires both a usable horizontal and vertical layer before reading locations.\n\n**Constraint and stop:** Missing usable layers, non-positive width/pitch, an empty pin list, or insufficient minimum-pitch capacity returns without placement; capacity exhaustion emits a native error. Valid assignments create die-edge port rectangles and synchronize IO pin and net-pin coordinates.",
+            "**Input and state:** `IOPlacer` consumes the configured layer-name list, each layer's preferred direction, minimum width, minimum area, preferred track offset/pitch, die/core bounds, and the IO-pin list. `placeAuto()` (used by `runSimpleFP`) always runs automatic placement on the layer list; `place()` (used by `runFP`) reads `io_placer.file_path` in `file` mode and otherwise falls back to the same automatic path.\n\n**Algorithm:** Automatic placement chooses the first valid horizontal and vertical layers, derives each pin's depth from the pin layer's minimum-area rule — extending inward only as far as `min_area / width` requires, with at least a half-width margin — and snaps the access point to the nearest track of the perpendicular layer, then enumerates track-aligned legal slots on all four die edges. Slots are first sampled at two-pitch spacing; if that cannot fit all pins, it retries at one-pitch spacing. It ranks slots by distance from the die center plus a perpendicular-span tie-breaker, keeps the best slots, then restores edge/coordinate order while assigning them to the original IO-pin order. File mode requires both a usable horizontal and vertical layer before reading locations.\n\n**Constraint and stop:** Missing usable layers, non-positive width/pitch, an empty pin list, or insufficient minimum-pitch capacity returns without placement; capacity exhaustion emits a native error. Valid assignments create die-edge port rectangles and synchronize IO pin and net-pin coordinates.",
             ("ifp.io_placer",),
         ),
         (
             "macro_placement_step",
             ("dreamplace macro placement step", "macro only placement", "macroPlacement"),
-            "**Input and state:** The `macroPlacement` flow step runs between the two floorplan phases and consumes the pre-floorplan DEF/netlist state.\n\n**Algorithm:** The runner first checks manual `macro.placements` workspace parameters; when present, DreamPlace is skipped entirely and the generated macro-location Tcl is used as-is. Otherwise `DreamplaceModule` forces macro-only parameters (`macro_only=1`, `macro_place_flag=1`, `global_place_flag=1`, `legalize_flag=1`, `two_stage_flag=0`, macro halos of 2000, routability and congestion extras off) and runs the placement engine; on success `tcl_save` writes the hard-macro placement commands to the workspace macro-location Tcl. A run with no unplaced hard macros is treated as a successful skip.\n\n**Boundary:** A failed engine run or a failed Tcl save marks the `macro placement` subflow incomplete and returns false before shared persistence; the step saves with `feature_step=False` and runs no stage analysis.",
+            "**Input and state:** The `macroPlacement` flow step runs between the two floorplan phases and consumes the pre-floorplan DEF/netlist state.\n\n**Algorithm:** The runner first checks manual `macro.placements` workspace parameters; when present, DreamPlace is skipped entirely and the generated macro-location Tcl is used as-is. Otherwise `DreamplaceModule` forces macro-only parameters (`macro_only=1`, `macro_place_flag=1`, `global_place_flag=1`, `legalize_flag=1`, `detailed_place_flag=0`, `two_stage_flag=0`, macro halos of 2000, routability and congestion extras off) and runs the placement engine; on success `tcl_save` writes the hard-macro placement commands to the workspace macro-location Tcl. A run with no unplaced hard macros is treated as a successful skip.\n\n**Boundary:** A failed engine run or a failed Tcl save marks the `macro placement` subflow incomplete and returns false before shared persistence; the step saves with `feature_step=False` and runs no stage analysis.",
             ("dreamplace.runner", "dreamplace.module", "ecc.macro_location"),
         ),
         (
@@ -164,7 +164,7 @@ ALGORITHM_DETAILS: dict[str, tuple[AlgorithmDetail, ...]] = {
         (
             "legalize_only_setup",
             ("legalization legalize only setup", "dreamplace legalization parameters"),
-            "**Input and state:** The standalone legalization runner uses the current ECC-backed DEF/netlist state and forces DreamPlace global placement, fillers, and random-center initialization off while enabling `legalize_flag`.\n\n**Algorithm:** `PlacementEngine.setup_rawdb()` imports the ECC database, builds placement tensors and operators, then invokes `NonLinearPlace` in legalize-only mode.\n\n**Stop:** The engine returns its PPA dictionary; an infinite HPWL is the runner's failure signal, while a finite value is still only auditable with saved stage artifacts.",
+            "**Input and state:** The standalone legalization runner uses the current ECC-backed DEF/netlist state and forces DreamPlace global placement, fillers, random-center initialization, and detailed placement off while enabling `legalize_flag`, with cell padding reset to the placement site width.\n\n**Algorithm:** `PlacementEngine.setup_rawdb()` imports the ECC database, builds placement tensors and operators, then invokes `NonLinearPlace` in legalize-only mode.\n\n**Stop:** The engine returns its PPA dictionary; an infinite HPWL is the runner's failure signal, while a finite value is still only auditable with saved stage artifacts.",
             ("dreamplace.module", "dreamplace.placer"),
         ),
         (
@@ -275,25 +275,25 @@ ALGORITHM_DETAILS: dict[str, tuple[AlgorithmDetail, ...]] = {
             "filler_model_initialization",
             ("filler model initialization", "izh filler rows masters"),
             "**Input and state:** The native filler insertion path builds an `FIModel` from iDB rows, cell masters, `-filler` configuration, and `-min_filler_width`.\n\n**Algorithm:** It filters invalid or non-horizontal rows and accepts only core-filler masters whose widths are site-width multiples, then sorts masters by descending width.\n\n**Constraint and stop:** A non-positive minimum width is invalid. Initialization ends with rows, sorted master choices, and insertion counters; it does not yet modify the design.",
-            ("izh.filler",),
+            ("imj.filler",),
         ),
         (
             "available_segment_extraction",
             ("filler available segments", "filler blockage site bitmap"),
             "**Input and state:** Each `FIRow` begins with a site-availability bitmap. Placed instance boxes and placement-blockage rectangles are clipped to intersecting rows.\n\n**Algorithm:** Blockages are converted to clamped site-index ranges and marked unavailable, then the bitmap is scanned into contiguous `FISegment` gaps.\n\n**Stop and output:** The finite blockage and row scans produce the legal segments in which filler cells may be inserted.",
-            ("izh.filler",),
+            ("imj.filler",),
         ),
         (
             "greedy_segment_packing",
             ("filler greedy packing", "filler largest first packing"),
             "**Input and state:** A legal segment, descending-width filler masters, and the minimum filler-site count form one packing problem.\n\n**Algorithm:** Starting at the segment's left site, the inserter picks the first master that fits while leaving either zero remainder or a remainder at least as large as the minimum filler width.\n\n**Stop and output:** Packing stops when no master can be added or the remaining sites are too few. This largest-first greedy policy avoids an unfillable sub-minimum gap but does not solve a global optimal packing problem.",
-            ("izh.filler",),
+            ("imj.filler",),
         ),
         (
             "instance_writeback",
             ("filler instance writeback", "filler placed instance creation"),
             "**Algorithm:** For each selected master, `addFillerInstance()` computes `origin_x + begin_site_idx * site_width`, keeps the row orientation, creates a unique instance name, and writes a placed filler instance to iDB.\n\n**Constraint and stop:** Missing design/master data prevents insertion; name collisions are handled by unique-name generation and error-on-existing creation. Counters advance for each created instance, then ECOS serializes the resulting database.",
-            ("izh.filler",),
+            ("imj.filler",),
         ),
     ),
     "rcx": (

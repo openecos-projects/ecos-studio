@@ -93,7 +93,7 @@ PLACE_PARAMETER_SEMANTICS = {
     "enable_fillers": ("Whether filler nodes are inserted.", "Filler nodes participate in the density model so continuous optimization represents available area."),
     "global_place_flag": ("Whether global placement runs.", "It controls entry into the NonLinearPlace continuous optimization loop."),
     "legalize_flag": ("Whether internal legalization runs.", "It controls whether the legalizer removes overlaps and aligns cells to sites after global placement."),
-    "detailed_place_flag": ("The detailed-placement enable flag.", "It marks detailed placement; the current ECOS default flow does not execute that stage."),
+    "detailed_place_flag": ("The detailed-placement enable flag.", "The place runner keeps the configured value, so the current configuration runs in-process detailed placement after legalization; macro-placement mode forces it to `0`, and legalization mode disables it for the standalone legalization step."),
     "stop_overflow": ("The acceptable global-placement overflow threshold.", "The parameter is effective when the final global-placement overflow is strictly below the actual threshold. A known final overflow at or above the threshold is inactive; missing or negative sentinel overflow is unknown. No stopping-cause trace is required."),
     "dtype": ("The placement-tensor data type.", "It affects numerical precision, memory use, and the type used by compiled operators."),
     "detailed_place_engine": ("The external detailed-placer path.", "When the path exists, PlacementEngine invokes that tool after global placement."),
@@ -112,6 +112,12 @@ PLACE_PARAMETER_SEMANTICS = {
     "dump_global_place_solution_flag": ("The global-placement solution dump switch.", "It controls whether the global-placement solution is saved before legalization."),
     "dump_legalize_solution_flag": ("The legalized-solution dump switch.", "It controls whether the legalizer result is saved."),
     "routability_opt_flag": ("The routability-optimization switch.", "A false request is effective when the algorithm is confirmed disabled. A true request requires an executed routability round to be effective; enabling the flag without executing a round is inactive after placement completes."),
+    "adjust_gpugr_area_flag": ("The GPUGR area-adjustment switch.", "It selects GPUGR global routing as the congestion-map source for routability-driven node-area adjustment and takes precedence over the NCTUgr and RUDY map sources."),
+    "gpugr_backend": ("The GPUGR backend selection.", "`auto` resolves to `cuda` when CUDA is available and the GPUGR extension has CUDA support, otherwise to `cpu_pr_mt`; an explicit `cuda` request without CUDA support fails, and the CPU backends reject positive RRR iteration counts."),
+    "gpugr_area_adjust_rrr_iters": ("The rip-up-and-reroute iteration count for GPUGR area-adjustment runs.", "`0` evaluates congestion from a single GPUGR routing pass; positive values request rip-up-and-reroute rounds and are rejected by the CPU backends."),
+    "gpugr_area_adjust_congestion_mode": ("The GPUGR overflow aggregation mode for area adjustment.", "It selects the GPUGR overflow map converted into the routing-utilization map: `union` overflow or the per-direction maximum of raw (`max_hv`) or effective (`max_hv_effective`) overflow; other values are rejected during parameter normalization."),
+    "l_shape_routability_flag": ("The L-shape routability-objective switch.", "Together with `routability_opt_flag` it arms the L-shape routability density objective, which activates once density overflow falls below its threshold and adds GGR-topology L-direction supply/demand terms to the placement objective; enabling it fills conservative L-shape defaults for unset keys."),
+    "l_shape_update_interval": ("The L-shape topology refresh interval in optimizer iterations.", "While the L-shape objective is active, Steiner topologies, L-directions, and supply/demand targets are rebuilt every this many iterations; the value must normalize to a positive integer."),
     "macro_place_flag": ("The macro-placement switch.", "It enables macro preprocessing and macro-legalization paths."),
     "macro_only": ("The macro-only placement switch.", "The macro-placement runner forces it to `1` so DreamPlace places only hard macros between the two floorplan phases; the serialized `0` default applies to normal placement runs."),
     "use_bb": ("The bounding-box approximation switch.", "It affects the bounding-box form used by wirelength or congestion modeling."),
@@ -120,7 +126,7 @@ PLACE_PARAMETER_SEMANTICS = {
     "node_area_adjust_overflow": ("The overflow threshold for node-area adjustment.", "It determines when congestion-driven placement begins area adjustment."),
     "two_stage_density_scaler": ("The two-stage density scale factor.", "It scales the density model across placement stages."),
     "max_num_area_adjust": ("The maximum number of area adjustments.", "It limits repeated node-area adjustment during routability optimization."),
-    "adjust_nctugr_area_flag": ("The EGR area-adjustment switch.", "It uses EGR congestion information to adjust node area."),
+    "adjust_nctugr_area_flag": ("The legacy EGR area-adjustment switch.", "It selects the ECC/iRT EGR congestion map for node-area adjustment without invoking NCTUgr itself; the GPUGR switch takes precedence when both are set."),
     "adjust_rudy_area_flag": ("The RUDY area-adjustment switch.", "It uses RUDY congestion estimates to adjust node area."),
     "adjust_pin_area_flag": ("The pin-density area-adjustment switch.", "It uses pin-density information to adjust node area."),
     "area_adjust_stop_ratio": ("The area-adjustment stopping ratio.", "It stops the related adjustment when area changes converge to this ratio."),
@@ -215,7 +221,7 @@ def _add_algorithms(entries: list[dict[str, object]], documents: dict[str, list[
         (
             "algorithm.dreamplace.routability_optimization",
             ("routability optimization", "routability opt", "可布线优化", "拥塞驱动布局"),
-            "**Trigger:** When routability optimization is enabled, the global-placement loop considers area adjustment only after density overflow falls below its configured threshold and while adjustment rounds remain.\n\n**Algorithm:** It obtains a routing-utilization map from EGR or the routing estimator, and optionally a pin-utilization map. `adjust_node_area_op` uses those maps to modify movable-cell area models so the following placement iterations can spread demand away from congested or pin-dense regions.\n\n**Restart after adjustment:** After an area change, DreamPlace resets density and overflow operators, reinitializes density weight and the optimizer state, estimates a new learning rate, and resumes the nested optimization loop. These are placement-time estimators, not evidence of detailed-routing completion.",
+            "**Trigger:** When routability optimization is enabled, the global-placement loop considers area adjustment only after density overflow falls below its configured threshold and while adjustment rounds remain.\n\n**Algorithm:** The route-map source is flag-selected: with `adjust_gpugr_area_flag` set, as in the shipped ECC configuration, the loop runs GPUGR global routing on the current positions and converts the overflow map chosen by `gpugr_area_adjust_congestion_mode` into the routing-utilization map; the legacy `adjust_nctugr_area_flag` key selects the ECC/iRT EGR map, and otherwise the RUDY estimator supplies it. A pin-utilization map is added when pin-area adjustment is enabled. `adjust_node_area_op` uses those maps to modify movable-cell area models so the following placement iterations can spread demand away from congested or pin-dense regions. When `l_shape_routability_flag` is enabled, the loop can also activate an L-shape routability density objective once overflow falls below its threshold and refreshes its GGR-topology targets every `l_shape_update_interval` iterations.\n\n**Restart after adjustment:** After an area change, DreamPlace resets density and overflow operators, reinitializes density weight and the optimizer state, estimates a new learning rate, and resumes the nested optimization loop. These are placement-time estimators, not evidence of detailed-routing completion.",
             ("dreamplace.nonlinear", "dreamplace.objective"),
         ),
         (
@@ -342,8 +348,8 @@ def _add_artifacts(entries: list[dict[str, object]], documents: dict[str, list[s
         (
             "view_json",
             "output/{design}_place_view",
-            "This is the reserved directory for a view-JSON package, whose API would write a manifest and layout package files for the current ECC design. The standard place flow uses the geometry snapshot instead, so it does not emit this package.",
-            "The builder allocates the directory and `ECCToolsModule.view_json_save` can create the package, but `save_data` explicitly skips view-JSON serialization and directs the GUI to the geometry snapshot.",
+            "This was the reserved directory for a view-JSON package, whose API would write a manifest and layout package files for the current ECC design. The current ECC step-output schema no longer allocates this path; the standard place flow uses the geometry snapshot instead, so no view-JSON package is emitted.",
+            "The ECC builder and `ECCToolsModule` no longer declare or expose view-JSON outputs, and `save_data` explicitly skips view-JSON serialization and directs the GUI to the geometry snapshot.",
             ("ecc.builder", "ecc.runner", "ecc.module"),
         ),
         (
@@ -431,7 +437,7 @@ def _add_failures(entries: list[dict[str, object]], documents: dict[str, list[st
         ("overflow_or_nonfinite_objective", ("place overflow nan inf", "布局overflow或NaN"), "When final overflow exceeds `stop_overflow`, or the objective is `Inf` or `NaN`, `NonLinearPlace` skips legalization and detailed placement and returns infinite HPWL.", ("dreamplace.nonlinear",)),
         ("infinite_hpwl", ("hpwl inf", "HPWL无穷"), '`DreamplaceModule` treats `ppa["hpwl"] == inf` as a failure and returns `False`.', ("dreamplace.module",)),
         ("missing_feature_map", ("place map missing", "place map缺失"), "The runner requests `feature_placement_map(json_path=step.feature.map)`. When the expected map is missing, it must not claim that QoR metrics were generated.", ("dreamplace.runner", "ecc.builder")),
-        ("missing_external_detailed_placer", ("detailed placer missing", "详细布局器缺失"), "When `detailed_place_engine` is configured but its path does not exist, `PlacementEngine` records only a warning. Detailed placement is disabled in the current default flow.", ("dreamplace.placer", "dreamplace.config")),
+        ("missing_external_detailed_placer", ("detailed placer missing", "详细布局器缺失"), "When `detailed_place_engine` is configured but its path does not exist, `PlacementEngine` records only a warning. The shipped configuration leaves the engine path empty, so no external detailed placer is invoked; in-process detailed placement is controlled separately by `detailed_place_flag`.", ("dreamplace.placer", "dreamplace.config")),
         ("misleading_subflow_success", ("subflow success", "subflow成功但失败"), "After DreamPlace returns, the runner unconditionally marks the subflow `run-placement` as successful, and `save_data` can later overwrite the result. Subflow success alone is not placement-success evidence; check terminal state, logs, and artifacts.", ("dreamplace.runner", "dreamplace.module")),
     ]
     for name, aliases, body, evidence in records:

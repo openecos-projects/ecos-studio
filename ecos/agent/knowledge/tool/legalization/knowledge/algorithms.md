@@ -1,14 +1,14 @@
 <a id="algorithm.legalization.execution"></a>
 ## algorithm.legalization.execution
 
-**Execution path:** The DreamPlace runner loads ECC data, builds `DreamplaceModule`, forces legalization-only parameters, creates the placement engine, and runs it. In legalization-only mode global placement and fillers are disabled while `legalize_flag` is enabled; the runner then saves the design and runs analysis and checklist generation.
+**Execution path:** The DreamPlace runner loads ECC data, builds `DreamplaceModule`, forces legalization-only parameters, creates the placement engine, and runs it. In legalization-only mode global placement, fillers, and detailed placement are disabled while `legalize_flag` is enabled, and cell padding is reset to the placement site width; the runner then saves the design and runs analysis and checklist generation.
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**
 
 <a id="algorithm.legalization.legalize_only_setup"></a>
 ## algorithm.legalization.legalize_only_setup
 
-**Input and state:** The standalone legalization runner uses the current ECC-backed DEF/netlist state and forces DreamPlace global placement, fillers, and random-center initialization off while enabling `legalize_flag`.
+**Input and state:** The standalone legalization runner uses the current ECC-backed DEF/netlist state and forces DreamPlace global placement, fillers, random-center initialization, and detailed placement off while enabling `legalize_flag`, with cell padding reset to the placement site width.
 
 **Algorithm:** `PlacementEngine.setup_rawdb()` imports the ECC database, builds placement tensors and operators, then invokes `NonLinearPlace` in legalize-only mode.
 

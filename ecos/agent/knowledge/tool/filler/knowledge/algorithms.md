@@ -14,7 +14,7 @@
 
 **Constraint and stop:** A non-positive minimum width is invalid. Initialization ends with rows, sorted master choices, and insertion counters; it does not yet modify the design.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **izh.filler**
+**Source evidence:** **ecc.runner**, **ecc.module**, **imj.filler**
 
 <a id="algorithm.filler.available_segment_extraction"></a>
 ## algorithm.filler.available_segment_extraction
@@ -25,7 +25,7 @@
 
 **Stop and output:** The finite blockage and row scans produce the legal segments in which filler cells may be inserted.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **izh.filler**
+**Source evidence:** **ecc.runner**, **ecc.module**, **imj.filler**
 
 <a id="algorithm.filler.greedy_segment_packing"></a>
 ## algorithm.filler.greedy_segment_packing
@@ -36,7 +36,7 @@
 
 **Stop and output:** Packing stops when no master can be added or the remaining sites are too few. This largest-first greedy policy avoids an unfillable sub-minimum gap but does not solve a global optimal packing problem.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **izh.filler**
+**Source evidence:** **ecc.runner**, **ecc.module**, **imj.filler**
 
 <a id="algorithm.filler.instance_writeback"></a>
 ## algorithm.filler.instance_writeback
@@ -45,4 +45,4 @@
 
 **Constraint and stop:** Missing design/master data prevents insertion; name collisions are handled by unique-name generation and error-on-existing creation. Counters advance for each created instance, then ECOS serializes the resulting database.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **izh.filler**
+**Source evidence:** **ecc.runner**, **ecc.module**, **imj.filler**

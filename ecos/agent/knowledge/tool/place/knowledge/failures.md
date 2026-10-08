@@ -36,7 +36,7 @@ The runner requests `feature_placement_map(json_path=step.feature.map)`. When th
 <a id="failure.place.missing_external_detailed_placer"></a>
 ## failure.place.missing_external_detailed_placer
 
-When `detailed_place_engine` is configured but its path does not exist, `PlacementEngine` records only a warning. Detailed placement is disabled in the current default flow.
+When `detailed_place_engine` is configured but its path does not exist, `PlacementEngine` records only a warning. The shipped configuration leaves the engine path empty, so no external detailed placer is invoked; in-process detailed placement is controlled separately by `detailed_place_flag`.
 
 **Source evidence:** **dreamplace.placer**, **dreamplace.config**
 

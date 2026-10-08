@@ -63,8 +63,8 @@ def test_knowledge_question_reports_local_observable_work_in_one_turn(
         "candidate_stages"
     ] == ["cts"]
     knowledge = json.loads(terminal["local-knowledge-search"]["result"])
-    assert knowledge["match_count"] == 3
-    assert "parameter.cts.cap_steps" in knowledge["entity_ids"]
+    assert knowledge["match_count"] == 4
+    assert "parameter.cts.skew_bound" in knowledge["entity_ids"]
     source_result = json.loads(terminal["local-source-search"]["result"])
     assert source_result == {
         "evidence_count": 1,

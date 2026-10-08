@@ -157,7 +157,7 @@
 
 **Meaning:** The detailed-placement enable flag.
 
-**Role:** It marks detailed placement; the current ECOS default flow does not execute that stage.
+**Role:** The place runner keeps the configured value, so the current configuration runs in-process detailed placement after legalization; macro-placement mode forces it to `0`, and legalization mode disables it for the standalone legalization step.
 
 <a id="parameter.dreamplace.stop_overflow"></a>
 ## parameter.dreamplace.stop_overflow
@@ -285,6 +285,48 @@
 
 **Role:** A false request is effective when the algorithm is confirmed disabled. A true request requires an executed routability round to be effective; enabling the flag without executing a round is inactive after placement completes.
 
+<a id="parameter.dreamplace.adjust_gpugr_area_flag"></a>
+## parameter.dreamplace.adjust_gpugr_area_flag
+
+**Meaning:** The GPUGR area-adjustment switch.
+
+**Role:** It selects GPUGR global routing as the congestion-map source for routability-driven node-area adjustment and takes precedence over the NCTUgr and RUDY map sources.
+
+<a id="parameter.dreamplace.gpugr_backend"></a>
+## parameter.dreamplace.gpugr_backend
+
+**Meaning:** The GPUGR backend selection.
+
+**Role:** `auto` resolves to `cuda` when CUDA is available and the GPUGR extension has CUDA support, otherwise to `cpu_pr_mt`; an explicit `cuda` request without CUDA support fails, and the CPU backends reject positive RRR iteration counts.
+
+<a id="parameter.dreamplace.gpugr_area_adjust_rrr_iters"></a>
+## parameter.dreamplace.gpugr_area_adjust_rrr_iters
+
+**Meaning:** The rip-up-and-reroute iteration count for GPUGR area-adjustment runs.
+
+**Role:** `0` evaluates congestion from a single GPUGR routing pass; positive values request rip-up-and-reroute rounds and are rejected by the CPU backends.
+
+<a id="parameter.dreamplace.gpugr_area_adjust_congestion_mode"></a>
+## parameter.dreamplace.gpugr_area_adjust_congestion_mode
+
+**Meaning:** The GPUGR overflow aggregation mode for area adjustment.
+
+**Role:** It selects the GPUGR overflow map converted into the routing-utilization map: `union` overflow or the per-direction maximum of raw (`max_hv`) or effective (`max_hv_effective`) overflow; other values are rejected during parameter normalization.
+
+<a id="parameter.dreamplace.l_shape_routability_flag"></a>
+## parameter.dreamplace.l_shape_routability_flag
+
+**Meaning:** The L-shape routability-objective switch.
+
+**Role:** Together with `routability_opt_flag` it arms the L-shape routability density objective, which activates once density overflow falls below its threshold and adds GGR-topology L-direction supply/demand terms to the placement objective; enabling it fills conservative L-shape defaults for unset keys.
+
+<a id="parameter.dreamplace.l_shape_update_interval"></a>
+## parameter.dreamplace.l_shape_update_interval
+
+**Meaning:** The L-shape topology refresh interval in optimizer iterations.
+
+**Role:** While the L-shape objective is active, Steiner topologies, L-directions, and supply/demand targets are rebuilt every this many iterations; the value must normalize to a positive integer.
+
 <a id="parameter.dreamplace.macro_place_flag"></a>
 ## parameter.dreamplace.macro_place_flag
 
@@ -344,9 +386,9 @@
 <a id="parameter.dreamplace.adjust_nctugr_area_flag"></a>
 ## parameter.dreamplace.adjust_nctugr_area_flag
 
-**Meaning:** The EGR area-adjustment switch.
+**Meaning:** The legacy EGR area-adjustment switch.
 
-**Role:** It uses EGR congestion information to adjust node area.
+**Role:** It selects the ECC/iRT EGR congestion map for node-area adjustment without invoking NCTUgr itself; the GPUGR switch takes precedence when both are set.
 
 <a id="parameter.dreamplace.adjust_rudy_area_flag"></a>
 ## parameter.dreamplace.adjust_rudy_area_flag

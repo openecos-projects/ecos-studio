@@ -73,9 +73,9 @@
 <a id="artifact.place.view_json"></a>
 ## artifact.place.view_json
 
-**Meaning:** This is the reserved directory for a view-JSON package, whose API would write a manifest and layout package files for the current ECC design. The standard place flow uses the geometry snapshot instead, so it does not emit this package.
+**Meaning:** This was the reserved directory for a view-JSON package, whose API would write a manifest and layout package files for the current ECC design. The current ECC step-output schema no longer allocates this path; the standard place flow uses the geometry snapshot instead, so no view-JSON package is emitted.
 
-**Calculation:** The builder allocates the directory and `ECCToolsModule.view_json_save` can create the package, but `save_data` explicitly skips view-JSON serialization and directs the GUI to the geometry snapshot.
+**Calculation:** The ECC builder and `ECCToolsModule` no longer declare or expose view-JSON outputs, and `save_data` explicitly skips view-JSON serialization and directs the GUI to the geometry snapshot.
 
 **Source evidence:** **ecc.builder**, **ecc.runner**, **ecc.module**
 

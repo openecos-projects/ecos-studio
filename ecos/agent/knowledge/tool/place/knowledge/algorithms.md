@@ -27,7 +27,7 @@
 
 **Trigger:** When routability optimization is enabled, the global-placement loop considers area adjustment only after density overflow falls below its configured threshold and while adjustment rounds remain.
 
-**Algorithm:** It obtains a routing-utilization map from EGR or the routing estimator, and optionally a pin-utilization map. `adjust_node_area_op` uses those maps to modify movable-cell area models so the following placement iterations can spread demand away from congested or pin-dense regions.
+**Algorithm:** The route-map source is flag-selected: with `adjust_gpugr_area_flag` set, as in the shipped ECC configuration, the loop runs GPUGR global routing on the current positions and converts the overflow map chosen by `gpugr_area_adjust_congestion_mode` into the routing-utilization map; the legacy `adjust_nctugr_area_flag` key selects the ECC/iRT EGR map, and otherwise the RUDY estimator supplies it. A pin-utilization map is added when pin-area adjustment is enabled. `adjust_node_area_op` uses those maps to modify movable-cell area models so the following placement iterations can spread demand away from congested or pin-dense regions. When `l_shape_routability_flag` is enabled, the loop can also activate an L-shape routability density objective once overflow falls below its threshold and refreshes its GGR-topology targets every `l_shape_update_interval` iterations.
 
 **Restart after adjustment:** After an area change, DreamPlace resets density and overflow operators, reinitializes density weight and the optimizer state, estimates a new learning rate, and resumes the nested optimization loop. These are placement-time estimators, not evidence of detailed-routing completion.
 
