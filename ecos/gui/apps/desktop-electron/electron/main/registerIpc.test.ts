@@ -195,6 +195,7 @@ function registerHandlers(
       })),
       retainProjectDirectoryReplacement: vi.fn(),
       writeProjectTextFile: vi.fn(),
+      importMacroLocationFile: vi.fn(),
     },
     workspaceResourceService: {
       getIndex: vi.fn(),
@@ -624,6 +625,23 @@ describe('registerIpc', () => {
 
     expect(services.shutdownCoordinator.beginAcceptedWork).toHaveBeenCalledWith(7)
     expect(finish).toHaveBeenCalledOnce()
+  })
+
+  it('imports macro location files through the workspace service', async () => {
+    const { handlers, services } = registerHandlers()
+
+    await handlers.get(desktopApiIpcChannels.workspaceImportMacroLocationFile)?.(
+      { sender: { id: 7 } },
+      '/tmp/custom-placement.tcl',
+    )
+
+    expect(services.workspaceService.importMacroLocationFile).toHaveBeenCalledWith(
+      '/tmp/custom-placement.tcl',
+    )
+    expect(services.workspaceService.getProjectRoot).toHaveBeenCalled()
+    expect(
+      services.backendProjectComparisonService.invalidateWorkspace,
+    ).toHaveBeenCalledWith('/work/demo')
   })
 
   it('allows only the exact active creation registration while draining', async () => {

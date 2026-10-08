@@ -303,6 +303,8 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceReadProjectBinaryFile, path),
     writeProjectTextFile: (path, content) =>
       invokeDesktop(desktopApiIpcChannels.workspaceWriteProjectTextFile, path, content),
+    importMacroLocationFile: (sourcePath) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceImportMacroLocationFile, sourcePath),
     listProjectDirectory: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceListProjectDirectory, path),
     pathExists: (path) => invokeDesktop(desktopApiIpcChannels.workspacePathExists, path),

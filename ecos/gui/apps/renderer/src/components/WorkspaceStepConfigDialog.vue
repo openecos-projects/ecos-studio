@@ -74,11 +74,36 @@ const hasUnsavedChanges = computed(
 
 const configurableSteps = computed(() => {
   const seen = new Set<StepEnum>()
+  let floorplanAdded = false
   return dynamicFlowStages.value.flatMap((stage, index) => {
     const step = Object.values(StepEnum).find(
       (candidate) => candidate.toLowerCase() === stage.path.toLowerCase(),
     )
     const applies = catalogApplies.value ?? []
+    const isFloorplanStage = [
+      StepEnum.FLOORPLAN,
+      StepEnum.PRE_FLOORPLAN,
+      StepEnum.MACRO_PLACEMENT,
+      StepEnum.POST_FLOORPLAN,
+    ].some((candidate) => candidate.toLowerCase() === stage.path.toLowerCase())
+    if (isFloorplanStage) {
+      if (floorplanAdded) return []
+      floorplanAdded = true
+      const parameterCount = applies.filter((target) =>
+        target === 'all'
+          ? index === 0
+          : catalogAppliesToFlowStep(target, StepEnum.FLOORPLAN),
+      ).length
+      return [
+        {
+          step: StepEnum.FLOORPLAN,
+          label: 'Floorplan',
+          icon: 'ri-layout-4-line',
+          tool: 'ECC',
+          parameterCount,
+        },
+      ]
+    }
     const parameterCount = applies.filter((target) =>
       target === 'all' ? index === 0 : catalogAppliesToFlowStep(target, stage.path),
     ).length

@@ -69,6 +69,7 @@ export const desktopApiIpcChannels = {
     'workspace:read-optional-project-text-file-chunk',
   workspaceReadProjectBinaryFile: 'workspace:read-project-binary-file',
   workspaceWriteProjectTextFile: 'workspace:write-project-text-file',
+  workspaceImportMacroLocationFile: 'workspace:import-macro-location-file',
   workspaceListProjectDirectory: 'workspace:list-project-directory',
   workspacePathExists: 'workspace:path-exists',
   workspaceDiscardFailedWorkspaceCreate: 'workspace:discard-failed-workspace-create',

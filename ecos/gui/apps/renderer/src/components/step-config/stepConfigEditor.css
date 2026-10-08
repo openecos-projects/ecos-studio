@@ -331,7 +331,7 @@
   display: none;
 }
 
-/* ---- Baseline side-by-side comparison ---- */
+/* ---- Workspace configuration editor ---- */
 
 .step-config-root .sc-compare {
   display: flex;
@@ -347,18 +347,8 @@
   min-height: 0;
 }
 
-.step-config-root .sc-compare.is-split .sc-compare-col--baseline {
+.step-config-root .sc-compare-col--current {
   flex: 1 1 0%;
-  border-right: 1px solid var(--border-color);
-  background: var(--bg-secondary);
-  /* Re-scope the container queries so per-column grids collapse by column width */
-  container-type: inline-size;
-  container-name: step-config;
-}
-
-.step-config-root .sc-compare.is-split .sc-compare-col--current {
-  flex: 1 1 0%;
-  /* Same container re-scope for the editable column */
   container-type: inline-size;
   container-name: step-config;
 }

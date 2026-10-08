@@ -164,6 +164,46 @@ describe('ensureBackendProjectManifestForCreate', () => {
 })
 
 describe('prepareWorkspaceCreateBinding', () => {
+  it('updates an existing project binding when the wizard selects another installation', async () => {
+    const { dependencies } = createDependencies()
+    const requirement = { familyId: 'ics55', manualConfig: null, version: null }
+    dependencies.pdkInventoryService.resolveBinding.mockResolvedValue({
+      projectId: 'proj_demo',
+      projectRoot: '/projects/demo',
+      installationId: 'pdk:ics55:old',
+    })
+    dependencies.pdkInventoryService.validateWorkspace.mockResolvedValue({
+      root: '/pdks/ics55/new',
+      version: null,
+    })
+
+    const prepared = await prepareWorkspaceCreateBinding(dependencies, {
+      commandId: 'create-rebind',
+      projectId: 'proj_demo',
+      projectRoot: '/projects/demo',
+      targetDirectory: '/projects/demo/runs/workspace',
+      pdkInstallationId: 'pdk:ics55:new',
+      pdkRequirement: requirement,
+      workspaceBindings: { inputs: {}, pdk: { root: '/pdks/ics55/old' } },
+      workspaceSpec: { pdk: { familyId: 'ics55', mode: 'default' } },
+    })
+
+    expect(dependencies.pdkInventoryService.bindInstallation).toHaveBeenCalledWith({
+      installationId: 'pdk:ics55:new',
+      requirement,
+      projectId: 'proj_demo',
+      projectRoot: '/projects/demo',
+    })
+    expect(dependencies.pdkInventoryService.validateWorkspace).toHaveBeenCalledWith({
+      projectId: 'proj_demo',
+      projectRoot: '/projects/demo',
+      requirement,
+    })
+    expect(prepared.workspaceBindings.pdk).toMatchObject({
+      root: '/pdks/ics55/new',
+    })
+  })
+
   it('reuses the persisted Project PDK requirement when the request omits it', async () => {
     const { dependencies } = createDependencies()
     const requirement = { familyId: 'ics55', manualConfig: null, version: null }

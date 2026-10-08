@@ -37,7 +37,7 @@ import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 
 function available(
   values: Record<string, unknown>,
-  step = 'Floorplan',
+  step = 'preFloorplan',
   types: Record<string, string> = {},
 ) {
   return {
@@ -87,7 +87,7 @@ describe('useStepConfigInfo', () => {
 
   afterEach(() => scope.stop())
 
-  it('loads an ECC-owned Step configuration object', async () => {
+  it('maps the combined Floorplan view to the preFloorplan runtime configuration', async () => {
     testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
       available({ 'floorplan.ifp.thread_number': 16 }),
     )
@@ -101,7 +101,7 @@ describe('useStepConfigInfo', () => {
     expect(result.workspaceRevision.value).toBe(1)
     expect(result.isEmpty.value).toBe(false)
     expect(testState.readWorkspaceStepConfigurationApi).toHaveBeenCalledWith({
-      step: 'Floorplan',
+      step: 'preFloorplan',
       workspaceHandle: 'workspace-demo',
     })
     expect(result.stepConfigParameterDescriptions.value).toEqual({
@@ -114,7 +114,7 @@ describe('useStepConfigInfo', () => {
 
   it('keeps parameter types for numeric editor steps', async () => {
     testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
-      available({ 'floorplan.core_util': 1 }, 'Floorplan', {
+      available({ 'floorplan.core_util': 1 }, 'preFloorplan', {
         'floorplan.core_util': 'float',
       }),
     )
@@ -153,7 +153,7 @@ describe('useStepConfigInfo', () => {
 
     await vi.waitFor(() => expect(result.stepConfigDraft.value).not.toBeNull())
     expect(testState.readWorkspaceStepConfigurationApi).toHaveBeenCalledWith({
-      step: 'Floorplan',
+      step: 'preFloorplan',
       workspaceHandle: 'workspace-restored',
     })
   })
@@ -234,7 +234,7 @@ describe('useStepConfigInfo', () => {
       commandId: expect.any(String),
       expectedWorkspaceRevision: 1,
       parameters: { 'floorplan.ifp.thread_number': 8 },
-      stepId: 'Floorplan',
+      stepId: 'preFloorplan',
       workspaceHandle: 'workspace-demo',
     })
     expect(useWorkspaceLifecycle().session.value.workspaceRevision).toBe(2)

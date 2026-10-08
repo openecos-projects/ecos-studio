@@ -395,6 +395,7 @@ export interface DesktopApi {
     ): Promise<DesktopProjectTextFileChunk | null>
     readProjectBinaryFile(path: string): Promise<Uint8Array>
     writeProjectTextFile(path: string, content: string): Promise<void>
+    importMacroLocationFile(sourcePath: string): Promise<void>
     listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]>
     pathExists(path: string): Promise<boolean>
     discardFailedWorkspaceCreate(path: string): Promise<boolean>
