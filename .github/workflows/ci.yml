@@ -411,6 +411,11 @@ jobs:
           ECOS_E2E_DESIGN_DIR: ${{ github.workspace }}/.scratch/ecc-ci-designs/${{ matrix.design }}
           ECOS_E2E_LIT_SUITE: ${{ github.workspace }}/.scratch/ecc-ci-designs
         run: |
+          if [ "${{ matrix.design }}" = "aes" ]; then
+            # aes flow alone is ~50min upstream; the default 30min
+            # ECOS_E2E_FLOW_TIMEOUT_MS would kill it mid-run.
+            export ECOS_E2E_FLOW_TIMEOUT_MS=4500000
+          fi
           if [ "${{ matrix.design }}" = "usb" ]; then
             # The usb leg is the fast one; it also carries the flow-cancel and
             # missing-Sizer control cases so big designs stay journey-only.
