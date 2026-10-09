@@ -5,7 +5,11 @@ import { createPinia } from 'pinia'
 import { defineComponent, h, nextTick } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, expect, it, vi } from 'vitest'
-import type { DesignRuntimeEvent, DesktopApi } from '@ecos-studio/shared'
+import type {
+  DesignRuntimeEvent,
+  DesktopAgentEvent,
+  DesktopApi,
+} from '@ecos-studio/shared'
 import AIChatPanel from './AIChatPanel.vue'
 import AgentToolCard from './AgentToolCard.vue'
 import { removeAgentSessionUi } from './agentSessionUi'
@@ -108,9 +112,13 @@ async function mountPostCreateFlow(options: { handoff?: boolean } = {}) {
         }
       : {}),
   }))
+  let receiveAgentEvent!: (event: DesktopAgentEvent) => void
   window.ecosDesktop = {
     agent: {
-      onEvent: () => () => {},
+      onEvent: (listener: (event: DesktopAgentEvent) => void) => {
+        receiveAgentEvent = listener
+        return () => {}
+      },
       getModelSettings: async () => ({ model: 'test', models: [] }),
       start: vi.fn(async () => undefined),
       startSession,
@@ -155,7 +163,7 @@ async function mountPostCreateFlow(options: { handoff?: boolean } = {}) {
   })
   await flushPromises()
   if (options.handoff !== false) expect(shell.pendingPostCreateFlow).toBeNull()
-  return { wrapper, messages, startSession }
+  return { wrapper, messages, startSession, receiveAgentEvent }
 }
 
 function dispose(wrapper: ReturnType<typeof mount>) {
@@ -163,6 +171,46 @@ function dispose(wrapper: ReturnType<typeof mount>) {
   removeAgentSessionUi('owner')
   delete window.ecosDesktop
 }
+
+it('restores selectable options after stopping an interaction answer', async () => {
+  const { wrapper, messages, receiveAgentEvent } = await mountPostCreateFlow({
+    handoff: false,
+  })
+  const interaction = messages.messages.find(
+    (message) => message.interaction?.requestId === 'workspace-options',
+  )!.interaction!
+  const event = { providerId: 'ecos_agent', sessionId: 'owner' }
+  const answerInteraction = vi.fn(async () => {
+    receiveAgentEvent({ ...event, type: 'status', status: 'running' })
+    return {
+      accepted: true as const,
+      requestId: interaction.requestId,
+      sessionId: 'owner',
+    }
+  })
+  window.ecosDesktop!.agent!.answerInteraction = answerInteraction
+  window.ecosDesktop!.agent!.interrupt = vi.fn(async () => {
+    receiveAgentEvent({ ...event, type: 'interaction', interaction })
+    receiveAgentEvent({ ...event, type: 'status', status: 'interrupted' })
+  })
+  try {
+    await wrapper.get('.interaction-card__option').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.interaction-dock').exists()).toBe(false)
+    await wrapper.get('button[aria-label="Stop Agent"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.interaction-dock').exists()).toBe(true)
+    expect(
+      wrapper.get('.interaction-card__option').attributes('disabled'),
+    ).toBeUndefined()
+    expect(wrapper.text()).toContain('Rerun a specified stage')
+    await wrapper.get('.interaction-card__option').trigger('click')
+    expect(answerInteraction).toHaveBeenCalledTimes(2)
+  } finally {
+    dispose(wrapper)
+  }
+})
 
 it('renames a home Agent tab when the workspace shell takes ownership', async () => {
   const { wrapper, startSession } = await mountPostCreateFlow({ handoff: false })

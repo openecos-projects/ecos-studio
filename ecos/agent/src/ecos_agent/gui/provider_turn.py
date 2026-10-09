@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Callable
+from typing import Any, Callable
 
 from ecos_agent.codex.rpc import CodexProviderError
 from ecos_agent.gui.messages import language_for_text
@@ -20,6 +20,7 @@ class ProviderTurnMixin:
         handler: Callable[[ProviderSession, str], None] | None = None,
         *,
         turn_reserved: bool = False,
+        interaction_state: dict[str, Any] | None = None,
     ) -> dict[str, str]:
         if not turn_reserved:
             self._reserve_turn(session)
@@ -31,11 +32,11 @@ class ProviderTurnMixin:
         session.active_turn_started_at = round(time.time() * 1000)
         session.active_local_activities.clear()
         session.active_tool_message_id = f"{turn_id}-tool"
-        session.interrupt_requested = False
         self._emit_status(session, "running")
         interrupted = False
         failed = False
         try:
+            self._check_interrupted(session)
             (handler or self._handle_input)(session, message)
             self._check_interrupted(session)
             if session.phase in _INTERACTION_UNDO_BARRIER_PHASES:
@@ -46,6 +47,18 @@ class ProviderTurnMixin:
                 self._emit_status(session, "error")
                 raise
             interrupted = True
+            if session.phase not in _INTERACTION_UNDO_BARRIER_PHASES:
+                if interaction_state is not None:
+                    self._restore_interaction_state(session, interaction_state)
+                    session.interaction_retry = None
+                    if session.interaction_undo and session.interaction_undo[-1] is interaction_state:
+                        session.interaction_undo.pop()
+                self._emit_phase_choice(session, reuse_pending=True)
+                if session.pending_interaction is None and session.phase == "optimization_objective":
+                    self._close_idle_optimization_provider(session)
+                    session.phase = "operation" if session.mode == "workspace" else "home_ready"
+                    session.optimization_phase = "idle"
+                    self._emit_phase_choice(session)
             self._emit(session, "message", "The current Agent turn was interrupted.")
             self._emit_status(session, "interrupted")
         except Exception:

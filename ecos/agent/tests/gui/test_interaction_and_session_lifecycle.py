@@ -117,6 +117,97 @@ def test_interaction_choice_accepts_a_typed_answer() -> None:
     assert provider.sessions[session_id].pending_interaction is not None
 
 
+@pytest.mark.parametrize("kind", ["choice", "form"])
+@pytest.mark.parametrize("before_handler", [False, True])
+def test_interrupting_an_interaction_answer_restores_the_choice(
+    kind, before_handler, monkeypatch,
+) -> None:
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    session = provider.sessions[session_id]
+    if kind == "form":
+        session.phase = "workspace_clock"
+        provider._emit_phase_choice(session)
+    request = session.pending_interaction["request"]
+    original_phase = session.phase
+    original_setup = session.workspace_setup.model_copy(deep=True)
+    started = threading.Event()
+    release = threading.Event()
+
+    def block_answer(current, _message) -> None:
+        current.phase = "workspace_mpc"
+        current.workspace_setup.top_module = "cancelled"
+        current.active_interrupt = release.set
+        started.set()
+        assert release.wait(timeout=2)
+
+    original_handler = provider._handle_input
+    monkeypatch.setattr(provider, "_handle_input", block_answer)
+    original_turn = provider._run_turn
+    if before_handler:
+        def delayed_turn(current, *args, **kwargs):
+            current.active_interrupt = release.set
+            started.set()
+            assert release.wait(timeout=2)
+            return original_turn(current, *args, **kwargs)
+
+        monkeypatch.setattr(provider, "_run_turn", delayed_turn)
+    payload = {
+        "sessionId": session_id,
+        "requestId": request["requestId"],
+        "kind": kind,
+        **({"values": {"value": "clk"}} if kind == "form" else {
+            "optionId": request["interaction"]["options"][1]["id"],
+        }),
+    }
+    answer = threading.Thread(
+        target=provider.answer_interaction,
+        args=(payload,),
+    )
+    answer.start()
+    assert started.wait(timeout=2)
+
+    provider.interrupt({"sessionId": session_id})
+    answer.join(timeout=2)
+
+    assert not answer.is_alive()
+    assert session.pending_interaction is not None
+    assert session.pending_interaction["request"] == request
+    assert session.phase == original_phase
+    assert session.workspace_setup == original_setup
+    assert session.interaction_retry is None
+    assert session.interaction_undo == []
+    assert request["requestId"] not in session.interaction_history
+    assert _last_event(events, "interaction")["interaction"]["requestId"] == request["requestId"]
+
+    monkeypatch.setattr(provider, "_handle_input", original_handler)
+    monkeypatch.setattr(provider, "_run_turn", original_turn)
+    provider.answer_interaction(payload)
+    assert session.phase == ("workspace_frequency" if kind == "form" else "workspace_project_mode")
+
+
+def test_interruption_after_execution_dispatch_does_not_restore_confirmation(monkeypatch) -> None:
+    provider = EcosAgentProvider(emit=lambda _event: None)
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    session = provider.sessions[session_id]
+    request = session.pending_interaction["request"]
+
+    def dispatched(current, _message) -> None:
+        current.phase = "workspace_creation_pending"
+        current.interrupt_requested = True
+
+    monkeypatch.setattr(provider, "_handle_input", dispatched)
+    provider.answer_interaction({
+        "sessionId": session_id, "requestId": request["requestId"],
+        "kind": "choice", "optionId": request["interaction"]["options"][1]["id"],
+    })
+
+    assert session.phase == "workspace_creation_pending"
+    assert session.pending_interaction is None
+    assert session.interaction_history[request["requestId"]] == "answered"
+
+
 def test_interaction_answer_refreshes_workspace_context_without_restarting_session(tmp_path: Path) -> None:
     provider = EcosAgentProvider(emit=lambda _event: None)
     session_id = provider.start_session({"mode": "home"})["sessionId"]
@@ -421,6 +512,7 @@ def test_running_turn_can_be_interrupted_and_the_session_accepts_another_message
     assert not turn.is_alive()
     assert errors == []
     assert session.running is False
+    assert session.phase == "workspace_overflow"
     assert _last_event(events, "status")["status"] == "interrupted"
     assert not any(event["type"] == "workspace_setup" for event in events)
 

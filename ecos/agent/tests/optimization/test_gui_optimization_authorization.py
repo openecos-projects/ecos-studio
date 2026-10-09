@@ -119,11 +119,17 @@ def test_gui_optimization_objective_interrupt_allows_retry(tmp_path: Path) -> No
     session = provider.sessions[session_id]
     assert not turn.is_alive()
     assert errors == []
-    assert session.phase == "optimization_objective"
-    assert session.optimization_phase == "awaiting_objective"
+    assert session.phase == "operation"
+    assert session.optimization_phase == "idle"
     assert interrupted_provider.closed == 1
     assert not any(event["type"] == "error" for event in events)
+    assert session.pending_interaction is not None
+    assert session.pending_interaction["request"]["title"] == "Choose an operation"
+    assert next(event for event in reversed(events) if event["type"] == "interaction")[
+        "interaction"
+    ] == session.pending_interaction["request"]
 
+    _send(provider, session_id, "3")
     _send(provider, session_id, "reduce routed wirelength")
 
     assert retry_provider.objective_requests == ["reduce routed wirelength"]

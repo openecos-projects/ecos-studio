@@ -314,6 +314,7 @@ class ProviderLifecycleMixin(ProviderTurnMixin):
     def _reserve_turn_locked(session: _Session) -> None:
         if session.running:
             raise ValueError("An ECOS Agent turn is already running for this session.")
+        session.interrupt_requested = False
         session.running = True
 
     @classmethod
@@ -460,7 +461,8 @@ class ProviderLifecycleMixin(ProviderTurnMixin):
         def run_answer() -> None:
             try:
                 self._run_turn(
-                    session, str(message), handler, turn_reserved=True
+                    session, str(message), handler, turn_reserved=True,
+                    interaction_state=undo_state,
                 )
             except Exception:
                 if session.interaction_retry is pending:
