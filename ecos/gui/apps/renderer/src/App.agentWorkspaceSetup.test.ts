@@ -97,14 +97,23 @@ describe('agent workspace creation', () => {
 })
 
 describe('quick start resources', () => {
-  it('positions the workspace wizard beside the Agent during Quick Start', () => {
-    expect(source).toContain(':quick-start="quickStartWizardResolve !== null"')
+  it('positions both creation dialogs beside the Agent for the entire Quick Start', () => {
+    expect(source).toContain(
+      ':class="{ \'app-wrapper--quick-start\': quickStartRunning }"',
+    )
+    expect(source).toContain('const quickStartRunning = ref(false)')
+    expect(source).toContain('quickStartRunning.value = true')
+    expect(source).toContain('quickStartRunning.value = false')
     expect(source).toContain(
       "'--home-agent-drawer-width': `${quickStartAgentPanelWidth}px`",
     )
     expect(source).toContain('agentShell.homeAgentOpen')
-    expect(wizardSource).toContain('new-workspace-wizard-overlay--quick-start')
-    expect(wizardSource).toContain('right: var(--home-agent-drawer-width)')
+    expect(source).toContain('.app-wrapper--quick-start :deep(.project-modal-scrim)')
+    expect(source).toContain(
+      '.app-wrapper--quick-start :deep(.new-workspace-wizard-overlay)',
+    )
+    expect(source).toContain('right: var(--home-agent-drawer-width)')
+    expect(wizardSource).not.toContain('new-workspace-wizard-overlay--quick-start')
   })
 
   it('renders a click-aware cursor and target highlight', () => {

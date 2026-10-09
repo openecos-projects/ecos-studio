@@ -1,6 +1,7 @@
 <template>
   <div
     class="app-wrapper"
+    :class="{ 'app-wrapper--quick-start': quickStartRunning }"
     :style="{ '--home-agent-drawer-width': `${quickStartAgentPanelWidth}px` }"
   >
     <!-- 主应用容器 -->
@@ -54,7 +55,6 @@
       v-if="showNewProjectWizard"
       :title="workspaceWizardTitle"
       :initial-config="workspaceWizardInitialConfig"
-      :quick-start="quickStartWizardResolve !== null"
       @close="handleWizardClose"
       @create="handleWizardCreate"
     />
@@ -392,7 +392,7 @@ const {
   showToast,
 })
 const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
-let quickStartRunning = false
+const quickStartRunning = ref(false)
 
 function updatePdkNameDialogVisibility(visible: boolean): void {
   if (!visible) cancelPdkName()
@@ -567,8 +567,9 @@ async function createWorkspaceFromAgent(
 provide(agentWorkspaceSetupKey, createWorkspaceFromAgent)
 
 const runQuickStart: QuickStartRunner = async (onEvent, signal, onNarration) => {
-  if (quickStartRunning) throw new Error('A Quick Start workflow is already running.')
-  quickStartRunning = true
+  if (quickStartRunning.value)
+    throw new Error('A Quick Start workflow is already running.')
+  quickStartRunning.value = true
   const narrate = (message: string): void => onNarration?.(message)
   try {
     signal?.throwIfAborted()
@@ -813,7 +814,7 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal, onNarration) => 
       closeQuickStartProjectDialog()
       resetWorkspaceWizard()
     }
-    quickStartRunning = false
+    quickStartRunning.value = false
   }
 }
 
@@ -2284,6 +2285,14 @@ onUnmounted(() => {
   height: 100%;
   min-height: 0;
   position: relative;
+}
+
+@media (min-width: 1280px) {
+  .app-wrapper--quick-start :deep(.project-modal-scrim),
+  .app-wrapper--quick-start :deep(.new-workspace-wizard-overlay) {
+    right: var(--home-agent-drawer-width);
+    overflow: hidden;
+  }
 }
 
 .quick-start-cursor {
