@@ -8,7 +8,11 @@ import {
   readStoredAgentPanelWidth,
   readStoredWorkspaceAgentCollapsed,
 } from '@/composables/agentPanelWidth'
-import { resolveAgentTabTitle, type AgentTabContextInput } from './agentTabContext'
+import {
+  resolveAgentTabContext,
+  resolveAgentTabTitle,
+  type AgentTabContextInput,
+} from './agentTabContext'
 
 export type AgentShellMode = 'home' | 'workspace'
 
@@ -46,6 +50,7 @@ export const useAgentShellStore = defineStore('agentShell', () => {
   const panelWidthPx = ref(readStoredAgentPanelWidth())
   const workspaceAgentCollapsed = ref(readStoredWorkspaceAgentCollapsed())
   const codexStatus = ref<DesktopCodexDependencyStatus | null>(null)
+  const hiddenOptimizationSessionIds = new Set<string>()
 
   const activeTab = computed(
     () => tabs.value.find((tab) => tab.id === activeTabId.value) ?? null,
@@ -113,6 +118,26 @@ export const useAgentShellStore = defineStore('agentShell', () => {
     )
   }
 
+  function bindTabToWorkspace(id: string, workspacePath: string): void {
+    const tab = tabs.value.find((candidate) => candidate.id === id)
+    if (!tab || !workspacePath.trim()) return
+    const context = resolveAgentTabContext({
+      shell: 'workspace',
+      currentWorkspacePath: workspacePath,
+      currentProjectRoot: tab.projectRoot,
+      currentProjectName: tab.projectName,
+    })
+    Object.assign(tab, context, {
+      step: undefined,
+      title: resolveAgentTabTitle({
+        ...context,
+        existingTitles: tabs.value
+          .filter((candidate) => candidate.id !== id)
+          .map((candidate) => candidate.title),
+      }),
+    })
+  }
+
   function removeTab(id: string): AgentChatTab | null {
     const index = tabs.value.findIndex((tab) => tab.id === id)
     if (index < 0) return null
@@ -123,6 +148,18 @@ export const useAgentShellStore = defineStore('agentShell', () => {
       activeTabId.value = next?.id ?? null
     }
     return removed ?? null
+  }
+
+  function hideOptimizationSession(id: string): void {
+    hiddenOptimizationSessionIds.add(id)
+  }
+
+  function revealOptimizationSession(id: string): void {
+    hiddenOptimizationSessionIds.delete(id)
+  }
+
+  function isOptimizationSessionHidden(id: string): boolean {
+    return hiddenOptimizationSessionIds.has(id)
   }
 
   function beginPreserveForAgentWorkspaceSwitch(): void {
@@ -220,7 +257,11 @@ export const useAgentShellStore = defineStore('agentShell', () => {
     activateTab,
     createTab,
     markTabStarted,
+    bindTabToWorkspace,
     removeTab,
+    hideOptimizationSession,
+    revealOptimizationSession,
+    isOptimizationSessionHidden,
     clearTabs,
     beginPreserveForAgentWorkspaceSwitch,
     consumePreserveMessages,

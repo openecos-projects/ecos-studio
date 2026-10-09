@@ -21,4 +21,4 @@ uv run --locked --with pyinstaller==6.17 pyinstaller \
   --specpath build \
   --workpath build \
   --add-data "$KNOWLEDGE_SRC:knowledge" \
-  packaging/run_ecos_agent.py
+  src/ecos_agent/gui/__main__.py

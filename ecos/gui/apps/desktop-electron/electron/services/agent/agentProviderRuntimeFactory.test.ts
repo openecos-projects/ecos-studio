@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { AgentRuntimeManager } from './agentRuntimeManager'
 import { createAgentRuntimeFromEnvironment } from './agentProviderRuntimeFactory'
 
@@ -17,7 +17,7 @@ describe('ECOS Agent provider runtime factory', () => {
         path.join(root, 'agent-provider.json'),
         JSON.stringify({
           command: 'uv',
-          protocolVersion: 1,
+          protocolVersion: 2,
           providerId: 'ecos_agent',
         }),
       )
@@ -32,6 +32,41 @@ describe('ECOS Agent provider runtime factory', () => {
     }
   })
 
+  it('injects the Product Command host into the process runtime', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ecos-flow-agent-host-'))
+    try {
+      await writeFile(
+        path.join(root, 'agent-provider.json'),
+        JSON.stringify({
+          command: 'uv',
+          protocolVersion: 2,
+          providerId: 'ecos_agent',
+        }),
+      )
+      const host = {
+        candidateCapabilities: vi.fn(),
+        candidateRerun: vi.fn(),
+        candidateResume: vi.fn(),
+        cancelOperation: vi.fn(),
+        openWorkspace: vi.fn(),
+        operationStatus: vi.fn(),
+        startFlowOperation: vi.fn(),
+        waitForOperation: vi.fn(),
+        workspaceSession: vi.fn(),
+      }
+
+      const runtime = await createAgentRuntimeFromEnvironment(
+        { ECOS_AGENT_PROVIDER_ROOTS: root },
+        undefined,
+        host,
+      )
+
+      expect(runtime).toBeInstanceOf(AgentRuntimeManager)
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
   it('loads the in-tree provider when no extension root is configured', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'ecos-agent-'))
     try {
@@ -39,7 +74,7 @@ describe('ECOS Agent provider runtime factory', () => {
         path.join(root, 'agent-provider.json'),
         JSON.stringify({
           command: 'uv',
-          protocolVersion: 1,
+          protocolVersion: 2,
           providerId: 'ecos_agent',
         }),
       )
@@ -58,7 +93,7 @@ describe('ECOS Agent provider runtime factory', () => {
     try {
       const manifest = JSON.stringify({
         command: 'uv',
-        protocolVersion: 1,
+        protocolVersion: 2,
         providerId: 'ecos_agent',
       })
       await writeFile(path.join(root, 'agent-provider.json'), manifest)
@@ -80,7 +115,7 @@ describe('ECOS Agent provider runtime factory', () => {
         path.join(root, 'agent-provider.json'),
         JSON.stringify({
           command: 'ecos-agent',
-          protocolVersion: 1,
+          protocolVersion: 2,
           providerId: 'ecos_agent',
         }),
       )

@@ -10,6 +10,10 @@ DRY_RUN=false
 
 REQUIRED_ENTRIES=(
   "resources/binaries/chip-viewer-native"
+  "resources/binaries/sizer/bin/Sizer"
+  "resources/binaries/sizer/libexec/Sizer"
+  "resources/binaries/sizer/lib/ld-linux-x86-64.so.2"
+  "resources/binaries/sizer/src/sizer_os.tcl"
 )
 
 usage() {
@@ -18,8 +22,8 @@ Usage: chip-viewer-appimage-smoke.sh [options]
 
 Inspect the ECOS Studio AppImage and fail if required chip viewer runtime
 payload files are missing. ECC is deliberately not packaged (slim build):
-it is acquired from the registry on first run, so only chip-viewer-native
-is required here.
+it is acquired from the registry on first run. Required payload covers
+chip-viewer-native and the staged Sizer runtime.
 
 Options:
   --appimage <path>   AppImage path. Defaults to the desktop-electron release.

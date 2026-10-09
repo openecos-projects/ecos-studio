@@ -1,0 +1,54 @@
+{
+  "benchmark_sha256": "20a8cf780ec1cc8890b4f46d26595c2549d5563b921db367a517785fc52c97b7",
+  "corpus_sha256": "ccc669f29a5f583d84330bd0c8e45c8de3db6d1c009323b765575b4d1e011b32",
+  "counts": {
+    "by_category": {
+      "cross_stage": 48,
+      "identifier": 48,
+      "no_answer": 60,
+      "semantic_paraphrase": 144
+    },
+    "by_language": {
+      "en": 204,
+      "mixed": 24,
+      "zh": 72
+    },
+    "by_split": {
+      "dev": 120,
+      "test": 180
+    },
+    "by_split_language_category": {
+      "dev|en|identifier": 24,
+      "dev|en|no_answer": 24,
+      "dev|en|semantic_paraphrase": 36,
+      "dev|zh|semantic_paraphrase": 36,
+      "test|en|cross_stage": 24,
+      "test|en|identifier": 24,
+      "test|en|no_answer": 36,
+      "test|en|semantic_paraphrase": 36,
+      "test|mixed|cross_stage": 24,
+      "test|zh|semantic_paraphrase": 36
+    },
+    "by_stage": {
+      "cts": 32,
+      "drc": 16,
+      "filler": 16,
+      "floorplan": 16,
+      "harden": 16,
+      "legalization": 16,
+      "none": 60,
+      "place": 32,
+      "rcx": 32,
+      "route": 16,
+      "sizer": 16,
+      "sta": 16,
+      "synthesis": 16
+    }
+  },
+  "data_version": "ecos-knowledge-retrieval-benchmark.v1",
+  "generator_version": "ecos-knowledge-benchmark.v2",
+  "reviewer_status": "deterministic_alias_leak_check_and_self_audit",
+  "schema_version": "ecos-knowledge-retrieval-benchmark-manifest.v1",
+  "seed": 20260808,
+  "total_cases": 300
+}

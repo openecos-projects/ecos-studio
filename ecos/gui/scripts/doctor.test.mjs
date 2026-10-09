@@ -118,7 +118,7 @@ describe('runGuiDoctor', () => {
     )
   })
 
-  it('requires packaged chip viewer resources', async () => {
+  it('requires packaged native resources', async () => {
     const cwd = '/repo/ecos/gui'
 
     const report = await createDoctorFixture({

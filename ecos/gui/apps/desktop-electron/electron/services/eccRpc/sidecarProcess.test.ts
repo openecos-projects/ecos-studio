@@ -1,4 +1,5 @@
-import { EventEmitter } from 'node:events'
+import { spawn } from 'node:child_process'
+import { EventEmitter, once } from 'node:events'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -57,6 +58,42 @@ describe('EccRpcSidecarProcess', () => {
     electronLogger.error.mockReset()
   })
 
+  it('handles broken stdin without throwing into the desktop process', async () => {
+    const child = new FakeChild()
+    const sidecar = new EccRpcSidecarProcess({ spawn: () => child })
+    const client = await sidecar.start()
+    const error = Object.assign(new Error('write EPIPE'), { code: 'EPIPE' })
+    const pending = client.call('rpc.ping').catch((failure: unknown) => failure)
+
+    try {
+      expect(() => child.stdin.emit('error', error)).not.toThrow()
+      expect(await pending).toBe(error)
+      expect(readFileSync(sidecar.logFile!, 'utf8')).toContain('write EPIPE')
+    } finally {
+      client.rejectPending(error)
+      await pending
+    }
+  })
+
+  it('rejects EPIPE from a real child that closes its input while still alive', async () => {
+    const child = spawn(process.execPath, [
+      '-e',
+      "require('node:fs').closeSync(0); process.stdout.write('ready'); setInterval(() => {}, 1000)",
+    ])
+    const ready = once(child.stdout, 'data')
+    const closed = once(child, 'close')
+    const sidecar = new EccRpcSidecarProcess({ spawn: () => child })
+    try {
+      const client = await sidecar.start()
+      await ready
+      await expect(client.call('rpc.ping')).rejects.toMatchObject({ code: 'EPIPE' })
+      expect(readFileSync(sidecar.logFile!, 'utf8')).toContain('EPIPE')
+    } finally {
+      child.kill()
+      await closed
+    }
+  })
+
   it('spawns ECC with persistent DB support for GUI edit sessions', async () => {
     const child = new FakeChild()
     const spawn = vi.fn(() => child)
@@ -101,6 +138,9 @@ describe('EccRpcSidecarProcess', () => {
         env: { PATH: '/bin', PYTHONPATH: '/work/ecc-fe' },
         stdio: ['pipe', 'pipe', 'pipe'],
       },
+    )
+    expect(readFileSync(sidecar.logFile!, 'utf8')).toContain(
+      '[sidecar] spawning python3 -m fecompiler.cli.main rpc serve --stdio',
     )
   })
 
@@ -177,6 +217,57 @@ describe('EccRpcSidecarProcess', () => {
         stdio: ['pipe', 'pipe', 'pipe'],
       },
     )
+  })
+
+  it('waits for an in-flight shutdown before spawning a fresh sidecar', async () => {
+    const firstChild = new FakeChild()
+    const secondChild = new FakeChild()
+    const children = [firstChild, secondChild]
+    const spawn = vi.fn(() => children.shift()!)
+    const sidecar = new EccRpcSidecarProcess({ spawn })
+    const firstClient = await sidecar.start()
+
+    const shutdown = sidecar.shutdown()
+    expect(firstChild.signals).toEqual(['SIGTERM'])
+
+    const restart = sidecar.start()
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(spawn).toHaveBeenCalledTimes(1)
+
+    firstChild.emit('close', null, 'SIGTERM')
+    await shutdown
+
+    const secondClient = await restart
+    expect(secondClient).not.toBe(firstClient)
+    expect(spawn).toHaveBeenCalledTimes(2)
+    expect(firstChild.stdin.chunks).toHaveLength(0)
+  })
+
+  it('reuses the live sidecar when a deferred shutdown is still settling', async () => {
+    const child = new FakeChild()
+    const spawn = vi.fn(() => child)
+    const sidecar = new EccRpcSidecarProcess({
+      managementRpc: true,
+      spawn,
+    })
+    const firstClient = await sidecar.start()
+
+    const shutdown = sidecar.shutdown().catch((error: unknown) => error)
+    await vi.waitFor(() => {
+      expect(child.stdin.chunks).toHaveLength(1)
+    })
+
+    const restart = sidecar.start()
+    child.stdout.write(
+      encodeContentLengthFrame(
+        '{"jsonrpc":"2.0","id":1,"result":{"ok":false,"deferred":true,"shutdownBarrier":{"operationId":"operation-1"}}}',
+      ),
+    )
+
+    await expect(shutdown).resolves.toBeInstanceOf(EccRpcShutdownDeferredError)
+    await expect(restart).resolves.toBe(firstClient)
+    expect(spawn).toHaveBeenCalledOnce()
+    expect(child.signals).toEqual([])
   })
 
   it('reuses the last successful environment when the provider temporarily fails', async () => {

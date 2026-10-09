@@ -11,6 +11,7 @@
           ? 'h-full max-h-none max-w-none rounded-none'
           : 'h-[88vh] max-h-[900px] max-w-6xl rounded-[20px]'
       "
+      :data-current-step="currentStep"
     >
       <button
         type="button"
@@ -1750,7 +1751,8 @@ import {
   nextTopModuleSelection,
   topModuleBlockedReason,
 } from './topModuleConfirmation'
-import type { HdlModuleDiscoveryResult } from '@ecos-studio/shared'
+import type { HdlModuleDiscoveryResult, PdkRequirement } from '@ecos-studio/shared'
+import { toDesktopBridgeData } from '@/api/desktopPayload'
 
 interface Emits {
   (e: 'close'): void
@@ -1763,7 +1765,6 @@ type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
   lockProjectContext?: boolean
   lockWorkspaceDirectory?: boolean
   standaloneWorkspace?: boolean
-  suggestedWorkspaceName?: string
 }
 
 interface Props {
@@ -1798,6 +1799,7 @@ const FLOW_STEP_NAME_ALIASES: Record<string, FlowStepName> = {
   cts: 'CTS',
   legal: 'legalization',
   legalization: 'legalization',
+  sizer: 'Timing optimization',
   timingopt: 'Timing optimization',
   timingoptimization: 'Timing optimization',
   route: 'route',
@@ -2277,10 +2279,7 @@ function initialWorkspaceName(initialConfig?: WorkspaceWizardInitialConfig) {
   if (initialConfig?.directory) {
     return getFileName(initialConfig.directory)
   }
-  return (
-    initialConfig?.suggestedWorkspaceName ??
-    String(initialConfig?.parameters?.design ?? '').trim()
-  )
+  return String(initialConfig?.parameters?.design ?? '').trim()
 }
 
 function defaultWorkspaceName() {
@@ -3393,10 +3392,12 @@ async function loadAndSelectPdks() {
       projectIdFromName(
         projectContext.value.project_name || getFileName(projectRoot) || 'project',
       )
+    // config is reactive, so the requirement is a Proxy that the desktop bridge
+    // cannot structured-clone; send a plain copy instead.
     const binding = await getDesktopApi().pdkInventory.resolveBinding({
       projectId,
       projectRoot,
-      requirement,
+      requirement: toDesktopBridgeData({ requirement }).requirement as PdkRequirement,
     })
     const bound = importedPdks.value.find((pdk) => pdk.id === binding?.installationId)
     if (bound) {
@@ -3482,7 +3483,7 @@ function showDirectoryUploadFailurePrompt() {
     severity: 'warn',
     summary: 'Folder Upload Failed',
     detail: DIRECTORY_UPLOAD_FAILURE_MESSAGE,
-    life: 5000,
+    life: 15000,
   })
 }
 
@@ -3832,7 +3833,7 @@ async function scanManualPdkResources() {
           error instanceof Error
             ? error.message
             : 'Failed to scan the current PDK folder.',
-        life: 5000,
+        life: 15000,
       })
     }
   }
@@ -3855,7 +3856,7 @@ async function scanExternalPdkPaths() {
           error instanceof Error
             ? error.message
             : `Failed to scan the external PDK folder ${path}.`,
-        life: 5000,
+        life: 15000,
       })
     }
   }

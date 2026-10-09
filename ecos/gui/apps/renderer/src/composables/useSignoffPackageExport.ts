@@ -44,6 +44,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+export function canExportSignoffPackage(flow: unknown): boolean {
+  if (!isRecord(flow) || !Array.isArray(flow.steps) || flow.steps.length === 0) {
+    return false
+  }
+
+  const finalStep = flow.steps[flow.steps.length - 1]
+  return (
+    isRecord(finalStep) &&
+    typeof finalStep.name === 'string' &&
+    finalStep.name.trim().toLowerCase() === 'harden' &&
+    finalStep.state === 'Success'
+  )
+}
+
 function workspaceLeaf(path: string): string {
   const normalized = path.replace(/\\/g, '/').replace(/\/+$/g, '')
   const parts = normalized.split('/').filter(Boolean)

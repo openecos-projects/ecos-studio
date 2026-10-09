@@ -1,4 +1,5 @@
 import { spawn as spawnChild, type SpawnOptions } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
 import {
   access,
@@ -22,11 +23,13 @@ import {
   type DesktopCodexInstallProgressEvent,
   type DesktopSettingsValue,
 } from '@ecos-studio/shared'
+import type { ModelProfileService } from './modelProfileService'
 
 type SpawnLike = typeof spawnChild
 type FetchLike = typeof fetch
 
 export interface CodexDependencySettingsStore {
+  delete(key: string): Promise<void>
   get<T extends DesktopSettingsValue = DesktopSettingsValue>(
     key: string,
   ): Promise<T | null>
@@ -39,6 +42,7 @@ export interface CodexDependencyServiceOptions {
   installRoot?: string
   platform?: NodeJS.Platform
   arch?: string
+  profileService: ModelProfileService
   settingsStore: CodexDependencySettingsStore
   spawn?: SpawnLike
   homedir?: () => string
@@ -54,6 +58,7 @@ export class CodexDependencyService {
   private readonly installRoot: string
   private readonly platform: NodeJS.Platform
   private readonly arch: string
+  private readonly profileService: ModelProfileService
   private readonly settingsStore: CodexDependencySettingsStore
   private readonly spawnImpl: SpawnLike
   private readonly resolveHomedir: () => string
@@ -69,6 +74,7 @@ export class CodexDependencyService {
       join(homedir(), '.local', 'share', 'ecos-studio', 'codex-cli')
     this.platform = options.platform ?? process.platform
     this.arch = options.arch ?? process.arch
+    this.profileService = options.profileService
     this.settingsStore = options.settingsStore
     this.spawnImpl = options.spawn ?? spawnChild
     this.resolveHomedir = options.homedir ?? homedir
@@ -101,10 +107,12 @@ export class CodexDependencyService {
   }
 
   private async probeStatus(): Promise<DesktopCodexDependencyStatus> {
+    const profile = await this.profileService.activeProfile()
     const resolved = await this.resolveBinPath()
     if (!resolved) {
       return {
         authState: 'unknown',
+        activeProfileId: profile.id,
         message: this.platformSupportsInstall()
           ? '未检测到 Codex CLI。可一键安装到 Studio 托管目录，或选择本机已有二进制。'
           : '未检测到 Codex CLI。请先安装 Codex CLI，再选择本机二进制路径。',
@@ -117,6 +125,7 @@ export class CodexDependencyService {
     if (!version) {
       return {
         authState: 'unknown',
+        activeProfileId: profile.id,
         binPath: resolved,
         message: '已找到 Codex 路径，但无法执行。请重新安装或选择其他二进制。',
         platformSupportsInstall: this.platformSupportsInstall(),
@@ -124,27 +133,18 @@ export class CodexDependencyService {
       }
     }
 
-    const authState = await this.detectAuthState(resolved)
-    if (authState === 'unauthenticated') {
-      return {
-        authState,
-        binPath: resolved,
-        message: 'Codex CLI 已就绪，但尚未登录。请完成登录后再使用 Agent。',
-        platformSupportsInstall: this.platformSupportsInstall(),
-        state: 'installed_needs_login',
-        version,
-      }
-    }
-
+    const apiKey = await this.profileService.getApiKey(profile.id)
+    const authState: DesktopCodexAuthState = apiKey ? 'authenticated' : 'unauthenticated'
     return {
+      activeProfileId: profile.id,
+      apiKeyConfigured: Boolean(apiKey),
       authState,
       binPath: resolved,
-      message:
-        authState === 'unknown'
-          ? '已找到 Codex CLI。若 Agent 仍提示需要登录，请点击“打开登录”。'
-          : 'Codex CLI 已就绪。',
+      message: apiKey
+        ? `${profile.name} API Key 已配置，Codex CLI 已就绪。`
+        : `已选择 ${profile.name}。请填入 API Key 后使用 Agent。`,
       platformSupportsInstall: this.platformSupportsInstall(),
-      state: 'ready',
+      state: authState === 'authenticated' ? 'ready' : 'needs_api_key',
       version,
     }
   }
@@ -166,6 +166,33 @@ export class CodexDependencyService {
     }
     await this.settingsStore.set(DESKTOP_CODEX_BIN_SETTING_KEY, resolved)
     return await this.getStatus()
+  }
+
+  async resolveEnvironmentForAgent(): Promise<Record<string, string | undefined>> {
+    const binPath = await this.resolveBinPath()
+    if (!binPath) return {}
+    const profile = await this.profileService.activeProfile()
+    const apiKey = await this.profileService.getApiKey(profile.id)
+    // Managed Codex config contains no key; saved keys live in Studio settings
+    // and reach the process through the environment.
+    const overrides: Record<string, string | undefined> = {
+      ECOS_AGENT_CODEX_BIN: binPath,
+      // Reload the provider when a profile changes but CODEX_HOME stays the same.
+      ECOS_AGENT_CODEX_PROFILE_REVISION: createHash('sha256')
+        .update(JSON.stringify(profile))
+        .digest('hex'),
+      CODEX_HOME: profile.baseUrl
+        ? this.profileService.configHomeFor(profile.id)
+        : undefined,
+      PATH: prependPath(dirname(binPath), this.env.PATH),
+    }
+    // Clear stale keys from other profiles; leave the active key untouched when
+    // unconfigured so a shell-provided value still works.
+    for (const envKey of await this.profileService.knownEnvKeys()) {
+      if (envKey !== profile.envKey) overrides[envKey] = undefined
+    }
+    if (apiKey) overrides[profile.envKey] = apiKey
+    return overrides
   }
 
   async install(): Promise<DesktopCodexDependencyStatus> {
@@ -196,14 +223,6 @@ export class CodexDependencyService {
     // Detached spawn returns immediately; give auth files a brief chance to appear
     // only if the user already completed login in another session.
     return await this.getStatus()
-  }
-
-  async resolveEnvironmentForAgent(): Promise<Record<string, string | undefined>> {
-    const binPath = await this.resolveBinPath()
-    return {
-      ECOS_AGENT_CODEX_BIN: binPath ?? undefined,
-      PATH: binPath ? prependPath(dirname(binPath), this.env.PATH) : undefined,
-    }
   }
 
   private async runInstall(): Promise<DesktopCodexDependencyStatus> {
@@ -312,14 +331,20 @@ export class CodexDependencyService {
   }
 
   private async resolveBinPath(): Promise<string | null> {
-    const fromSettings = await this.settingsStore.get<string>(
-      DESKTOP_CODEX_BIN_SETTING_KEY,
-    )
-    if (typeof fromSettings === 'string' && fromSettings.trim()) {
-      const validated = await this.validateExecutable(
-        expandUserPath(fromSettings.trim(), this.resolveHomedir),
+    // Profiles with a managed CODEX_HOME must not run a user-selected codex
+    // wrapper that exports its own CODEX_HOME — that would silently defeat the
+    // managed config — so the settings-level binary override only applies to
+    // the built-in codex profile (no managed config home).
+    if ((await this.profileService.activeProfile()).baseUrl === null) {
+      const fromSettings = await this.settingsStore.get<string>(
+        DESKTOP_CODEX_BIN_SETTING_KEY,
       )
-      if (validated) return validated
+      if (typeof fromSettings === 'string' && fromSettings.trim()) {
+        const validated = await this.validateExecutable(
+          expandUserPath(fromSettings.trim(), this.resolveHomedir),
+        )
+        if (validated) return validated
+      }
     }
 
     const fromEnv = this.env.ECOS_AGENT_CODEX_BIN
@@ -419,34 +444,6 @@ export class CodexDependencyService {
     } catch {
       return null
     }
-  }
-
-  private async detectAuthState(bin: string): Promise<DesktopCodexAuthState> {
-    try {
-      const { stdout, stderr } = await this.runCommandCapture(bin, ['login', 'status'], {
-        env: this.commandEnv(bin),
-        timeoutMs: 8_000,
-      })
-      const text = `${stdout}\n${stderr}`.toLowerCase()
-      if (/not logged|unauthenticated|signed out|no .*auth|login required/.test(text)) {
-        return 'unauthenticated'
-      }
-      if (/logged in|authenticated|signed in|active.*session|auth.*ok/.test(text)) {
-        return 'authenticated'
-      }
-    } catch {
-      // Fall through to auth file probe.
-    }
-
-    const authPath = join(this.resolveHomedir(), '.codex', 'auth.json')
-    try {
-      await access(authPath)
-      const info = await stat(authPath)
-      if (info.isFile() && info.size > 2) return 'authenticated'
-    } catch {
-      // ignore
-    }
-    return 'unknown'
   }
 
   private emitProgress(event: DesktopCodexInstallProgressEvent): void {

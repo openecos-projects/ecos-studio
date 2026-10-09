@@ -51,12 +51,17 @@ const { panelWidthStyle, onResizePointerDown } = useAgentPanelResize(viewportRef
   z-index: 40;
   display: flex;
   min-width: 280px;
-  max-width: min(720px, 100vw);
+  max-width: min(720px, calc(100vw - 320px));
   flex-direction: column;
   border-left: 1px solid var(--border-color);
   /* Keep the same surface as the shell so the drawer is not a solid square slab. */
   background: var(--bg-primary);
   box-shadow: -6px 0 24px rgb(0 0 0 / 6%);
+}
+
+/* Keep the walkthrough visible while Quick Start drives the underlying page. */
+.home-agent-drawer:has(.quick-start-stop) {
+  max-width: min(400px, calc(100vw - 320px));
 }
 
 .agent-panel-resize-handle {

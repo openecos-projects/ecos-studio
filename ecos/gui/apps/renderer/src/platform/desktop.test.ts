@@ -1,6 +1,12 @@
 import type { DesktopApi } from '@ecos-studio/shared'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DESKTOP_BRIDGE_UNAVAILABLE_MESSAGE, getDesktopApi } from './desktop'
+import {
+  DESKTOP_BRIDGE_UNAVAILABLE_MESSAGE,
+  getDesktopApi,
+  getOptionalDesktopApi,
+  hasDesktopApi,
+  waitForDesktopApi,
+} from './desktop'
 
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
 
@@ -26,6 +32,8 @@ describe('desktop bridge contract', () => {
     const desktopApi = {} as DesktopApi
     setWindow({ ecosDesktop: desktopApi })
 
+    expect(hasDesktopApi()).toBe(true)
+    expect(getOptionalDesktopApi()).toBe(desktopApi)
     expect(getDesktopApi()).toBe(desktopApi)
   })
 
@@ -33,7 +41,21 @@ describe('desktop bridge contract', () => {
     const setTimeout = vi.spyOn(globalThis, 'setTimeout')
     setWindow({})
 
+    expect(hasDesktopApi()).toBe(false)
+    expect(getOptionalDesktopApi()).toBeNull()
     expect(() => getDesktopApi()).toThrow(DESKTOP_BRIDGE_UNAVAILABLE_MESSAGE)
     expect(setTimeout).not.toHaveBeenCalled()
+  })
+
+  it('waits until the preload bridge appears', async () => {
+    const desktopApi = {} as DesktopApi
+    setWindow({})
+    queueMicrotask(() => {
+      setWindow({ ecosDesktop: desktopApi })
+    })
+
+    await expect(waitForDesktopApi({ timeoutMs: 200, pollIntervalMs: 1 })).resolves.toBe(
+      desktopApi,
+    )
   })
 })

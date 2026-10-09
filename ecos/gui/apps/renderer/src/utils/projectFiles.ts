@@ -102,6 +102,12 @@ export async function readOptionalProjectTextFile(
   }
 }
 
+export async function readWorkspaceParametersFile(
+  _workspacePath: string,
+): Promise<Record<string, unknown> | null> {
+  return await getDesktopApi().workspaceResources.readParameters()
+}
+
 export async function readProjectTextFileTail(
   path: string,
   maxChars: number,

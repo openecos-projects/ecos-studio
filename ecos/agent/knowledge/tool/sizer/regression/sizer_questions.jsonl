@@ -1,0 +1,9 @@
+{"entity_id": "algorithm.sizer.execution", "id": "sizer-execution", "question": "Explain algorithm.sizer.execution", "required_text": "Execution path:"}
+{"entity_id": "algorithm.sizer.runtime_and_script_preconditions", "id": "sizer-runtime_and_script_preconditions", "question": "Explain sizer algorithm runtime and script preconditions.", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.sizer.command_and_staging_gate", "id": "sizer-command_and_staging_gate", "question": "Explain sizer algorithm command and staging gate.", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.sizer.legalization_handoff", "id": "sizer-legalization_handoff", "question": "Explain sizer algorithm legalization handoff.", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.sizer.publication_and_cleanup", "id": "sizer-publication_and_cleanup", "question": "Explain sizer algorithm publication and cleanup.", "required_text": "Source evidence:"}
+{"entity_id": "parameter.sizer.script_inputs", "id": "sizer-parameter", "question": "Explain parameter.sizer.script_inputs", "required_text": "**Role:**"}
+{"entity_id": "metric.sizer.database_summary", "id": "sizer-metric", "question": "Explain metric.sizer.database_summary", "required_text": "**Calculation:**"}
+{"entity_id": "artifact.sizer.outputs", "id": "sizer-artifact", "question": "Explain artifact.sizer.outputs", "required_text": "**Meaning:**"}
+{"entity_id": "failure.sizer.preconditions", "id": "sizer-failure", "question": "Explain failure.sizer.preconditions", "required_text": "**Failure mode:**"}

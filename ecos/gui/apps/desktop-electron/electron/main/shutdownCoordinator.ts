@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type {
   DesktopShutdownStatus,
+  DesktopAgentOptimizationEpisodeSummary,
   EccBackgroundOperation,
   EccBackgroundOperationProjection,
   EccBackgroundWorkspaceCreation,
@@ -19,7 +20,9 @@ import { ShutdownAcceptedWork } from './shutdownAcceptedWork'
 
 interface ShutdownCoordinatorOptions {
   approve(scope: ShutdownScope): void | Promise<void>
+  beginOptimizationDrain?(): Promise<void>
   cancelOperation(workspaceHandle: string, operationId: string): Promise<unknown>
+  cancelOptimizationDrain?(): Promise<void>
   creationEntries?(): Promise<EccBackgroundWorkspaceCreation[]>
   currentOperationProjection?(): EccBackgroundOperationProjection
   forceTerminate(workspaceHandles?: readonly string[]): Promise<void>
@@ -29,6 +32,7 @@ interface ShutdownCoordinatorOptions {
   operationProjection():
     | EccBackgroundOperationProjection
     | Promise<EccBackgroundOperationProjection>
+  optimizationEpisodes?(): DesktopAgentOptimizationEpisodeSummary[]
   promptForce(blockers: ShutdownBlockerSummary): Promise<'keep-waiting' | 'force'>
   promptInitial(blockers: ShutdownBlockerSummary): Promise<'wait' | 'cancel'>
   requestRendererCleanup(attemptId: string, windowIds: number[]): void
@@ -37,10 +41,17 @@ interface ShutdownCoordinatorOptions {
   clearTimeout?: typeof clearTimeout
 }
 
+export interface OptimizationShutdownLifecycle {
+  beginDrain(workspaceHandles?: readonly string[]): Promise<void>
+  cancelDrain(): Promise<void>
+  episodes(): DesktopAgentOptimizationEpisodeSummary[]
+}
+
 interface Attempt {
   id: string
   forceEligible: boolean
   initialPromptOpen: boolean
+  optimizationDrainStarted: boolean
   pendingCleanup: Set<number>
   scope: ShutdownScope
   state: DesktopShutdownStatus['state']
@@ -57,8 +68,25 @@ export class ShutdownCoordinator {
   private forcePromptOpen = false
   private applicationApproved = false
   private readonly approvedWindows = new Set<number>()
+  private optimizationLifecycle?: OptimizationShutdownLifecycle
 
-  constructor(private readonly options: ShutdownCoordinatorOptions) {}
+  constructor(private readonly options: ShutdownCoordinatorOptions) {
+    if (
+      options.beginOptimizationDrain ||
+      options.cancelOptimizationDrain ||
+      options.optimizationEpisodes
+    ) {
+      this.optimizationLifecycle = {
+        beginDrain: options.beginOptimizationDrain ?? (async () => undefined),
+        cancelDrain: options.cancelOptimizationDrain ?? (async () => undefined),
+        episodes: options.optimizationEpisodes ?? (() => []),
+      }
+    }
+  }
+
+  setOptimizationLifecycle(lifecycle: OptimizationShutdownLifecycle): void {
+    this.optimizationLifecycle = lifecycle
+  }
 
   trackWorkspaceHandle(windowId: number, workspaceHandle: string): void {
     this.handleOwners.set(workspaceHandle, windowId)
@@ -117,6 +145,7 @@ export class ShutdownCoordinator {
     const blockers = attempt?.blockers ?? emptyShutdownBlockers()
     return {
       activeFlows: blockers.activeFlows,
+      activeOptimizations: blockers.activeOptimizations,
       attemptId: attempt?.id ?? null,
       finalizations: blockers.finalizations,
       forceEligible: attempt?.forceEligible ?? false,
@@ -198,11 +227,13 @@ export class ShutdownCoordinator {
     await this.approve()
   }
 
-  cancelShutdown(): void {
+  async cancelShutdown(): Promise<void> {
     if (this.attempt?.state === 'forcing' || this.attempt?.state === 'approved') return
+    const restoreOptimization = this.attempt?.optimizationDrainStarted
     this.attempt = null
     this.forcePromptOpen = false
     this.emit()
+    if (restoreOptimization) await this.optimizationLifecycle?.cancelDrain()
   }
 
   async reviewShutdownOptions(): Promise<void> {
@@ -252,6 +283,7 @@ export class ShutdownCoordinator {
         forceEligible: false,
         id: randomUUID(),
         initialPromptOpen: false,
+        optimizationDrainStarted: false,
         pendingCleanup: new Set(),
         scope,
         state: 'idle',
@@ -278,13 +310,29 @@ export class ShutdownCoordinator {
     attempt.initialPromptOpen = true
     try {
       if ((await this.options.promptInitial(blockers)) === 'cancel') {
-        if (this.attempt === attempt) this.cancelShutdown()
+        if (this.attempt === attempt) await this.cancelShutdown()
         return
       }
     } finally {
       attempt.initialPromptOpen = false
     }
     if (this.attempt !== attempt || attempt.state !== 'idle') return
+    if (this.optimizationLifecycle) {
+      try {
+        attempt.optimizationDrainStarted = true
+        await this.optimizationLifecycle.beginDrain(
+          workspaceHandlesInShutdownScope(this.handleOwners, attempt.scope),
+        )
+      } catch (error) {
+        if (this.attempt !== attempt) return
+        attempt.state = 'error'
+        attempt.issue = boundedShutdownIssue(
+          error instanceof Error ? error.message : String(error),
+        )
+        this.emit()
+        return
+      }
+    }
     this.enterDraining()
   }
 
@@ -427,6 +475,7 @@ export class ShutdownCoordinator {
       creations,
       handleOwners: this.handleOwners,
       projection,
+      optimizationEpisodes: this.optimizationLifecycle?.episodes(),
       scope,
     })
   }

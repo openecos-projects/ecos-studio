@@ -38,17 +38,23 @@ function insightSteps(
   return buildFlowInsightSteps(
     names.map((name, index) => ({
       name,
-      tool: name === 'Synthesis' ? 'yosys' : 'ecc',
+      tool:
+        name === 'Synthesis' ? 'yosys' : name === 'Timing optimization' ? 'sizer' : 'ecc',
       state: extras[index]?.state ?? 'Success',
       runtime: extras[index]?.runtime ?? '',
       peakMemoryMb: extras[index]?.peakMemoryMb ?? null,
-      directory: `/ws/${name.toLowerCase()}_ecc`,
+      directory:
+        name === 'Timing optimization'
+          ? '/ws/timing_optimization_sizer'
+          : `/ws/${name.toLowerCase()}_ecc`,
     })),
   )
 }
 
 describe('flow insights data', () => {
   it('normalizes step keys and parses runtime / memory fallbacks', () => {
+    expect(canonicalStepKey('Timing optimization')).toBe('Sizer')
+    expect(canonicalStepKey('timing_optimization_sizer')).toBe('Sizer')
     expect(canonicalStepKey('sta_ecc')).toBe('STA')
     expect(canonicalStepKey('preFloorplan')).toBe('Floor')
     expect(canonicalStepKey('macroPlacement')).toBe('Floor')
@@ -75,6 +81,7 @@ describe('flow insights data', () => {
       'place',
       'CTS',
       'legalization',
+      'Timing optimization',
       'route',
       'drc',
       'filler',
@@ -82,8 +89,8 @@ describe('flow insights data', () => {
       'STA',
       'Harden',
     ]
-    const runtimes = [22.8, 2.3, 66.7, 30.7, 3.0, 11.1, 4.1, 3.5, 8.2, 215.479, 12.8]
-    const memories = [1706, 73, 865, 2024, 148, 166, 213, 120, 831, 11482.379, 831]
+    const runtimes = [22.8, 2.3, 2.1, 66.7, 30.7, 3.0, 11.1, 4.1, 3.5, 8.2, 215.479, 12.8]
+    const memories = [1706, 73, 101, 865, 2024, 148, 166, 213, 120, 831, 11482.379, 831]
     const steps = insightSteps(
       names,
       names.map((_, index) => ({
@@ -96,10 +103,10 @@ describe('flow insights data', () => {
     }))
     const model = buildStepResourcesModel(steps)
     expect(model.steps[model.runtimeBottleneckIndex]?.key).toBe('STA')
-    expect(model.rows[0]?.values[9]).toBe(215.479)
+    expect(model.rows[0]?.values[10]).toBe(215.479)
     expect(model.peakMemoryMb).toBeCloseTo(11482.379)
     expect(model.steps[model.memoryBottleneckIndex]?.key).toBe('STA')
-    expect(model.totalRuntimeSeconds).toBeCloseTo(380.679, 2)
+    expect(model.totalRuntimeSeconds).toBeCloseTo(382.779, 2)
   })
 
   it('maps synthesis cell_count and treats the filler instance jump as structural', () => {
@@ -109,13 +116,16 @@ describe('flow insights data', () => {
       'place',
       'CTS',
       'legalization',
+      'Timing optimization',
       'route',
       'drc',
       'filler',
       'RCX',
       'STA',
     ]
-    const instanceCounts = [1699, 2161, 2189, 2206, 2206, 2206, 2206, 5879, 5879, 5879]
+    const instanceCounts = [
+      1699, 2161, 2189, 2189, 2206, 2206, 2206, 2206, 5879, 5879, 5879,
+    ]
     const dbJsonByStep = new Map(
       names.slice(1).map((name, index) => [
         name,
