@@ -390,6 +390,7 @@ import { updateWorkspaceConfigurationApi } from '@/api/workspace'
 import { readWorkspaceFlowResourceApi } from '@/api/workspaceResources'
 import { canExportSignoffPackage } from '@/composables/useSignoffPackageExport'
 import { loadProjectHistory } from '@/utils/projectHistory'
+import { loadAgentPdkInstallations } from '@/utils/agentPdkInstallations'
 import {
   registerProjectManagedWorkspace,
   resolveManagedProjectContext,
@@ -1036,6 +1037,7 @@ async function startProviderSession(
       name: project.name,
       path: project.path,
     }))
+    const pdkInstallations = await loadAgentPdkInstallations()
     const response = await agent.startSession({
       providerId: AGENT_PROVIDER_ID,
       sessionId,
@@ -1044,6 +1046,7 @@ async function startProviderSession(
       ...(tab.projectRoot ? { projectRoot: tab.projectRoot } : {}),
       ...(tab.workspacePath ? { directory: tab.workspacePath } : {}),
       ...(knownProjects.length > 0 ? { knownProjects } : {}),
+      ...(pdkInstallations.length > 0 ? { pdkInstallations } : {}),
     })
     if (response.pendingInteraction) {
       messageStore.addInteraction(response.pendingInteraction, undefined, sessionId)

@@ -95,6 +95,10 @@ describe('AgentProviderProcessRuntime', () => {
     const response = runtime.startSession({
       directory: '/work/demo',
       knownProjects: [{ name: 'work', path: '/work' }],
+      pdkInstallations: [
+        { name: 'ICS55', path: '/pdks/ics55', source: 'managed', version: '1.0' },
+        { name: 'ICS55 local', path: '/local/ics55', source: 'imported' },
+      ],
       projectRoot: '/work',
       providerId: 'codex',
       reconnect: true,
@@ -113,6 +117,10 @@ describe('AgentProviderProcessRuntime', () => {
       params: {
         directory: '/work/demo',
         knownProjects: [{ name: 'work', path: '/work' }],
+        pdkInstallations: [
+          { name: 'ICS55', path: '/pdks/ics55', source: 'managed', version: '1.0' },
+          { name: 'ICS55 local', path: '/local/ics55', source: 'imported' },
+        ],
         projectRoot: '/work',
         providerId: 'codex',
         reconnect: true,

@@ -3640,6 +3640,7 @@ function readAgentStartSessionRequest(value: unknown): DesktopAgentStartSessionR
       ? record.directory.trim()
       : undefined
   const knownProjects = readAgentKnownProjects(record.knownProjects)
+  const pdkInstallations = readAgentPdkInstallations(record.pdkInstallations)
   const workspaceId =
     typeof record.workspaceId === 'string' &&
     /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(record.workspaceId)
@@ -3653,6 +3654,7 @@ function readAgentStartSessionRequest(value: unknown): DesktopAgentStartSessionR
     ...(directory ? { directory } : {}),
     ...(projectRoot ? { projectRoot } : {}),
     ...(knownProjects ? { knownProjects } : {}),
+    ...(pdkInstallations ? { pdkInstallations } : {}),
     ...(workspaceId ? { workspaceId } : {}),
   }
 }
@@ -3675,6 +3677,35 @@ function readAgentKnownProjects(
     })
     .filter((item): item is { name: string; path: string } => item !== null)
   return projects.length > 0 ? projects : undefined
+}
+
+function readAgentPdkInstallations(
+  value: unknown,
+): DesktopAgentStartSessionRequest['pdkInstallations'] {
+  if (!Array.isArray(value)) return undefined
+  const installations = value
+    .slice(0, 32)
+    .map((item) => {
+      if (!isRecord(item)) return null
+      const path = typeof item.path === 'string' ? item.path.trim() : ''
+      const source =
+        item.source === 'managed' || item.source === 'imported' ? item.source : null
+      if (!path || !source) return null
+      const name =
+        typeof item.name === 'string' && item.name.trim()
+          ? item.name.trim()
+          : path.split(/[/\\]/).filter(Boolean).at(-1) || path
+      const version =
+        typeof item.version === 'string' && item.version.trim()
+          ? item.version.trim()
+          : undefined
+      return { name, path, source, ...(version ? { version } : {}) }
+    })
+    .filter(
+      (item): item is { name: string; path: string; source: 'managed' | 'imported' } =>
+        item !== null,
+    )
+  return installations.length > 0 ? installations : undefined
 }
 
 function readAgentSendMessageRequest(value: unknown): DesktopAgentSendMessageRequest {

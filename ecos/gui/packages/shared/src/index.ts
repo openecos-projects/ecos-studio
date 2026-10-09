@@ -455,6 +455,7 @@ export type {
   DesktopAgentSetModeRequest,
   DesktopAgentStartRequest,
   DesktopAgentKnownProject,
+  DesktopAgentPdkInstallation,
   DesktopAgentSessionMode,
   DesktopAgentStartSessionRequest,
   DesktopAgentStartSessionResponse,

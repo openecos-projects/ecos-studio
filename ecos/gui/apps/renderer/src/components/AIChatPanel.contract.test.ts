@@ -416,6 +416,8 @@ describe('AIChatPanel flow contracts', () => {
   it('starts sessions with projectRoot and known project history', () => {
     expect(source).toContain('loadProjectHistory()')
     expect(source).toContain('knownProjects')
+    expect(source).toContain('loadAgentPdkInstallations()')
+    expect(source).toContain('pdkInstallations')
     expect(source).toContain('projectRoot')
     expect(source).toContain('route.query.projectRoot')
     expect(source).toContain('Create another workspace in this project')

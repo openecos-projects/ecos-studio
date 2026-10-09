@@ -6,6 +6,7 @@ import type {
   DesktopAgentInterruptRequest,
   DesktopAgentInteractionAnswerRequest,
   DesktopAgentKnownProject,
+  DesktopAgentPdkInstallation,
   DesktopAgentStartSessionRequest,
   DesktopSaveFileDialogOptions,
   EccWorkspacePdkConfigPersist,
@@ -58,15 +59,23 @@ describe('shared public contracts', () => {
       name: 'gcd',
       path: '/projects/gcd',
     } satisfies DesktopAgentKnownProject
+    const pdkInstallation = {
+      name: 'ICS55',
+      path: '/pdks/ics55',
+      source: 'managed',
+      version: '1.0',
+    } satisfies DesktopAgentPdkInstallation
     const startSession = {
       knownProjects: [knownProject],
       mode: 'workspace',
+      pdkInstallations: [pdkInstallation],
       projectRoot: '/projects/gcd',
       providerId: 'ecos_agent',
       sessionId: 'session-1',
     } satisfies DesktopAgentStartSessionRequest
     expect(startSession.projectRoot).toBe('/projects/gcd')
     expect(startSession.knownProjects?.[0]?.path).toBe('/projects/gcd')
+    expect(startSession.pdkInstallations?.[0]?.source).toBe('managed')
   })
 
   it('exports versioned interaction requests without client execution values', () => {

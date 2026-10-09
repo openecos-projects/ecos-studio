@@ -1661,6 +1661,15 @@ describe('registerIpc', () => {
       sessionId: 'gui-session-1',
       projectRoot: '/runs',
       knownProjects: [{ name: 'runs', path: '/runs' }],
+      pdkInstallations: [
+        {
+          name: 'ICS55',
+          path: '/pdks/ics55',
+          source: 'managed' as const,
+          version: '1.0',
+        },
+        { name: 'ICS55 local', path: '/local/ics55', source: 'imported' as const },
+      ],
       mode: 'workspace' as const,
     }
     mockAgentWorkspaceContext(services)

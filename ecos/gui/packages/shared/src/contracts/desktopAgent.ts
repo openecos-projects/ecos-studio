@@ -24,10 +24,19 @@ export interface DesktopAgentKnownProject {
   path: string
 }
 
+export interface DesktopAgentPdkInstallation {
+  /** PDK inventory ownership: Resource Manager download or local import. */
+  source: 'managed' | 'imported'
+  name: string
+  path: string
+  version?: string
+}
+
 export interface DesktopAgentStartSessionRequest extends DesktopAgentProviderRequest {
   directory?: string
   knownProjects?: DesktopAgentKnownProject[]
   mode?: DesktopAgentSessionMode
+  pdkInstallations?: DesktopAgentPdkInstallation[]
   projectRoot?: string
   /** Rebind a restarted provider without replaying first-session UI messages. */
   reconnect?: boolean
