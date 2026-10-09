@@ -354,6 +354,33 @@ def recommended_path_choice(
     )
 
 
+def pdk_choice(
+    language: str,
+    prompt_id: str,
+    options: tuple[tuple[str, str], ...],
+) -> dict[str, Any]:
+    """options: (label, path value) pairs from the recommendation and inventory."""
+    return {
+        "promptId": prompt_id,
+        "title": _prompt(language, "选择 PDK", "Choose a PDK"),
+        "options": [
+            {
+                "id": f"{prompt_id}-{index}",
+                "label": label,
+                "value": path,
+            }
+            for index, (label, path) in enumerate(options, 1)
+        ],
+        "allowFreeText": True,
+        "description": _prompt(
+            language,
+            "请选择 PDK，或输入其他已存在的 PDK 目录。",
+            "Choose a PDK, or enter another existing PDK directory.",
+        ),
+        "variant": "list",
+    }
+
+
 def default_value_choice(
     language: str, prompt_id: str, label: str, value: object
 ) -> dict[str, Any]:

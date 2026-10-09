@@ -563,9 +563,12 @@ def test_optional_path_steps_emit_skip_and_recommendation_choices(tmp_path: Path
     _send(provider, session_id, str(sdc))
     assert session.phase == "workspace_pdk"
     pdk_choice = _last_event(events, "interaction")["interaction"]
-    assert pdk_choice["fields"][0]["defaultValue"] == display_path(str(pdk))
+    assert pdk_choice["kind"] == "choice"
+    assert [option["label"] for option in pdk_choice["options"]] == [
+        f"Use recommended path: {display_path(str(pdk))}",
+    ]
 
-    _send(provider, session_id, pdk_choice["fields"][0]["defaultValue"])
+    _send(provider, session_id, str(pdk))
     assert session.phase == "workspace_mpc"
     mpc_choice = _last_event(events, "interaction")["interaction"]
     assert [option["label"] for option in mpc_choice["options"]] == [
@@ -581,6 +584,102 @@ def test_optional_path_steps_emit_skip_and_recommendation_choices(tmp_path: Path
     assert session.phase == "workspace_top"
     top_choice = _last_event(events, "interaction")["interaction"]
     assert top_choice["fields"][0]["defaultValue"] == "gcd"
+
+
+def test_workspace_pdk_step_lists_inventory_installations(tmp_path: Path) -> None:
+    project_root = tmp_path / "projects"
+    project_root.mkdir()
+    rtl, _filelist, _sdc, _pdk = _write_workspace_inputs(project_root)
+    managed_root = tmp_path / "managed-pdk"
+    managed_root.mkdir()
+    imported_root = tmp_path / "imported-pdk"
+    imported_root.mkdir()
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session(
+        {
+            "pdkInstallations": [
+                {"name": "ICS55", "path": str(managed_root), "source": "managed"},
+                {"name": "ICS55 custom", "path": str(imported_root), "source": "imported"},
+                {"name": "unsupported", "path": str(project_root), "source": "unknown"},
+                {"name": "missing path", "path": "", "source": "managed"},
+            ]
+        }
+    )["sessionId"]
+    for message in (
+        "2",
+        "2",
+        str(project_root),
+        "ws_0001",
+        "gcd",
+        "4",
+        str(rtl),
+        EMPTY_CHOICE_VALUE,
+        EMPTY_CHOICE_VALUE,
+    ):
+        _send(provider, session_id, message)
+
+    session = provider.sessions[session_id]
+    assert session.phase == "workspace_pdk"
+    pdk_choice = _last_event(events, "interaction")["interaction"]
+    assert pdk_choice["kind"] == "choice"
+    assert [option["label"] for option in pdk_choice["options"]] == [
+        f"ICS55 (Resource Manager): {display_path(str(managed_root))}",
+        f"ICS55 custom (Local): {display_path(str(imported_root))}",
+    ]
+
+    _send(provider, session_id, str(imported_root))
+    assert session.workspace_inputs.pdk_root == str(imported_root.resolve())
+    assert session.phase == "workspace_mpc"
+
+
+def test_workspace_pdk_step_keeps_free_text_when_no_options(tmp_path: Path) -> None:
+    project_root = tmp_path / "projects"
+    project_root.mkdir()
+    rtl, _filelist, _sdc, pdk = _write_workspace_inputs(project_root)
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session({})["sessionId"]
+    for message in (
+        "2",
+        "2",
+        str(project_root),
+        "ws_0001",
+        "gcd",
+        "4",
+        str(rtl),
+        EMPTY_CHOICE_VALUE,
+        EMPTY_CHOICE_VALUE,
+    ):
+        _send(provider, session_id, message)
+
+    session = provider.sessions[session_id]
+    assert session.phase == "workspace_pdk"
+    assert session.pending_interaction is None
+
+    _send(provider, session_id, str(pdk))
+    assert session.workspace_inputs.pdk_root == str(pdk.resolve())
+    assert session.phase == "workspace_mpc"
+
+
+def test_pdk_choice_options_dedupe_recommendation_against_inventory(tmp_path: Path) -> None:
+    from ecos_agent.gui.pdk_options import _pdk_choice_options
+    from ecos_agent.gui.provider_common import _Session
+
+    pdk = tmp_path / "pdk"
+    pdk.mkdir()
+    session = _Session(session_id="s")
+    session.path_recommendations["pdk"] = str(pdk)
+    session.pdk_installations = [
+        ("ICS55", str(pdk), "managed"),
+        ("ICS55 backup", str(tmp_path / "other"), "imported"),
+    ]
+
+    labels = [label for label, _path in _pdk_choice_options(session)]
+    assert labels == [
+        f"Use recommended path: {display_path(str(pdk))}",
+        f"ICS55 backup (Local): {display_path(str(tmp_path / 'other'))}",
+    ]
 
 
 def test_workspace_confirmation_accepts_deterministic_frequency_and_workspace_name(

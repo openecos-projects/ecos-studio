@@ -237,13 +237,13 @@ def pdk_prompt(language: str, recommendation: str = "") -> str:
     if not recommendation:
         return _prompt(
             language,
-            "PDK 路径是什么？请输入一个已存在的 PDK 目录。",
-            "What is the PDK path? Enter an existing PDK directory.",
+            "PDK 路径是什么？请从下方选项中选择，或输入一个已存在的 PDK 目录。",
+            "What is the PDK path? Choose an option below, or enter an existing PDK directory.",
         )
     return _prompt(
         language,
-        "PDK 路径是什么？可点击使用下方推荐路径，或输入其他已存在的 PDK 目录。",
-        "What is the PDK path? Use the recommended path below, or enter another existing PDK directory.",
+        "PDK 路径是什么？请从下方选项中选择（含推荐路径），或输入其他已存在的 PDK 目录。",
+        "What is the PDK path? Choose an option below (including the recommended path), or enter another existing PDK directory.",
     )
 
 

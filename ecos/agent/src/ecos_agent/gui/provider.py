@@ -204,6 +204,7 @@ from ecos_agent.gui.provider_chat import ProviderChatMixin
 from ecos_agent.gui.provider_emission import ProviderEmissionMixin
 from ecos_agent.gui.provider_lifecycle import ProviderLifecycleMixin
 from ecos_agent.gui.provider_optimization import ProviderOptimizationMixin
+from ecos_agent.gui.provider_slash_commands import ProviderSlashCommandsMixin
 from ecos_agent.gui.provider_source_evidence import ProviderSourceEvidenceMixin
 from ecos_agent.gui.provider_workspace_lifecycle import ProviderWorkspaceLifecycleMixin
 from ecos_agent.gui.provider_workspace_rerun import ProviderWorkspaceRerunMixin
@@ -212,6 +213,7 @@ from ecos_agent.gui.provider_workspace_setup import ProviderWorkspaceSetupMixin
 
 class EcosAgentProvider(
     ProviderLifecycleMixin,
+    ProviderSlashCommandsMixin,
     ProviderChatMixin,
     ProviderSourceEvidenceMixin,
     ProviderOptimizationMixin,

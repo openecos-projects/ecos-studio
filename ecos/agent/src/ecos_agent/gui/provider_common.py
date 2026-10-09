@@ -293,6 +293,23 @@ def _known_projects(value: object) -> list[tuple[str, str]]:
     return projects
 
 
+def _pdk_installations(value: object) -> list[tuple[str, str, str]]:
+    """Parse host-supplied PDK installations into (name, path, source) tuples."""
+    if not isinstance(value, list):
+        return []
+    installations: list[tuple[str, str, str]] = []
+    for item in value[:32]:
+        if not isinstance(item, Mapping):
+            continue
+        path = _optional_text(item.get("path"))
+        source = _optional_text(item.get("source"))
+        if not path or source not in {"managed", "imported"}:
+            continue
+        name = _optional_text(item.get("name")) or Path(path).name
+        installations.append((name, path, source))
+    return installations
+
+
 def _design_id_for_workspace(workspace: str) -> str | None:
     root = Path(workspace)
     try:

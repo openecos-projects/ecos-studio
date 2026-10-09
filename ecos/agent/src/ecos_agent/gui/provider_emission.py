@@ -67,6 +67,7 @@ from ecos_agent.gui.messages import (
     optimization_workspace_prompt,
     optional_file_choice,
     optional_file_prompt,
+    pdk_choice,
     pdk_prompt,
     project_mode_choice,
     project_root_prompt,
@@ -158,6 +159,7 @@ from ecos_agent.gui.support import (
     _workspace_rerun_execution_contract,
 )
 from ecos_agent.gui.workspace_flow import WorkspaceFlow
+from ecos_agent.gui.pdk_options import _pdk_choice_options
 from ecos_agent.optimization.contracts import (
     OptimizationEpisodeState,
     OptimizationObjectiveProposal,
@@ -369,14 +371,9 @@ class ProviderEmissionMixin:
                 _recommended_path(session, "sdc"),
             )
         elif session.phase == "workspace_pdk":
-            recommendation = _recommended_path(session, "pdk")
-            if recommendation:
-                choice = recommended_path_choice(
-                    session.language,
-                    prompt_id,
-                    recommendation,
-                    field="PDK",
-                )
+            options = _pdk_choice_options(session)
+            if options:
+                choice = pdk_choice(session.language, prompt_id, options)
         elif session.phase == "workspace_mpc":
             choice = mpc_choice(session.language, prompt_id)
         elif session.phase == "workspace_top":
@@ -483,6 +480,7 @@ class ProviderEmissionMixin:
             "workspace_project_root",
             "workspace_filelist",
             "workspace_sdc",
+            "workspace_pdk",
         }:
             field_kind = "number" if session.phase in {
                 "workspace_frequency",
@@ -691,7 +689,7 @@ class ProviderEmissionMixin:
 
     @staticmethod
     def _resting_status(session: _Session) -> str:
-        if session.phase == "workspace_pdk" and not _recommended_path(session, "pdk"):
+        if session.phase == "workspace_pdk" and not _pdk_choice_options(session):
             return "idle"
         if session.phase == "workspace_rtl" and not _recommended_path(session, "rtl"):
             return "idle"
@@ -750,6 +748,7 @@ class ProviderEmissionMixin:
         rerun_workspace_path = session.rerun_workspace_path
         project_root = session.project_root
         known_projects = session.known_projects
+        pdk_installations = session.pdk_installations
         inherited_design_name = session.inherited_design_name
         session.phase = "home_ready" if mode == "home" else "operation"
         session.language = language
@@ -758,6 +757,7 @@ class ProviderEmissionMixin:
         session.rerun_workspace_path = rerun_workspace_path
         session.project_root = project_root
         session.known_projects = known_projects
+        session.pdk_installations = pdk_installations
         session.inherited_design_name = inherited_design_name
         session.creating_project = False
         session.design_id = None

@@ -96,6 +96,7 @@ class ProviderSession:
     language_locked: bool = False
     project_root: str | None = None
     known_projects: list[tuple[str, str]] = field(default_factory=list)
+    pdk_installations: list[tuple[str, str, str]] = field(default_factory=list)
     creating_project: bool = False
     design_id: str | None = None
     inherited_design_name: str | None = None
