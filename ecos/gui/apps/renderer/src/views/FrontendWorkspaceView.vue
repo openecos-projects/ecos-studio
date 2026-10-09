@@ -620,11 +620,6 @@
                   <div class="summary-card">
                     <header>
                       <span>Review Delta</span>
-                      <strong>{{
-                        reviewDelta.baseline === 'previous_run'
-                          ? 'Previous Run'
-                          : 'No Baseline'
-                      }}</strong>
                     </header>
                     <div class="summary-metrics">
                       <span
@@ -1590,9 +1585,6 @@
                     <div class="sim-insight-card">
                       <header>
                         <span>Run Regression</span>
-                        <strong>{{
-                          simRegression.baseline_run_id || 'No baseline'
-                        }}</strong>
                       </header>
                       <div class="sim-regression-grid">
                         <div
@@ -2628,11 +2620,6 @@ const simCycleChanges = computed(() =>
     : [],
 )
 const simRegressionTiles = computed(() => [
-  {
-    label: 'Baseline',
-    value: simRegression.value.has_baseline ? 'Compared' : 'First Run',
-    tone: simRegression.value.has_baseline ? 'neutral' : 'ok',
-  },
   {
     label: 'New Failures',
     value: numberLabel(simRegression.value.new_failures?.length),
