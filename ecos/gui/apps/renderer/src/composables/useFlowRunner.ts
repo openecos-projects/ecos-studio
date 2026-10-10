@@ -10,11 +10,7 @@ import {
   type RunStepResponse,
 } from '@/api/flow'
 import type { DesignTool } from '@ecos-studio/shared'
-import {
-  isResourceStalenessError,
-  readResourceStalenessPayload,
-} from '@ecos-studio/shared'
-import { useResourceStalenessGuard } from './useResourceStalenessGuard'
+import { confirmStaleResourceRerun } from './useResourceStalenessGuard'
 import {
   WORKSPACE_RESULT_INVALIDATION_SCOPES,
   type WorkspaceInvalidationScope,
@@ -89,7 +85,6 @@ export function useFlowRunner() {
     workspaceSession,
   } = useWorkspace()
   const route = useRoute()
-  const { requestStalenessConfirmation } = useResourceStalenessGuard()
 
   /**
    * Converts a RESOURCE_UPDATE_AVAILABLE failure into the confirmation
@@ -102,16 +97,9 @@ export function useFlowRunner() {
     options: FlowRunOptions,
     retryRunner: (nextOptions: FlowRunOptions) => Promise<unknown>,
   ): boolean {
-    if (!isResourceStalenessError(err)) return false
-    const payload = readResourceStalenessPayload(err)
-    requestStalenessConfirmation({
-      resources: payload?.resources ?? [],
-      runLabel,
-      retry: async (allowStale) => {
-        await retryRunner({ ...options, allowStaleResources: allowStale })
-      },
+    return confirmStaleResourceRerun(err, runLabel, async (allowStale) => {
+      await retryRunner({ ...options, allowStaleResources: allowStale })
     })
-    return true
   }
 
   // 状态：当前 workspace 的运行态。flowExecutionActive 仍保留为全局兼容信号。

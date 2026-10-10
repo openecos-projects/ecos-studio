@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ResourceStalenessItem } from '@ecos-studio/shared'
 
-import { useResourceStalenessGuard } from './useResourceStalenessGuard'
+import {
+  confirmStaleResourceRerun,
+  useResourceStalenessGuard,
+} from './useResourceStalenessGuard'
 
 const STALE_ITEM: ResourceStalenessItem = {
   id: 'tool:yosys',
@@ -9,6 +12,10 @@ const STALE_ITEM: ResourceStalenessItem = {
   installed_version: '0.61',
   latest_version: '0.62',
   update_kind: 'version',
+}
+
+function makeStalenessError(resources: ResourceStalenessItem[] = [STALE_ITEM]) {
+  return { code: 'RESOURCE_UPDATE_AVAILABLE', details: { resources } }
 }
 
 function makeRequest(retry: (allowStale: boolean) => Promise<void>) {
@@ -108,6 +115,59 @@ describe('useResourceStalenessGuard', () => {
     await guard.runAnyway()
     await guard.retryAfterUpdates()
 
+    expect(guard.pendingRequest.value).toBeNull()
+  })
+})
+
+describe('confirmStaleResourceRerun', () => {
+  beforeEach(() => {
+    useResourceStalenessGuard().dismiss()
+  })
+
+  it('ignores non-staleness errors', () => {
+    const retry = vi.fn(async (_allowStale: boolean) => undefined)
+
+    const intercepted = confirmStaleResourceRerun(new Error('boom'), 'lint step', retry)
+
+    expect(intercepted).toBe(false)
+    expect(useResourceStalenessGuard().pendingRequest.value).toBeNull()
+  })
+
+  it('queues a confirmation carrying the error payload resources', () => {
+    const retry = vi.fn(async (_allowStale: boolean) => undefined)
+
+    const intercepted = confirmStaleResourceRerun(
+      makeStalenessError(),
+      'lint step',
+      retry,
+    )
+
+    expect(intercepted).toBe(true)
+    expect(useResourceStalenessGuard().pendingRequest.value).toMatchObject({
+      resources: [STALE_ITEM],
+      runLabel: 'lint step',
+    })
+  })
+
+  it('queues an empty resource list when the error carries no details', () => {
+    const intercepted = confirmStaleResourceRerun(
+      { code: 'RESOURCE_UPDATE_AVAILABLE' },
+      'lint step',
+      vi.fn(async (_allowStale: boolean) => undefined),
+    )
+
+    expect(intercepted).toBe(true)
+    expect(useResourceStalenessGuard().pendingRequest.value?.resources).toEqual([])
+  })
+
+  it('routes the user decision through the provided retry', async () => {
+    const guard = useResourceStalenessGuard()
+    const retry = vi.fn(async (_allowStale: boolean) => undefined)
+    confirmStaleResourceRerun(makeStalenessError(), 'lint step', retry)
+
+    await guard.runAnyway()
+
+    expect(retry).toHaveBeenCalledWith(true)
     expect(guard.pendingRequest.value).toBeNull()
   })
 })

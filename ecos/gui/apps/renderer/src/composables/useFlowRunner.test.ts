@@ -15,7 +15,6 @@ const {
   currentProject,
   markHomeRunArtifactResetAwaitingBackendStart,
   clearHomeRunArtifactResetAwaitingBackendStart,
-  requestStalenessConfirmation,
 } = vi.hoisted(() => ({
   ensureApiReady: vi.fn(() => Promise.resolve(true)),
   showToast: vi.fn(),
@@ -49,7 +48,6 @@ const {
   },
   markHomeRunArtifactResetAwaitingBackendStart: vi.fn(),
   clearHomeRunArtifactResetAwaitingBackendStart: vi.fn(),
-  requestStalenessConfirmation: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -80,10 +78,6 @@ vi.mock('./homeRunArtifacts', () => ({
   clearHomeRunArtifactResetAwaitingBackendStart,
 }))
 
-vi.mock('./useResourceStalenessGuard', () => ({
-  useResourceStalenessGuard: () => ({ requestStalenessConfirmation }),
-}))
-
 import {
   clearFlowExecutionActiveForWorkspace,
   flowExecutionActive,
@@ -91,6 +85,7 @@ import {
   resetFlowExecutionState,
   useFlowRunner,
 } from './useFlowRunner'
+import { useResourceStalenessGuard } from './useResourceStalenessGuard'
 import {
   setBackendFlowProjectionReady,
   setBackendFlowProjectionUnknown,
@@ -110,7 +105,7 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     waitForRuntimeOperation.mockImplementation(() => new Promise<void>(() => undefined))
     markHomeRunArtifactResetAwaitingBackendStart.mockReset()
     clearHomeRunArtifactResetAwaitingBackendStart.mockReset()
-    requestStalenessConfirmation.mockReset()
+    useResourceStalenessGuard().dismiss()
     workspaceSession.value = {
       sessionId: 'session-1',
       workspaceId: 'workspace-demo',
@@ -342,13 +337,12 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     const runner = useFlowRunner()
     await expect(runner.runAllFlow()).resolves.toBeNull()
 
-    expect(requestStalenessConfirmation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        resources: [staleItem],
-        retry: expect.any(Function),
-        runLabel: 'full flow',
-      }),
-    )
+    const request = useResourceStalenessGuard().pendingRequest.value
+    expect(request).toMatchObject({
+      resources: [staleItem],
+      runLabel: 'full flow',
+    })
+    expect(request?.retry).toBeTypeOf('function')
     expect(runner.isRunning.value).toBe(false)
     expect(runner.state.value).toBe(StateEnum.Invalid)
     expect(showToast.mock.calls.some((call) => call[0]?.severity === 'error')).toBe(false)
@@ -369,10 +363,10 @@ describe('useFlowRunner desktop and design-tool routing', () => {
 
     const runner = useFlowRunner()
     await runner.runAllFlow()
-    const request = requestStalenessConfirmation.mock.calls[0]?.[0]
+    const request = useResourceStalenessGuard().pendingRequest.value
     expect(request).toBeDefined()
 
-    await request.retry(true)
+    await request!.retry(true)
 
     expect(startFlowOperationApi).toHaveBeenCalledTimes(2)
     expect(startFlowOperationApi).toHaveBeenLastCalledWith(
@@ -393,13 +387,12 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     const runner = useFlowRunner()
     await expect(runner.runFlow()).resolves.toBeNull()
 
-    expect(requestStalenessConfirmation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        resources: [],
-        retry: expect.any(Function),
-        runLabel: 'Floorplan step',
-      }),
-    )
+    const request = useResourceStalenessGuard().pendingRequest.value
+    expect(request).toMatchObject({
+      resources: [],
+      runLabel: 'Floorplan step',
+    })
+    expect(request?.retry).toBeTypeOf('function')
     expect(runner.isRunning.value).toBe(false)
     expect(runner.state.value).toBe(StateEnum.Invalid)
     expect(showToast.mock.calls.some((call) => call[0]?.severity === 'error')).toBe(false)
@@ -421,10 +414,10 @@ describe('useFlowRunner desktop and design-tool routing', () => {
 
     const runner = useFlowRunner()
     await runner.runFlow()
-    const request = requestStalenessConfirmation.mock.calls[0]?.[0]
+    const request = useResourceStalenessGuard().pendingRequest.value
     expect(request).toBeDefined()
 
-    await request.retry(true)
+    await request!.retry(true)
 
     expect(runStepApi).toHaveBeenCalledTimes(2)
     expect(runStepApi).toHaveBeenLastCalledWith({
@@ -443,7 +436,7 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     const runner = useFlowRunner()
     await runner.runAllFlow()
 
-    expect(requestStalenessConfirmation).not.toHaveBeenCalled()
+    expect(useResourceStalenessGuard().pendingRequest.value).toBeNull()
     expect(showToast.mock.calls.some((call) => call[0]?.severity === 'error')).toBe(true)
   })
 })
