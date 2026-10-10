@@ -42,6 +42,7 @@ const {
 
 <style scoped>
 .flow-signoff-card {
+  position: absolute;
   display: flex;
   flex-direction: column;
   align-items: center;

@@ -71,22 +71,36 @@ describe('RTL workspace dashboard', () => {
     }
   })
 
-  it('shows only Dashboard navigation and preserves the three-row dashboard', async () => {
+  it('shows only Dashboard navigation with Flow above three information cards', async () => {
     const { page, app } = launched!
     await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0].setSize(1440, 1000),
     )
-    await waitForText(page, '.home-dashboard-top', 'Signoff Checklist')
+    await waitForText(page, '.flow-overview', 'Signoff Checklist')
     expect(
       (
         await page.locator('nav[aria-label="Workspace navigation"] a').allTextContents()
       ).map((text) => text.trim()),
     ).toEqual(['Dashboard'])
-    expect(await page.locator('.home-dashboard-top h2').allTextContents()).toEqual([
-      'Chip Basic Info',
+    expect(await page.locator('.flow-overview h2').allTextContents()).toEqual([
       'Quality of Results',
       'Signoff Checklist',
     ])
+    expect(await page.locator('.home-dashboard-bottom h2').allTextContents()).toEqual([
+      'Chip Basic Info',
+      'Key Metrics',
+      'Data Snapshot',
+    ])
+    expect(await page.locator('.home-dashboard-top').count()).toBe(0)
+    expect(
+      await page.locator('.flow-overview .status-detail-link').evaluateAll((buttons) =>
+        buttons.every((button) => {
+          const bounds = button.getBoundingClientRect()
+          const card = button.closest('.flow-status-card')!.getBoundingClientRect()
+          return bounds.top >= card.top && bounds.bottom <= card.bottom - 1
+        }),
+      ),
+    ).toBe(true)
     expect(
       await page.locator('.workspace-workbench-right .flow-status-strip').count(),
     ).toBe(0)
@@ -95,16 +109,23 @@ describe('RTL workspace dashboard', () => {
     )
     expect(await page.locator('.home-dashboard-bottom').count()).toBe(1)
     await shot('dashboard-wide')
-    const firstStep = page.locator('.flow-step-card').first()
     expect(
-      await firstStep.evaluate((element) => {
+      await page.locator('.flow-canvas').evaluate((element) => {
         const bounds = element.getBoundingClientRect()
         const viewport = element.closest('.flow-scroll')!.getBoundingClientRect()
         return (
-          bounds.top >= viewport.top &&
-          bounds.bottom <= viewport.bottom &&
-          bounds.left >= viewport.left &&
-          bounds.right <= viewport.right
+          Math.abs(
+            bounds.left +
+              bounds.width / 2 -
+              viewport.left -
+              (element.closest('.flow-scroll') as HTMLElement).clientWidth / 2,
+          ) < 2 &&
+          Math.abs(
+            bounds.top +
+              bounds.height / 2 -
+              viewport.top -
+              (element.closest('.flow-scroll') as HTMLElement).clientHeight / 2,
+          ) < 2
         )
       }),
     ).toBe(true)
@@ -183,14 +204,19 @@ describe('RTL workspace dashboard', () => {
     })
     expect(
       await page.locator('.home-dashboard').evaluate((element) => {
-        const top = element.querySelector('.home-dashboard-top')!.getBoundingClientRect()
         const flow = element
           .querySelector('.workspace-flow-dashboard')!
           .getBoundingClientRect()
         const bottom = element
           .querySelector('.home-dashboard-bottom')!
           .getBoundingClientRect()
-        return top.bottom <= flow.top && flow.bottom <= bottom.top
+        const overview = element.querySelector('.flow-overview')!.getBoundingClientRect()
+        const viewport = element.querySelector('.flow-scroll')!.getBoundingClientRect()
+        return (
+          flow.bottom <= bottom.top &&
+          overview.top >= viewport.top &&
+          overview.bottom <= viewport.bottom
+        )
       }),
     ).toBe(true)
     await page.locator('.flow-scroll').scrollIntoViewIfNeeded()
@@ -202,6 +228,25 @@ describe('RTL workspace dashboard', () => {
     )
     await page.getByRole('button', { name: 'Expand flow diagram', exact: true }).click()
     await page.locator('.workspace-flow-dashboard.is-expanded').waitFor()
+    const expandedPositions = await page
+      .locator('.flow-scroll')
+      .evaluate(async (element) => {
+        const positions: string[] = []
+        for (let frame = 0; frame < 90; frame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+          const canvas = element.querySelector('.flow-canvas')!.getBoundingClientRect()
+          positions.push(
+            `${canvas.x},${canvas.y},${element.clientWidth},${element.clientHeight}`,
+          )
+        }
+        return positions.slice(-30)
+      })
+    expect(new Set(expandedPositions).size).toBe(1)
+    expect(
+      await page
+        .locator('.workspace-flow-dashboard.is-expanded .flow-status-card')
+        .count(),
+    ).toBe(2)
     expect(
       await page
         .locator('.workspace-flow-dashboard')
@@ -216,7 +261,150 @@ describe('RTL workspace dashboard', () => {
       element.scrollTop = 0
     })
     await shot('dashboard-expanded-verification')
+    await page.locator('.flow-scroll').evaluate((element) => {
+      element.scrollLeft = element.scrollWidth
+    })
+    expect(
+      await page.locator('.flow-signoff-card').evaluate((element) => {
+        const harden = document.querySelector('[data-step="Harden"]')!
+        const before = harden.getBoundingClientRect()
+        const after = element.getBoundingClientRect()
+        return (
+          getComputedStyle(element).position === 'absolute' &&
+          Math.abs(before.top - after.top) < 2 &&
+          after.left > before.right
+        )
+      }),
+    ).toBe(true)
+    await shot('signoff-after-harden')
     await page.getByRole('button', { name: 'Restore flow diagram', exact: true }).click()
+  })
+
+  it('applies two-row ratios, nine snapshot cells, and keeps status cards fixed while zooming', async () => {
+    const { page } = launched!
+    const ratios = await page.locator('.home-dashboard').evaluate((element) => {
+      const middle = element
+        .querySelector('.workspace-flow-dashboard')!
+        .getBoundingClientRect()
+      const bottom = element.querySelector('.home-dashboard-bottom')!
+      const bottomCards = [...bottom.children].map(
+        (card) => card.getBoundingClientRect().width,
+      )
+      return {
+        rows: middle.height / bottom.getBoundingClientRect().height,
+        bottom: bottomCards.map((width) => width / bottomCards[2]),
+      }
+    })
+    expect(ratios.rows).toBeCloseTo(2, 1)
+    expect(ratios.bottom[0]).toBeCloseTo(2, 1)
+    expect(ratios.bottom[1]).toBeCloseTo(4, 1)
+    expect(await page.locator('.qor-card').textContent()).not.toContain('Current QoR')
+    expect(await page.locator('.data-snapshot-cell').count()).toBe(9)
+    const overview = page.locator('.flow-overview')
+    const before = await overview.boundingBox()
+    expect(
+      await overview.locator('.flow-status-card').evaluateAll((cards) => {
+        const first = cards[0].getBoundingClientRect()
+        const second = cards[1].getBoundingClientRect()
+        const viewport = document.querySelector('.flow-scroll')!.getBoundingClientRect()
+        return (
+          Math.abs(first.top - second.top) < 1 &&
+          first.right <= second.left &&
+          first.height >= 140 &&
+          first.height <= 180 &&
+          second.top >= viewport.top &&
+          second.bottom <= viewport.bottom &&
+          Math.abs(
+            viewport.top -
+              document.querySelector('.flow-header')!.getBoundingClientRect().bottom,
+          ) < 2 &&
+          Boolean(
+            document
+              .elementFromPoint(second.right + 16, first.top + 20)
+              ?.closest('.flow-scroll'),
+          )
+        )
+      }),
+    ).toBe(true)
+    const slider = page.getByRole('slider', { name: 'Flow diagram zoom' })
+    await slider.fill('1')
+    await waitForText(page, '.flow-header output', '100%')
+    await page.locator('.flow-scroll').hover()
+    await page.keyboard.down('Control')
+    try {
+      await page.mouse.wheel(0, -100)
+      await waitForText(page, '.flow-header output', '105%')
+      await page.mouse.wheel(0, 100)
+      await waitForText(page, '.flow-header output', '100%')
+    } finally {
+      await page.keyboard.up('Control')
+    }
+    await slider.fill('0.75')
+    await waitForText(page, '.flow-header output', '75%')
+    expect(await overview.boundingBox()).toEqual(before)
+    await page.getByRole('button', { name: 'QoR details', exact: false }).click()
+    await page.getByRole('dialog').waitFor()
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Close', exact: true })
+      .click()
+    await page.getByRole('button', { name: 'Sign-off details', exact: false }).click()
+    await page.getByRole('dialog').waitFor()
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Close', exact: true })
+      .click()
+    await shot('dashboard-adjusted-ratios')
+  })
+
+  it('pans with a real left-button drag, stops on release, and keeps report buttons clickable', async () => {
+    const { page } = launched!
+    const viewport = page.locator('.flow-scroll')
+    const overviewBefore = await page.locator('.flow-overview').boundingBox()
+    await viewport.evaluate((element) => {
+      element.scrollLeft = 100
+      element.scrollTop = 100
+    })
+    const bounds = await viewport.boundingBox()
+    if (!bounds) throw new Error('Flow viewport is unavailable')
+    await page.mouse.move(bounds.x + 600, bounds.y + 70)
+    await page.mouse.down({ button: 'left' })
+    await page.mouse.move(bounds.x + 520, bounds.y + 40, { steps: 6 })
+    expect(await viewport.evaluate((element) => getComputedStyle(element).cursor)).toBe(
+      'grabbing',
+    )
+    await page.mouse.up({ button: 'left' })
+    const position = await viewport.evaluate((element) => ({
+      left: element.scrollLeft,
+      top: element.scrollTop,
+    }))
+    expect(position.left).toBeCloseTo(180, 0)
+    expect(position.top).toBeCloseTo(130, 0)
+    expect(await viewport.evaluate((element) => getComputedStyle(element).cursor)).toBe(
+      'grab',
+    )
+    await page.mouse.move(bounds.x + 600, bounds.y + 25)
+    expect(await viewport.evaluate((element) => element.scrollLeft)).toBe(position.left)
+    await page.mouse.down({ button: 'left' })
+    await page.mouse.move(bounds.x - 20, bounds.y + 25, { steps: 6 })
+    await page.mouse.up({ button: 'left' })
+    expect(await viewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(
+      position.left,
+    )
+    expect(
+      await viewport.evaluate((element) => element.classList.contains('is-panning')),
+    ).toBe(false)
+    await shot('flow-left-button-pan')
+    expect(await page.locator('.flow-overview').boundingBox()).toEqual(overviewBefore)
+    await viewport.evaluate((element) => {
+      element.scrollLeft = 0
+    })
+    await page.getByRole('button', { name: 'Synthesis reports', exact: true }).click()
+    await page.locator('.reports-browser').waitFor()
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Close', exact: true })
+      .click()
   })
 })
 
