@@ -6,6 +6,7 @@ import type {
   MpcSpecReadResult as DesktopMpcSpecReadResult,
   ResourceStatus as DesktopResourceStatus,
   ResourceType as DesktopResourceType,
+  ResourceUpdatesDetectedEvent,
   PdkInstallationSnapshot,
 } from '@ecos-studio/shared'
 import { getDesktopApi } from '@/platform/desktop'
@@ -246,6 +247,12 @@ export function subscribeResourceProgress(
 
 export function subscribeResourcesChanged(onChanged: () => void): () => void {
   return getDesktopApi().resources.onChanged(onChanged)
+}
+
+export function subscribeResourceUpdatesDetected(
+  listener: (event: ResourceUpdatesDetectedEvent) => void,
+): () => void {
+  return getDesktopApi().resources.onUpdatesDetected(listener)
 }
 
 export function subscribePluginProgress(

@@ -22,6 +22,7 @@ import type {
   MpcSpecReadResult,
   ResourceOperationResult,
   ResourceUpdateCheckResult,
+  ResourceUpdatesDetectedEvent,
 } from './resources.ts'
 import type {
   EccRuntimeApi,
@@ -450,6 +451,13 @@ export interface DesktopApi {
      * so listings rendered from the cache can be re-fetched silently.
      */
     onChanged(listener: () => void): DesktopEventUnsubscribe
+    /**
+     * Fired when an automatic (non-manual) update check finds newly available
+     * resource updates, so the UI can notify without polling.
+     */
+    onUpdatesDetected(
+      listener: (event: ResourceUpdatesDetectedEvent) => void,
+    ): DesktopEventUnsubscribe
   }
   pdkInventory: {
     list(): Promise<PdkInstallationSnapshot[]>

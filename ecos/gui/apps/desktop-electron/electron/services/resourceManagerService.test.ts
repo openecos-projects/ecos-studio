@@ -5227,6 +5227,132 @@ describe('ResourceManagerService', () => {
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
+  it('reports a missing update-check cache as stale', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      registryUrl: 'https://example.com/registry.json',
+      ...dirs,
+    })
+
+    await expect(
+      service.isUpdateCheckCacheStale(Date.parse('2026-10-10T12:00:00.000Z')),
+    ).resolves.toBe(true)
+  })
+
+  it('reports update-check cache staleness from the cached checked_at age', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const dirs = testResourceDirs(root)
+    const registryUrl = 'https://example.com/registry.json'
+    const cachePath = testUpdateCheckCachePath(dirs.cacheDir, registryUrl)
+    await mkdir(dirs.cacheDir, { recursive: true })
+    await writeFile(
+      cachePath,
+      JSON.stringify({
+        schema_version: 1,
+        checked_at: '2026-10-10T11:00:00.000Z',
+        resources: {},
+      }),
+      'utf8',
+    )
+    const service = new ResourceManagerService({ registryUrl, ...dirs })
+
+    await expect(
+      service.isUpdateCheckCacheStale(Date.parse('2026-10-10T12:00:00.000Z')),
+    ).resolves.toBe(false)
+
+    await writeFile(
+      cachePath,
+      JSON.stringify({
+        schema_version: 1,
+        checked_at: '2026-10-10T05:00:00.000Z',
+        resources: {},
+      }),
+      'utf8',
+    )
+    const rereadService = new ResourceManagerService({ registryUrl, ...dirs })
+    await expect(
+      rereadService.isUpdateCheckCacheStale(Date.parse('2026-10-10T12:00:00.000Z')),
+    ).resolves.toBe(true)
+  })
+
+  it('marks health.update_check stale from the cached check age', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(Date.parse('2026-10-10T12:00:00.000Z'))
+    try {
+      const root = await createTempDir('ecos-resources-')
+      const archive = await createEccFeArchive(root)
+      const registryPath = join(root, 'registry.json')
+      const dirs = testResourceDirs(root)
+      const metadataUrl = 'https://example.com/ecc-fe-latest.metadata.json'
+      const installedSha = 'c'.repeat(64)
+      const latestSha = 'd'.repeat(64)
+      await writePinnedEccFeRegistry(registryPath, {
+        version: 'latest',
+        asset: {
+          url: `file://${archive.path}`,
+          metadata_url: metadataUrl,
+          sha256: latestSha,
+          size: 1,
+          strip_prefix: 'ecc-fe-runtime',
+        },
+      })
+      await createInstalledEccFeRoot(join(dirs.toolsDir, 'ecc-fe', 'latest'))
+      await writeTestManifest(root, {
+        'tool:ecc-fe': installedEccFeEntry(root, {
+          version: 'latest',
+          sha256: installedSha,
+        }),
+      })
+      const cachePath = testUpdateCheckCachePath(dirs.cacheDir, `file://${registryPath}`)
+      const writeCache = async (checkedAt: string) => {
+        await mkdir(dirs.cacheDir, { recursive: true })
+        await writeFile(
+          cachePath,
+          JSON.stringify({
+            schema_version: 1,
+            checked_at: checkedAt,
+            resources: {
+              'tool:ecc-fe': {
+                resource_id: 'tool:ecc-fe',
+                checked_at: checkedAt,
+                sha256: latestSha,
+                status: 'checked',
+                update_available: true,
+                error: null,
+                update_url: metadataUrl,
+              },
+            },
+          }),
+          'utf8',
+        )
+      }
+      const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+        throw new Error(`unexpected fetch ${String(url)}`)
+      })
+
+      await writeCache('2026-10-10T05:00:00.000Z')
+      const staleService = new ResourceManagerService({
+        registryUrl: `file://${registryPath}`,
+        ...dirs,
+        fetchImpl: fetchImpl as typeof fetch,
+      })
+      const staleResource = await staleService.getResource('tool:ecc-fe')
+      expect(staleResource.health.update_check).toMatchObject({ stale: true })
+
+      await writeCache('2026-10-10T11:30:00.000Z')
+      const freshService = new ResourceManagerService({
+        registryUrl: `file://${registryPath}`,
+        ...dirs,
+        fetchImpl: fetchImpl as typeof fetch,
+      })
+      const freshResource = await freshService.getResource('tool:ecc-fe')
+      expect(freshResource.health.update_check).toMatchObject({ stale: false })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('checks sidecar-less pinned PDKs against the registry checksum without fetching', async () => {
     const root = await createTempDir('ecos-resources-')
     const registryPath = join(root, 'registry.json')

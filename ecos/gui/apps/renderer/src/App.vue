@@ -248,6 +248,7 @@ import {
 import { useRouter, useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/themeStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
+import { usePluginStore } from '@/stores/pluginStore'
 import { AGENT_PANEL_DEFAULT_WIDTH } from '@/composables/agentPanelWidth'
 import { useAppMenuActions } from '@/composables/useAppMenuActions'
 import { useAppWindowClose } from '@/composables/useAppWindowClose'
@@ -333,6 +334,7 @@ type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
 const router = useRouter()
 const themeStore = useThemeStore()
 const agentShell = useAgentShellStore()
+const pluginStore = usePluginStore()
 const route = useRoute()
 const isWelcome = computed(() => route.path === '/')
 const isWorkspaceRoute = computed(() => route.path.startsWith('/workspace'))
@@ -421,6 +423,22 @@ watch(
     })()
   },
   { immediate: true },
+)
+
+watch(
+  () => pluginStore.detectedUpdates,
+  (updates) => {
+    if (updates.length === 0) return
+    const names = updates.slice(0, 3).map((update) => update.display_name)
+    const remainder = updates.length - names.length
+    showToast({
+      severity: 'info',
+      summary:
+        updates.length === 1 ? 'Resource update available' : 'Resource updates available',
+      detail: `${names.join(', ')}${remainder > 0 ? ` and ${remainder} more` : ''} — open Resource Manager to update.`,
+      life: 6000,
+    })
+  },
 )
 
 const documentationUrl =

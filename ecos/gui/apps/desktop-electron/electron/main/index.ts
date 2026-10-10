@@ -55,6 +55,7 @@ import {
 } from '../services/projectManagementReadService'
 import { ProjectWorkspaceImportService } from '../services/projectWorkspaceImportService'
 import { ResourceManagerService } from '../services/resourceManagerService'
+import { ResourceUpdateScheduler } from '../services/resourceUpdateScheduler'
 import type { PdkInventoryService } from '../services/pdkInventoryService'
 import { ProjectEccConfigService } from '../services/projectEccConfigService'
 import { SettingsStore } from '../services/settingsStore'
@@ -108,6 +109,7 @@ let services: {
   projectDoctorService: ProjectDoctorService
   settingsStore: SettingsStore
   resourceManagerService: ResourceManagerService
+  resourceUpdateScheduler: ResourceUpdateScheduler
   pdkInventoryService: PdkInventoryService
   projectEccConfigService: ProjectEccConfigService
   chipViewerService: ChipViewerService
@@ -189,6 +191,18 @@ function getDesktopServices() {
     env: runtimeEnv,
   })
   const resourceManagerService = new ResourceManagerService()
+  // Broadcast detected updates to every window: automatic checks run outside
+  // any IPC request, so the renderer relies on this push channel.
+  const resourceUpdateScheduler = new ResourceUpdateScheduler({
+    resourceManagerService,
+    emit: (event) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) {
+          window.webContents.send(desktopApiEventChannels.resourcesUpdatesDetected, event)
+        }
+      }
+    },
+  })
   const pdkInventoryService = resourceManagerService.getPdkInventoryService()
   const projectEccConfigService = new ProjectEccConfigService()
   const cliInstallerService = new CliInstallerService({
@@ -404,6 +418,7 @@ function getDesktopServices() {
     pdkInventoryService,
     projectEccConfigService,
     resourceManagerService,
+    resourceUpdateScheduler,
     settingsStore,
     shellService,
     surferProtocolService,
@@ -559,6 +574,11 @@ async function launchWindow(
       .catch((error) =>
         electronLogger.warn('[project-comparison] focus check failed', error),
       )
+    void services?.resourceUpdateScheduler
+      .runCycle('focus')
+      .catch((error) =>
+        electronLogger.warn('[resources] focus update check failed', error),
+      )
   })
   return mainWindow
 }
@@ -699,6 +719,7 @@ if (!cliInvocation && gotSingleInstanceLock) {
     })
 
     startCliInstallerStartupTasks()
+    getDesktopServices().resourceUpdateScheduler.start()
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {

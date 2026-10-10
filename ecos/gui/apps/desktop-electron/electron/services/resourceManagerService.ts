@@ -47,6 +47,7 @@ import {
   type PdkInventoryServiceOptions,
 } from './pdkInventoryService'
 import { fetchGitHubBranchHead, parseGitHubArchiveCommit } from './mpcUpdateProbe'
+import { isUpdateCheckStale } from './resourceUpdatePolicy'
 import { requiredToolHealthMarkers, type ToolHealthMarkerKind } from './toolHealthPolicy'
 import {
   validateMpcSpec,
@@ -1422,6 +1423,15 @@ export class ResourceManagerService {
         this.updateCheckPromise = null
       }
     }
+  }
+
+  /**
+   * True when the persisted update-check cache is missing, unreadable, or
+   * older than the TTL — i.e. an automatic check is due.
+   */
+  async isUpdateCheckCacheStale(now = Date.now()): Promise<boolean> {
+    const cache = await this.readUpdateCheckCache()
+    return isUpdateCheckStale(cache?.checked_at ?? null, now)
   }
 
   private async runResourceUpdateCheck(
@@ -4913,6 +4923,7 @@ function withUpdateCheckHealth(
       error: updateCheck.error,
       commit: updateCheck.commit ?? null,
       built_at: updateCheck.built_at ?? null,
+      stale: isUpdateCheckStale(updateCheck.checked_at, Date.now()),
     },
   }
 }

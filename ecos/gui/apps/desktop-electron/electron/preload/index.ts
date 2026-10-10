@@ -15,6 +15,7 @@ import type {
   ResourceJob,
   ResourceImportLocalRequest,
   ResourceInstallRequest,
+  ResourceUpdatesDetectedEvent,
   DesktopSettingsValue,
   DesktopShellDataEvent,
   DesktopShellExitEvent,
@@ -395,6 +396,13 @@ const desktopApi: DesktopApi = {
       subscribeToDesktopEvent(desktopApiEventChannels.resourcesChanged, () => {
         listener()
       }),
+    onUpdatesDetected: (listener) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.resourcesUpdatesDetected,
+        (_event, payload: unknown) => {
+          listener(payload as ResourceUpdatesDetectedEvent)
+        },
+      ),
   },
   pdkInventory: {
     list: () => invokeDesktop(desktopApiIpcChannels.pdkInventoryList),
