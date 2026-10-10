@@ -7,6 +7,7 @@ import {
   type QorScalarStatus,
 } from '@ecos-studio/shared'
 import type { BackendWorkspaceQorComparison } from '@/composables/useBackendWorkspaceQor'
+import type { EccQorSnapshotDimension } from '@ecos-studio/shared'
 
 export interface HomeQorComparisonStep {
   step: FlowStep
@@ -48,6 +49,40 @@ export interface HomeQorDetailModel {
   scoreState: HomeQorComparisonTone
   summary: HomeQorComparisonSummary
   steps: HomeQorDetailStep[]
+  scoring: {
+    engine: string
+    profile: string
+    score: number | null
+    scalarStatus: QorScalarStatus
+    dimensions: Array<{
+      name: string
+      value: number | null
+      state: EccQorSnapshotDimension['state']
+      featureIds: string[]
+    }>
+    feasibility: string
+    evidence: {
+      state: string
+      index: number | null
+      coverage: number | null
+      consistency: number | null
+    }
+    power: { totalUw: number | null; budgetUw: number | null; sourceKind: string | null }
+    inflation: {
+      iPlace: number | null
+      iRoute: number | null
+      iTotal: number | null
+      congestionSeverity: number | null
+    }
+    gates: Array<{ id: string; stage: string; state: string; blocksTapeout: boolean }>
+    diagnoses: Array<{
+      diagnosisId: string
+      state: string
+      severity: number
+      confidence: string
+      affectedDimensions: string[]
+    }>
+  } | null
 }
 
 export function homeQorFlowStepForLabel(label: string): FlowStep | null {
@@ -161,6 +196,23 @@ export function buildHomeQorDetailModel(
     scoreState: scoreComparisonState(comparison.score, comparison.baselineScore),
     summary,
     steps,
+    scoring: comparison.qorSnapshotExtension
+      ? {
+          engine: comparison.qorSnapshotExtension.scoringEngine,
+          profile: comparison.qorSnapshotExtension.profile,
+          score: comparison.qorSnapshotExtension.score,
+          scalarStatus: comparison.qorSnapshotExtension.scalarStatus,
+          dimensions: Object.entries(comparison.qorSnapshotExtension.qphys).map(
+            ([name, dimension]) => ({ name, ...dimension }),
+          ),
+          feasibility: comparison.qorSnapshotExtension.feasibility.status,
+          evidence: comparison.qorSnapshotExtension.evidence,
+          power: comparison.qorSnapshotExtension.power,
+          inflation: comparison.qorSnapshotExtension.inflation,
+          gates: comparison.qorSnapshotExtension.feasibility.gates,
+          diagnoses: comparison.qorSnapshotExtension.diagnoses,
+        }
+      : null,
   }
 }
 

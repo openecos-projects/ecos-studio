@@ -1,5 +1,6 @@
 import { computed } from 'vue'
 import type {
+  EccQorSnapshotExtension,
   MetricComparison,
   MetricValue,
   ProjectManifestFlowStep,
@@ -35,6 +36,7 @@ export interface BackendWorkspaceQorComparison {
   available: boolean
   metrics: BackendWorkspaceQorMetric[]
   deltas: BackendWorkspaceQorMetric[]
+  qorSnapshotExtension?: EccQorSnapshotExtension | null
 }
 
 export type BackendWorkspaceQorStatus =
@@ -127,6 +129,7 @@ export function useBackendWorkspaceQor() {
         available: false,
         metrics,
         deltas: [],
+        qorSnapshotExtension: qor.data.qorSnapshotExtension ?? null,
       }
       return {
         status: overview.identity.baselineWorkspaceId ? 'current-only' : 'no-baseline',
@@ -152,6 +155,7 @@ export function useBackendWorkspaceQor() {
       available: baseline.data.status !== 'not-comparable',
       metrics,
       deltas: metrics.filter((metric) => metric.isDirectional),
+      qorSnapshotExtension: qor.data.qorSnapshotExtension ?? null,
     }
     return {
       status: comparison.isBaselineWorkspace

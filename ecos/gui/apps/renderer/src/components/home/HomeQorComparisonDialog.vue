@@ -3,7 +3,7 @@
     :visible="visible"
     modal
     maximizable
-    header="QoR Comparison"
+    header="QoR Details"
     class="qor-detail-dialog"
     :style="{ width: 'min(1280px, calc(100vw - 32px))' }"
     :draggable="false"
@@ -13,22 +13,12 @@
       <article class="qor-detail-card qor-detail-summary-card">
         <header>
           <div>
-            <span>QoR comparison</span>
-            <strong>Baseline and current workspace</strong>
+            <span>Current QoR</span>
+            <strong>{{ detail.current.workspaceName }}</strong>
           </div>
           <i class="ri-scales-3-line" aria-hidden="true" />
         </header>
         <div class="qor-detail-summary-grid">
-          <section class="is-baseline">
-            <span>Baseline</span>
-            <strong :title="detail.baseline.workspaceName">
-              {{ detail.baseline.workspaceName }}
-            </strong>
-            <div class="qor-detail-score-value">
-              <strong>{{ formatQorScore(detail.baseline.score) }}</strong>
-              <span v-if="detail.baseline.score !== null">/ 100</span>
-            </div>
-          </section>
           <section class="is-current" :class="`is-${detail.scoreState}`">
             <span>Current workspace</span>
             <strong :title="detail.current.workspaceName">
@@ -41,68 +31,104 @@
           </section>
           <dl class="qor-detail-summary-list">
             <div>
-              <dt>Directional metrics</dt>
-              <dd>{{ detail.summary.comparableCount }}</dd>
-            </div>
-            <div class="is-improvement">
-              <dt>Improved</dt>
-              <dd>{{ detail.summary.improvedCount }}</dd>
-            </div>
-            <div class="is-regression">
-              <dt>Regressed</dt>
-              <dd>{{ detail.summary.regressedCount }}</dd>
-            </div>
-            <div>
-              <dt>Score trend</dt>
-              <dd :class="`is-${detail.scoreState}`">
-                {{ qorScoreComparisonLabel(detail.current.score, detail.baseline.score) }}
-              </dd>
+              <dt>Dimension count</dt>
+              <dd>{{ detail.scoring?.dimensions.length ?? 0 }}</dd>
             </div>
           </dl>
         </div>
       </article>
 
-      <p v-if="!detail.steps.length" class="qor-detail-no-metrics">
-        {{ emptyLabel }}
-      </p>
-
-      <article
-        v-for="step in detail.steps"
-        :key="step.step"
-        class="qor-detail-card qor-detail-step-card"
-      >
+      <article v-if="detail.scoring" class="qor-detail-card qor-detail-scoring-card">
         <header>
           <div>
-            <span>Step {{ String(step.order).padStart(2, '0') }}</span>
-            <strong>{{ step.label }}</strong>
+            <span>Score calculation</span>
+            <strong>{{ detail.scoring.engine }} · {{ detail.scoring.profile }}</strong>
           </div>
-          <small>
-            {{ step.metrics.length }} metrics · {{ step.improvedCount }} improved ·
-            {{ step.regressedCount }} regressed
-          </small>
+          <i class="ri-function-line" aria-hidden="true" />
         </header>
-        <dl class="qor-detail-metric-list">
-          <div class="qor-detail-metric-heading" aria-hidden="true">
-            <dt>Metric</dt>
-            <dd>Baseline</dd>
-            <dd>Current</dd>
-            <p>Trend</p>
-          </div>
-          <div
-            v-for="metric in step.metrics"
-            :key="`${step.step}:${metric.metricName}`"
-            :class="`is-${metric.state}`"
-          >
-            <dt>
-              <span>{{ metric.displayName }}</span>
-              <small>{{ metric.metricName }}</small>
-            </dt>
-            <dd>{{ formatQorValue(metric.baselineValue, metric.unit) }}</dd>
-            <dd>{{ formatQorValue(metric.currentValue, metric.unit) }}</dd>
-            <p :class="`is-${metric.state}`">{{ qorMetricComparisonLabel(metric) }}</p>
+        <p class="qor-detail-method">
+          The total is the authoritative QoR v3 score emitted by the runtime. It combines
+          the five normalized dimensions below; the runtime status bands classify the
+          result.
+        </p>
+        <dl class="qor-detail-dimension-list">
+          <div v-for="dimension in detail.scoring.dimensions" :key="dimension.name">
+            <dt>{{ dimension.name }}</dt>
+            <dd>{{ dimension.value ?? 'NR' }}</dd>
+            <small>{{ dimension.state }}</small>
           </div>
         </dl>
+        <dl class="qor-detail-scoring-facts">
+          <div>
+            <dt>Feasibility</dt>
+            <dd>{{ detail.scoring.feasibility }}</dd>
+          </div>
+          <div>
+            <dt>Evidence</dt>
+            <dd>{{ detail.scoring.evidence.state }}</dd>
+          </div>
+          <div>
+            <dt>Coverage</dt>
+            <dd>{{ detail.scoring.evidence.coverage ?? 'NR' }}</dd>
+          </div>
+          <div>
+            <dt>Consistency</dt>
+            <dd>{{ detail.scoring.evidence.consistency ?? 'NR' }}</dd>
+          </div>
+          <div>
+            <dt>Power</dt>
+            <dd>{{ detail.scoring.power.totalUw ?? 'NR' }} µW</dd>
+          </div>
+          <div>
+            <dt>Power source</dt>
+            <dd>{{ detail.scoring.power.sourceKind ?? 'NR' }}</dd>
+          </div>
+          <div>
+            <dt>Placement inflation</dt>
+            <dd>{{ detail.scoring.inflation.iPlace ?? 'NR' }}</dd>
+          </div>
+          <div>
+            <dt>Route inflation</dt>
+            <dd>{{ detail.scoring.inflation.iRoute ?? 'NR' }}</dd>
+          </div>
+          <div>
+            <dt>Total inflation</dt>
+            <dd>{{ detail.scoring.inflation.iTotal ?? 'NR' }}</dd>
+          </div>
+          <div>
+            <dt>Congestion severity</dt>
+            <dd>{{ detail.scoring.inflation.congestionSeverity ?? 'NR' }}</dd>
+          </div>
+        </dl>
+        <div class="qor-detail-subsection">
+          <strong>Feasibility gates</strong>
+          <ul>
+            <li v-for="gate in detail.scoring.gates" :key="gate.id">
+              <span>{{ gate.stage }} · {{ gate.id }}</span>
+              <em :class="`is-${gate.state}`"
+                >{{ gate.state }}{{ gate.blocksTapeout ? ' · tapeout blocker' : '' }}</em
+              >
+            </li>
+          </ul>
+        </div>
+        <div v-if="detail.scoring.diagnoses.length" class="qor-detail-subsection">
+          <strong>Runtime diagnoses</strong>
+          <ul>
+            <li
+              v-for="diagnosis in detail.scoring.diagnoses"
+              :key="diagnosis.diagnosisId"
+            >
+              <span
+                >{{ diagnosis.diagnosisId }} ·
+                {{ diagnosis.affectedDimensions.join(', ') || 'general' }}</span
+              >
+              <em>{{ diagnosis.state }} · severity {{ diagnosis.severity }}</em>
+            </li>
+          </ul>
+        </div>
       </article>
+
+      <p v-if="!detail.scoring" class="qor-detail-no-metrics">{{ emptyLabel }}</p>
     </div>
     <p v-else class="dialog-empty">{{ emptyLabel }}</p>
   </Dialog>
@@ -110,13 +136,7 @@
 
 <script setup lang="ts">
 import Dialog from 'primevue/dialog'
-import {
-  formatQorScore,
-  formatQorValue,
-  qorMetricComparisonLabel,
-  qorScoreComparisonLabel,
-  type HomeQorDetailModel,
-} from './qorComparisonData'
+import { formatQorScore, type HomeQorDetailModel } from './qorComparisonData'
 
 defineProps<{
   detail: HomeQorDetailModel | null
@@ -157,6 +177,81 @@ const emit = defineEmits<{
   flex: 0 0 auto;
   min-width: 0;
   overflow: hidden;
+}
+
+.qor-detail-method {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+  padding: 10px 12px 0;
+}
+
+.qor-detail-dimension-list,
+.qor-detail-scoring-facts {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.qor-detail-dimension-list > div,
+.qor-detail-scoring-facts > div {
+  min-width: 0;
+}
+
+.qor-detail-dimension-list dt,
+.qor-detail-scoring-facts dt {
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-transform: capitalize;
+}
+
+.qor-detail-dimension-list dd,
+.qor-detail-scoring-facts dd {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  margin: 2px 0 0;
+}
+
+.qor-detail-dimension-list small {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.qor-detail-subsection {
+  border-top: 1px solid var(--border-color);
+  padding: 10px 12px;
+}
+
+.qor-detail-subsection > strong {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.qor-detail-subsection ul {
+  display: grid;
+  gap: 5px;
+  list-style: none;
+  margin: 7px 0 0;
+  padding: 0;
+}
+
+.qor-detail-subsection li {
+  align-items: center;
+  color: var(--text-secondary);
+  display: flex;
+  font-size: 11px;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.qor-detail-subsection em {
+  color: var(--text-primary);
+  font-style: normal;
+  white-space: nowrap;
 }
 
 .qor-detail-card > header {
@@ -443,10 +538,6 @@ const emit = defineEmits<{
   }
 
   .qor-detail-metric-list dd:nth-of-type(1)::before {
-    content: 'Baseline';
-  }
-
-  .qor-detail-metric-list dd:nth-of-type(2)::before {
     content: 'Current';
   }
 }
