@@ -80,15 +80,6 @@ export function flowStepRunArtifacts(step: WorkspaceStepResource): FlowStepRunAr
   }
 }
 
-export function flowStepArtifactFingerprint(step: WorkspaceStepResource): string {
-  const artifacts = flowStepRunArtifacts(step)
-  return [
-    step.state.trim().toLowerCase(),
-    ...artifacts.reports.map(resourceFingerprint),
-    artifacts.layout ? resourceFingerprint(artifacts.layout) : 'layout:missing',
-  ].join('|')
-}
-
 function flattenReportResource(resource: ReportResource): WorkspaceResourceFile[] {
   return isWorkspaceResourceFile(resource)
     ? [resource]
@@ -104,8 +95,4 @@ function isWorkspaceResourceFile(value: unknown): value is WorkspaceResourceFile
     'exists' in value &&
     typeof value.exists === 'boolean'
   )
-}
-
-function resourceFingerprint(file: WorkspaceResourceFile): string {
-  return `${file.path}:${file.sizeBytes ?? 0}:${file.mtimeMs ?? 0}`
 }
