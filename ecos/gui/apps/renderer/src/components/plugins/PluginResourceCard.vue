@@ -16,13 +16,29 @@
         >
           {{ row.progressMessage || row.description }}
         </p>
-        <div v-if="row.flowTags.length || row.dependencyLabel" class="plugin-card-tags">
+        <div
+          v-if="
+            row.flowTags.length ||
+            row.dependencyLabel ||
+            row.checksumHint ||
+            row.updateCheckLabel
+          "
+          class="plugin-card-tags"
+        >
           <span v-if="row.flowTags.length" class="resource-flow-tags">
             <b v-for="tag in row.flowTags.slice(0, 4)" :key="tag">{{ tag }}</b>
           </span>
           <span v-if="row.dependencyLabel" class="resource-dependency">
             <i class="ri-node-tree" aria-hidden="true"></i>
             <span>{{ row.dependencyLabel }}</span>
+          </span>
+          <span v-if="row.checksumHint" class="resource-checksum-hint">
+            <i class="ri-error-warning-line" aria-hidden="true"></i>
+            <span>{{ row.checksumHint }}</span>
+          </span>
+          <span v-if="row.updateCheckLabel" class="resource-update-check">
+            <i class="ri-time-line" aria-hidden="true"></i>
+            <span>{{ row.updateCheckLabel }}</span>
           </span>
         </div>
       </div>
@@ -246,6 +262,35 @@ const homepageUrl = computed(() => homepageUrlFor(props.row))
 }
 
 .resource-dependency span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resource-checksum-hint,
+.resource-update-check {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 10px;
+  gap: 4px;
+}
+
+.resource-checksum-hint i {
+  flex: 0 0 auto;
+  color: var(--warn-color, #d99a2b);
+  font-size: 12px;
+}
+
+.resource-update-check i {
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+.resource-checksum-hint span,
+.resource-update-check span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

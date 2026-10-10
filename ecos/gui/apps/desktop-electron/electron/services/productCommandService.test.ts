@@ -638,3 +638,144 @@ describe('executeProductCommand Workspace creation', () => {
     expect(startFlowOperation).not.toHaveBeenCalled()
   })
 })
+
+describe('executeProductCommand run resource staleness guard', () => {
+  const staleItem = {
+    id: 'tool:yosys',
+    display_name: 'Yosys',
+    installed_version: '0.61',
+    latest_version: '0.62',
+    update_kind: 'version' as const,
+  }
+
+  it('blocks workspace.run when the assessment finds stale resources', async () => {
+    const startFlowOperation = vi.fn()
+    const assessResourceStaleness = vi.fn(async () => [staleItem])
+
+    await expect(
+      executeProductCommand(
+        {
+          command: 'workspace.run',
+          payload: {
+            expectedWorkspaceRevision: 4,
+            idempotencyKey: 'run-1',
+            workspaceHandle: 'handle-1',
+          },
+        },
+        {
+          assessResourceStaleness,
+          ownsWorkspaceHandle: () => true,
+          runtime: { startFlowOperation } as never,
+          workspaceDirectoryForHandle: () => '/projects/demo/ws_1',
+        } as never,
+      ),
+    ).rejects.toMatchObject({
+      code: 'RESOURCE_UPDATE_AVAILABLE',
+      details: { resources: [staleItem] },
+    })
+    expect(assessResourceStaleness).toHaveBeenCalledWith('/projects/demo/ws_1')
+    expect(startFlowOperation).not.toHaveBeenCalled()
+  })
+
+  it('blocks workspace.runStep when the assessment finds stale resources', async () => {
+    const startStepOperation = vi.fn()
+    const assessResourceStaleness = vi.fn(async () => [staleItem])
+
+    await expect(
+      executeProductCommand(
+        {
+          command: 'workspace.runStep',
+          payload: {
+            expectedWorkspaceRevision: 4,
+            idempotencyKey: 'run-step-1',
+            step: 'Place',
+            workspaceHandle: 'handle-1',
+          },
+        },
+        {
+          assessResourceStaleness,
+          ownsWorkspaceHandle: () => true,
+          runtime: { startStepOperation } as never,
+        } as never,
+      ),
+    ).rejects.toMatchObject({
+      code: 'RESOURCE_UPDATE_AVAILABLE',
+      details: { resources: [staleItem] },
+    })
+    expect(assessResourceStaleness).toHaveBeenCalledWith(null)
+    expect(startStepOperation).not.toHaveBeenCalled()
+  })
+
+  it('runs with allowStaleResources despite a stale assessment', async () => {
+    const startFlowOperation = vi.fn().mockResolvedValue({ operationId: 'op-1' })
+    const assessResourceStaleness = vi.fn(async () => [staleItem])
+
+    await expect(
+      executeProductCommand(
+        {
+          command: 'workspace.run',
+          payload: {
+            allowStaleResources: true,
+            expectedWorkspaceRevision: 4,
+            idempotencyKey: 'run-1',
+            workspaceHandle: 'handle-1',
+          },
+        },
+        {
+          assessResourceStaleness,
+          ownsWorkspaceHandle: () => true,
+          runtime: { startFlowOperation } as never,
+        } as never,
+      ),
+    ).resolves.toEqual({ operationId: 'op-1' })
+    expect(startFlowOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ allowStaleResources: true }),
+    )
+  })
+
+  it('runs when the assessment is clean', async () => {
+    const startFlowOperation = vi.fn().mockResolvedValue({ operationId: 'op-1' })
+    const assessResourceStaleness = vi.fn(async () => [])
+
+    await expect(
+      executeProductCommand(
+        {
+          command: 'workspace.run',
+          payload: {
+            expectedWorkspaceRevision: 4,
+            idempotencyKey: 'run-1',
+            workspaceHandle: 'handle-1',
+          },
+        },
+        {
+          assessResourceStaleness,
+          ownsWorkspaceHandle: () => true,
+          runtime: { startFlowOperation } as never,
+        } as never,
+      ),
+    ).resolves.toEqual({ operationId: 'op-1' })
+    expect(startFlowOperation).toHaveBeenCalledOnce()
+  })
+
+  it('runs unguarded when the context has no assessment hook', async () => {
+    const startFlowOperation = vi.fn().mockResolvedValue({ operationId: 'op-1' })
+
+    await expect(
+      executeProductCommand(
+        {
+          command: 'workspace.run',
+          payload: {
+            expectedWorkspaceRevision: 4,
+            idempotencyKey: 'run-1',
+            workspaceHandle: 'handle-1',
+          },
+        },
+        {
+          ownsWorkspaceHandle: () => true,
+          runtime: { startFlowOperation } as never,
+        } as never,
+      ),
+    ).resolves.toEqual({ operationId: 'op-1' })
+    expect(startFlowOperation).toHaveBeenCalledOnce()
+  })
+})

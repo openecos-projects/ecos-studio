@@ -60,7 +60,7 @@ export function cardActionsForRow(
   } else if (primary === 'update' && row.statusKind !== 'error') {
     actions.push({
       id: 'update',
-      label: 'Update',
+      label: row.resource.update_kind === 'rebuild' ? 'Reinstall update' : 'Update',
       icon: 'ri-refresh-line',
       tone: 'info',
       iconOnly: false,

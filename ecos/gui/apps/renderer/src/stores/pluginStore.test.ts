@@ -66,6 +66,7 @@ vi.mock('@/api/plugin', () => {
     subscribePluginProgress: vi.fn(),
     subscribeResourceProgress: vi.fn(),
     subscribeResourcesChanged: vi.fn(),
+    subscribeResourceUpdatesDetected: vi.fn(),
     uninstallResourceApi: vi.fn(),
     uninstallToolApi: vi.fn(),
     updateResourceApi: vi.fn(),
@@ -83,6 +84,7 @@ import {
   removePdkInstallationApi,
   subscribeResourceProgress,
   subscribeResourcesChanged,
+  subscribeResourceUpdatesDetected,
   uninstallResourceApi,
   updateResourceApi,
   type InstallProgress,
@@ -187,6 +189,7 @@ describe('pluginStore', () => {
     vi.mocked(removePdkInstallationApi).mockReset()
     vi.mocked(subscribeResourceProgress).mockReset()
     vi.mocked(subscribeResourcesChanged).mockReset()
+    vi.mocked(subscribeResourceUpdatesDetected).mockReset()
     vi.mocked(uninstallResourceApi).mockReset()
     vi.mocked(updateResourceApi).mockReset()
   })
@@ -250,6 +253,46 @@ describe('pluginStore', () => {
   it('stops listening for registry changes after cleanup', async () => {
     const unsubscribe = vi.fn()
     vi.mocked(subscribeResourcesChanged).mockReturnValue(unsubscribe)
+    vi.mocked(listResourcesApi).mockResolvedValue([])
+
+    const store = usePluginStore()
+    await store.fetchTools()
+    store.cleanup()
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+  })
+
+  it('records pushed updates and re-fetches silently when they are detected', async () => {
+    vi.mocked(listResourcesApi).mockResolvedValue([])
+
+    const store = usePluginStore()
+    await store.fetchTools()
+
+    expect(vi.mocked(subscribeResourceUpdatesDetected)).toHaveBeenCalledTimes(1)
+    const onDetected = vi.mocked(subscribeResourceUpdatesDetected).mock.calls[0]?.[0]
+    expect(onDetected).toBeTypeOf('function')
+
+    const detected = [
+      {
+        resource_id: 'tool:yosys',
+        display_name: 'Yosys',
+        update_kind: 'version' as const,
+        installed_version: '0.61',
+        latest_version: '0.62',
+      },
+    ]
+    onDetected?.({ resources: detected })
+
+    expect(store.detectedUpdates).toEqual(detected)
+    await vi.waitFor(() => {
+      expect(listResourcesApi).toHaveBeenCalledTimes(2)
+    })
+    expect(store.loading).toBe(false)
+  })
+
+  it('stops listening for detected updates after cleanup', async () => {
+    const unsubscribe = vi.fn()
+    vi.mocked(subscribeResourceUpdatesDetected).mockReturnValue(unsubscribe)
     vi.mocked(listResourcesApi).mockResolvedValue([])
 
     const store = usePluginStore()

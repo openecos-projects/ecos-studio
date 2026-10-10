@@ -102,6 +102,7 @@ async function loadDesktopBridge() {
     }
     resources: {
       onChanged(listener: () => void): () => void
+      onUpdatesDetected(listener: (event: unknown) => void): () => void
     }
     window: {
       setLeftPanelExtension(widthPx: number): Promise<number>
@@ -775,6 +776,39 @@ describe('preload desktop bridge contract', () => {
     expect(listener).toHaveBeenCalledTimes(1)
     expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
       desktopApiEventChannels.resourcesChanged,
+      eventListener,
+    )
+  })
+
+  it('routes resource updates-detected notifications through the shared event channel', async () => {
+    const bridge = await loadDesktopBridge()
+    const listener = vi.fn()
+    const payload = {
+      resources: [
+        {
+          resource_id: 'tool:yosys',
+          display_name: 'Yosys',
+          update_kind: 'version',
+          installed_version: '0.61',
+          latest_version: '0.62',
+        },
+      ],
+    }
+
+    const unsubscribe = bridge.resources.onUpdatesDetected(listener)
+    const eventListener = ipcRenderer.on.mock.calls.at(-1)?.[1] as
+      | ((event: unknown, payload: unknown) => void)
+      | undefined
+    eventListener?.({}, payload)
+    unsubscribe()
+
+    expect(ipcRenderer.on).toHaveBeenCalledWith(
+      desktopApiEventChannels.resourcesUpdatesDetected,
+      expect.any(Function),
+    )
+    expect(listener).toHaveBeenCalledWith(payload)
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
+      desktopApiEventChannels.resourcesUpdatesDetected,
       eventListener,
     )
   })

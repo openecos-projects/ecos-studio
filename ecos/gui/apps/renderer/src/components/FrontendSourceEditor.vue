@@ -116,6 +116,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { CMDEnum, InfoEnum, ResponseEnum, StateEnum } from '@/api/type'
 import { getInfoApi, runStepApi } from '@/api/flow'
 import { useWorkspace } from '@/composables/useWorkspace'
+import { confirmStaleResourceRerun } from '@/composables/useResourceStalenessGuard'
 import { useThemeStore } from '@/stores/themeStore'
 import { frontendSourceLanguageForPath } from './frontendSourceLanguage'
 import {
@@ -410,7 +411,7 @@ async function saveSource(): Promise<void> {
   }
 }
 
-async function runLint(): Promise<void> {
+async function runLint(allowStaleResources = false): Promise<void> {
   const directory = currentProject.value?.path
   if (!directory) return
   lintRunning.value = true
@@ -426,6 +427,7 @@ async function runLint(): Promise<void> {
         workspaceHandle: workspaceSession.value.workspaceId,
         step: 'lint',
         rerun: true,
+        ...(allowStaleResources ? { allowStaleResources: true } : {}),
       },
     })
     lintStatus.value = result.data?.state === StateEnum.Success ? 'success' : 'failed'
@@ -433,6 +435,13 @@ async function runLint(): Promise<void> {
     invalidateWorkspaceResources(['flow', 'step', 'logs'])
     emit('linted')
   } catch (err) {
+    if (
+      confirmStaleResourceRerun(err, 'lint step', async (allowStale) => {
+        await runLint(allowStale)
+      })
+    ) {
+      return
+    }
     lintStatus.value = 'error'
     lintLog.value = err instanceof Error ? err.message : String(err)
   } finally {

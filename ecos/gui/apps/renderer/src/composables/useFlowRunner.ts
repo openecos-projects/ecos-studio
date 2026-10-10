@@ -10,6 +10,7 @@ import {
   type RunStepResponse,
 } from '@/api/flow'
 import type { DesignTool } from '@ecos-studio/shared'
+import { confirmStaleResourceRerun } from './useResourceStalenessGuard'
 import {
   WORKSPACE_RESULT_INVALIDATION_SCOPES,
   type WorkspaceInvalidationScope,
@@ -33,6 +34,8 @@ import {
 export interface FlowRunOptions {
   rerun?: boolean
   resetDependents?: boolean
+  /** Bypasses the pre-run stale-resource guard after explicit user confirmation. */
+  allowStaleResources?: boolean
 }
 
 // A completed backend or frontend flow can update every Home data source. Keep
@@ -82,6 +85,22 @@ export function useFlowRunner() {
     workspaceSession,
   } = useWorkspace()
   const route = useRoute()
+
+  /**
+   * Converts a RESOURCE_UPDATE_AVAILABLE failure into the confirmation
+   * dialog. Returns true when the error was intercepted; the retry re-enters
+   * the same runner with the user's allow-stale decision.
+   */
+  function interceptStalenessError(
+    err: unknown,
+    runLabel: string,
+    options: FlowRunOptions,
+    retryRunner: (nextOptions: FlowRunOptions) => Promise<unknown>,
+  ): boolean {
+    return confirmStaleResourceRerun(err, runLabel, async (allowStale) => {
+      await retryRunner({ ...options, allowStaleResources: allowStale })
+    })
+  }
 
   // 状态：当前 workspace 的运行态。flowExecutionActive 仍保留为全局兼容信号。
   const isRunning = computed(
@@ -228,6 +247,7 @@ export function useFlowRunner() {
             ...requestScope,
             step: step as StepEnum,
             rerun: Boolean(options.rerun),
+            allowStaleResources: options.allowStaleResources === true,
           },
         })
         const allResourcesAlreadyInvalidated = FLOW_COMPLETION_FALLBACK_SCOPES.every(
@@ -263,6 +283,7 @@ export function useFlowRunner() {
         resetDependents: Boolean(options.resetDependents),
         step,
         workspaceHandle: requestScope.workspaceHandle,
+        ...(options.allowStaleResources === true ? { allowStaleResources: true } : {}),
       })
       observeRuntimeOperation(
         operation.operationId,
@@ -278,6 +299,11 @@ export function useFlowRunner() {
       })
       return lastRunResult.value
     } catch (err) {
+      if (interceptStalenessError(err, `${step} step`, options, runFlow)) {
+        clearFlowExecutionActiveForWorkspace(directory)
+        state.value = StateEnum.Invalid
+        return null
+      }
       console.error('Single-step run failed:', err)
       clearFlowExecutionActiveForWorkspace(directory)
       showToast({
@@ -348,6 +374,7 @@ export function useFlowRunner() {
           data: {
             ...requestScope,
             rerun: Boolean(options.rerun),
+            allowStaleResources: options.allowStaleResources === true,
           },
         })
         console.log('rtl2gds result:', result)
@@ -380,6 +407,7 @@ export function useFlowRunner() {
         idempotencyKey: crypto.randomUUID(),
         rerun: Boolean(options.rerun),
         workspaceHandle: requestScope.workspaceHandle,
+        ...(options.allowStaleResources === true ? { allowStaleResources: true } : {}),
       })
       // Keep the rerun marker until the backend emits its authoritative
       // rerun-prepared protocol event. A failed start must clear it below.
@@ -396,6 +424,12 @@ export function useFlowRunner() {
       })
       return operation
     } catch (err) {
+      if (interceptStalenessError(err, 'full flow', options, runAllFlow)) {
+        clearFlowExecutionActiveForWorkspace(directory)
+        clearHomeRunArtifactResetAwaitingBackendStart(directory)
+        state.value = StateEnum.Invalid
+        return null
+      }
       console.error('Run-all flow failed:', err)
       clearFlowExecutionActiveForWorkspace(directory)
       clearHomeRunArtifactResetAwaitingBackendStart(directory)

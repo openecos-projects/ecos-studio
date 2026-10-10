@@ -1951,6 +1951,7 @@ import {
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useSubflow } from '@/composables/useSubflow'
 import { isFlowExecutionActiveForWorkspace } from '@/composables/useFlowRunner'
+import { confirmStaleResourceRerun } from '@/composables/useResourceStalenessGuard'
 import { useParameters } from '@/composables/useParameters'
 import { readOptionalProjectTextFileTail } from '@/utils/projectFiles'
 import {
@@ -4026,7 +4027,10 @@ async function loadWaveCaseFallback(
   }
 }
 
-async function runCurrentStep(suiteOverride?: SimSuite): Promise<void> {
+async function runCurrentStep(
+  suiteOverride?: SimSuite,
+  allowStaleResources = false,
+): Promise<void> {
   const projectPath = currentProject.value?.path?.trim() || ''
   const workspaceHandle =
     workspaceSession.value.state === 'active'
@@ -4059,6 +4063,7 @@ async function runCurrentStep(suiteOverride?: SimSuite): Promise<void> {
         step: currentStepName.value,
         rerun: true,
         ...payload,
+        ...(allowStaleResources ? { allowStaleResources: true } : {}),
       },
     })
     invalidateWorkspaceResources(['flow', 'step', 'logs'])
@@ -4075,6 +4080,17 @@ async function runCurrentStep(suiteOverride?: SimSuite): Promise<void> {
       life: 4000,
     })
   } catch (err) {
+    if (
+      confirmStaleResourceRerun(
+        err,
+        `${currentStepName.value} step`,
+        async (allowStale) => {
+          await runCurrentStep(suiteOverride, allowStale)
+        },
+      )
+    ) {
+      return
+    }
     showToast({
       severity: 'error',
       summary: 'Run Failed',

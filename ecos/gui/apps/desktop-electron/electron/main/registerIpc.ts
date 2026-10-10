@@ -91,6 +91,7 @@ import {
   type ResourceImportLocalRequest,
   type ResourceInstallRequest,
   type ResourceJob,
+  type ResourceList,
   type MpcSpecReadResult,
   type PdkBinding,
   type PdkBindRequest,
@@ -142,6 +143,10 @@ import {
   verifyWorkspaceRerunContract,
 } from '../services/eccRpc/workspaceRerun'
 import { executeProductCommand } from '../services/productCommandService'
+import {
+  assessRunStaleness,
+  assertRunResourcesFresh,
+} from '../services/resourceStalenessGuard'
 import { buildWorkspaceCreationModel } from '../services/workspaceCreationModel'
 import { rememberWorkspaceParameterCatalog } from '../services/workspaceParameterCatalogCache'
 import {
@@ -162,6 +167,7 @@ type IpcHandler = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
 interface DesktopBridgeErrorResult {
   error: {
     code?: string
+    details?: unknown
     message: string
     name: string
   }
@@ -456,7 +462,7 @@ export interface DesktopBridgeServices {
     resolveStepInfo(request: WorkspaceStepInfoRequest): Promise<WorkspaceStepInfoResult>
   }
   resourceManagerService: {
-    listResources(): Promise<unknown>
+    listResources(): Promise<ResourceList>
     getResource(resourceId: string): Promise<unknown>
     readMpcSpec(resourceId: string): Promise<MpcSpecReadResult>
     installResource(
@@ -480,12 +486,16 @@ export interface DesktopBridgeServices {
       force?: boolean
       refreshRegistry?: boolean
     }): Promise<unknown>
+    readCachedLatestPdkRelease(
+      familyId: string,
+    ): Promise<{ version: string; sha256: string | null } | null>
     onRegistryChanged(listener: () => void): () => void
   }
   pdkInventoryService: {
     bindInstallation(request: PdkBindRequest): Promise<PdkBinding>
     importInstallation(request: PdkImportRequest): Promise<PdkInstallationSnapshot>
     listInstallations(): Promise<PdkInstallationSnapshot[]>
+    listBindings(): Promise<PdkBinding[]>
     locateInstallation(request: PdkLocateRequest): Promise<PdkInstallationSnapshot>
     removeInstallation(installationId: string): Promise<{ unboundProjectIds: string[] }>
     resolveBinding(request: PdkResolveBindingRequest): Promise<PdkBinding | null>
@@ -688,15 +698,19 @@ function summarizeProjectBinaryReadError(path: string, error: unknown): string {
 
 function serializeError(error: unknown): {
   code?: string
+  details?: unknown
   message: string
   name: string
 } {
   if (error instanceof Error) {
+    const details = (error as { details?: unknown }).details
     return {
       code:
         typeof (error as NodeJS.ErrnoException).code === 'string'
           ? (error as NodeJS.ErrnoException).code
           : undefined,
+      // Only plain JSON-shaped details cross the bridge; anything else is dropped.
+      details: isRecord(details) || Array.isArray(details) ? details : undefined,
       message: error.message,
       name: error.name,
     }
@@ -925,6 +939,24 @@ async function pickRtlSources(
   }
 
   return picked.files.length > 0 ? picked : null
+}
+
+async function guardFrontendRunStaleness(
+  services: DesktopBridgeServices,
+  workspaceHandleSubscriptions: ReadonlyMap<string, { directories: Set<string> }>,
+  workspaceHandle: string,
+  allowStaleResources: boolean | undefined,
+  runLabel: string,
+): Promise<void> {
+  const workspaceDirectory =
+    workspaceHandleSubscriptions.get(workspaceHandle)?.directories.values().next()
+      .value ?? null
+  const items = await assessRunStaleness({
+    resourceManagerService: services.resourceManagerService,
+    pdkInventoryService: services.pdkInventoryService,
+    workspaceDirectory,
+  })
+  assertRunResourcesFresh(items, allowStaleResources, runLabel)
 }
 
 export function registerIpc(
@@ -2924,6 +2956,12 @@ export function registerIpc(
       workspaceDirectoryForHandle: (workspaceHandle) =>
         workspaceHandleSubscriptions.get(workspaceHandle)?.directories.values().next()
           .value,
+      assessResourceStaleness: (workspaceDirectory) =>
+        assessRunStaleness({
+          resourceManagerService: services.resourceManagerService,
+          pdkInventoryService: services.pdkInventoryService,
+          workspaceDirectory,
+        }),
       authorizeWorkspaceMutation: (_command, workspaceHandle, workspaceDirectory) => {
         if (
           !services.agentRuntimeService?.isOptimizationParentGuarded?.(workspaceHandle) &&
@@ -3247,6 +3285,13 @@ export function registerIpc(
     if (requireDesignTool(runtimeRequest.designTool) !== 'frontend') {
       throw new Error('Backend flow execution requires a Product Command')
     }
+    await guardFrontendRunStaleness(
+      services,
+      workspaceHandleSubscriptions,
+      runtimeRequest.workspaceHandle,
+      runtimeRequest.allowStaleResources,
+      'designRuntime.flow.run',
+    )
     return await services.frontendRpcRuntimeService.runFlow(
       runtimeRequest.workspaceHandle,
       Boolean(runtimeRequest.rerun),
@@ -3258,6 +3303,13 @@ export function registerIpc(
     if (requireDesignTool(runtimeRequest.designTool) !== 'frontend') {
       throw new Error('Backend flow execution requires a Product Command')
     }
+    await guardFrontendRunStaleness(
+      services,
+      workspaceHandleSubscriptions,
+      runtimeRequest.workspaceHandle,
+      runtimeRequest.allowStaleResources,
+      'designRuntime.flow.runStep',
+    )
     return await services.frontendRpcRuntimeService.runStep(
       runtimeRequest.workspaceHandle,
       {

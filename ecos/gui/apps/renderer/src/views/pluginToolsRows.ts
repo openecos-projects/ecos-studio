@@ -1,4 +1,5 @@
 import type { InstallProgress, ResourceAction, ResourceItem } from '@/api/plugin'
+import { CHECKSUM_MISSING_HINT, updateCheckFootnote } from './pluginResourceMeta'
 
 export type ResourceType = 'tool' | 'pdk' | 'mpc'
 export type StatusKind = 'available' | 'installed' | 'update' | 'installing' | 'error'
@@ -39,6 +40,8 @@ export interface ResourceRow {
   requires: string[]
   missingRequires: string[]
   dependencyLabel: string
+  checksumHint: string | null
+  updateCheckLabel: string | null
   progressPercent: number | null
   progressMessage: string | null
   actions: ResourceAction[]
@@ -273,7 +276,10 @@ function mapStatus(
     case 'installed':
       return { kind: 'installed', text: installedStatusText(resource) }
     case 'update_available':
-      return { kind: 'update', text: 'Update' }
+      return {
+        kind: 'update',
+        text: resource.update_kind === 'rebuild' ? 'Republished' : 'Update available',
+      }
     case 'error':
     case 'missing':
     case 'invalid':
@@ -412,6 +418,15 @@ export function resourceToRow(
   const status = mapStatus(resource, progress)
   const description = rowDescription(resource)
   const flowTags = frontendFlowTagsFor(resource)
+  // The update pill already covers remediation while an update is pending;
+  // surface the checksum warning only when no update badge takes precedence.
+  const checksumHint =
+    resource.checksum_missing === true &&
+    status.kind !== 'installing' &&
+    status.kind !== 'update'
+      ? CHECKSUM_MISSING_HINT
+      : null
+  const updateCheckLabel = updateCheckFootnote(resource.health?.update_check)
 
   return {
     id:
@@ -437,6 +452,8 @@ export function resourceToRow(
     requires: resource.requires ?? [],
     missingRequires: resource.missing_requires ?? [],
     dependencyLabel: dependencyLabel(resource),
+    checksumHint,
+    updateCheckLabel,
     progressPercent,
     progressMessage,
     actions: resource.actions,

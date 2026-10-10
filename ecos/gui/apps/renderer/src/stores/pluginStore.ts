@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
+import type { ResourceUpdatesDetectedItem } from '@ecos-studio/shared'
 import {
   cancelResourceApi,
   checkResourceUpdatesApi,
@@ -13,6 +14,7 @@ import {
   resourceListToTools,
   subscribeResourceProgress,
   subscribeResourcesChanged,
+  subscribeResourceUpdatesDetected,
   uninstallResourceApi,
   updateResourceApi,
   validatePdkApi,
@@ -31,6 +33,8 @@ export const usePluginStore = defineStore('plugin', () => {
   const installProgress = ref<Record<string, InstallProgress>>({})
   const resourceErrors = ref<Record<string, string>>({})
   const resourceProgress = ref<Record<string, InstallProgress>>({})
+  /** Updates found by the last automatic (pushed) update check. */
+  const detectedUpdates = shallowRef<ResourceUpdatesDetectedItem[]>([])
 
   const _sseConnections = new Map<string, { close: () => void }>()
   const _pendingProgress = new Map<string, InstallProgress>()
@@ -38,6 +42,7 @@ export const usePluginStore = defineStore('plugin', () => {
   const _cancelledResources = new Set<string>()
   let _resourcesChangedSubscribed = false
   let _resourcesChangedUnsubscribe: (() => void) | null = null
+  let _updatesDetectedUnsubscribe: (() => void) | null = null
   let _fetchSequence = 0
   let _visibleFetchCount = 0
 
@@ -178,6 +183,12 @@ export const usePluginStore = defineStore('plugin', () => {
     // lands, re-fetch silently so fresh resources appear without a manual
     // refresh.
     _resourcesChangedUnsubscribe = subscribeResourcesChanged(() => {
+      void fetchTools({ silent: true })
+    })
+    // Automatic checks push newly detected updates; record them for the UI
+    // and refresh the listing so statuses reflect the check.
+    _updatesDetectedUnsubscribe = subscribeResourceUpdatesDetected((event) => {
+      detectedUpdates.value = event.resources
       void fetchTools({ silent: true })
     })
   }
@@ -415,6 +426,8 @@ export const usePluginStore = defineStore('plugin', () => {
   function cleanup(): void {
     _resourcesChangedUnsubscribe?.()
     _resourcesChangedUnsubscribe = null
+    _updatesDetectedUnsubscribe?.()
+    _updatesDetectedUnsubscribe = null
     _resourcesChangedSubscribed = false
     for (const conn of _sseConnections.values()) {
       conn.close()
@@ -435,6 +448,7 @@ export const usePluginStore = defineStore('plugin', () => {
     installProgress,
     resourceErrors,
     resourceProgress,
+    detectedUpdates,
     categories,
     fetchTools,
     installResource,
