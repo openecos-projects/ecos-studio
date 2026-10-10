@@ -96,6 +96,21 @@
       <ShutdownStatusButton />
       <NotificationCenter />
       <button
+        v-if="isWorkspaceRoute && hasWorkspace && workspaceDesignTool !== 'frontend'"
+        type="button"
+        class="window-btn information-panel-btn"
+        :title="
+          informationPanelVisible ? 'Hide information panel' : 'Show information panel'
+        "
+        :aria-label="
+          informationPanelVisible ? 'Hide information panel' : 'Show information panel'
+        "
+        :aria-expanded="informationPanelVisible"
+        @click="toggleInformationPanel"
+      >
+        <i class="ri-side-bar-line text-base" aria-hidden="true" />
+      </button>
+      <button
         @click="toggleTheme"
         class="window-btn theme-btn"
         :title="isDark ? 'Switch to light theme' : 'Switch to dark theme'"
@@ -220,6 +235,7 @@ import BackgroundTasksButton from '@/components/BackgroundTasksButton.vue'
 import ShutdownStatusButton from '@/components/ShutdownStatusButton.vue'
 import { rememberWorkspaceManagementReturnRoute } from '@/utils/workspaceNavigation'
 import { useWorkspaceTitle } from '@/composables/useWorkspaceTitle'
+import { useWorkspaceInformationPanel } from '@/composables/useWorkspaceInformationPanel'
 // ---- 类型定义 ----
 type TopBarMenuAction = AppMenuAction | 'step-config'
 
@@ -249,6 +265,7 @@ const props = defineProps<{
   projectName?: string | null
   workspacePath?: string | null
   hasWorkspace?: boolean
+  workspaceDesignTool?: 'backend' | 'frontend'
   mutationsDisabled?: boolean
   signoffExportDisabled?: boolean
   workspaceUpdateDisabled?: boolean
@@ -270,6 +287,7 @@ const workspaceFocusId = computed(
 )
 
 const themeStore = useThemeStore()
+const { informationPanelVisible, toggleInformationPanel } = useWorkspaceInformationPanel()
 const agentShell = useAgentShellStore()
 const userGuide = useUserGuideStore()
 const { homeAgentOpen } = storeToRefs(agentShell)

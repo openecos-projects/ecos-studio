@@ -1,5 +1,11 @@
 <template>
-  <div class="workspace-workbench">
+  <div
+    class="workspace-workbench"
+    :class="{
+      'is-information-hidden': agentOnly && !informationPanelVisible,
+      'is-agent-only': agentOnly,
+    }"
+  >
     <Splitter class="workspace-workbench-splitter" :gutter-size="7">
       <SplitterPanel :size="60" :min-size="33" class="workspace-workbench-left">
         <slot name="left" />
@@ -11,6 +17,7 @@
         :class="{ 'workspace-workbench-right--agent-collapsed': workspaceAgentCollapsed }"
       >
         <FlowStatusStrip
+          v-if="!agentOnly"
           class="workspace-workbench-flow-status"
           :loading="loading"
           :nodes="nodes"
@@ -22,12 +29,13 @@
           </template>
         </FlowStatusStrip>
         <slot
+          v-if="!agentOnly"
           name="right-log"
           :selected-node="selectedLogNode"
           :selected-node-pinned="logSelectionPinned"
         />
         <div v-show="!workspaceAgentCollapsed" class="workspace-workbench-inspector">
-          <ChatInspectorPanel />
+          <ChatInspectorPanel :hide-gui-artifacts="agentOnly" />
         </div>
         <div v-if="workspaceAgentCollapsed" class="workspace-workbench-agent-collapsed">
           <button
@@ -58,6 +66,7 @@ import { storeToRefs } from 'pinia'
 import Splitter from 'primevue/splitter'
 import SplitterPanel from 'primevue/splitterpanel'
 import ChatInspectorPanel from '@/components/ChatInspectorPanel.vue'
+import { useWorkspaceInformationPanel } from '@/composables/useWorkspaceInformationPanel'
 import FlowRunControl from './FlowRunControl.vue'
 import FlowStatusStrip from './FlowStatusStrip.vue'
 import {
@@ -76,11 +85,13 @@ const props = withDefaults(
     loading?: boolean
     logRerunAffectedSteps?: readonly string[]
     nodes: FlowStatusNode[]
+    agentOnly?: boolean
   }>(),
   { loading: false },
 )
 
 const agentShell = useAgentShellStore()
+const { informationPanelVisible } = useWorkspaceInformationPanel()
 const { workspaceAgentCollapsed, codexStatus } = storeToRefs(agentShell)
 const codexStatusState = computed(() => codexStatus.value?.state ?? 'unknown')
 const codexStatusLabel = computed(() => {
@@ -187,6 +198,20 @@ defineSlots<{
   min-height: 0;
   min-width: 0;
   width: 100%;
+}
+
+.is-information-hidden :deep(.p-splitter-gutter),
+.is-information-hidden .workspace-workbench-right {
+  display: none;
+}
+
+.is-information-hidden .workspace-workbench-left {
+  flex-basis: 100% !important;
+  flex-grow: 1;
+}
+
+.is-agent-only .workspace-workbench-inspector {
+  min-height: 0;
 }
 
 .workspace-workbench-splitter {

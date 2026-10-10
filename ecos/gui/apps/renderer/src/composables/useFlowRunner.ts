@@ -35,6 +35,7 @@ import {
 
 /** 任意流程命令执行中为 true，供 Home flow log 等订阅，避免多实例 composable 状态不一致 */
 export interface FlowRunOptions {
+  step?: string
   rerun?: boolean
   resetDependents?: boolean
   /** Bypasses the pre-run stale-resource guard after explicit user confirmation. */
@@ -214,7 +215,7 @@ export function useFlowRunner() {
   async function runFlow(options: FlowRunOptions = {}): Promise<RunStepResponse | null> {
     const isCurrentContext = captureResourceStalenessContext()
     // 从动态路由参数获取当前步骤
-    const step = getCurrentStep()
+    const step = options.step ?? getCurrentStep()
 
     if (!step) {
       console.warn('Unable to get current step')

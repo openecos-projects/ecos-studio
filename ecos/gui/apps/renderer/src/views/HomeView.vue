@@ -2,8 +2,8 @@
   <WorkspaceWorkbench
     flow-title="Flow status"
     :loading="flowLoading"
-    :log-rerun-affected-steps="flowLogRerunAffectedSteps"
-    :nodes="flowNodes"
+    :nodes="[]"
+    agent-only
   >
     <template #left>
       <main
@@ -81,9 +81,41 @@
             </dl>
           </section>
 
+          <section class="dashboard-section status-card qor-card">
+            <header class="dashboard-section-header">
+              <div><h2>Quality of Results</h2></div>
+            </header>
+            <div class="qor-overview">
+              <div class="qor-visual-column">
+                <div class="qor-score-hero" :class="`is-${qorScoreTone}`">
+                  <span>QoR v3 score</span>
+                  <div>
+                    <strong>{{ qorScoreValue }}</strong>
+                    <small v-if="qorScoreValue !== 'NR'">/ 100</small>
+                  </div>
+                  <em>{{ qorScoreStatusLabel }}</em>
+                </div>
+              </div>
+              <div class="qor-summary-content" :class="`is-${qorStatusTone}`">
+                <div>
+                  <strong class="status-summary-title">Current QoR</strong>
+                  <p>{{ qorScoreStatusLabel }}</p>
+                </div>
+                <button
+                  type="button"
+                  class="status-detail-link"
+                  title="View QoR details"
+                  @click="void openQorDetails()"
+                >
+                  QoR details <i class="ri-arrow-right-up-line" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          </section>
+
           <section class="dashboard-section status-card">
             <header class="dashboard-section-header">
-              <div><h2>Checklist</h2></div>
+              <div><h2>Signoff Checklist</h2></div>
             </header>
             <div class="status-card-content">
               <StatusPieChart
@@ -130,87 +162,7 @@
           </section>
         </div>
 
-        <div class="home-dashboard-row home-dashboard-middle">
-          <section class="dashboard-section status-card qor-card">
-            <header class="dashboard-section-header">
-              <div><h2>Quality of Results</h2></div>
-            </header>
-            <div class="qor-overview">
-              <div class="qor-visual-column">
-                <div class="qor-score-hero" :class="`is-${qorScoreTone}`">
-                  <span>QoR v3 score</span>
-                  <div>
-                    <strong>{{ qorScoreValue }}</strong>
-                    <small v-if="qorScoreValue !== 'NR'">/ 100</small>
-                  </div>
-                  <em>{{ qorScoreStatusLabel }}</em>
-                </div>
-              </div>
-              <div class="qor-summary-content" :class="`is-${qorStatusTone}`">
-                <div>
-                  <strong class="status-summary-title">Current QoR</strong>
-                  <p>{{ qorScoreStatusLabel }}</p>
-                </div>
-                <button
-                  type="button"
-                  class="status-detail-link"
-                  title="View QoR details"
-                  @click="void openQorDetails()"
-                >
-                  QoR details <i class="ri-arrow-right-up-line" aria-hidden="true" />
-                </button>
-              </div>
-            </div>
-          </section>
-
-          <section class="dashboard-section layout-card">
-            <header class="dashboard-section-header">
-              <div>
-                <i class="ri-layout-masonry-line" aria-hidden="true" />
-                <h2>LayoutView</h2>
-              </div>
-              <span class="dashboard-muted">{{ layoutThumbnails.length }} layouts</span>
-            </header>
-            <div
-              v-if="layoutThumbnails.length"
-              class="layout-thumbnail-grid"
-              aria-label="Layout thumbnails"
-            >
-              <div
-                v-for="(thumbnail, index) in layoutThumbnailCells"
-                :key="thumbnail?.id ?? `layout-empty-${index}`"
-                class="layout-thumbnail-cell"
-                :class="{
-                  'is-empty': !thumbnail,
-                  'is-opening': thumbnail?.step === openingLayoutStep,
-                }"
-              >
-                <button
-                  v-if="thumbnail"
-                  type="button"
-                  :disabled="!canOpenLayoutThumbnail(thumbnail)"
-                  :title="layoutThumbnailTitle(thumbnail)"
-                  @click="void openLayoutThumbnail(thumbnail)"
-                >
-                  <img v-if="thumbnail.url" :src="thumbnail.url" :alt="thumbnail.label" />
-                  <div v-else class="layout-thumbnail-placeholder">
-                    <i class="ri-image-2-line" aria-hidden="true" />
-                    <small>{{ homeArtifactPlaceholderLabel(thumbnail) }}</small>
-                  </div>
-                  <i
-                    v-if="thumbnail.step === openingLayoutStep"
-                    class="ri-loader-4-line spin"
-                    aria-hidden="true"
-                  />
-                  <span>{{ thumbnail.label }}</span>
-                </button>
-              </div>
-            </div>
-            <div v-else class="dashboard-empty">
-              <i class="ri-image-2-line" /><span>Waiting for layout data</span>
-            </div>
-          </section>
-        </div>
+        <WorkspaceFlowDashboard @layout="void openLayoutThumbnail($event)" />
 
         <div class="home-dashboard-row home-dashboard-bottom">
           <section class="dashboard-section key-metrics-card">
@@ -248,20 +200,6 @@
           </section>
         </div>
       </main>
-    </template>
-
-    <template #right-log="{ selectedNode, selectedNodePinned }">
-      <FlowLogPanel
-        :active-step-name="flowLogStepName"
-        :content-by-key="flowLogContentByKey"
-        :ensure-content="ensureFlowLogSegmentContentLoaded"
-        :error="flowLogError"
-        :execution-active="currentWorkspaceFlowExecutionActive"
-        :loading="flowLogLoading"
-        :selected-node="selectedNode"
-        :selected-node-pinned="selectedNodePinned"
-        :segments="flowLogSegments"
-      />
     </template>
   </WorkspaceWorkbench>
 
@@ -318,9 +256,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import Dialog from 'primevue/dialog'
-import FlowLogPanel from '@/components/workbench/FlowLogPanel.vue'
+import WorkspaceFlowDashboard from '@/components/workspace-dashboard/WorkspaceFlowDashboard.vue'
 import WorkspaceWorkbench from '@/components/workbench/WorkspaceWorkbench.vue'
-import { flowNodeStatus, type FlowStatusNode } from '@/components/workbench/flowStatus'
 import FlowInsightsPanel from '@/components/flow-insights/FlowInsightsPanel.vue'
 import { staConvergenceFromComparison } from '@/components/flow-insights/flowInsightsData'
 import StatusPieChart from '@/components/home/StatusPieChart.vue'
@@ -343,10 +280,7 @@ import HomeQorComparisonDialog from '@/components/home/HomeQorComparisonDialog.v
 import { useDashboardOverview } from '@/composables/useDashboardOverview'
 import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
 import { useBackendFlowLogs } from '@/composables/useBackendFlowLogs'
-import {
-  useHomeSnapshots,
-  type HomeLayoutThumbnail,
-} from '@/composables/useHomeSnapshots'
+import { type HomeLayoutThumbnail } from '@/composables/useHomeSnapshots'
 import { useFlowInsights } from '@/composables/useFlowInsights'
 import { useBackendWorkspaceQor } from '@/composables/useBackendWorkspaceQor'
 import { useWorkspace } from '@/composables/useWorkspace'
@@ -390,17 +324,8 @@ const currentWorkspaceName = computed(() => {
   const pathName = currentProject.value?.path?.split(/[/\\]/).filter(Boolean).pop()
   return pathName || currentProject.value?.name || null
 })
-const { flowStages, isLoading: flowLoading } = useBackendFlowStages()
-const {
-  currentWorkspaceFlowExecutionActive,
-  ensureFlowLogSegmentContentLoaded,
-  flowLogContentByKey,
-  flowLogError,
-  flowLogLoading,
-  flowLogRerunAffectedSteps,
-  flowLogSegments,
-  flowLogStepName,
-} = useBackendFlowLogs()
+const { isLoading: flowLoading } = useBackendFlowStages()
+const { currentWorkspaceFlowExecutionActive } = useBackendFlowLogs()
 const staleResultNotice = computed(() => {
   return workspaceResultFreshnessNotice(
     resultFreshness.value,
@@ -413,7 +338,6 @@ const checklistItems = computed(() => {
     ? section.data.findings
     : []
 })
-const { layoutThumbnails } = useHomeSnapshots()
 const {
   stepResources: flowInsightResources,
   dbTrends: flowInsightDbTrends,
@@ -435,28 +359,6 @@ const showQor = ref(false)
 
 const showChecklist = ref(false)
 const openingLayoutStep = ref<string | null>(null)
-const LAYOUT_THUMBNAIL_ROWS = 4
-const LAYOUT_THUMBNAIL_COLUMNS = 4
-const layoutThumbnailCells = computed(() =>
-  Array.from(
-    { length: LAYOUT_THUMBNAIL_ROWS * LAYOUT_THUMBNAIL_COLUMNS },
-    (_, index) => layoutThumbnails.value[index] ?? null,
-  ),
-)
-
-const flowNodes = computed<FlowStatusNode[]>(() =>
-  flowStages.value
-    .filter((stage) => stage.group === 'run')
-    .map((stage) => ({
-      id: `${stage.path}:${stage.label}`,
-      label: stage.label,
-      status: flowNodeStatus(stage.state),
-      runtime: stage.runtime,
-      peakMemoryMb: Number.isFinite(stage['peak memory (mb)'])
-        ? stage['peak memory (mb)']
-        : null,
-    })),
-)
 const resolvedChecklistItems = checklistItems
 const {
   expandedFindingId: expandedEvidenceId,
@@ -577,23 +479,6 @@ function canOpenLayoutThumbnail(thumbnail: HomeLayoutThumbnail): boolean {
   })
 }
 
-function layoutThumbnailTitle(thumbnail: HomeLayoutThumbnail): string {
-  if (thumbnail.availability !== 'available') {
-    return `${thumbnail.label}: preview is ${thumbnail.availability}${thumbnail.reason ? ` (${thumbnail.reason})` : ''}.`
-  }
-  if (!thumbnail.hasGeometry) {
-    return `${thumbnail.label}: saved layout data is unavailable.`
-  }
-  return `Open ${thumbnail.label} in Chip Viewer`
-}
-
-function homeArtifactPlaceholderLabel(thumbnail: HomeLayoutThumbnail): string {
-  const reason = thumbnail.reason?.toUpperCase() ?? ''
-  if (reason.includes('TOO_LARGE')) return 'Too large'
-  if (reason.includes('INVALID')) return 'Invalid'
-  return thumbnail.availability === 'stale' ? 'Stale' : 'Missing'
-}
-
 async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void> {
   const projectPath = currentProject.value?.path
   if (!projectPath || !canOpenLayoutThumbnail(thumbnail)) return
@@ -660,6 +545,10 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 
 .home-dashboard-top {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.chip-info-grid {
+  overflow: auto;
 }
 
 .home-dashboard-middle {
@@ -1039,7 +928,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 
 .qor-visual-column {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) 20px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   padding: 0;
 }
 
@@ -1232,7 +1121,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 }
 
 .qor-overview {
-  grid-template-columns: minmax(112px, 0.34fr) minmax(160px, 0.62fr);
+  grid-template-columns: minmax(78px, 0.4fr) minmax(0, 0.6fr);
 }
 
 .qor-summary-content {
@@ -1338,7 +1227,8 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 
 @media (max-width: 1180px) {
   .home-dashboard {
-    grid-template-rows: auto auto auto;
+    grid-template-rows: auto 300px auto;
+    align-content: start;
   }
   .home-dashboard-top,
   .home-dashboard-middle,
@@ -1348,11 +1238,22 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   .dashboard-section {
     min-height: 180px;
   }
+  .home-dashboard-top {
+    grid-template-rows: repeat(3, minmax(180px, auto));
+    min-height: 556px;
+  }
+  .home-dashboard-bottom {
+    grid-template-rows: repeat(2, minmax(180px, auto));
+    min-height: 368px;
+  }
+  .home-dashboard > :deep(.workspace-flow-dashboard) {
+    min-height: 300px;
+  }
 }
 
 @media (max-width: 720px) {
   .qor-overview {
-    grid-template-columns: minmax(78px, 0.32fr) minmax(122px, 0.55fr) minmax(0, 1fr);
+    grid-template-columns: minmax(78px, 0.4fr) minmax(0, 0.6fr);
   }
 }
 </style>

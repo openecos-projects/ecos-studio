@@ -3,6 +3,7 @@ import {
   flowNodeStatus,
   flowStatusSummary,
   formatPeakMemory,
+  formatRuntime,
   initialSelectedNodeId,
   nextFlowNodeSelection,
   runningFlowNodeId,
@@ -10,6 +11,14 @@ import {
 } from './flowStatus'
 
 describe('flow status presentation', () => {
+  it('formats execution duration without inventing values for missing or invalid metrics', () => {
+    expect(formatRuntime(undefined)).toBe('')
+    expect(formatRuntime(-1)).toBe('')
+    expect(formatRuntime(Number.NaN)).toBe('')
+    expect(formatRuntime(0)).toBe('00:00:00')
+    expect(formatRuntime(3661.25)).toBe('01:01:01.25')
+    expect(formatRuntime(59.9999)).toBe('00:01:00')
+  })
   it('normalizes workspace and subflow state names', () => {
     expect(flowNodeStatus('Success')).toBe('succeeded')
     expect(flowNodeStatus('Warning')).toBe('warning')

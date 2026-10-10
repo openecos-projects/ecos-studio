@@ -46,8 +46,26 @@ vi.mock('@/components/ShutdownStatusButton.vue', () => ({
 }))
 
 import TopBar from './TopBar.vue'
+import { useWorkspaceInformationPanel } from '@/composables/useWorkspaceInformationPanel'
 
 describe('TopBar title', () => {
+  it('toggles the RTL information area immediately before the theme button', async () => {
+    testState.route.path = '/workspace/home'
+    useWorkspaceInformationPanel().informationPanelVisible.value = true
+    const wrapper = mount(TopBar, {
+      props: { hasWorkspace: true, workspaceDesignTool: 'backend' },
+    })
+    const button = wrapper.get('.information-panel-btn')
+    expect(button.attributes('aria-expanded')).toBe('true')
+    expect(button.element.nextElementSibling?.classList.contains('theme-btn')).toBe(true)
+    await button.trigger('click')
+    expect(button.attributes('aria-expanded')).toBe('false')
+    expect(button.attributes('aria-label')).toBe('Show information panel')
+    await wrapper.setProps({ workspaceDesignTool: 'frontend' })
+    expect(wrapper.find('.information-panel-btn').exists()).toBe(false)
+    useWorkspaceInformationPanel().informationPanelVisible.value = true
+    wrapper.unmount()
+  })
   it('shows the Background Tasks identity label from the route query before project state loads', async () => {
     testState.route.path = '/workspace/home'
     testState.route.query = {

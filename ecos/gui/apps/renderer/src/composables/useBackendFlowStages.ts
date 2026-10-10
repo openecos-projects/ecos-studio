@@ -5,6 +5,7 @@ import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
 import { useWorkspace } from './useWorkspace'
 import { projectBackendFlowSteps, projectRuntimeFlowSteps } from './backendFlowProjection'
+import { formatRuntime } from '@/components/workbench/flowStatus'
 
 export interface BackendFlowStage {
   label: string
@@ -39,17 +40,6 @@ const optimisticRun = ref<{
 
 function normalizedPath(path: string): string {
   return path.trim().replace(/\\/g, '/').replace(/\/$/, '')
-}
-
-function formatRuntime(seconds: number | undefined): string {
-  if (seconds === undefined || !Number.isFinite(seconds)) return ''
-  const hours = Math.floor(seconds / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  const remaining = seconds % 60
-  const secondText = Number.isInteger(remaining)
-    ? String(remaining).padStart(2, '0')
-    : remaining.toFixed(3).replace(/0+$/, '').padStart(2, '0')
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${secondText}`
 }
 
 function displayFlowState(state: FlowStepState): string {
@@ -196,6 +186,7 @@ export function useBackendFlowStages() {
     flowStages,
     hasOngoingRunStage,
     isLoading,
+    projectedSteps,
     loadFlowStages: session.load,
     refreshFlowStages,
     setFirstRunStepOngoing,

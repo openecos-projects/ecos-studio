@@ -22,6 +22,15 @@ export interface ChatTurn {
   responses: ChatTurnItem[]
 }
 
+export function visibleChatMessages(
+  messages: Message[],
+  hideGuiArtifacts: boolean,
+): Message[] {
+  return hideGuiArtifacts
+    ? messages.filter((message) => !message.isGuiArtifact)
+    : messages
+}
+
 export interface PendingInteractionPresentation {
   companionMessageId?: string
   interaction?: NonNullable<Message['interaction']>
