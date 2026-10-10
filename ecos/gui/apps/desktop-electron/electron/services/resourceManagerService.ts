@@ -46,6 +46,7 @@ import {
   PdkInventoryService,
   type PdkInventoryServiceOptions,
 } from './pdkInventoryService'
+import { fetchGitHubBranchHead, parseGitHubArchiveCommit } from './mpcUpdateProbe'
 import { requiredToolHealthMarkers, type ToolHealthMarkerKind } from './toolHealthPolicy'
 import {
   validateMpcSpec,
@@ -56,6 +57,7 @@ import {
   type MpcSpecReadResult,
   type ResourceOperationResult,
   type ResourceStatus,
+  type ResourceUpdateKind,
   type PdkInstallationSnapshot,
 } from '@ecos-studio/shared'
 
@@ -128,6 +130,11 @@ class DownloadSizeMismatchError extends Error {
   }
 }
 
+interface PlatformAssetUpdateSource {
+  type: 'github_branch'
+  branch: string
+}
+
 interface PlatformAsset {
   url: string
   cnb_url?: string | null
@@ -136,6 +143,7 @@ interface PlatformAsset {
   size: number | null
   metadata_url?: string | null
   strip_prefix?: string | null
+  update_source?: PlatformAssetUpdateSource | null
   packages: RegistryPdkPackage[]
   supplemental_assets: RegistrySupplementalAsset[]
   post_install: RegistryPostInstallStep[]
@@ -160,6 +168,8 @@ interface ResourceUpdateCheckItem {
   status: 'checked' | 'skipped' | 'error'
   update_available: boolean
   error: string | null
+  commit?: string | null
+  built_at?: string | null
 }
 
 interface ResourceUpdateSource {
@@ -196,6 +206,12 @@ interface ResourceUpdateCheckCache {
   schema_version: 1
   checked_at: string
   resources: Record<string, CachedResourceUpdateCheckItem>
+}
+
+interface ResourceUpdateCheckCandidate {
+  resourceId: string
+  asset: PlatformAsset
+  installedSha256: string
 }
 
 interface RegistryPostInstallStep {
@@ -282,6 +298,7 @@ const BUILTIN_MPCS: RegistryMpc[] = [
             sha256: '34c0013bb5b74876351be6b7cc3885fd5fccb66e6edf9afd15519408a52b5113',
             size: 471915,
             strip_prefix: 'mpc-frame-7555b4053816895919fb1d324d623d46d70dec3d',
+            update_source: { type: 'github_branch', branch: 'main' },
             packages: [],
             supplemental_assets: [],
             post_install: [],
@@ -511,7 +528,11 @@ export class ResourceManagerService {
     }
     for (const [id, entry] of Object.entries(installedMpcs)) {
       resources.push(
-        this.mpcEntryToResource(entry, this.findRegistryMpc(state.registry, id)),
+        this.mpcEntryToResource(
+          entry,
+          this.findRegistryMpc(state.registry, id),
+          updateChecks,
+        ),
       )
     }
 
@@ -1424,23 +1445,43 @@ export class ResourceManagerService {
     const cacheResources: ResourceUpdateCheckCache['resources'] = {}
 
     for (const candidate of collectUpdateCheckCandidates(state.registry, manifest)) {
-      const updateSource = getAssetUpdateSource(candidate.asset)
-      if (!updateSource) {
-        const item: ResourceUpdateCheckItem = {
-          resource_id: candidate.resourceId,
-          checked_at: checkedAt,
-          sha256: null,
-          status: 'skipped',
-          update_available: false,
-          error: 'No metadata_url or sha256_url in registry asset',
-        }
+      if (
+        candidate.resourceId.startsWith('mpc:') &&
+        candidate.asset.update_source?.type === 'github_branch'
+      ) {
+        const item = await this.checkMpcBranchUpdate(candidate, manifest, checkedAt)
         resources.push(item)
         cacheResources[candidate.resourceId] = { ...item, update_url: null }
         continue
       }
 
-      const sha256 = await this.fetchAssetUpdateSha256(candidate.asset)
-      if (!sha256) {
+      const updateSource = getAssetUpdateSource(candidate.asset)
+      if (!updateSource) {
+        const registrySha256 = readSha256(candidate.asset.sha256)
+        const item: ResourceUpdateCheckItem = registrySha256
+          ? {
+              resource_id: candidate.resourceId,
+              checked_at: checkedAt,
+              sha256: registrySha256,
+              status: 'checked',
+              update_available: registrySha256 !== candidate.installedSha256,
+              error: null,
+            }
+          : {
+              resource_id: candidate.resourceId,
+              checked_at: checkedAt,
+              sha256: null,
+              status: 'skipped',
+              update_available: false,
+              error: 'No sha256 in registry asset',
+            }
+        resources.push(item)
+        cacheResources[candidate.resourceId] = { ...item, update_url: null }
+        continue
+      }
+
+      const provenance = await this.fetchAssetUpdateProvenance(candidate.asset)
+      if (!provenance) {
         const item: ResourceUpdateCheckItem = {
           resource_id: candidate.resourceId,
           checked_at: checkedAt,
@@ -1455,14 +1496,16 @@ export class ResourceManagerService {
       }
 
       const registrySha256 = readSha256(candidate.asset.sha256)
-      if (sha256 !== registrySha256) {
+      if (provenance.sha256 !== registrySha256) {
         const item: ResourceUpdateCheckItem = {
           resource_id: candidate.resourceId,
           checked_at: checkedAt,
-          sha256,
+          sha256: provenance.sha256,
           status: 'skipped',
           update_available: false,
           error: 'Registry lock has not caught up with the published asset',
+          commit: provenance.commit,
+          built_at: provenance.built_at,
         }
         resources.push(item)
         cacheResources[candidate.resourceId] = { ...item, update_url: updateSource.url }
@@ -1472,10 +1515,12 @@ export class ResourceManagerService {
       const item: ResourceUpdateCheckItem = {
         resource_id: candidate.resourceId,
         checked_at: checkedAt,
-        sha256,
+        sha256: provenance.sha256,
         status: 'checked',
-        update_available: sha256 !== candidate.installedSha256,
+        update_available: provenance.sha256 !== candidate.installedSha256,
         error: null,
+        commit: provenance.commit,
+        built_at: provenance.built_at,
       }
       resources.push(item)
       cacheResources[candidate.resourceId] = { ...item, update_url: updateSource.url }
@@ -2890,6 +2935,7 @@ export class ResourceManagerService {
     )
     let status: ResourceStatus = 'available'
     let actions: ResourceAction[] = ['install']
+    let update: { kind: ResourceUpdateKind } | null = null
 
     if (this.installCoordinator.isActive(resourceId)) {
       status = 'installing'
@@ -2899,16 +2945,15 @@ export class ResourceManagerService {
         status = localHealth?.status ?? 'invalid'
         actions = local.managed ? ['update', 'uninstall'] : ['remove_reference']
       } else {
-        status =
-          local.managed &&
-          toolHasUpdate(
-            local,
-            versions[0],
-            asset,
-            getUpdateCheck(updateChecks, resourceId),
-          )
-            ? 'update_available'
-            : 'installed'
+        update = local.managed
+          ? toolHasUpdate(
+              local,
+              versions[0],
+              asset,
+              getUpdateCheck(updateChecks, resourceId),
+            )
+          : null
+        status = update ? 'update_available' : 'installed'
         actions = local.managed
           ? status === 'update_available'
             ? ['update', 'uninstall']
@@ -2939,6 +2984,10 @@ export class ResourceManagerService {
       source: local && !local.managed ? 'local' : 'registry',
       homepage: tool.homepage,
       actions,
+      ...(update ? { update_kind: update.kind } : {}),
+      ...(local?.managed && localHealth?.status === 'ok' && !readSha256(local.sha256)
+        ? { checksum_missing: true }
+        : {}),
       health: local
         ? withUpdateCheckHealth(
             toolHealthInfo(local, localHealth),
@@ -3014,10 +3063,70 @@ export class ResourceManagerService {
     }
   }
 
-  private async fetchAssetUpdateSha256(asset: PlatformAsset): Promise<string | null> {
+  private async fetchAssetUpdateProvenance(
+    asset: PlatformAsset,
+  ): Promise<{ sha256: string; commit: string | null; built_at: string | null } | null> {
     const metadata = await this.fetchAssetMetadata(asset)
-    if (metadata?.sha256) return metadata.sha256
-    return await this.fetchAssetSha256(asset)
+    if (metadata?.sha256) {
+      return {
+        sha256: metadata.sha256,
+        commit: metadata.commit || null,
+        built_at: metadata.built_at || null,
+      }
+    }
+    const sha256 = await this.fetchAssetSha256(asset)
+    return sha256 ? { sha256, commit: null, built_at: null } : null
+  }
+
+  private async checkMpcBranchUpdate(
+    candidate: ResourceUpdateCheckCandidate,
+    manifest: ResourceManifest,
+    checkedAt: string,
+  ): Promise<ResourceUpdateCheckItem> {
+    const updateSource = candidate.asset.update_source
+    const branch = updateSource?.type === 'github_branch' ? updateSource.branch : null
+    const entry = manifest.installed[candidate.resourceId]
+    const installed = parseGitHubArchiveCommit(isMpcEntry(entry) ? entry.source_url : '')
+    const skipped = (error: string): ResourceUpdateCheckItem => ({
+      resource_id: candidate.resourceId,
+      checked_at: checkedAt,
+      sha256: null,
+      status: 'skipped',
+      update_available: false,
+      error,
+      commit: null,
+    })
+    if (!branch || !installed) {
+      return skipped('Unable to resolve the installed MPC source commit')
+    }
+    const headCommit = await fetchGitHubBranchHead(
+      this.fetchImpl,
+      installed.owner,
+      installed.repo,
+      branch,
+    )
+    if (!headCommit) {
+      return skipped('Unable to probe the upstream branch head')
+    }
+    const registryCommit = parseGitHubArchiveCommit(candidate.asset.url)
+    if (!registryCommit) {
+      return skipped('Unable to verify registry asset currency')
+    }
+    if (registryCommit.commit !== headCommit) {
+      return {
+        ...skipped('Registry lock has not caught up with the published branch'),
+        commit: headCommit,
+      }
+    }
+    return {
+      resource_id: candidate.resourceId,
+      checked_at: checkedAt,
+      sha256: null,
+      status: 'checked',
+      update_available: headCommit !== installed.commit,
+      error: null,
+      commit: headCommit,
+    }
   }
 
   private installedToolToResource(
@@ -3051,6 +3160,9 @@ export class ResourceManagerService {
       source: 'local',
       homepage: '',
       actions: entry.managed ? ['uninstall'] : ['remove_reference'],
+      ...(entry.managed && toolHealth.status === 'ok' && !readSha256(entry.sha256)
+        ? { checksum_missing: true }
+        : {}),
       health: toolHealthInfo(entry, toolHealth),
       error: toolHealth.status === 'ok' ? null : toolHealthError(toolHealth),
       requires: [],
@@ -3158,20 +3270,22 @@ export class ResourceManagerService {
       manifest && registry
         ? dependencyStateFor(requirements, registry, manifest, toolHealth)
         : { installed: [], missing: [] }
-    const hasUpdate =
+    const update =
       entry.managed &&
       entry.health === 'ok' &&
       Boolean(entry.version) &&
       Boolean(latestVersion?.version) &&
       !installedPdkIds?.has(
         managedPdkResourceId(entry.pdk_id, latestVersion?.version ?? ''),
-      ) &&
-      pdkHasUpdate(
-        entry,
-        latestVersion?.version,
-        asset,
-        getUpdateCheck(updateChecks ?? null, registryResourceId),
       )
+        ? pdkHasUpdate(
+            entry,
+            latestVersion?.version,
+            asset,
+            getUpdateCheck(updateChecks ?? null, registryResourceId),
+          )
+        : null
+    const hasUpdate = update !== null
     const status: ResourceStatus =
       this.installCoordinator.isActive(resourceId) ||
       this.isPdkInstallActive(entry.pdk_id, registryPdk)
@@ -3209,6 +3323,7 @@ export class ResourceManagerService {
       source: entry.source || 'local',
       homepage: registryPdk?.homepage ?? '',
       actions,
+      ...(update ? { update_kind: update.kind } : {}),
       health: withUpdateCheckHealth(
         pdkHealth(entry),
         getUpdateCheck(updateChecks ?? null, registryResourceId),
@@ -3326,17 +3441,16 @@ export class ResourceManagerService {
   private mpcEntryToResource(
     entry: MpcInventoryEntry,
     registryMpc?: RegistryMpc,
+    updateChecks?: ResourceUpdateCheckCache | null,
   ): ResourceInfo {
     const resourceId = `mpc:${entry.id}`
     const latestVersion = registryMpc?.versions[0]
     const latestAsset = latestVersion ? selectPlatformAsset(latestVersion).asset : null
-    const hasUpdate =
-      entry.managed &&
-      entry.health === 'ok' &&
-      Boolean(entry.version) &&
-      Boolean(latestVersion?.version) &&
-      (latestVersion?.version !== entry.version ||
-        (Boolean(latestAsset?.sha256) && latestAsset?.sha256 !== entry.sha256))
+    const update =
+      entry.managed && entry.health === 'ok' && Boolean(entry.version)
+        ? mpcHasUpdate(entry, latestVersion?.version, latestAsset)
+        : null
+    const hasUpdate = update !== null
     const status: ResourceStatus = this.installCoordinator.isActive(resourceId)
       ? 'installing'
       : entry.health === 'missing'
@@ -3371,7 +3485,12 @@ export class ResourceManagerService {
       source: entry.source || 'local',
       homepage: registryMpc?.homepage ?? '',
       actions,
-      health: mpcHealth(entry),
+      ...(update ? { update_kind: update.kind } : {}),
+      ...(entry.managed && !readSha256(entry.sha256) ? { checksum_missing: true } : {}),
+      health: withUpdateCheckHealth(
+        mpcHealth(entry),
+        getUpdateCheck(updateChecks ?? null, resourceId),
+      ),
       error: null,
     }
   }
@@ -3760,12 +3879,20 @@ function parsePlatformAssets(value: unknown): Record<string, PlatformAsset> {
       size: readOptionalPositiveNumber(asset.size) ?? null,
       metadata_url: readOptionalString(asset.metadata_url),
       strip_prefix: typeof asset.strip_prefix === 'string' ? asset.strip_prefix : null,
+      update_source: parseAssetUpdateSource(asset.update_source),
       packages: parsePdkPackages(asset.packages),
       supplemental_assets: parseSupplementalAssets(asset.supplemental_assets),
       post_install: parsePostInstallSteps(asset.post_install),
     }
   }
   return assets
+}
+
+function parseAssetUpdateSource(value: unknown): PlatformAssetUpdateSource | null {
+  const record = readRecord(value)
+  if (record.type !== 'github_branch') return null
+  const branch = readOptionalString(record.branch)
+  return branch ? { type: 'github_branch', branch } : null
 }
 
 function parsePdkPackages(value: unknown): RegistryPdkPackage[] {
@@ -4178,6 +4305,8 @@ function parseUpdateCheckCache(value: unknown): ResourceUpdateCheckCache {
       update_available: item.update_available === true,
       error: readOptionalString(item.error),
       update_url: updateUrl,
+      commit: readOptionalString(item.commit),
+      built_at: readOptionalString(item.built_at),
     }
   }
   return {
@@ -4197,16 +4326,8 @@ function getUpdateCheck(
 function collectUpdateCheckCandidates(
   registry: ResourceRegistry,
   manifest: ResourceManifest,
-): {
-  resourceId: string
-  asset: PlatformAsset
-  installedSha256: string
-}[] {
-  const candidates: {
-    resourceId: string
-    asset: PlatformAsset
-    installedSha256: string
-  }[] = []
+): ResourceUpdateCheckCandidate[] {
+  const candidates: ResourceUpdateCheckCandidate[] = []
 
   for (const tool of registry.tools) {
     const latest = tool.versions[0]
@@ -4220,7 +4341,7 @@ function collectUpdateCheckCandidates(
       continue
     }
     const { asset } = selectPlatformAsset(latest)
-    if (!asset || !getAssetUpdateSource(asset)) {
+    if (!asset) {
       continue
     }
     candidates.push({
@@ -4248,11 +4369,34 @@ function collectUpdateCheckCandidates(
       continue
     }
     const { asset } = selectPlatformAsset(latest)
-    if (!asset || !getAssetUpdateSource(asset)) {
+    if (!asset) {
       continue
     }
     candidates.push({
       resourceId: `pdk:${pdk.id}`,
+      asset,
+      installedSha256: entry.sha256,
+    })
+  }
+
+  for (const mpc of registry.mpcs) {
+    const latest = mpc.versions[0]
+    const entry = manifest.installed[`mpc:${mpc.id}`]
+    if (
+      !latest ||
+      !isMpcEntry(entry) ||
+      !entry.managed ||
+      entry.health !== 'ok' ||
+      latest.version !== entry.version
+    ) {
+      continue
+    }
+    const { asset } = selectPlatformAsset(latest)
+    if (!asset || asset.update_source?.type !== 'github_branch') {
+      continue
+    }
+    candidates.push({
+      resourceId: `mpc:${mpc.id}`,
       asset,
       installedSha256: entry.sha256,
     })
@@ -4295,21 +4439,35 @@ function readSha256(value: unknown): string | null {
   return /^[a-f0-9]{64}$/.test(normalized) ? normalized : null
 }
 
+function assetShaDrift(
+  installedSha256: string | null | undefined,
+  assetSha256: unknown,
+): boolean {
+  const installed = readSha256(installedSha256)
+  const published = readSha256(assetSha256)
+  return installed !== null && published !== null && installed !== published
+}
+
 function toolHasUpdate(
   entry: ToolInventoryEntry,
   latestVersion: string | undefined,
   latestAsset: PlatformAsset | null,
   updateCheck: CachedResourceUpdateCheckItem | null,
-): boolean {
-  if (!latestVersion) return false
-  if (latestVersion !== entry.version) return true
+): { kind: ResourceUpdateKind } | null {
+  if (!latestVersion) return null
+  if (latestVersion !== entry.version) return { kind: 'version' }
   const updateSource = getAssetUpdateSource(latestAsset)
-  if (latestVersion === 'latest' && updateSource && updateCheck?.status === 'checked') {
-    if (updateCheck.update_url && updateCheck.update_url !== updateSource.url)
-      return false
-    return Boolean(updateCheck.sha256) && updateCheck.sha256 !== entry.sha256
+  if (updateSource) {
+    if (latestVersion === 'latest' && updateCheck?.status === 'checked') {
+      if (updateCheck.update_url && updateCheck.update_url !== updateSource.url)
+        return null
+      return Boolean(updateCheck.sha256) && updateCheck.sha256 !== entry.sha256
+        ? { kind: 'rebuild' }
+        : null
+    }
+    return null
   }
-  return false
+  return assetShaDrift(entry.sha256, latestAsset?.sha256) ? { kind: 'rebuild' } : null
 }
 
 function pdkHasUpdate(
@@ -4317,16 +4475,31 @@ function pdkHasUpdate(
   latestVersion: string | undefined,
   latestAsset: PlatformAsset | null,
   updateCheck: CachedResourceUpdateCheckItem | null,
-): boolean {
-  if (!latestVersion) return false
-  if (latestVersion !== entry.version) return true
+): { kind: ResourceUpdateKind } | null {
+  if (!latestVersion) return null
+  if (latestVersion !== entry.version) return { kind: 'version' }
   const updateSource = getAssetUpdateSource(latestAsset)
-  if (latestVersion === 'latest' && updateSource && updateCheck?.status === 'checked') {
-    if (updateCheck.update_url && updateCheck.update_url !== updateSource.url)
-      return false
-    return Boolean(updateCheck.sha256) && updateCheck.sha256 !== entry.sha256
+  if (updateSource) {
+    if (latestVersion === 'latest' && updateCheck?.status === 'checked') {
+      if (updateCheck.update_url && updateCheck.update_url !== updateSource.url)
+        return null
+      return Boolean(updateCheck.sha256) && updateCheck.sha256 !== entry.sha256
+        ? { kind: 'rebuild' }
+        : null
+    }
+    return null
   }
-  return false
+  return assetShaDrift(entry.sha256, latestAsset?.sha256) ? { kind: 'rebuild' } : null
+}
+
+function mpcHasUpdate(
+  entry: MpcInventoryEntry,
+  latestVersion: string | undefined,
+  latestAsset: PlatformAsset | null,
+): { kind: ResourceUpdateKind } | null {
+  if (!latestVersion) return null
+  if (latestVersion !== entry.version) return { kind: 'version' }
+  return assetShaDrift(entry.sha256, latestAsset?.sha256) ? { kind: 'rebuild' } : null
 }
 
 function normalizeToolName(name: string): string {
@@ -4709,6 +4882,9 @@ function pdkSnapshotToResource(
       'validate',
       installation.ownership === 'managed' ? 'uninstall' : 'remove_reference',
     ],
+    ...(installation.ownership === 'managed' && !installation.registrySha256
+      ? { checksum_missing: true }
+      : {}),
     health: {
       detected_file_groups: detectedFiles,
       known_layout: installation.familyId === 'ics55',
@@ -4735,6 +4911,8 @@ function withUpdateCheckHealth(
       status: updateCheck.status,
       update_available: updateCheck.update_available,
       error: updateCheck.error,
+      commit: updateCheck.commit ?? null,
+      built_at: updateCheck.built_at ?? null,
     },
   }
 }
