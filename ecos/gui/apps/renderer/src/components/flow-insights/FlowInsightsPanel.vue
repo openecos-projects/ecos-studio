@@ -110,8 +110,8 @@ const props = defineProps<{
   loadCongestion?: () => void | Promise<void>
 }>()
 
-const DATA_SNAPSHOT_ROWS = 4
-const DATA_SNAPSHOT_COLUMNS = 5
+const DATA_SNAPSHOT_ROWS = 3
+const DATA_SNAPSHOT_COLUMNS = 3
 const DATA_SNAPSHOT_CELL_COUNT = DATA_SNAPSHOT_ROWS * DATA_SNAPSHOT_COLUMNS
 
 const activeTab = ref<string | null>(null)
@@ -194,8 +194,8 @@ function openModule(moduleId: string): void {
 .data-snapshot-grid {
   display: grid;
   flex: 1;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  grid-template-rows: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
   min-height: 0;
   padding: 2px 0 0;
 }
@@ -207,11 +207,11 @@ function openModule(moduleId: string): void {
   min-width: 0;
 }
 
-.data-snapshot-cell:nth-child(5n) {
+.data-snapshot-cell:nth-child(3n) {
   border-right: 0;
 }
 
-.data-snapshot-cell:nth-child(n + 16) {
+.data-snapshot-cell:nth-child(n + 7) {
   border-bottom: 0;
 }
 

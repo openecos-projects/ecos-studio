@@ -21,7 +21,85 @@
           <i class="ri-history-line" aria-hidden="true" />
           <span>{{ staleResultNotice.message }}</span>
         </div>
-        <div class="home-dashboard-row home-dashboard-top">
+        <WorkspaceFlowDashboard @layout="void openLayoutThumbnail($event)">
+          <template #overview>
+            <section class="dashboard-section status-card qor-card flow-status-card">
+              <header class="dashboard-section-header">
+                <div><h2>Quality of Results</h2></div>
+              </header>
+              <div class="qor-overview">
+                <div class="qor-score-hero" :class="`is-${qorScoreTone}`">
+                  <span>QoR v3 score</span>
+                  <div>
+                    <strong>{{ qorScoreValue }}</strong>
+                    <small v-if="qorScoreValue !== 'NR'">/ 100</small>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  class="status-detail-link"
+                  title="View QoR details"
+                  @click="void openQorDetails()"
+                >
+                  QoR details <i class="ri-arrow-right-up-line" aria-hidden="true" />
+                </button>
+              </div>
+            </section>
+
+            <section
+              class="dashboard-section status-card flow-status-card signoff-overview-card"
+            >
+              <header class="dashboard-section-header">
+                <div><h2>Signoff Checklist</h2></div>
+              </header>
+              <div class="status-card-content">
+                <StatusPieChart
+                  label="Checklist status distribution"
+                  :slices="checklistSlices"
+                  :center-primary="checklistCenterPrimary"
+                  :center-secondary="checklistCenterSecondary"
+                />
+                <div class="status-summary-content" :class="`is-${checklistStatusTone}`">
+                  <div>
+                    <strong class="status-summary-title">{{ checklistTitle }}</strong>
+                    <p>{{ checklistSummaryLabel }}</p>
+                  </div>
+                  <dl class="status-count-list">
+                    <div v-if="checklistSummary.total" class="is-pass">
+                      <dt>Passing</dt>
+                      <dd>{{ checklistSummary.passed }}/{{ checklistSummary.total }}</dd>
+                    </div>
+                    <div v-if="checklistSummary.total" class="is-blocked">
+                      <dt>Blocked</dt>
+                      <dd>{{ checklistSummary.blocked }}/{{ checklistSummary.total }}</dd>
+                    </div>
+                    <div v-if="checklistSummary.total" class="is-warning">
+                      <dt>Warning</dt>
+                      <dd>{{ checklistSummary.warning }}/{{ checklistSummary.total }}</dd>
+                    </div>
+                    <div v-if="checklistSummary.unavailable" class="is-unavailable">
+                      <dt>Unavailable</dt>
+                      <dd>
+                        {{ checklistSummary.unavailable }}/{{ checklistSummary.total }}
+                      </dd>
+                    </div>
+                  </dl>
+                  <button
+                    type="button"
+                    class="status-detail-link"
+                    title="View checklist details"
+                    @click="showChecklist = true"
+                  >
+                    Sign-off details
+                    <i class="ri-arrow-right-up-line" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+            </section>
+          </template>
+        </WorkspaceFlowDashboard>
+
+        <div class="home-dashboard-row home-dashboard-bottom">
           <section class="dashboard-section chip-card">
             <header class="dashboard-section-header">
               <div>
@@ -80,91 +158,6 @@
               </div>
             </dl>
           </section>
-
-          <section class="dashboard-section status-card qor-card">
-            <header class="dashboard-section-header">
-              <div><h2>Quality of Results</h2></div>
-            </header>
-            <div class="qor-overview">
-              <div class="qor-visual-column">
-                <div class="qor-score-hero" :class="`is-${qorScoreTone}`">
-                  <span>QoR v3 score</span>
-                  <div>
-                    <strong>{{ qorScoreValue }}</strong>
-                    <small v-if="qorScoreValue !== 'NR'">/ 100</small>
-                  </div>
-                  <em>{{ qorScoreStatusLabel }}</em>
-                </div>
-              </div>
-              <div class="qor-summary-content" :class="`is-${qorStatusTone}`">
-                <div>
-                  <strong class="status-summary-title">Current QoR</strong>
-                  <p>{{ qorScoreStatusLabel }}</p>
-                </div>
-                <button
-                  type="button"
-                  class="status-detail-link"
-                  title="View QoR details"
-                  @click="void openQorDetails()"
-                >
-                  QoR details <i class="ri-arrow-right-up-line" aria-hidden="true" />
-                </button>
-              </div>
-            </div>
-          </section>
-
-          <section class="dashboard-section status-card">
-            <header class="dashboard-section-header">
-              <div><h2>Signoff Checklist</h2></div>
-            </header>
-            <div class="status-card-content">
-              <StatusPieChart
-                label="Checklist status distribution"
-                :slices="checklistSlices"
-                :center-primary="checklistCenterPrimary"
-                :center-secondary="checklistCenterSecondary"
-              />
-              <div class="status-summary-content" :class="`is-${checklistStatusTone}`">
-                <div>
-                  <strong class="status-summary-title">{{ checklistTitle }}</strong>
-                  <p>{{ checklistSummaryLabel }}</p>
-                </div>
-                <dl class="status-count-list">
-                  <div v-if="checklistSummary.total" class="is-pass">
-                    <dt>Passing</dt>
-                    <dd>{{ checklistSummary.passed }}/{{ checklistSummary.total }}</dd>
-                  </div>
-                  <div v-if="checklistSummary.total" class="is-blocked">
-                    <dt>Blocked</dt>
-                    <dd>{{ checklistSummary.blocked }}/{{ checklistSummary.total }}</dd>
-                  </div>
-                  <div v-if="checklistSummary.total" class="is-warning">
-                    <dt>Warning</dt>
-                    <dd>{{ checklistSummary.warning }}/{{ checklistSummary.total }}</dd>
-                  </div>
-                  <div v-if="checklistSummary.unavailable" class="is-unavailable">
-                    <dt>Unavailable</dt>
-                    <dd>
-                      {{ checklistSummary.unavailable }}/{{ checklistSummary.total }}
-                    </dd>
-                  </div>
-                </dl>
-                <button
-                  type="button"
-                  class="status-detail-link"
-                  title="View checklist details"
-                  @click="showChecklist = true"
-                >
-                  Sign-off details <i class="ri-arrow-right-up-line" aria-hidden="true" />
-                </button>
-              </div>
-            </div>
-          </section>
-        </div>
-
-        <WorkspaceFlowDashboard @layout="void openLayoutThumbnail($event)" />
-
-        <div class="home-dashboard-row home-dashboard-bottom">
           <section class="dashboard-section key-metrics-card">
             <header class="dashboard-section-header">
               <div>
@@ -290,7 +283,6 @@ import {
   buildChipViewerOpenRequest,
   canOpenChipViewer,
 } from '@/components/drawingAreaChipViewer'
-import { qorScalarStatusLabel } from '@ecos-studio/shared'
 
 const { currentProject } = useWorkspace()
 const backendWorkspaceSession = useBackendWorkspaceSession()
@@ -390,18 +382,6 @@ async function openQorDetails(): Promise<void> {
 }
 
 const checklistStatusTone = computed(() => statusTone(checklistSummary.value))
-const qorStatusTone = computed<'pass' | 'warning' | 'blocked' | 'unavailable'>(() => {
-  if (
-    qorComparisonState.value.status !== 'available' &&
-    qorComparisonState.value.status !== 'baseline' &&
-    qorComparisonState.value.status !== 'current-only'
-  ) {
-    return 'unavailable'
-  }
-  if (qorComparisonState.value.comparison?.score === null) return 'unavailable'
-  if (qorComparisonState.value.status === 'baseline') return 'pass'
-  return 'pass'
-})
 const checklistCenterPrimary = computed(() =>
   checklistSummary.value.passingPercent === null
     ? '--'
@@ -416,9 +396,6 @@ const qorScoreValue = computed(() => {
 const qorScoreTone = computed<'green' | 'yellow' | 'orange' | 'red' | 'unrated'>(() => {
   const comparison = qorComparisonState.value.comparison
   return getQorScoreTone(comparison?.scalarStatus)
-})
-const qorScoreStatusLabel = computed(() => {
-  return qorScalarStatusLabel(qorComparisonState.value.comparison?.scalarStatus)
 })
 const qorDetailsEmptyLabel = 'No current QoR metrics are available.'
 const checklistTitle = computed(() => {
@@ -511,7 +488,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   box-sizing: border-box;
   display: grid;
   gap: 8px;
-  grid-template-rows: repeat(3, minmax(0, 1fr));
+  grid-template-rows: minmax(0, 4fr) minmax(0, 2fr);
   height: 100%;
   min-height: 0;
   min-width: 0;
@@ -520,7 +497,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 }
 
 .home-dashboard.has-stale {
-  grid-template-rows: auto repeat(3, minmax(0, 1fr));
+  grid-template-rows: auto minmax(0, 4fr) minmax(0, 2fr);
 }
 
 .home-dashboard-stale {
@@ -543,20 +520,12 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   min-width: 0;
 }
 
-.home-dashboard-top {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
-}
-
 .chip-info-grid {
   overflow: auto;
 }
 
-.home-dashboard-middle {
-  grid-template-columns: minmax(0, 5fr) minmax(0, 2fr);
-}
-
 .home-dashboard-bottom {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 4fr) minmax(0, 1fr);
 }
 
 .dashboard-section {
@@ -582,6 +551,55 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   justify-content: space-between;
   min-height: 33px;
   padding: 6px 9px;
+}
+
+.flow-status-card {
+  --dashboard-surface: var(--bg-primary);
+  --dashboard-soft-surface: var(--bg-secondary);
+  --dashboard-border: var(--border-color);
+  flex: 0 0 164px;
+  height: 168px;
+  box-shadow: none;
+}
+
+.signoff-overview-card {
+  flex-basis: 264px;
+}
+
+.flow-status-card .dashboard-section-header {
+  min-height: 28px;
+  padding: 5px 7px;
+}
+
+.flow-status-card .dashboard-section-header h2 {
+  font-size: 12px;
+}
+
+.flow-status-card .status-summary-content {
+  gap: 4px;
+  padding: 6px 7px;
+}
+
+.flow-status-card .status-summary-title {
+  font-size: 12px;
+}
+
+.flow-status-card .status-summary-content p {
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-status-card .status-count-list > div,
+.flow-status-card .status-count-list dd {
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.flow-status-card .status-detail-link {
+  font-size: 11px;
+  flex-shrink: 0;
 }
 
 .dashboard-section-header > div {
@@ -912,24 +930,26 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 }
 
 .status-card-content {
-  grid-template-columns: minmax(104px, 0.45fr) minmax(0, 1fr);
+  grid-template-columns: minmax(64px, 0.45fr) minmax(0, 1fr);
+  overflow: auto;
 }
 
-.status-card-content > .status-pie,
-.qor-visual-column {
+.status-card-content > .status-pie {
   align-self: stretch;
   border-right: 1px solid var(--dashboard-border);
   height: 100%;
-  min-height: 108px;
+  min-height: 0;
   min-width: 0;
   overflow: hidden;
-  padding: 8px;
+  padding: 4px;
 }
 
-.qor-visual-column {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
-  padding: 0;
+.status-card-content :deep(.status-pie-center strong) {
+  font-size: 12px;
+}
+
+.status-card-content :deep(.status-pie-center span) {
+  font-size: 8px;
 }
 
 .qor-score-hero {
@@ -992,19 +1012,13 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   color: var(--danger-color);
 }
 
-.status-summary-content,
-.qor-summary-content {
+.status-summary-content {
   display: flex;
   flex-direction: column;
   gap: 6px;
   min-height: 0;
   min-width: 0;
   padding: 9px 11px;
-}
-
-.qor-summary-content {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
 }
 
 .status-summary-title {
@@ -1121,11 +1135,9 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 }
 
 .qor-overview {
-  grid-template-columns: minmax(78px, 0.4fr) minmax(0, 0.6fr);
-}
-
-.qor-summary-content {
-  border-right: 1px solid var(--dashboard-border);
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: auto;
 }
 
 .status-card .dashboard-section-header h2 {
@@ -1226,34 +1238,24 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 }
 
 @media (max-width: 1180px) {
-  .home-dashboard {
-    grid-template-rows: auto 300px auto;
+  .home-dashboard,
+  .home-dashboard.has-stale {
+    grid-template-rows: minmax(440px, auto) auto;
     align-content: start;
   }
-  .home-dashboard-top,
-  .home-dashboard-middle,
+  .home-dashboard.has-stale {
+    grid-template-rows: auto minmax(440px, auto) auto;
+  }
   .home-dashboard-bottom {
     grid-template-columns: 1fr;
-  }
-  .dashboard-section {
-    min-height: 180px;
-  }
-  .home-dashboard-top {
     grid-template-rows: repeat(3, minmax(180px, auto));
     min-height: 556px;
   }
-  .home-dashboard-bottom {
-    grid-template-rows: repeat(2, minmax(180px, auto));
-    min-height: 368px;
+  .home-dashboard-bottom > .dashboard-section {
+    min-height: 180px;
   }
   .home-dashboard > :deep(.workspace-flow-dashboard) {
-    min-height: 300px;
-  }
-}
-
-@media (max-width: 720px) {
-  .qor-overview {
-    grid-template-columns: minmax(78px, 0.4fr) minmax(0, 0.6fr);
+    min-height: 440px;
   }
 }
 </style>

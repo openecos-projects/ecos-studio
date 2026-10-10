@@ -26,6 +26,12 @@ describe('workspace flow topology', () => {
     const result = withSignoffMilestone(buildFlowTopology(runtime), runtime)
     expect(result.edges).toContainEqual({ from: 'Harden', to: SIGNOFF_MILESTONE_ID })
     expect(result.nodes).toHaveLength(runtime.length + 1)
+    const harden = result.nodes.find((node) => node.id === 'Harden')!
+    expect(result.nodes.find((node) => node.id === SIGNOFF_MILESTONE_ID)).toEqual({
+      id: SIGNOFF_MILESTONE_ID,
+      column: harden.column + 1,
+      row: harden.row,
+    })
     const existing = buildFlowTopology(steps)
     expect(withSignoffMilestone(existing, steps)).toBe(existing)
     const empty = buildFlowTopology([])
