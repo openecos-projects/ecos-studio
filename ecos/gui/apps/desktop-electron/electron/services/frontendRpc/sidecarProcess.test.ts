@@ -235,7 +235,7 @@ describe('EccRpcSidecarProcess', () => {
     const secondChild = new FakeChild()
     const children = [firstChild, secondChild]
     const spawn = vi.fn(() => children.shift()!)
-    const sidecar = new EccRpcSidecarProcess({ spawn })
+    const sidecar = new EccRpcSidecarProcess({ ...explicitFrontendLaunch, spawn })
     const firstClient = await sidecar.start()
 
     const shutdown = sidecar.shutdown()
@@ -258,6 +258,7 @@ describe('EccRpcSidecarProcess', () => {
     const child = new FakeChild()
     const spawn = vi.fn(() => child)
     const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
       managementRpc: true,
       spawn,
     })

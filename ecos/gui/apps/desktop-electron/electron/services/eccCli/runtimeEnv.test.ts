@@ -10,12 +10,7 @@ import {
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import {
-  createEccRuntimeEnv,
-  resolveDataHome,
-  resolveEccExecutable,
-  resolveEccSidecarLaunch,
-} from './runtimeEnv'
+import { createEccRuntimeEnv, resolveDataHome, resolveEccExecutable } from './runtimeEnv'
 
 function createRepoFixture(): {
   appPath: string
@@ -533,17 +528,6 @@ describe('createEccRuntimeEnv', () => {
     })
 
     expect(executable).toBe(join(fixture.userDataPath, 'runtime-bin', 'ecc'))
-  })
-
-  it('launches every sidecar through ecc rpc serve', () => {
-    expect(
-      resolveEccSidecarLaunch({
-        eccExecutable: '/runtime/ecc',
-      }),
-    ).toEqual({
-      command: '/runtime/ecc',
-      commandArgs: ['rpc', 'serve', '--stdio', '--persistent-db'],
-    })
   })
 
   it('strips inherited OSS CAD vars in packaged mode without bundled ecc', () => {

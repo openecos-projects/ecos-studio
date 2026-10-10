@@ -89,16 +89,14 @@ vi.mock('../services/menuService', () => ({
   setMenuActionEnabled,
 }))
 
-const { executeWorkspaceRerunMock, verifyWorkspaceRerunContractMock } = vi.hoisted(
-  () => ({
-    executeWorkspaceRerunMock: vi.fn(),
-    verifyWorkspaceRerunContractMock: vi.fn(),
-  }),
-)
+const { executeWorkspaceRerunMock, prepareWorkspaceRerunMock } = vi.hoisted(() => ({
+  executeWorkspaceRerunMock: vi.fn(),
+  prepareWorkspaceRerunMock: vi.fn(),
+}))
 
 vi.mock('../services/workspaceRerun', () => ({
   executeWorkspaceRerun: executeWorkspaceRerunMock,
-  verifyWorkspaceRerunContract: verifyWorkspaceRerunContractMock,
+  prepareWorkspaceRerun: prepareWorkspaceRerunMock,
 }))
 
 import { registerIpc, type DesktopBridgeServices } from './registerIpc'
@@ -477,7 +475,7 @@ describe('registerIpc', () => {
     openExternal.mockReset()
     openPath.mockReset()
     executeWorkspaceRerunMock.mockReset()
-    verifyWorkspaceRerunContractMock.mockReset()
+    prepareWorkspaceRerunMock.mockReset()
     showOpenDialog.mockReset()
     showMessageBox.mockReset()
     showSaveDialog.mockReset()
@@ -1756,7 +1754,7 @@ describe('registerIpc', () => {
       start: vi.fn(),
       startSession: vi.fn(async (request) => ({ sessionId: request.sessionId })),
     } as unknown as DesktopBridgeServices['agentRuntimeService']
-    const { handlers, services } = registerHandlers(agentRuntimeService)
+    const { handlers } = registerHandlers(agentRuntimeService)
     const window = {
       focus: vi.fn(),
       isDestroyed: vi.fn(() => false),
@@ -1787,16 +1785,7 @@ describe('registerIpc', () => {
       target_workspace: '/runs/gcd_rerun_place',
     }
     fromWebContents.mockReturnValue(window)
-    mockAgentWorkspaceContext(services)
-    verifyWorkspaceRerunContractMock.mockResolvedValue({
-      sourceWorkspace: contract.source_workspace,
-      targetWorkspace: contract.target_workspace,
-    })
-    services.eccRuntimeService.deriveWorkspace.mockResolvedValue({
-      directory: contract.target_workspace,
-      workspaceHandle: 'derived-handle',
-      workspaceRevision: 1,
-    })
+    prepareWorkspaceRerunMock.mockResolvedValue({ directory: contract.target_workspace })
     await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
       { sender: owner },
       session,
@@ -1813,21 +1802,10 @@ describe('registerIpc', () => {
     })
 
     workspaceWindowRegistry.register(contract.source_workspace, window)
-    await openBackendWorkspace(
-      handlers,
-      { sender: owner },
-      { directory: contract.source_workspace },
-    )
     await expect(
       prepare?.({ sender: owner }, { token: forwarded.workspaceRerunToken }),
     ).resolves.toMatchObject({ directory: contract.target_workspace })
-    expect(verifyWorkspaceRerunContractMock).toHaveBeenCalledWith(contract)
-    expect(services.eccRuntimeService.deriveWorkspace).toHaveBeenCalledWith({
-      workspaceHandle: 'workspace-1',
-      directory: contract.source_workspace,
-      targetDirectory: contract.target_workspace,
-      resetFromStep: contract.target_step,
-    })
+    expect(prepareWorkspaceRerunMock).toHaveBeenCalledWith(contract)
   })
 
   it('executes a prepared rerun through the target workspace handle owned by its window', async () => {
@@ -1874,15 +1852,7 @@ describe('registerIpc', () => {
     fromWebContents.mockReturnValue(window)
     workspaceWindowRegistry.register(contract.source_workspace, window)
     mockAgentWorkspaceContext(services)
-    verifyWorkspaceRerunContractMock.mockResolvedValue({
-      sourceWorkspace: contract.source_workspace,
-      targetWorkspace: contract.target_workspace,
-    })
-    services.eccRuntimeService.deriveWorkspace.mockResolvedValue({
-      directory: contract.target_workspace,
-      workspaceHandle: 'derived-handle',
-      workspaceRevision: 1,
-    })
+    prepareWorkspaceRerunMock.mockResolvedValue({ directory: contract.target_workspace })
     await openBackendWorkspace(
       handlers,
       { sender: owner },
@@ -1983,15 +1953,7 @@ describe('registerIpc', () => {
     fromWebContents.mockReturnValue(window)
     workspaceWindowRegistry.register(contract.source_workspace, window)
     mockAgentWorkspaceContext(services)
-    verifyWorkspaceRerunContractMock.mockResolvedValue({
-      sourceWorkspace: contract.source_workspace,
-      targetWorkspace: contract.target_workspace,
-    })
-    services.eccRuntimeService.deriveWorkspace.mockResolvedValue({
-      directory: contract.target_workspace,
-      workspaceHandle: 'derived-handle',
-      workspaceRevision: 1,
-    })
+    prepareWorkspaceRerunMock.mockResolvedValue({ directory: contract.target_workspace })
     await openBackendWorkspace(
       handlers,
       { sender: owner },

@@ -9,6 +9,9 @@ import type {
   EccFlowRunResult,
   EccFlowRunStepRequest,
   EccFlowRunStepResult,
+  EccCandidateCapabilitiesRequest,
+  EccCandidateRerunRequest,
+  EccCandidateResumeRequest,
   EccProjectManifest,
   EccRuntimeEvent,
   EccRuntimeOperation,
@@ -19,6 +22,8 @@ import type {
   EccWorkspaceConfigurationUpdateRequest,
   EccWorkspaceCreateRequest,
   EccWorkspaceCreateResult,
+  EccWorkspaceDeriveRequest,
+  EccWorkspaceDeriveResult,
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceExportSignoffResult,
   EccWorkspaceHandleRequest,
@@ -869,6 +874,28 @@ export class EccCliRuntimeService {
       workspaceHandle: tracked.session.handle,
     })
     return { cancelled: true, operationId: tracked.operation.operationId }
+  }
+
+  // Candidate optimization operations are only exposed by the ECC RPC
+  // runtime; the CLI runtime has no counterpart, so fail closed here.
+  async candidateCapabilities(
+    _request: EccCandidateCapabilitiesRequest,
+  ): Promise<unknown> {
+    throw new Error('Candidate capabilities require the ECC RPC runtime.')
+  }
+
+  async candidateRerun(_request: EccCandidateRerunRequest): Promise<unknown> {
+    throw new Error('Candidate rerun requires the ECC RPC runtime.')
+  }
+
+  async candidateResume(_request: EccCandidateResumeRequest): Promise<unknown> {
+    throw new Error('Candidate resume requires the ECC RPC runtime.')
+  }
+
+  async deriveWorkspace(
+    _request: EccWorkspaceDeriveRequest & { workspaceHandle: string },
+  ): Promise<EccWorkspaceDeriveResult> {
+    throw new Error('Workspace derive requires the ECC RPC runtime.')
   }
 
   operationProjection(): EccBackgroundOperationProjection {

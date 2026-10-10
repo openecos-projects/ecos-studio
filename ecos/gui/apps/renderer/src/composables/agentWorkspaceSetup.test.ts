@@ -66,7 +66,11 @@ describe('Agent workspace PDK preparation', () => {
     const service = new ProjectManifestService(
       { resolveProjectRoot: async (root) => root },
       undefined,
-      { callRuntime: vi.fn().mockResolvedValue(manifest) },
+      {
+        discoverProject: vi.fn(),
+        loadProjectManifest: vi.fn().mockResolvedValue(manifest),
+        mutateProjectManifest: vi.fn(),
+      },
     )
 
     const prepared = await prepareAgentWorkspaceConfig(config)
@@ -90,7 +94,11 @@ describe('Agent workspace PDK preparation', () => {
     const service = new ProjectManifestService(
       { resolveProjectRoot: async (root) => root },
       undefined,
-      { callRuntime: vi.fn().mockResolvedValue(manifest) },
+      {
+        discoverProject: vi.fn(),
+        loadProjectManifest: vi.fn().mockResolvedValue(manifest),
+        mutateProjectManifest: vi.fn(),
+      },
     )
     const prepared = await prepareAgentWorkspaceConfig({
       ...config,

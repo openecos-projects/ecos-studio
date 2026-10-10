@@ -106,6 +106,18 @@ vi.mock('@/utils/projectManagementRead', () => ({
       },
   ),
 }))
+vi.mock('@/utils/projectConsistency', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/utils/projectConsistency')>()),
+  checkProjectConsistency: vi.fn(async () => ({
+    doctor: 'project' as const,
+    status: 'ok' as const,
+    projectRoot: null,
+    checked: 0,
+    inconsistent: 0,
+    findings: [],
+  })),
+  repairProjectConsistency: vi.fn(),
+}))
 vi.mock('@/stores/backendProjectComparisonSession', () => ({
   useBackendProjectComparisonSession: () => ({
     dispose: vi.fn(),
@@ -150,8 +162,13 @@ vi.mock('@/platform/desktop', () => ({
 
 import ProjectsView from './ProjectsView.vue'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
+import { useProjectConsistencyStore } from '@/stores/projectConsistencyStore'
 import { loadProjectHistory, rememberProjectHistoryEntry } from '@/utils/projectHistory'
-import { importProjectManagementWorkspace } from '@/utils/projectManagementRead'
+import {
+  importProjectManagementWorkspace,
+  readProjectManagementManifest,
+} from '@/utils/projectManagementRead'
+import { checkProjectConsistency } from '@/utils/projectConsistency'
 import { readFrontendProjectWorkspaceData } from './project-management/frontendProjectWorkspaceData'
 import {
   consumeWorkspaceWizardRequest,
@@ -192,6 +209,15 @@ describe('ProjectsView background lifecycle integration', () => {
     testState.selectProject.mockReset()
     testState.selectProject.mockImplementation(async () => undefined)
     vi.mocked(readFrontendProjectWorkspaceData).mockClear()
+    vi.mocked(checkProjectConsistency).mockReset()
+    vi.mocked(checkProjectConsistency).mockResolvedValue({
+      doctor: 'project',
+      status: 'ok',
+      projectRoot: null,
+      checked: 0,
+      inconsistent: 0,
+      findings: [],
+    })
     testState.mutateProjectManifest.mockReset()
     testState.mutateProjectManifest.mockResolvedValue(null)
     testState.pickDirectory.mockReset()

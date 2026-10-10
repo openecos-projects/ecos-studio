@@ -138,7 +138,7 @@ import {
   workspaceWindowRegistry,
   type WorkspaceWindowLike,
 } from '../services/workspaceWindowRegistry'
-import { executeWorkspaceRerun, verifyWorkspaceRerunContract } from '../services/workspaceRerun'
+import { executeWorkspaceRerun, prepareWorkspaceRerun } from '../services/workspaceRerun'
 import { executeProductCommand } from '../services/productCommandService'
 import { buildWorkspaceCreationModel } from '../services/workspaceCreationModel'
 import { rememberWorkspaceParameterCatalog } from '../services/workspaceParameterCatalogCache'
@@ -1854,48 +1854,10 @@ export function registerIpc(
       throw new Error('Workspace rerun source is not bound to this window.')
     }
     pendingWorkspaceReruns.delete(token)
-    // Isolated rerun preparation is delegated to the ECC workspace.derive
-    // domain command; Electron only verifies the frozen contract evidence.
-    const verified = await verifyWorkspaceRerunContract(pending.contract)
-    // openWorkspace reuses the live handle or reopens one released by idle
-    // cleanup, so a stale source binding self-heals before ownership checks.
-    const openedSource = await services.eccRuntimeService.openWorkspace({
-      directory: verified.sourceWorkspace,
-    })
-    const sourceWorkspaceHandle = workspaceHandleFromResult(openedSource)
-    const openedSourceDirectory = workspaceDirectoryFromResult(openedSource)
-    if (!sourceWorkspaceHandle || !openedSourceDirectory) {
-      throw new Error('Workspace rerun source is not active in this window.')
-    }
-    trackWorkspaceHandle(event.sender, sourceWorkspaceHandle, openedSourceDirectory)
-    const derived = (await executeProductCommand(
-      {
-        command: 'workspace.derive',
-        payload: {
-          workspaceHandle: sourceWorkspaceHandle,
-          directory: verified.sourceWorkspace,
-          targetDirectory: verified.targetWorkspace,
-          resetFromStep: pending.contract.target_step,
-        },
-      },
-      {
-        ownsWorkspaceHandle: (workspaceHandle) =>
-          workspaceHandleSubscriptions.get(workspaceHandle)?.sender === event.sender,
-        prepareCreate: async (createRequest) => createRequest,
-        runtime: services.eccRuntimeService,
-        trackCreateResult: () => undefined,
-      },
-    )) as { directory?: unknown }
-    if (
-      typeof derived.directory !== 'string' ||
-      normalizeWorkspacePath(derived.directory) !==
-        normalizeWorkspacePath(verified.targetWorkspace)
-    ) {
-      throw new Error('Workspace derive returned an unexpected target directory.')
-    }
+    const prepared = await prepareWorkspaceRerun(pending.contract)
     const executionToken = randomUUID()
     pendingWorkspaceRerunExecutions.set(executionToken, pending)
-    return { directory: derived.directory, executionToken }
+    return { ...prepared, executionToken }
   })
 
   handle(desktopApiIpcChannels.workspaceExecuteFlowAgentRerun, async (event, request) => {
