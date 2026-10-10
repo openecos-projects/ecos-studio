@@ -38,6 +38,10 @@ const routes: RouteRecordRaw[] = [
     children: [
       // 固定的设置页面
       {
+        path: 'project',
+        redirect: (to) => ({ path: '/workspace/home', query: to.query }),
+      },
+      {
         path: 'home',
         name: 'Home',
         component: () => import('../views/WorkspaceRouteView.vue'),

@@ -55,7 +55,9 @@ import { useSubflow } from '@/composables/useSubflow'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { getDesktopApi } from '@/platform/desktop'
 import { useOptimizationEpisodeStore } from '@/stores/optimizationEpisodeStore'
-import { flowNodeStatus } from './flowStatus'
+import { flowNodeStatus, type FlowNodeStatus } from './flowStatus'
+
+const props = defineProps<{ step?: string; status?: FlowNodeStatus }>()
 
 const rerunConfirmationVisible = ref(false)
 const preparingRerun = ref(false)
@@ -91,8 +93,11 @@ const parentRunGuarded = computed(() =>
 const flowRunControlDisabled = computed(
   () => flowRunControlBusy.value || parentRunGuarded.value,
 )
-const isHomeStage = computed(() => currentStage.value === 'home')
-const runTargetLabel = computed(() => (isHomeStage.value ? 'the full flow' : 'this step'))
+const targetStep = computed(() => props.step ?? currentStage.value)
+const isHomeStage = computed(() => !props.step && currentStage.value === 'home')
+const runTargetLabel = computed(
+  () => props.step ?? (isHomeStage.value ? 'the full flow' : 'this step'),
+)
 const runButtonLabel = computed(() =>
   parentRunGuarded.value
     ? 'Optimization is running in the background.'
@@ -115,8 +120,10 @@ const hasFinishedFlow = computed(
       )
     }),
 )
-const hasFinishedStep = computed(
-  () => overallStatus.value === 'completed' || overallStatus.value === 'failed',
+const hasFinishedStep = computed(() =>
+  props.status
+    ? ['succeeded', 'warning', 'failed', 'skipped'].includes(props.status)
+    : overallStatus.value === 'completed' || overallStatus.value === 'failed',
 )
 const needsRerunConfirmation = computed(() =>
   isHomeStage.value ? hasFinishedFlow.value : hasFinishedStep.value,
@@ -131,7 +138,7 @@ async function refreshChipViewerSaving(): Promise<void> {
   try {
     const status = await getDesktopApi().chipViewer.isOpen({
       projectPath,
-      step: currentStage.value || 'Home',
+      step: targetStep.value || 'Home',
     })
     chipViewerSaving.value = status.saving === true
   } catch {
@@ -195,8 +202,12 @@ async function executeRun(rerun: boolean): Promise<void> {
     return
   }
 
-  setRunStepOngoingByPath(currentStage.value)
-  await runFlow({ rerun, resetDependents: rerun })
+  setRunStepOngoingByPath(targetStep.value)
+  await runFlow({
+    rerun,
+    resetDependents: rerun,
+    ...(props.step ? { step: props.step } : {}),
+  })
 }
 
 async function canRerunCurrentStep(): Promise<boolean> {
@@ -205,7 +216,7 @@ async function canRerunCurrentStep(): Promise<boolean> {
 
   const viewer = await getDesktopApi().chipViewer.isOpen({
     projectPath,
-    step: currentStage.value,
+    step: targetStep.value,
   })
   if (!viewer.open) return true
 

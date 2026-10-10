@@ -1,57 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
+import FlowRunControl from '@/components/workbench/FlowRunControl.vue'
 import StepDashboard from '@/components/StepDashboard.vue'
-import FlowLogPanel from '@/components/workbench/FlowLogPanel.vue'
 import WorkspaceWorkbench from '@/components/workbench/WorkspaceWorkbench.vue'
-import { flowNodeStatus, type FlowStatusNode } from '@/components/workbench/flowStatus'
-import { getStepMetadata } from '@/api/type'
-import { selectedFlowLogSegment } from '@/components/workbench/flowLogSelection'
-import { useBackendFlowLogs } from '@/composables/useBackendFlowLogs'
 import { useSubflow } from '@/composables/useSubflow'
 import { useRoute } from 'vue-router'
 
-const { currentStepTitle, isLoading, subflowSteps } = useSubflow()
+const { currentStepTitle, isLoading } = useSubflow()
 const route = useRoute()
-const {
-  currentWorkspaceFlowExecutionActive,
-  ensureFlowLogSegmentContentLoaded,
-  flowLogContentByKey,
-  flowLogError,
-  flowLogLoading,
-  flowLogSegments,
-  flowLogStepName,
-} = useBackendFlowLogs()
-
 let isResizing = false
-
-const flowNodes = computed<FlowStatusNode[]>(() =>
-  subflowSteps.value.map((step) => ({
-    id: step.id,
-    label: step.name,
-    status: flowNodeStatus(step.status),
-    runtime: step.duration ?? '',
-    peakMemoryMb: step.peakMemory ?? null,
-    detail: step.description,
-  })),
-)
-const flowTitle = computed(() => `${currentStepTitle.value} subflow`)
-const currentStepLogNode = computed<FlowStatusNode | null>(() => {
-  const stepKey = typeof route.params.step === 'string' ? route.params.step : ''
-  if (!stepKey) return null
-
-  const metadata = getStepMetadata(stepKey)
-  const label = metadata?.label ?? stepKey
-  const segment =
-    selectedFlowLogSegment(flowLogSegments.value, stepKey) ??
-    selectedFlowLogSegment(flowLogSegments.value, label)
-  return {
-    id: `workspace-log:${metadata?.path ?? stepKey}`,
-    label: segment?.stepName ?? label,
-    status: flowNodeStatus(segment?.state),
-    runtime: '',
-    peakMemoryMb: null,
-  }
-})
 
 function handleMouseDown(event: MouseEvent): void {
   const target = event.target as HTMLElement
@@ -92,22 +49,23 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <WorkspaceWorkbench :flow-title="flowTitle" :loading="isLoading" :nodes="flowNodes">
+  <WorkspaceWorkbench
+    :flow-title="currentStepTitle"
+    :loading="isLoading"
+    :nodes="[]"
+    agent-only
+  >
     <template #left>
-      <StepDashboard />
-    </template>
-    <template #right-log>
-      <FlowLogPanel
-        :active-step-name="flowLogStepName"
-        :content-by-key="flowLogContentByKey"
-        :ensure-content="ensureFlowLogSegmentContentLoaded"
-        :error="flowLogError"
-        :execution-active="currentWorkspaceFlowExecutionActive"
-        :loading="flowLogLoading"
-        :selected-node="currentStepLogNode"
-        :selected-node-pinned="true"
-        :segments="flowLogSegments"
-      />
+      <section class="workspace-step-view">
+        <header>
+          <span>{{ currentStepTitle }}</span>
+          <router-link :to="{ path: '/workspace/home', query: route.query }"
+            >Dashboard</router-link
+          >
+          <FlowRunControl />
+        </header>
+        <StepDashboard />
+      </section>
     </template>
   </WorkspaceWorkbench>
 </template>

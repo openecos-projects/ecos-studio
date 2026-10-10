@@ -3,6 +3,7 @@ import type { Message } from '../types'
 import {
   describeInteractionAnswer,
   groupMessagesIntoTurns,
+  visibleChatMessages,
   groupTurnResponses,
   isChatStepArtifactGroup,
   pendingInteractionPresentation,
@@ -51,6 +52,20 @@ function layout(id: string, step: string): Message {
 }
 
 describe('groupMessagesIntoTurns', () => {
+  it('hides only generated GUI artifacts in RTL chat while preserving all conversation and stored messages', () => {
+    const conversation = [
+      msg({ id: 'user', role: 'user', content: 'Run flow' }),
+      report('rpt', 'place'),
+      layout('image', 'place'),
+      msg({ id: 'agent', role: 'assistant', content: 'Flow finished' }),
+    ]
+    expect(visibleChatMessages(conversation, true).map((message) => message.id)).toEqual([
+      'user',
+      'agent',
+    ])
+    expect(visibleChatMessages(conversation, false)).toBe(conversation)
+    expect(conversation).toHaveLength(4)
+  })
   it('describes structured interaction answers for the transcript', () => {
     const choice = {
       interaction: {

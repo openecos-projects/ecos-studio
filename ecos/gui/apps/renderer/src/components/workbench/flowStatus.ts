@@ -108,6 +108,17 @@ export function formatPeakMemory(peakMemoryMb: number | null): string {
   return `${(peakMemoryMb / 1024).toFixed(1)} GB`
 }
 
+export function formatRuntime(seconds: number | undefined): string {
+  if (seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return ''
+  const milliseconds = Math.round(seconds * 1000)
+  const hours = Math.floor(milliseconds / 3600000)
+  const minutes = Math.floor((milliseconds % 3600000) / 60000)
+  const wholeSeconds = Math.floor((milliseconds % 60000) / 1000)
+  const fraction = milliseconds % 1000
+  const secondText = `${String(wholeSeconds).padStart(2, '0')}${fraction ? `.${String(fraction).padStart(3, '0').replace(/0+$/, '')}` : ''}`
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${secondText}`
+}
+
 export function initialSelectedNodeId(nodes: readonly FlowStatusNode[]): string | null {
   return runningFlowNodeId(nodes) ?? nodes[0]?.id ?? null
 }

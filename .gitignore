@@ -18,6 +18,7 @@ result
 .humanize*
 .humanize/
 /docs/
+/ecos/gui/docs/
 .superpowers/
 .worktrees/
 

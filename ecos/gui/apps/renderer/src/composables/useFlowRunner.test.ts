@@ -123,6 +123,23 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     currentProject.value = null
   })
 
+  it('runs the explicitly selected dashboard step instead of the current route step', async () => {
+    currentProject.value = { path: '/work/demo' }
+    startStepOperationApi.mockResolvedValue({
+      operationId: 'operation-rcx',
+      state: 'queued',
+    })
+    await useFlowRunner().runFlow({ step: 'RCX', rerun: true, resetDependents: true })
+    expect(startStepOperationApi).toHaveBeenCalledWith({
+      expectedWorkspaceRevision: 1,
+      idempotencyKey: expect.any(String),
+      rerun: true,
+      resetDependents: true,
+      step: 'RCX',
+      workspaceHandle: 'workspace-demo',
+    })
+  })
+
   it('starts backend flows through the main runtime operation tracker', async () => {
     currentProject.value = { path: '/work/demo' }
     startFlowOperationApi.mockResolvedValue({

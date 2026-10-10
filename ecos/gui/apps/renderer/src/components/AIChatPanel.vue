@@ -35,7 +35,7 @@
         />
       </div>
       <div
-        v-else-if="messages.length === 0"
+        v-else-if="visibleMessages.length === 0"
         class="flex h-full flex-col items-center justify-center px-4 py-10 text-center"
       >
         <div
@@ -360,6 +360,7 @@ import { agentActivityUpdateKey } from './agentActivityPresentation'
 import {
   describeInteractionAnswer,
   groupMessagesIntoTurns,
+  visibleChatMessages,
   isChatStepArtifactGroup,
   pendingInteractionPresentation,
   type InteractionAnswer,
@@ -399,6 +400,7 @@ import {
 const props = withDefaults(
   defineProps<{
     shell?: 'home' | 'workspace'
+    hideGuiArtifacts?: boolean
   }>(),
   { shell: 'workspace' },
 )
@@ -421,7 +423,10 @@ const codexSetupCardStatus = computed(() =>
     : null,
 )
 const { tabs: chatTabs, sessionId: sharedSessionId, activeTab } = storeToRefs(agentShell)
-const conversationTurns = computed(() => groupMessagesIntoTurns(messages.value))
+const visibleMessages = computed(() =>
+  visibleChatMessages(messages.value, props.hideGuiArtifacts === true),
+)
+const conversationTurns = computed(() => groupMessagesIntoTurns(visibleMessages.value))
 const interactionPresentation = computed(() =>
   pendingInteractionPresentation(messages.value),
 )

@@ -8,6 +8,7 @@
     >
       <AIChatPanel
         shell="workspace"
+        :hide-gui-artifacts="hideGuiArtifacts"
         class="h-full min-h-0 w-full max-w-full min-w-0 flex-1 overflow-hidden"
       >
         <template #tab-actions>
@@ -21,6 +22,7 @@
             <i class="ri-arrow-down-s-line" aria-hidden="true" />
           </button>
           <button
+            v-if="!hideGuiArtifacts"
             type="button"
             class="chat-inspector-clear-artifacts"
             :disabled="!canClearGuiArtifacts"
@@ -67,6 +69,8 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useMessageStore } from '@/stores/messageStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 import AIChatPanel from './AIChatPanel.vue'
+
+defineProps<{ hideGuiArtifacts?: boolean }>()
 
 const isFullscreen = ref(false)
 const messageStore = useMessageStore()

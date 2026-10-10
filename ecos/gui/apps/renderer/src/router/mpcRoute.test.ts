@@ -12,6 +12,19 @@ describe('MPC resources route', () => {
 })
 
 describe('workspace fixed routes', () => {
+  it('redirects the removed Project page to Dashboard with workspace context', () => {
+    const query = { projectRoot: '/work/project', workspaceId: 'current' }
+    const route = router.resolve({ path: '/workspace/project', query })
+    const redirect = route.matched[route.matched.length - 1]?.redirect
+
+    expect(typeof redirect).toBe('function')
+    if (typeof redirect !== 'function') throw new Error('Expected Project redirect')
+    expect(redirect(route, router.currentRoute.value)).toEqual({
+      path: '/workspace/home',
+      query,
+    })
+  })
+
   it('resolves Tech Library before the dynamic workspace step route', () => {
     const route = router.resolve('/workspace/tech')
 

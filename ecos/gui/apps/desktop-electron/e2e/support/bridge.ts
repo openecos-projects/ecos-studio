@@ -3,6 +3,8 @@
  * consumed by the e2e harness. Only the methods the harness drives are
  * declared; payloads cross as plain JSON exactly as the renderer sends them.
  */
+import type { DesktopApi } from '@ecos-studio/shared'
+
 export interface E2EBridge {
   app: {
     getVersions(): Promise<Record<string, string | undefined>>
@@ -33,6 +35,7 @@ export interface E2EBridge {
   workspace: {
     registerProjectRoot(path: string): Promise<string>
   }
+  workspaceResources: Pick<DesktopApi['workspaceResources'], 'getIndex'>
   backendWorkspace: {
     refreshOverview(): Promise<unknown>
   }
