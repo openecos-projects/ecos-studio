@@ -14,7 +14,9 @@ import type {
   EccWorkspaceStepConfigurationUpdateRequest,
   EccWorkspaceUpdateRequest,
   ProductCommandRequest,
+  ResourceStalenessItem,
 } from '@ecos-studio/shared'
+import { assertRunResourcesFresh } from './resourceStalenessGuard'
 
 interface ProductCommandRuntime {
   cancelOperation(request: EccRuntimeOperationRequest): Promise<unknown>
@@ -54,6 +56,14 @@ interface ProductCommandContext {
     workspaceDirectory?: string,
   ): void
   workspaceDirectoryForHandle?(workspaceHandle: string): string | undefined
+  /**
+   * Pre-run staleness assessment over cached resource data (tools/MPCs plus
+   * the bound PDK). When absent, runs are not guarded — tests construct
+   * minimal contexts.
+   */
+  assessResourceStaleness?(
+    workspaceDirectory: string | null,
+  ): Promise<ResourceStalenessItem[]>
   beginCreate?(
     request: EccWorkspaceCreateRequest,
   ): Promise<{ creationId: string; targetDirectory: string }>
@@ -175,6 +185,12 @@ export async function executeProductCommand(
           { code: 'WORKSPACE_MUTATION_BUSY' },
         )
       }
+      await guardRunResourceStaleness(
+        context,
+        workspaceHandle,
+        request.payload.allowStaleResources,
+        request.command,
+      )
       return await context.runtime.startFlowOperation(request.payload)
     case 'workspace.runStep':
       if (context.isWorkspaceMutationBusy?.(workspaceHandle)) {
@@ -185,6 +201,12 @@ export async function executeProductCommand(
           { code: 'WORKSPACE_MUTATION_BUSY' },
         )
       }
+      await guardRunResourceStaleness(
+        context,
+        workspaceHandle,
+        request.payload.allowStaleResources,
+        request.command,
+      )
       return await context.runtime.startStepOperation(request.payload)
     case 'workspace.update': {
       const draft = await context.prepareCreate({
@@ -237,6 +259,19 @@ export async function executeProductCommand(
       }
       return await context.cleanupOptimizationEpisode(request.payload)
   }
+}
+
+async function guardRunResourceStaleness(
+  context: ProductCommandContext,
+  workspaceHandle: string,
+  allowStaleResources: boolean | undefined,
+  runLabel: string,
+): Promise<void> {
+  if (!context.assessResourceStaleness) return
+  const items = await context.assessResourceStaleness(
+    context.workspaceDirectoryForHandle?.(workspaceHandle) ?? null,
+  )
+  assertRunResourcesFresh(items, allowStaleResources, runLabel)
 }
 
 const GUARDED_PARENT_COMMANDS = new Set<ProductCommandRequest['command']>([

@@ -76,6 +76,9 @@ vi.mock('electron', () => ({
 
 const electronLogger = vi.hoisted(() => ({
   debug: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+  status: vi.fn(),
   warn: vi.fn(),
 }))
 
@@ -211,6 +214,7 @@ function registerHandlers(
       importPdkPath: vi.fn(),
       installResource: vi.fn(),
       listResources: vi.fn(),
+      readCachedLatestPdkRelease: vi.fn(),
       refreshRegistry: vi.fn(),
       checkResourceUpdates: vi.fn(),
       removePdkReference: vi.fn(),
@@ -224,6 +228,7 @@ function registerHandlers(
       bindInstallation: vi.fn(),
       importInstallation: vi.fn(),
       listInstallations: vi.fn(),
+      listBindings: vi.fn(),
       locateInstallation: vi.fn(),
       removeInstallation: vi.fn(),
       resolveBinding: vi.fn(),
@@ -4738,6 +4743,181 @@ describe('registerIpc', () => {
         step: 'prepare',
       }),
     )
+  })
+
+  it('blocks a frontend flow run while stale resources are pending', async () => {
+    const { handlers, services } = registerHandlers()
+    const sender = Object.assign(new EventEmitter(), {
+      id: 11,
+      isDestroyed: vi.fn(() => false),
+      send: vi.fn(),
+    })
+    services.frontendRpcRuntimeService.openWorkspace.mockResolvedValueOnce({
+      directory: '/work/frontend',
+      workspaceHandle: 'workspace-frontend-1',
+    })
+    await handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceOpen)?.(
+      { sender },
+      { designTool: 'frontend', directory: '/work/frontend' },
+    )
+    services.resourceManagerService.listResources.mockResolvedValue({
+      resources: [
+        {
+          id: 'tool:yosys',
+          type: 'tool',
+          name: 'yosys',
+          display_name: 'Yosys',
+          status: 'update_available',
+          installed_version: '0.61',
+          available_versions: ['0.62'],
+          active_version: '0.61',
+          active: true,
+          update_kind: 'version',
+          health: {},
+        },
+      ],
+      diagnostics: [],
+    })
+    services.pdkInventoryService.listBindings.mockResolvedValue([])
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.designRuntimeFlowRun)?.(
+        { sender },
+        { designTool: 'frontend', workspaceHandle: 'workspace-frontend-1' },
+      ),
+    ).resolves.toMatchObject({
+      error: {
+        code: 'RESOURCE_UPDATE_AVAILABLE',
+        details: {
+          resources: [
+            {
+              id: 'tool:yosys',
+              display_name: 'Yosys',
+              installed_version: '0.61',
+              latest_version: '0.62',
+              update_kind: 'version',
+            },
+          ],
+        },
+      },
+      ok: false,
+    })
+    expect(services.frontendRpcRuntimeService.runFlow).not.toHaveBeenCalled()
+  })
+
+  it('runs a frontend flow with allowStaleResources despite the stale listing', async () => {
+    const { handlers, services } = registerHandlers()
+    services.frontendRpcRuntimeService.runFlow.mockResolvedValueOnce({
+      ok: true,
+    })
+    services.resourceManagerService.listResources.mockResolvedValue({
+      resources: [
+        {
+          id: 'tool:yosys',
+          type: 'tool',
+          name: 'yosys',
+          display_name: 'Yosys',
+          status: 'update_available',
+          installed_version: '0.61',
+          available_versions: ['0.62'],
+          active_version: '0.61',
+          active: true,
+          update_kind: 'version',
+          health: {},
+        },
+      ],
+      diagnostics: [],
+    })
+    services.pdkInventoryService.listBindings.mockResolvedValue([])
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.designRuntimeFlowRun)?.(
+        { sender: { id: 7 } },
+        {
+          allowStaleResources: true,
+          designTool: 'frontend',
+          workspaceHandle: 'workspace-frontend-1',
+        },
+      ),
+    ).resolves.toEqual({ ok: true })
+    expect(services.frontendRpcRuntimeService.runFlow).toHaveBeenCalledWith(
+      'workspace-frontend-1',
+      false,
+    )
+  })
+
+  it('blocks a frontend step run on a stale bound PDK', async () => {
+    const { handlers, services } = registerHandlers()
+    const sender = Object.assign(new EventEmitter(), {
+      id: 11,
+      isDestroyed: vi.fn(() => false),
+      send: vi.fn(),
+    })
+    services.frontendRpcRuntimeService.openWorkspace.mockResolvedValueOnce({
+      directory: '/work/frontend/ws_1',
+      workspaceHandle: 'workspace-frontend-1',
+    })
+    await handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceOpen)?.(
+      { sender },
+      { designTool: 'frontend', directory: '/work/frontend/ws_1' },
+    )
+    services.resourceManagerService.listResources.mockResolvedValue({
+      resources: [],
+      diagnostics: [],
+    })
+    services.resourceManagerService.readCachedLatestPdkRelease.mockResolvedValue({
+      version: '1.1.0',
+      sha256: null,
+    })
+    services.pdkInventoryService.listBindings.mockResolvedValue([
+      {
+        projectId: 'project-1',
+        projectRoot: '/work/frontend',
+        installationId: 'pdk-install-1',
+      },
+    ])
+    services.pdkInventoryService.listInstallations.mockResolvedValue([
+      {
+        id: 'pdk-install-1',
+        familyId: 'ics55',
+        displayName: 'ICS55 PDK',
+        version: '1.0.0',
+        root: '/pdks/ics55',
+        ownership: 'managed',
+        registrySha256: null,
+        readiness: 'ready',
+        reason: null,
+        supportsEccDefaults: true,
+      },
+    ])
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.designRuntimeFlowRunStep)?.(
+        { sender },
+        {
+          designTool: 'frontend',
+          step: 'place',
+          workspaceHandle: 'workspace-frontend-1',
+        },
+      ),
+    ).resolves.toMatchObject({
+      error: {
+        code: 'RESOURCE_UPDATE_AVAILABLE',
+        details: {
+          resources: [
+            {
+              id: 'pdk-install-1',
+              display_name: 'ICS55 PDK',
+              installed_version: '1.0.0',
+              latest_version: '1.1.0',
+              update_kind: 'version',
+            },
+          ],
+        },
+      },
+      ok: false,
+    })
+    expect(services.frontendRpcRuntimeService.runStep).not.toHaveBeenCalled()
   })
 
   it('focuses an existing workspace window instead of proceeding to open', async () => {

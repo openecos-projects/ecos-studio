@@ -1434,6 +1434,24 @@ export class ResourceManagerService {
     return isUpdateCheckStale(cache?.checked_at ?? null, now)
   }
 
+  /**
+   * Latest published release for a PDK family, read from the cached registry
+   * only (memory or on-disk cache; never the network). Null when the family
+   * is unknown or no registry has been cached yet.
+   */
+  async readCachedLatestPdkRelease(
+    familyId: string,
+  ): Promise<{ version: string; sha256: string | null } | null> {
+    const registry =
+      this.registryMemory ??
+      (await this.readCachedRegistry(registryCachePath(this.cacheDir, this.registryUrl)))
+        .registry
+    const latest = registry?.pdks.find((pdk) => pdk.id === familyId)?.versions[0]
+    if (!latest) return null
+    const { asset } = selectPlatformAsset(latest)
+    return { version: latest.version, sha256: readSha256(asset?.sha256) }
+  }
+
   private async runResourceUpdateCheck(
     options: ResourceUpdateCheckOptions,
   ): Promise<ResourceUpdateCheckResult> {
@@ -4449,7 +4467,7 @@ function readSha256(value: unknown): string | null {
   return /^[a-f0-9]{64}$/.test(normalized) ? normalized : null
 }
 
-function assetShaDrift(
+export function assetShaDrift(
   installedSha256: string | null | undefined,
   assetSha256: unknown,
 ): boolean {

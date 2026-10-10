@@ -15,6 +15,7 @@ const {
   currentProject,
   markHomeRunArtifactResetAwaitingBackendStart,
   clearHomeRunArtifactResetAwaitingBackendStart,
+  requestStalenessConfirmation,
 } = vi.hoisted(() => ({
   ensureApiReady: vi.fn(() => Promise.resolve(true)),
   showToast: vi.fn(),
@@ -48,6 +49,7 @@ const {
   },
   markHomeRunArtifactResetAwaitingBackendStart: vi.fn(),
   clearHomeRunArtifactResetAwaitingBackendStart: vi.fn(),
+  requestStalenessConfirmation: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -78,6 +80,10 @@ vi.mock('./homeRunArtifacts', () => ({
   clearHomeRunArtifactResetAwaitingBackendStart,
 }))
 
+vi.mock('./useResourceStalenessGuard', () => ({
+  useResourceStalenessGuard: () => ({ requestStalenessConfirmation }),
+}))
+
 import {
   clearFlowExecutionActiveForWorkspace,
   flowExecutionActive,
@@ -104,6 +110,7 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     waitForRuntimeOperation.mockImplementation(() => new Promise<void>(() => undefined))
     markHomeRunArtifactResetAwaitingBackendStart.mockReset()
     clearHomeRunArtifactResetAwaitingBackendStart.mockReset()
+    requestStalenessConfirmation.mockReset()
     workspaceSession.value = {
       sessionId: 'session-1',
       workspaceId: 'workspace-demo',
@@ -188,6 +195,7 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     expect(rtl2gdsApi).toHaveBeenCalledWith({
       cmd: 'rtl2gds',
       data: {
+        allowStaleResources: false,
         designTool: 'frontend',
         directory: '/work/frontend-demo',
         rerun: false,
@@ -197,6 +205,7 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     expect(runStepApi).toHaveBeenCalledWith({
       cmd: 'run_step',
       data: {
+        allowStaleResources: false,
         designTool: 'frontend',
         directory: '/work/frontend-demo',
         rerun: true,
@@ -312,5 +321,129 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     setBackendFlowProjectionReady(false)
 
     expect(runner.isRunning.value).toBe(false)
+  })
+
+  it('converts a backend RESOURCE_UPDATE_AVAILABLE failure into a confirmation request', async () => {
+    currentProject.value = { path: '/work/demo' }
+    const staleItem = {
+      id: 'tool:yosys',
+      display_name: 'Yosys',
+      installed_version: '0.61',
+      latest_version: '0.62',
+      update_kind: 'version' as const,
+    }
+    startFlowOperationApi.mockRejectedValueOnce(
+      Object.assign(new Error('Resource updates are available for: Yosys'), {
+        code: 'RESOURCE_UPDATE_AVAILABLE',
+        details: { resources: [staleItem] },
+      }),
+    )
+
+    const runner = useFlowRunner()
+    await expect(runner.runAllFlow()).resolves.toBeNull()
+
+    expect(requestStalenessConfirmation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resources: [staleItem],
+        retry: expect.any(Function),
+        runLabel: 'full flow',
+      }),
+    )
+    expect(runner.isRunning.value).toBe(false)
+    expect(runner.state.value).toBe(StateEnum.Invalid)
+    expect(showToast.mock.calls.some((call) => call[0]?.severity === 'error')).toBe(false)
+  })
+
+  it('re-runs an intercepted backend flow with the allow-stale decision', async () => {
+    currentProject.value = { path: '/work/demo' }
+    startFlowOperationApi
+      .mockRejectedValueOnce(
+        Object.assign(new Error('Resource updates are available for: Yosys'), {
+          code: 'RESOURCE_UPDATE_AVAILABLE',
+        }),
+      )
+      .mockResolvedValueOnce({
+        operationId: 'operation-flow',
+        state: 'queued',
+      })
+
+    const runner = useFlowRunner()
+    await runner.runAllFlow()
+    const request = requestStalenessConfirmation.mock.calls[0]?.[0]
+    expect(request).toBeDefined()
+
+    await request.retry(true)
+
+    expect(startFlowOperationApi).toHaveBeenCalledTimes(2)
+    expect(startFlowOperationApi).toHaveBeenLastCalledWith(
+      expect.objectContaining({ allowStaleResources: true }),
+    )
+    clearFlowExecutionActiveForWorkspace('/work/demo')
+  })
+
+  it('converts a frontend step RESOURCE_UPDATE_AVAILABLE failure into a confirmation request', async () => {
+    currentProject.value = { path: '/work/frontend-demo', designTool: 'frontend' }
+    runStepApi.mockRejectedValueOnce(
+      Object.assign(new Error('Resource updates are available for: Yosys'), {
+        code: 'RESOURCE_UPDATE_AVAILABLE',
+        details: { resources: [] },
+      }),
+    )
+
+    const runner = useFlowRunner()
+    await expect(runner.runFlow()).resolves.toBeNull()
+
+    expect(requestStalenessConfirmation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resources: [],
+        retry: expect.any(Function),
+        runLabel: 'Floorplan step',
+      }),
+    )
+    expect(runner.isRunning.value).toBe(false)
+    expect(runner.state.value).toBe(StateEnum.Invalid)
+    expect(showToast.mock.calls.some((call) => call[0]?.severity === 'error')).toBe(false)
+  })
+
+  it('passes the allow-stale decision through a frontend step retry', async () => {
+    currentProject.value = { path: '/work/frontend-demo', designTool: 'frontend' }
+    runStepApi
+      .mockRejectedValueOnce(
+        Object.assign(new Error('Resource updates are available for: Yosys'), {
+          code: 'RESOURCE_UPDATE_AVAILABLE',
+        }),
+      )
+      .mockResolvedValueOnce({
+        response: 'success',
+        data: { state: StateEnum.Success, step: StepEnum.FLOORPLAN },
+        message: [],
+      })
+
+    const runner = useFlowRunner()
+    await runner.runFlow()
+    const request = requestStalenessConfirmation.mock.calls[0]?.[0]
+    expect(request).toBeDefined()
+
+    await request.retry(true)
+
+    expect(runStepApi).toHaveBeenCalledTimes(2)
+    expect(runStepApi).toHaveBeenLastCalledWith({
+      cmd: 'run_step',
+      data: expect.objectContaining({
+        allowStaleResources: true,
+        step: StepEnum.FLOORPLAN,
+      }),
+    })
+  })
+
+  it('surfaces non-staleness failures as before', async () => {
+    currentProject.value = { path: '/work/demo' }
+    startFlowOperationApi.mockRejectedValueOnce(new Error('sidecar unavailable'))
+
+    const runner = useFlowRunner()
+    await runner.runAllFlow()
+
+    expect(requestStalenessConfirmation).not.toHaveBeenCalled()
+    expect(showToast.mock.calls.some((call) => call[0]?.severity === 'error')).toBe(true)
   })
 })
