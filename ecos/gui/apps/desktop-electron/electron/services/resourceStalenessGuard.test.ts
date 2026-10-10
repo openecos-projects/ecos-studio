@@ -260,6 +260,32 @@ describe('assessRunStaleness bound PDK', () => {
     await expect(assessRunStaleness(assessOptions(stubs))).resolves.toEqual([])
   })
 
+  it('skips an imported installation even when the registry has a newer release', async () => {
+    const stubs = createServiceStubs()
+    stubs.pdkInventoryService.listBindings.mockResolvedValue([makeBinding()])
+    stubs.pdkInventoryService.listInstallations.mockResolvedValue([
+      makeInstallation({
+        ownership: 'imported',
+        version: null,
+        registrySha256: null,
+      }),
+    ])
+
+    await expect(assessRunStaleness(assessOptions(stubs))).resolves.toEqual([])
+    expect(stubs.resourceManagerService.readCachedLatestPdkRelease).not.toHaveBeenCalled()
+  })
+
+  it('skips a managed installation without a recorded version', async () => {
+    const stubs = createServiceStubs()
+    stubs.pdkInventoryService.listBindings.mockResolvedValue([makeBinding()])
+    stubs.pdkInventoryService.listInstallations.mockResolvedValue([
+      makeInstallation({ version: null }),
+    ])
+
+    await expect(assessRunStaleness(assessOptions(stubs))).resolves.toEqual([])
+    expect(stubs.resourceManagerService.readCachedLatestPdkRelease).not.toHaveBeenCalled()
+  })
+
   it('skips bindings whose project root does not contain the workspace', async () => {
     const stubs = createServiceStubs()
     stubs.pdkInventoryService.listBindings.mockResolvedValue([

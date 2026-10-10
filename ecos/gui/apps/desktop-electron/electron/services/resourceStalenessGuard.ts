@@ -71,7 +71,8 @@ function collectStaleRunResources(resources: ResourceInfo[]): ResourceStalenessI
  * Best-effort PDK staleness: find the binding whose project root contains the
  * run's workspace directory (longest normalized prefix wins), then compare the
  * bound installation against the cached registry release. Returns null when no
- * binding matches, the installation is unknown, or the PDK is fresh.
+ * binding matches, the installation is unknown or imported (user-managed
+ * external trees have no registry update source), or the PDK is fresh.
  */
 async function assessBoundPdk(
   options: RunStalenessAssessmentOptions,
@@ -92,6 +93,10 @@ async function assessBoundPdk(
     (candidate) => candidate.id === binding.installationId,
   )
   if (!installation) return null
+  // Imported PDKs are user-managed external trees; comparing them against the
+  // registry release would false-positive on every run. Mirrors the Resource
+  // Manager listing, which only checks updates for managed PDKs.
+  if (installation.ownership === 'imported' || !installation.version) return null
 
   const release = await options.resourceManagerService.readCachedLatestPdkRelease(
     installation.familyId,
