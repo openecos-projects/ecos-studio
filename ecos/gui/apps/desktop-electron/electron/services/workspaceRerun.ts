@@ -1,13 +1,19 @@
-import { createHash } from 'node:crypto'
-import { lstat, readFile, realpath } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
+import {
+  cp,
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  unlink,
+  writeFile,
+} from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
-import {
-  ECC_CATALOG_END_STEP as CATALOG_END_STEP,
-  ECC_FLOW_STEPS as FLOW_STEP_SEQUENCE,
-  ECC_FLOW_STEP_SET as FLOW_STEPS,
-  type DesktopAgentWorkspaceRerunContract,
-} from '@ecos-studio/shared'
+import type { DesktopAgentWorkspaceRerunContract } from '@ecos-studio/shared'
 import { isPathWithinRoot, isRelativePathOutsideRoot } from './pathScope'
 import {
   executeWorkspaceRerunDomain,
@@ -90,6 +96,10 @@ function rerunStageDirectoryName(stepName: string, tool: string): string {
 function rerunStepSlug(stepName: string): string {
   return stepName.trim().split(/\s+/).join('_').toLowerCase()
 }
+
+function isObsoleteFlowStep(stepName: string): boolean {
+  return stepName.toLowerCase().replace(/[\s_-]/g, '') === 'fixfanout'
+}
 const AUTHORIZED_KNOBS = {
   place: new Set([
     'place.target_density',
@@ -168,6 +178,57 @@ const BOOLEAN_KNOBS = new Set([
   'legalization.deterministic',
   'route.enable_timing',
 ])
+const OWNER_MARKER = '.flow_agent_workspace_rerun_owner'
+
+export async function prepareWorkspaceRerun(
+  contract: DesktopAgentWorkspaceRerunContract,
+): Promise<{ directory: string }> {
+  const verified = await verifyWorkspaceRerunContract(contract)
+  const owner = randomUUID()
+  const stagingRoot = await createStagingRoot(verified.targetWorkspace)
+  const stagedWorkspace = join(stagingRoot, basename(verified.targetWorkspace))
+  let targetCreated = false
+  try {
+    await cp(verified.sourceWorkspace, stagedWorkspace, {
+      errorOnExist: true,
+      force: false,
+      recursive: true,
+    })
+    await prepareWorkspaceRerunFlow(
+      stagedWorkspace,
+      contract.target_step,
+      contract.end_step,
+      contract.execution_scope,
+    )
+    await prepareWorkspaceRerunMetadata({
+      sourceWorkspace: verified.sourceWorkspace,
+      sourceWorkspaceRaw: contract.source_workspace,
+      stagedWorkspace,
+      targetStep: contract.target_step,
+      targetWorkspace: verified.targetWorkspace,
+    })
+    const stagedHome = await resolvePathWithinWorkspace(
+      stagedWorkspace,
+      join(stagedWorkspace, 'home'),
+      'rerun home',
+    )
+    await assertMissing(join(stagedWorkspace, OWNER_MARKER))
+    await writeFile(
+      join(stagedHome, 'flow_agent_workspace_rerun_contract.v1.json'),
+      `${JSON.stringify(contract, null, 2)}\n`,
+      'utf8',
+    )
+    await writeFile(join(stagedWorkspace, OWNER_MARKER), owner, 'utf8')
+    await rename(stagedWorkspace, verified.targetWorkspace)
+    targetCreated = true
+    return { directory: verified.targetWorkspace }
+  } catch (error) {
+    if (targetCreated) await removeOwnedWorkspace(verified.targetWorkspace, owner)
+    throw error
+  } finally {
+    await rm(stagingRoot, { force: true, recursive: true })
+  }
+}
 
 export async function executeWorkspaceRerun(
   contract: DesktopAgentWorkspaceRerunContract,
@@ -183,7 +244,7 @@ export async function executeWorkspaceRerun(
   )
 }
 
-export async function verifyWorkspaceRerunContract(
+async function verifyWorkspaceRerunContract(
   contract: DesktopAgentWorkspaceRerunContract,
 ): Promise<{
   sourceWorkspace: string
@@ -319,6 +380,33 @@ function isWorkspaceArtifactReference(value: string): boolean {
   )
 }
 
+async function createStagingRoot(targetWorkspace: string): Promise<string> {
+  const parent = dirname(targetWorkspace)
+  const stagingRoot = join(parent, `.${basename(targetWorkspace)}.${randomUUID()}`)
+  await mkdir(parent, { recursive: true })
+  await mkdir(stagingRoot)
+  return stagingRoot
+}
+
+async function removeOwnedWorkspace(
+  targetWorkspace: string,
+  owner: string,
+): Promise<void> {
+  try {
+    const targetStats = await lstat(targetWorkspace)
+    if (targetStats.isSymbolicLink() || !targetStats.isDirectory()) return
+    const resolvedTarget = await realpath(targetWorkspace)
+    if (resolvedTarget !== resolve(targetWorkspace)) return
+    const marker = join(resolvedTarget, OWNER_MARKER)
+    const markerStats = await lstat(marker)
+    if (markerStats.isSymbolicLink() || !markerStats.isFile()) return
+    if ((await readFile(marker, 'utf8')) !== owner) return
+    await rm(resolvedTarget, { force: true, recursive: true })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+}
+
 async function resolvePathWithinWorkspace(
   workspace: string,
   path: string,
@@ -333,6 +421,15 @@ async function resolvePathWithinWorkspace(
 
 function isWithinWorkspace(workspace: string, path: string): boolean {
   return isPathWithinRoot(path, workspace)
+}
+
+async function assertMissing(path: string): Promise<void> {
+  try {
+    await lstat(path)
+    throw new Error('Workspace rerun marker already exists.')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
 }
 
 function hasValidParameterPatch(
