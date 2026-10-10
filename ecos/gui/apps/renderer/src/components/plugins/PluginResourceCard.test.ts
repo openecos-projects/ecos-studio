@@ -139,4 +139,70 @@ describe('PluginResourceCard', () => {
       'Downloading Yosys package 3/7: pkg.tar.bz2 (39.1 MB / 77.0 MB)...',
     )
   })
+
+  it('shows a subtle checksum warning on installed rows missing a recorded checksum', () => {
+    const wrapper = mountCard({
+      status: 'installed',
+      installed_version: '20260827',
+      checksum_missing: true,
+      actions: ['uninstall'],
+    })
+
+    expect(wrapper.find('.resource-checksum-hint').text()).toContain(
+      'Checksum missing — reinstall recommended',
+    )
+  })
+
+  it('hides the checksum warning while an update badge takes precedence', () => {
+    const wrapper = mountCard({
+      status: 'update_available',
+      installed_version: '20250101',
+      checksum_missing: true,
+      actions: ['update'],
+    })
+
+    expect(wrapper.find('.resource-checksum-hint').exists()).toBe(false)
+    expect(wrapper.find('.status-pill').text()).toBe('Update available')
+  })
+
+  it('shows a republished pill for a same-version republish', () => {
+    const wrapper = mountCard({
+      status: 'update_available',
+      installed_version: '20260827',
+      update_kind: 'rebuild',
+      actions: ['update'],
+    })
+
+    expect(wrapper.find('.status-pill').text()).toBe('Republished')
+  })
+
+  it('shows a last-checked footnote when an update check has run', () => {
+    const wrapper = mountCard({
+      status: 'installed',
+      installed_version: '20260827',
+      actions: ['uninstall'],
+      health: {
+        update_check: {
+          checked_at: '2020-01-01T00:00:00Z',
+          stale: true,
+          commit: null,
+        },
+      },
+    })
+
+    const footnote = wrapper.find('.resource-update-check')
+    expect(footnote.text()).toContain('Last checked')
+    expect(footnote.text()).toContain('may be outdated')
+  })
+
+  it('omits both footnotes for a plain installed row', () => {
+    const wrapper = mountCard({
+      status: 'installed',
+      installed_version: '20260827',
+      actions: ['uninstall'],
+    })
+
+    expect(wrapper.find('.resource-checksum-hint').exists()).toBe(false)
+    expect(wrapper.find('.resource-update-check').exists()).toBe(false)
+  })
 })

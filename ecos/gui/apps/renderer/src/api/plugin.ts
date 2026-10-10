@@ -115,6 +115,11 @@ export function pdkInstallationToResourceItem(
     source: installation.ownership,
     homepage: '',
     actions: [installation.ownership === 'managed' ? 'uninstall' : 'remove_reference'],
+    // Mirrors main's pdkSnapshotToResource: managed installs without a recorded
+    // registry sha256 cannot detect rebuild drift, so reinstall is recommended.
+    ...(installation.ownership === 'managed' && !installation.registrySha256
+      ? { checksum_missing: true }
+      : {}),
     health: { readiness: installation.readiness },
     error: installation.reason,
   }

@@ -101,10 +101,17 @@
                   v-if="selectedEntry.resource.status === 'update_available'"
                   class="is-update"
                 >
-                  Update available
+                  {{
+                    selectedEntry.resource.update_kind === 'rebuild'
+                      ? 'Republished'
+                      : 'Update available'
+                  }}
                 </span>
               </div>
               <p>{{ selectedEntry.candidate.spec_path }}</p>
+              <p v-if="selectedUpdateCheckFootnote" class="mpc-update-check">
+                {{ selectedUpdateCheckFootnote }}
+              </p>
             </div>
 
             <label v-if="designs.length > 1" class="mpc-design-select">
@@ -155,6 +162,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import MpcTemplatePreview from '@/components/MpcTemplatePreview.vue'
 import { listResourcesApi, readMpcSpecApi, type ResourceItem } from '@/api/plugin'
+import { updateCheckFootnote } from './pluginResourceMeta'
 import {
   projectMpcOptionFromResource,
   type ProjectManifestMpcCandidate,
@@ -191,6 +199,10 @@ const selectedDesign = computed<MpcSpecDesign | null>(() => {
     designs.value.find((design) => design.index === selectedDesignIndex.value) ?? null
   )
 })
+
+const selectedUpdateCheckFootnote = computed(() =>
+  updateCheckFootnote(selectedEntry.value?.resource.health?.update_check),
+)
 
 onMounted(() => {
   void loadResources()
