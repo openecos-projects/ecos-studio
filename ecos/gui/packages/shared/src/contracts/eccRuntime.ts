@@ -423,6 +423,8 @@ export interface EccBackgroundOperationLogResult {
 export interface EccRuntimeStartFlowRequest extends EccWorkspaceMutationRequest {
   idempotencyKey: string
   rerun?: boolean
+  /** Bypasses the pre-run stale-resource guard after explicit user confirmation. */
+  allowStaleResources?: boolean
 }
 
 export interface EccRuntimeStartStepRequest extends EccRuntimeStartFlowRequest {

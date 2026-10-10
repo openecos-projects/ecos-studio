@@ -162,6 +162,7 @@ type IpcHandler = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
 interface DesktopBridgeErrorResult {
   error: {
     code?: string
+    details?: unknown
     message: string
     name: string
   }
@@ -688,15 +689,19 @@ function summarizeProjectBinaryReadError(path: string, error: unknown): string {
 
 function serializeError(error: unknown): {
   code?: string
+  details?: unknown
   message: string
   name: string
 } {
   if (error instanceof Error) {
+    const details = (error as { details?: unknown }).details
     return {
       code:
         typeof (error as NodeJS.ErrnoException).code === 'string'
           ? (error as NodeJS.ErrnoException).code
           : undefined,
+      // Only plain JSON-shaped details cross the bridge; anything else is dropped.
+      details: isRecord(details) || Array.isArray(details) ? details : undefined,
       message: error.message,
       name: error.name,
     }

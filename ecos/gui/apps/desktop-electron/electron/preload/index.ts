@@ -31,9 +31,10 @@ import type {
   WorkspaceStepInfoRequest,
 } from '@ecos-studio/shared'
 
-function isDesktopBridgeErrorResult(
-  value: unknown,
-): value is { error: { code?: string; message: string; name: string }; ok: false } {
+function isDesktopBridgeErrorResult(value: unknown): value is {
+  error: { code?: string; details?: unknown; message: string; name: string }
+  ok: false
+} {
   return (
     typeof value === 'object' &&
     value !== null &&
@@ -48,10 +49,11 @@ function isDesktopBridgeErrorResult(
 }
 
 function toErrorFromIpcResult(result: {
-  error: { code?: string; message: string; name: string }
+  error: { code?: string; details?: unknown; message: string; name: string }
 }): Error {
   return Object.assign(new Error(result.error.message), {
     code: result.error.code,
+    details: result.error.details,
     name: result.error.name,
   })
 }
