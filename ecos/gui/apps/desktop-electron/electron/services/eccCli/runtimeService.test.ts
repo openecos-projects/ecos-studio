@@ -145,6 +145,25 @@ function request(
 }
 
 describe('ECC CLI workspace command planning', () => {
+  it('persists the selected STA limit through CLI for fresh and derived workspaces', () => {
+    const input = request()
+    input.workspaceSpec.parameters = { 'sta.max_parallel_corners': 3 }
+    expect(workspaceCreateCommands(input, '/projects/demo')[1]).toContain(
+      'sta.max_parallel_corners=3',
+    )
+    input.deriveFrom = { sourceStep: 'placement', workspaceId: 'ws_source' }
+    expect(workspaceCreateCommands(input, '/projects/demo')[1]).toEqual([
+      'param',
+      'set',
+      'sta.max_parallel_corners',
+      '3',
+      '--project',
+      '/projects/demo',
+      '--workspace',
+      'ws_1',
+    ])
+  })
+
   it('initializes an MPC Project before its Project and Workspace transactions', () => {
     const input = request({
       eccPdkConfig: {

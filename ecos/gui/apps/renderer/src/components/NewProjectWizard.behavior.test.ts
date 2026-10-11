@@ -1356,6 +1356,10 @@ describe('NewProjectWizard behavior', () => {
     await flushPromises()
 
     const startSelect = wrapper.get('select')
+    const parallelCorners = wrapper.get('#sta-max-parallel-corners')
+    expect((parallelCorners.element as HTMLSelectElement).value).toBe('1')
+    await parallelCorners.setValue('3')
+    expect((parallelCorners.element as HTMLSelectElement).value).toBe('3')
     expect(wizard.flowStartStep).toBe('Synthesis')
     await startSelect.setValue('CTS')
     await flushPromises()

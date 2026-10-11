@@ -261,6 +261,12 @@ export function backendWorkspaceOptions(
           }
         : {}),
       parameters: {
+        ...(parameterApplies(['sta'])
+          ? {
+              [specKey('sta_max_parallel_corners', 'sta.max_parallel_corners')]:
+                parameters.sta_max_parallel_corners ?? 1,
+            }
+          : {}),
         ...(synthesisApplies
           ? {
               [specKey('frequency_max', 'design.frequency_mhz')]: numberValue(
