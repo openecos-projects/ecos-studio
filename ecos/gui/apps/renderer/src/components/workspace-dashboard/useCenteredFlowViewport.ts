@@ -10,6 +10,7 @@ export function useCenteredFlowViewport(
   const size = ref({ width: 0, height: 0 })
   let updateVersion = 0
   let observedElement: HTMLElement | null = null
+  let lastCenteredSize = { width: 0, height: 0 }
   const surfaceSize = computed(() => ({
     width: Math.max(size.value.width, graphWidth.value * zoom.value),
     height: Math.max(size.value.height, graphHeight.value * zoom.value),
@@ -49,8 +50,12 @@ export function useCenteredFlowViewport(
               zoom.value,
           }
         : { x: graphWidth.value / 2, y: graphHeight.value / 2 }
+    const sizeChanged = width !== size.value.width || height !== size.value.height
     size.value = { width, height }
-    void positionCenter(element, center)
+    if (sizeChanged && (width !== lastCenteredSize.width || height !== lastCenteredSize.height)) {
+      lastCenteredSize = { width, height }
+      void positionCenter(element, center)
+    }
   }
 
   watch(
@@ -58,6 +63,7 @@ export function useCenteredFlowViewport(
     (element, _previous, onCleanup) => {
       if (element === observedElement) return
       ++updateVersion
+      lastCenteredSize = { width: 0, height: 0 }
       if (size.value.width || size.value.height) size.value = { width: 0, height: 0 }
       observedElement = element
       if (!element) return
@@ -82,6 +88,7 @@ export function useCenteredFlowViewport(
     () => {
       const element = viewport.value
       if (element && size.value.width && size.value.height) {
+        lastCenteredSize = { width: size.value.width, height: size.value.height }
         void positionCenter(element, {
           x: graphWidth.value / 2,
           y: graphHeight.value / 2,
