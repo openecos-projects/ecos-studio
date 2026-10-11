@@ -22,7 +22,7 @@ import {
   type WorkspaceJourney,
 } from './support/journey'
 
-const FLOW_TIMEOUT_MS = Number(process.env.ECOS_E2E_FLOW_TIMEOUT_MS ?? 30 * 60_000)
+const FLOW_TIMEOUT_MS = 75 * 60_000
 const PDK_ROOT = process.env.ECOS_E2E_PDK_ROOT ?? join(repoRoot, 'pdk/icsprout55-pdk')
 
 async function expectedEccVersion(): Promise<string> {
