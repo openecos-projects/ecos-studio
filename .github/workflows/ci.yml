@@ -260,6 +260,7 @@ jobs:
           needs.changes.outputs.ci == 'true'))
       }}
     runs-on: ubuntu-22.04
+    # Must stay above the in-test flow watchdog (75min) so its catch block can capture evidence first.
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -411,19 +412,6 @@ jobs:
           ECOS_E2E_DESIGN_DIR: ${{ github.workspace }}/.scratch/ecc-ci-designs/${{ matrix.design }}
           ECOS_E2E_LIT_SUITE: ${{ github.workspace }}/.scratch/ecc-ci-designs
         run: |
-          case "${{ matrix.design }}" in
-            aes)
-              # aes flow alone is ~50min upstream; the default 30min
-              # ECOS_E2E_FLOW_TIMEOUT_MS would kill it mid-run.
-              export ECOS_E2E_FLOW_TIMEOUT_MS=4500000
-              ;;
-            BM64)
-              # BM64 flow runs ~28-30min, right at the default 30min
-              # ECOS_E2E_FLOW_TIMEOUT_MS; a slightly slow runner kills
-              # it mid-route. 45min gives ~50% headroom.
-              export ECOS_E2E_FLOW_TIMEOUT_MS=2700000
-              ;;
-          esac
           if [ "${{ matrix.design }}" = "usb" ]; then
             # The usb leg is the fast one; it also carries the flow-cancel and
             # missing-Sizer control cases so big designs stay journey-only.
