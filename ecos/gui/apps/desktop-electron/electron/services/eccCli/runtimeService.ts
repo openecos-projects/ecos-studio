@@ -1858,6 +1858,7 @@ export function workspaceCreateCommands(
 ): string[][] {
   const workspaceId = basename(resolve(request.targetDirectory))
   if (request.deriveFrom) {
+    const parameters = requireRecord(request.workspaceSpec.parameters ?? {})
     return [
       [
         'workspace',
@@ -1873,6 +1874,20 @@ export function workspaceCreateCommands(
         request.commandId,
         '--no-wait',
       ],
+      ...(parameters['sta.max_parallel_corners'] !== undefined
+        ? [
+            [
+              'param',
+              'set',
+              'sta.max_parallel_corners',
+              JSON.stringify(parameters['sta.max_parallel_corners']),
+              '--project',
+              projectRoot,
+              '--workspace',
+              workspaceId,
+            ],
+          ]
+        : []),
     ]
   }
   return [

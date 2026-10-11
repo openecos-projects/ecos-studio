@@ -517,6 +517,28 @@
                     </div>
                   </div>
 
+                  <div v-if="isFlowStepRunnable('sta')" class="mb-5">
+                    <label
+                      for="sta-max-parallel-corners"
+                      class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                    >
+                      STA maximum parallel corners
+                    </label>
+                    <select
+                      id="sta-max-parallel-corners"
+                      v-model.number="config.parameters.sta_max_parallel_corners"
+                      class="rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2 text-sm text-(--text-primary)"
+                    >
+                      <option v-for="count in 4" :key="count" :value="count">
+                        {{ count }}
+                      </option>
+                    </select>
+                    <p class="mt-2 text-xs text-(--text-secondary)">
+                      Defaults to 1 (serial). Available memory may reduce concurrency;
+                      parallel STA requires Linux.
+                    </p>
+                  </div>
+
                   <p
                     v-if="sourceContext"
                     class="mb-5 rounded-lg border border-(--border-color) bg-(--bg-primary)/60 px-4 py-3 text-xs text-(--text-secondary)"
@@ -2202,6 +2224,7 @@ function createInitialConfig(
       clock: '',
       frequency_max: 50,
       max_fanout: 32,
+      sta_max_parallel_corners: 1,
       die_area_mode: dieAreaMode.value,
       die_width: 100,
       die_height: 100,
@@ -2323,6 +2346,7 @@ async function readProjectManifestForProject(
 const SYSTEM_PARAMETER_DEFAULTS: Record<string, number> = {
   frequency_max: 50,
   max_fanout: 32,
+  sta_max_parallel_corners: 1,
   die_width: 100,
   die_height: 100,
   utilization: 0.6,
@@ -4113,7 +4137,10 @@ function specReady() {
     }) &&
     String(params.clock || '').trim() !== '' &&
     Number(params.frequency_max) > 0 &&
-    Number(params.max_fanout) > 0
+    Number(params.max_fanout) > 0 &&
+    Number.isInteger(params.sta_max_parallel_corners ?? 1) &&
+    Number(params.sta_max_parallel_corners ?? 1) >= 1 &&
+    Number(params.sta_max_parallel_corners ?? 1) <= 4
 
   if (!hasCoreFields || projectManifestError.value || isLoadingProjectManifest.value) {
     return false

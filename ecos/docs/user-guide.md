@@ -306,6 +306,18 @@ Names must not contain spaces or Chinese characters.
 
 **Step 3 — Flow Setup.** Define the step range of the harden flow:
 
+When the range includes STA, **STA maximum parallel corners** selects an integer
+from 1 to 4 (default 1, serial). Studio submits `sta.max_parallel_corners` through
+the ECC CLI workspace parameter workflow; ECC persists the override in
+`home/params.toml` and regenerates the STA configuration's `max_parallel_corners`.
+This is an upper bound, not a promise: Linux worker dispatch is also limited by
+CPU count and memory headroom. Other platforms run serially. The runtime reserves
+at least 1 GiB or 10% of the effective memory capacity, whichever is larger,
+honors Linux cgroup v2 memory limits, and stops adding workers when estimated
+memory requirements exceed the remaining headroom. Unknown memory availability
+reduces dispatch to one worker. This heuristic does not guarantee that an
+individual corner fits in memory; use 1 for very large designs or constrained hosts.
+
 - A summary strip shows the selected **Start Step**, **End Step**, and step
   count.
 - Click a step card to set the range. Steps are marked *Reused from source*
