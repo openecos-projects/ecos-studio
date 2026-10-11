@@ -109,30 +109,32 @@ defineEmits<{
   display: flex;
   flex-direction: column;
   width: 150px;
-  height: 176px;
+  height: 184px;
   overflow: hidden;
   border: 1px solid var(--border-color);
   border-radius: 6px;
-  background: var(--bg-secondary);
+  background: color-mix(in srgb, var(--bg-secondary) 88%, var(--text-secondary));
   color: var(--text-primary);
-  font-size: 10px;
+  font-size: 12px;
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
 }
 header {
-  flex: 0 0 22px;
-  padding: 3px 6px;
+  flex: 0 0 27px;
+  padding: 5px 7px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 650;
+  font-size: 13px;
+  font-weight: 700;
 }
 .step-resources {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 6px;
+  padding: 3px 7px;
 }
 .step-state {
-  font-size: 22px;
+  font-size: 25px;
 }
 button {
   border: 0;
@@ -159,9 +161,11 @@ dl > div {
   gap: 4px;
 }
 dt {
+  font-size: 11px;
   color: var(--text-secondary);
 }
 dd {
+  font-size: 11px;
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
@@ -185,7 +189,7 @@ footer {
   justify-content: space-between;
   align-items: center;
   gap: 4px;
-  padding: 3px 6px;
+  padding: 4px 7px;
 }
 footer {
   border-top: 1px solid var(--border-color);
@@ -197,16 +201,36 @@ footer button {
 .check-passed {
   color: var(--success-color, #22c55e);
 }
+.flow-step-card[data-status='succeeded'] {
+  border-color: color-mix(in srgb, var(--success-color, #22c55e) 65%, var(--border-color));
+  background: color-mix(in srgb, var(--success-color, #22c55e) 13%, var(--bg-secondary));
+  box-shadow: inset 0 3px 0 var(--success-color, #22c55e);
+}
 .is-failed,
 .check-blocked {
   color: var(--error-color, #ef4444);
 }
+.flow-step-card[data-status='failed'] {
+  border-color: color-mix(in srgb, var(--error-color, #ef4444) 65%, var(--border-color));
+  background: color-mix(in srgb, var(--error-color, #ef4444) 13%, var(--bg-secondary));
+  box-shadow: inset 0 3px 0 var(--error-color, #ef4444);
+}
 .is-running {
   color: var(--accent-color);
+}
+.flow-step-card[data-status='running'] {
+  border-color: color-mix(in srgb, var(--accent-color) 70%, var(--border-color));
+  background: color-mix(in srgb, var(--accent-color) 11%, var(--bg-secondary));
+  box-shadow: inset 0 3px 0 var(--accent-color);
 }
 .is-warning,
 .check-warning {
   color: var(--warning-color, #f59e0b);
+}
+.flow-step-card[data-status='warning'] {
+  border-color: color-mix(in srgb, var(--warning-color, #f59e0b) 65%, var(--border-color));
+  background: color-mix(in srgb, var(--warning-color, #f59e0b) 13%, var(--bg-secondary));
+  box-shadow: inset 0 3px 0 var(--warning-color, #f59e0b);
 }
 .is-queued,
 .is-skipped,

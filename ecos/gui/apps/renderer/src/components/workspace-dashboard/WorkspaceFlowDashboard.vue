@@ -419,6 +419,7 @@ output {
   position: absolute;
   inset: 0;
   overflow: auto;
+  scrollbar-gutter: stable both-edges;
   cursor: grab;
 }
 .flow-overview {
