@@ -1,5 +1,10 @@
 <template>
-  <article class="flow-step-card" :data-step="step.id" :data-status="step.status">
+  <article
+    class="flow-step-card"
+    :data-step="step.id"
+    :data-status="step.status"
+    :data-check-state="step.checkState"
+  >
     <header :title="step.label">{{ step.label }}</header>
     <div class="step-resources">
       <button
@@ -211,6 +216,11 @@ footer button {
   color: var(--error-color, #ef4444);
 }
 .flow-step-card[data-status='failed'] {
+  border-color: color-mix(in srgb, var(--error-color, #ef4444) 65%, var(--border-color));
+  background: color-mix(in srgb, var(--error-color, #ef4444) 13%, var(--bg-secondary));
+  box-shadow: inset 0 3px 0 var(--error-color, #ef4444);
+}
+.flow-step-card[data-check-state='blocked'] {
   border-color: color-mix(in srgb, var(--error-color, #ef4444) 65%, var(--border-color));
   background: color-mix(in srgb, var(--error-color, #ef4444) 13%, var(--bg-secondary));
   box-shadow: inset 0 3px 0 var(--error-color, #ef4444);
