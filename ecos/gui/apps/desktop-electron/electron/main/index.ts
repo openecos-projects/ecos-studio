@@ -197,11 +197,16 @@ function getDesktopServices() {
   const resourceUpdateScheduler = new ResourceUpdateScheduler({
     resourceManagerService,
     emit: (event) => {
-      for (const window of BrowserWindow.getAllWindows()) {
-        if (!window.isDestroyed()) {
-          window.webContents.send(desktopApiEventChannels.resourcesUpdatesDetected, event)
-        }
+      const windows = BrowserWindow.getAllWindows().filter(
+        (window) =>
+          !window.isDestroyed() &&
+          !window.webContents.isLoadingMainFrame() &&
+          window.webContents.getURL(),
+      )
+      for (const window of windows) {
+        window.webContents.send(desktopApiEventChannels.resourcesUpdatesDetected, event)
       }
+      return windows.length > 0
     },
   })
   const pdkInventoryService = resourceManagerService.getPdkInventoryService()
@@ -726,7 +731,6 @@ if (!cliInvocation && gotSingleInstanceLock) {
     })
 
     startCliInstallerStartupTasks()
-    getDesktopServices().resourceUpdateScheduler.start()
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -740,7 +744,9 @@ if (!cliInvocation && gotSingleInstanceLock) {
       }
     })
 
-    void launchWindow().catch(handleLaunchError)
+    void launchWindow()
+      .then(() => getDesktopServices().resourceUpdateScheduler.start())
+      .catch(handleLaunchError)
   })
 
   app.on('window-all-closed', () => {

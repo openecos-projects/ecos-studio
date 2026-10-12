@@ -190,4 +190,28 @@ describe('ResourceStalenessDialog', () => {
     )
     wrapper.unmount()
   })
+  it('requires reconfiguration for a PDK version upgrade instead of retrying an old workspace binding', async () => {
+    pluginStore.resources = [
+      { id: 'pdk:ics55:managed:1.0.0', name: 'ics55', type: 'pdk' },
+    ]
+    const wrapper = mount(ResourceStalenessDialog, { global: { plugins: [PrimeVue] } })
+    const retry = vi.fn(async (_allowStale: boolean) => undefined)
+    requestConfirmation(
+      [
+        {
+          ...PDK_ITEM,
+          id: 'pdk:ics55:managed:1.0.0',
+          latest_version: '2.0.0',
+          update_kind: 'version',
+        },
+      ],
+      retry,
+    )
+    await nextTick()
+    expect(buttonByText('Update and run')?.disabled).toBe(true)
+    expect(dialogText()).toContain('PDK version upgrades require a new project binding')
+    expect(pluginStore.updateResource).not.toHaveBeenCalled()
+    expect(retry).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
 })

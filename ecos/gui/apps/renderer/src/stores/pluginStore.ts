@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref, shallowRef } from 'vue'
+import { computed, onScopeDispose, ref, shallowRef } from 'vue'
 import type { ResourceUpdatesDetectedItem } from '@ecos-studio/shared'
 import {
   cancelResourceApi,
@@ -42,7 +42,6 @@ export const usePluginStore = defineStore('plugin', () => {
   const _cancelledResources = new Set<string>()
   let _resourcesChangedSubscribed = false
   let _resourcesChangedUnsubscribe: (() => void) | null = null
-  let _updatesDetectedUnsubscribe: (() => void) | null = null
   let _fetchSequence = 0
   let _visibleFetchCount = 0
 
@@ -183,12 +182,6 @@ export const usePluginStore = defineStore('plugin', () => {
     // lands, re-fetch silently so fresh resources appear without a manual
     // refresh.
     _resourcesChangedUnsubscribe = subscribeResourcesChanged(() => {
-      void fetchTools({ silent: true })
-    })
-    // Automatic checks push newly detected updates; record them for the UI
-    // and refresh the listing so statuses reflect the check.
-    _updatesDetectedUnsubscribe = subscribeResourceUpdatesDetected((event) => {
-      detectedUpdates.value = event.resources
       void fetchTools({ silent: true })
     })
   }
@@ -434,8 +427,6 @@ export const usePluginStore = defineStore('plugin', () => {
   function cleanup(): void {
     _resourcesChangedUnsubscribe?.()
     _resourcesChangedUnsubscribe = null
-    _updatesDetectedUnsubscribe?.()
-    _updatesDetectedUnsubscribe = null
     _resourcesChangedSubscribed = false
     for (const conn of _sseConnections.values()) {
       conn.close()
@@ -445,6 +436,13 @@ export const usePluginStore = defineStore('plugin', () => {
       _clearProgressTimer(resourceId)
     }
   }
+
+  // App creates this store before route views; notifications live for its entire scope.
+  const unsubscribeUpdates = subscribeResourceUpdatesDetected((event) => {
+    detectedUpdates.value = event.resources
+    void fetchTools({ silent: true })
+  })
+  onScopeDispose(() => unsubscribeUpdates?.())
 
   return {
     resources,

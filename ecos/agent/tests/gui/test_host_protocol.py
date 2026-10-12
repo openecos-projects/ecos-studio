@@ -1,8 +1,31 @@
 import json
 import threading
+import pytest
 
 from ecos_agent.gui.protocol import EcosAgentProtocolServer
 from ecos_agent.optimization.host_transport import ProtocolHostTransport
+
+
+def test_host_error_code_survives_the_protocol_roundtrip(monkeypatch) -> None:
+    server = EcosAgentProtocolServer()
+
+    def reply(payload):
+        server._handle_line(
+            json.dumps(
+                {
+                    "id": payload["id"],
+                    "error": {
+                        "code": "RESOURCE_UPDATE_AVAILABLE",
+                        "message": "Resource updates are available for: Yosys",
+                    },
+                }
+            )
+        )
+
+    monkeypatch.setattr(server, "_write", reply)
+    with pytest.raises(RuntimeError, match="Resource updates are available") as failure:
+        server.call_host("workspace.run", {"workspaceHandle": "handle-1"})
+    assert getattr(failure.value, "code") == "RESOURCE_UPDATE_AVAILABLE"
 
 
 class _HostStdio:
@@ -20,7 +43,9 @@ class _HostStdio:
             self._pending[request_id] = payload
             self._condition.notify_all()
 
-    def wait_for_host_request(self, method: str, timeout: float = 2.0) -> dict[str, object]:
+    def wait_for_host_request(
+        self, method: str, timeout: float = 2.0
+    ) -> dict[str, object]:
         deadline = threading.Event()
         with self._condition:
             remaining = timeout

@@ -180,7 +180,9 @@ export class PdkInventoryService {
   async listBindings(): Promise<PdkBinding[]> {
     return await this.withLock(async () => {
       const inventory = await this.readInventory()
-      return inventory.bindings.map(publicBinding)
+      return inventory.bindings
+        .filter((binding) => binding.installationId !== null)
+        .map(publicBinding)
     })
   }
 

@@ -76,6 +76,19 @@ afterEach(() => {
 })
 
 describe('ResourceUpdateScheduler', () => {
+  it('retries notifications when no renderer could receive the event', async () => {
+    const service = createServiceStub()
+    service.listResources.mockResolvedValue(makeResourceList([makeResource()]))
+    const emit = vi.fn().mockReturnValueOnce(false).mockReturnValue(true)
+    const scheduler = new ResourceUpdateScheduler({
+      resourceManagerService: service,
+      emit,
+    })
+    await scheduler.runCycle('startup')
+    await scheduler.runCycle('focus')
+    await scheduler.runCycle('interval')
+    expect(emit).toHaveBeenCalledTimes(2)
+  })
   it('skips checkResourceUpdates when the cache is fresh but still emits from the listing', async () => {
     const service = createServiceStub()
     service.listResources.mockResolvedValue(makeResourceList([makeResource()]))

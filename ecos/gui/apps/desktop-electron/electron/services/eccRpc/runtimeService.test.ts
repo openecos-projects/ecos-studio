@@ -229,7 +229,7 @@ describe('EccRpcRuntimeService pool', () => {
       expect(
         pool
           .clientFor('/work/demo')
-          .calls.some((call) => call.method === 'operation.start'),
+          .calls.some((call) => call.method.startsWith('operation.start_')),
       ).toBe(false)
       pool.clientFor('/work/demo').responses.push({
         createdAt: 1,

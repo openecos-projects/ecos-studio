@@ -769,7 +769,7 @@ describe('ResourceManagerService', () => {
     })
   })
 
-  it('migrates a cached legacy built-in MPC while offline', async () => {
+  it('migrates a cached legacy built-in MPC without offering an unverified offline branch update', async () => {
     const root = await createTempDir('ecos-resources-')
     const cacheDir = join(root, 'cache')
     const mpcsDir = join(root, 'data', 'mpcs')
@@ -830,9 +830,9 @@ describe('ResourceManagerService', () => {
     })
 
     await expect(service.getResource('mpc:mpc-frame')).resolves.toMatchObject({
-      status: 'update_available',
+      status: 'installed',
       available_versions: ['0.1.0'],
-      actions: ['update', 'uninstall'],
+      actions: ['uninstall'],
     })
   })
 
@@ -5716,7 +5716,7 @@ describe('ResourceManagerService', () => {
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
-  it('skips the MPC branch probe until the registry lock catches up', async () => {
+  it('never offers a downgrade when an installed MPC is newer than the registry lock', async () => {
     const root = await createTempDir('ecos-resources-')
     const registryPath = join(root, 'registry.json')
     const archive = await createFixtureArchive(root)
@@ -5724,16 +5724,21 @@ describe('ResourceManagerService', () => {
     const installedSha = 'a'.repeat(64)
     const installedCommit = '1'.repeat(40)
     const headCommit = '2'.repeat(40)
-    await writeMpcRegistry(registryPath, { ...archive, sha256: installedSha }, '0.1.0', {
-      updateSource: { type: 'github_branch', branch: 'main' },
-      url: `https://github.com/openecos-projects/mpc-frame/archive/${installedCommit}.tar.gz`,
-    })
+    await writeMpcRegistry(
+      registryPath,
+      { ...archive, sha256: 'b'.repeat(64) },
+      '0.1.0',
+      {
+        updateSource: { type: 'github_branch', branch: 'main' },
+        url: `https://github.com/openecos-projects/mpc-frame/archive/${installedCommit}.tar.gz`,
+      },
+    )
     await mkdir(join(mpcsDir, 'mpc-frame', '0.1.0'), { recursive: true })
     await writeTestManifest(root, {
       'mpc:mpc-frame': installedMpcEntry(root, {
         version: '0.1.0',
         sha256: installedSha,
-        sourceUrl: `https://github.com/openecos-projects/mpc-frame/archive/${installedCommit}.tar.gz`,
+        sourceUrl: `https://github.com/openecos-projects/mpc-frame/archive/${headCommit}.tar.gz`,
       }),
     })
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {
@@ -8359,7 +8364,7 @@ describe('ResourceManagerService', () => {
     ).rejects.toThrow('ENOENT')
   })
 
-  it('marks managed registry PDKs updateable and updates them through the PDK install path', async () => {
+  it('installs PDK upgrades alongside the bound version and reuses the latest installation for rebuilds', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createPdkArchive(root)
     await cp(
@@ -8469,9 +8474,18 @@ describe('ResourceManagerService', () => {
       await readFile(join(root, 'state', 'resources', 'pdk-inventory.json'), 'utf8'),
     ) as { installations: Array<{ id: string; version: string }> }
     expect(inventory.installations).toContainEqual(
-      expect.objectContaining({ id: 'pdk:ics55', version: '1.10.101' }),
+      expect.objectContaining({ id: 'pdk:ics55:managed:1.10.101', version: '1.10.101' }),
+    )
+    expect(inventory.installations).toContainEqual(
+      expect.objectContaining({ id: 'pdk:ics55', version: '1.10.100' }),
     )
     await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
+      status: 'update_available',
+      installed_version: '1.10.100',
+    })
+    await expect(
+      service.getResource('pdk:ics55:managed:1.10.101'),
+    ).resolves.toMatchObject({
       status: 'installed',
       installed_version: '1.10.101',
       active: false,
@@ -8480,7 +8494,7 @@ describe('ResourceManagerService', () => {
       actions: ['validate', 'uninstall'],
     })
     await service.getPdkInventoryService().registerManagedInstallation({
-      id: 'pdk:ics55',
+      id: 'pdk:ics55:managed:1.10.101',
       familyId: 'ics55',
       displayName: 'ICsprout 55nm PDK',
       root: join(root, 'data', 'pdks', 'ics55', '1.10.101'),
@@ -8495,8 +8509,12 @@ describe('ResourceManagerService', () => {
     expect(verifySha256).toHaveBeenCalledTimes(2)
     const updatedInventory = JSON.parse(
       await readFile(join(root, 'state', 'resources', 'pdk-inventory.json'), 'utf8'),
-    ) as { installations: Array<{ registrySha256: string }> }
-    expect(updatedInventory.installations[0]?.registrySha256).toBe(archive.sha256)
+    ) as { installations: Array<{ id: string; registrySha256: string }> }
+    expect(
+      updatedInventory.installations.find(
+        (item) => item.id === 'pdk:ics55:managed:1.10.101',
+      )?.registrySha256,
+    ).toBe(archive.sha256)
   })
 
   it('downloads only locked PDK supplemental assets before post-install', async () => {

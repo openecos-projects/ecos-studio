@@ -306,7 +306,7 @@ describe('pluginStore', () => {
     expect(store.loading).toBe(false)
   })
 
-  it('stops listening for detected updates after cleanup', async () => {
+  it('keeps update notifications through page cleanup until the store is disposed', async () => {
     const unsubscribe = vi.fn()
     vi.mocked(subscribeResourceUpdatesDetected).mockReturnValue(unsubscribe)
     vi.mocked(listResourcesApi).mockResolvedValue([])
@@ -314,7 +314,22 @@ describe('pluginStore', () => {
     const store = usePluginStore()
     await store.fetchTools()
     store.cleanup()
-
+    expect(unsubscribe).not.toHaveBeenCalled()
+    const onDetected = vi.mocked(subscribeResourceUpdatesDetected).mock.calls[0]?.[0]
+    onDetected?.({
+      resources: [
+        {
+          resource_id: 'tool:yosys',
+          display_name: 'Yosys',
+          update_kind: 'version',
+          installed_version: '1',
+          latest_version: '2',
+        },
+      ],
+    })
+    expect(store.detectedUpdates).toHaveLength(1)
+    await vi.waitFor(() => expect(listResourcesApi).toHaveBeenCalledTimes(2))
+    store.$dispose()
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 

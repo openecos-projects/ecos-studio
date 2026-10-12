@@ -230,6 +230,33 @@ it('managed PDK inventory is checked for same-version checksum drift', async () 
   ).resolves.toEqual([
     expect.objectContaining({ id: 'pdk:demo-pdk:managed:1.0', update_kind: 'rebuild' }),
   ])
+  const otherRoot = join(root, 'pdks', 'other', '1.0')
+  await mkdir(otherRoot, { recursive: true })
+  await service.getPdkInventoryService().registerManagedInstallation({
+    id: 'pdk:other:managed:1.0',
+    familyId: 'other',
+    displayName: 'Other PDK',
+    root: otherRoot,
+    version: '1.0',
+    registrySha256: 'a'.repeat(64),
+  })
+  await service.getPdkInventoryService().bindInstallation({
+    projectId: 'other',
+    projectRoot: join(root, 'other-project'),
+    installationId: 'pdk:other:managed:1.0',
+    requirement: { familyId: 'other', version: '1.0', manualConfig: null },
+  })
+  await service.getPdkInventoryService().removeInstallation('pdk:other:managed:1.0')
+  await expect(service.getPdkInventoryService().listBindings()).resolves.toEqual([
+    expect.objectContaining({ projectId: 'demo' }),
+  ])
+  await expect(
+    assessRunStaleness({
+      resourceManagerService: service,
+      pdkInventoryService: service.getPdkInventoryService(),
+      workspaceDirectory: join(projectRoot, 'ws_1'),
+    }),
+  ).resolves.toEqual([expect.objectContaining({ id: 'pdk:demo-pdk:managed:1.0' })])
 })
 
 it('a non-boolean allowStaleResources does not bypass the confirmation', () => {

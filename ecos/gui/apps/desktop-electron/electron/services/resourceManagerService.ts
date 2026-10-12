@@ -1914,7 +1914,10 @@ export class ResourceManagerService {
       const destination = join(this.pdksDir, pdkId, version)
       const installations = await this.pdkInventoryService.listInstallations()
       const target =
-        installations.find((installation) => installation.id === installationId) ??
+        installations.find(
+          (installation) =>
+            installation.id === installationId && installation.version === version,
+        ) ??
         installations.find(
           (installation) =>
             installation.familyId === pdkId &&
@@ -3416,7 +3419,12 @@ export class ResourceManagerService {
     const latestAsset = latestVersion ? selectPlatformAsset(latestVersion).asset : null
     const update =
       entry.managed && entry.health === 'ok' && Boolean(entry.version)
-        ? mpcHasUpdate(entry, latestVersion?.version, latestAsset)
+        ? mpcHasUpdate(
+            entry,
+            latestVersion?.version,
+            latestAsset,
+            getUpdateCheck(updateChecks ?? null, resourceId),
+          )
         : null
     const hasUpdate = update !== null
     const status: ResourceStatus = this.installCoordinator.isActive(resourceId)
@@ -4453,9 +4461,19 @@ function mpcHasUpdate(
   entry: MpcInventoryEntry,
   latestVersion: string | undefined,
   latestAsset: PlatformAsset | null,
+  updateCheck: CachedResourceUpdateCheckItem | null,
 ): { kind: ResourceUpdateKind } | null {
   if (!latestVersion) return null
   if (latestVersion !== entry.version) return { kind: 'version' }
+  if (latestAsset?.update_source?.type === 'github_branch') {
+    const publishedCommit = parseGitHubArchiveCommit(latestAsset.url)?.commit
+    if (
+      updateCheck?.status !== 'checked' ||
+      !updateCheck.update_available ||
+      updateCheck.commit !== publishedCommit
+    )
+      return null
+  }
   return assetShaDrift(entry.sha256, latestAsset?.sha256) ? { kind: 'rebuild' } : null
 }
 

@@ -16,7 +16,8 @@ export type ResourceUpdateCycleReason = 'startup' | 'focus' | 'interval'
 
 export interface ResourceUpdateSchedulerOptions {
   resourceManagerService: ResourceUpdateCheckService
-  emit: (event: ResourceUpdatesDetectedEvent) => void
+  /** Return false when no renderer received the event, so it stays pending. */
+  emit: (event: ResourceUpdatesDetectedEvent) => boolean | void
   intervalMs?: number
   now?: () => number
 }
@@ -34,7 +35,7 @@ function detectedSignature(item: ResourceUpdatesDetectedItem): string {
  */
 export class ResourceUpdateScheduler {
   private readonly resourceManagerService: ResourceUpdateCheckService
-  private readonly emit: (event: ResourceUpdatesDetectedEvent) => void
+  private readonly emit: (event: ResourceUpdatesDetectedEvent) => boolean | void
   private readonly intervalMs: number
   private readonly now: () => number
   private readonly notifiedSignatures = new Set<string>()
@@ -105,7 +106,7 @@ export class ResourceUpdateScheduler {
         (_item, index) => !this.notifiedSignatures.has(signatures[index]),
       )
       if (newItems.length > 0) {
-        this.emit({ resources: newItems })
+        if (this.emit({ resources: newItems }) === false) return
       }
       for (const signature of signatures) {
         this.notifiedSignatures.add(signature)

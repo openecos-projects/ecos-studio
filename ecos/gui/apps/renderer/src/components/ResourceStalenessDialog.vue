@@ -36,7 +36,13 @@
 
       <p v-if="updateError" class="staleness-error">{{ updateError }}</p>
       <p v-if="!allUpdatable" class="staleness-hint">
-        Some resources can only be updated from Resource Manager.
+        <template v-if="needsPdkReconfiguration">
+          PDK version upgrades require a new project binding and workspace configuration.
+          Install the new version in Resource Manager, then reconfigure the workspace.
+        </template>
+        <template v-else
+          >Some resources can only be updated from Resource Manager.</template
+        >
       </p>
 
       <div class="staleness-actions">
@@ -94,13 +100,23 @@ function kindLabel(kind: ResourceUpdateKind | null): string {
   return 'update available'
 }
 
-/**
- * The id `pluginStore.updateResource` accepts for a staleness item. Tool/MPC
- * ids are already resource ids; a PDK item carries its installation id, which
- * maps to the registry PDK resource through the store listing (inventory
- * entries keep the family id in `name`).
- */
+function isPdkVersionUpgrade(item: ResourceStalenessItem): boolean {
+  return (
+    item.update_kind === 'version' &&
+    (item.id.startsWith('pdk:') ||
+      pluginStore.resources.some(
+        (resource) => resource.id === item.id && resource.type === 'pdk',
+      ))
+  )
+}
+
+const needsPdkReconfiguration = computed(() =>
+  request.value?.resources.some(isPdkVersionUpgrade),
+)
+
+/** Keeps installation ids; legacy PDK ids resolve through their inventory family. */
 function updatableIdFor(item: ResourceStalenessItem): string | null {
+  if (isPdkVersionUpgrade(item)) return null
   if (/^(tool|mpc|pdk):/.test(item.id)) return item.id
   const match = pluginStore.resources.find(
     (resource) => resource.id === item.id && resource.type === 'pdk',
