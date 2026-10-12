@@ -59,6 +59,7 @@ import {
   type ResourceOperationResult,
   type ResourceStatus,
   type ResourceUpdateKind,
+  type DesignTool,
   type PdkInstallationSnapshot,
 } from '@ecos-studio/shared'
 
@@ -72,6 +73,7 @@ const REGISTRY_CACHE_VERSION = 1
 const DOWNLOAD_MAX_ATTEMPTS = 3
 const DOWNLOAD_RETRY_DELAY_MS = 250
 const REGISTRY_BACKGROUND_REFRESH_TIMEOUT_MS = 30_000
+const RESOURCE_UPDATE_REQUEST_TIMEOUT_MS = 8_000
 
 type ResourceInventoryEntry = ToolInventoryEntry | PdkInventoryEntry | MpcInventoryEntry
 type ArchiveExtractor = (
@@ -410,6 +412,7 @@ export interface ResourceManagerServiceOptions {
 
 export interface RuntimeEnvOptions {
   platform: NodeJS.Platform
+  designTool?: DesignTool
 }
 
 export interface RegistryAssetDownloadRequest {
@@ -723,6 +726,10 @@ export class ResourceManagerService {
       if (eccFeExecutable) {
         env.ECOS_FE_CLI = eccFeExecutable
         env.ECOS_FE_COMPILER_ROOT = entry.path
+        if (options.designTool === 'frontend') {
+          // Same-path rebuilds must replace the already loaded frontend implementation.
+          env.ECOS_FE_RUNTIME_SHA256 = readSha256(entry.sha256) ?? ''
+        }
       }
       if (runtimeTools.has('riscv-toolchain')) {
         const prefix = detectRiscvPrefix(entry.detected_executables, entry.executable)
@@ -3076,7 +3083,9 @@ export class ResourceManagerService {
   ): Promise<ReleaseMetadata | null> {
     if (!asset.metadata_url) return null
     try {
-      const response = await this.fetchImpl(asset.metadata_url)
+      const response = await this.fetchImpl(asset.metadata_url, {
+        signal: AbortSignal.timeout(RESOURCE_UPDATE_REQUEST_TIMEOUT_MS),
+      })
       if (!response.ok) {
         electronLogger.debug(
           '[resources] Metadata request failed with %d: %s',
@@ -3099,7 +3108,9 @@ export class ResourceManagerService {
   private async fetchAssetSha256(asset: PlatformAsset): Promise<string | null> {
     if (!asset.sha256_url) return null
     try {
-      const response = await this.fetchImpl(asset.sha256_url)
+      const response = await this.fetchImpl(asset.sha256_url, {
+        signal: AbortSignal.timeout(RESOURCE_UPDATE_REQUEST_TIMEOUT_MS),
+      })
       if (!response.ok) {
         electronLogger.debug(
           '[resources] SHA256 request failed with %d: %s',

@@ -418,6 +418,12 @@ async function runLint(allowStaleResources = false): Promise<void> {
   const isCurrentContext = captureResourceStalenessContext()
   const directory = currentProject.value?.path
   if (!directory) return
+  const previousLint = {
+    sourcePath: props.source?.path,
+    status: lintStatus.value,
+    log: lintLog.value,
+    diagnostics: diagnostics.value,
+  }
   lintRunning.value = true
   lintStatus.value = 'running'
   lintLog.value = ''
@@ -449,6 +455,11 @@ async function runLint(allowStaleResources = false): Promise<void> {
         isCurrentContext,
       )
     ) {
+      if (isCurrentContext() && props.source?.path === previousLint.sourcePath) {
+        lintStatus.value = previousLint.status
+        lintLog.value = previousLint.log
+        setDiagnostics(previousLint.diagnostics)
+      }
       return
     }
     lintStatus.value = 'error'

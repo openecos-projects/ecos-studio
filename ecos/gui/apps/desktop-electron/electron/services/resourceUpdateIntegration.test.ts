@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { ResourceManagerService } from './resourceManagerService'
 import { ResourceUpdateScheduler } from './resourceUpdateScheduler'
 import { assessRunStaleness, assertRunResourcesFresh } from './resourceStalenessGuard'
+import { EccRpcSidecarProcess } from './eccRpc/sidecarProcess'
 
 vi.mock('./logger', () => ({
   electronLogger: {
@@ -68,6 +69,183 @@ function registryWithTool(sha: string) {
     ],
   }
 }
+
+it.each([
+  ['metadata', 'headers'],
+  ['metadata', 'body'],
+  ['checksum', 'headers'],
+  ['checksum', 'body'],
+])('recovers automatic checks after a stalled %s %s request', async (source, phase) => {
+  const registry = registryWithTool('b'.repeat(64))
+  registry.tools[0].versions[0].version = 'latest'
+  Object.assign(registry.tools[0].versions[0].platforms['all-platform'], {
+    [source === 'metadata' ? 'metadata_url' : 'sha256_url']:
+      'https://example.test/update',
+  })
+  const { root, resourcesDir, service, fetchImpl } = await fixture(() => registry)
+  const toolRoot = join(root, 'tools', 'demo', 'latest')
+  await mkdir(join(toolRoot, 'bin'), { recursive: true })
+  await writeFile(join(toolRoot, 'bin', 'demo'), '#!/bin/sh\n')
+  await chmod(join(toolRoot, 'bin', 'demo'), 0o755)
+  await writeFile(
+    join(resourcesDir, 'manifest.json'),
+    JSON.stringify({
+      schema_version: 3,
+      installed: {
+        'tool:demo': {
+          type: 'tool',
+          name: 'demo',
+          version: 'latest',
+          path: toolRoot,
+          executable: 'bin/demo',
+          detected_executables: ['bin/demo'],
+          active: true,
+          managed: true,
+          sha256: 'a'.repeat(64),
+        },
+      },
+    }),
+  )
+  let stalled = true
+  fetchImpl.mockImplementation(async (url, init?: RequestInit) => {
+    if (url !== 'https://example.test/update')
+      return new Response(JSON.stringify(registry))
+    if (!stalled)
+      return new Response(
+        source === 'metadata'
+          ? JSON.stringify({ sha256: 'b'.repeat(64), size: 1 })
+          : 'b'.repeat(64),
+      )
+    const signal = init?.signal
+    if (!signal) throw new Error('Update fetch must supply an abort signal')
+    if (phase === 'headers')
+      return await new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+      })
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          signal.addEventListener('abort', () => controller.error(signal.reason), {
+            once: true,
+          })
+        },
+      }),
+    )
+  })
+  const nativeTimeout = AbortSignal.timeout.bind(AbortSignal)
+  const timeout = vi
+    .spyOn(AbortSignal, 'timeout')
+    .mockImplementation((milliseconds) =>
+      nativeTimeout(milliseconds === 8_000 ? 20 : milliseconds),
+    )
+  let now = Date.now()
+  const emit = vi.fn()
+  const scheduler = new ResourceUpdateScheduler({
+    resourceManagerService: service,
+    emit,
+    now: () => now,
+  })
+  try {
+    await scheduler.runCycle('startup')
+    expect(timeout).toHaveBeenCalledWith(8_000)
+    expect((await service.getResource('tool:demo')).health.update_check).toMatchObject({
+      status: 'error',
+    })
+    expect(emit).not.toHaveBeenCalled()
+    stalled = false
+    now += 7 * 60 * 60 * 1000
+    await scheduler.runCycle('interval')
+    expect((await service.getResource('tool:demo')).status).toBe('update_available')
+    expect(emit).toHaveBeenCalledTimes(1)
+  } finally {
+    timeout.mockRestore()
+  }
+})
+
+it('restarts an already loaded runtime after a same-path ECC-FE package changes', async () => {
+  const { root, resourcesDir, service } = await fixture(() => ({
+    schema_version: 2,
+    tools: [],
+    pdks: [],
+    mpcs: [],
+  }))
+  const toolRoot = join(root, 'tools', 'ecc-fe', 'latest')
+  await mkdir(join(toolRoot, 'bin'), { recursive: true })
+  await mkdir(join(toolRoot, 'fecompiler'), { recursive: true })
+  await writeFile(join(toolRoot, 'bin', 'ecc-fe'), '#!/bin/sh\n')
+  await chmod(join(toolRoot, 'bin', 'ecc-fe'), 0o755)
+  const command = join(toolRoot, 'runtime.cjs')
+  const program = (version: string) => `
+    const version = ${JSON.stringify(version)};
+    let buffer = Buffer.alloc(0);
+    process.stdin.on('data', chunk => {
+      buffer = Buffer.concat([buffer, chunk]);
+      while (true) {
+        const end = buffer.indexOf('\\r\\n\\r\\n');
+        if (end < 0) return;
+        const length = Number(buffer.subarray(0, end).toString().match(/Content-Length: (\\d+)/i)[1]);
+        if (buffer.length < end + 4 + length) return;
+        const request = JSON.parse(buffer.subarray(end + 4, end + 4 + length));
+        buffer = buffer.subarray(end + 4 + length);
+        const result = request.method === 'rpc.shutdown' ? {ok:true} : {version};
+        const payload = JSON.stringify({jsonrpc:'2.0',id:request.id,result});
+        process.stdout.write('Content-Length: ' + Buffer.byteLength(payload) + '\\r\\n\\r\\n' + payload);
+        if (request.method === 'rpc.shutdown') setTimeout(() => process.exit(0), 10);
+      }
+    });`
+  const install = async (version: string, sha256: string) => {
+    await writeFile(command, program(version))
+    await writeFile(
+      join(resourcesDir, 'manifest.json'),
+      JSON.stringify({
+        schema_version: 3,
+        installed: {
+          'tool:ecc-fe': {
+            type: 'tool',
+            name: 'ecc-fe',
+            version: 'latest',
+            path: toolRoot,
+            executable: 'bin/ecc-fe',
+            detected_executables: ['bin/ecc-fe'],
+            active: true,
+            managed: true,
+            sha256,
+          },
+        },
+      }),
+    )
+  }
+  await install('old', 'a'.repeat(64))
+  const backendEnv = await service.createRuntimeEnv(process.env, {
+    platform: process.platform,
+  })
+  expect(backendEnv.ECOS_FE_RUNTIME_SHA256).toBeUndefined()
+  const sidecar = new EccRpcSidecarProcess({
+    command: process.execPath,
+    commandArgs: [command],
+    managementRpc: true,
+    envProvider: () =>
+      service.createRuntimeEnv(process.env, {
+        platform: process.platform,
+        designTool: 'frontend',
+      }),
+  })
+  try {
+    const oldClient = await sidecar.start()
+    expect(await oldClient.call('rpc.ping')).toEqual({ version: 'old' })
+    expect(await sidecar.start()).toBe(oldClient)
+    await install('new', 'b'.repeat(64))
+    expect(
+      await service.createRuntimeEnv(process.env, { platform: process.platform }),
+    ).toEqual(backendEnv)
+    const newClient = await sidecar.start()
+    expect(newClient).not.toBe(oldClient)
+    expect(await newClient.call('rpc.ping')).toEqual({ version: 'new' })
+    expect(await sidecar.start()).toBe(newClient)
+  } finally {
+    await sidecar.shutdown()
+  }
+})
 
 it('pre-run assessment performs zero network requests with no registry cache', async () => {
   const { service, fetchImpl } = await fixture(() => ({

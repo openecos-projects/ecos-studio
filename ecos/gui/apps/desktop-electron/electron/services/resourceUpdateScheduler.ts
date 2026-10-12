@@ -1,4 +1,5 @@
 import type {
+  ResourceInfo,
   ResourceUpdatesDetectedEvent,
   ResourceUpdatesDetectedItem,
 } from '@ecos-studio/shared'
@@ -22,8 +23,17 @@ export interface ResourceUpdateSchedulerOptions {
   now?: () => number
 }
 
-function detectedSignature(item: ResourceUpdatesDetectedItem): string {
-  return `${item.resource_id}|${item.update_kind}|${item.latest_version}`
+function detectedSignature(resource: ResourceInfo): string {
+  const updateCheck = resource.health.update_check as
+    | { sha256?: string | null; commit?: string | null }
+    | undefined
+  return JSON.stringify([
+    resource.id,
+    resource.update_kind,
+    resource.available_versions[0],
+    updateCheck?.sha256,
+    updateCheck?.commit,
+  ])
 }
 
 /**
@@ -83,8 +93,10 @@ export class ResourceUpdateScheduler {
 
       const list = await this.resourceManagerService.listResources()
       const items: ResourceUpdatesDetectedItem[] = []
+      const signatures: string[] = []
       for (const resource of list.resources) {
         if (resource.status !== 'update_available') continue
+        signatures.push(detectedSignature(resource))
         items.push({
           resource_id: resource.id,
           display_name: resource.display_name,
@@ -94,14 +106,10 @@ export class ResourceUpdateScheduler {
         })
       }
 
-      if (items.length === 0) {
-        // Nothing pending: forget what was notified so a future update
-        // notifies again.
-        this.notifiedSignatures.clear()
-        return
+      const pendingSignatures = new Set(signatures)
+      for (const signature of this.notifiedSignatures) {
+        if (!pendingSignatures.has(signature)) this.notifiedSignatures.delete(signature)
       }
-
-      const signatures = items.map(detectedSignature)
       const newItems = items.filter(
         (_item, index) => !this.notifiedSignatures.has(signatures[index]),
       )

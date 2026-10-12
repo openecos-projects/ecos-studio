@@ -37,7 +37,7 @@ import {
 import { FrontendRpcRuntimeService } from '../services/frontendRpcRuntimeService'
 import { ChipViewerService } from '../services/chipViewerService'
 import { CliInstallerService } from '../services/cliInstallerService'
-import { desktopApiEventChannels } from '@ecos-studio/shared'
+import { desktopApiEventChannels, type DesignTool } from '@ecos-studio/shared'
 import { configureElectronLoggerFile, electronLogger } from '../services/logger'
 import {
   applyWindowMenuState,
@@ -221,7 +221,7 @@ function getDesktopServices() {
     userDataPath: app.getPath('userData'),
     externalBinDir: resolveExternalEccOverride(),
   })
-  const runtimeEnvProvider = () => {
+  const runtimeEnvProvider = (designTool: DesignTool = 'backend') => {
     // Rebuild the base env on every resolution so a bundle acquired (or
     // refreshed) by the CLI installer contributes fresh PATH and
     // LD_LIBRARY_PATH entries — the packaged mount or bundle home may not
@@ -229,6 +229,7 @@ function getDesktopServices() {
     const baseEccEnv = createEccRuntimeEnv(eccRuntimeOptions)
     return resourceManagerService.createRuntimeEnv(baseEccEnv, {
       platform: process.platform,
+      designTool,
     })
   }
   const eccRuntimeService = new EccRpcRuntimeService({
@@ -284,7 +285,7 @@ function getDesktopServices() {
       new EccRpcSidecarProcess({
         managementRpc: true,
         env: runtimeEnv,
-        envProvider: runtimeEnvProvider,
+        envProvider: () => runtimeEnvProvider('frontend'),
         logDirectoryProvider: () => resolveEccSidecarLogDirectory(logSessionDirectory),
         onEvent,
         onNotification: (notification) => {

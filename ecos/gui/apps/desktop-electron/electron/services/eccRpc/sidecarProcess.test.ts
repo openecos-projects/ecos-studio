@@ -270,6 +270,35 @@ describe('EccRpcSidecarProcess', () => {
     expect(child.signals).toEqual([])
   })
 
+  it('does not terminate active frontend work when a rebuilt package requests a restart', async () => {
+    const child = new FakeChild()
+    const spawn = vi.fn(() => child)
+    let checksum = 'a'.repeat(64)
+    const sidecar = new EccRpcSidecarProcess({
+      managementRpc: true,
+      envProvider: async () => ({ ECOS_FE_RUNTIME_SHA256: checksum }),
+      spawn,
+    })
+    const client = await sidecar.start()
+    checksum = 'b'.repeat(64)
+    const restart = sidecar.start().catch((error: unknown) => error)
+    await vi.waitFor(() => expect(child.stdin.chunks).toHaveLength(1))
+    child.stdout.write(
+      encodeContentLengthFrame(
+        '{"jsonrpc":"2.0","id":1,"result":{"ok":false,"deferred":true}}',
+      ),
+    )
+
+    await expect(restart).resolves.toBeInstanceOf(EccRpcShutdownDeferredError)
+    expect(spawn).toHaveBeenCalledOnce()
+    expect(child.signals).toEqual([])
+    const ping = client.call('rpc.ping')
+    child.stdout.write(
+      encodeContentLengthFrame('{"jsonrpc":"2.0","id":2,"result":{"ok":true}}'),
+    )
+    await expect(ping).resolves.toEqual({ ok: true })
+  })
+
   it('reuses the last successful environment when the provider temporarily fails', async () => {
     const firstChild = new FakeChild()
     const secondChild = new FakeChild()

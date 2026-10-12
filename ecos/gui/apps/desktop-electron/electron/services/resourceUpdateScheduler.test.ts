@@ -221,6 +221,63 @@ describe('ResourceUpdateScheduler', () => {
     expect(emit).toHaveBeenCalledTimes(2)
   })
 
+  it('forgets an installed rebuild even while another update remains pending', async () => {
+    const service = createServiceStub()
+    const rebuild = makeResource({
+      update_kind: 'rebuild',
+      installed_version: 'latest',
+      available_versions: ['latest'],
+    })
+    const other = makeResource({ id: 'tool:other', name: 'other' })
+    const emit = vi.fn()
+    const scheduler = new ResourceUpdateScheduler({
+      resourceManagerService: service,
+      emit,
+    })
+    service.listResources.mockResolvedValue(makeResourceList([rebuild, other]))
+    await scheduler.runCycle('startup')
+    service.listResources.mockResolvedValue(makeResourceList([other]))
+    await scheduler.runCycle('focus')
+    service.listResources.mockResolvedValue(makeResourceList([rebuild, other]))
+    await scheduler.runCycle('interval')
+
+    expect(emit).toHaveBeenCalledTimes(2)
+    expect(
+      emit.mock.calls[1][0].resources.map(
+        (item: { resource_id: string }) => item.resource_id,
+      ),
+    ).toEqual(['tool:yosys'])
+  })
+
+  it.each(['sha256', 'commit'])(
+    'notifies a new rebuild %s without repeating an unchanged publication',
+    async (field) => {
+      const service = createServiceStub()
+      const emit = vi.fn()
+      const scheduler = new ResourceUpdateScheduler({
+        resourceManagerService: service,
+        emit,
+      })
+      const listing = (value: string, checkedAt: string) =>
+        makeResourceList([
+          makeResource({
+            update_kind: 'rebuild',
+            installed_version: 'latest',
+            available_versions: ['latest'],
+            health: { update_check: { [field]: value, checked_at: checkedAt } },
+          }),
+        ])
+      service.listResources.mockResolvedValue(listing('a'.repeat(64), 'first'))
+      await scheduler.runCycle('startup')
+      service.listResources.mockResolvedValue(listing('a'.repeat(64), 'second'))
+      await scheduler.runCycle('focus')
+      expect(emit).toHaveBeenCalledTimes(1)
+      service.listResources.mockResolvedValue(listing('b'.repeat(64), 'third'))
+      await scheduler.runCycle('interval')
+      expect(emit).toHaveBeenCalledTimes(2)
+    },
+  )
+
   it('start() runs a startup cycle and fires interval cycles until stop()', async () => {
     vi.useFakeTimers()
     const service = createServiceStub()
