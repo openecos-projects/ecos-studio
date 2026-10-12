@@ -83,6 +83,13 @@
                     >EDA tools and PDKs</span
                   >
                 </span>
+                <span
+                  v-if="resourceUpdateCount > 0"
+                  class="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-400"
+                  title="Updates available"
+                >
+                  {{ resourceUpdateCount }}
+                </span>
                 <i
                   class="ri-arrow-right-s-line text-lg text-(--text-secondary) transition-colors group-hover:text-(--accent-color)"
                 ></i>
@@ -150,10 +157,25 @@
 </template>
 
 <script setup lang="ts">
+import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import CliInstallerCard from '@/components/CliInstallerCard.vue'
+import { usePluginStore } from '@/stores/pluginStore'
 
 const router = useRouter()
+const pluginStore = usePluginStore()
+
+const resourceUpdateCount = computed(
+  () =>
+    pluginStore.resources.filter((resource) => resource.status === 'update_available')
+      .length,
+)
+
+onMounted(() => {
+  // Home is the landing view: a silent fetch registers the push subscriptions
+  // (resources-changed / updates-detected) and feeds the update badge.
+  void pluginStore.fetchTools({ silent: true })
+})
 
 const navigateToECC = () => router.push('/ecc')
 const navigateToFE = () => router.push('/fe')

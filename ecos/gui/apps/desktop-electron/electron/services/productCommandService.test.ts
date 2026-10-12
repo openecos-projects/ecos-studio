@@ -638,3 +638,26 @@ describe('executeProductCommand Workspace creation', () => {
     expect(startFlowOperation).not.toHaveBeenCalled()
   })
 })
+
+describe('executeProductCommand resource confirmation validation', () => {
+  it.each(['workspace.run', 'workspace.runStep'])(
+    'rejects a non-boolean bypass for %s',
+    async (command) => {
+      await expect(
+        executeProductCommand(
+          {
+            command,
+            payload: {
+              workspaceHandle: 'handle-1',
+              expectedWorkspaceRevision: 1,
+              idempotencyKey: 'run-1',
+              step: 'Place',
+              allowStaleResources: 'false',
+            },
+          },
+          { ownsWorkspaceHandle: () => true, runtime: {} } as never,
+        ),
+      ).rejects.toThrow('allowStaleResources must be a boolean')
+    },
+  )
+})

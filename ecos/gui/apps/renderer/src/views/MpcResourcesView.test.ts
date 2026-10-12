@@ -116,4 +116,88 @@ describe('MpcResourcesView', () => {
       'Malformed MPC spec.',
     )
   })
+
+  it('badges a newer published version as an available update', async () => {
+    mocks.listResourcesApi.mockResolvedValue([
+      { ...resource, status: 'update_available', update_kind: 'version' },
+    ])
+    mocks.readMpcSpecApi.mockResolvedValue({
+      resource_id: resource.id,
+      installed_version: resource.installed_version,
+      spec_path: `${resource.path}/spec/spec.json.in`,
+      spec,
+    })
+
+    const wrapper = mount(MpcResourcesView)
+    await flushPromises()
+
+    expect(wrapper.find('.mpc-resource-detail__identity .is-update').text()).toBe(
+      'Update available',
+    )
+  })
+
+  it('badges a same-version republish as republished', async () => {
+    mocks.listResourcesApi.mockResolvedValue([
+      { ...resource, status: 'update_available', update_kind: 'rebuild' },
+    ])
+    mocks.readMpcSpecApi.mockResolvedValue({
+      resource_id: resource.id,
+      installed_version: resource.installed_version,
+      spec_path: `${resource.path}/spec/spec.json.in`,
+      spec,
+    })
+
+    const wrapper = mount(MpcResourcesView)
+    await flushPromises()
+
+    expect(wrapper.find('.mpc-resource-detail__identity .is-update').text()).toBe(
+      'Republished',
+    )
+  })
+
+  it('shows a last-checked footnote when an update check has run', async () => {
+    mocks.listResourcesApi.mockResolvedValue([
+      {
+        ...resource,
+        health: {
+          status: 'ok',
+          managed: true,
+          update_check: {
+            checked_at: '2020-01-01T00:00:00Z',
+            stale: true,
+            commit: 'abcdef1234567890',
+          },
+        },
+      },
+    ])
+    mocks.readMpcSpecApi.mockResolvedValue({
+      resource_id: resource.id,
+      installed_version: resource.installed_version,
+      spec_path: `${resource.path}/spec/spec.json.in`,
+      spec,
+    })
+
+    const wrapper = mount(MpcResourcesView)
+    await flushPromises()
+
+    const footnote = wrapper.find('.mpc-update-check')
+    expect(footnote.text()).toContain('Last checked')
+    expect(footnote.text()).toContain('may be outdated')
+    expect(footnote.text()).toContain('abcdef12')
+  })
+
+  it('omits the footnote without an update check record', async () => {
+    mocks.listResourcesApi.mockResolvedValue([resource])
+    mocks.readMpcSpecApi.mockResolvedValue({
+      resource_id: resource.id,
+      installed_version: resource.installed_version,
+      spec_path: `${resource.path}/spec/spec.json.in`,
+      spec,
+    })
+
+    const wrapper = mount(MpcResourcesView)
+    await flushPromises()
+
+    expect(wrapper.find('.mpc-update-check').exists()).toBe(false)
+  })
 })

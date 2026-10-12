@@ -116,6 +116,10 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { CMDEnum, InfoEnum, ResponseEnum, StateEnum } from '@/api/type'
 import { getInfoApi, runStepApi } from '@/api/flow'
 import { useWorkspace } from '@/composables/useWorkspace'
+import {
+  captureResourceStalenessContext,
+  confirmStaleResourceRerun,
+} from '@/composables/useResourceStalenessGuard'
 import { useThemeStore } from '@/stores/themeStore'
 import { frontendSourceLanguageForPath } from './frontendSourceLanguage'
 import {
@@ -410,9 +414,16 @@ async function saveSource(): Promise<void> {
   }
 }
 
-async function runLint(): Promise<void> {
+async function runLint(allowStaleResources = false): Promise<void> {
+  const isCurrentContext = captureResourceStalenessContext()
   const directory = currentProject.value?.path
   if (!directory) return
+  const previousLint = {
+    sourcePath: props.source?.path,
+    status: lintStatus.value,
+    log: lintLog.value,
+    diagnostics: diagnostics.value,
+  }
   lintRunning.value = true
   lintStatus.value = 'running'
   lintLog.value = ''
@@ -426,6 +437,7 @@ async function runLint(): Promise<void> {
         workspaceHandle: workspaceSession.value.workspaceId,
         step: 'lint',
         rerun: true,
+        ...(allowStaleResources ? { allowStaleResources: true } : {}),
       },
     })
     lintStatus.value = result.data?.state === StateEnum.Success ? 'success' : 'failed'
@@ -433,6 +445,23 @@ async function runLint(): Promise<void> {
     invalidateWorkspaceResources(['flow', 'step', 'logs'])
     emit('linted')
   } catch (err) {
+    if (
+      confirmStaleResourceRerun(
+        err,
+        'lint step',
+        async (allowStale) => {
+          await runLint(allowStale)
+        },
+        isCurrentContext,
+      )
+    ) {
+      if (isCurrentContext() && props.source?.path === previousLint.sourcePath) {
+        lintStatus.value = previousLint.status
+        lintLog.value = previousLint.log
+        setDiagnostics(previousLint.diagnostics)
+      }
+      return
+    }
     lintStatus.value = 'error'
     lintLog.value = err instanceof Error ? err.message : String(err)
   } finally {

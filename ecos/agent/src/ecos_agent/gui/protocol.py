@@ -54,7 +54,12 @@ class EcosAgentProtocolServer:
                 message = error.get("message")
             else:
                 message = error
-            raise RuntimeError(str(message or f"host Product Command {method} failed"))
+            failure = RuntimeError(
+                str(message or f"host Product Command {method} failed")
+            )
+            if isinstance(error, dict) and isinstance(error.get("code"), str):
+                setattr(failure, "code", error["code"])
+            raise failure
         result = payload.get("result")
         if not isinstance(result, dict):
             raise RuntimeError(f"host Product Command {method} result is invalid")
@@ -63,7 +68,9 @@ class EcosAgentProtocolServer:
     def _handle_line(self, raw_line: str) -> None:
         payload, request_id = _protocol_record(raw_line)
         if payload is None:
-            self._write({"id": request_id, "error": {"message": "Invalid provider request."}})
+            self._write(
+                {"id": request_id, "error": {"message": "Invalid provider request."}}
+            )
             return
         if request_id is not None and not payload.get("method"):
             pending = self._pending_host.get(request_id)
@@ -72,7 +79,9 @@ class EcosAgentProtocolServer:
                 return
             if "result" in payload or "error" in payload:
                 return
-            self._write({"id": request_id, "error": {"message": "Unknown host response."}})
+            self._write(
+                {"id": request_id, "error": {"message": "Unknown host response."}}
+            )
             return
         if payload.get("method") in {"sendMessage", "answerInteraction"}:
             self._threads = [thread for thread in self._threads if thread.is_alive()]

@@ -344,11 +344,21 @@ export type {
   ResourceList,
   MpcSpecReadResult,
   ResourceOperationResult,
+  ResourceStalenessErrorPayload,
+  ResourceStalenessItem,
   ResourceStatus,
   ResourceType,
   ResourceUpdateCheckItem,
   ResourceUpdateCheckResult,
+  ResourceUpdateKind,
+  ResourceUpdatesDetectedEvent,
+  ResourceUpdatesDetectedItem,
 } from './contracts/resources.ts'
+export {
+  isResourceStalenessError,
+  readResourceStalenessPayload,
+  RESOURCE_UPDATE_AVAILABLE,
+} from './utils/resourceStaleness.ts'
 export type {
   DesktopShellDataEvent,
   DesktopShellExitEvent,

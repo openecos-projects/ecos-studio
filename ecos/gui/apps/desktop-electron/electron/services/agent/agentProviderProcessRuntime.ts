@@ -526,6 +526,11 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
       this.writeHostReply({
         id,
         error: {
+          code:
+            error instanceof Error &&
+            typeof (error as NodeJS.ErrnoException).code === 'string'
+              ? (error as NodeJS.ErrnoException).code
+              : undefined,
           message: error instanceof Error ? error.message : String(error),
         },
       })

@@ -77,6 +77,7 @@ export interface RTL2GDSRequest {
   designTool?: DesignTool
   directory: string
   rerun: boolean
+  allowStaleResources?: boolean
   workspaceHandle?: string
   workspace_handle?: string
   workspaceRevision?: number
@@ -92,18 +93,22 @@ export function rtl2gdsApi(request: RequestData<RTL2GDSRequest>) {
     rerun: Boolean(data.rerun),
     workspaceHandle: workspaceHandleFromData(data),
   }
+  const stalenessBypass =
+    data.allowStaleResources === true ? { allowStaleResources: true as const } : {}
   const result =
     designToolFromData(data) === 'backend'
       ? getDesktopApi().productCommands.execute({
           command: 'workspace.run',
           payload: {
             ...runtimeRequest,
+            ...stalenessBypass,
             expectedWorkspaceRevision: workspaceRevisionFromData(data),
             idempotencyKey: crypto.randomUUID(),
           },
         })
       : getDesktopApi().runtime.flow.run({
           ...runtimeRequest,
+          ...stalenessBypass,
           designTool: 'frontend',
         })
   return result.then((result) =>
@@ -116,6 +121,7 @@ export interface RunStepRequest {
   directory: string
   step: string
   rerun: boolean
+  allowStaleResources?: boolean
   workspaceHandle?: string
   workspace_handle?: string
   workspaceRevision?: number
@@ -161,18 +167,22 @@ export function runStepApi(request: RequestData<RunStepRequest>) {
     step: String(data.step ?? ''),
     workspaceHandle: workspaceHandleFromData(data),
   }
+  const stalenessBypass =
+    data.allowStaleResources === true ? { allowStaleResources: true as const } : {}
   const result =
     designToolFromData(data) === 'backend'
       ? getDesktopApi().productCommands.execute({
           command: 'workspace.runStep',
           payload: {
             ...runtimeRequest,
+            ...stalenessBypass,
             expectedWorkspaceRevision: workspaceRevisionFromData(data),
             idempotencyKey: crypto.randomUUID(),
           },
         })
       : getDesktopApi().runtime.flow.runStep({
           ...runtimeRequest,
+          ...stalenessBypass,
           designTool: 'frontend',
           options,
         })

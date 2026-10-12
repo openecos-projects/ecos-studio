@@ -25,6 +25,7 @@ import {
   cancelResourceApi,
   importLocalResourcePathApi,
   importPdkPathApi,
+  pdkInstallationToResourceItem,
   resourceJobToInstallProgress,
   resourceListToResources,
   resourceListToTools,
@@ -173,6 +174,52 @@ describe('Resource Manager tool API adapter', () => {
 
     expect(resourceToResourceItem(resource)).toEqual(resource)
     expect(resourceToResourceItem(resource)).not.toBe(resource)
+  })
+
+  it('carries update metadata through to resource items', () => {
+    const item = resourceToResourceItem({
+      ...resourceListPayload.resources[0],
+      status: 'update_available' as const,
+      update_kind: 'rebuild' as const,
+      checksum_missing: true,
+    })
+
+    expect(item.update_kind).toBe('rebuild')
+    expect(item.checksum_missing).toBe(true)
+  })
+
+  it('derives checksum_missing for managed PDK installations without a registry sha', () => {
+    const base = {
+      id: 'pdk-install-1',
+      familyId: 'ics55',
+      displayName: 'ICS55 PDK',
+      version: '1.0.0',
+      root: '/pdks/ics55',
+      readiness: 'ready' as const,
+      reason: null,
+      supportsEccDefaults: true,
+    }
+
+    const managed = pdkInstallationToResourceItem({
+      ...base,
+      ownership: 'managed' as const,
+      registrySha256: null,
+    })
+    expect(managed.checksum_missing).toBe(true)
+
+    const recorded = pdkInstallationToResourceItem({
+      ...base,
+      ownership: 'managed' as const,
+      registrySha256: 'a'.repeat(64),
+    })
+    expect(recorded.checksum_missing).toBeUndefined()
+
+    const imported = pdkInstallationToResourceItem({
+      ...base,
+      ownership: 'imported' as const,
+      registrySha256: null,
+    })
+    expect(imported.checksum_missing).toBeUndefined()
   })
 
   it('maps imported backend PDK resources into resource items', () => {

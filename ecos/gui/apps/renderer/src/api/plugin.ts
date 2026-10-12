@@ -6,6 +6,7 @@ import type {
   MpcSpecReadResult as DesktopMpcSpecReadResult,
   ResourceStatus as DesktopResourceStatus,
   ResourceType as DesktopResourceType,
+  ResourceUpdatesDetectedEvent,
   PdkInstallationSnapshot,
 } from '@ecos-studio/shared'
 import { getDesktopApi } from '@/platform/desktop'
@@ -114,6 +115,11 @@ export function pdkInstallationToResourceItem(
     source: installation.ownership,
     homepage: '',
     actions: [installation.ownership === 'managed' ? 'uninstall' : 'remove_reference'],
+    // Mirrors main's pdkSnapshotToResource: managed installs without a recorded
+    // registry sha256 cannot detect rebuild drift, so reinstall is recommended.
+    ...(installation.ownership === 'managed' && !installation.registrySha256
+      ? { checksum_missing: true }
+      : {}),
     health: { readiness: installation.readiness },
     error: installation.reason,
   }
@@ -246,6 +252,12 @@ export function subscribeResourceProgress(
 
 export function subscribeResourcesChanged(onChanged: () => void): () => void {
   return getDesktopApi().resources.onChanged(onChanged)
+}
+
+export function subscribeResourceUpdatesDetected(
+  listener: (event: ResourceUpdatesDetectedEvent) => void,
+): () => void {
+  return getDesktopApi().resources.onUpdatesDetected(listener)
 }
 
 export function subscribePluginProgress(

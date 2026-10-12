@@ -253,6 +253,13 @@ function readProductCommandRequest(value: unknown): ProductCommandRequest {
     throw new Error('Invalid Product Command')
   }
   const payload = value.payload
+  if (
+    (value.command === 'workspace.run' || value.command === 'workspace.runStep') &&
+    payload.allowStaleResources !== undefined &&
+    typeof payload.allowStaleResources !== 'boolean'
+  ) {
+    throw new Error('allowStaleResources must be a boolean')
+  }
   switch (value.command) {
     case 'workspace.create':
       requireString(payload, 'commandId')

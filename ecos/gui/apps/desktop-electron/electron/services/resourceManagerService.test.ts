@@ -412,6 +412,11 @@ function testRegistryCachePath(cacheDir: string, registryUrl: string): string {
   return join(cacheDir, `resource-registry-${key}.json`)
 }
 
+function testUpdateCheckCachePath(cacheDir: string, registryUrl: string): string {
+  const key = createHash('sha256').update(registryUrl).digest('hex').slice(0, 12)
+  return join(cacheDir, `resource-update-checks-${key}.json`)
+}
+
 function testResourceDirs(root: string): {
   resourcesDir: string
   toolsDir: string
@@ -544,6 +549,7 @@ async function writeMpcRegistry(
   registryPath: string,
   archive: { path: string; sha256: string; size: number },
   version = '0.1.0',
+  options: { updateSource?: Record<string, unknown>; url?: string } = {},
 ): Promise<void> {
   await writeFile(
     registryPath,
@@ -563,10 +569,13 @@ async function writeMpcRegistry(
               version,
               platforms: {
                 'all-platform': {
-                  url: `file://${archive.path}`,
+                  url: options.url ?? `file://${archive.path}`,
                   sha256: archive.sha256,
                   size: archive.size,
                   strip_prefix: `mpc-frame-${version}`,
+                  ...(options.updateSource
+                    ? { update_source: options.updateSource }
+                    : {}),
                 },
               },
             },
@@ -576,6 +585,74 @@ async function writeMpcRegistry(
     }),
     'utf8',
   )
+}
+
+function installedMpcEntry(
+  root: string,
+  options: { version: string; sha256: string; sourceUrl: string },
+): Record<string, unknown> {
+  return {
+    type: 'mpc',
+    id: 'mpc-frame',
+    name: 'MPC Frame',
+    version: options.version,
+    sha256: options.sha256,
+    source: 'registry',
+    source_url: options.sourceUrl,
+    path: join(root, 'data', 'mpcs', 'mpc-frame', options.version),
+    installed_at: '2026-08-02T00:00:00.000Z',
+    managed: true,
+    health: 'ok',
+  }
+}
+
+async function writePinnedEccFeRegistry(
+  registryPath: string,
+  options: { version: string; asset: Record<string, unknown> },
+): Promise<void> {
+  await writeFile(
+    registryPath,
+    JSON.stringify({
+      schema_version: 2,
+      tools: [
+        {
+          name: 'ecc-fe',
+          display_name: 'ECC-FE Frontend Flow',
+          description: 'Frontend flow runtime CLI',
+          category: 'frontend',
+          homepage: 'https://github.com/openecos-projects/ecc-fe',
+          versions: [
+            {
+              version: options.version,
+              platforms: { 'all-platform': options.asset },
+              requires: [],
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }),
+    'utf8',
+  )
+}
+
+function installedEccFeEntry(
+  root: string,
+  options: { version: string; sha256: string },
+): Record<string, unknown> {
+  const dirs = testResourceDirs(root)
+  return {
+    type: 'tool',
+    name: 'ecc-fe',
+    version: options.version,
+    path: join(dirs.toolsDir, 'ecc-fe', options.version),
+    installed_at: '2026-06-30T00:00:00Z',
+    sha256: options.sha256,
+    executable: 'bin/ecc-fe',
+    detected_executables: ['bin/ecc-fe'],
+    active: true,
+    managed: true,
+  }
 }
 
 describe('ResourceManagerService', () => {
@@ -692,7 +769,7 @@ describe('ResourceManagerService', () => {
     })
   })
 
-  it('migrates a cached legacy built-in MPC while offline', async () => {
+  it('migrates a cached legacy built-in MPC without offering an unverified offline branch update', async () => {
     const root = await createTempDir('ecos-resources-')
     const cacheDir = join(root, 'cache')
     const mpcsDir = join(root, 'data', 'mpcs')
@@ -753,9 +830,9 @@ describe('ResourceManagerService', () => {
     })
 
     await expect(service.getResource('mpc:mpc-frame')).resolves.toMatchObject({
-      status: 'update_available',
+      status: 'installed',
       available_versions: ['0.1.0'],
-      actions: ['update', 'uninstall'],
+      actions: ['uninstall'],
     })
   })
 
@@ -763,8 +840,10 @@ describe('ResourceManagerService', () => {
     const root = await createTempDir('ecos-resources-')
     const registryPath = join(root, 'registry.json')
     const archive = await createFixtureArchive(root)
+    const installedSha = 'a'.repeat(64)
+    const replacementSha = 'e'.repeat(64)
     const mpcsDir = join(root, 'data', 'mpcs')
-    await writeMpcRegistry(registryPath, archive)
+    await writeMpcRegistry(registryPath, { ...archive, sha256: installedSha })
     let frameSource = 'module FrameTop; endmodule\n'
     const extract = vi.fn(async (_archivePath: string, destination: string) => {
       await mkdir(join(destination, 'spec'), { recursive: true })
@@ -823,10 +902,11 @@ describe('ResourceManagerService', () => {
       health: expect.objectContaining({ managed: true, source: 'registry' }),
     })
 
-    await writeMpcRegistry(registryPath, { ...archive, sha256: 'replacement-sha' })
+    await writeMpcRegistry(registryPath, { ...archive, sha256: replacementSha })
     await service.refreshRegistry()
     await expect(service.getResource('mpc:mpc-frame')).resolves.toMatchObject({
       status: 'update_available',
+      update_kind: 'rebuild',
       available_versions: ['0.1.0'],
       actions: ['update', 'uninstall'],
     })
@@ -1092,7 +1172,7 @@ describe('ResourceManagerService', () => {
     )
   })
 
-  it('keeps imported PDKs out of the generic Resource listing', async () => {
+  it('includes imported PDK inventory entries without registry update status', async () => {
     const root = await createTempDir('ecos-resources-')
     const registryPath = join(root, 'registry.json')
     const pdkPath = join(root, 'pdks', 'ics55')
@@ -1175,8 +1255,8 @@ describe('ResourceManagerService', () => {
         }),
       ]),
     )
-    expect(result.resources).not.toContainEqual(
-      expect.objectContaining({ id: imported.id, path: pdkPath }),
+    expect(result.resources).toContainEqual(
+      expect.objectContaining({ id: imported.id, path: pdkPath, status: 'invalid' }),
     )
     await expect(service.getResource(imported.id)).resolves.toMatchObject({
       id: imported.id,
@@ -4668,6 +4748,1152 @@ describe('ResourceManagerService', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 
+  it('marks a managed tool version bump as a version update kind', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const dirs = testResourceDirs(root)
+    await writePinnedEccFeRegistry(registryPath, {
+      version: '1.2.0',
+      asset: {
+        url: 'file:///tmp/ecc-fe.tar',
+        sha256: 'b'.repeat(64),
+        size: 1,
+        strip_prefix: 'ecc-fe-runtime',
+      },
+    })
+    await createInstalledEccFeRoot(join(dirs.toolsDir, 'ecc-fe', '1.1.0'))
+    await writeTestManifest(root, {
+      'tool:ecc-fe': installedEccFeEntry(root, {
+        version: '1.1.0',
+        sha256: 'a'.repeat(64),
+      }),
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+      status: 'update_available',
+      update_kind: 'version',
+      installed_version: '1.1.0',
+      available_versions: ['1.2.0'],
+      actions: ['update', 'uninstall'],
+    })
+  })
+
+  it('marks a same-version tool checksum drift as a rebuild update kind', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const dirs = testResourceDirs(root)
+    await writePinnedEccFeRegistry(registryPath, {
+      version: '1.2.0',
+      asset: {
+        url: 'file:///tmp/ecc-fe.tar',
+        sha256: 'b'.repeat(64),
+        size: 1,
+        strip_prefix: 'ecc-fe-runtime',
+      },
+    })
+    await createInstalledEccFeRoot(join(dirs.toolsDir, 'ecc-fe', '1.2.0'))
+    await writeTestManifest(root, {
+      'tool:ecc-fe': installedEccFeEntry(root, {
+        version: '1.2.0',
+        sha256: 'c'.repeat(64),
+      }),
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+      status: 'update_available',
+      update_kind: 'rebuild',
+      installed_version: '1.2.0',
+      actions: ['update', 'uninstall'],
+    })
+  })
+
+  it('keeps a tool with a matching registry checksum installed without an update kind', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const dirs = testResourceDirs(root)
+    await writePinnedEccFeRegistry(registryPath, {
+      version: '1.2.0',
+      asset: {
+        url: 'file:///tmp/ecc-fe.tar',
+        sha256: 'b'.repeat(64),
+        size: 1,
+        strip_prefix: 'ecc-fe-runtime',
+      },
+    })
+    await createInstalledEccFeRoot(join(dirs.toolsDir, 'ecc-fe', '1.2.0'))
+    await writeTestManifest(root, {
+      'tool:ecc-fe': installedEccFeEntry(root, {
+        version: '1.2.0',
+        sha256: 'b'.repeat(64),
+      }),
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    const resource = await service.getResource('tool:ecc-fe')
+    expect(resource).toMatchObject({
+      status: 'installed',
+      actions: ['uninstall'],
+    })
+    expect(resource.update_kind).toBeUndefined()
+    expect(resource.checksum_missing).toBeUndefined()
+  })
+
+  it('flags a managed tool without a recorded checksum instead of reporting drift', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const dirs = testResourceDirs(root)
+    await writePinnedEccFeRegistry(registryPath, {
+      version: '1.2.0',
+      asset: {
+        url: 'file:///tmp/ecc-fe.tar',
+        sha256: 'b'.repeat(64),
+        size: 1,
+        strip_prefix: 'ecc-fe-runtime',
+      },
+    })
+    await createInstalledEccFeRoot(join(dirs.toolsDir, 'ecc-fe', '1.2.0'))
+    await writeTestManifest(root, {
+      'tool:ecc-fe': installedEccFeEntry(root, { version: '1.2.0', sha256: '' }),
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    const resource = await service.getResource('tool:ecc-fe')
+    expect(resource).toMatchObject({
+      status: 'installed',
+      actions: ['uninstall'],
+    })
+    expect(resource.checksum_missing).toBe(true)
+    expect(resource.update_kind).toBeUndefined()
+  })
+
+  it('flags a managed tool missing from the registry when its checksum is unknown', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const dirs = testResourceDirs(root)
+    await writeFile(
+      registryPath,
+      JSON.stringify({ schema_version: 2, tools: [], pdks: [] }),
+      'utf8',
+    )
+    await createInstalledEccFeRoot(join(dirs.toolsDir, 'ecc-fe', '1.2.0'))
+    await writeTestManifest(root, {
+      'tool:ecc-fe': installedEccFeEntry(root, { version: '1.2.0', sha256: '' }),
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    const resource = await service.getResource('tool:ecc-fe')
+    expect(resource).toMatchObject({
+      status: 'installed',
+      actions: ['uninstall'],
+    })
+    expect(resource.checksum_missing).toBe(true)
+  })
+
+  it('checks sidecar-less pinned tools against the registry checksum without fetching', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const dirs = testResourceDirs(root)
+    const registrySha = 'b'.repeat(64)
+    const installedSha = 'c'.repeat(64)
+    await writePinnedEccFeRegistry(registryPath, {
+      version: '1.2.0',
+      asset: {
+        url: 'file:///tmp/ecc-fe.tar',
+        sha256: registrySha,
+        size: 1,
+        strip_prefix: 'ecc-fe-runtime',
+      },
+    })
+    await createInstalledEccFeRoot(join(dirs.toolsDir, 'ecc-fe', '1.2.0'))
+    await writeTestManifest(root, {
+      'tool:ecc-fe': installedEccFeEntry(root, {
+        version: '1.2.0',
+        sha256: installedSha,
+      }),
+    })
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      throw new Error(`unexpected fetch ${String(url)}`)
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+
+    await expect(service.checkResourceUpdates({ force: true })).resolves.toMatchObject({
+      status: 'ok',
+      checked_count: 1,
+      update_count: 1,
+      resources: [
+        expect.objectContaining({
+          resource_id: 'tool:ecc-fe',
+          sha256: registrySha,
+          status: 'checked',
+          update_available: true,
+        }),
+      ],
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
+
+    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+      status: 'update_available',
+      update_kind: 'rebuild',
+      health: expect.objectContaining({
+        update_check: expect.objectContaining({
+          sha256: registrySha,
+          update_url: null,
+          status: 'checked',
+          update_available: true,
+        }),
+      }),
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('reports no update for a sidecar-less tool matching the registry checksum', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const dirs = testResourceDirs(root)
+    const registrySha = 'b'.repeat(64)
+    await writePinnedEccFeRegistry(registryPath, {
+      version: '1.2.0',
+      asset: {
+        url: 'file:///tmp/ecc-fe.tar',
+        sha256: registrySha,
+        size: 1,
+        strip_prefix: 'ecc-fe-runtime',
+      },
+    })
+    await createInstalledEccFeRoot(join(dirs.toolsDir, 'ecc-fe', '1.2.0'))
+    await writeTestManifest(root, {
+      'tool:ecc-fe': installedEccFeEntry(root, {
+        version: '1.2.0',
+        sha256: registrySha,
+      }),
+    })
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      throw new Error(`unexpected fetch ${String(url)}`)
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+
+    await expect(service.checkResourceUpdates({ force: true })).resolves.toMatchObject({
+      status: 'ok',
+      checked_count: 1,
+      update_count: 0,
+      resources: [
+        expect.objectContaining({
+          resource_id: 'tool:ecc-fe',
+          sha256: registrySha,
+          status: 'checked',
+          update_available: false,
+        }),
+      ],
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('skips a sidecar-less tool when the registry asset has no usable checksum', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const dirs = testResourceDirs(root)
+    await writePinnedEccFeRegistry(registryPath, {
+      version: '1.2.0',
+      asset: {
+        url: 'file:///tmp/ecc-fe.tar',
+        sha256: 'not-a-valid-sha',
+        size: 1,
+        strip_prefix: 'ecc-fe-runtime',
+      },
+    })
+    await createInstalledEccFeRoot(join(dirs.toolsDir, 'ecc-fe', '1.2.0'))
+    await writeTestManifest(root, {
+      'tool:ecc-fe': installedEccFeEntry(root, {
+        version: '1.2.0',
+        sha256: 'c'.repeat(64),
+      }),
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    await expect(service.checkResourceUpdates({ force: true })).resolves.toMatchObject({
+      status: 'ok',
+      checked_count: 0,
+      update_count: 0,
+      resources: [
+        expect.objectContaining({
+          resource_id: 'tool:ecc-fe',
+          sha256: null,
+          status: 'skipped',
+          update_available: false,
+          error: 'No sha256 in registry asset',
+        }),
+      ],
+    })
+
+    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+      status: 'installed',
+      actions: ['uninstall'],
+    })
+  })
+
+  it('records release metadata provenance in the update check cache and health', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createEccFeArchive(root)
+    const registryPath = join(root, 'registry.json')
+    const dirs = testResourceDirs(root)
+    const metadataUrl = 'https://example.com/ecc-fe-latest.metadata.json'
+    const installedSha = 'c'.repeat(64)
+    const latestSha = 'd'.repeat(64)
+    const publishedCommit = 'f'.repeat(40)
+    const publishedBuiltAt = '2026-06-30T00:00:00Z'
+    await writePinnedEccFeRegistry(registryPath, {
+      version: 'latest',
+      asset: {
+        url: `file://${archive.path}`,
+        metadata_url: metadataUrl,
+        sha256: latestSha,
+        size: 1,
+        strip_prefix: 'ecc-fe-runtime',
+      },
+    })
+    await createInstalledEccFeRoot(join(dirs.toolsDir, 'ecc-fe', 'latest'))
+    await writeTestManifest(root, {
+      'tool:ecc-fe': installedEccFeEntry(root, {
+        version: 'latest',
+        sha256: installedSha,
+      }),
+    })
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      const requestUrl = String(url)
+      if (requestUrl === metadataUrl) {
+        return new Response(
+          JSON.stringify({
+            sha256: latestSha,
+            size: archive.size,
+            commit: publishedCommit,
+            built_at: publishedBuiltAt,
+          }),
+          { status: 200 },
+        )
+      }
+      throw new Error(`unexpected fetch ${requestUrl}`)
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+
+    await expect(service.checkResourceUpdates({ force: true })).resolves.toMatchObject({
+      status: 'ok',
+      checked_count: 1,
+      update_count: 1,
+      resources: [
+        expect.objectContaining({
+          resource_id: 'tool:ecc-fe',
+          sha256: latestSha,
+          status: 'checked',
+          update_available: true,
+          commit: publishedCommit,
+          built_at: publishedBuiltAt,
+        }),
+      ],
+    })
+
+    const cache = JSON.parse(
+      await readFile(
+        testUpdateCheckCachePath(dirs.cacheDir, `file://${registryPath}`),
+        'utf8',
+      ),
+    ) as { resources: Record<string, unknown> }
+    expect(cache.resources['tool:ecc-fe']).toMatchObject({
+      sha256: latestSha,
+      status: 'checked',
+      update_available: true,
+      update_url: metadataUrl,
+      commit: publishedCommit,
+      built_at: publishedBuiltAt,
+    })
+
+    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+      status: 'update_available',
+      update_kind: 'rebuild',
+      health: expect.objectContaining({
+        update_check: expect.objectContaining({
+          sha256: latestSha,
+          update_url: metadataUrl,
+          status: 'checked',
+          update_available: true,
+          commit: publishedCommit,
+          built_at: publishedBuiltAt,
+        }),
+      }),
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('normalizes legacy update check caches without release provenance', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createEccFeArchive(root)
+    const registryPath = join(root, 'registry.json')
+    const dirs = testResourceDirs(root)
+    const metadataUrl = 'https://example.com/ecc-fe-latest.metadata.json'
+    const installedSha = 'c'.repeat(64)
+    const latestSha = 'd'.repeat(64)
+    await writePinnedEccFeRegistry(registryPath, {
+      version: 'latest',
+      asset: {
+        url: `file://${archive.path}`,
+        metadata_url: metadataUrl,
+        sha256: latestSha,
+        size: 1,
+        strip_prefix: 'ecc-fe-runtime',
+      },
+    })
+    await createInstalledEccFeRoot(join(dirs.toolsDir, 'ecc-fe', 'latest'))
+    await writeTestManifest(root, {
+      'tool:ecc-fe': installedEccFeEntry(root, {
+        version: 'latest',
+        sha256: installedSha,
+      }),
+    })
+    await mkdir(dirs.cacheDir, { recursive: true })
+    await writeFile(
+      testUpdateCheckCachePath(dirs.cacheDir, `file://${registryPath}`),
+      JSON.stringify({
+        schema_version: 1,
+        checked_at: '2026-06-30T00:00:00Z',
+        resources: {
+          'tool:ecc-fe': {
+            resource_id: 'tool:ecc-fe',
+            checked_at: '2026-06-30T00:00:00Z',
+            sha256: latestSha,
+            status: 'checked',
+            update_available: true,
+            error: null,
+            update_url: metadataUrl,
+          },
+        },
+      }),
+      'utf8',
+    )
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      throw new Error(`unexpected fetch ${String(url)}`)
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+
+    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+      status: 'update_available',
+      update_kind: 'rebuild',
+      actions: ['update', 'uninstall'],
+      health: expect.objectContaining({
+        update_check: expect.objectContaining({
+          sha256: latestSha,
+          update_url: metadataUrl,
+          status: 'checked',
+          update_available: true,
+          commit: null,
+          built_at: null,
+        }),
+      }),
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('reports a missing update-check cache as stale', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      registryUrl: 'https://example.com/registry.json',
+      ...dirs,
+    })
+
+    await expect(
+      service.isUpdateCheckCacheStale(Date.parse('2026-10-10T12:00:00.000Z')),
+    ).resolves.toBe(true)
+  })
+
+  it('reports update-check cache staleness from the cached checked_at age', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const dirs = testResourceDirs(root)
+    const registryUrl = 'https://example.com/registry.json'
+    const cachePath = testUpdateCheckCachePath(dirs.cacheDir, registryUrl)
+    await mkdir(dirs.cacheDir, { recursive: true })
+    await writeFile(
+      cachePath,
+      JSON.stringify({
+        schema_version: 1,
+        checked_at: '2026-10-10T11:00:00.000Z',
+        resources: {},
+      }),
+      'utf8',
+    )
+    const service = new ResourceManagerService({ registryUrl, ...dirs })
+
+    await expect(
+      service.isUpdateCheckCacheStale(Date.parse('2026-10-10T12:00:00.000Z')),
+    ).resolves.toBe(false)
+
+    await writeFile(
+      cachePath,
+      JSON.stringify({
+        schema_version: 1,
+        checked_at: '2026-10-10T05:00:00.000Z',
+        resources: {},
+      }),
+      'utf8',
+    )
+    const rereadService = new ResourceManagerService({ registryUrl, ...dirs })
+    await expect(
+      rereadService.isUpdateCheckCacheStale(Date.parse('2026-10-10T12:00:00.000Z')),
+    ).resolves.toBe(true)
+  })
+
+  it('marks health.update_check stale from the cached check age', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(Date.parse('2026-10-10T12:00:00.000Z'))
+    try {
+      const root = await createTempDir('ecos-resources-')
+      const archive = await createEccFeArchive(root)
+      const registryPath = join(root, 'registry.json')
+      const dirs = testResourceDirs(root)
+      const metadataUrl = 'https://example.com/ecc-fe-latest.metadata.json'
+      const installedSha = 'c'.repeat(64)
+      const latestSha = 'd'.repeat(64)
+      await writePinnedEccFeRegistry(registryPath, {
+        version: 'latest',
+        asset: {
+          url: `file://${archive.path}`,
+          metadata_url: metadataUrl,
+          sha256: latestSha,
+          size: 1,
+          strip_prefix: 'ecc-fe-runtime',
+        },
+      })
+      await createInstalledEccFeRoot(join(dirs.toolsDir, 'ecc-fe', 'latest'))
+      await writeTestManifest(root, {
+        'tool:ecc-fe': installedEccFeEntry(root, {
+          version: 'latest',
+          sha256: installedSha,
+        }),
+      })
+      const cachePath = testUpdateCheckCachePath(dirs.cacheDir, `file://${registryPath}`)
+      const writeCache = async (checkedAt: string) => {
+        await mkdir(dirs.cacheDir, { recursive: true })
+        await writeFile(
+          cachePath,
+          JSON.stringify({
+            schema_version: 1,
+            checked_at: checkedAt,
+            resources: {
+              'tool:ecc-fe': {
+                resource_id: 'tool:ecc-fe',
+                checked_at: checkedAt,
+                sha256: latestSha,
+                status: 'checked',
+                update_available: true,
+                error: null,
+                update_url: metadataUrl,
+              },
+            },
+          }),
+          'utf8',
+        )
+      }
+      const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+        throw new Error(`unexpected fetch ${String(url)}`)
+      })
+
+      await writeCache('2026-10-10T05:00:00.000Z')
+      const staleService = new ResourceManagerService({
+        registryUrl: `file://${registryPath}`,
+        ...dirs,
+        fetchImpl: fetchImpl as typeof fetch,
+      })
+      const staleResource = await staleService.getResource('tool:ecc-fe')
+      expect(staleResource.health.update_check).toMatchObject({ stale: true })
+
+      await writeCache('2026-10-10T11:30:00.000Z')
+      const freshService = new ResourceManagerService({
+        registryUrl: `file://${registryPath}`,
+        ...dirs,
+        fetchImpl: fetchImpl as typeof fetch,
+      })
+      const freshResource = await freshService.getResource('tool:ecc-fe')
+      expect(freshResource.health.update_check).toMatchObject({ stale: false })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('checks sidecar-less pinned PDKs against the registry checksum without fetching', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const dirs = testResourceDirs(root)
+    const registrySha = 'b'.repeat(64)
+    const installedSha = 'c'.repeat(64)
+    await writeIcs55Registry(registryPath, {
+      url: 'file:///tmp/ics55.tar',
+      sha256: registrySha,
+      size: 1,
+    })
+    await writeTestManifest(root, {
+      'pdk:ics55': {
+        type: 'pdk',
+        id: 'ics55',
+        name: 'ICS55 PDK',
+        pdk_id: 'ics55',
+        version: '1.10.100',
+        sha256: installedSha,
+        source: 'registry',
+        source_url: 'file:///tmp/ics55.tar',
+        canonical_path: join(dirs.pdksDir, 'ics55', '1.10.100'),
+        path: join(dirs.pdksDir, 'ics55', '1.10.100'),
+        detected_files: [],
+        detected_file_groups: { directories: [], files: [] },
+        imported_at: '2026-06-30T00:00:00Z',
+        active: false,
+        managed: true,
+        health: 'ok',
+      },
+    })
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      throw new Error(`unexpected fetch ${String(url)}`)
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+
+    await expect(service.checkResourceUpdates({ force: true })).resolves.toMatchObject({
+      status: 'ok',
+      checked_count: 1,
+      update_count: 1,
+      resources: [
+        expect.objectContaining({
+          resource_id: 'pdk:ics55',
+          sha256: registrySha,
+          status: 'checked',
+          update_available: true,
+        }),
+      ],
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('flags a managed PDK installation without a registry checksum', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const dirs = testResourceDirs(root)
+    const managedRoot = join(dirs.pdksDir, 'demo', '1.0.0')
+    const importedRoot = join(root, 'imported-pdk')
+    await mkdir(managedRoot, { recursive: true })
+    await mkdir(importedRoot, { recursive: true })
+    await mkdir(dirs.resourcesDir, { recursive: true })
+    await writeFile(
+      join(dirs.resourcesDir, 'pdk-inventory.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        installations: [
+          {
+            id: 'pdk:demo:managed:1.0.0',
+            familyId: 'demo',
+            displayName: 'Demo PDK',
+            version: '1.0.0',
+            root: managedRoot,
+            ownership: 'managed',
+            registrySha256: null,
+          },
+          {
+            id: 'pdk:demo:local:imported',
+            familyId: 'demo',
+            displayName: 'Demo PDK',
+            version: '1.0.0',
+            root: importedRoot,
+            ownership: 'imported',
+            registrySha256: null,
+          },
+        ],
+        bindings: [],
+      }),
+      'utf8',
+    )
+    const service = new ResourceManagerService({
+      registryUrl: `file://${join(root, 'registry.json')}`,
+      ...dirs,
+    })
+
+    const managed = await service.getResource('pdk:demo:managed:1.0.0')
+    expect(managed).toMatchObject({ status: 'installed', source: 'registry' })
+    expect(managed.checksum_missing).toBe(true)
+
+    const imported = await service.getResource('pdk:demo:local:imported')
+    expect(imported).toMatchObject({ status: 'installed', source: 'local' })
+    expect(imported.checksum_missing).toBeUndefined()
+  })
+
+  it('marks an MPC version bump as a version update kind in the listing', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    const mpcsDir = join(root, 'data', 'mpcs')
+    await writeMpcRegistry(registryPath, { ...archive, sha256: 'b'.repeat(64) }, '0.2.0')
+    await mkdir(join(mpcsDir, 'mpc-frame', '0.1.0'), { recursive: true })
+    await writeTestManifest(root, {
+      'mpc:mpc-frame': installedMpcEntry(root, {
+        version: '0.1.0',
+        sha256: 'a'.repeat(64),
+        sourceUrl: 'https://example.com/mpc-frame-0.1.0.tar.gz',
+      }),
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      mpcsDir,
+    })
+
+    await expect(service.getResource('mpc:mpc-frame')).resolves.toMatchObject({
+      status: 'update_available',
+      update_kind: 'version',
+      installed_version: '0.1.0',
+      available_versions: ['0.2.0'],
+      actions: ['update', 'uninstall'],
+    })
+  })
+
+  it('flags a managed MPC without a recorded checksum instead of reporting drift', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    const mpcsDir = join(root, 'data', 'mpcs')
+    await writeMpcRegistry(registryPath, { ...archive, sha256: 'b'.repeat(64) })
+    await mkdir(join(mpcsDir, 'mpc-frame', '0.1.0'), { recursive: true })
+    await writeTestManifest(root, {
+      'mpc:mpc-frame': installedMpcEntry(root, {
+        version: '0.1.0',
+        sha256: '',
+        sourceUrl: 'https://example.com/mpc-frame-0.1.0.tar.gz',
+      }),
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      mpcsDir,
+    })
+
+    const resource = await service.getResource('mpc:mpc-frame')
+    expect(resource).toMatchObject({
+      status: 'installed',
+      actions: ['uninstall'],
+    })
+    expect(resource.checksum_missing).toBe(true)
+    expect(resource.update_kind).toBeUndefined()
+  })
+
+  it('probes the upstream branch of a GitHub-sourced MPC and reports a moved head', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    const mpcsDir = join(root, 'data', 'mpcs')
+    const installedSha = 'a'.repeat(64)
+    const registrySha = 'b'.repeat(64)
+    const installedCommit = '1'.repeat(40)
+    const headCommit = '2'.repeat(40)
+    await writeMpcRegistry(registryPath, { ...archive, sha256: registrySha }, '0.1.0', {
+      updateSource: { type: 'github_branch', branch: 'main' },
+      url: `https://github.com/openecos-projects/mpc-frame/archive/${headCommit}.tar.gz`,
+    })
+    await mkdir(join(mpcsDir, 'mpc-frame', '0.1.0'), { recursive: true })
+    await writeTestManifest(root, {
+      'mpc:mpc-frame': installedMpcEntry(root, {
+        version: '0.1.0',
+        sha256: installedSha,
+        sourceUrl: `https://github.com/openecos-projects/mpc-frame/archive/${installedCommit}.tar.gz`,
+      }),
+    })
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      const requestUrl = String(url)
+      if (
+        requestUrl ===
+        'https://api.github.com/repos/openecos-projects/mpc-frame/commits/main'
+      ) {
+        return new Response(JSON.stringify({ sha: headCommit }), { status: 200 })
+      }
+      throw new Error(`unexpected fetch ${requestUrl}`)
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      mpcsDir,
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+
+    await expect(service.checkResourceUpdates({ force: true })).resolves.toMatchObject({
+      status: 'ok',
+      checked_count: 1,
+      update_count: 1,
+      resources: [
+        expect.objectContaining({
+          resource_id: 'mpc:mpc-frame',
+          sha256: null,
+          status: 'checked',
+          update_available: true,
+          commit: headCommit,
+          error: null,
+        }),
+      ],
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports no MPC update when the probed branch head matches the install', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    const mpcsDir = join(root, 'data', 'mpcs')
+    const installedSha = 'a'.repeat(64)
+    const installedCommit = '1'.repeat(40)
+    await writeMpcRegistry(registryPath, { ...archive, sha256: installedSha }, '0.1.0', {
+      updateSource: { type: 'github_branch', branch: 'main' },
+      url: `https://github.com/openecos-projects/mpc-frame/archive/${installedCommit}.tar.gz`,
+    })
+    await mkdir(join(mpcsDir, 'mpc-frame', '0.1.0'), { recursive: true })
+    await writeTestManifest(root, {
+      'mpc:mpc-frame': installedMpcEntry(root, {
+        version: '0.1.0',
+        sha256: installedSha,
+        sourceUrl: `https://codeload.github.com/openecos-projects/mpc-frame/tar.gz/${installedCommit}`,
+      }),
+    })
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      const requestUrl = String(url)
+      if (
+        requestUrl ===
+        'https://api.github.com/repos/openecos-projects/mpc-frame/commits/main'
+      ) {
+        return new Response(JSON.stringify({ sha: installedCommit }), { status: 200 })
+      }
+      throw new Error(`unexpected fetch ${requestUrl}`)
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      mpcsDir,
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+
+    await expect(service.checkResourceUpdates({ force: true })).resolves.toMatchObject({
+      status: 'ok',
+      checked_count: 1,
+      update_count: 0,
+      resources: [
+        expect.objectContaining({
+          resource_id: 'mpc:mpc-frame',
+          sha256: null,
+          status: 'checked',
+          update_available: false,
+          commit: installedCommit,
+          error: null,
+        }),
+      ],
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('skips the MPC update probe silently when the upstream probe fails', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    const mpcsDir = join(root, 'data', 'mpcs')
+    const installedSha = 'a'.repeat(64)
+    const installedCommit = '1'.repeat(40)
+    await writeMpcRegistry(registryPath, { ...archive, sha256: installedSha }, '0.1.0', {
+      updateSource: { type: 'github_branch', branch: 'main' },
+    })
+    await mkdir(join(mpcsDir, 'mpc-frame', '0.1.0'), { recursive: true })
+    await writeTestManifest(root, {
+      'mpc:mpc-frame': installedMpcEntry(root, {
+        version: '0.1.0',
+        sha256: installedSha,
+        sourceUrl: `https://github.com/openecos-projects/mpc-frame/archive/${installedCommit}.tar.gz`,
+      }),
+    })
+    const fetchImpl = vi.fn(async () => new Response('not found', { status: 404 }))
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      mpcsDir,
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+
+    await expect(service.checkResourceUpdates({ force: true })).resolves.toMatchObject({
+      status: 'ok',
+      checked_count: 0,
+      update_count: 0,
+      resources: [
+        expect.objectContaining({
+          resource_id: 'mpc:mpc-frame',
+          sha256: null,
+          status: 'skipped',
+          update_available: false,
+          error: 'Unable to probe the upstream branch head',
+          commit: null,
+        }),
+      ],
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('skips the MPC update probe when the installed source URL has no pinned commit', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    const mpcsDir = join(root, 'data', 'mpcs')
+    const installedSha = 'a'.repeat(64)
+    await writeMpcRegistry(registryPath, { ...archive, sha256: installedSha }, '0.1.0', {
+      updateSource: { type: 'github_branch', branch: 'main' },
+    })
+    await mkdir(join(mpcsDir, 'mpc-frame', '0.1.0'), { recursive: true })
+    await writeTestManifest(root, {
+      'mpc:mpc-frame': installedMpcEntry(root, {
+        version: '0.1.0',
+        sha256: installedSha,
+        sourceUrl: 'https://example.com/stale-mpc-frame.tar.gz',
+      }),
+    })
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      throw new Error(`unexpected fetch ${String(url)}`)
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      mpcsDir,
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+
+    await expect(service.checkResourceUpdates({ force: true })).resolves.toMatchObject({
+      status: 'ok',
+      checked_count: 0,
+      update_count: 0,
+      resources: [
+        expect.objectContaining({
+          resource_id: 'mpc:mpc-frame',
+          sha256: null,
+          status: 'skipped',
+          update_available: false,
+          error: 'Unable to resolve the installed MPC source commit',
+          commit: null,
+        }),
+      ],
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('never offers a downgrade when an installed MPC is newer than the registry lock', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    const mpcsDir = join(root, 'data', 'mpcs')
+    const installedSha = 'a'.repeat(64)
+    const installedCommit = '1'.repeat(40)
+    const headCommit = '2'.repeat(40)
+    await writeMpcRegistry(
+      registryPath,
+      { ...archive, sha256: 'b'.repeat(64) },
+      '0.1.0',
+      {
+        updateSource: { type: 'github_branch', branch: 'main' },
+        url: `https://github.com/openecos-projects/mpc-frame/archive/${installedCommit}.tar.gz`,
+      },
+    )
+    await mkdir(join(mpcsDir, 'mpc-frame', '0.1.0'), { recursive: true })
+    await writeTestManifest(root, {
+      'mpc:mpc-frame': installedMpcEntry(root, {
+        version: '0.1.0',
+        sha256: installedSha,
+        sourceUrl: `https://github.com/openecos-projects/mpc-frame/archive/${headCommit}.tar.gz`,
+      }),
+    })
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      const requestUrl = String(url)
+      if (
+        requestUrl ===
+        'https://api.github.com/repos/openecos-projects/mpc-frame/commits/main'
+      ) {
+        return new Response(JSON.stringify({ sha: headCommit }), { status: 200 })
+      }
+      throw new Error(`unexpected fetch ${requestUrl}`)
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      mpcsDir,
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+
+    await expect(service.checkResourceUpdates({ force: true })).resolves.toMatchObject({
+      status: 'ok',
+      checked_count: 0,
+      update_count: 0,
+      resources: [
+        expect.objectContaining({
+          resource_id: 'mpc:mpc-frame',
+          sha256: null,
+          status: 'skipped',
+          update_available: false,
+          error: 'Registry lock has not caught up with the published branch',
+          commit: headCommit,
+        }),
+      ],
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+
+    await expect(service.getResource('mpc:mpc-frame')).resolves.toMatchObject({
+      status: 'installed',
+      actions: ['uninstall'],
+    })
+  })
+
+  it('skips the MPC branch probe when the registry asset currency cannot be verified', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    const mpcsDir = join(root, 'data', 'mpcs')
+    const installedSha = 'a'.repeat(64)
+    const installedCommit = '1'.repeat(40)
+    const headCommit = '2'.repeat(40)
+    await writeMpcRegistry(registryPath, { ...archive, sha256: installedSha }, '0.1.0', {
+      updateSource: { type: 'github_branch', branch: 'main' },
+    })
+    await mkdir(join(mpcsDir, 'mpc-frame', '0.1.0'), { recursive: true })
+    await writeTestManifest(root, {
+      'mpc:mpc-frame': installedMpcEntry(root, {
+        version: '0.1.0',
+        sha256: installedSha,
+        sourceUrl: `https://github.com/openecos-projects/mpc-frame/archive/${installedCommit}.tar.gz`,
+      }),
+    })
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      const requestUrl = String(url)
+      if (
+        requestUrl ===
+        'https://api.github.com/repos/openecos-projects/mpc-frame/commits/main'
+      ) {
+        return new Response(JSON.stringify({ sha: headCommit }), { status: 200 })
+      }
+      throw new Error(`unexpected fetch ${requestUrl}`)
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      mpcsDir,
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+
+    await expect(service.checkResourceUpdates({ force: true })).resolves.toMatchObject({
+      status: 'ok',
+      checked_count: 0,
+      update_count: 0,
+      resources: [
+        expect.objectContaining({
+          resource_id: 'mpc:mpc-frame',
+          sha256: null,
+          status: 'skipped',
+          update_available: false,
+          error: 'Unable to verify registry asset currency',
+          commit: null,
+        }),
+      ],
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('surfaces the MPC branch probe result in the listed resource health', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    const mpcsDir = join(root, 'data', 'mpcs')
+    const installedSha = 'a'.repeat(64)
+    const registrySha = 'b'.repeat(64)
+    const installedCommit = '1'.repeat(40)
+    const headCommit = '2'.repeat(40)
+    await writeMpcRegistry(registryPath, { ...archive, sha256: registrySha }, '0.1.0', {
+      updateSource: { type: 'github_branch', branch: 'main' },
+      url: `https://github.com/openecos-projects/mpc-frame/archive/${headCommit}.tar.gz`,
+    })
+    await mkdir(join(mpcsDir, 'mpc-frame', '0.1.0'), { recursive: true })
+    await writeTestManifest(root, {
+      'mpc:mpc-frame': installedMpcEntry(root, {
+        version: '0.1.0',
+        sha256: installedSha,
+        sourceUrl: `https://github.com/openecos-projects/mpc-frame/archive/${installedCommit}.tar.gz`,
+      }),
+    })
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      const requestUrl = String(url)
+      if (
+        requestUrl ===
+        'https://api.github.com/repos/openecos-projects/mpc-frame/commits/main'
+      ) {
+        return new Response(JSON.stringify({ sha: headCommit }), { status: 200 })
+      }
+      throw new Error(`unexpected fetch ${requestUrl}`)
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      mpcsDir,
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+
+    await expect(service.checkResourceUpdates({ force: true })).resolves.toMatchObject({
+      status: 'ok',
+      checked_count: 1,
+      update_count: 1,
+    })
+
+    await expect(service.getResource('mpc:mpc-frame')).resolves.toMatchObject({
+      status: 'update_available',
+      update_kind: 'rebuild',
+      health: expect.objectContaining({
+        update_check: expect.objectContaining({
+          checked_at: expect.any(String),
+          sha256: null,
+          status: 'checked',
+          update_available: true,
+          commit: headCommit,
+        }),
+      }),
+    })
+  })
+
   it('streams remote downloads and emits byte progress while downloading a managed tool', async () => {
     const root = await createTempDir('ecos-resources-')
     const registryPath = join(root, 'registry.json')
@@ -7138,7 +8364,7 @@ describe('ResourceManagerService', () => {
     ).rejects.toThrow('ENOENT')
   })
 
-  it('marks managed registry PDKs updateable and updates them through the PDK install path', async () => {
+  it('installs PDK upgrades alongside the bound version and reuses the latest installation for rebuilds', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createPdkArchive(root)
     await cp(
@@ -7232,12 +8458,12 @@ describe('ResourceManagerService', () => {
     })
 
     await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
-      status: 'installed',
+      status: 'update_available',
       installed_version: '1.10.100',
-      available_versions: [],
+      available_versions: ['1.10.101', '1.10.100'],
       active: false,
       size: null,
-      actions: ['validate', 'uninstall'],
+      actions: ['validate', 'update', 'uninstall'],
     })
     await expect(service.updateResource('pdk:ics55')).resolves.toEqual({
       status: 'started',
@@ -7248,9 +8474,18 @@ describe('ResourceManagerService', () => {
       await readFile(join(root, 'state', 'resources', 'pdk-inventory.json'), 'utf8'),
     ) as { installations: Array<{ id: string; version: string }> }
     expect(inventory.installations).toContainEqual(
-      expect.objectContaining({ id: 'pdk:ics55', version: '1.10.101' }),
+      expect.objectContaining({ id: 'pdk:ics55:managed:1.10.101', version: '1.10.101' }),
+    )
+    expect(inventory.installations).toContainEqual(
+      expect.objectContaining({ id: 'pdk:ics55', version: '1.10.100' }),
     )
     await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
+      status: 'update_available',
+      installed_version: '1.10.100',
+    })
+    await expect(
+      service.getResource('pdk:ics55:managed:1.10.101'),
+    ).resolves.toMatchObject({
       status: 'installed',
       installed_version: '1.10.101',
       active: false,
@@ -7259,7 +8494,7 @@ describe('ResourceManagerService', () => {
       actions: ['validate', 'uninstall'],
     })
     await service.getPdkInventoryService().registerManagedInstallation({
-      id: 'pdk:ics55',
+      id: 'pdk:ics55:managed:1.10.101',
       familyId: 'ics55',
       displayName: 'ICsprout 55nm PDK',
       root: join(root, 'data', 'pdks', 'ics55', '1.10.101'),
@@ -7274,8 +8509,12 @@ describe('ResourceManagerService', () => {
     expect(verifySha256).toHaveBeenCalledTimes(2)
     const updatedInventory = JSON.parse(
       await readFile(join(root, 'state', 'resources', 'pdk-inventory.json'), 'utf8'),
-    ) as { installations: Array<{ registrySha256: string }> }
-    expect(updatedInventory.installations[0]?.registrySha256).toBe(archive.sha256)
+    ) as { installations: Array<{ id: string; registrySha256: string }> }
+    expect(
+      updatedInventory.installations.find(
+        (item) => item.id === 'pdk:ics55:managed:1.10.101',
+      )?.registrySha256,
+    ).toBe(archive.sha256)
   })
 
   it('downloads only locked PDK supplemental assets before post-install', async () => {
@@ -8316,7 +9555,7 @@ describe('ResourceManagerService', () => {
       (resource) => resource.type === 'pdk' && resource.path !== null,
     )
 
-    expect(pdks).toHaveLength(0)
+    expect(pdks).toHaveLength(1)
     await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
       id: 'pdk:ics55',
       path: pdkRoot,

@@ -258,6 +258,7 @@ const desktopBridge = {
     }),
     onProgress: () => () => undefined,
     onChanged: () => () => undefined,
+    onUpdatesDetected: () => () => undefined,
   },
   pdkInventory: {
     list: listPdkInstallations,

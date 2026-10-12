@@ -37,7 +37,7 @@ import {
 import { FrontendRpcRuntimeService } from '../services/frontendRpcRuntimeService'
 import { ChipViewerService } from '../services/chipViewerService'
 import { CliInstallerService } from '../services/cliInstallerService'
-import { desktopApiEventChannels } from '@ecos-studio/shared'
+import { desktopApiEventChannels, type DesignTool } from '@ecos-studio/shared'
 import { configureElectronLoggerFile, electronLogger } from '../services/logger'
 import {
   applyWindowMenuState,
@@ -55,6 +55,8 @@ import {
 } from '../services/projectManagementReadService'
 import { ProjectWorkspaceImportService } from '../services/projectWorkspaceImportService'
 import { ResourceManagerService } from '../services/resourceManagerService'
+import { ResourceUpdateScheduler } from '../services/resourceUpdateScheduler'
+import { assessRunStaleness } from '../services/resourceStalenessGuard'
 import type { PdkInventoryService } from '../services/pdkInventoryService'
 import { ProjectEccConfigService } from '../services/projectEccConfigService'
 import { SettingsStore } from '../services/settingsStore'
@@ -108,6 +110,7 @@ let services: {
   projectDoctorService: ProjectDoctorService
   settingsStore: SettingsStore
   resourceManagerService: ResourceManagerService
+  resourceUpdateScheduler: ResourceUpdateScheduler
   pdkInventoryService: PdkInventoryService
   projectEccConfigService: ProjectEccConfigService
   chipViewerService: ChipViewerService
@@ -189,6 +192,23 @@ function getDesktopServices() {
     env: runtimeEnv,
   })
   const resourceManagerService = new ResourceManagerService()
+  // Broadcast detected updates to every window: automatic checks run outside
+  // any IPC request, so the renderer relies on this push channel.
+  const resourceUpdateScheduler = new ResourceUpdateScheduler({
+    resourceManagerService,
+    emit: (event) => {
+      const windows = BrowserWindow.getAllWindows().filter(
+        (window) =>
+          !window.isDestroyed() &&
+          !window.webContents.isLoadingMainFrame() &&
+          window.webContents.getURL(),
+      )
+      for (const window of windows) {
+        window.webContents.send(desktopApiEventChannels.resourcesUpdatesDetected, event)
+      }
+      return windows.length > 0
+    },
+  })
   const pdkInventoryService = resourceManagerService.getPdkInventoryService()
   const projectEccConfigService = new ProjectEccConfigService()
   const cliInstallerService = new CliInstallerService({
@@ -201,7 +221,7 @@ function getDesktopServices() {
     userDataPath: app.getPath('userData'),
     externalBinDir: resolveExternalEccOverride(),
   })
-  const runtimeEnvProvider = () => {
+  const runtimeEnvProvider = (designTool: DesignTool = 'backend') => {
     // Rebuild the base env on every resolution so a bundle acquired (or
     // refreshed) by the CLI installer contributes fresh PATH and
     // LD_LIBRARY_PATH entries — the packaged mount or bundle home may not
@@ -209,9 +229,16 @@ function getDesktopServices() {
     const baseEccEnv = createEccRuntimeEnv(eccRuntimeOptions)
     return resourceManagerService.createRuntimeEnv(baseEccEnv, {
       platform: process.platform,
+      designTool,
     })
   }
   const eccRuntimeService = new EccRpcRuntimeService({
+    assessResourceStaleness: (workspaceDirectory) =>
+      assessRunStaleness({
+        resourceManagerService,
+        pdkInventoryService,
+        workspaceDirectory,
+      }),
     createSidecar: (_directory, onEvent, onNotification) =>
       new EccRpcSidecarProcess({
         // Re-resolve the executable on every start so a bundle downloaded by
@@ -258,7 +285,7 @@ function getDesktopServices() {
       new EccRpcSidecarProcess({
         managementRpc: true,
         env: runtimeEnv,
-        envProvider: runtimeEnvProvider,
+        envProvider: () => runtimeEnvProvider('frontend'),
         logDirectoryProvider: () => resolveEccSidecarLogDirectory(logSessionDirectory),
         onEvent,
         onNotification: (notification) => {
@@ -404,6 +431,7 @@ function getDesktopServices() {
     pdkInventoryService,
     projectEccConfigService,
     resourceManagerService,
+    resourceUpdateScheduler,
     settingsStore,
     shellService,
     surferProtocolService,
@@ -559,6 +587,11 @@ async function launchWindow(
       .catch((error) =>
         electronLogger.warn('[project-comparison] focus check failed', error),
       )
+    void services?.resourceUpdateScheduler
+      .runCycle('focus')
+      .catch((error) =>
+        electronLogger.warn('[resources] focus update check failed', error),
+      )
   })
   return mainWindow
 }
@@ -712,7 +745,9 @@ if (!cliInvocation && gotSingleInstanceLock) {
       }
     })
 
-    void launchWindow().catch(handleLaunchError)
+    void launchWindow()
+      .then(() => getDesktopServices().resourceUpdateScheduler.start())
+      .catch(handleLaunchError)
   })
 
   app.on('window-all-closed', () => {

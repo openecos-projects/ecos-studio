@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, onScopeDispose, ref, shallowRef } from 'vue'
+import type { ResourceUpdatesDetectedItem } from '@ecos-studio/shared'
 import {
   cancelResourceApi,
   checkResourceUpdatesApi,
@@ -13,6 +14,7 @@ import {
   resourceListToTools,
   subscribeResourceProgress,
   subscribeResourcesChanged,
+  subscribeResourceUpdatesDetected,
   uninstallResourceApi,
   updateResourceApi,
   validatePdkApi,
@@ -31,6 +33,8 @@ export const usePluginStore = defineStore('plugin', () => {
   const installProgress = ref<Record<string, InstallProgress>>({})
   const resourceErrors = ref<Record<string, string>>({})
   const resourceProgress = ref<Record<string, InstallProgress>>({})
+  /** Updates found by the last automatic (pushed) update check. */
+  const detectedUpdates = shallowRef<ResourceUpdatesDetectedItem[]>([])
 
   const _sseConnections = new Map<string, { close: () => void }>()
   const _pendingProgress = new Map<string, InstallProgress>()
@@ -196,7 +200,15 @@ export const usePluginStore = defineStore('plugin', () => {
         listResourcesApi(),
         listPdkInstallationsApi(),
       ])
-      const inventoryResources = installations.map(pdkInstallationToResourceItem)
+      const inventoryResources = installations.map(
+        (installation) =>
+          genericResources.find(
+            (resource) =>
+              resource.id === installation.id &&
+              resource.type === 'pdk' &&
+              resource.path !== null,
+          ) ?? pdkInstallationToResourceItem(installation),
+      )
       const nextResources = [
         ...genericResources.filter(
           (resource) => resource.type !== 'pdk' || resource.path === null,
@@ -425,6 +437,13 @@ export const usePluginStore = defineStore('plugin', () => {
     }
   }
 
+  // App creates this store before route views; notifications live for its entire scope.
+  const unsubscribeUpdates = subscribeResourceUpdatesDetected((event) => {
+    detectedUpdates.value = event.resources
+    void fetchTools({ silent: true })
+  })
+  onScopeDispose(() => unsubscribeUpdates?.())
+
   return {
     resources,
     tools,
@@ -435,6 +454,7 @@ export const usePluginStore = defineStore('plugin', () => {
     installProgress,
     resourceErrors,
     resourceProgress,
+    detectedUpdates,
     categories,
     fetchTools,
     installResource,

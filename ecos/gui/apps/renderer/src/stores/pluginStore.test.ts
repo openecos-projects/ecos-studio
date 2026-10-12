@@ -66,6 +66,7 @@ vi.mock('@/api/plugin', () => {
     subscribePluginProgress: vi.fn(),
     subscribeResourceProgress: vi.fn(),
     subscribeResourcesChanged: vi.fn(),
+    subscribeResourceUpdatesDetected: vi.fn(),
     uninstallResourceApi: vi.fn(),
     uninstallToolApi: vi.fn(),
     updateResourceApi: vi.fn(),
@@ -83,6 +84,7 @@ import {
   removePdkInstallationApi,
   subscribeResourceProgress,
   subscribeResourcesChanged,
+  subscribeResourceUpdatesDetected,
   uninstallResourceApi,
   updateResourceApi,
   type InstallProgress,
@@ -173,6 +175,22 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe('pluginStore', () => {
+  it('preserves PDK update status and check health from the main listing', async () => {
+    const pdk = makePdkResource({
+      id: 'pdk:ics55:managed:1.01',
+      path: '/tmp/pdks/ics55',
+      installed_version: '1.01',
+      status: 'update_available',
+      update_kind: 'rebuild',
+      actions: ['update', 'uninstall'],
+      health: { update_check: { checked_at: '2026-10-10T00:00:00Z', stale: false } },
+    })
+    vi.mocked(listResourcesApi).mockResolvedValue([makePdkResource(), pdk])
+    vi.mocked(listPdkInstallationsApi).mockResolvedValue([makePdkInstallation(pdk)])
+    const store = usePluginStore()
+    await store.fetchTools()
+    expect(store.resources.filter((resource) => resource.id === pdk.id)).toEqual([pdk])
+  })
   beforeEach(() => {
     vi.useRealTimers()
     setActivePinia(createPinia())
@@ -187,6 +205,7 @@ describe('pluginStore', () => {
     vi.mocked(removePdkInstallationApi).mockReset()
     vi.mocked(subscribeResourceProgress).mockReset()
     vi.mocked(subscribeResourcesChanged).mockReset()
+    vi.mocked(subscribeResourceUpdatesDetected).mockReset()
     vi.mocked(uninstallResourceApi).mockReset()
     vi.mocked(updateResourceApi).mockReset()
   })
@@ -256,6 +275,61 @@ describe('pluginStore', () => {
     await store.fetchTools()
     store.cleanup()
 
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+  })
+
+  it('records pushed updates and re-fetches silently when they are detected', async () => {
+    vi.mocked(listResourcesApi).mockResolvedValue([])
+
+    const store = usePluginStore()
+    await store.fetchTools()
+
+    expect(vi.mocked(subscribeResourceUpdatesDetected)).toHaveBeenCalledTimes(1)
+    const onDetected = vi.mocked(subscribeResourceUpdatesDetected).mock.calls[0]?.[0]
+    expect(onDetected).toBeTypeOf('function')
+
+    const detected = [
+      {
+        resource_id: 'tool:yosys',
+        display_name: 'Yosys',
+        update_kind: 'version' as const,
+        installed_version: '0.61',
+        latest_version: '0.62',
+      },
+    ]
+    onDetected?.({ resources: detected })
+
+    expect(store.detectedUpdates).toEqual(detected)
+    await vi.waitFor(() => {
+      expect(listResourcesApi).toHaveBeenCalledTimes(2)
+    })
+    expect(store.loading).toBe(false)
+  })
+
+  it('keeps update notifications through page cleanup until the store is disposed', async () => {
+    const unsubscribe = vi.fn()
+    vi.mocked(subscribeResourceUpdatesDetected).mockReturnValue(unsubscribe)
+    vi.mocked(listResourcesApi).mockResolvedValue([])
+
+    const store = usePluginStore()
+    await store.fetchTools()
+    store.cleanup()
+    expect(unsubscribe).not.toHaveBeenCalled()
+    const onDetected = vi.mocked(subscribeResourceUpdatesDetected).mock.calls[0]?.[0]
+    onDetected?.({
+      resources: [
+        {
+          resource_id: 'tool:yosys',
+          display_name: 'Yosys',
+          update_kind: 'version',
+          installed_version: '1',
+          latest_version: '2',
+        },
+      ],
+    })
+    expect(store.detectedUpdates).toHaveLength(1)
+    await vi.waitFor(() => expect(listResourcesApi).toHaveBeenCalledTimes(2))
+    store.$dispose()
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 

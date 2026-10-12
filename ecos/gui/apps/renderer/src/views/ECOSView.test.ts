@@ -26,6 +26,11 @@ const { push, loadRecentProjects, openProject, recentProjectFixtures } = vi.hois
   }),
 )
 
+const { fetchTools, pluginResourceFixtures } = vi.hoisted(() => ({
+  fetchTools: vi.fn(async (_options?: { silent?: boolean }) => {}),
+  pluginResourceFixtures: [] as Array<Record<string, unknown>>,
+}))
+
 const originalGlobals = {
   document: globalThis.document,
   window: globalThis.window,
@@ -352,6 +357,16 @@ function loadECOSViewComponent(vue: VueRuntime) {
         render: () => null,
       }
     }
+    if (id === '@/stores/pluginStore') {
+      return {
+        usePluginStore: () => ({
+          get resources() {
+            return pluginResourceFixtures
+          },
+          fetchTools,
+        }),
+      }
+    }
     if (id === '../composables/useWorkspace') {
       return {
         useWorkspace: () => ({
@@ -376,7 +391,9 @@ describe('ECOSView home', () => {
     push.mockReset()
     loadRecentProjects.mockClear()
     openProject.mockClear()
+    fetchTools.mockClear()
     recentProjectFixtures.splice(0)
+    pluginResourceFixtures.splice(0)
     document.body.innerHTML = ''
   })
 
@@ -453,6 +470,66 @@ describe('ECOSView home', () => {
     expect(container.textContent).not.toContain('Continue Working')
     expect(container.textContent).not.toContain('Resume')
     expect(container.textContent).not.toContain('recent_workspace')
+
+    app.unmount()
+  })
+
+  it('fetches resources silently on mount so push subscriptions register', async () => {
+    const vue = await loadVueRuntime()
+    const ECOSView = loadECOSViewComponent(vue)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+
+    const app = vue.createApp(ECOSView)
+    app.mount(container as never)
+    await vue.nextTick()
+
+    expect(fetchTools).toHaveBeenCalledWith({ silent: true })
+
+    app.unmount()
+  })
+
+  it('shows an update count badge on the Resource Manager card', async () => {
+    pluginResourceFixtures.push(
+      { id: 'tool:yosys', status: 'update_available' },
+      { id: 'pdk:ics55', status: 'update_available' },
+      { id: 'tool:openroad', status: 'installed' },
+    )
+
+    const vue = await loadVueRuntime()
+    const ECOSView = loadECOSViewComponent(vue)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+
+    const app = vue.createApp(ECOSView)
+    app.mount(container as never)
+    await vue.nextTick()
+
+    const toolsButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent.includes('Resource Manager'),
+    )
+    expect(toolsButton).toBeDefined()
+    expect(toolsButton?.textContent).toContain('2')
+
+    app.unmount()
+  })
+
+  it('hides the update badge when no updates are available', async () => {
+    pluginResourceFixtures.push({ id: 'tool:yosys', status: 'installed' })
+
+    const vue = await loadVueRuntime()
+    const ECOSView = loadECOSViewComponent(vue)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+
+    const app = vue.createApp(ECOSView)
+    app.mount(container as never)
+    await vue.nextTick()
+
+    const toolsButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent.includes('Resource Manager'),
+    )
+    expect(toolsButton?.textContent).not.toMatch(/\d/)
 
     app.unmount()
   })

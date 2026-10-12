@@ -8,6 +8,7 @@ import {
   EccRpcRuntimeService,
   type EccRpcRuntimeClient,
   type EccRpcRuntimeSidecar,
+  type EccRpcRuntimeServiceOptions,
 } from './runtimeService'
 import { WorkspaceSessionNotFoundError } from './workspaceSessions'
 import type { JsonRpcNotificationPayload } from './jsonRpcClient'
@@ -141,7 +142,9 @@ class FakeSidecar implements EccRpcRuntimeSidecar {
   }
 }
 
-function createPool() {
+function createPool(
+  options: Pick<EccRpcRuntimeServiceOptions, 'assessResourceStaleness'> = {},
+) {
   const events: EccRuntimeEvent[] = []
   const sidecars = new Map<string | null, FakeSidecar>()
   const clients = new Map<string | null, FakeRpcClient>()
@@ -153,6 +156,7 @@ function createPool() {
   let createCount = 0
 
   const service = new EccRpcRuntimeService({
+    ...options,
     createSidecar: (directory, onEvent, onNotification) => {
       createCount += 1
       const client = new FakeRpcClient(directory, `id-${directory ?? 'control'}`)
@@ -198,6 +202,69 @@ function createPool() {
 }
 
 describe('EccRpcRuntimeService pool', () => {
+  it.each(['startFlowOperation', 'startStepOperation'] as const)(
+    'guards %s at the shared GUI and Agent runtime boundary',
+    async (method) => {
+      const staleItem = {
+        id: 'tool:yosys',
+        display_name: 'Yosys',
+        installed_version: '0.61',
+        latest_version: '0.62',
+        update_kind: 'version' as const,
+      }
+      const assessResourceStaleness = vi.fn(async () => [staleItem])
+      const pool = createPool({ assessResourceStaleness })
+      const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
+      const request = {
+        workspaceHandle: workspace.workspaceHandle,
+        expectedWorkspaceRevision: 1,
+        idempotencyKey: 'run-1',
+        step: 'Place',
+      }
+      await expect(pool.service[method](request)).rejects.toMatchObject({
+        code: 'RESOURCE_UPDATE_AVAILABLE',
+        details: { resources: [staleItem] },
+      })
+      expect(assessResourceStaleness).toHaveBeenCalledWith('/work/demo')
+      expect(
+        pool
+          .clientFor('/work/demo')
+          .calls.some((call) => call.method.startsWith('operation.start_')),
+      ).toBe(false)
+      pool.clientFor('/work/demo').responses.push({
+        createdAt: 1,
+        currentStep: 'Place',
+        currentTool: '',
+        error: null,
+        kind: 'flow',
+        operationId: 'allowed-run',
+        origin: 'agent',
+        rerun: false,
+        result: null,
+        state: 'running',
+        step: '',
+        updatedAt: 1,
+        workspaceId: 'id-/work/demo',
+      })
+      await expect(
+        pool.service[method]({ ...request, allowStaleResources: true }),
+      ).resolves.toMatchObject({ operationId: 'allowed-run' })
+      expect(assessResourceStaleness).toHaveBeenCalledTimes(2)
+    },
+  )
+
+  it('rejects non-boolean confirmation on direct runtime calls', async () => {
+    const pool = createPool()
+    const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
+    await expect(
+      pool.service.startFlowOperation({
+        workspaceHandle: workspace.workspaceHandle,
+        expectedWorkspaceRevision: 1,
+        idempotencyKey: 'run-1',
+        allowStaleResources: 'false' as unknown as boolean,
+      }),
+    ).rejects.toThrow('allowStaleResources must be a boolean')
+  })
   it('reconciles a terminal Quick Start receipt before waitForOperation resolves', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'ecos-quick-start-wait-'))
     try {

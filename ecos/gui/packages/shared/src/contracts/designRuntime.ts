@@ -75,6 +75,8 @@ export interface DesignRuntimeWorkspaceStepOutputsRequest extends DesignRuntimeT
 
 export interface DesignRuntimeFlowRunRequest extends DesignRuntimeWorkspaceHandleRequest {
   rerun?: boolean
+  /** Bypasses the pre-run stale-resource guard after explicit user confirmation. */
+  allowStaleResources?: boolean
 }
 
 export interface DesignRuntimeFlowRunStepRequest extends DesignRuntimeFlowRunRequest {

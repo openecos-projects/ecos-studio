@@ -461,4 +461,127 @@ describe('pluginToolsRows', () => {
       ),
     ).toBe(false)
   })
+
+  it('describes a newer published version as an update', () => {
+    const row = resourceToRow(
+      resource({
+        status: 'update_available',
+        installed_version: '1.01',
+        update_kind: 'version',
+        actions: ['update'],
+      }),
+      undefined,
+    )
+
+    expect(row.statusKind).toBe('update')
+    expect(row.statusText).toBe('Update available')
+  })
+
+  it('describes a same-version republish as republished', () => {
+    const row = resourceToRow(
+      resource({
+        status: 'update_available',
+        installed_version: '1.01',
+        update_kind: 'rebuild',
+        actions: ['update'],
+      }),
+      undefined,
+    )
+
+    expect(row.statusKind).toBe('update')
+    expect(row.statusText).toBe('Republished')
+  })
+
+  it('defaults an unknown update kind to the generic update text', () => {
+    const row = resourceToRow(
+      resource({
+        status: 'update_available',
+        installed_version: '1.01',
+        actions: ['update'],
+      }),
+      undefined,
+    )
+
+    expect(row.statusKind).toBe('update')
+    expect(row.statusText).toBe('Update available')
+  })
+
+  it('surfaces a checksum hint on installed rows without altering their status', () => {
+    const row = resourceToRow(
+      resource({
+        status: 'installed',
+        installed_version: '1.01',
+        checksum_missing: true,
+        actions: ['uninstall'],
+      }),
+      undefined,
+    )
+
+    expect(row.statusKind).toBe('installed')
+    expect(row.statusText).toBe('Installed')
+    expect(row.checksumHint).toBe('Checksum missing — reinstall recommended')
+  })
+
+  it('yields the checksum hint to the update badge while an update is pending', () => {
+    const row = resourceToRow(
+      resource({
+        status: 'update_available',
+        installed_version: '1.01',
+        checksum_missing: true,
+        actions: ['update'],
+      }),
+      undefined,
+    )
+
+    expect(row.statusKind).toBe('update')
+    expect(row.checksumHint).toBeNull()
+  })
+
+  it('hides the checksum hint while the resource is mutating or intact', () => {
+    const installing = resourceToRow(
+      resource({ status: 'installing', checksum_missing: true, actions: ['cancel'] }),
+      undefined,
+    )
+    expect(installing.checksumHint).toBeNull()
+
+    const intact = resourceToRow(
+      resource({
+        status: 'installed',
+        installed_version: '1.01',
+        actions: ['uninstall'],
+      }),
+      undefined,
+    )
+    expect(intact.checksumHint).toBeNull()
+  })
+
+  it('exposes a last-checked footnote from the update check health record', () => {
+    const row = resourceToRow(
+      resource({
+        status: 'installed',
+        installed_version: '1.01',
+        health: {
+          update_check: {
+            checked_at: '2020-01-01T00:00:00Z',
+            stale: true,
+            commit: 'abcdef1234567890',
+          },
+        },
+      }),
+      undefined,
+    )
+
+    expect(row.updateCheckLabel).toMatch(/^Last checked \d+ days ago/)
+    expect(row.updateCheckLabel).toContain('may be outdated')
+    expect(row.updateCheckLabel).toContain('abcdef12')
+  })
+
+  it('omits the last-checked footnote without an update check record', () => {
+    const row = resourceToRow(
+      resource({ status: 'installed', installed_version: '1.01' }),
+      undefined,
+    )
+
+    expect(row.updateCheckLabel).toBeNull()
+  })
 })

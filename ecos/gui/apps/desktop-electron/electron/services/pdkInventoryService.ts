@@ -177,6 +177,15 @@ export class PdkInventoryService {
     })
   }
 
+  async listBindings(): Promise<PdkBinding[]> {
+    return await this.withLock(async () => {
+      const inventory = await this.readInventory()
+      return inventory.bindings
+        .filter((binding) => binding.installationId !== null)
+        .map(publicBinding)
+    })
+  }
+
   async resolveBinding(request: PdkResolveBindingRequest): Promise<PdkBinding | null> {
     return await this.withLock(async () => {
       const projectRoot = await normalizedProjectRoot(request.projectRoot)

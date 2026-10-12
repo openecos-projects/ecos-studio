@@ -64,6 +64,38 @@ describe('pluginResourceCards', () => {
     expect(actionIds(row)).toEqual(['import_local', 'update'])
   })
 
+  it('labels the update action per update kind', () => {
+    const versionRow = resourceToRow(
+      resource({
+        status: 'update_available',
+        installed_version: '20250101',
+        update_kind: 'version',
+        actions: ['update'],
+      }),
+      undefined,
+    )
+    const rebuildRow = resourceToRow(
+      resource({
+        status: 'update_available',
+        installed_version: '20250101',
+        update_kind: 'rebuild',
+        actions: ['update'],
+      }),
+      undefined,
+    )
+
+    expect(
+      cardActionsForRow(versionRow, { importing: false }).find(
+        (action) => action.id === 'update',
+      )?.label,
+    ).toBe('Update')
+    expect(
+      cardActionsForRow(rebuildRow, { importing: false }).find(
+        (action) => action.id === 'update',
+      )?.label,
+    ).toBe('Reinstall update')
+  })
+
   it('offers only cancel while installing, and disables local import', () => {
     const row = resourceToRow(resource({ status: 'installing', actions: ['cancel'] }), {
       resourceId: 'tool:yosys',

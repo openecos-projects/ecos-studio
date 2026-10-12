@@ -15,6 +15,7 @@ import type {
   ResourceJob,
   ResourceImportLocalRequest,
   ResourceInstallRequest,
+  ResourceUpdatesDetectedEvent,
   DesktopSettingsValue,
   DesktopShellDataEvent,
   DesktopShellExitEvent,
@@ -31,9 +32,10 @@ import type {
   WorkspaceStepInfoRequest,
 } from '@ecos-studio/shared'
 
-function isDesktopBridgeErrorResult(
-  value: unknown,
-): value is { error: { code?: string; message: string; name: string }; ok: false } {
+function isDesktopBridgeErrorResult(value: unknown): value is {
+  error: { code?: string; details?: unknown; message: string; name: string }
+  ok: false
+} {
   return (
     typeof value === 'object' &&
     value !== null &&
@@ -48,10 +50,11 @@ function isDesktopBridgeErrorResult(
 }
 
 function toErrorFromIpcResult(result: {
-  error: { code?: string; message: string; name: string }
+  error: { code?: string; details?: unknown; message: string; name: string }
 }): Error {
   return Object.assign(new Error(result.error.message), {
     code: result.error.code,
+    details: result.error.details,
     name: result.error.name,
   })
 }
@@ -393,6 +396,13 @@ const desktopApi: DesktopApi = {
       subscribeToDesktopEvent(desktopApiEventChannels.resourcesChanged, () => {
         listener()
       }),
+    onUpdatesDetected: (listener) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.resourcesUpdatesDetected,
+        (_event, payload: unknown) => {
+          listener(payload as ResourceUpdatesDetectedEvent)
+        },
+      ),
   },
   pdkInventory: {
     list: () => invokeDesktop(desktopApiIpcChannels.pdkInventoryList),
