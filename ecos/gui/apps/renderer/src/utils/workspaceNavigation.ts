@@ -11,6 +11,7 @@ export interface WorkspaceManagementReturnRoute {
 export type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
   managedWorkspaceRoot?: string
   deriveDirectoryFromDesign?: boolean
+  lockProjectContext?: boolean
   lockWorkspaceDirectory?: boolean
   standaloneWorkspace?: boolean
   suggestedWorkspaceName?: string

@@ -253,6 +253,7 @@ describe('ProjectsView background lifecycle integration', () => {
     expect(consumeWorkspaceWizardRequest()).toEqual({
       initialConfig: expect.objectContaining({
         directory: '/projects/demo/ws_0002',
+        designTool: 'backend',
         managedWorkspaceRoot: '/projects/demo',
         lockWorkspaceDirectory: true,
       }),
@@ -291,6 +292,14 @@ describe('ProjectsView background lifecycle integration', () => {
     expect(wrapper.text()).toContain('sim')
     expect(readFrontendProjectWorkspaceData).toHaveBeenCalledWith(projectRoot, manifest)
     expect(testState.selectProject).not.toHaveBeenCalled()
+    await wrapper.get('button[aria-label="New workspace in cpu"]').trigger('click')
+    await flushPromises()
+    expect(consumeWorkspaceWizardRequest()?.initialConfig).toMatchObject({
+      designTool: 'frontend',
+      directory: `${projectRoot}/ws_0002`,
+      parameters: { design: 'core' },
+      project_context: { project_root: projectRoot },
+    })
   })
 
   it('notifies when the picked workspace is already registered', async () => {

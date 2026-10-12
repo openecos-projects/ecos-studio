@@ -2164,6 +2164,7 @@ async function createWorkspaceForProject(project: ProjectManagementProject) {
   if (!workspaceId) return
   requestWorkspaceWizard({
     directory: joinProjectPath(project.path, workspaceId),
+    designTool: project.projectType,
     lockWorkspaceDirectory: true,
     managedWorkspaceRoot: project.path,
     parameters: {
