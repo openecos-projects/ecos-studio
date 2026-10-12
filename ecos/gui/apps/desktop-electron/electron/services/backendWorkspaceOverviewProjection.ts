@@ -187,8 +187,8 @@ export function flowSection(
         const peakMemoryMb = finiteNumber(
           step['peak memory (mb)'] ?? record(step.info)?.['peak memory (mb)'],
         )
-        const checklist = record(step.checklist)
-        const checklistStatus = stringValue(checklist, 'status')
+        const checklistStatusRecord = record(step.checklist_status)
+        const checklistStatus = stringValue(checklistStatusRecord, 'status')
         return [
           {
             stepId: step.name,

@@ -516,7 +516,8 @@ export interface EccRuntimeStepSnapshot {
   runtime: string
   state: string
   tool: string
-  checklist?: {
+  checklist?: Array<Record<string, unknown>>
+  checklist_status?: {
     status: 'passed' | 'blocked' | 'attention' | 'unknown'
     blocked: boolean
     failed_items?: string[]

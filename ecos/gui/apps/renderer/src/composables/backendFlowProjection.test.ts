@@ -119,7 +119,8 @@ it('projects persisted checklist status without changing legacy step state', () 
       state: 'Success',
       runtime: '',
       peakMemory: 0,
-      checklist: { status: 'blocked', blocked: true, failed_items: ['drc.clean'] },
+      checklist: [{ id: 'drc.clean', blocked: true }],
+      checklist_status: { status: 'blocked', blocked: true, failed_items: ['drc.clean'] },
     },
   ])
 
