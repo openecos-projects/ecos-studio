@@ -18,6 +18,12 @@ interface PendingResourceStalenessRequest extends ResourceStalenessConfirmationR
 
 const pendingRequest = shallowRef<PendingResourceStalenessRequest | null>(null)
 let requestSequence = 0
+let contextSequence = 0
+
+export function captureResourceStalenessContext(): () => boolean {
+  const sequence = contextSequence
+  return () => sequence === contextSequence
+}
 
 function requestStalenessConfirmation(
   request: ResourceStalenessConfirmationRequest,
@@ -36,12 +42,16 @@ export function confirmStaleResourceRerun(
   error: unknown,
   runLabel: string,
   retry: (allowStale: boolean) => Promise<void>,
+  isCurrentContext: () => boolean,
 ): boolean {
   if (!isResourceStalenessError(error)) return false
+  if (!isCurrentContext()) return true
   requestStalenessConfirmation({
     resources: readResourceStalenessPayload(error)?.resources ?? [],
     runLabel,
-    retry,
+    retry: async (allowStale) => {
+      if (isCurrentContext()) await retry(allowStale)
+    },
   })
   return true
 }
@@ -55,6 +65,8 @@ export function confirmStaleResourceRerun(
  */
 export function useResourceStalenessGuard() {
   function dismiss(): void {
+    // Invalidate refusals still in flight, even before a dialog opens.
+    contextSequence += 1
     pendingRequest.value = null
   }
 

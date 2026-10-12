@@ -429,6 +429,64 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     })
   })
 
+  it.each(['flow', 'step'])(
+    'ignores a delayed %s refusal after switching workspaces',
+    async (kind) => {
+      currentProject.value = { path: '/work/confirmed' }
+      let rejectRun!: (reason: unknown) => void
+      const api = kind === 'flow' ? startFlowOperationApi : startStepOperationApi
+      api.mockReturnValueOnce(
+        new Promise((_resolve, reject) => {
+          rejectRun = reject
+        }),
+      )
+      const runner = useFlowRunner()
+      const attempt =
+        kind === 'flow'
+          ? runner.runAllFlow({ rerun: true })
+          : runner.runFlow({ rerun: true })
+      await vi.waitFor(() => expect(api).toHaveBeenCalledTimes(1))
+
+      currentProject.value = { path: '/work/other' }
+      workspaceSession.value = {
+        ...workspaceSession.value,
+        sessionId: 'session-other',
+        workspaceId: 'workspace-other',
+      }
+      const guard = useResourceStalenessGuard()
+      guard.dismiss()
+      rejectRun(Object.assign(new Error('stale'), { code: 'RESOURCE_UPDATE_AVAILABLE' }))
+      await attempt
+      await guard.runAnyway()
+
+      expect(guard.pendingRequest.value).toBeNull()
+      expect(api).toHaveBeenCalledTimes(1)
+      expect(runner.isRunning.value).toBe(false)
+    },
+  )
+
+  it.each(['flow', 'step'])(
+    'cancels a %s start if context changes while waiting for the API',
+    async (kind) => {
+      currentProject.value = { path: '/work/confirmed' }
+      let ready!: (value: boolean) => void
+      ensureApiReady.mockReturnValueOnce(
+        new Promise<boolean>((resolve) => {
+          ready = resolve
+        }),
+      )
+      const runner = useFlowRunner()
+      const attempt = kind === 'flow' ? runner.runAllFlow() : runner.runFlow()
+      currentProject.value = { path: '/work/other' }
+      useResourceStalenessGuard().dismiss()
+      ready(true)
+      await attempt
+
+      expect(startFlowOperationApi).not.toHaveBeenCalled()
+      expect(startStepOperationApi).not.toHaveBeenCalled()
+    },
+  )
+
   it('surfaces non-staleness failures as before', async () => {
     currentProject.value = { path: '/work/demo' }
     startFlowOperationApi.mockRejectedValueOnce(new Error('sidecar unavailable'))

@@ -1951,7 +1951,10 @@ import {
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useSubflow } from '@/composables/useSubflow'
 import { isFlowExecutionActiveForWorkspace } from '@/composables/useFlowRunner'
-import { confirmStaleResourceRerun } from '@/composables/useResourceStalenessGuard'
+import {
+  captureResourceStalenessContext,
+  confirmStaleResourceRerun,
+} from '@/composables/useResourceStalenessGuard'
 import { useParameters } from '@/composables/useParameters'
 import { readOptionalProjectTextFileTail } from '@/utils/projectFiles'
 import {
@@ -4031,6 +4034,7 @@ async function runCurrentStep(
   suiteOverride?: SimSuite,
   allowStaleResources = false,
 ): Promise<void> {
+  const isCurrentContext = captureResourceStalenessContext()
   const projectPath = currentProject.value?.path?.trim() || ''
   const workspaceHandle =
     workspaceSession.value.state === 'active'
@@ -4087,6 +4091,7 @@ async function runCurrentStep(
         async (allowStale) => {
           await runCurrentStep(suiteOverride, allowStale)
         },
+        isCurrentContext,
       )
     ) {
       return

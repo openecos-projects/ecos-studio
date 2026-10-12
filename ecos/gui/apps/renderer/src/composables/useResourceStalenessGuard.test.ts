@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ResourceStalenessItem } from '@ecos-studio/shared'
 
 import {
+  captureResourceStalenessContext,
   confirmStaleResourceRerun,
   useResourceStalenessGuard,
 } from './useResourceStalenessGuard'
@@ -127,7 +128,12 @@ describe('confirmStaleResourceRerun', () => {
   it('ignores non-staleness errors', () => {
     const retry = vi.fn(async (_allowStale: boolean) => undefined)
 
-    const intercepted = confirmStaleResourceRerun(new Error('boom'), 'lint step', retry)
+    const intercepted = confirmStaleResourceRerun(
+      new Error('boom'),
+      'lint step',
+      retry,
+      captureResourceStalenessContext(),
+    )
 
     expect(intercepted).toBe(false)
     expect(useResourceStalenessGuard().pendingRequest.value).toBeNull()
@@ -140,6 +146,7 @@ describe('confirmStaleResourceRerun', () => {
       makeStalenessError(),
       'lint step',
       retry,
+      captureResourceStalenessContext(),
     )
 
     expect(intercepted).toBe(true)
@@ -154,6 +161,7 @@ describe('confirmStaleResourceRerun', () => {
       { code: 'RESOURCE_UPDATE_AVAILABLE' },
       'lint step',
       vi.fn(async (_allowStale: boolean) => undefined),
+      captureResourceStalenessContext(),
     )
 
     expect(intercepted).toBe(true)
@@ -163,11 +171,46 @@ describe('confirmStaleResourceRerun', () => {
   it('routes the user decision through the provided retry', async () => {
     const guard = useResourceStalenessGuard()
     const retry = vi.fn(async (_allowStale: boolean) => undefined)
-    confirmStaleResourceRerun(makeStalenessError(), 'lint step', retry)
+    confirmStaleResourceRerun(
+      makeStalenessError(),
+      'lint step',
+      retry,
+      captureResourceStalenessContext(),
+    )
 
     await guard.runAnyway()
 
     expect(retry).toHaveBeenCalledWith(true)
     expect(guard.pendingRequest.value).toBeNull()
+  })
+
+  it('handles a delayed refusal without creating a confirmation after cancellation', () => {
+    const guard = useResourceStalenessGuard()
+    const isCurrentContext = captureResourceStalenessContext()
+    guard.dismiss()
+    expect(
+      confirmStaleResourceRerun(
+        makeStalenessError(),
+        'lint step',
+        vi.fn(async () => undefined),
+        isCurrentContext,
+      ),
+    ).toBe(true)
+    expect(guard.pendingRequest.value).toBeNull()
+  })
+
+  it('refuses a retained retry after its originating context is cancelled', async () => {
+    const guard = useResourceStalenessGuard()
+    const retry = vi.fn(async (_allowStale: boolean) => undefined)
+    confirmStaleResourceRerun(
+      makeStalenessError(),
+      'lint step',
+      retry,
+      captureResourceStalenessContext(),
+    )
+    const request = guard.pendingRequest.value!
+    guard.dismiss()
+    await request.retry(true)
+    expect(retry).not.toHaveBeenCalled()
   })
 })

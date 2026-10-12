@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils'
-import { nextTick } from 'vue'
+import { nextTick, reactive, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import PrimeVue from 'primevue/config'
 import type { ResourceStalenessItem } from '@ecos-studio/shared'
@@ -11,16 +11,28 @@ const { pluginStore } = vi.hoisted(() => ({
     resourceErrors: {} as Record<string, string>,
     resourceProgress: {} as Record<string, { progress: number }>,
     fetchTools: vi.fn(async () => undefined),
-    updateResource: vi.fn(async (_id: string) => undefined),
+    updateResource: vi.fn(async (_id: string): Promise<void> => undefined),
   },
 }))
 
 vi.mock('@/stores/pluginStore', () => ({
   usePluginStore: () => pluginStore,
 }))
+vi.mock('@/composables/useWorkspace', () => ({
+  useWorkspace: () => ({ currentProject, workspaceSession }),
+}))
+vi.mock('vue-router', () => ({ useRoute: () => route }))
+
+const currentProject = ref({ path: '/work/confirmed' })
+const workspaceSession = ref({ sessionId: 'session-confirmed' })
+const route = reactive({ fullPath: '/workspace/home' })
 
 import ResourceStalenessDialog from './ResourceStalenessDialog.vue'
-import { useResourceStalenessGuard } from '@/composables/useResourceStalenessGuard'
+import {
+  captureResourceStalenessContext,
+  confirmStaleResourceRerun,
+  useResourceStalenessGuard,
+} from '@/composables/useResourceStalenessGuard'
 
 const TOOL_ITEM: ResourceStalenessItem = {
   id: 'tool:yosys',
@@ -64,6 +76,9 @@ function requestConfirmation(
 
 describe('ResourceStalenessDialog', () => {
   beforeEach(() => {
+    currentProject.value = { path: '/work/confirmed' }
+    workspaceSession.value = { sessionId: 'session-confirmed' }
+    route.fullPath = '/workspace/home'
     pluginStore.resources = []
     pluginStore.resourceErrors = {}
     pluginStore.resourceProgress = {}
@@ -135,6 +150,86 @@ describe('ResourceStalenessDialog', () => {
     expect(useResourceStalenessGuard().pendingRequest.value).toBeNull()
     wrapper.unmount()
   })
+
+  it.each(['workspace', 'session', 'route'])(
+    'cancels the confirmation synchronously when the %s changes',
+    async (context) => {
+      const wrapper = mount(ResourceStalenessDialog, {
+        global: { plugins: [PrimeVue] },
+      })
+      const retry = vi.fn(async (_allowStale: boolean) => undefined)
+      requestConfirmation([TOOL_ITEM], retry)
+      await nextTick()
+      const runButton = buttonByText('Run anyway')
+      expect(runButton).not.toBeNull()
+
+      if (context === 'workspace') currentProject.value = { path: '/work/other' }
+      if (context === 'session') workspaceSession.value = { sessionId: 'session-other' }
+      if (context === 'route') route.fullPath = '/workspace/step/place'
+      runButton?.click()
+      await flushPromises()
+
+      expect(useResourceStalenessGuard().pendingRequest.value).toBeNull()
+      expect(retry).not.toHaveBeenCalled()
+      wrapper.unmount()
+    },
+  )
+
+  it('discards a refusal that arrives after the workspace changes', async () => {
+    const wrapper = mount(ResourceStalenessDialog, { global: { plugins: [PrimeVue] } })
+    const isCurrentContext = captureResourceStalenessContext()
+    currentProject.value = { path: '/work/other' }
+    const retry = vi.fn(async (_allowStale: boolean) => undefined)
+    confirmStaleResourceRerun(
+      { code: 'RESOURCE_UPDATE_AVAILABLE' },
+      'full flow',
+      retry,
+      isCurrentContext,
+    )
+    await useResourceStalenessGuard().runAnyway()
+    await nextTick()
+
+    expect(useResourceStalenessGuard().pendingRequest.value).toBeNull()
+    expect(retry).not.toHaveBeenCalled()
+    expect(buttonByText('Run anyway')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it.each([false, true])(
+    'does not retry after switching workspaces during an update (replacement request: %s)',
+    async (replaceRequest) => {
+      let completeUpdate!: () => void
+      pluginStore.updateResource.mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            completeUpdate = resolve
+          }),
+      )
+      const wrapper = mount(ResourceStalenessDialog, {
+        global: { plugins: [PrimeVue] },
+      })
+      const retry = vi.fn(async (_allowStale: boolean) => undefined)
+      requestConfirmation([TOOL_ITEM], retry)
+      await nextTick()
+      buttonByText('Update and run')?.click()
+      expect(pluginStore.updateResource).toHaveBeenCalledWith('tool:yosys')
+
+      currentProject.value = { path: '/work/other' }
+      const otherRetry = vi.fn(async (_allowStale: boolean) => undefined)
+      if (replaceRequest) requestConfirmation([TOOL_ITEM], otherRetry)
+      completeUpdate()
+      await flushPromises()
+
+      expect(retry).not.toHaveBeenCalled()
+      expect(otherRetry).not.toHaveBeenCalled()
+      if (replaceRequest) {
+        expect(useResourceStalenessGuard().pendingRequest.value?.retry).toBe(otherRetry)
+      } else {
+        expect(useResourceStalenessGuard().pendingRequest.value).toBeNull()
+      }
+      wrapper.unmount()
+    },
+  )
 
   it('updates every resource and then retries the run', async () => {
     pluginStore.resources = [{ id: 'pdk-install-1', name: 'ics55', type: 'pdk' }]

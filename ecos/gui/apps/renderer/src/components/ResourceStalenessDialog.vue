@@ -78,15 +78,30 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import Dialog from 'primevue/dialog'
 import type { ResourceStalenessItem, ResourceUpdateKind } from '@ecos-studio/shared'
 import { useResourceStalenessGuard } from '@/composables/useResourceStalenessGuard'
+import { useWorkspace } from '@/composables/useWorkspace'
 import { usePluginStore } from '@/stores/pluginStore'
 
 const { pendingRequest, dismiss, runAnyway, retryAfterUpdates } =
   useResourceStalenessGuard()
 const pluginStore = usePluginStore()
+const { currentProject, workspaceSession } = useWorkspace()
+const route = useRoute()
+
+// Native menus can change the run target while this modal is open.
+watch(
+  [
+    () => workspaceSession.value.sessionId,
+    () => currentProject.value?.path,
+    () => route.fullPath,
+  ],
+  dismiss,
+  { flush: 'sync' },
+)
 
 const request = computed(() => pendingRequest.value)
 const updating = ref(false)
@@ -167,6 +182,7 @@ async function updateAndRun(): Promise<void> {
       .map((id) => pluginStore.resourceErrors[id])
       .find((message) => typeof message === 'string' && message.length > 0)
     await pluginStore.fetchTools({ silent: true })
+    if (pendingRequest.value?.token !== current.token) return
     if (failure) {
       updateError.value = failure
       return
