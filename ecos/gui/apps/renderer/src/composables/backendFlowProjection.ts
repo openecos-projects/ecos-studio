@@ -46,6 +46,14 @@ function stepKey(value: string): string {
   return value.trim().toLowerCase()
 }
 
+function checklistStatusValue(value: unknown): FlowStepSummary['checklistStatus'] | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const status = (value as Record<string, unknown>).status
+  return ['passed', 'blocked', 'attention', 'unknown'].includes(status as string)
+    ? (status as FlowStepSummary['checklistStatus'])
+    : undefined
+}
+
 export function isObsoleteBackendFlowStep(value: string): boolean {
   return value.toLowerCase().replace(/[\s_-]/g, '') === 'fixfanout'
 }
@@ -65,9 +73,12 @@ export function projectRuntimeFlowSteps(
         state: normalizeState(step.state, 'unknown'),
         stepId: step.name,
         ...(step.tool ? { toolId: step.tool } : {}),
-        ...(step.checklist_status?.status
-          ? { checklistStatus: step.checklist_status.status }
-          : {}),
+        ...(() => {
+          const checklistStatus =
+            checklistStatusValue(step.checklist_status) ??
+            checklistStatusValue(step.checklist)
+          return checklistStatus ? { checklistStatus } : {}
+        })(),
       },
     ]
   })
@@ -175,7 +186,7 @@ export function projectBackendFlowSteps(
         ? 'failed'
         : 'succeeded'
     step.state = normalizeState(data.state, fallback)
-    const checklist = data.checklist_status
+    const checklist = data.checklist_status ?? data.checklist
     if (
       checklist &&
       typeof checklist === 'object' &&
