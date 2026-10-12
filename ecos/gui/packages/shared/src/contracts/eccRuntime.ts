@@ -516,6 +516,13 @@ export interface EccRuntimeStepSnapshot {
   runtime: string
   state: string
   tool: string
+  checklist?: {
+    status: 'passed' | 'blocked' | 'attention' | 'unknown'
+    blocked: boolean
+    failed_items?: string[]
+    source?: string
+    updated_at?: string
+  }
 }
 
 export interface EccWorkspaceRuntimeSnapshot extends EccWorkspaceHandleRequest {

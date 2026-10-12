@@ -187,6 +187,8 @@ export function flowSection(
         const peakMemoryMb = finiteNumber(
           step['peak memory (mb)'] ?? record(step.info)?.['peak memory (mb)'],
         )
+        const checklist = record(step.checklist)
+        const checklistStatus = stringValue(checklist, 'status')
         return [
           {
             stepId: step.name,
@@ -196,6 +198,9 @@ export function flowSection(
             ...(typeof step.tool === 'string' && step.tool ? { toolId: step.tool } : {}),
             ...(runtimeSeconds === null ? {} : { runtimeSeconds }),
             ...(peakMemoryMb === null ? {} : { peakMemoryMb }),
+            ...(['passed', 'blocked', 'attention', 'unknown'].includes(checklistStatus)
+              ? { checklistStatus: checklistStatus as WorkspaceFlowSummary['steps'][number]['checklistStatus'] }
+              : {}),
           },
         ]
       }),

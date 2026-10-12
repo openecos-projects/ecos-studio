@@ -47,6 +47,7 @@ function displayFlowState(state: FlowStepState): string {
   if (state === 'warning') return 'Warning'
   if (state === 'running') return 'Ongoing'
   if (state === 'failed' || state === 'cancelled') return 'Incomplete'
+  if (state === 'blocked') return 'Blocked'
   if (state === 'skipped') return 'Skipped'
   if (state === 'unknown') return 'Invalid'
   return 'Unstart'

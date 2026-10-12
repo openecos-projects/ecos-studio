@@ -55,6 +55,7 @@ export type FlowStepState =
   | 'succeeded'
   | 'warning'
   | 'failed'
+  | 'blocked'
   | 'cancelled'
   | 'skipped'
   | 'unknown'
@@ -67,6 +68,7 @@ export interface FlowStepSummary {
   toolId?: string
   runtimeSeconds?: number
   peakMemoryMb?: number
+  checklistStatus?: 'passed' | 'blocked' | 'attention' | 'unknown'
 }
 
 export interface WorkspaceFlowSummary {
