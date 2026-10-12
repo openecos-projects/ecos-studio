@@ -555,7 +555,6 @@
               :refreshing="projectComparisonSession.projection.status === 'refreshing'"
               @refresh="projectComparisonSession.refresh()"
             />
-            <ProjectCreationRecoveryPanel />
             <ProjectBackgroundOperationPanel
               v-if="selectedWorkspace"
               :operation-ids="selectedWorkspaceOperationIds"
@@ -930,7 +929,6 @@ import ProjectComparisonRefreshStatus from './project-management/ProjectComparis
 import ProjectExecutionStatus from './project-management/ProjectExecutionStatus.vue'
 import ProjectResultStatus from './project-management/ProjectResultStatus.vue'
 import ProjectBackgroundOperationPanel from './project-management/ProjectBackgroundOperationPanel.vue'
-import ProjectCreationRecoveryPanel from './project-management/ProjectCreationRecoveryPanel.vue'
 import ProjectConsistencyRepairStrip from './project-management/ProjectConsistencyRepairStrip.vue'
 import MpcTemplatePreview from '@/components/MpcTemplatePreview.vue'
 import { previewList } from './project-management/projectListPreview'

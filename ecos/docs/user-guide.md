@@ -514,10 +514,6 @@ Conditional panels above the analysis view:
 
 - **ProjectComparisonRefreshStatus** — when automatic refresh is unavailable, a
   warning with a manual **Refresh** button.
-- **Unfinished Workspace Creation** — lists interrupted workspace creations
-  (target directory, issue, stage, timestamp). **Continue Initialization**
-  resumes; **Abandon Registration** (red, confirmed) unregisters the attempt
-  while leaving files on disk.
 - **Project Background Operation** — when the selected workspace has a queued,
   running, or cancelling background operation (step run or full flow), with
   **Cancel**, **Retry Snapshot** (on snapshot failure), and **Open Workspace**
