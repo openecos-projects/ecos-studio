@@ -65,6 +65,7 @@ export function projectRuntimeFlowSteps(
         state: normalizeState(step.state, 'unknown'),
         stepId: step.name,
         ...(step.tool ? { toolId: step.tool } : {}),
+        ...(step.checklist?.status ? { checklistStatus: step.checklist.status } : {}),
       },
     ]
   })
@@ -172,6 +173,17 @@ export function projectBackendFlowSteps(
         ? 'failed'
         : 'succeeded'
     step.state = normalizeState(data.state, fallback)
+    const checklist = data.checklist
+    if (
+      checklist &&
+      typeof checklist === 'object' &&
+      typeof (checklist as Record<string, unknown>).status === 'string'
+    ) {
+      const status = (checklist as Record<string, unknown>).status
+      if (['passed', 'blocked', 'attention', 'unknown'].includes(status as string)) {
+        step.checklistStatus = status as FlowStepSummary['checklistStatus']
+      }
+    }
     if (typeof data.tool === 'string' && data.tool) step.toolId = data.tool
   }
 

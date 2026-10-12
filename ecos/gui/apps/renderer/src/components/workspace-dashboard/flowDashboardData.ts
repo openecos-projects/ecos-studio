@@ -51,7 +51,14 @@ export function dashboardFlowSteps(
         runtime: formatRuntime(step.runtimeSeconds),
         peakMemoryMb: step.peakMemoryMb ?? null,
         checklist,
-        checkState: stepCheckState(checklist),
+        checkState:
+          step.checklistStatus === 'blocked'
+            ? 'blocked'
+            : step.checklistStatus === 'attention'
+              ? 'warning'
+              : step.checklistStatus === 'passed'
+                ? 'passed'
+                : stepCheckState(checklist),
         thumbnail:
           thumbnails.find((thumbnail) => sameFlowStepName(thumbnail.step, step.stepId)) ??
           null,
