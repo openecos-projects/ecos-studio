@@ -463,6 +463,7 @@ export interface DesktopBridgeServices {
   }
   resourceManagerService: {
     listResources(): Promise<ResourceList>
+    listCachedResources(): Promise<ResourceList>
     getResource(resourceId: string): Promise<unknown>
     readMpcSpec(resourceId: string): Promise<MpcSpecReadResult>
     installResource(
@@ -486,9 +487,6 @@ export interface DesktopBridgeServices {
       force?: boolean
       refreshRegistry?: boolean
     }): Promise<unknown>
-    readCachedLatestPdkRelease(
-      familyId: string,
-    ): Promise<{ version: string; sha256: string | null } | null>
     onRegistryChanged(listener: () => void): () => void
   }
   pdkInventoryService: {
@@ -2956,12 +2954,6 @@ export function registerIpc(
       workspaceDirectoryForHandle: (workspaceHandle) =>
         workspaceHandleSubscriptions.get(workspaceHandle)?.directories.values().next()
           .value,
-      assessResourceStaleness: (workspaceDirectory) =>
-        assessRunStaleness({
-          resourceManagerService: services.resourceManagerService,
-          pdkInventoryService: services.pdkInventoryService,
-          workspaceDirectory,
-        }),
       authorizeWorkspaceMutation: (_command, workspaceHandle, workspaceDirectory) => {
         if (
           !services.agentRuntimeService?.isOptimizationParentGuarded?.(workspaceHandle) &&

@@ -1172,7 +1172,7 @@ describe('ResourceManagerService', () => {
     )
   })
 
-  it('keeps imported PDKs out of the generic Resource listing', async () => {
+  it('includes imported PDK inventory entries without registry update status', async () => {
     const root = await createTempDir('ecos-resources-')
     const registryPath = join(root, 'registry.json')
     const pdkPath = join(root, 'pdks', 'ics55')
@@ -1255,8 +1255,8 @@ describe('ResourceManagerService', () => {
         }),
       ]),
     )
-    expect(result.resources).not.toContainEqual(
-      expect.objectContaining({ id: imported.id, path: pdkPath }),
+    expect(result.resources).toContainEqual(
+      expect.objectContaining({ id: imported.id, path: pdkPath, status: 'invalid' }),
     )
     await expect(service.getResource(imported.id)).resolves.toMatchObject({
       id: imported.id,
@@ -8453,12 +8453,12 @@ describe('ResourceManagerService', () => {
     })
 
     await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
-      status: 'installed',
+      status: 'update_available',
       installed_version: '1.10.100',
-      available_versions: [],
+      available_versions: ['1.10.101', '1.10.100'],
       active: false,
       size: null,
-      actions: ['validate', 'uninstall'],
+      actions: ['validate', 'update', 'uninstall'],
     })
     await expect(service.updateResource('pdk:ics55')).resolves.toEqual({
       status: 'started',
@@ -9537,7 +9537,7 @@ describe('ResourceManagerService', () => {
       (resource) => resource.type === 'pdk' && resource.path !== null,
     )
 
-    expect(pdks).toHaveLength(0)
+    expect(pdks).toHaveLength(1)
     await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
       id: 'pdk:ics55',
       path: pdkRoot,

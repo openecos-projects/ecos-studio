@@ -113,7 +113,10 @@ describe('ResourceUpdateScheduler', () => {
 
     await scheduler.runCycle('startup')
 
-    expect(service.checkResourceUpdates).toHaveBeenCalledWith({ force: false })
+    expect(service.checkResourceUpdates).toHaveBeenCalledWith({
+      force: false,
+      refreshRegistry: true,
+    })
     expect(emit).toHaveBeenCalledTimes(1)
   })
 

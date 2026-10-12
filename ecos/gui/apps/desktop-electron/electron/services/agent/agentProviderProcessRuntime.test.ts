@@ -49,6 +49,54 @@ function readProtocolRequest(
 }
 
 describe('AgentProviderProcessRuntime', () => {
+  it('preserves a resource-update error code in the Agent host reply', async () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      host: {
+        candidateCapabilities: vi.fn(),
+        candidateRerun: vi.fn(),
+        candidateResume: vi.fn(),
+        cancelOperation: vi.fn(),
+        openWorkspace: vi.fn(),
+        operationStatus: vi.fn(),
+        waitForOperation: vi.fn(),
+        startFlowOperation: vi.fn().mockRejectedValue(
+          Object.assign(new Error('Resource updates are available for: Yosys'), {
+            code: 'RESOURCE_UPDATE_AVAILABLE',
+          }),
+        ),
+      },
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const started = runtime.startSession({ providerId: 'codex', sessionId: 'session-1' })
+    const child = harness.children[0]
+    const startRequest = readProtocolRequest(child)
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ id: startRequest.id, result: { sessionId: 'session-1' } })}\n`,
+    )
+    await started
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ id: 'host-run', method: 'workspace.run', params: { workspaceHandle: 'handle-1' } })}\n`,
+    )
+    await vi.waitFor(() => {
+      expect(JSON.parse(String(child.stdin.write.mock.calls[1]?.[0]))).toEqual({
+        id: 'host-run',
+        error: {
+          code: 'RESOURCE_UPDATE_AVAILABLE',
+          message: 'Resource updates are available for: Yosys',
+        },
+      })
+    })
+  })
   it('resolves the Windows executable suffix from the runtime platform', async () => {
     const pluginRoot = await mkdtemp(join(tmpdir(), 'ecos-agent-runtime-'))
     try {

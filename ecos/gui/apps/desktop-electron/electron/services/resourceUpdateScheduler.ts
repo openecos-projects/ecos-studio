@@ -27,8 +27,8 @@ function detectedSignature(item: ResourceUpdatesDetectedItem): string {
 
 /**
  * Runs automatic resource update checks: once at startup, then on a timer and
- * on window focus. Checks are TTL-gated (never forced, never refreshing the
- * registry — the registry's own background refresh covers that), and an
+ * on window focus. TTL-gated checks refresh the registry before comparing
+ * installed resources, and an
  * updates-detected event is emitted only for updates not already notified
  * this session. Cycles never reject; failures are logged.
  */
@@ -74,7 +74,10 @@ export class ResourceUpdateScheduler {
   private async runCycleOnce(reason: ResourceUpdateCycleReason): Promise<void> {
     try {
       if (await this.resourceManagerService.isUpdateCheckCacheStale(this.now())) {
-        await this.resourceManagerService.checkResourceUpdates({ force: false })
+        await this.resourceManagerService.checkResourceUpdates({
+          force: false,
+          refreshRegistry: true,
+        })
       }
 
       const list = await this.resourceManagerService.listResources()

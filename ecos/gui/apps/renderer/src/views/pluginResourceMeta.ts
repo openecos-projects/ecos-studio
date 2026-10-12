@@ -10,7 +10,7 @@ interface UpdateCheckFootnoteInput {
 
 /**
  * Small "Last checked …" line for resources whose health carries an
- * update_check record (tools and MPCs; PDK installations never have one).
+ * update_check record (tools, MPCs, and managed PDK installations).
  * Appends "· may be outdated" once the cached result exceeds its TTL, and the
  * short published commit when the release metadata recorded one. Returns null
  * when no check has run or the shape is unexpected.

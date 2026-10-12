@@ -175,6 +175,22 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe('pluginStore', () => {
+  it('preserves PDK update status and check health from the main listing', async () => {
+    const pdk = makePdkResource({
+      id: 'pdk:ics55:managed:1.01',
+      path: '/tmp/pdks/ics55',
+      installed_version: '1.01',
+      status: 'update_available',
+      update_kind: 'rebuild',
+      actions: ['update', 'uninstall'],
+      health: { update_check: { checked_at: '2026-10-10T00:00:00Z', stale: false } },
+    })
+    vi.mocked(listResourcesApi).mockResolvedValue([makePdkResource(), pdk])
+    vi.mocked(listPdkInstallationsApi).mockResolvedValue([makePdkInstallation(pdk)])
+    const store = usePluginStore()
+    await store.fetchTools()
+    expect(store.resources.filter((resource) => resource.id === pdk.id)).toEqual([pdk])
+  })
   beforeEach(() => {
     vi.useRealTimers()
     setActivePinia(createPinia())

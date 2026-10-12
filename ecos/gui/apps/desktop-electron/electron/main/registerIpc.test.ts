@@ -214,7 +214,7 @@ function registerHandlers(
       importPdkPath: vi.fn(),
       installResource: vi.fn(),
       listResources: vi.fn(),
-      readCachedLatestPdkRelease: vi.fn(),
+      listCachedResources: vi.fn(),
       refreshRegistry: vi.fn(),
       checkResourceUpdates: vi.fn(),
       removePdkReference: vi.fn(),
@@ -4760,7 +4760,7 @@ describe('registerIpc', () => {
       { sender },
       { designTool: 'frontend', directory: '/work/frontend' },
     )
-    services.resourceManagerService.listResources.mockResolvedValue({
+    services.resourceManagerService.listCachedResources.mockResolvedValue({
       resources: [
         {
           id: 'tool:yosys',
@@ -4810,7 +4810,7 @@ describe('registerIpc', () => {
     services.frontendRpcRuntimeService.runFlow.mockResolvedValueOnce({
       ok: true,
     })
-    services.resourceManagerService.listResources.mockResolvedValue({
+    services.resourceManagerService.listCachedResources.mockResolvedValue({
       resources: [
         {
           id: 'tool:yosys',
@@ -4861,13 +4861,20 @@ describe('registerIpc', () => {
       { sender },
       { designTool: 'frontend', directory: '/work/frontend/ws_1' },
     )
-    services.resourceManagerService.listResources.mockResolvedValue({
-      resources: [],
+    services.resourceManagerService.listCachedResources.mockResolvedValue({
+      resources: [
+        {
+          id: 'pdk-install-1',
+          type: 'pdk',
+          display_name: 'ICS55 PDK',
+          installed_version: '1.0.0',
+          available_versions: ['1.1.0'],
+          status: 'update_available',
+          update_kind: 'version',
+          health: {},
+        },
+      ],
       diagnostics: [],
-    })
-    services.resourceManagerService.readCachedLatestPdkRelease.mockResolvedValue({
-      version: '1.1.0',
-      sha256: null,
     })
     services.pdkInventoryService.listBindings.mockResolvedValue([
       {

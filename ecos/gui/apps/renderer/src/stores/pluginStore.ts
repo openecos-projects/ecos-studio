@@ -207,7 +207,15 @@ export const usePluginStore = defineStore('plugin', () => {
         listResourcesApi(),
         listPdkInstallationsApi(),
       ])
-      const inventoryResources = installations.map(pdkInstallationToResourceItem)
+      const inventoryResources = installations.map(
+        (installation) =>
+          genericResources.find(
+            (resource) =>
+              resource.id === installation.id &&
+              resource.type === 'pdk' &&
+              resource.path !== null,
+          ) ?? pdkInstallationToResourceItem(installation),
+      )
       const nextResources = [
         ...genericResources.filter(
           (resource) => resource.type !== 'pdk' || resource.path === null,

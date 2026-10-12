@@ -49,10 +49,12 @@ import type {
   EccWorkspaceSpecValidationResult,
   EccWorkspaceUpdateRequest,
   EccWorkspaceUpdateResult,
+  ResourceStalenessItem,
 } from '@ecos-studio/shared'
 import { open, stat } from 'node:fs/promises'
 
 import { electronLogger } from '../logger'
+import { assertRunResourcesFresh } from '../resourceStalenessGuard'
 
 import { normalizeWorkspacePath } from '../workspacePath'
 import { WorkspaceSessionNotFoundError } from './workspaceSessions'
@@ -82,6 +84,7 @@ export interface EccRpcRuntimeServiceOptions {
   onEvent?: (event: EccRuntimeEvent) => void
   lazyWorkspaceOpen?: boolean
   managementRpc?: boolean
+  assessResourceStaleness?(directory: string | null): Promise<ResourceStalenessItem[]>
 }
 
 /**
@@ -508,6 +511,11 @@ export class EccRpcRuntimeService {
     request: EccRuntimeStartFlowRequest,
   ): Promise<EccRuntimeOperation> {
     const runtime = this.runtimeForHandle(request.workspaceHandle)
+    assertRunResourcesFresh(
+      (await this.options.assessResourceStaleness?.(runtime.directory)) ?? [],
+      request.allowStaleResources,
+      'workspace.run',
+    )
     const operation = await runtime.startFlowOperation(request)
     runtime.trackOperationSnapshot(operation)
     this.projection.refresh()
@@ -518,6 +526,11 @@ export class EccRpcRuntimeService {
     request: EccRuntimeStartStepRequest,
   ): Promise<EccRuntimeOperation> {
     const runtime = this.runtimeForHandle(request.workspaceHandle)
+    assertRunResourcesFresh(
+      (await this.options.assessResourceStaleness?.(runtime.directory)) ?? [],
+      request.allowStaleResources,
+      'workspace.runStep',
+    )
     const operation = await runtime.startStepOperation(request)
     runtime.trackOperationSnapshot(operation)
     this.projection.refresh()

@@ -3,21 +3,14 @@ import {
   RESOURCE_UPDATE_AVAILABLE,
   type ResourceInfo,
   type ResourceStalenessItem,
-  type ResourceUpdateKind,
 } from '@ecos-studio/shared'
 import { electronLogger } from './logger'
-import { assetShaDrift, type ResourceManagerService } from './resourceManagerService'
+import type { ResourceManagerService } from './resourceManagerService'
 import type { PdkInventoryService } from './pdkInventoryService'
 
-type StalenessResourceManager = Pick<
-  ResourceManagerService,
-  'listResources' | 'readCachedLatestPdkRelease'
->
+type StalenessResourceManager = Pick<ResourceManagerService, 'listCachedResources'>
 
-type StalenessPdkInventory = Pick<
-  PdkInventoryService,
-  'listBindings' | 'listInstallations'
->
+type StalenessPdkInventory = Pick<PdkInventoryService, 'listBindings'>
 
 export interface RunStalenessAssessmentOptions {
   resourceManagerService: StalenessResourceManager
@@ -31,17 +24,14 @@ function shortRef(value: unknown): string | null {
 
 /**
  * Structured run-input record ("record versions at run start"): one log line
- * with every active tool's version and the short commit/sha from its update
- * check, when known. Logger only — no persisted format.
+ * with every active tool's installed version and short commit/sha.
+ * Logger only — no persisted format.
  */
 function logRunResourceInputs(resources: ResourceInfo[]): void {
   const inputs = resources
     .filter((resource) => resource.type === 'tool' && resource.active)
     .map((tool) => {
-      const updateCheck = tool.health?.update_check as
-        | { commit?: unknown; sha256?: unknown }
-        | undefined
-      const ref = shortRef(updateCheck?.commit ?? updateCheck?.sha256)
+      const ref = shortRef(tool.health.commit ?? tool.health.sha256)
       const version = tool.active_version ?? tool.installed_version ?? 'unknown'
       return `${tool.name}@${version}${ref ? ` (${ref})` : ''}`
     })
@@ -70,12 +60,12 @@ function collectStaleRunResources(resources: ResourceInfo[]): ResourceStalenessI
 /**
  * Best-effort PDK staleness: find the binding whose project root contains the
  * run's workspace directory (longest normalized prefix wins), then compare the
- * bound installation against the cached registry release. Returns null when no
- * binding matches, the installation is unknown or imported (user-managed
- * external trees have no registry update source), or the PDK is fresh.
+ * bound installation's cached update status. Imported installations are never
+ * marked stale by the resource listing.
  */
 async function assessBoundPdk(
   options: RunStalenessAssessmentOptions,
+  resources: ResourceInfo[],
 ): Promise<ResourceStalenessItem | null> {
   if (!options.workspaceDirectory) return null
   const bindings = await options.pdkInventoryService.listBindings()
@@ -88,35 +78,17 @@ async function assessBoundPdk(
     .sort((a, b) => resolve(b.projectRoot).length - resolve(a.projectRoot).length)[0]
   if (!binding) return null
 
-  const installations = await options.pdkInventoryService.listInstallations()
-  const installation = installations.find(
-    (candidate) => candidate.id === binding.installationId,
+  const resource = resources.find(
+    (candidate) => candidate.type === 'pdk' && candidate.id === binding.installationId,
   )
-  if (!installation) return null
-  // Imported PDKs are user-managed external trees; comparing them against the
-  // registry release would false-positive on every run. Mirrors the Resource
-  // Manager listing, which only checks updates for managed PDKs.
-  if (installation.ownership === 'imported' || !installation.version) return null
-
-  const release = await options.resourceManagerService.readCachedLatestPdkRelease(
-    installation.familyId,
-  )
-  if (!release) return null
-
-  let updateKind: ResourceUpdateKind | null = null
-  if (installation.version !== release.version) {
-    updateKind = 'version'
-  } else if (assetShaDrift(installation.registrySha256, release.sha256)) {
-    updateKind = 'rebuild'
-  }
-  if (!updateKind) return null
+  if (resource?.status !== 'update_available') return null
 
   return {
-    id: installation.id,
-    display_name: installation.displayName,
-    installed_version: installation.version,
-    latest_version: release.version,
-    update_kind: updateKind,
+    id: resource.id,
+    display_name: resource.display_name,
+    installed_version: resource.installed_version,
+    latest_version: resource.available_versions[0] ?? null,
+    update_kind: resource.update_kind ?? null,
   }
 }
 
@@ -129,15 +101,17 @@ export async function assessRunStaleness(
   options: RunStalenessAssessmentOptions,
 ): Promise<ResourceStalenessItem[]> {
   const items: ResourceStalenessItem[] = []
+  let resources: ResourceInfo[] = []
   try {
-    const list = await options.resourceManagerService.listResources()
+    const list = await options.resourceManagerService.listCachedResources()
+    resources = list.resources
     logRunResourceInputs(list.resources)
     items.push(...collectStaleRunResources(list.resources))
   } catch (error) {
     electronLogger.warn('[resources] run staleness assessment failed to list', error)
   }
   try {
-    const pdkItem = await assessBoundPdk(options)
+    const pdkItem = await assessBoundPdk(options, resources)
     if (pdkItem) items.push(pdkItem)
   } catch (error) {
     electronLogger.warn('[resources] run staleness PDK assessment failed', error)
@@ -155,9 +129,12 @@ export function assertRunResourcesFresh(
   allowStaleResources: boolean | undefined,
   runLabel: string,
 ): void {
+  if (allowStaleResources !== undefined && typeof allowStaleResources !== 'boolean') {
+    throw new Error('allowStaleResources must be a boolean')
+  }
   if (items.length === 0) return
   const names = items.map((item) => item.display_name).join(', ')
-  if (allowStaleResources) {
+  if (allowStaleResources === true) {
     electronLogger.warn(
       '[resources] %s proceeds with stale resources: %s',
       runLabel,

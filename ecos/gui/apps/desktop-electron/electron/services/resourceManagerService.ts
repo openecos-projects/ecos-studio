@@ -489,6 +489,18 @@ export class ResourceManagerService {
 
   async listResources(): Promise<ResourceList> {
     const state = await this.fetchRegistry()
+    return await this.buildResourceList(state)
+  }
+
+  async listCachedResources(): Promise<ResourceList> {
+    const registry =
+      this.registryMemory ??
+      (await this.readCachedRegistry(registryCachePath(this.cacheDir, this.registryUrl)))
+        .registry
+    return await this.buildResourceList({ registry, diagnostics: [] })
+  }
+
+  private async buildResourceList(state: RegistryState): Promise<ResourceList> {
     const pdkInstallations = await this.pdkInventoryService.listInstallations()
     const manifest = await this.readManifestForListing()
     const updateChecks = await this.readUpdateCheckCache()
@@ -514,6 +526,18 @@ export class ResourceManagerService {
     for (const pdk of registry?.pdks ?? []) {
       resources.push(
         this.registryPdkToResource(pdk, registry, manifest, toolHealth, pdkInstallations),
+      )
+    }
+    for (const installation of pdkInstallations) {
+      const pdk = this.findRegistryPdk(registry, installation.familyId)
+      resources.push(
+        pdkSnapshotToResource(
+          installation,
+          undefined,
+          pdk,
+          getUpdateCheck(updateChecks, installation.id),
+          this.isPdkInstallActive(installation.familyId, pdk),
+        ),
       )
     }
     for (const mpc of state.registry?.mpcs ?? []) {
@@ -552,7 +576,18 @@ export class ResourceManagerService {
         (isPdkRegistryId(resourceId)
           ? installations.find((candidate) => candidate.familyId === pdkId)
           : undefined)
-      if (installation) return pdkSnapshotToResource(installation)
+      if (installation) {
+        const state = await this.fetchRegistry()
+        const updateChecks = await this.readUpdateCheckCache()
+        const pdk = this.findRegistryPdk(state.registry, installation.familyId)
+        return pdkSnapshotToResource(
+          installation,
+          undefined,
+          pdk,
+          getUpdateCheck(updateChecks, installation.id),
+          this.isPdkInstallActive(installation.familyId, pdk),
+        )
+      }
     }
     const resources = (await this.listResources()).resources
     const resource = resources.find((item) => item.id === resourceId)
@@ -1434,28 +1469,13 @@ export class ResourceManagerService {
     return isUpdateCheckStale(cache?.checked_at ?? null, now)
   }
 
-  /**
-   * Latest published release for a PDK family, read from the cached registry
-   * only (memory or on-disk cache; never the network). Null when the family
-   * is unknown or no registry has been cached yet.
-   */
-  async readCachedLatestPdkRelease(
-    familyId: string,
-  ): Promise<{ version: string; sha256: string | null } | null> {
-    const registry =
-      this.registryMemory ??
-      (await this.readCachedRegistry(registryCachePath(this.cacheDir, this.registryUrl)))
-        .registry
-    const latest = registry?.pdks.find((pdk) => pdk.id === familyId)?.versions[0]
-    if (!latest) return null
-    const { asset } = selectPlatformAsset(latest)
-    return { version: latest.version, sha256: readSha256(asset?.sha256) }
-  }
-
   private async runResourceUpdateCheck(
     options: ResourceUpdateCheckOptions,
   ): Promise<ResourceUpdateCheckResult> {
-    const state = await this.fetchRegistry(options.refreshRegistry === true)
+    const state = await this.fetchRegistry(
+      options.refreshRegistry === true,
+      AbortSignal.timeout(REGISTRY_BACKGROUND_REFRESH_TIMEOUT_MS),
+    )
     const diagnostics = [...state.diagnostics]
     if (!state.registry) {
       return {
@@ -1467,12 +1487,17 @@ export class ResourceManagerService {
       }
     }
 
+    const pdkInstallations = await this.pdkInventoryService.listInstallations()
     const manifest = await this.readManifest()
     const checkedAt = utcNowIso()
     const resources: ResourceUpdateCheckItem[] = []
     const cacheResources: ResourceUpdateCheckCache['resources'] = {}
 
-    for (const candidate of collectUpdateCheckCandidates(state.registry, manifest)) {
+    for (const candidate of collectUpdateCheckCandidates(
+      state.registry,
+      manifest,
+      pdkInstallations,
+    )) {
       if (
         candidate.resourceId.startsWith('mpc:') &&
         candidate.asset.update_source?.type === 'github_branch'
@@ -3278,91 +3303,6 @@ export class ResourceManagerService {
     }
   }
 
-  private pdkEntryToResource(
-    resourceId: string,
-    entry: PdkInventoryEntry,
-    registryPdk?: RegistryPdk,
-    installedPdkIds?: ReadonlySet<string>,
-    registry?: ResourceRegistry | null,
-    manifest?: ResourceManifest,
-    updateChecks?: ResourceUpdateCheckCache | null,
-    toolHealth: ToolHealthByResourceId = {},
-  ): ResourceInfo {
-    const registryResourceId = `pdk:${entry.pdk_id}`
-    const latestVersion = registryPdk?.versions[0]
-    const { platform, asset } = latestVersion
-      ? selectPlatformAsset(latestVersion)
-      : { platform: null, asset: null }
-    const requirements = latestVersion?.requires ?? []
-    const requirementState =
-      manifest && registry
-        ? dependencyStateFor(requirements, registry, manifest, toolHealth)
-        : { installed: [], missing: [] }
-    const update =
-      entry.managed &&
-      entry.health === 'ok' &&
-      Boolean(entry.version) &&
-      Boolean(latestVersion?.version) &&
-      !installedPdkIds?.has(
-        managedPdkResourceId(entry.pdk_id, latestVersion?.version ?? ''),
-      )
-        ? pdkHasUpdate(
-            entry,
-            latestVersion?.version,
-            asset,
-            getUpdateCheck(updateChecks ?? null, registryResourceId),
-          )
-        : null
-    const hasUpdate = update !== null
-    const status: ResourceStatus =
-      this.installCoordinator.isActive(resourceId) ||
-      this.isPdkInstallActive(entry.pdk_id, registryPdk)
-        ? 'installing'
-        : entry.health === 'missing'
-          ? 'missing'
-          : entry.health === 'invalid'
-            ? 'invalid'
-            : hasUpdate
-              ? 'update_available'
-              : 'installed'
-    const actions: ResourceAction[] = []
-    if (status !== 'installing') {
-      actions.push('validate')
-      if (hasUpdate) actions.push('update')
-      actions.push(entry.managed ? 'uninstall' : 'remove_reference')
-    }
-
-    return {
-      id: resourceId,
-      type: 'pdk',
-      name: entry.pdk_id,
-      display_name: entry.name || registryPdk?.display_name || entry.pdk_id,
-      description: registryPdk?.description ?? '',
-      category: registryPdk?.category ?? 'pdk',
-      status,
-      installed_version: entry.version || null,
-      available_versions: registryPdk?.versions.map((version) => version.version) ?? [],
-      active_version: null,
-      active: false,
-      path: entry.canonical_path,
-      managed_root: entry.managed ? this.pdksDir : null,
-      platform,
-      size: entry.size && entry.size > 0 ? entry.size : (asset?.size ?? null),
-      source: entry.source || 'local',
-      homepage: registryPdk?.homepage ?? '',
-      actions,
-      ...(update ? { update_kind: update.kind } : {}),
-      health: withUpdateCheckHealth(
-        pdkHealth(entry),
-        getUpdateCheck(updateChecks ?? null, registryResourceId),
-      ),
-      error: null,
-      requires: requirements,
-      installed_requires: requirementState.installed,
-      missing_requires: requirementState.missing,
-    }
-  }
-
   private isPdkInstallActive(pdkId: string, registryPdk?: RegistryPdk): boolean {
     if (this.installCoordinator.isActive(`pdk:${pdkId}`)) return true
     return Boolean(
@@ -4354,6 +4294,7 @@ function getUpdateCheck(
 function collectUpdateCheckCandidates(
   registry: ResourceRegistry,
   manifest: ResourceManifest,
+  pdkInstallations: readonly PdkInstallationSnapshot[],
 ): ResourceUpdateCheckCandidate[] {
   const candidates: ResourceUpdateCheckCandidate[] = []
 
@@ -4364,6 +4305,7 @@ function collectUpdateCheckCandidates(
       !latest ||
       !isToolEntry(entry) ||
       !entry.managed ||
+      !readSha256(entry.sha256) ||
       latest.version !== entry.version
     ) {
       continue
@@ -4381,30 +4323,20 @@ function collectUpdateCheckCandidates(
 
   for (const pdk of registry.pdks) {
     const latest = pdk.versions[0]
-    const entry = Object.values(manifest.installed).find(
-      (candidate) =>
-        isPdkEntry(candidate) &&
-        candidate.pdk_id === pdk.id &&
-        candidate.managed &&
-        candidate.version === latest?.version,
-    )
-    if (
-      !latest ||
-      !isPdkEntry(entry) ||
-      !entry.managed ||
-      latest.version !== entry.version
-    ) {
-      continue
-    }
+    if (!latest) continue
     const { asset } = selectPlatformAsset(latest)
-    if (!asset) {
-      continue
+    if (!asset) continue
+    for (const installation of pdkInstallations) {
+      const installedSha256 = readSha256(installation.registrySha256)
+      if (
+        installation.familyId !== pdk.id ||
+        installation.ownership !== 'managed' ||
+        installation.version !== latest.version ||
+        !installedSha256
+      )
+        continue
+      candidates.push({ resourceId: installation.id, asset, installedSha256 })
     }
-    candidates.push({
-      resourceId: `pdk:${pdk.id}`,
-      asset,
-      installedSha256: entry.sha256,
-    })
   }
 
   for (const mpc of registry.mpcs) {
@@ -4414,6 +4346,7 @@ function collectUpdateCheckCandidates(
       !latest ||
       !isMpcEntry(entry) ||
       !entry.managed ||
+      !readSha256(entry.sha256) ||
       entry.health !== 'ok' ||
       latest.version !== entry.version
     ) {
@@ -4489,9 +4422,7 @@ function toolHasUpdate(
     if (latestVersion === 'latest' && updateCheck?.status === 'checked') {
       if (updateCheck.update_url && updateCheck.update_url !== updateSource.url)
         return null
-      return Boolean(updateCheck.sha256) && updateCheck.sha256 !== entry.sha256
-        ? { kind: 'rebuild' }
-        : null
+      return assetShaDrift(entry.sha256, updateCheck.sha256) ? { kind: 'rebuild' } : null
     }
     return null
   }
@@ -4499,7 +4430,7 @@ function toolHasUpdate(
 }
 
 function pdkHasUpdate(
-  entry: PdkInventoryEntry,
+  entry: { version: string | null; sha256: string | null },
   latestVersion: string | undefined,
   latestAsset: PlatformAsset | null,
   updateCheck: CachedResourceUpdateCheckItem | null,
@@ -4511,9 +4442,7 @@ function pdkHasUpdate(
     if (latestVersion === 'latest' && updateCheck?.status === 'checked') {
       if (updateCheck.update_url && updateCheck.update_url !== updateSource.url)
         return null
-      return Boolean(updateCheck.sha256) && updateCheck.sha256 !== entry.sha256
-        ? { kind: 'rebuild' }
-        : null
+      return assetShaDrift(entry.sha256, updateCheck.sha256) ? { kind: 'rebuild' } : null
     }
     return null
   }
@@ -4861,33 +4790,37 @@ function toolHealthError(health: ToolHealthStatus): string {
   return 'Installed resource is invalid'
 }
 
-function pdkHealth(entry: PdkInventoryEntry): Record<string, unknown> {
-  return {
-    status: entry.health,
-    detected_files: entry.detected_file_groups,
-    detected_file_list: entry.detected_files,
-    detected_file_groups: entry.detected_file_groups,
-    imported_at: entry.imported_at,
-    managed: entry.managed,
-    version: entry.version,
-    sha256: entry.sha256,
-    source: entry.source,
-    source_url: entry.source_url,
-    known_layout: isKnownPdk(entry.pdk_id),
-  }
-}
-
 function pdkSnapshotToResource(
   installation: PdkInstallationSnapshot,
   detectedFiles: { directories: string[]; files: string[] } = {
     directories: [],
     files: [],
   },
+  registryPdk?: RegistryPdk,
+  updateCheck: CachedResourceUpdateCheckItem | null = null,
+  installing = false,
 ): ResourceInfo {
-  const status: ResourceStatus =
-    installation.readiness === 'ready' || installation.readiness === 'unverified'
-      ? 'installed'
-      : installation.readiness
+  const latestVersion = registryPdk?.versions[0]
+  const { asset } = latestVersion ? selectPlatformAsset(latestVersion) : { asset: null }
+  const update =
+    !installing &&
+    installation.ownership === 'managed' &&
+    Boolean(installation.version) &&
+    (installation.readiness === 'ready' || installation.readiness === 'unverified')
+      ? pdkHasUpdate(
+          { version: installation.version, sha256: installation.registrySha256 },
+          latestVersion?.version,
+          asset,
+          updateCheck,
+        )
+      : null
+  const status: ResourceStatus = installing
+    ? 'installing'
+    : update
+      ? 'update_available'
+      : installation.readiness === 'ready' || installation.readiness === 'unverified'
+        ? 'installed'
+        : installation.readiness
   return {
     id: installation.id,
     type: 'pdk',
@@ -4897,7 +4830,7 @@ function pdkSnapshotToResource(
     category: 'pdk',
     status,
     installed_version: installation.version,
-    available_versions: [],
+    available_versions: registryPdk?.versions.map((version) => version.version) ?? [],
     active_version: null,
     active: false,
     path: installation.root,
@@ -4906,19 +4839,30 @@ function pdkSnapshotToResource(
     size: null,
     source: installation.ownership === 'managed' ? 'registry' : 'local',
     homepage: '',
-    actions: [
-      'validate',
-      installation.ownership === 'managed' ? 'uninstall' : 'remove_reference',
-    ],
-    ...(installation.ownership === 'managed' && !installation.registrySha256
+    actions: installing
+      ? []
+      : [
+          'validate',
+          ...(update ? ['update' as const] : []),
+          installation.ownership === 'managed' ? 'uninstall' : 'remove_reference',
+        ],
+    ...(installation.ownership === 'managed' && !readSha256(installation.registrySha256)
       ? { checksum_missing: true }
       : {}),
-    health: {
-      detected_file_groups: detectedFiles,
-      known_layout: installation.familyId === 'ics55',
-      managed: installation.ownership === 'managed',
-      status: status === 'installed' ? 'ok' : installation.readiness,
-    },
+    ...(update ? { update_kind: update.kind } : {}),
+    health: withUpdateCheckHealth(
+      {
+        detected_file_groups: detectedFiles,
+        known_layout: installation.familyId === 'ics55',
+        managed: installation.ownership === 'managed',
+        status:
+          installation.readiness === 'ready' || installation.readiness === 'unverified'
+            ? 'ok'
+            : installation.readiness,
+        readiness: installation.readiness,
+      },
+      updateCheck,
+    ),
     error: installation.reason,
   }
 }

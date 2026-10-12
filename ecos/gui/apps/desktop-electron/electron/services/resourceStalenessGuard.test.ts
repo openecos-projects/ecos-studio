@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   PdkBinding,
-  PdkInstallationSnapshot,
   ResourceInfo,
   ResourceList,
   ResourceStalenessItem,
@@ -48,24 +47,6 @@ function makeResource(overrides: Partial<ResourceInfo> = {}): ResourceInfo {
   }
 }
 
-function makeInstallation(
-  overrides: Partial<PdkInstallationSnapshot> = {},
-): PdkInstallationSnapshot {
-  return {
-    id: 'pdk-install-1',
-    familyId: 'ics55',
-    displayName: 'ICS55 PDK',
-    version: '1.0.0',
-    root: '/pdks/ics55',
-    ownership: 'managed',
-    registrySha256: 'a'.repeat(64),
-    readiness: 'ready',
-    reason: null,
-    supportsEccDefaults: true,
-    ...overrides,
-  }
-}
-
 function makeBinding(overrides: Partial<PdkBinding> = {}): PdkBinding {
   return {
     projectId: 'project-1',
@@ -78,19 +59,15 @@ function makeBinding(overrides: Partial<PdkBinding> = {}): PdkBinding {
 function createServiceStubs() {
   return {
     resourceManagerService: {
-      listResources: vi.fn(
+      listCachedResources: vi.fn(
         async (): Promise<ResourceList> => ({
           resources: [],
           diagnostics: [],
         }),
       ),
-      readCachedLatestPdkRelease: vi.fn(
-        async (): Promise<{ version: string; sha256: string | null } | null> => null,
-      ),
     },
     pdkInventoryService: {
       listBindings: vi.fn(async (): Promise<PdkBinding[]> => []),
-      listInstallations: vi.fn(async (): Promise<PdkInstallationSnapshot[]> => []),
     },
   }
 }
@@ -122,7 +99,7 @@ beforeEach(() => {
 describe('assessRunStaleness tools and MPCs', () => {
   it('includes an active tool with an available update', async () => {
     const stubs = createServiceStubs()
-    stubs.resourceManagerService.listResources.mockResolvedValue({
+    stubs.resourceManagerService.listCachedResources.mockResolvedValue({
       resources: [makeResource({ active: true, update_kind: 'version' })],
       diagnostics: [],
     })
@@ -134,7 +111,7 @@ describe('assessRunStaleness tools and MPCs', () => {
 
   it('excludes an inactive tool with an available update', async () => {
     const stubs = createServiceStubs()
-    stubs.resourceManagerService.listResources.mockResolvedValue({
+    stubs.resourceManagerService.listCachedResources.mockResolvedValue({
       resources: [makeResource({ active: false })],
       diagnostics: [],
     })
@@ -144,7 +121,7 @@ describe('assessRunStaleness tools and MPCs', () => {
 
   it('includes a bound MPC with an available update', async () => {
     const stubs = createServiceStubs()
-    stubs.resourceManagerService.listResources.mockResolvedValue({
+    stubs.resourceManagerService.listCachedResources.mockResolvedValue({
       resources: [
         makeResource({
           id: 'mpc:gf180',
@@ -163,7 +140,7 @@ describe('assessRunStaleness tools and MPCs', () => {
 
   it('excludes resources without update_available status', async () => {
     const stubs = createServiceStubs()
-    stubs.resourceManagerService.listResources.mockResolvedValue({
+    stubs.resourceManagerService.listCachedResources.mockResolvedValue({
       resources: [makeResource({ active: true, status: 'installed' })],
       diagnostics: [],
     })
@@ -171,16 +148,17 @@ describe('assessRunStaleness tools and MPCs', () => {
     await expect(assessRunStaleness(assessOptions(stubs))).resolves.toEqual([])
   })
 
-  it('logs the active run inputs with a short update-check ref', async () => {
+  it('logs the installed ref rather than the published update ref', async () => {
     const stubs = createServiceStubs()
-    stubs.resourceManagerService.listResources.mockResolvedValue({
+    stubs.resourceManagerService.listCachedResources.mockResolvedValue({
       resources: [
         makeResource({
           active: true,
           status: 'installed',
           active_version: '0.61',
           health: {
-            update_check: { commit: 'abcdef1234567890' },
+            sha256: 'abcdef1234567890',
+            update_check: { commit: 'fedcba9876543210' },
           },
         }),
       ],
@@ -197,7 +175,7 @@ describe('assessRunStaleness tools and MPCs', () => {
 
   it('keeps returning tool items when the listing fails', async () => {
     const stubs = createServiceStubs()
-    stubs.resourceManagerService.listResources.mockRejectedValue(
+    stubs.resourceManagerService.listCachedResources.mockRejectedValue(
       new Error('cache unreadable'),
     )
 
@@ -210,108 +188,66 @@ describe('assessRunStaleness tools and MPCs', () => {
 })
 
 describe('assessRunStaleness bound PDK', () => {
-  it('reports a version drift against the cached registry release', async () => {
-    const stubs = createServiceStubs()
-    stubs.pdkInventoryService.listBindings.mockResolvedValue([makeBinding()])
-    stubs.pdkInventoryService.listInstallations.mockResolvedValue([makeInstallation()])
-    stubs.resourceManagerService.readCachedLatestPdkRelease.mockResolvedValue({
-      version: '1.1.0',
-      sha256: 'b'.repeat(64),
+  function stalePdk(id = 'pdk-install-1'): ResourceInfo {
+    return makeResource({
+      id,
+      type: 'pdk',
+      display_name: 'ICS55 PDK',
+      installed_version: '1.0.0',
+      available_versions: ['1.1.0'],
     })
+  }
 
-    const items = await assessRunStaleness(assessOptions(stubs))
+  it.each(['version', 'rebuild'] as const)(
+    'includes the bound PDK %s update from the cached listing',
+    async (update_kind) => {
+      const stubs = createServiceStubs()
+      stubs.pdkInventoryService.listBindings.mockResolvedValue([makeBinding()])
+      stubs.resourceManagerService.listCachedResources.mockResolvedValue({
+        resources: [stalePdk(), makeResource({ id: 'pdk-other', type: 'pdk' })].map(
+          (resource) => ({ ...resource, update_kind }),
+        ),
+        diagnostics: [],
+      })
+      await expect(assessRunStaleness(assessOptions(stubs))).resolves.toEqual([
+        {
+          id: 'pdk-install-1',
+          display_name: 'ICS55 PDK',
+          installed_version: '1.0.0',
+          latest_version: '1.1.0',
+          update_kind,
+        },
+      ])
+    },
+  )
 
-    expect(items).toEqual([
-      {
-        id: 'pdk-install-1',
-        display_name: 'ICS55 PDK',
-        installed_version: '1.0.0',
-        latest_version: '1.1.0',
-        update_kind: 'version',
-      },
-    ])
-  })
+  it.each(['installed', 'missing', 'invalid', 'available'] as const)(
+    'skips a bound PDK with %s status',
+    async (status) => {
+      const stubs = createServiceStubs()
+      stubs.pdkInventoryService.listBindings.mockResolvedValue([makeBinding()])
+      stubs.resourceManagerService.listCachedResources.mockResolvedValue({
+        resources: [{ ...stalePdk(), status }],
+        diagnostics: [],
+      })
+      await expect(assessRunStaleness(assessOptions(stubs))).resolves.toEqual([])
+    },
+  )
 
-  it('reports a rebuild when the version matches but the asset sha drifted', async () => {
-    const stubs = createServiceStubs()
-    stubs.pdkInventoryService.listBindings.mockResolvedValue([makeBinding()])
-    stubs.pdkInventoryService.listInstallations.mockResolvedValue([makeInstallation()])
-    stubs.resourceManagerService.readCachedLatestPdkRelease.mockResolvedValue({
-      version: '1.0.0',
-      sha256: 'b'.repeat(64),
-    })
-
-    const items = await assessRunStaleness(assessOptions(stubs))
-
-    expect(items).toEqual([
-      expect.objectContaining({ id: 'pdk-install-1', update_kind: 'rebuild' }),
-    ])
-  })
-
-  it('skips a fresh installation', async () => {
-    const stubs = createServiceStubs()
-    stubs.pdkInventoryService.listBindings.mockResolvedValue([makeBinding()])
-    stubs.pdkInventoryService.listInstallations.mockResolvedValue([makeInstallation()])
-    stubs.resourceManagerService.readCachedLatestPdkRelease.mockResolvedValue({
-      version: '1.0.0',
-      sha256: 'a'.repeat(64),
-    })
-
-    await expect(assessRunStaleness(assessOptions(stubs))).resolves.toEqual([])
-  })
-
-  it('skips an imported installation even when the registry has a newer release', async () => {
-    const stubs = createServiceStubs()
-    stubs.pdkInventoryService.listBindings.mockResolvedValue([makeBinding()])
-    stubs.pdkInventoryService.listInstallations.mockResolvedValue([
-      makeInstallation({
-        ownership: 'imported',
-        version: null,
-        registrySha256: null,
-      }),
-    ])
-
-    await expect(assessRunStaleness(assessOptions(stubs))).resolves.toEqual([])
-    expect(stubs.resourceManagerService.readCachedLatestPdkRelease).not.toHaveBeenCalled()
-  })
-
-  it('skips a managed installation without a recorded version', async () => {
-    const stubs = createServiceStubs()
-    stubs.pdkInventoryService.listBindings.mockResolvedValue([makeBinding()])
-    stubs.pdkInventoryService.listInstallations.mockResolvedValue([
-      makeInstallation({ version: null }),
-    ])
-
-    await expect(assessRunStaleness(assessOptions(stubs))).resolves.toEqual([])
-    expect(stubs.resourceManagerService.readCachedLatestPdkRelease).not.toHaveBeenCalled()
-  })
-
-  it('skips bindings whose project root does not contain the workspace', async () => {
-    const stubs = createServiceStubs()
-    stubs.pdkInventoryService.listBindings.mockResolvedValue([
-      makeBinding({ projectRoot: '/work/other' }),
-    ])
-    stubs.pdkInventoryService.listInstallations.mockResolvedValue([makeInstallation()])
-    stubs.resourceManagerService.readCachedLatestPdkRelease.mockResolvedValue({
-      version: '1.1.0',
-      sha256: null,
-    })
-
-    await expect(assessRunStaleness(assessOptions(stubs))).resolves.toEqual([])
-    expect(stubs.resourceManagerService.readCachedLatestPdkRelease).not.toHaveBeenCalled()
-  })
-
-  it('does not match a sibling directory sharing a path prefix', async () => {
-    const stubs = createServiceStubs()
-    stubs.pdkInventoryService.listBindings.mockResolvedValue([
-      makeBinding({ projectRoot: '/work/demo' }),
-    ])
-    stubs.pdkInventoryService.listInstallations.mockResolvedValue([makeInstallation()])
-
-    await expect(
-      assessRunStaleness(assessOptions(stubs, '/work/demo-other/ws_1')),
-    ).resolves.toEqual([])
-  })
+  it.each(['/work/other', '/work/demo-other'])(
+    'does not match unrelated workspace %s',
+    async (workspaceDirectory) => {
+      const stubs = createServiceStubs()
+      stubs.pdkInventoryService.listBindings.mockResolvedValue([makeBinding()])
+      stubs.resourceManagerService.listCachedResources.mockResolvedValue({
+        resources: [stalePdk()],
+        diagnostics: [],
+      })
+      await expect(
+        assessRunStaleness(assessOptions(stubs, workspaceDirectory)),
+      ).resolves.toEqual([])
+    },
+  )
 
   it('prefers the longest matching project root', async () => {
     const stubs = createServiceStubs()
@@ -319,63 +255,34 @@ describe('assessRunStaleness bound PDK', () => {
       makeBinding({ projectRoot: '/work', installationId: 'pdk-outer' }),
       makeBinding({ projectRoot: '/work/demo', installationId: 'pdk-inner' }),
     ])
-    stubs.pdkInventoryService.listInstallations.mockResolvedValue([
-      makeInstallation({ id: 'pdk-outer', version: '1.0.0' }),
-      makeInstallation({ id: 'pdk-inner', version: '1.0.0' }),
-    ])
-    stubs.resourceManagerService.readCachedLatestPdkRelease.mockResolvedValue({
-      version: '2.0.0',
-      sha256: null,
-    })
-
-    const items = await assessRunStaleness(assessOptions(stubs))
-
-    expect(items).toEqual([expect.objectContaining({ id: 'pdk-inner' })])
-  })
-
-  it('skips the PDK assessment without a workspace directory', async () => {
-    const stubs = createServiceStubs()
-    stubs.resourceManagerService.listResources.mockResolvedValue({
-      resources: [makeResource({ active: true })],
+    stubs.resourceManagerService.listCachedResources.mockResolvedValue({
+      resources: [stalePdk('pdk-outer'), stalePdk('pdk-inner')],
       diagnostics: [],
     })
+    await expect(assessRunStaleness(assessOptions(stubs))).resolves.toEqual([
+      expect.objectContaining({ id: 'pdk-inner' }),
+    ])
+  })
 
-    const items = await assessRunStaleness(assessOptions(stubs, null))
-
-    expect(items).toEqual([STALE_ITEM])
+  it('skips missing installation data and missing workspace directories', async () => {
+    const stubs = createServiceStubs()
+    stubs.pdkInventoryService.listBindings.mockResolvedValue([makeBinding()])
+    await expect(assessRunStaleness(assessOptions(stubs))).resolves.toEqual([])
+    stubs.pdkInventoryService.listBindings.mockClear()
+    await expect(assessRunStaleness(assessOptions(stubs, null))).resolves.toEqual([])
     expect(stubs.pdkInventoryService.listBindings).not.toHaveBeenCalled()
   })
 
-  it('skips the PDK when the bound installation is unknown', async () => {
+  it('keeps tool items when the PDK binding assessment fails', async () => {
     const stubs = createServiceStubs()
-    stubs.pdkInventoryService.listBindings.mockResolvedValue([makeBinding()])
-    stubs.pdkInventoryService.listInstallations.mockResolvedValue([])
-
-    await expect(assessRunStaleness(assessOptions(stubs))).resolves.toEqual([])
-  })
-
-  it('skips the PDK when no cached registry release is available', async () => {
-    const stubs = createServiceStubs()
-    stubs.pdkInventoryService.listBindings.mockResolvedValue([makeBinding()])
-    stubs.pdkInventoryService.listInstallations.mockResolvedValue([makeInstallation()])
-    stubs.resourceManagerService.readCachedLatestPdkRelease.mockResolvedValue(null)
-
-    await expect(assessRunStaleness(assessOptions(stubs))).resolves.toEqual([])
-  })
-
-  it('keeps tool items when the PDK assessment fails', async () => {
-    const stubs = createServiceStubs()
-    stubs.resourceManagerService.listResources.mockResolvedValue({
+    stubs.resourceManagerService.listCachedResources.mockResolvedValue({
       resources: [makeResource({ active: true })],
       diagnostics: [],
     })
     stubs.pdkInventoryService.listBindings.mockRejectedValue(
       new Error('inventory locked'),
     )
-
-    const items = await assessRunStaleness(assessOptions(stubs))
-
-    expect(items).toEqual([STALE_ITEM])
+    await expect(assessRunStaleness(assessOptions(stubs))).resolves.toEqual([STALE_ITEM])
     expect(electronLogger.warn).toHaveBeenCalledWith(
       '[resources] run staleness PDK assessment failed',
       expect.any(Error),

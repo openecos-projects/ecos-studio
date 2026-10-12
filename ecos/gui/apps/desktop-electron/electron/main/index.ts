@@ -56,6 +56,7 @@ import {
 import { ProjectWorkspaceImportService } from '../services/projectWorkspaceImportService'
 import { ResourceManagerService } from '../services/resourceManagerService'
 import { ResourceUpdateScheduler } from '../services/resourceUpdateScheduler'
+import { assessRunStaleness } from '../services/resourceStalenessGuard'
 import type { PdkInventoryService } from '../services/pdkInventoryService'
 import { ProjectEccConfigService } from '../services/projectEccConfigService'
 import { SettingsStore } from '../services/settingsStore'
@@ -226,6 +227,12 @@ function getDesktopServices() {
     })
   }
   const eccRuntimeService = new EccRpcRuntimeService({
+    assessResourceStaleness: (workspaceDirectory) =>
+      assessRunStaleness({
+        resourceManagerService,
+        pdkInventoryService,
+        workspaceDirectory,
+      }),
     createSidecar: (_directory, onEvent, onNotification) =>
       new EccRpcSidecarProcess({
         // Re-resolve the executable on every start so a bundle downloaded by
