@@ -218,20 +218,31 @@ export function useDesignReportExport({
       let parameters: Record<string, unknown> | null = null
       let projectMetadata: Record<string, unknown> | null = null
 
-      const runtimeSnapshot =
+      let runtimeSnapshot = null
+      if (
         isBackend &&
         workspaceSession?.value.state === 'active' &&
         workspaceSession.value.workspaceId
-          ? await getWorkspaceRuntimeSnapshotApi(workspaceSession.value.workspaceId)
-          : null
-
-      if (isBackend && !runtimeSnapshot) {
-        throw new Error('ECC Workspace Runtime Snapshot is unavailable.')
+      ) {
+        try {
+          runtimeSnapshot = await getWorkspaceRuntimeSnapshotApi(
+            workspaceSession.value.workspaceId,
+          )
+        } catch {}
       }
 
       if (runtimeSnapshot) {
         flow = runtimeSnapshot.flow
         parameters = runtimeSnapshot.parameters
+      }
+
+      if (isBackend && !runtimeSnapshot) {
+        flow = await readWorkspaceJson('home/flow.json')
+        parameters = await readWorkspaceJson('home/parameters.json')
+        projectMetadata =
+          (await readWorkspaceJson('home/pdk.json')) ||
+          (await readWorkspaceJson('config/pdk.json')) ||
+          (await readWorkspaceJson('pdk.json'))
       }
 
       if (!runtimeSnapshot && !isBackend) {
