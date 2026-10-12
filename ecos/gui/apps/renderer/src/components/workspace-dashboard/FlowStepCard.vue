@@ -121,7 +121,10 @@ defineEmits<{
   background: color-mix(in srgb, var(--bg-secondary) 88%, var(--text-secondary));
   color: var(--text-primary);
   font-size: 12px;
-  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
 }
 header {
   flex: 0 0 27px;
@@ -207,7 +210,11 @@ footer button {
   color: var(--success-color, #22c55e);
 }
 .flow-step-card[data-status='succeeded'] {
-  border-color: color-mix(in srgb, var(--success-color, #22c55e) 65%, var(--border-color));
+  border-color: color-mix(
+    in srgb,
+    var(--success-color, #22c55e) 65%,
+    var(--border-color)
+  );
   background: color-mix(in srgb, var(--success-color, #22c55e) 13%, var(--bg-secondary));
   box-shadow: inset 0 3px 0 var(--success-color, #22c55e);
 }
@@ -220,7 +227,9 @@ footer button {
   background: color-mix(in srgb, var(--error-color, #ef4444) 13%, var(--bg-secondary));
   box-shadow: inset 0 3px 0 var(--error-color, #ef4444);
 }
-.flow-step-card[data-check-state='blocked'] {
+.flow-step-card[data-check-state='blocked']:where(
+    :not([data-status='queued'], [data-status='skipped'])
+  ) {
   border-color: color-mix(in srgb, var(--error-color, #ef4444) 65%, var(--border-color));
   background: color-mix(in srgb, var(--error-color, #ef4444) 13%, var(--bg-secondary));
   box-shadow: inset 0 3px 0 var(--error-color, #ef4444);
@@ -238,7 +247,11 @@ footer button {
   color: var(--warning-color, #f59e0b);
 }
 .flow-step-card[data-status='warning'] {
-  border-color: color-mix(in srgb, var(--warning-color, #f59e0b) 65%, var(--border-color));
+  border-color: color-mix(
+    in srgb,
+    var(--warning-color, #f59e0b) 65%,
+    var(--border-color)
+  );
   background: color-mix(in srgb, var(--warning-color, #f59e0b) 13%, var(--bg-secondary));
   box-shadow: inset 0 3px 0 var(--warning-color, #f59e0b);
 }
