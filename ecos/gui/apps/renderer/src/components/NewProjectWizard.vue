@@ -1757,6 +1757,7 @@ import { toDesktopBridgeData } from '@/api/desktopPayload'
 interface Emits {
   (e: 'close'): void
   (e: 'create', config: WorkspaceConfig): void
+  (e: 'select-frontend-project', config: WorkspaceWizardInitialConfig): void
 }
 
 type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
@@ -1875,6 +1876,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  projectManifestLoadGeneration += 1
   document.removeEventListener('keydown', handleWizardKeydown)
 })
 
@@ -2102,6 +2104,7 @@ const projectDesignName = ref(
 const projectMpc = ref<ProjectManifestMpc | null>(null)
 const projectPresetParameters = ref<Record<string, unknown>>({})
 const projectManifestError = ref('')
+const selectedProjectIsFrontend = ref(false)
 const isLoadingProjectManifest = ref(false)
 let projectManifestLoadGeneration = 0
 const mpcDieAreaValidation = computed(() =>
@@ -2746,6 +2749,9 @@ const canProceed = computed(() => {
       return (
         projectContext.value.project_root.trim() !== '' &&
         projectContext.value.project_name.trim() !== '' &&
+        !isLoadingProjectManifest.value &&
+        !projectManifestError.value &&
+        !selectedProjectIsFrontend.value &&
         !projectNameError.value
       )
     case 2:
@@ -2964,6 +2970,7 @@ async function loadProjectHistoryEntries() {
 
 async function applyProjectDefaultsForProject(projectRoot: string) {
   const loadGeneration = ++projectManifestLoadGeneration
+  selectedProjectIsFrontend.value = false
   projectMpc.value = null
   projectPresetParameters.value = {}
   projectManifestError.value = ''
@@ -2985,6 +2992,31 @@ async function applyProjectDefaultsForProject(projectRoot: string) {
 
   if (!lockWorkspaceDirectory.value && !workspaceNameTouched.value) {
     workspaceName.value = nextWorkspaceNameForProject(manifest)
+  }
+  if (manifest?.project_type === 'frontend') {
+    selectedProjectIsFrontend.value = true
+    isLoadingProjectManifest.value = false
+    const initialConfig =
+      initialProjectRoot(props.initialConfig) === normalizePath(projectRoot)
+        ? props.initialConfig
+        : undefined
+    emit('select-frontend-project', {
+      ...initialConfig,
+      designTool: 'frontend',
+      directory: workspaceLocation.value,
+      parameters: {
+        ...initialConfig?.parameters,
+        design: initialConfig?.parameters?.design || manifest.design_name,
+      },
+      project_context: {
+        mode: 'select',
+        project_id: manifest.project_id,
+        project_name: manifest.name,
+        project_root: projectRoot,
+        project_json_path: joinPath(projectRoot, 'project.json'),
+      },
+    })
+    return
   }
   if (manifest) {
     applyProjectManifestDefaults(manifest)
@@ -3272,6 +3304,7 @@ function setProjectMode(mode: ProjectMode) {
   projectContext.value.mode = mode
   if (mode === 'create') {
     projectManifestLoadGeneration += 1
+    selectedProjectIsFrontend.value = false
     projectMpc.value = null
     projectPresetParameters.value = {}
     projectManifestError.value = ''

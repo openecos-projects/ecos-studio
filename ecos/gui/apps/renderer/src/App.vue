@@ -51,7 +51,7 @@
     <Toast position="top-right" class="app-toast" />
 
     <!-- 全局新建工程向导 -->
-    <NewProjectWizard
+    <WorkspaceWizard
       v-if="showNewProjectWizard"
       :title="workspaceWizardTitle"
       :initial-config="workspaceWizardInitialConfig"
@@ -282,7 +282,7 @@ import DesignReportExportDialog from '@/components/DesignReportExportDialog.vue'
 import Toast from 'primevue/toast'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
-import NewProjectWizard from '@/components/NewProjectWizard.vue'
+import WorkspaceWizard from '@/components/WorkspaceWizard.vue'
 import DesignFilesManageDialog from '@/components/DesignFilesManageDialog.vue'
 import WorkspaceSnapshotRecoveryDialog from '@/components/WorkspaceSnapshotRecoveryDialog.vue'
 import WorkspaceStepConfigDialog from '@/components/WorkspaceStepConfigDialog.vue'
@@ -316,6 +316,7 @@ import {
   projectContextFromWorkspaceConfig,
   registerProjectManagedWorkspace,
   resolveProjectRouteContextForWorkspace,
+  workspaceRouteQueryFromProjectContext,
   type ProjectRouteContext,
 } from '@/utils/projectManifestRegistration'
 import {
@@ -1365,6 +1366,16 @@ const handleWizardCreate = async (config: WorkspaceConfig) => {
   if (!success) return
 
   await syncProjectManagedWorkspace(config)
+  if (config.designTool === 'frontend') {
+    await router.push({
+      path: '/workspace/home',
+      query: workspaceRouteQueryFromProjectContext(
+        config.directory,
+        projectContextFromWorkspaceConfig(config),
+      ),
+    })
+    return
+  }
   requestOpenStepConfigAfterCreate()
   router.push('/workspace')
 }

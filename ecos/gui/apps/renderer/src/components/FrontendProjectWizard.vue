@@ -347,6 +347,7 @@
                         v-model.trim="workspaceName"
                         type="text"
                         placeholder="e.g. ws_0001"
+                        :disabled="lockWorkspaceDirectory"
                         class="w-full rounded-lg border bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
                         :class="
                           workspaceNameError
@@ -1138,11 +1139,13 @@ interface Props {
   creating?: boolean
   initialConfig?: Partial<WorkspaceConfig>
   lockProjectContext?: boolean
+  lockWorkspaceDirectory?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   creating: false,
   lockProjectContext: false,
+  lockWorkspaceDirectory: false,
 })
 const emit = defineEmits<Emits>()
 
@@ -1166,7 +1169,12 @@ function createEmptyCatalog(): FrontendCatalogPayload {
 const currentStep = ref(1)
 const highestStep = ref(1)
 const isCreating = computed(() => props.creating)
-const lockProjectContext = computed(() => props.lockProjectContext)
+const lockWorkspaceDirectory = computed(() =>
+  Boolean(props.lockWorkspaceDirectory && props.initialConfig?.directory),
+)
+const lockProjectContext = computed(
+  () => props.lockProjectContext || lockWorkspaceDirectory.value,
+)
 const catalogLoading = ref(false)
 const catalogError = ref('')
 const validationBusy = ref(false)
@@ -1193,7 +1201,7 @@ const initialProjectRoot = normalizePath(
     parentPath(props.initialConfig?.directory || ''),
 )
 const projectContext = ref<ProjectContext>({
-  mode: props.lockProjectContext
+  mode: lockProjectContext.value
     ? 'select'
     : props.initialConfig?.project_context?.mode || 'select',
   project_name:
@@ -1916,10 +1924,10 @@ function syncProjectTarget(): void {
   projectContext.value.project_json_path = projectContext.value.project_root
     ? joinPath(projectContext.value.project_root, 'project.json')
     : ''
-  config.value.directory = joinPath(
-    projectContext.value.project_root,
-    workspaceName.value,
-  )
+  config.value.directory =
+    lockWorkspaceDirectory.value && props.initialConfig?.directory
+      ? normalizePath(props.initialConfig.directory)
+      : joinPath(projectContext.value.project_root, workspaceName.value)
   config.value.project_context = { ...projectContext.value }
 }
 

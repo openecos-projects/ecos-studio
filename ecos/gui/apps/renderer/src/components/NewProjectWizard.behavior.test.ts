@@ -1,8 +1,16 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils'
-import type { ProjectEccPdkConfigReadResult, ProjectManifest } from '@ecos-studio/shared'
-import { describe, expect, it, vi } from 'vitest'
+import {
+  createProjectManifestDraft,
+  type ProjectEccPdkConfigReadResult,
+  type ProjectManifest,
+} from '@ecos-studio/shared'
+import type { Project } from '@/types'
+import type { WorkspaceWizardInitialConfig } from '@/utils/workspaceNavigation'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import NewProjectWizard from './NewProjectWizard.vue'
+import WorkspaceWizard from './WorkspaceWizard.vue'
+import FrontendProjectWizard from './FrontendProjectWizard.vue'
 import PdkResourcePickerDialog from './PdkResourcePickerDialog.vue'
 
 const wizardMocks = vi.hoisted(() => {
@@ -57,7 +65,7 @@ const wizardMocks = vi.hoisted(() => {
     validatePdk: vi.fn(),
     locatePdk: vi.fn(),
     showToast: vi.fn(),
-    loadProjectHistory: vi.fn(async () => []),
+    loadProjectHistory: vi.fn<() => Promise<Project[]>>(async () => []),
     readProjectManagementManifest: vi.fn<() => Promise<ProjectManifest | null>>(
       async () => null,
     ),
@@ -74,6 +82,7 @@ const wizardMocks = vi.hoisted(() => {
     writeProjectEccPdkConfig: vi.fn(),
     scanPdkDirectory: vi.fn(),
     pickFiles: vi.fn(),
+    pickDirectory: vi.fn(),
     discoverHdlModules: vi.fn(async (request: { rtlPaths?: string[] }) => {
       if (request.rtlPaths?.includes('/rtl/empty.v')) {
         return { candidates: [], status: 'complete', suggested: '' }
@@ -103,7 +112,10 @@ vi.mock('@/platform/desktop', () => ({
       read: wizardMocks.readProjectEccPdkConfig,
       write: wizardMocks.writeProjectEccPdkConfig,
     },
-    dialog: { pickFiles: wizardMocks.pickFiles },
+    dialog: {
+      pickFiles: wizardMocks.pickFiles,
+      pickDirectory: wizardMocks.pickDirectory,
+    },
     workspaceCreationModel: { get: wizardMocks.getWorkspaceCreationModel },
     workspace: {
       scanPdkDirectory: wizardMocks.scanPdkDirectory,
@@ -118,6 +130,21 @@ vi.mock('@/utils/projectHistory', () => ({
 
 vi.mock('@/utils/projectManagementRead', () => ({
   readProjectManagementManifest: wizardMocks.readProjectManagementManifest,
+}))
+
+vi.mock('@/api/frontendCatalog', () => ({
+  listFrontendCatalogApi: vi.fn(async () => ({
+    response: 'success',
+    data: {
+      version: 1,
+      defaults: { core_id: '', soc_harness_id: '', toolchain_id: '', test_suite_id: '' },
+      cores: [],
+      soc_harnesses: [],
+      toolchains: [],
+      test_suites: [],
+    },
+  })),
+  validateFrontendConfigApi: vi.fn(),
 }))
 
 const primevueStubs = {
@@ -1597,6 +1624,277 @@ describe('NewProjectWizard behavior', () => {
 
     expect(wizard.flowStartStep).toBe('preFloorplan')
     expect(wizard.selectedFlowSteps[0]).toBe('preFloorplan')
+    wrapper.unmount()
+  })
+})
+
+describe('workspace wizard project type routing', () => {
+  const projectRoot = '/projects/cpu'
+  const frontendManifest = createProjectManifestDraft({
+    rootPath: projectRoot,
+    name: 'project_cpu_soc',
+    designName: 'simple_cpu',
+    projectType: 'frontend',
+  })
+  const global = {
+    stubs: { DesignFileTransfer: true, PdkResourcePickerDialog: true, ...primevueStubs },
+  }
+
+  beforeEach(() => {
+    wizardMocks.readProjectManagementManifest.mockReset()
+    wizardMocks.readProjectManagementManifest.mockResolvedValue(frontendManifest)
+    wizardMocks.loadProjectHistory.mockResolvedValue([
+      {
+        id: projectRoot,
+        path: projectRoot,
+        name: 'project_cpu_soc',
+        // The on-disk manifest must decide the flow even when history is stale.
+        projectType: 'backend',
+        lastOpened: new Date(),
+      },
+    ])
+    wizardMocks.pickDirectory.mockResolvedValue(projectRoot)
+    wizardMocks.getWorkspaceCreationModel.mockClear()
+  })
+
+  it.each(['history', 'browse'])(
+    'opens frontend setup when selecting a frontend project via %s',
+    async (entry) => {
+      const wrapper = mount(WorkspaceWizard, { global })
+      await flushPromises()
+      const button = wrapper
+        .findAll('button')
+        .find((item) =>
+          entry === 'history'
+            ? item.text().includes('project_cpu_soc')
+            : item.text() === 'Browse',
+        )
+      expect(button).toBeDefined()
+      await button!.trigger('click')
+      await flushPromises()
+
+      expect(wrapper.findComponent(NewProjectWizard).exists()).toBe(false)
+      const frontend = wrapper.getComponent(FrontendProjectWizard)
+      expect(frontend.props('initialConfig')).toEqual({
+        designTool: 'frontend',
+        directory: `${projectRoot}/ws_0001`,
+        parameters: { design: 'simple_cpu' },
+        project_context: {
+          mode: 'select',
+          project_id: frontendManifest.project_id,
+          project_name: 'project_cpu_soc',
+          project_root: projectRoot,
+          project_json_path: `${projectRoot}/project.json`,
+        },
+      })
+      const continueButton = frontend
+        .findAll('button')
+        .find((item) => item.text() === 'Continue')!
+      expect(continueButton.attributes('disabled')).toBeUndefined()
+      await continueButton.trigger('click')
+      await flushPromises()
+      expect(frontend.find('h2')?.text()).toBe('Verification Setup')
+      expect(wrapper.text()).not.toContain('Flow Setup')
+      expect(wrapper.text()).not.toContain('preFloorplan')
+      wrapper.unmount()
+    },
+  )
+
+  it('opens frontend requests directly without querying the backend flow', async () => {
+    const wrapper = mount(WorkspaceWizard, {
+      props: {
+        initialConfig: {
+          designTool: 'frontend',
+          directory: `${projectRoot}/ws_0003`,
+          project_context: {
+            mode: 'select',
+            project_root: projectRoot,
+            project_name: 'project_cpu_soc',
+            project_json_path: `${projectRoot}/project.json`,
+          },
+        },
+      },
+      global,
+    })
+    await flushPromises()
+    expect(wrapper.findComponent(NewProjectWizard).exists()).toBe(false)
+    expect(
+      wrapper.getComponent(FrontendProjectWizard).props('initialConfig')?.directory,
+    ).toBe(`${projectRoot}/ws_0003`)
+    expect(wizardMocks.getWorkspaceCreationModel).not.toHaveBeenCalled()
+    await wrapper.get('input[placeholder="e.g. ws_0001"]').setValue('ws_0004')
+    expect(wrapper.get(`p[title="${projectRoot}/ws_0004"]`).text()).toBe(
+      `${projectRoot}/ws_0004`,
+    )
+    wrapper.unmount()
+  })
+
+  it('preserves loaded workspace configuration when discovering a frontend project', async () => {
+    const initialConfig: WorkspaceWizardInitialConfig = {
+      directory: `${projectRoot}/ws_0003`,
+      lockWorkspaceDirectory: true,
+      parameters: {
+        design: 'simple_cpu',
+        description: 'Existing workspace settings',
+        clock: 'sys_clk',
+        frequency_max: 150,
+        cpu_filelist: '/rtl/cpu.f',
+      },
+      pdk: 'ics55',
+      pdk_root: '/pdks/ics55',
+      sdc: '/constraints/cpu.sdc',
+      flow_config: {
+        start_step: 'elab',
+        end_step: 'sim',
+        steps: ['elab', 'lint', 'sim'],
+      },
+      project_context: {
+        mode: 'select',
+        project_root: projectRoot,
+        project_name: 'project_cpu_soc',
+        project_json_path: `${projectRoot}/project.json`,
+      },
+    }
+    const wrapper = mount(WorkspaceWizard, { props: { initialConfig }, global })
+    await flushPromises()
+
+    expect(wrapper.findComponent(NewProjectWizard).exists()).toBe(false)
+    expect(
+      wrapper.getComponent(FrontendProjectWizard).props('initialConfig'),
+    ).toMatchObject({
+      ...initialConfig,
+      designTool: 'frontend',
+    })
+    expect(wrapper.get('textarea').element.value).toBe('Existing workspace settings')
+    expect(initialConfig.parameters?.clock).toBe('sys_clk')
+    expect(initialConfig.parameters?.frequency_max).toBe(150)
+    wrapper.unmount()
+  })
+
+  it.each(['direct', 'manifest'])(
+    'enforces the project management target lock for %s frontend routing',
+    async (entry) => {
+      const directory = `${projectRoot}/ws_0003`
+      const wrapper = mount(WorkspaceWizard, {
+        props: {
+          initialConfig: {
+            designTool: entry === 'direct' ? 'frontend' : undefined,
+            directory,
+            lockWorkspaceDirectory: true,
+            project_context: {
+              mode: 'select',
+              project_root: projectRoot,
+              project_name: 'project_cpu_soc',
+              project_json_path: `${projectRoot}/project.json`,
+            },
+          },
+        },
+        global,
+      })
+      await flushPromises()
+
+      expect(
+        wrapper.getComponent(FrontendProjectWizard).props('lockWorkspaceDirectory'),
+      ).toBe(true)
+      expect(
+        wrapper.get('input[placeholder="e.g. ws_0001"]').attributes('disabled'),
+      ).toBeDefined()
+      expect(
+        wrapper.get('input[placeholder="e.g. project_fe"]').attributes('readonly'),
+      ).toBeDefined()
+      const buttonLabels = wrapper.findAll('button').map((button) => button.text())
+      expect(buttonLabels).not.toContain('Browse')
+      expect(buttonLabels).not.toContain('Create Project')
+      expect(wrapper.get(`p[title="${directory}"]`).text()).toBe(directory)
+      wrapper.unmount()
+    },
+  )
+
+  it('keeps a locked target outside the project root at its supplied path', async () => {
+    const directory = '/scratch/cpu/ws_0003'
+    const wrapper = mount(WorkspaceWizard, {
+      props: {
+        initialConfig: {
+          designTool: 'frontend',
+          directory,
+          lockWorkspaceDirectory: true,
+          project_context: {
+            mode: 'select',
+            project_root: projectRoot,
+            project_name: 'project_cpu_soc',
+            project_json_path: `${projectRoot}/project.json`,
+          },
+        },
+      },
+      global,
+    })
+    await flushPromises()
+    expect(wrapper.get(`p[title="${directory}"]`).text()).toBe(directory)
+    expect(wrapper.find(`p[title="${projectRoot}/ws_0003"]`).exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('blocks Continue until the selected manifest is read and reports read failures', async () => {
+    let rejectRead!: (reason: Error) => void
+    wizardMocks.readProjectManagementManifest.mockReturnValue(
+      new Promise((_resolve, reject) => {
+        rejectRead = reject
+      }),
+    )
+    const wrapper = mount(WorkspaceWizard, {
+      props: {
+        initialConfig: {
+          directory: `${projectRoot}/ws_0001`,
+          project_context: {
+            mode: 'select',
+            project_root: projectRoot,
+            project_name: 'cpu',
+            project_json_path: `${projectRoot}/project.json`,
+          },
+        },
+      },
+      global,
+    })
+    await flushPromises()
+    const continueButton = () =>
+      wrapper.findAll('button').find((item) => item.text() === 'Continue')!
+    expect(continueButton().attributes('disabled')).toBeDefined()
+    rejectRead(new Error('Unreadable manifest'))
+    await flushPromises()
+    expect(wrapper.text()).toContain('could not be read')
+    expect(continueButton().attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('keeps backend projects on the backend flow', async () => {
+    wizardMocks.readProjectManagementManifest.mockResolvedValue({
+      ...frontendManifest,
+      project_type: 'backend',
+    })
+    const wrapper = mount(WorkspaceWizard, {
+      props: {
+        initialConfig: {
+          directory: `${projectRoot}/ws_0001`,
+          project_context: {
+            mode: 'select',
+            project_root: projectRoot,
+            project_name: 'cpu',
+            project_json_path: `${projectRoot}/project.json`,
+          },
+        },
+      },
+      global,
+    })
+    await flushPromises()
+    for (let step = 0; step < 2; step += 1) {
+      await wrapper
+        .findAll('button')
+        .find((item) => item.text() === 'Continue')!
+        .trigger('click')
+      await flushPromises()
+    }
+    expect(wrapper.findComponent(FrontendProjectWizard).exists()).toBe(false)
+    expect(wrapper.text()).toContain('preFloorplan')
     wrapper.unmount()
   })
 })
