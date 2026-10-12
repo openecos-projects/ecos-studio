@@ -1,4 +1,4 @@
-import { ref, watch } from 'vue'
+import { onScopeDispose, ref, watch, type Ref } from 'vue'
 import type { WorkspaceArtifactDescriptor } from '@ecos-studio/shared'
 import { getDesktopApi } from '@/platform/desktop'
 import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
@@ -30,20 +30,42 @@ export function staTimingIssuesLabel(code: string): string {
  * dialog loads sta_timing_issues.json (with stage lists) through the backend
  * artifact channel.
  */
-export function useStaTimingIssues() {
+export function useStaTimingIssues(
+  artifactRef?: Readonly<Ref<WorkspaceArtifactDescriptor | null>>,
+) {
   const session = useBackendWorkspaceSession()
   const visible = ref(false)
   const state = ref<StaTimingIssuesState>({ status: 'idle' })
   let requestVersion = 0
+  let cachedArtifactKey = ''
 
   watch(
-    () => session.generation,
-    () => {
+    () =>
+      [
+        session.generation,
+        session.workspaceContextId,
+        session.projection.data?.revision?.status === 'ready' ||
+        session.projection.data?.revision?.status === 'partial'
+          ? session.projection.data.revision.data.workspaceRevision
+          : null,
+        artifactRef?.value?.artifactId,
+        artifactRef?.value?.sourceRevision,
+        artifactRef?.value?.availability,
+      ] as const,
+    (current, previous) => {
       requestVersion += 1
-      visible.value = false
+      cachedArtifactKey = ''
       state.value = { status: 'idle' }
+      if (current[0] !== previous[0] || current[1] !== previous[1]) {
+        visible.value = false
+      } else if (visible.value && artifactRef) {
+        void open(artifactRef.value)
+      }
     },
   )
+  onScopeDispose(() => {
+    requestVersion += 1
+  })
 
   function close(): void {
     visible.value = false
@@ -51,7 +73,13 @@ export function useStaTimingIssues() {
 
   async function open(artifact: WorkspaceArtifactDescriptor | null): Promise<void> {
     visible.value = true
-    if (state.value.status === 'ready' || state.value.status === 'loading') return
+    const artifactKey = JSON.stringify([artifact?.artifactId, artifact?.sourceRevision])
+    if (
+      cachedArtifactKey === artifactKey &&
+      (state.value.status === 'ready' || state.value.status === 'loading')
+    )
+      return
+    cachedArtifactKey = artifactKey
     const version = ++requestVersion
     if (!artifact) {
       state.value = { status: 'unavailable', code: 'ARTIFACT_REFERENCE_MISSING' }
@@ -84,6 +112,8 @@ export function useStaTimingIssues() {
         return
       }
       if (
+        result.workspaceContextId !== contextId ||
+        result.workspaceRevision !== workspaceRevision ||
         result.artifact.status !== 'ready' ||
         result.artifact.data.artifactId !== artifact.artifactId ||
         !result.artifact.data.timingIssues
@@ -107,6 +137,9 @@ export function useStaTimingIssues() {
           slackNs: issue.slackNs,
           stageCount: issue.stages.length,
           stages: issue.stages,
+          startPoint: issue.startPoint,
+          endPoint: issue.endPoint,
+          pathGroup: issue.pathGroup,
         })),
         missingCorners: detail.missingCorners,
       }

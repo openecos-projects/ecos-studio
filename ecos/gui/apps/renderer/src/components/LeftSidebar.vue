@@ -5,15 +5,15 @@
   >
     <router-link
       v-for="stage in workspaceStages"
-      :key="stage.path"
-      :to="workspaceStageLink(stage.path)"
+      :key="stage.id"
+      :to="workspaceStageLink(stage.id)"
       class="group relative mb-1 flex w-full min-w-0 flex-col items-center justify-center px-1 py-4 transition-all"
       :class="[
-        currentStage === stage.path ? 'text-(--accent-color)' : 'text-(--text-secondary)',
+        currentStage === stage.id ? 'text-(--accent-color)' : 'text-(--text-secondary)',
       ]"
     >
       <span
-        v-if="currentStage === stage.path"
+        v-if="currentStage === stage.id"
         class="absolute top-2 bottom-2 left-0 w-1 rounded-r-full bg-(--accent-color) shadow-[0_0_10px_var(--accent-color)]"
         aria-hidden="true"
       />
@@ -33,15 +33,25 @@
 
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
+import { computed } from 'vue'
+import { FLOW_INSIGHT_MODULES } from './flow-insights/flowInsightsModule'
 
 const route = useRoute()
-const currentStage = 'home'
-const workspaceStages = [{ label: 'Dashboard', path: 'home', icon: 'ri-dashboard-line' }]
+const currentStage = computed(() => route.query.insight ?? 'home')
+const workspaceStages = [
+  { label: 'Dashboard', id: 'home', icon: 'ri-dashboard-line' },
+  ...FLOW_INSIGHT_MODULES.map((module) => ({
+    label: module.title,
+    id: module.id,
+    icon: module.icon,
+  })),
+]
 
-function workspaceStageLink(stagePath: string) {
+function workspaceStageLink(moduleId: string) {
+  const { insight: _insight, ...query } = route.query
   return {
-    path: `/workspace/${stagePath}`,
-    query: route.query,
+    path: '/workspace/home',
+    query: moduleId === 'home' ? query : { ...query, insight: moduleId },
   }
 }
 </script>

@@ -12,7 +12,6 @@ import {
   buildStaOverviewModel,
   congestionCandidatePngPaths,
   buildStepResourcesModel,
-  staConvergenceFromComparison,
   canonicalStepKey,
   describeMetricDelta,
   flowInsightStepStateIcon,
@@ -277,7 +276,7 @@ describe('flow insights data', () => {
         corner: 'MIN_m40/Cworst',
         summary: {
           summary: {
-            setup: { wns: 20.1, tns: 0, nvp: 0, frequency_mhz: 146 },
+            setup: { wns: 20.1, tns: 0, nvp: 0, frequency_mhz: 140 },
             hold: { wns: 0.07, tns: 0, nvp: 0 },
           },
         },
@@ -286,7 +285,7 @@ describe('flow insights data', () => {
     expect(model.worstSetup).toEqual({ corner: 'MAX_125/Cworst', wns: 13.139 })
     expect(model.worstHold).toEqual({ corner: 'MIN_m40/Cworst', wns: 0.07 })
     expect(model.allCornersMet).toBe(true)
-    expect(model.frequencyMhz).toBe(146)
+    expect(model.frequencyMhz).toBe(140)
     expect(model.pathGroups).toEqual([])
     expect(model.selectedPathGroup).toBe('summary')
   })
@@ -478,31 +477,5 @@ describe('flow insights data', () => {
     const scoped = selectStaCriticalPaths(pathsByCorner, 'TYP/Cbest')
     expect(scoped.setup.map((path) => path.id)).toEqual(['TYP/Cbest:setup_ok'])
     expect(scoped.hold.map((path) => path.id)).toEqual(['TYP/Cbest:hold_bad'])
-  })
-
-  it('hides cross-run convergence until a baseline workspace is available', () => {
-    expect(
-      staConvergenceFromComparison({
-        workspaceName: 'ws_0007',
-        baselineWorkspaceName: null,
-        isBaselineWorkspace: true,
-        metrics: [],
-      }),
-    ).toBeNull()
-    const model = staConvergenceFromComparison({
-      workspaceName: 'ws_0007',
-      baselineWorkspaceName: 'ws_0001',
-      isBaselineWorkspace: false,
-      metrics: [
-        { metricName: 'sta_setup_wns', currentValue: 13.139, baselineValue: 10.1 },
-        { metricName: 'sta_hold_wns', currentValue: 0.07, baselineValue: 0.05 },
-        { metricName: 'sta_frequency_mhz', currentValue: 146, baselineValue: 140 },
-      ],
-    })
-    expect(model?.points.map((point) => point.workspaceName)).toEqual([
-      'ws_0001',
-      'ws_0007',
-    ])
-    expect(model?.points[1]?.setupWns).toBe(13.139)
   })
 })

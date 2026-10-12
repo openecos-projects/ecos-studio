@@ -444,6 +444,9 @@ export function applyTimingArtifacts(
       slackNs: path.slackNs,
       stageCount: path.stages.length,
       stages: path.stages,
+      startPoint: path.startPoint,
+      endPoint: path.endPoint,
+      pathGroup: path.pathGroup,
     })),
   }))
   const existingPaths = new Map(

@@ -37,6 +37,7 @@ export interface FlowInsightsData {
   drcRelated: DrcRelatedMetrics
   sta: StaOverviewModel | null
   staCriticalPaths: StaCriticalPathsModel | null
+  timingArtifacts: WorkspaceArtifactDescriptor[]
   /**
    * Indexed sta_timing_issues artifact for lazy-loading the full timing issue
    * list (with stage detail) when the preview is only the bounded head.
@@ -214,6 +215,9 @@ export function staCriticalPathsFromSnapshot(
     slackNs: path.slackNs,
     stageCount: path.stages.length,
     stages: path.stages,
+    startPoint: path.startPoint,
+    endPoint: path.endPoint,
+    pathGroup: path.pathGroup,
   }))
   return {
     setup: paths.filter((path) => path.analysisType === 'setup'),
@@ -337,6 +341,11 @@ export function buildSnapshotFlowInsights(
     }),
     sta: staOverviewFromSnapshot(insights.data.sta),
     staCriticalPaths: staCriticalPathsFromSnapshot(insights.data.sta),
+    timingArtifacts: artifactItems.filter(
+      (artifact) =>
+        artifact.stepId?.toLowerCase() === 'sta' &&
+        (artifact.kind === 'timing_summary' || artifact.kind === 'timing_paths'),
+    ),
     timingIssuesArtifact:
       artifactItems.find(
         (artifact) =>

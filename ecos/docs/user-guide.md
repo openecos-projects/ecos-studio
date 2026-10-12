@@ -569,12 +569,58 @@ The Home page aggregates the whole flow:
   count. Click a thumbnail to open that layout in the Chip Viewer. Unavailable
   layouts show the reason (too large, invalid, changed, stale, missing).
 - **Key Metrics** — area, instances, timing, and other headline metrics.
-- **Flow Insights** — a tile grid (click a tile to open its full-size dialog):
-  step resources (runtime and peak memory, with a **Log scale** toggle), DB
+- **Insight navigation** — buttons beneath **Dashboard** in the left sidebar
+  open full-size dialogs: **Step Trends** (runtime and peak memory, with a
+  **Log scale** toggle), **DB Trends**
   trends (metric×step heat matrix, trend lines, instance composition with a
   Count/Area toggle), congestion (overflow trends and per-step heat maps), DRC
   (bars/pie toggle, per-type list, layer×type matrix with a *Non-zero only*
-  filter), and STA (timing analysis plus cross-run convergence).
+  filter), and **Timing** (current-workspace STA analysis). The Data Snapshot
+  card is no longer on the Dashboard; Chip Basic Info and Key Metrics share
+  its bottom row in a 4:6 width ratio.
+
+### Timing
+
+The Timing dialog shows current STA results, without a baseline or cross-run
+convergence chart. QoR baseline comparisons elsewhere in Studio are unchanged.
+
+- **Overview / Summary** — separate worst setup/hold WNS and TNS KPIs (also
+  present in the compact Synthesis/STA summaries), with each metric's own
+  worst corner; the minimum available frequency across
+  corners, and a per-corner WNS/TNS/NVP table. Times are in ns; frequency is in
+  MHz. NVP is the number of violating paths. Missing corner data stays visible
+  and cannot be interpreted as a passing result. A path-group selector and
+  negative-first sorting help focus the overview.
+  Red cells trace the Worst row back to its source corner values, including
+  ties; this provenance marker is not itself a violation indicator. NVP is a
+  total across corners, so its non-zero contributors are highlighted instead
+  of inventing a single worst corner.
+- **WNS / TNS by Corner** — switches the same chart between worst slack and
+  total negative slack. Both modes show setup and hold series in ns, with a
+  zero reference line; unavailable values are gaps, not zero-valued passes.
+  Expand the chart when needed. The corner table scrolls with pinned column
+  headers and a Worst row so path selection remains easy to reach.
+- **Timing paths · corner** — selects the corner to inspect, initially the
+  worst setup corner. Setup and hold paths are sorted by lowest slack first.
+  Each compact path row shows slack, endpoints, path group, and stage count;
+  expand it for a delay waterfall and a scrollable pin/cell/delay/arrival table.
+  All exported paths for the selected corner are available, including paths
+  with positive slack; Run Information states the tool's export limit and the
+  setup/hold path counts.
+- **View full timing issues with stages** — separately loads the analysis
+  issue list. An empty issue list does not imply an empty timing-path export.
+  Zero issues, missing paths, and artifact errors have distinct messages.
+- **Reload timing** re-reads the indexed corner artifacts. Committing a new
+  workspace revision automatically invalidates cached summaries, paths, and
+  issues; late responses from an older revision do not replace current data.
+
+Corner overview data comes from indexed
+`sta_ecc/feature/<corner>/qor_summary.json` artifacts, and path details come from
+the matching `timing_paths.json`. The separate issue list comes from
+`sta_ecc/analysis/sta_timing_issues.json`. Reads go through the desktop backend's
+committed artifact index, not renderer-side filesystem access. Missing, changed,
+or unindexed artifacts remain unavailable rather than being silently replaced
+with data from another revision.
 
 ---
 

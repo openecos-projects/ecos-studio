@@ -71,7 +71,7 @@ describe('RTL workspace dashboard', () => {
     }
   })
 
-  it('shows only Dashboard navigation with Flow above three information cards', async () => {
+  it('shows insight navigation with Flow above two information cards', async () => {
     const { page, app } = launched!
     await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0].setSize(1440, 1000),
@@ -81,7 +81,7 @@ describe('RTL workspace dashboard', () => {
       (
         await page.locator('nav[aria-label="Workspace navigation"] a').allTextContents()
       ).map((text) => text.trim()),
-    ).toEqual(['Dashboard'])
+    ).toEqual(['Dashboard', 'Step Trends', 'DB Trends', 'Congestion', 'DRC', 'Timing'])
     expect(await page.locator('.flow-overview h2').allTextContents()).toEqual([
       'Quality of Results',
       'Signoff Checklist',
@@ -89,7 +89,6 @@ describe('RTL workspace dashboard', () => {
     expect(await page.locator('.home-dashboard-bottom h2').allTextContents()).toEqual([
       'Chip Basic Info',
       'Key Metrics',
-      'Data Snapshot',
     ])
     expect(await page.locator('.home-dashboard-top').count()).toBe(0)
     expect(
@@ -280,7 +279,7 @@ describe('RTL workspace dashboard', () => {
     await page.getByRole('button', { name: 'Restore flow diagram', exact: true }).click()
   })
 
-  it('applies two-row ratios, nine snapshot cells, and keeps status cards fixed while zooming', async () => {
+  it('applies two-row ratios and keeps status cards fixed while zooming', async () => {
     const { page } = launched!
     const ratios = await page.locator('.home-dashboard').evaluate((element) => {
       const middle = element
@@ -292,14 +291,13 @@ describe('RTL workspace dashboard', () => {
       )
       return {
         rows: middle.height / bottom.getBoundingClientRect().height,
-        bottom: bottomCards.map((width) => width / bottomCards[2]),
+        bottom: bottomCards[0] / bottomCards[1],
       }
     })
     expect(ratios.rows).toBeCloseTo(2, 1)
-    expect(ratios.bottom[0]).toBeCloseTo(2, 1)
-    expect(ratios.bottom[1]).toBeCloseTo(4, 1)
+    expect(ratios.bottom).toBeCloseTo(4 / 6, 1)
     expect(await page.locator('.qor-card').textContent()).not.toContain('Current QoR')
-    expect(await page.locator('.data-snapshot-cell').count()).toBe(9)
+    expect(await page.locator('.data-snapshot-cell').count()).toBe(0)
     const overview = page.locator('.flow-overview')
     const before = await overview.boundingBox()
     expect(

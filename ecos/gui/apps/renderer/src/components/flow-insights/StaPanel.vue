@@ -1,12 +1,41 @@
 <template>
   <div class="insight-module">
+    <header class="sta-overview-header">
+      <div>
+        <h3>STA Timing Analysis</h3>
+        <p>Current workspace · corner summaries and timing paths · all times in ns</p>
+      </div>
+      <button
+        type="button"
+        class="sta-full-list-button"
+        :disabled="summaryLoading"
+        @click="void refresh()"
+      >
+        <i class="ri-refresh-line" aria-hidden="true" /> Reload timing
+      </button>
+    </header>
+    <p v-if="summaryLoading" class="sta-load-note" role="status">
+      Loading STA corner summaries…
+    </p>
+    <p v-else-if="failedSummaryCorners.length" class="sta-issues-missing" role="status">
+      Incomplete corner data: {{ failedSummaryCorners.join(', ') }}. Reload timing to
+      retry.
+    </p>
     <TimingAnalysisPanel
-      :overview="model"
-      :critical-paths="criticalPaths"
+      :overview="summaryLoading ? null : displayedOverview"
+      :paths-by-corner="pathsByCorner"
+      :selected-corner="selectedCorner"
+      :detail-loading="selectedPathLoading"
+      :detail-error="selectedPathError"
+      :critical-path-limit="Number.POSITIVE_INFINITY"
+      :run-info="selectedRunInfo"
+      corner-selector="select"
       empty-hint="Waiting for STA corners…"
+      @select-corner="selectCorner"
+      @retry-corner="retryCorner"
     />
 
-    <div v-if="criticalPaths" class="sta-full-list-entry">
+    <div v-if="timingIssuesArtifact || criticalPaths" class="sta-full-list-entry">
       <button
         type="button"
         class="sta-full-list-button"
@@ -47,26 +76,14 @@
             {{ issuesState.missingCorners.join(', ') }}.</span
           >
         </p>
-        <TimingCriticalPaths :critical-paths="fullIssuesModel" />
+        <p v-if="!issuesState.issues.length" class="sta-issues-state" role="status">
+          <i class="ri-checkbox-circle-line" aria-hidden="true" />
+          No timing issues were reported in this STA analysis. Corner timing paths are
+          available separately in the main Timing panel.
+        </p>
+        <TimingCriticalPaths v-else :critical-paths="fullIssuesModel" />
       </template>
     </Dialog>
-
-    <section v-if="hasCorners && convergence" class="sta-card">
-      <header class="sta-subheader">
-        <h3>Cross-run Convergence</h3>
-        <span class="sta-hint">baseline → current workspace</span>
-      </header>
-      <FlowTrendChart
-        label="STA WNS across workspaces"
-        :categories="convergence.points.map((point) => point.workspaceName)"
-        :series="convergenceSeries"
-        left-unit="ns"
-        right-unit="MHz"
-        height="200px"
-        :mark-line-y="0"
-        negative-band
-      />
-    </section>
   </div>
 </template>
 
@@ -74,24 +91,19 @@
 import { computed } from 'vue'
 import Dialog from 'primevue/dialog'
 import type { WorkspaceArtifactDescriptor } from '@ecos-studio/shared'
-import FlowTrendChart from './FlowTrendChart.vue'
-import type { FlowTrendSeries } from './FlowTrendChart.vue'
 import TimingAnalysisPanel from '../step-insights/TimingAnalysisPanel.vue'
 import TimingCriticalPaths from '../step-insights/TimingCriticalPaths.vue'
 import {
   staTimingIssuesLabel,
   useStaTimingIssues,
 } from '@/composables/useStaTimingIssues'
-import type {
-  StaConvergenceModel,
-  StaCriticalPathsModel,
-  StaOverviewModel,
-} from './flowInsightsData'
+import { useStaCornerDetails } from '@/composables/useStaCornerDetails'
+import type { StaCriticalPathsModel, StaOverviewModel } from './flowInsightsData'
 
 const props = defineProps<{
   model: StaOverviewModel | null
   criticalPaths?: StaCriticalPathsModel | null
-  convergence?: StaConvergenceModel | null
+  timingArtifacts?: WorkspaceArtifactDescriptor[]
   /** Indexed sta_timing_issues artifact enabling the full-issue lazy load. */
   timingIssuesArtifact?: WorkspaceArtifactDescriptor | null
 }>()
@@ -101,9 +113,54 @@ const {
   open: openIssues,
   state: issuesState,
   visible: issuesVisible,
-} = useStaTimingIssues()
+} = useStaTimingIssues(computed(() => props.timingIssuesArtifact ?? null))
 
-const hasCorners = computed(() => Boolean(props.model?.corners.length))
+const {
+  overview,
+  summaryLoading,
+  summaryErrors,
+  pathsByCorner,
+  pathLimits,
+  pathErrors,
+  pathLoading,
+  selectedCorner,
+  selectCorner,
+  refresh,
+} = useStaCornerDetails(computed(() => props.timingArtifacts ?? []))
+const displayedOverview = computed(() => overview.value ?? props.model)
+const failedSummaryCorners = computed(() => Object.keys(summaryErrors.value))
+const selectedPathLoading = computed(
+  () => selectedCorner.value !== null && pathLoading.value.includes(selectedCorner.value),
+)
+const selectedPathError = computed(() =>
+  selectedCorner.value ? (pathErrors.value[selectedCorner.value] ?? null) : null,
+)
+const selectedRunInfo = computed(() => {
+  const corner = selectedCorner.value
+  if (!corner || pathLimits.value[corner] === undefined) return []
+  const paths = pathsByCorner.value.find((entry) => entry.corner === corner)?.paths ?? []
+  return [
+    {
+      id: 'path-limit',
+      label: 'Tool path limit per analysis type',
+      value: String(pathLimits.value[corner]),
+    },
+    {
+      id: 'setup-paths',
+      label: 'Setup paths available',
+      value: String(paths.filter((path) => path.analysisType === 'setup').length),
+    },
+    {
+      id: 'hold-paths',
+      label: 'Hold paths available',
+      value: String(paths.filter((path) => path.analysisType === 'hold').length),
+    },
+  ]
+})
+
+function retryCorner(): void {
+  selectCorner(selectedCorner.value)
+}
 
 const fullListButtonLabel = computed(() => {
   const preview = props.criticalPaths
@@ -121,40 +178,6 @@ const fullIssuesModel = computed<StaCriticalPathsModel | null>(() => {
     hold: issues.filter((issue) => issue.analysisType === 'hold'),
   }
 })
-
-const convergenceSeries = computed<FlowTrendSeries[]>(() => {
-  const points = props.convergence?.points ?? []
-  return [
-    {
-      id: 'setup-wns-run',
-      label: 'Setup WNS',
-      type: 'line' as const,
-      values: points.map((point) => point.setupWns),
-      unit: 'ns',
-      color: '#3b82f6',
-      symbol: 'triangle',
-    },
-    {
-      id: 'hold-wns-run',
-      label: 'Hold WNS',
-      type: 'line' as const,
-      values: points.map((point) => point.holdWns),
-      unit: 'ns',
-      color: '#f59e0b',
-      symbol: 'triangle',
-      symbolRotate: 180,
-    },
-    {
-      id: 'freq-run',
-      label: 'Frequency',
-      type: 'line' as const,
-      values: points.map((point) => point.frequencyMhz),
-      unit: 'MHz',
-      color: '#10b981',
-      yAxisIndex: 1 as const,
-    },
-  ]
-})
 </script>
 
 <style scoped>
@@ -165,33 +188,25 @@ const convergenceSeries = computed<FlowTrendSeries[]>(() => {
   min-width: 0;
 }
 
-.sta-card {
-  background: color-mix(in srgb, var(--bg-primary) 74%, transparent);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  padding: 10px;
-}
-
-.sta-subheader {
+.sta-overview-header {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   justify-content: space-between;
 }
 
-.sta-subheader h3 {
+.sta-overview-header h3 {
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 14px;
   margin: 0;
 }
 
-.sta-hint {
+.sta-overview-header p,
+.sta-load-note {
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: 12px;
+  margin: 6px 0 0;
 }
 
 .sta-full-list-entry {

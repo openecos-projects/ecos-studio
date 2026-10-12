@@ -12,7 +12,7 @@ vi.mock('vue-router', () => ({ useRoute: () => state.route }))
 import LeftSidebar from './LeftSidebar.vue'
 
 describe('RTL workspace navigation', () => {
-  it('shows only Dashboard and preserves workspace query context', () => {
+  it('shows Dashboard and insight modules while preserving workspace context', () => {
     const wrapper = mount(LeftSidebar, {
       global: {
         stubs: {
@@ -23,9 +23,21 @@ describe('RTL workspace navigation', () => {
     const links = wrapper.findAllComponents({ name: 'RouterLink' })
     expect(wrapper.text()).not.toContain('Project')
     expect(wrapper.text()).toContain('Dashboard')
-    expect(wrapper.findAll('a')).toHaveLength(1)
+    expect(wrapper.findAll('a')).toHaveLength(6)
     expect(links.map((link) => link.props('to'))).toEqual([
       { path: '/workspace/home', query: state.route.query },
+      ...['resources', 'db-trends', 'congestion', 'drc', 'timing'].map((insight) => ({
+        path: '/workspace/home',
+        query: { ...state.route.query, insight },
+      })),
+    ])
+    expect(links.map((link) => link.text())).toEqual([
+      'Dashboard',
+      'Step Trends',
+      'DB Trends',
+      'Congestion',
+      'DRC',
+      'Timing',
     ])
   })
 })

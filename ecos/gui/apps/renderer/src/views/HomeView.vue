@@ -172,27 +172,27 @@
               </div>
             </dl>
           </section>
-
-          <section class="dashboard-section flow-insights-card">
-            <FlowInsightsPanel
-              :steps="flowInsightSteps"
-              :step-resources="flowInsightResources"
-              :db-trends="flowInsightDbTrends"
-              :instance-composition="flowInsightComposition"
-              :congestion-tiles="flowInsightCongestionTiles"
-              :congestion-tile-urls="flowInsightCongestionUrls"
-              :drc="flowInsightDrc"
-              :drc-related="flowInsightDrcRelated"
-              :sta="flowInsightSta"
-              :sta-critical-paths="flowInsightStaPaths"
-              :sta-convergence="flowInsightStaConvergence"
-              :timing-issues-artifact="flowInsightTimingIssuesArtifact"
-              :loading="flowInsightsLoading"
-              :load-congestion="loadFlowInsightCongestion"
-            />
-          </section>
         </div>
       </main>
+      <FlowInsightsPanel
+        dialog-only
+        :selected-module="selectedInsight"
+        @close="closeInsight"
+        :steps="flowInsightSteps"
+        :step-resources="flowInsightResources"
+        :db-trends="flowInsightDbTrends"
+        :instance-composition="flowInsightComposition"
+        :congestion-tiles="flowInsightCongestionTiles"
+        :congestion-tile-urls="flowInsightCongestionUrls"
+        :drc="flowInsightDrc"
+        :drc-related="flowInsightDrcRelated"
+        :sta="flowInsightSta"
+        :sta-critical-paths="flowInsightStaPaths"
+        :timing-artifacts="flowInsightTimingArtifacts"
+        :timing-issues-artifact="flowInsightTimingIssuesArtifact"
+        :loading="flowInsightsLoading"
+        :load-congestion="loadFlowInsightCongestion"
+      />
     </template>
   </WorkspaceWorkbench>
 
@@ -248,11 +248,11 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import Dialog from 'primevue/dialog'
 import WorkspaceFlowDashboard from '@/components/workspace-dashboard/WorkspaceFlowDashboard.vue'
 import WorkspaceWorkbench from '@/components/workbench/WorkspaceWorkbench.vue'
 import FlowInsightsPanel from '@/components/flow-insights/FlowInsightsPanel.vue'
-import { staConvergenceFromComparison } from '@/components/flow-insights/flowInsightsData'
 import StatusPieChart from '@/components/home/StatusPieChart.vue'
 import {
   checklistPieSlices,
@@ -283,6 +283,17 @@ import {
   buildChipViewerOpenRequest,
   canOpenChipViewer,
 } from '@/components/drawingAreaChipViewer'
+
+const route = useRoute()
+const router = useRouter()
+const selectedInsight = computed(() =>
+  typeof route.query.insight === 'string' ? route.query.insight : null,
+)
+
+function closeInsight(): void {
+  const { insight: _insight, ...query } = route.query
+  void router.replace({ path: route.path, query })
+}
 
 const { currentProject } = useWorkspace()
 const backendWorkspaceSession = useBackendWorkspaceSession()
@@ -339,6 +350,7 @@ const {
   drc: flowInsightDrc,
   drcRelated: flowInsightDrcRelated,
   sta: flowInsightSta,
+  timingArtifacts: flowInsightTimingArtifacts,
   staCriticalPaths: flowInsightStaPaths,
   timingIssuesArtifact: flowInsightTimingIssuesArtifact,
   loading: flowInsightsLoading,
@@ -370,9 +382,6 @@ function evidenceErrorLabel(findingId: string): string | null {
 const checklistSlices = computed(() => checklistPieSlices(resolvedChecklistItems.value))
 const checklistSummary = computed(() =>
   checklistStatusSummary(resolvedChecklistItems.value),
-)
-const flowInsightStaConvergence = computed(() =>
-  staConvergenceFromComparison(qorComparisonState.value.comparison),
 )
 const qorDetail = computed(() =>
   buildHomeQorDetailModel(qorComparisonState.value.comparison),
@@ -525,7 +534,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 }
 
 .home-dashboard-bottom {
-  grid-template-columns: minmax(0, 2fr) minmax(0, 4fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 4fr) minmax(0, 6fr);
 }
 
 .dashboard-section {
