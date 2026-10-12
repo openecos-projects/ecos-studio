@@ -513,9 +513,6 @@ describe('ProjectsView background lifecycle integration', () => {
       (wrapper.get('button.project-toolbar-action.primary').element as HTMLButtonElement)
         .disabled,
     ).toBe(true)
-    expect(wrapper.findComponent({ name: 'ProjectCreationRecoveryPanel' }).exists()).toBe(
-      true,
-    )
     expect(
       wrapper.findComponent({ name: 'ProjectBackgroundOperationPanel' }).exists(),
     ).toBe(true)

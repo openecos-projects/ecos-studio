@@ -32,6 +32,7 @@ describe('createMainWindow', () => {
     const windowDouble = {
       loadFile: vi.fn().mockResolvedValue(undefined),
       loadURL: vi.fn().mockResolvedValue(undefined),
+      maximize: vi.fn(),
       webContents: {
         on: vi.fn(),
       },
@@ -50,6 +51,7 @@ describe('createMainWindow', () => {
         backgroundColor: '#ffffff',
       }),
     )
+    expect(windowDouble.maximize).toHaveBeenCalledTimes(1)
     expect(windowDouble.loadFile).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ hash: '/' }),
@@ -60,6 +62,7 @@ describe('createMainWindow', () => {
     const windowDouble = {
       loadFile: vi.fn().mockResolvedValue(undefined),
       loadURL: vi.fn().mockResolvedValue(undefined),
+      maximize: vi.fn(),
       webContents: {
         on: vi.fn(),
       },
@@ -82,6 +85,7 @@ describe('createMainWindow', () => {
     const windowDouble = {
       loadFile: vi.fn().mockResolvedValue(undefined),
       loadURL: vi.fn().mockResolvedValue(undefined),
+      maximize: vi.fn(),
       webContents: {
         on: vi.fn(),
         openDevTools: vi.fn(),
@@ -103,6 +107,7 @@ describe('createMainWindow', () => {
     const windowDouble = {
       loadFile: vi.fn().mockResolvedValue(undefined),
       loadURL: vi.fn().mockResolvedValue(undefined),
+      maximize: vi.fn(),
       webContents: {
         on: vi.fn(),
       },
