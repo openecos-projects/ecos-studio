@@ -3,12 +3,30 @@
     <div class="timing-kpi" :class="slackTone(overview.worstSetup?.wns)">
       <span>Worst setup WNS</span>
       <strong>{{ formatSlack(overview.worstSetup?.wns) }}</strong>
-      <small v-if="attributesCorner">{{ overview.worstSetup?.corner ?? '--' }}</small>
+      <small v-if="attributesCorner" :title="overview.worstSetup?.corner">{{
+        overview.worstSetup?.corner ?? '--'
+      }}</small>
+    </div>
+    <div class="timing-kpi" :class="slackTone(worstSetupTns?.tns)">
+      <span>Worst setup TNS</span>
+      <strong>{{ formatSlack(worstSetupTns?.tns) }}</strong>
+      <small v-if="attributesCorner" :title="worstSetupTns?.corner">{{
+        worstSetupTns?.corner ?? '--'
+      }}</small>
     </div>
     <div class="timing-kpi" :class="slackTone(overview.worstHold?.wns)">
       <span>Worst hold WNS</span>
       <strong>{{ formatSlack(overview.worstHold?.wns) }}</strong>
-      <small v-if="attributesCorner">{{ overview.worstHold?.corner ?? '--' }}</small>
+      <small v-if="attributesCorner" :title="overview.worstHold?.corner">{{
+        overview.worstHold?.corner ?? '--'
+      }}</small>
+    </div>
+    <div class="timing-kpi" :class="slackTone(worstHoldTns?.tns)">
+      <span>Worst hold TNS</span>
+      <strong>{{ formatSlack(worstHoldTns?.tns) }}</strong>
+      <small v-if="attributesCorner" :title="worstHoldTns?.corner">{{
+        worstHoldTns?.corner ?? '--'
+      }}</small>
     </div>
     <div class="timing-kpi" :class="thirdTone">
       <span>{{ thirdLabel }}</span>
@@ -31,6 +49,20 @@ const props = defineProps<{
 const hasFrequency = computed(() => props.overview.frequencyMhz !== null)
 /** Corner attribution is redundant when the summary covers a single corner. */
 const attributesCorner = computed(() => props.overview.corners.length > 1)
+const worstSetupTns = computed(() => worstTns('setup'))
+const worstHoldTns = computed(() => worstTns('hold'))
+
+function worstTns(
+  analysisType: 'setup' | 'hold',
+): { corner: string; tns: number } | null {
+  const values = props.overview.corners.flatMap((row) => {
+    const tns = row[analysisType]?.tns
+    return row.missing || tns === null || tns === undefined
+      ? []
+      : [{ corner: row.corner, tns }]
+  })
+  return values.sort((left, right) => left.tns - right.tns)[0] ?? null
+}
 
 const thirdLabel = computed(() => (hasFrequency.value ? 'Frequency' : 'Violating paths'))
 
@@ -117,7 +149,7 @@ const thirdTone = computed(() => {
 
 .timing-kpis.is-compact .timing-kpi {
   border-radius: 6px;
-  flex: 1 1 0;
+  flex: 1 1 90px;
   gap: 1px;
   min-width: 0;
   padding: 4px 8px;

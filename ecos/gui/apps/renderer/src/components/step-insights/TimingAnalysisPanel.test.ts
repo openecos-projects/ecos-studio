@@ -118,4 +118,63 @@ describe('TimingAnalysisPanel', () => {
     expect(error.attributes('data-error-code')).toBe('ARTIFACT_TOO_LARGE')
     expect(error.attributes('title')).toBe('Timing detail error: ARTIFACT_TOO_LARGE')
   })
+
+  it('shows an accessible corner selector and every exported setup/hold path', async () => {
+    const paths = Array.from({ length: 40 }, (_, index) => ({
+      id: `path-${index}`,
+      corner: 'MAX_125/RCworst',
+      analysisType: index < 20 ? ('setup' as const) : ('hold' as const),
+      slackNs: index + 0.1,
+      stageCount: 0,
+      stages: [],
+    }))
+    const wrapper = mount(TimingAnalysisPanel, {
+      props: {
+        overview,
+        pathsByCorner: [{ corner: 'MAX_125/RCworst', paths }],
+        selectedCorner: 'MAX_125/RCworst',
+        cornerSelector: 'select',
+        criticalPathLimit: Number.POSITIVE_INFINITY,
+      },
+      global: {
+        stubs: {
+          TimingCornerTable: true,
+          TimingCriticalPaths: true,
+          TimingKpis: true,
+          TimingRunInfo: true,
+          TimingWnsChart: true,
+        },
+      },
+    })
+    expect(wrapper.find('.timing-corner-selector').text()).toContain(
+      'Timing paths · corner',
+    )
+    const model = wrapper
+      .findComponent({ name: 'TimingCriticalPaths' })
+      .props('criticalPaths')
+    expect(model.setup).toHaveLength(20)
+    expect(model.hold).toHaveLength(20)
+    await wrapper.find('.timing-corner-selector select').setValue('TYP_25/TYPICAL')
+    expect(wrapper.emitted('select-corner')).toEqual([['TYP_25/TYPICAL']])
+  })
+
+  it('distinguishes an empty path export from zero timing issues', () => {
+    const wrapper = mount(TimingAnalysisPanel, {
+      props: {
+        overview,
+        pathsByCorner: [{ corner: 'MAX_125/RCworst', paths: [] }],
+        selectedCorner: 'MAX_125/RCworst',
+      },
+      global: {
+        stubs: {
+          TimingCornerTable: true,
+          TimingCriticalPaths: true,
+          TimingKpis: true,
+          TimingRunInfo: true,
+          TimingWnsChart: true,
+        },
+      },
+    })
+    expect(wrapper.text()).toContain('No timing paths were exported for MAX_125/RCworst')
+  })
 })

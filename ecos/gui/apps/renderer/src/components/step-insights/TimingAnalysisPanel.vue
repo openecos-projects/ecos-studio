@@ -6,8 +6,47 @@
     <template v-else>
       <TimingKpis :overview="displayed" />
 
+      <TimingCornerTable
+        :overview="displayed"
+        :rows="sortedRows"
+        :path-group-options="pathGroupOptions"
+        :selected-path-group="selectedPathGroup"
+        :negative-first="negativeFirst"
+        @update:selected-path-group="selectedPathGroup = $event"
+        @update:negative-first="negativeFirst = $event"
+      />
+
+      <details
+        v-if="cornerSelector === 'select' && sortedRows.length > 1"
+        class="timing-chart-disclosure"
+        @toggle="activateChart"
+      >
+        <summary>WNS / TNS by Corner · compare timing margins</summary>
+        <TimingWnsChart v-if="chartActivated" :rows="sortedRows" />
+      </details>
+      <TimingWnsChart v-else :rows="sortedRows" />
+
+      <label
+        v-if="cornerTabs.length && cornerSelector === 'select'"
+        class="timing-corner-selector"
+      >
+        <span>Timing paths · corner</span>
+        <select :value="cornerFilter ?? ''" @change="onCornerChange">
+          <option value="">Select a corner</option>
+          <option
+            v-for="tab in cornerTabs.slice(1)"
+            :key="tab.id"
+            :value="tab.corner ?? ''"
+          >
+            {{ tab.label }}
+          </option>
+        </select>
+        <small
+          >Setup and hold · lowest slack first · expand a path to inspect stages</small
+        >
+      </label>
       <div
-        v-if="cornerTabs.length"
+        v-else-if="cornerTabs.length"
         class="timing-corner-tabs"
         role="tablist"
         aria-label="Critical path corner scope"
@@ -26,18 +65,6 @@
         </button>
       </div>
 
-      <TimingCornerTable
-        :overview="displayed"
-        :rows="sortedRows"
-        :path-group-options="pathGroupOptions"
-        :selected-path-group="selectedPathGroup"
-        :negative-first="negativeFirst"
-        @update:selected-path-group="selectedPathGroup = $event"
-        @update:negative-first="negativeFirst = $event"
-      />
-
-      <TimingWnsChart :rows="sortedRows" />
-
       <div v-if="cornerFilter && detailLoading" class="timing-detail-state">
         <i class="ri-loader-4-line spin" aria-hidden="true" />
         <span>Loading timing paths</span>
@@ -49,7 +76,27 @@
           :title="`Timing detail error: ${detailError}`"
           >{{ timingDetailErrorLabel(detailError) }}</span
         >
+        <button
+          v-if="cornerSelector === 'select'"
+          type="button"
+          @click="emit('retry-corner')"
+        >
+          Retry paths
+        </button>
       </div>
+      <p
+        v-else-if="
+          cornerFilter &&
+          showCriticalPaths &&
+          !criticalPathsModel?.setup.length &&
+          !criticalPathsModel?.hold.length
+        "
+        class="timing-detail-state"
+        role="status"
+      >
+        No timing paths were exported for {{ cornerFilter }}. This is separate from the
+        timing issue count.
+      </p>
       <TimingCriticalPaths
         v-else-if="showCriticalPaths"
         :critical-paths="criticalPathsModel"
@@ -88,14 +135,18 @@ const props = defineProps<{
   selectedCorner?: string | null
   detailLoading?: boolean
   detailError?: string | null
+  cornerSelector?: 'tabs' | 'select'
+  criticalPathLimit?: number
   emptyHint?: string
 }>()
 
 const emit = defineEmits<{
   'select-corner': [corner: string | null]
+  'retry-corner': []
 }>()
 
 const negativeFirst = ref(false)
+const chartActivated = ref(false)
 const selectedPathGroup = ref('summary')
 const cornerFilter = computed(() => props.selectedCorner ?? null)
 
@@ -143,7 +194,20 @@ const criticalPathsModel = computed(() => {
   if (!cornerFilter.value) return null
   const groups = props.pathsByCorner
   if (groups && groups.length) {
-    return selectStaCriticalPaths(groups, cornerFilter.value)
+    const filtered =
+      selectedPathGroup.value === 'summary'
+        ? groups
+        : groups.map((group) => ({
+            ...group,
+            paths: group.paths.filter(
+              (path) => path.pathGroup === selectedPathGroup.value,
+            ),
+          }))
+    return selectStaCriticalPaths(
+      filtered,
+      cornerFilter.value,
+      props.criticalPathLimit ?? 5,
+    )
   }
   return props.criticalPaths ?? null
 })
@@ -183,6 +247,14 @@ function emptyStaOverview(): StaOverviewModel {
     holdViolationCount: 0,
     allCornersMet: null,
   }
+}
+
+function onCornerChange(event: Event): void {
+  emit('select-corner', (event.target as HTMLSelectElement).value || null)
+}
+
+function activateChart(event: Event): void {
+  if ((event.target as HTMLDetailsElement).open) chartActivated.value = true
 }
 
 function timingDetailErrorLabel(code: string): string {
@@ -242,6 +314,38 @@ function timingDetailErrorLabel(code: string): string {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+.timing-corner-selector {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.timing-corner-selector select,
+.timing-detail-state button {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font: inherit;
+  max-width: 100%;
+  padding: 6px 10px;
+}
+
+.timing-corner-selector small {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.timing-chart-disclosure summary {
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 6px 0;
 }
 
 .timing-corner-tabs button {

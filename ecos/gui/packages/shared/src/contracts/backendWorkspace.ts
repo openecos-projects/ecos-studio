@@ -280,6 +280,11 @@ export interface WorkspaceTimingSummaryDetail {
     tns: number | null
     violationCount: number | null
   }
+  pathGroups?: Array<{
+    name: string
+    setup: WorkspaceTimingSummaryDetail['setup']
+    hold: WorkspaceTimingSummaryDetail['hold']
+  }>
 }
 
 /**

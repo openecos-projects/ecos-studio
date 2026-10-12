@@ -1,4 +1,4 @@
-import { effectScope, nextTick, reactive } from 'vue'
+import { effectScope, nextTick, reactive, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const testState = vi.hoisted(() => ({
@@ -88,6 +88,9 @@ describe('useStaTimingIssues', () => {
           slackNs: -0.42,
           stageCount: 1,
           stages: [{ pin: 'u0/Q', cell: 'DFF_X1', arrivalNs: 0.5, delayNs: 0.5 }],
+          startPoint: 'u0/Q',
+          endPoint: 'u1/D',
+          pathGroup: 'clk',
         },
       ],
       missingCorners: ['WCL_0c'],
@@ -198,6 +201,53 @@ describe('useStaTimingIssues', () => {
       workspaceRevision: 7,
     })
     expect(issues.state.value.status).toBe('ready')
+    scope.stop()
+  })
+
+  it('reloads an open issue list when the committed revision changes', async () => {
+    testState.getArtifact.mockImplementation(async (request) => ({
+      ...request,
+      artifact: {
+        status: 'ready',
+        data: { artifactId: request.artifactId, timingIssues: timingIssuesPayload },
+      },
+    }))
+    const scope = effectScope()
+    const artifact = ref(descriptor)
+    const issues = scope.run(() => useStaTimingIssues(artifact))!
+    await issues.open(artifact.value)
+    testState.session!.projection.data.revision = {
+      status: 'ready',
+      data: { workspaceRevision: 10 },
+    }
+    await vi.waitFor(() => expect(testState.getArtifact).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(issues.state.value.status).toBe('ready'))
+    expect(testState.getArtifact.mock.calls[1]?.[0].workspaceRevision).toBe(10)
+    expect(issues.visible.value).toBe(true)
+    scope.stop()
+  })
+
+  it('does not reuse the cached list for a different artifact', async () => {
+    testState.getArtifact.mockImplementation(async (request) => ({
+      ...request,
+      artifact: {
+        status: 'ready',
+        data: {
+          artifactId: request.artifactId,
+          timingIssues: { issues: [], missingCorners: [] },
+        },
+      },
+    }))
+    const scope = effectScope()
+    const issues = scope.run(() => useStaTimingIssues())!
+    await issues.open(descriptor)
+    await issues.open({ ...descriptor, artifactId: 'sta-issues-next' })
+    expect(testState.getArtifact).toHaveBeenCalledTimes(2)
+    expect(issues.state.value).toEqual({
+      status: 'ready',
+      issues: [],
+      missingCorners: [],
+    })
     scope.stop()
   })
 })

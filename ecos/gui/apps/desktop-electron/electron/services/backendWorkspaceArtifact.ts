@@ -140,8 +140,34 @@ function timingSummary(
   }
   const setupWns = finiteNumber(setup.wns)
   const holdWns = finiteNumber(hold.wns)
+  const pathGroups: NonNullable<WorkspaceTimingSummaryDetail['pathGroups']> = []
+  if (source.path_groups !== undefined) {
+    if (!Array.isArray(source.path_groups) || source.path_groups.length > 256) return null
+    for (const value of source.path_groups) {
+      const group = record(value)
+      const name = group ? stringValue(group, 'name') : ''
+      const groupSetup = record(group?.setup)
+      const groupHold = record(group?.hold)
+      if (!name || !groupSetup || !groupHold) return null
+      pathGroups.push({
+        name,
+        setup: {
+          wns: finiteNumber(groupSetup.wns),
+          tns: finiteNumber(groupSetup.tns),
+          violationCount: finiteNumber(groupSetup.nvp),
+          frequencyMhz: finiteNumber(groupSetup.frequency_mhz),
+        },
+        hold: {
+          wns: finiteNumber(groupHold.wns),
+          tns: finiteNumber(groupHold.tns),
+          violationCount: finiteNumber(groupHold.nvp),
+        },
+      })
+    }
+  }
   return {
     corner,
+    ...(source.path_groups === undefined ? {} : { pathGroups }),
     meetsTiming:
       setupWns === null || holdWns === null ? null : setupWns >= 0 && holdWns >= 0,
     setup: {

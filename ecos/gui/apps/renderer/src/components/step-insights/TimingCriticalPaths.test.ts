@@ -65,4 +65,23 @@ describe('TimingCriticalPaths', () => {
     expect(wrapper.text()).not.toContain('worst-slack issues')
     expect(wrapper.text()).toContain('DFF_X1')
   })
+
+  it('keeps path stages collapsed and exposes endpoints, group and arrival times', async () => {
+    const setup = {
+      ...path('MAX_125/RCworst:path-1', 'setup', 7.457),
+      startPoint: 'u0/Q',
+      endPoint: 'u1/D',
+      pathGroup: 'clk',
+    }
+    const wrapper = mount(TimingCriticalPaths, {
+      props: { criticalPaths: { setup: [setup], hold: [] } },
+    })
+    expect(wrapper.find('details').attributes('open')).toBeUndefined()
+    expect(wrapper.find('summary').text()).toContain('u0/Q → u1/D')
+    expect(wrapper.find('summary').text()).toContain('Group: clk')
+    expect(wrapper.find('table').text()).toContain('Arrival (ns)')
+    expect(wrapper.find('table').text()).toContain('1.100 ns')
+    await wrapper.find('summary').trigger('click')
+    expect(wrapper.findAll('tbody tr')).toHaveLength(2)
+  })
 })

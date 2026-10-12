@@ -21,18 +21,26 @@
         >
       </div>
     </header>
+    <p v-if="!compact" class="timing-source-legend">
+      <span>Red cells</span> identify Worst-row sources, including ties; red does not
+      necessarily mean a violation. NVP highlights non-zero contributors to the total.
+    </p>
     <div class="timing-table-scroll">
       <table class="timing-table">
         <thead>
           <tr>
             <th class="timing-corner-col">Corner</th>
-            <th>Setup WNS</th>
-            <th>Setup TNS</th>
-            <th>NVP</th>
-            <th>Hold WNS</th>
-            <th>Hold TNS</th>
-            <th>NVP</th>
-            <th v-if="!compact">Freq</th>
+            <th>{{ compact ? 'Setup WNS' : 'Setup WNS (ns)' }}</th>
+            <th>{{ compact ? 'Setup TNS' : 'Setup TNS (ns)' }}</th>
+            <th title="Number of violating setup paths">
+              {{ compact ? 'NVP' : 'Setup NVP' }}
+            </th>
+            <th>{{ compact ? 'Hold WNS' : 'Hold WNS (ns)' }}</th>
+            <th>{{ compact ? 'Hold TNS' : 'Hold TNS (ns)' }}</th>
+            <th title="Number of violating hold paths">
+              {{ compact ? 'NVP' : 'Hold NVP' }}
+            </th>
+            <th v-if="!compact">Freq (MHz)</th>
           </tr>
         </thead>
         <tbody>
@@ -48,58 +56,71 @@
             </template>
             <template v-else>
               <td
-                :class="slackClass(row.setup?.wns)"
-                :title="compact ? undefined : pathPreviewTitle(row)"
+                :class="metricCellClass(row, 'setup', 'wns')"
+                :title="metricCellTitle(row, 'setup', 'wns')"
               >
                 {{ formatSlack(row.setup?.wns) }}
               </td>
               <td
-                :class="slackClass(row.setup?.tns)"
-                :title="compact ? undefined : pathPreviewTitle(row)"
+                :class="metricCellClass(row, 'setup', 'tns')"
+                :title="metricCellTitle(row, 'setup', 'tns')"
               >
                 {{ formatSlack(row.setup?.tns) }}
               </td>
               <td
-                :class="countClass(row.setup?.nvp)"
-                :title="compact ? undefined : pathPreviewTitle(row)"
+                :class="metricCellClass(row, 'setup', 'nvp')"
+                :title="metricCellTitle(row, 'setup', 'nvp')"
               >
                 {{ row.setup?.nvp ?? '—' }}
               </td>
               <td
-                :class="slackClass(row.hold?.wns)"
-                :title="compact ? undefined : pathPreviewTitle(row)"
+                :class="metricCellClass(row, 'hold', 'wns')"
+                :title="metricCellTitle(row, 'hold', 'wns')"
               >
                 {{ formatSlack(row.hold?.wns) }}
               </td>
               <td
-                :class="slackClass(row.hold?.tns)"
-                :title="compact ? undefined : pathPreviewTitle(row)"
+                :class="metricCellClass(row, 'hold', 'tns')"
+                :title="metricCellTitle(row, 'hold', 'tns')"
               >
                 {{ formatSlack(row.hold?.tns) }}
               </td>
               <td
-                :class="countClass(row.hold?.nvp)"
-                :title="compact ? undefined : pathPreviewTitle(row)"
+                :class="metricCellClass(row, 'hold', 'nvp')"
+                :title="metricCellTitle(row, 'hold', 'nvp')"
               >
                 {{ row.hold?.nvp ?? '—' }}
               </td>
-              <td v-if="!compact" :title="pathPreviewTitle(row)">
+              <td
+                v-if="!compact"
+                :class="metricCellClass(row, 'setup', 'frequencyMhz')"
+                :title="metricCellTitle(row, 'setup', 'frequencyMhz')"
+              >
                 {{ row.setup?.frequencyMhz ?? '—' }}
               </td>
             </template>
           </tr>
           <tr class="timing-total-row">
-            <th class="timing-corner-col">Worst</th>
+            <th
+              class="timing-corner-col"
+              title="WNS/TNS and frequency are worst-corner values; NVP is summed across corners."
+            >
+              Worst
+            </th>
             <td :class="slackClass(overview.worstSetup?.wns)">
               {{ formatSlack(overview.worstSetup?.wns) }}
             </td>
             <td :class="slackClass(minSetupTns)">{{ formatSlack(minSetupTns) }}</td>
-            <td>{{ overview.setupViolationCount ?? '—' }}</td>
+            <td title="Total setup NVP across corners">
+              {{ overview.setupViolationCount ?? '—' }}
+            </td>
             <td :class="slackClass(overview.worstHold?.wns)">
               {{ formatSlack(overview.worstHold?.wns) }}
             </td>
             <td :class="slackClass(minHoldTns)">{{ formatSlack(minHoldTns) }}</td>
-            <td>{{ overview.holdViolationCount ?? '—' }}</td>
+            <td title="Total hold NVP across corners">
+              {{ overview.holdViolationCount ?? '—' }}
+            </td>
             <td v-if="!compact">
               {{
                 overview.frequencyMhz === null ? '—' : Math.round(overview.frequencyMhz)
@@ -154,8 +175,75 @@ const minHoldTns = computed(() => {
   return values.length ? Math.min(...values) : null
 })
 
-function pathPreviewTitle(row: StaCornerRowModel): string {
-  return formatStaPathPreview(row.firstPath)
+type TimingMetric = 'wns' | 'tns' | 'nvp' | 'frequencyMhz'
+
+function metricValue(
+  row: StaCornerRowModel,
+  analysisType: 'setup' | 'hold',
+  metric: TimingMetric,
+): number | null {
+  return metric === 'frequencyMhz'
+    ? (row.setup?.frequencyMhz ?? null)
+    : (row[analysisType]?.[metric] ?? null)
+}
+
+function isWorstSource(
+  row: StaCornerRowModel,
+  analysisType: 'setup' | 'hold',
+  metric: TimingMetric,
+): boolean {
+  const value = metricValue(row, analysisType, metric)
+  if (row.missing || value === null) return false
+  if (metric === 'nvp') {
+    const total =
+      analysisType === 'setup'
+        ? props.overview.setupViolationCount
+        : props.overview.holdViolationCount
+    return total !== null && value > 0
+  }
+  const target =
+    metric === 'frequencyMhz'
+      ? props.overview.frequencyMhz
+      : metric === 'tns'
+        ? analysisType === 'setup'
+          ? minSetupTns.value
+          : minHoldTns.value
+        : analysisType === 'setup'
+          ? props.overview.worstSetup?.wns
+          : props.overview.worstHold?.wns
+  return target !== null && target !== undefined && value === target
+}
+
+function metricCellClass(
+  row: StaCornerRowModel,
+  analysisType: 'setup' | 'hold',
+  metric: TimingMetric,
+): string[] {
+  const value = metricValue(row, analysisType, metric)
+  const classes =
+    metric === 'nvp'
+      ? countClass(value)
+      : metric === 'frequencyMhz'
+        ? []
+        : slackClass(value)
+  return isWorstSource(row, analysisType, metric)
+    ? [...classes, 'is-worst-source']
+    : classes
+}
+
+function metricCellTitle(
+  row: StaCornerRowModel,
+  analysisType: 'setup' | 'hold',
+  metric: TimingMetric,
+): string {
+  const source = isWorstSource(row, analysisType, metric)
+    ? metric === 'nvp'
+      ? 'Contributes to the Worst-row NVP total'
+      : 'Source of the Worst-row value (ties included)'
+    : ''
+  return [source, props.compact ? '' : formatStaPathPreview(row.firstPath)]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 function onPathGroupChange(event: Event): void {
@@ -231,10 +319,37 @@ function onNegativeFirstChange(event: Event): void {
   overflow: auto;
 }
 
+.timing-table-card:not(.is-compact) .timing-table-scroll {
+  max-height: 320px;
+}
+
+.timing-table-card:not(.is-compact) .timing-table thead th {
+  background: var(--bg-secondary);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.timing-table-card:not(.is-compact) .timing-total-row td,
+.timing-table-card:not(.is-compact) .timing-total-row th {
+  background: var(--bg-secondary);
+  bottom: 0;
+  position: sticky;
+}
+
 .timing-table {
   border-collapse: collapse;
   font-size: 10px;
   min-width: 100%;
+}
+
+.timing-table-card:not(.is-compact) .timing-table {
+  font-size: 12px;
+}
+
+.timing-table-card:not(.is-compact) .timing-table th,
+.timing-table-card:not(.is-compact) .timing-table td {
+  padding: 6px 8px;
 }
 
 .timing-table th,
@@ -260,6 +375,10 @@ function onNegativeFirstChange(event: Event): void {
   z-index: 1;
 }
 
+.timing-table .timing-corner-col {
+  text-align: left;
+}
+
 .timing-table-card.is-compact .timing-corner-col {
   position: static;
 }
@@ -270,6 +389,23 @@ function onNegativeFirstChange(event: Event): void {
 
 .timing-table td.is-bad {
   color: var(--danger-color);
+  font-weight: 700;
+}
+
+.timing-table td.is-worst-source {
+  background: color-mix(in srgb, var(--danger-color, #dc2626) 8%, transparent);
+  color: var(--danger-color, #dc2626);
+  font-weight: 700;
+}
+
+.timing-source-legend {
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin: 0;
+}
+
+.timing-source-legend span {
+  color: var(--danger-color, #dc2626);
   font-weight: 700;
 }
 
