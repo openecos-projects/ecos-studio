@@ -188,7 +188,9 @@ export function flowSection(
           step['peak memory (mb)'] ?? record(step.info)?.['peak memory (mb)'],
         )
         const checklistStatusRecord = record(step.checklist_status)
-        const checklistStatus = stringValue(checklistStatusRecord, 'status')
+        const checklist = record(step.checklist)
+        const checklistStatus =
+          stringValue(checklistStatusRecord, 'status') || stringValue(checklist, 'status')
         return [
           {
             stepId: step.name,
