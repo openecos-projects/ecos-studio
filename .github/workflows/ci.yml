@@ -421,6 +421,12 @@ jobs:
               exec vitest run --config vitest.e2e.config.ts rtl2gds
           fi
 
+      - name: Run Packaged Reproducible CLI Smoke
+        run: |
+          python3 ecc/packaging/reproducible_cli_smoke.py \
+            --binary "$ECOS_E2E_ECC_BIN_DIR/ecc" \
+            --design "$ECOS_E2E_DESIGN_DIR"
+
       - name: Upload E2E Evidence
         if: always()
         uses: actions/upload-artifact@v4
