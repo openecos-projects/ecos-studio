@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { ResourceManagerService } from './resourceManagerService'
 import { ResourceUpdateScheduler } from './resourceUpdateScheduler'
 import { assessRunStaleness, assertRunResourcesFresh } from './resourceStalenessGuard'
-import { EccRpcSidecarProcess } from './eccRpc/sidecarProcess'
+import { EccRpcSidecarProcess } from './frontendRpc/sidecarProcess'
 
 vi.mock('./logger', () => ({
   electronLogger: {

@@ -287,6 +287,7 @@ describe('EccRpcSidecarProcess', () => {
     const spawn = vi.fn(() => child)
     let checksum = 'a'.repeat(64)
     const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
       managementRpc: true,
       envProvider: async () => ({ ECOS_FE_RUNTIME_SHA256: checksum }),
       spawn,
