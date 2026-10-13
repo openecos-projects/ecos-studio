@@ -425,7 +425,8 @@ jobs:
         run: |
           python3 ecc/packaging/reproducible_cli_smoke.py \
             --binary "$ECOS_E2E_ECC_BIN_DIR/ecc" \
-            --design "$ECOS_E2E_DESIGN_DIR"
+            --design "$ECOS_E2E_DESIGN_DIR" \
+            --e2e-out "$ECOS_E2E_OUT"
 
       - name: Upload E2E Evidence
         if: always()
