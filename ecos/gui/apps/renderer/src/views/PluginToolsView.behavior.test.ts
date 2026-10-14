@@ -334,6 +334,31 @@ describe('PluginToolsView download source', () => {
     expect(buttons[2].classes()).toContain('active')
     wrapper.unmount()
   })
+
+  it('follows the value committed last when another window wins the write race', async () => {
+    viewMocks.store.resources = []
+    let resolveSet: () => void = () => undefined
+    viewMocks.settingsSet.mockImplementationOnce(() =>
+      new Promise<void>((resolve) => {
+        resolveSet = resolve
+      }).then(() => undefined),
+    )
+    // The post-commit re-read sees the newer value another window wrote
+    // while our write was in flight.
+    viewMocks.settingsGet.mockResolvedValueOnce('github')
+    const wrapper = mount(PluginToolsView)
+    await flushPromises()
+    const buttons = wrapper.findAll('.download-source button')
+
+    await buttons[2].trigger('click') // we pick cnb; the write stays pending
+    resolveSet()
+    await flushPromises()
+
+    // The store's last committed value wins over our own request.
+    expect(buttons[1].classes()).toContain('active')
+    expect(buttons[2].classes()).not.toContain('active')
+    wrapper.unmount()
+  })
 })
 
 describe('PluginToolsView structure', () => {

@@ -676,30 +676,38 @@ function startCliInstallerStartupTasks(): void {
     }
   })
   // Restore the persisted download-source preference before any startup
-  // download so the first acquisition already honors it.
-  void (async () => {
-    await restoreDownloadSourcePreference()
-    await cliInstaller.checkSyncOnStartup()
+  // download so the first acquisition already honors it. The sync check and
+  // the first-use acquisition stay independent tasks: a failure of one must
+  // not suppress the other.
+  void restoreDownloadSourcePreference().then(() => {
+    void cliInstaller.checkSyncOnStartup().catch((error: unknown) => {
+      electronLogger.warn(
+        '[cli-installer] Startup sync check failed: %s',
+        error instanceof Error ? error.message : String(error),
+      )
+    })
     if (!resolveEccExecutable(cliEccRuntimeOptions())) {
       electronLogger.info(
         '[cli-installer] No ECC bundle resolved; acquiring on first use',
       )
       // installShim so the host command is usable immediately after the
       // first-use download instead of waiting for an explicit reinstall.
-      try {
-        const versionDir = await cliInstaller.ensureBundle({ installShim: true })
-        electronLogger.info(
-          '[cli-installer] First-use acquisition installed %s',
-          versionDir,
-        )
-      } catch (error) {
-        electronLogger.warn(
-          '[cli-installer] First-use acquisition failed: %s',
-          error instanceof Error ? error.message : String(error),
-        )
-      }
+      void cliInstaller
+        .ensureBundle({ installShim: true })
+        .then((versionDir) => {
+          electronLogger.info(
+            '[cli-installer] First-use acquisition installed %s',
+            versionDir,
+          )
+        })
+        .catch((error: unknown) => {
+          electronLogger.warn(
+            '[cli-installer] First-use acquisition failed: %s',
+            error instanceof Error ? error.message : String(error),
+          )
+        })
     }
-  })()
+  })
 }
 
 if (cliInvocation) {

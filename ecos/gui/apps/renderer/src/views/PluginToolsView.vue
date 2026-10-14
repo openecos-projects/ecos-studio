@@ -213,8 +213,14 @@ async function handleDownloadSourceChange(source: DesktopDownloadSource): Promis
     // Only the newest settled persist confirms the stored value; an older
     // late-resolving write was superseded by a newer committed one.
     if (selection > downloadSourceSettledSeq) {
-      confirmedDownloadSource = source
       downloadSourceSettledSeq = selection
+      // Another window may have committed a newer value while this write was
+      // in flight; re-read so the rollback target and the switch follow the
+      // store rather than this window's own request.
+      confirmedDownloadSource = await readCommittedDownloadSource(source)
+      if (selection === downloadSourceSelectionSeq) {
+        downloadSource.value = confirmedDownloadSource
+      }
     }
   } catch (error) {
     if (selection > downloadSourceSettledSeq) {
@@ -226,6 +232,17 @@ async function handleDownloadSourceChange(source: DesktopDownloadSource): Promis
       downloadSource.value = confirmedDownloadSource
     }
     console.warn('[PluginToolsView] Failed to persist the download source:', error)
+  }
+}
+
+async function readCommittedDownloadSource(
+  fallback: DesktopDownloadSource,
+): Promise<DesktopDownloadSource> {
+  try {
+    const stored = await getDesktopApi().settings.get(DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY)
+    return normalizeDesktopDownloadSource(stored) ?? fallback
+  } catch {
+    return fallback
   }
 }
 
