@@ -9422,7 +9422,7 @@ describe('ResourceManagerService', () => {
     expect(fetchedUrls).not.toContain('https://example.com/ics55-base.tar.gz')
   })
 
-  it('installs mirror-less PDK packages when the download source is github', async () => {
+  it('installs mirror-less PDK packages from GitHub in any download-source mode', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createPdkArchive(root, { valid: false })
     const first = await createLibertyPackageFixture(
@@ -9479,16 +9479,22 @@ describe('ResourceManagerService', () => {
       { status: 'started' },
     )
 
-    // Every other mode keeps requiring the mirror URL.
-    const mirrorlessService = new ResourceManagerService({
+    // Mirror-less packages fall back to their GitHub url in cnb mode too.
+    const fetchedUrls: string[] = []
+    const cnbService = new ResourceManagerService({
       registryUrl: `file://${registryPath}`,
       ...testResourceDirs(await createTempDir('ecos-resources-')),
-      fetchImpl: vi.fn(async () => new Response(first.bytes)) as typeof fetch,
+      downloadSource: 'cnb',
+      fetchImpl: vi.fn(async (url) => {
+        fetchedUrls.push(String(url))
+        return new Response(first.bytes)
+      }) as typeof fetch,
       sha256Verifier: async () => true,
     })
     await expect(
-      mirrorlessService.installResource('pdk:ics55', '1.10.100'),
-    ).rejects.toThrow('Missing mirror URL for PDK package')
+      cnbService.installResource('pdk:ics55', '1.10.100'),
+    ).resolves.toMatchObject({ status: 'started' })
+    expect(fetchedUrls).toContain('https://example.com/ics55_LLSC_H7CL_liberty.tar.bz2')
   })
 
   it('rejects a PDK package destination outside the staged PDK', async () => {

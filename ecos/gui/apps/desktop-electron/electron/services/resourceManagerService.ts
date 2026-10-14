@@ -2606,11 +2606,7 @@ export class ResourceManagerService {
   ): Promise<void> {
     const seenPaths = new Set<string>()
     const packageDestinations = packages.map((packageAsset) => {
-      // A mirror-less registry stays installable when downloads are pinned
-      // to GitHub; every other mode keeps requiring the mirror.
-      validatePdkPackage(packageAsset, {
-        requireMirror: this.downloadSource !== 'github',
-      })
+      validatePdkPackage(packageAsset)
       if (seenPaths.has(packageAsset.path)) {
         throw new Error(`Duplicate PDK package path: ${packageAsset.path}`)
       }
@@ -5696,16 +5692,10 @@ function validateSupplementalAsset(asset: RegistrySupplementalAsset): void {
   }
 }
 
-function validatePdkPackage(
-  packageAsset: RegistryPdkPackage,
-  options: { requireMirror?: boolean } = {},
-): void {
+function validatePdkPackage(packageAsset: RegistryPdkPackage): void {
+  // Packages without a mirror simply fall back to their GitHub url in every
+  // download-source mode; the mirror stays optional.
   validateSupplementalAsset(packageAsset)
-  if ((options.requireMirror ?? true) && !packageAsset.cnb_url) {
-    throw new Error(
-      `Missing mirror URL for PDK package ${packageAsset.path || '(unknown)'}`,
-    )
-  }
 }
 
 function resolveSupplementalAssetTarget(root: string, assetPath: string): string {
