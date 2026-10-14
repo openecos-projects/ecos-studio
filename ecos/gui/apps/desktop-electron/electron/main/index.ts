@@ -33,7 +33,12 @@ import {
 import { FrontendRpcRuntimeService } from '../services/frontendRpcRuntimeService'
 import { ChipViewerService } from '../services/chipViewerService'
 import { CliInstallerService } from '../services/cliInstallerService'
-import { desktopApiEventChannels, type DesignTool } from '@ecos-studio/shared'
+import {
+  desktopApiEventChannels,
+  DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY,
+  normalizeDesktopDownloadSource,
+  type DesignTool,
+} from '@ecos-studio/shared'
 import { configureElectronLoggerFile, electronLogger } from '../services/logger'
 import {
   applyWindowMenuState,
@@ -89,6 +94,7 @@ if (!gotSingleInstanceLock) {
 let ipcRegistered = false
 let workspaceReplacementRecoveryComplete = false
 let workspaceReplacementRecovery: Promise<void> | null = null
+let downloadSourceRestored = false
 let projectScopeService: ProjectScopeService | null = null
 let services: {
   appInfoService: AppInfoService
@@ -436,6 +442,23 @@ function getDesktopServices() {
 
 async function ensureDesktopBridgeReady(): Promise<void> {
   const desktopServices = getDesktopServices()
+  if (!downloadSourceRestored) {
+    downloadSourceRestored = true
+    try {
+      const stored = await desktopServices.settingsStore.get(
+        DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY,
+      )
+      const source = normalizeDesktopDownloadSource(stored)
+      if (source) {
+        desktopServices.resourceManagerService.setDownloadSource(source)
+      }
+    } catch (error) {
+      electronLogger.warn(
+        '[desktop] Failed to restore the download source preference: %s',
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  }
   if (!workspaceReplacementRecoveryComplete) {
     workspaceReplacementRecovery ??= desktopServices.workspaceCreationJournal
       .initialize()

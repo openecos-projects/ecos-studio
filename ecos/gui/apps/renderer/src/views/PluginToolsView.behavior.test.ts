@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import type { ResourceItem } from '@/api/plugin'
 import PluginToolsView from './PluginToolsView.vue'
@@ -7,9 +7,13 @@ import PluginToolsView from './PluginToolsView.vue'
 const viewMocks = vi.hoisted(() => ({
   push: vi.fn(),
   importPdk: vi.fn(async () => ({ id: 'pdk-installation:ics55' })),
+  settingsGet: vi.fn(async (): Promise<unknown> => null),
+  settingsSet: vi.fn(async () => undefined),
+  getOptionalDesktopApi: vi.fn((): unknown => null),
   getDesktopApi: vi.fn(() => ({
     dialog: { pickDirectory: vi.fn() },
     system: { openExternal: vi.fn() },
+    settings: { get: viewMocks.settingsGet, set: viewMocks.settingsSet },
   })),
   store: {
     resources: [] as ResourceItem[],
@@ -37,6 +41,7 @@ vi.mock('@/composables/usePdkManager', () => ({
 }))
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: viewMocks.getDesktopApi,
+  getOptionalDesktopApi: viewMocks.getOptionalDesktopApi,
 }))
 vi.mock('@/api/cliInstaller', () => ({
   fetchCliInstallerStatus: vi.fn(async () => null),
@@ -139,6 +144,43 @@ describe('PluginToolsView PDK behavior', () => {
     await wrapper.get('button.danger').trigger('click')
 
     expect(viewMocks.store.installResource).toHaveBeenCalledWith('pdk:ics55')
+    wrapper.unmount()
+  })
+})
+
+describe('PluginToolsView download source', () => {
+  it('restores the persisted download source on mount', async () => {
+    viewMocks.store.resources = []
+    viewMocks.settingsGet.mockResolvedValueOnce('cnb')
+    viewMocks.getOptionalDesktopApi.mockReturnValueOnce({
+      settings: { get: viewMocks.settingsGet, set: viewMocks.settingsSet },
+    })
+    const wrapper = mount(PluginToolsView)
+    await flushPromises()
+
+    expect(viewMocks.settingsGet).toHaveBeenCalledWith('download_source')
+    const buttons = wrapper.findAll('.download-source button')
+    expect(buttons.map((button) => button.text())).toEqual([
+      'Auto',
+      'GitHub',
+      'CNB Mirror',
+    ])
+    expect(buttons[2].classes()).toContain('active')
+    wrapper.unmount()
+  })
+
+  it('persists the selection when the user switches the download source', async () => {
+    viewMocks.store.resources = []
+    viewMocks.settingsSet.mockClear()
+    const wrapper = mount(PluginToolsView)
+    await flushPromises()
+
+    const buttons = wrapper.findAll('.download-source button')
+    expect(buttons[0].classes()).toContain('active')
+    await buttons[2].trigger('click')
+
+    expect(viewMocks.settingsSet).toHaveBeenCalledWith('download_source', 'cnb')
+    expect(buttons[2].classes()).toContain('active')
     wrapper.unmount()
   })
 })

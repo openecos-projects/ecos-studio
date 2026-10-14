@@ -496,7 +496,14 @@ async function writeYosysRegistry(
 
 async function writeIcs55Registry(
   registryPath: string,
-  asset: { url: string; sha256: string; size: number; packages?: unknown[] },
+  asset: {
+    url: string
+    sha256: string
+    size: number
+    cnb_url?: string
+    cnb_sha256?: string
+    packages?: unknown[]
+  },
 ): Promise<void> {
   await writeFile(
     registryPath,
@@ -8984,6 +8991,219 @@ describe('ResourceManagerService', () => {
       'https://example.com/ics55_LLSC_H7CH_liberty.tar.bz2',
       'https://example.com/ics55_LLSC_H7CR_liberty.tar.bz2',
     ])
+  })
+
+  it('prefers the mirror for PDK packages when the download source is cnb', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createPdkArchive(root, { valid: false })
+    const first = await createLibertyPackageFixture(
+      root,
+      'ics55_LLSC_H7CL_liberty.tar.bz2',
+      'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
+    )
+    const registryPath = join(root, 'registry.json')
+    await writeIcs55Registry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+      packages: [
+        {
+          path: 'ics55_LLSC_H7CL_liberty.tar.bz2',
+          url: 'https://example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
+          cnb_url: 'https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
+          sha256: first.sha256,
+          size: first.size,
+          dest: 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL',
+        },
+      ],
+    })
+    const fetchedUrls: string[] = []
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      downloadSource: 'cnb',
+      fetchImpl: vi.fn(async (url) => {
+        const text = String(url)
+        fetchedUrls.push(text)
+        return text === 'https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2'
+          ? new Response(first.bytes)
+          : new Response(null, { status: 404 })
+      }) as typeof fetch,
+      sha256Verifier: async (path, expected) =>
+        expected === archive.sha256 || (await archiveLock(path)).sha256 === expected,
+    })
+
+    await service.installResource('pdk:ics55', '1.10.100')
+
+    // The mirror is tried first and the GitHub URL is never requested.
+    expect(fetchedUrls).toEqual([
+      'https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
+    ])
+  })
+
+  it('never requests the mirror when the download source is github', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createPdkArchive(root, { valid: false })
+    const first = await createLibertyPackageFixture(
+      root,
+      'ics55_LLSC_H7CL_liberty.tar.bz2',
+      'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
+    )
+    const registryPath = join(root, 'registry.json')
+    await writeIcs55Registry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+      packages: [
+        {
+          path: 'ics55_LLSC_H7CL_liberty.tar.bz2',
+          url: 'https://example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
+          cnb_url: 'https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
+          sha256: first.sha256,
+          size: first.size,
+          dest: 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL',
+        },
+      ],
+    })
+    const fetchedUrls: string[] = []
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      downloadSource: 'github',
+      fetchImpl: vi.fn(async (url) => {
+        const text = String(url)
+        fetchedUrls.push(text)
+        return text === 'https://example.com/ics55_LLSC_H7CL_liberty.tar.bz2'
+          ? new Response(first.bytes)
+          : new Response(null, { status: 404 })
+      }) as typeof fetch,
+      sha256Verifier: async (path, expected) =>
+        expected === archive.sha256 || (await archiveLock(path)).sha256 === expected,
+    })
+
+    await service.installResource('pdk:ics55', '1.10.100')
+
+    expect(fetchedUrls).toEqual(['https://example.com/ics55_LLSC_H7CL_liberty.tar.bz2'])
+  })
+
+  it('applies setDownloadSource to later downloads', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createPdkArchive(root, { valid: false })
+    const first = await createLibertyPackageFixture(
+      root,
+      'ics55_LLSC_H7CL_liberty.tar.bz2',
+      'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
+    )
+    const registryPath = join(root, 'registry.json')
+    await writeIcs55Registry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+      packages: [
+        {
+          path: 'ics55_LLSC_H7CL_liberty.tar.bz2',
+          url: 'https://example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
+          cnb_url: 'https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
+          sha256: first.sha256,
+          size: first.size,
+          dest: 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL',
+        },
+      ],
+    })
+    const fetchedUrls: string[] = []
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      fetchImpl: vi.fn(async (url) => {
+        const text = String(url)
+        fetchedUrls.push(text)
+        return text === 'https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2'
+          ? new Response(first.bytes)
+          : new Response(null, { status: 404 })
+      }) as typeof fetch,
+      sha256Verifier: async (path, expected) =>
+        expected === archive.sha256 || (await archiveLock(path)).sha256 === expected,
+    })
+
+    service.setDownloadSource('cnb')
+    await service.installResource('pdk:ics55', '1.10.100')
+
+    expect(service.getDownloadSource()).toBe('cnb')
+    expect(fetchedUrls).toEqual([
+      'https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
+    ])
+  })
+
+  it('downloads the PDK base from the mirror and verifies it against cnb_sha256', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createPdkArchive(root, { valid: false })
+    const archiveBytes = await readFile(archive.path)
+    const first = await createLibertyPackageFixture(
+      root,
+      'ics55_LLSC_H7CL_liberty.tar.bz2',
+      'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
+    )
+    const registryPath = join(root, 'registry.json')
+    const githubBaseSha256 = 'a'.repeat(64)
+    const cnbBaseSha256 = 'b'.repeat(64)
+    await writeIcs55Registry(registryPath, {
+      url: 'https://example.com/ics55-base.tar.gz',
+      cnb_url: 'https://mirror.example.com/ics55-base.tar.gz',
+      cnb_sha256: cnbBaseSha256,
+      sha256: githubBaseSha256,
+      size: archive.size + 100,
+      packages: [
+        {
+          path: 'ics55_LLSC_H7CL_liberty.tar.bz2',
+          url: 'https://example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
+          cnb_url: 'https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
+          sha256: first.sha256,
+          size: first.size,
+          dest: 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL',
+        },
+      ],
+    })
+    const fetchedUrls: string[] = []
+    const verifiedSha256: string[] = []
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      downloadSource: 'cnb',
+      fetchImpl: vi.fn(async (url) => {
+        const text = String(url)
+        fetchedUrls.push(text)
+        if (text === 'https://mirror.example.com/ics55-base.tar.gz') {
+          return new Response(archiveBytes)
+        }
+        if (text === 'https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2') {
+          return new Response(first.bytes)
+        }
+        return new Response(null, { status: 404 })
+      }) as typeof fetch,
+      // The mirror bytes differ from the GitHub tarball: the base verifies
+      // against cnb_sha256 only, packages against their shared sha256.
+      sha256Verifier: async (path, expected) => {
+        verifiedSha256.push(expected)
+        return expected === cnbBaseSha256 || (await archiveLock(path)).sha256 === expected
+      },
+    })
+
+    await service.installResource('pdk:ics55', '1.10.100')
+
+    expect(fetchedUrls[0]).toBe('https://mirror.example.com/ics55-base.tar.gz')
+    expect(fetchedUrls).not.toContain('https://example.com/ics55-base.tar.gz')
+    expect(verifiedSha256).toContain(cnbBaseSha256)
+    expect(verifiedSha256).not.toContain(githubBaseSha256)
+    await expect(
+      readFile(
+        join(
+          root,
+          'data/pdks/ics55/1.10.100/IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/liberty',
+          'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
+        ),
+        'utf8',
+      ),
+    ).resolves.toBe('library(test) {}\n')
   })
 
   it('rejects a PDK package destination outside the staged PDK', async () => {

@@ -51,6 +51,9 @@ import { isUpdateCheckStale } from './resourceUpdatePolicy'
 import { requiredToolHealthMarkers, type ToolHealthMarkerKind } from './toolHealthPolicy'
 import {
   validateMpcSpec,
+  DEFAULT_DESKTOP_DOWNLOAD_SOURCE,
+  normalizeDesktopDownloadSource,
+  type DesktopDownloadSource,
   type ResourceAction,
   type ResourceInfo,
   type ResourceJob,
@@ -141,6 +144,12 @@ interface PlatformAssetUpdateSource {
 interface PlatformAsset {
   url: string
   cnb_url?: string | null
+  /**
+   * Checksum of the CNB mirror bytes when they differ from the primary
+   * archive (the PDK base is mirrored as a git archive). Assets whose mirror
+   * serves byte-identical content omit this and verify against `sha256`.
+   */
+  cnb_sha256?: string | null
   sha256: string
   sha256_url?: string | null
   size: number | null
@@ -398,6 +407,7 @@ export interface ResourceManagerServiceOptions {
   archiveExtractor?: ArchiveExtractor
   cacheDir?: string
   commandRunner?: CommandRunner
+  downloadSource?: DesktopDownloadSource
   fetchImpl?: typeof fetch
   manifestWriter?: ManifestWriter
   mirrorFallback?: MirrorFallbackPreference
@@ -439,6 +449,7 @@ export class ResourceManagerService {
   private readonly manifestPath: string
   private readonly manifestWriter: ManifestWriter
   private readonly mirrorFallback: MirrorFallbackPreference
+  private downloadSource: DesktopDownloadSource
   private readonly mpcsDir: string
   private readonly pdksDir: string
   private readonly pdkInventoryService: PdkInventoryService
@@ -484,6 +495,85 @@ export class ResourceManagerService {
     this.sha256Verifier = options.sha256Verifier ?? verifySha256
     this.manifestWriter = options.manifestWriter ?? writeFile
     this.mirrorFallback = options.mirrorFallback ?? createMirrorFallbackPreference()
+    this.downloadSource =
+      normalizeDesktopDownloadSource(options.downloadSource) ??
+      DEFAULT_DESKTOP_DOWNLOAD_SOURCE
+  }
+
+  getDownloadSource(): DesktopDownloadSource {
+    return this.downloadSource
+  }
+
+  /**
+   * Update the mirror preference applied to later downloads. In-flight
+   * downloads keep the plan they started with.
+   */
+  setDownloadSource(source: DesktopDownloadSource): void {
+    const normalized =
+      normalizeDesktopDownloadSource(source) ?? DEFAULT_DESKTOP_DOWNLOAD_SOURCE
+    if (normalized === this.downloadSource) return
+    this.downloadSource = normalized
+    electronLogger.info('[resources] Download source preference set to %s', normalized)
+  }
+
+  /**
+   * Resolve the download order for one mirrored asset from the current
+   * download-source preference: `github` disables the mirror, `cnb` tries the
+   * mirror first and keeps the primary URL as fallback, and `auto` tries the
+   * primary first (the session failover memory may still skip failing hosts).
+   */
+  private planDownloadUrls(
+    url: string,
+    cnbUrl: string | null | undefined,
+  ): { primary: string; mirror: string | null } {
+    const mirror = cnbUrl?.trim() ? cnbUrl.trim() : null
+    if (!mirror || this.downloadSource === 'github') {
+      return { primary: url, mirror: null }
+    }
+    if (this.downloadSource === 'cnb') {
+      return { primary: mirror, mirror: url }
+    }
+    return { primary: url, mirror }
+  }
+
+  /**
+   * The CNB mirror of the PDK base is a git archive whose bytes (and size)
+   * differ from the GitHub tarball, so each source verifies against its own
+   * checksum and caches under its own namespace.
+   */
+  private planPdkBaseDownload(asset: ResolvedPlatformAsset): {
+    url: string
+    sha256: string
+    size: number | null
+    fallbackUrl: string | null
+  } {
+    const mirrorUrl = asset.cnb_url?.trim() ? asset.cnb_url.trim() : null
+    const mirrorSha256 = asset.cnb_sha256?.trim().toLowerCase() || null
+    const mirrorUsable =
+      mirrorUrl !== null && mirrorSha256 !== null && this.downloadSource !== 'github'
+    const preferMirror =
+      mirrorUsable &&
+      (this.downloadSource === 'cnb' || this.mirrorFallback.prefersMirror(asset.url))
+    if (preferMirror) {
+      // The mirror serves different bytes with an unknown size; the sha256
+      // check below stays the authoritative integrity gate.
+      return { url: mirrorUrl, sha256: mirrorSha256, size: null, fallbackUrl: asset.url }
+    }
+    return {
+      url: asset.url,
+      sha256: asset.sha256,
+      size: asset.size,
+      fallbackUrl: mirrorUsable ? mirrorUrl : null,
+    }
+  }
+
+  private pdkBaseSha256ForUrl(asset: ResolvedPlatformAsset, usedUrl: string): string {
+    const mirrorUrl = asset.cnb_url?.trim() ? asset.cnb_url.trim() : null
+    const mirrorSha256 = asset.cnb_sha256?.trim().toLowerCase() || null
+    if (mirrorUrl !== null && mirrorSha256 !== null && usedUrl === mirrorUrl) {
+      return mirrorSha256
+    }
+    return asset.sha256
   }
 
   getPdkInventoryService(): PdkInventoryService {
@@ -1279,9 +1369,13 @@ export class ResourceManagerService {
           message: `Downloading ${name} v${version}...`,
         })
         await mkdir(dirname(archivePath), { recursive: true })
-        await downloadAssetWithMirror(
+        const downloadPlan = this.planDownloadUrls(
           resolvedAsset.url,
           resolvedAsset.cnb_url,
+        )
+        await downloadAssetWithMirror(
+          downloadPlan.primary,
+          downloadPlan.mirror,
           archivePath,
           this.fetchImpl,
           resolvedAsset.size,
@@ -1725,9 +1819,10 @@ export class ResourceManagerService {
         tempArchive,
         resolvedAsset.size,
       )
+      const downloadPlan = this.planDownloadUrls(resolvedAsset.url, resolvedAsset.cnb_url)
       await downloadAssetWithMirror(
-        resolvedAsset.url,
-        resolvedAsset.cnb_url,
+        downloadPlan.primary,
+        downloadPlan.mirror,
         partialArchive,
         this.fetchImpl,
         resolvedAsset.size,
@@ -1965,13 +2060,14 @@ export class ResourceManagerService {
         progress: 0,
         message: `Downloading ${displayName} v${version}...`,
       })
+      const basePlan = this.planPdkBaseDownload(resolvedAsset)
       const preparedArchive = await prepareResourceArchive({
-        expectedSha256: resolvedAsset.sha256,
+        expectedSha256: basePlan.sha256,
         resourceId,
         resourcesDir: this.resourcesDir,
         sha256Verifier: this.sha256Verifier,
         signal,
-        sourceUrl: resolvedAsset.url,
+        sourceUrl: basePlan.url,
         version,
       })
       tempArchive = preparedArchive.completedArchivePath
@@ -1979,16 +2075,17 @@ export class ResourceManagerService {
       electronLogger.debug(
         '[resources] Download source for %s: %s -> %s (%d bytes)',
         resourceId,
-        resolvedAsset.url,
+        basePlan.url,
         tempArchive,
-        resolvedAsset.size,
+        basePlan.size ?? resolvedAsset.size,
       )
       let archiveFraction = 0
-      await downloadAsset(
-        resolvedAsset.url,
+      const usedBaseUrl = await downloadAssetWithMirror(
+        basePlan.url,
+        basePlan.fallbackUrl,
         partialArchive,
         this.fetchImpl,
-        resolvedAsset.size,
+        basePlan.size,
         (progress) => {
           archiveFraction = progress.progress
           const totalLabel =
@@ -2019,7 +2116,18 @@ export class ResourceManagerService {
               message: `Downloading ${displayName} v${version} (auto-retry ${attempt}/${maxAttempts})...`,
             })
           },
+          onMirrorSwitch: () => {
+            archiveFraction = 0
+            this.publish(listener, {
+              resource_id: resourceId,
+              action,
+              phase: 'downloading',
+              progress: 0,
+              message: `Downloading ${displayName} v${version} (switching to mirror)...`,
+            })
+          },
         },
+        this.mirrorFallback,
       )
       await rename(partialArchive, tempArchive)
       throwIfAborted(signal)
@@ -2030,16 +2138,16 @@ export class ResourceManagerService {
         progress: 0,
         message: 'Verifying SHA256...',
       })
+      // The mirror serves different bytes than the primary archive; verify
+      // against the checksum of the source the download actually used.
+      const expectedBaseSha256 = this.pdkBaseSha256ForUrl(resolvedAsset, usedBaseUrl)
       electronLogger.debug(
-        '[resources] Verifying %s with SHA256 %s',
+        '[resources] Verifying %s from %s with SHA256 %s',
         resourceId,
-        resolvedAsset.sha256 || '(not provided)',
+        usedBaseUrl,
+        expectedBaseSha256 || '(not provided)',
       )
-      const verified = await this.sha256Verifier(
-        tempArchive,
-        resolvedAsset.sha256,
-        signal,
-      )
+      const verified = await this.sha256Verifier(tempArchive, expectedBaseSha256, signal)
       if (!verified) {
         throw new Error(`SHA256 verification failed for ${pdkId}`)
       }
@@ -2563,9 +2671,10 @@ export class ResourceManagerService {
       }
       publishPackage()
       try {
+        const packagePlan = this.planDownloadUrls(packageAsset.url, packageAsset.cnb_url)
         await downloadAssetWithMirror(
-          packageAsset.url,
-          packageAsset.cnb_url,
+          packagePlan.primary,
+          packagePlan.mirror,
           temporaryPath,
           this.fetchImpl,
           packageAsset.size,
@@ -3861,6 +3970,7 @@ function parsePlatformAssets(value: unknown): Record<string, PlatformAsset> {
     assets[platform] = {
       url: normalizeRegistryAssetUrl(readString(asset.url)),
       cnb_url: readOptionalString(asset.cnb_url),
+      cnb_sha256: readOptionalString(asset.cnb_sha256),
       sha256: readString(asset.sha256),
       sha256_url: readOptionalString(asset.sha256_url),
       size: readOptionalPositiveNumber(asset.size) ?? null,
@@ -5066,7 +5176,7 @@ async function downloadAssetWithMirror(
   signal?: AbortSignal,
   hooks?: DownloadHooks,
   mirrorFallback?: MirrorFallbackPreference,
-): Promise<void> {
+): Promise<string> {
   const mirror = mirrorUrl?.trim() || null
   if (mirror && mirrorFallback?.prefersMirror(url)) {
     electronLogger.info(
@@ -5084,7 +5194,7 @@ async function downloadAssetWithMirror(
         signal,
         hooks,
       )
-      return
+      return mirror
     } catch (error) {
       if (isAbortError(error) || signal?.aborted) throw error
       await rm(destination, { force: true })
@@ -5104,7 +5214,7 @@ async function downloadAssetWithMirror(
         hooks,
       )
       mirrorFallback.clearFailover(url)
-      return
+      return url
     }
   }
   try {
@@ -5118,6 +5228,7 @@ async function downloadAssetWithMirror(
       hooks,
     )
     mirrorFallback?.clearFailover(url)
+    return url
   } catch (error) {
     if (isAbortError(error) || signal?.aborted || !mirror) throw error
     await rm(destination, { force: true })
@@ -5138,6 +5249,7 @@ async function downloadAssetWithMirror(
       signal,
       hooks,
     )
+    return mirror
   }
 }
 

@@ -3,6 +3,7 @@ import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
   desktopMenuEventIds,
+  DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY,
   type EccRuntimeEvent,
   type EccBackgroundOperationProjection,
   type DesktopShutdownStatus,
@@ -223,6 +224,7 @@ function registerHandlers(
       validatePdk: vi.fn(),
       validatePdkRootForWorkspace: vi.fn(),
       onRegistryChanged: vi.fn(),
+      setDownloadSource: vi.fn(),
     },
     pdkInventoryService: {
       bindInstallation: vi.fn(),
@@ -3205,6 +3207,38 @@ describe('registerIpc', () => {
       services.workspaceService.retainProjectDirectoryReplacement,
     ).toHaveBeenCalledWith(replacement.id)
     expect(services.workspaceService.clearProjectRoot).toHaveBeenCalledTimes(1)
+  })
+
+  it('applies the download source setting to the resource manager', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+
+    await handlers.get(desktopApiIpcChannels.settingsSet)?.(
+      event,
+      DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY,
+      'cnb',
+    )
+
+    expect(services.settingsStore.set).toHaveBeenCalledWith(
+      DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY,
+      'cnb',
+    )
+    expect(services.resourceManagerService.setDownloadSource).toHaveBeenCalledWith('cnb')
+  })
+
+  it('rejects an invalid download source setting without touching the store', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+
+    const result = await handlers.get(desktopApiIpcChannels.settingsSet)?.(
+      event,
+      DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY,
+      'mirror',
+    )
+
+    expect(result).toMatchObject({ ok: false })
+    expect(services.settingsStore.set).not.toHaveBeenCalled()
+    expect(services.resourceManagerService.setDownloadSource).not.toHaveBeenCalled()
   })
 
   it('rejects malformed replacement ids before calling the workspace service', async () => {

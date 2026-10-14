@@ -37,8 +37,10 @@
             :active-tab="statusFilter"
             :result-count="filteredRows.length"
             :refreshing="pluginStore.refreshing"
+            :download-source="downloadSource"
             @select-tab="statusFilter = $event"
             @refresh="pluginStore.refresh()"
+            @select-download-source="handleDownloadSourceChange"
           />
 
           <PluginFrontendReadiness
@@ -78,7 +80,13 @@ import PluginManagerToolbar from '@/components/plugins/PluginManagerToolbar.vue'
 import PluginResourceCardGrid from '@/components/plugins/PluginResourceCardGrid.vue'
 import { usePluginStore } from '@/stores/pluginStore'
 import { usePdkManager } from '@/composables/usePdkManager'
-import { getDesktopApi } from '@/platform/desktop'
+import { getDesktopApi, getOptionalDesktopApi } from '@/platform/desktop'
+import {
+  DEFAULT_DESKTOP_DOWNLOAD_SOURCE,
+  DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY,
+  normalizeDesktopDownloadSource,
+  type DesktopDownloadSource,
+} from '@ecos-studio/shared'
 import {
   compactResourceMessage,
   resourceToRow,
@@ -104,6 +112,7 @@ const searchQuery = ref('')
 const categoryFilter = ref<CategoryFilter>('all')
 const statusFilter = ref<StatusFilter>('all')
 const importingResourceIds = ref<Set<string>>(new Set())
+const downloadSource = ref<DesktopDownloadSource>(DEFAULT_DESKTOP_DOWNLOAD_SOURCE)
 
 const resourceRows = computed<ResourceRow[]>(() => {
   return pluginStore.resources.map((resource) => {
@@ -131,6 +140,7 @@ const frontendSummary = computed(() => frontendReadiness(resourceRows.value))
 
 onMounted(() => {
   void pluginStore.fetchTools()
+  void restoreDownloadSource()
 })
 
 onUnmounted(() => {
@@ -141,6 +151,29 @@ function clearFilters(): void {
   searchQuery.value = ''
   categoryFilter.value = 'all'
   statusFilter.value = 'all'
+}
+
+async function restoreDownloadSource(): Promise<void> {
+  const desktopApi = getOptionalDesktopApi()
+  if (!desktopApi) return
+  try {
+    const saved = await desktopApi.settings.get(DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY)
+    downloadSource.value =
+      normalizeDesktopDownloadSource(saved) ?? DEFAULT_DESKTOP_DOWNLOAD_SOURCE
+  } catch (error) {
+    console.warn('[PluginToolsView] Failed to restore the download source:', error)
+  }
+}
+
+async function handleDownloadSourceChange(source: DesktopDownloadSource): Promise<void> {
+  downloadSource.value = source
+  try {
+    // Electron main validates the value and applies it to the resource
+    // manager once the setting is durably stored.
+    await getDesktopApi().settings.set(DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY, source)
+  } catch (error) {
+    console.warn('[PluginToolsView] Failed to persist the download source:', error)
+  }
 }
 
 async function handleCardAction(
