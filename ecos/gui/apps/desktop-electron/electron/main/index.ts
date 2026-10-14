@@ -1,8 +1,4 @@
 import { app, BrowserWindow, ipcMain, protocol } from 'electron'
-import {
-  projectManifestForPresentation,
-  type EccProjectManifest,
-} from '@ecos-studio/shared'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { runAfterAppReady } from './appReady'
@@ -267,13 +263,7 @@ function getDesktopServices() {
     lazyWorkspaceOpen: false,
   })
   projectScopeService = new ProjectScopeService({
-    loadProjectManifest: async (projectRoot) =>
-      projectManifestForPresentation(
-        await eccRuntimeService.callRuntime<EccProjectManifest>('project.manifest.load', {
-          projectRoot,
-        }),
-        projectRoot,
-      ),
+    loadProjectManifest: (projectRoot) => projectManifestService.load(projectRoot),
     readGrantProvider: projectReadGrantStore,
   })
   const workspaceResourceService = new WorkspaceResourceService({
@@ -319,7 +309,7 @@ function getDesktopServices() {
     projectScopeService,
     workspaceService,
   )
-  const projectManifestService = new ProjectManifestService(
+  const projectManifestService: ProjectManifestService = new ProjectManifestService(
     projectScopeService,
     workspaceService,
     eccRuntimeService,

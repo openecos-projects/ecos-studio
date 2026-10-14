@@ -1,3 +1,7 @@
+import {
+  frontendWorkspaceOptions,
+  frontendInputsRequireBackup,
+} from '@/utils/frontendWorkspaceConfig'
 import { ref, getCurrentInstance } from 'vue'
 import type {
   DesignRuntimeEvent,
@@ -761,13 +765,14 @@ export function useWorkspace() {
       if (!isLatestOpenProjectRequest()) return false
 
       const normalizedSelectedPath = normalizePath(selectedPath)
-      const knownProject =
-        project ??
-        recentProjects.value.find(
-          (candidate) => normalizePath(candidate.path) === normalizedSelectedPath,
-        )
+      const recentProject = recentProjects.value.find(
+        (candidate) => normalizePath(candidate.path) === normalizedSelectedPath,
+      )
       const requestedDesignTool =
-        options.designTool ?? knownProject?.designTool ?? 'backend'
+        options.designTool ??
+        project?.designTool ??
+        recentProject?.designTool ??
+        'backend'
       candidateDesignTool = requestedDesignTool
       if (
         currentProject.value &&
@@ -1202,6 +1207,14 @@ export function useWorkspace() {
       // path unchanged; backend updates (both backup options) already returned
       // via the ECC in-place update above, so no backend journal is prepared.
       if (config?.replaceExistingWorkspace && creationConfig?.designTool === 'frontend') {
+        if (
+          !config.keepReplacementBackup &&
+          frontendInputsRequireBackup(config, selectedPath)
+        ) {
+          throw new Error(
+            'The selected RTL inputs are inside the workspace being replaced. Choose Keep Backup or select source files outside this workspace before updating it.',
+          )
+        }
         const desktopApi = getDesktopApi()
         const registeredParent = await registerProjectRoot(
           workspaceParentPath(selectedPath),
@@ -1261,70 +1274,11 @@ export function useWorkspace() {
       // 3. Create the workspace through the selected persistent RPC runtime.
       const designTool = creationConfig?.designTool ?? 'backend'
       candidateDesignTool = designTool
-      const frontendParams = creationConfig?.parameters || {}
-      const designName = String(
-        frontendParams.design ||
-          frontendParams.Design ||
-          selectedPath.split('/').filter(Boolean).pop() ||
-          'New_Chip_Design',
-      )
-      const stringArray = (value: unknown): string[] =>
-        Array.isArray(value) ? (value as string[]) : []
       let response: Awaited<ReturnType<typeof createWorkspaceApi>>
-
       if (designTool === 'frontend') {
-        const parameters = {
-          ...frontendParams,
-          Design: designName,
-          'Design Tool': 'frontend',
-          'Top module':
-            frontendParams.top_module || frontendParams['Top module'] || 'ecos_sim_top',
-          Clock: frontendParams.clock || frontendParams.Clock || 'clk',
-          'Frequency max [MHz]':
-            frontendParams.frequency_max || frontendParams['Frequency max [MHz]'] || 100,
-        }
-
-        response = await createWorkspaceApi({
-          cpu_filelist: String(frontendParams.cpu_filelist || ''),
-          cpu_rtl_files: creationConfig?.cpu_rtl_files || [],
-          cpu_top_module: String(frontendParams.cpu_top_module || ''),
-          designTool: 'frontend',
-          directory: selectedPath,
-          parameters,
-          sim_build_all_programs: Boolean(frontendParams.sim_build_all_programs),
-          sim_build_test_script: String(frontendParams.sim_build_test_script || ''),
-          sim_cflags: stringArray(frontendParams.sim_cflags),
-          sim_compile_extra_cflags: stringArray(frontendParams.sim_compile_extra_cflags),
-          sim_compile_mabi: String(frontendParams.sim_compile_mabi || ''),
-          sim_compile_march: String(frontendParams.sim_compile_march || ''),
-          sim_compile_opt_level: String(frontendParams.sim_compile_opt_level || ''),
-          sim_compile_preset: String(frontendParams.sim_compile_preset || ''),
-          sim_coremark_has_float: Boolean(frontendParams.sim_coremark_has_float),
-          sim_coremark_iterations: String(frontendParams.sim_coremark_iterations || ''),
-          sim_coremark_total_data_size: String(
-            frontendParams.sim_coremark_total_data_size || '',
-          ),
-          sim_cpp_sources: stringArray(frontendParams.sim_cpp_sources),
-          sim_images: stringArray(frontendParams.sim_images),
-          sim_ldflags: stringArray(frontendParams.sim_ldflags),
-          sim_program_names: stringArray(frontendParams.sim_program_names),
-          sim_program_sources: stringArray(frontendParams.sim_program_sources),
-          sim_program_link_base: String(frontendParams.sim_program_link_base || ''),
-          sim_programs_dir: String(frontendParams.sim_programs_dir || ''),
-          sim_run_args: stringArray(frontendParams.sim_run_args),
-          sim_soc_root: String(frontendParams.sim_soc_root || ''),
-          sim_tests_dir: String(frontendParams.sim_tests_dir || ''),
-          sim_tests_out_dir: String(frontendParams.sim_tests_out_dir || ''),
-          soc_harness_id: String(frontendParams.soc_harness_id || ''),
-          soc_filelist: String(frontendParams.soc_filelist || ''),
-          soc_variant: String(frontendParams.soc_variant || 'soc1'),
-          testbench: String(frontendParams.testbench || ''),
-          toolchain_id: String(frontendParams.toolchain_id || ''),
-          test_suite_id: String(frontendParams.test_suite_id || ''),
-          core_id: String(
-            frontendParams.frontend_core_id || frontendParams.core_id || '',
-          ),
-        })
+        response = await createWorkspaceApi(
+          frontendWorkspaceOptions(creationConfig, selectedPath),
+        )
       } else {
         const parameterDisplayIndex = await loadWorkspaceParameterDisplayIndex()
         response = await createWorkspaceApi(

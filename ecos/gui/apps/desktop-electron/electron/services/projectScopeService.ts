@@ -7,6 +7,7 @@ import {
 } from '@ecos-studio/shared'
 import { requireWindowScopeId } from './windowScopeContext'
 import { isPathWithinRoot } from './pathScope'
+import { normalizeFrontendFilelistToken } from './frontendFilelist'
 
 const REQUIRED_PROJECT_FILES = ['flow.json']
 // A workspace persists its configuration as either home/params.toml (preferred)
@@ -18,7 +19,7 @@ const FRONTEND_EXTRA_ROOT_PATH_FIELDS = [
   'sim_programs_dir',
   'sim_tests_dir',
 ]
-const FRONTEND_FILELIST_FIELDS = ['cpu_filelist', 'soc_filelist']
+const FRONTEND_FILELIST_FIELDS = ['cpu_filelist', 'soc_filelist', 'input_filelist']
 
 interface ProjectReadScope {
   projectRoot: string
@@ -100,7 +101,14 @@ async function canonicalizePotentialPathWithinRoot(
   }
 
   const relativePath = relative(rootPath, candidatePath)
-  if (!relativePath) return rootPath
+  if (!relativePath) {
+    try {
+      return await realpath(rootPath)
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) return rootPath
+      throw error
+    }
+  }
 
   const segments = relativePath.split(/[\\/]+/).filter(Boolean)
   let resolvedPrefix = rootPath
@@ -621,6 +629,7 @@ async function detectFrontendExtraRoots(projectRoot: string): Promise<string[]> 
         for (const sourceRoot of await readFrontendFilelistSourceRoots(
           filelistPath,
           filelistRoot,
+          projectRoot,
         )) {
           roots.add(sourceRoot)
         }
@@ -637,6 +646,7 @@ async function detectFrontendExtraRoots(projectRoot: string): Promise<string[]> 
 async function readFrontendFilelistSourceRoots(
   filelistPath: string,
   filelistRoot: string,
+  projectRoot: string,
 ): Promise<string[]> {
   const raw = await readFile(filelistPath, 'utf8')
   const roots = new Set<string>()
@@ -696,7 +706,14 @@ async function readFrontendFilelistSourceRoots(
         continue
       }
       try {
-        roots.add(dirname(await canonicalizeExistingPath(resolvedPath)))
+        const sourcePath = await canonicalizeExistingPath(resolvedPath)
+        const sourceRoot = dirname(sourcePath)
+        // Sources often sit beside the project. Offer those specific files for
+        // approval without exposing the whole ancestor directory and its siblings.
+        if (!(await stat(sourcePath)).isFile()) continue
+        roots.add(
+          isSafeExternalReadRoot(sourceRoot, projectRoot) ? sourceRoot : sourcePath,
+        )
       } catch {
         // Ignore stale entries; ecc-fe reports required missing inputs.
       }
@@ -704,14 +721,4 @@ async function readFrontendFilelistSourceRoots(
   }
 
   return [...roots]
-}
-
-function normalizeFrontendFilelistToken(line: string): string {
-  const withoutComment = line.replace(/\/\/.*$/, '').trim()
-  if (!withoutComment || withoutComment.startsWith('+define+')) return ''
-  const parts = withoutComment.split(/\s+/)
-  const first = parts[0] ?? ''
-  const second = parts[1] ?? ''
-  if (first === '-f' && second) return `-f${second}`
-  return first.replace(/^['"]|['"]$/g, '')
 }

@@ -1,5 +1,9 @@
 <template>
-  <div class="frontend-analysis-content" aria-label="Frontend project analysis">
+  <div
+    class="frontend-analysis-content"
+    :class="{ 'is-generic-rtl': !hasSimulation }"
+    aria-label="Frontend project analysis"
+  >
     <div
       v-show="selectedAnalysisTab === 'dashboard'"
       id="analysis-dashboard-panel"
@@ -26,7 +30,7 @@
             <dd>{{ analysis.completeWorkspaceCount }}/{{ analysis.workspaceCount }}</dd>
             <small>flow complete</small>
           </div>
-          <div>
+          <div v-if="hasSimulation">
             <dt>Simulation</dt>
             <dd
               :class="
@@ -80,9 +84,9 @@
             <span role="columnheader">QoR</span>
             <span role="columnheader">Errors</span>
             <span role="columnheader">Warnings</span>
-            <span role="columnheader">Simulation</span>
-            <span role="columnheader">Cycles</span>
-            <span role="columnheader">Difftest</span>
+            <span v-if="hasSimulation" role="columnheader">Simulation</span>
+            <span v-if="hasSimulation" role="columnheader">Cycles</span>
+            <span v-if="hasSimulation" role="columnheader">Difftest</span>
           </div>
           <button
             v-for="workspace in analysis.workspaces"
@@ -134,6 +138,7 @@
               {{ numberLabel(workspace.actionableWarnings) }} actionable
             </span>
             <span
+              v-if="hasSimulation"
               role="cell"
               :class="
                 workspace.failedCases === null
@@ -145,8 +150,12 @@
             >
               {{ casesLabel(workspace.passedCases, workspace.totalCases, false) }}
             </span>
-            <span role="cell">{{ numberLabel(workspace.cycles) }}</span>
-            <span role="cell">{{ numberLabel(workspace.difftestPassed) }}</span>
+            <span v-if="hasSimulation" role="cell">{{
+              numberLabel(workspace.cycles)
+            }}</span>
+            <span v-if="hasSimulation" role="cell">{{
+              numberLabel(workspace.difftestPassed)
+            }}</span>
           </button>
         </div>
       </section>
@@ -359,7 +368,6 @@ import FrontendQorInputSnapshot from '@/components/frontend/FrontendQorInputSnap
 import FrontendQorScoreBreakdown from '@/components/frontend/FrontendQorScoreBreakdown.vue'
 import { frontendQorGateEvidence } from '@/utils/frontendQor'
 import {
-  FRONTEND_FLOW_STEPS,
   type ProjectManagementProject,
   type ProjectStage,
 } from '@/utils/projectManagement'
@@ -390,10 +398,13 @@ const emit = defineEmits<{
 }>()
 
 const findingsExpanded = ref(false)
+const hasSimulation = computed(() => props.project.flowSteps.includes('sim'))
 const analysis = computed(() => props.project.frontendAnalysis!)
-const frontendStages = FRONTEND_FLOW_STEPS
+const frontendStages = computed(
+  () => props.project.flowSteps as readonly FrontendAnalysisStage[],
+)
 const activeStage = computed<FrontendAnalysisStage>(() =>
-  frontendStages.includes(props.selectedStep as FrontendAnalysisStage)
+  frontendStages.value.includes(props.selectedStep as FrontendAnalysisStage)
     ? (props.selectedStep as FrontendAnalysisStage)
     : 'prepare',
 )

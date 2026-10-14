@@ -1,3 +1,4 @@
+import { frontendDesignKindFromConfig } from '@ecos-studio/shared'
 import { toDesktopBridgeData } from './desktopPayload'
 import { CMDEnum, ResponseEnum } from './type'
 import { getDesktopApi } from '@/platform/desktop'
@@ -34,7 +35,8 @@ type BackendWorkspaceCreateOptions = Omit<EccWorkspaceCreateRequest, 'commandId'
   designTool: 'backend'
 }
 
-interface FrontendWorkspaceCreateOptions {
+export interface FrontendWorkspaceCreateOptions {
+  frontend_design_kind?: import('@ecos-studio/shared').FrontendDesignKind
   directory?: string
   designTool: 'frontend'
   pdk?: string
@@ -363,49 +365,63 @@ export function createWorkspaceApi(
   options: BackendWorkspaceCreateOptions | FrontendWorkspaceCreateOptions,
 ) {
   if (options.designTool === 'frontend') {
-    const payload = toDesktopBridgeData({
-      cpu_filelist: options.cpu_filelist || '',
-      cpu_rtl_files: options.cpu_rtl_files || [],
-      cpu_top_module: options.cpu_top_module || '',
-      designTool: 'frontend',
-      directory: options.directory || '',
-      filelist: options.filelist || '',
-      origin_def: options.origin_def || '',
-      origin_verilog: options.origin_verilog || '',
-      parameters: options.parameters || {},
-      pdk: options.pdk || '',
-      pdk_root: options.pdk_root || '',
-      rtl_list: options.rtl_list || [],
-      sim_build_all_programs: options.sim_build_all_programs ?? false,
-      sim_build_test_script: options.sim_build_test_script || '',
-      sim_cflags: options.sim_cflags || [],
-      sim_compile_extra_cflags: options.sim_compile_extra_cflags || [],
-      sim_compile_mabi: options.sim_compile_mabi || '',
-      sim_compile_march: options.sim_compile_march || '',
-      sim_compile_opt_level: options.sim_compile_opt_level || '',
-      sim_compile_preset: options.sim_compile_preset || '',
-      sim_coremark_has_float: options.sim_coremark_has_float ?? false,
-      sim_coremark_iterations: options.sim_coremark_iterations || '',
-      sim_coremark_total_data_size: options.sim_coremark_total_data_size || '',
-      sim_cpp_sources: options.sim_cpp_sources || [],
-      sim_images: options.sim_images || [],
-      sim_ldflags: options.sim_ldflags || [],
-      sim_program_link_base: options.sim_program_link_base || '',
-      sim_program_names: options.sim_program_names || [],
-      sim_program_sources: options.sim_program_sources || [],
-      sim_programs_dir: options.sim_programs_dir || '',
-      sim_run_args: options.sim_run_args || [],
-      sim_soc_root: options.sim_soc_root || '',
-      sim_tests_dir: options.sim_tests_dir || '',
-      sim_tests_out_dir: options.sim_tests_out_dir || '',
-      soc_filelist: options.soc_filelist || '',
-      soc_harness_id: options.soc_harness_id || '',
-      soc_variant: options.soc_variant || '',
-      test_suite_id: options.test_suite_id || '',
-      testbench: options.testbench || '',
-      toolchain_id: options.toolchain_id || '',
-      core_id: options.core_id || '',
-    })
+    const kind = frontendDesignKindFromConfig(options)
+    const payload = toDesktopBridgeData(
+      kind === 'generic_rtl'
+        ? {
+            designTool: 'frontend',
+            frontend_design_kind: kind,
+            directory: options.directory || '',
+            parameters: { ...options.parameters, frontend_design_kind: kind },
+            filelist: options.filelist || '',
+            origin_verilog: options.origin_verilog || '',
+            rtl_list: options.rtl_list || [],
+          }
+        : {
+            frontend_design_kind: kind,
+            cpu_filelist: options.cpu_filelist || '',
+            cpu_rtl_files: options.cpu_rtl_files || [],
+            cpu_top_module: options.cpu_top_module || '',
+            designTool: 'frontend',
+            directory: options.directory || '',
+            filelist: options.filelist || '',
+            origin_def: options.origin_def || '',
+            origin_verilog: options.origin_verilog || '',
+            parameters: options.parameters || {},
+            pdk: options.pdk || '',
+            pdk_root: options.pdk_root || '',
+            rtl_list: options.rtl_list || [],
+            sim_build_all_programs: options.sim_build_all_programs ?? false,
+            sim_build_test_script: options.sim_build_test_script || '',
+            sim_cflags: options.sim_cflags || [],
+            sim_compile_extra_cflags: options.sim_compile_extra_cflags || [],
+            sim_compile_mabi: options.sim_compile_mabi || '',
+            sim_compile_march: options.sim_compile_march || '',
+            sim_compile_opt_level: options.sim_compile_opt_level || '',
+            sim_compile_preset: options.sim_compile_preset || '',
+            sim_coremark_has_float: options.sim_coremark_has_float ?? false,
+            sim_coremark_iterations: options.sim_coremark_iterations || '',
+            sim_coremark_total_data_size: options.sim_coremark_total_data_size || '',
+            sim_cpp_sources: options.sim_cpp_sources || [],
+            sim_images: options.sim_images || [],
+            sim_ldflags: options.sim_ldflags || [],
+            sim_program_link_base: options.sim_program_link_base || '',
+            sim_program_names: options.sim_program_names || [],
+            sim_program_sources: options.sim_program_sources || [],
+            sim_programs_dir: options.sim_programs_dir || '',
+            sim_run_args: options.sim_run_args || [],
+            sim_soc_root: options.sim_soc_root || '',
+            sim_tests_dir: options.sim_tests_dir || '',
+            sim_tests_out_dir: options.sim_tests_out_dir || '',
+            soc_filelist: options.soc_filelist || '',
+            soc_harness_id: options.soc_harness_id || '',
+            soc_variant: options.soc_variant || '',
+            test_suite_id: options.test_suite_id || '',
+            testbench: options.testbench || '',
+            toolchain_id: options.toolchain_id || '',
+            core_id: options.core_id || '',
+          },
+    )
     return getDesktopApi()
       .runtime.workspace.create({
         designTool: 'frontend',

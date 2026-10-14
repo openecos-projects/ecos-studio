@@ -4,6 +4,7 @@ import { open, realpath, rename, stat, unlink } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import {
   applyFrontendProjectManifestMutation,
+  normalizeFrontendDesignKind,
   parseProjectManifest,
   recordReplacementBackupInManifest,
   registerWorkspaceInManifest,
@@ -45,18 +46,22 @@ export class FrontendProjectManifestService {
     return manifest
   }
 
-  async discover(directory: string): Promise<ProjectManifest | null> {
+  // A recognized frontend project can temporarily have no registered workspace.
+  // Keep that distinct from "no frontend project" so discovery never falls back to ECC.
+  async discover(
+    directory: string,
+  ): Promise<{ manifest: ProjectManifest | null } | null> {
     const candidate = await this.scope.resolveProjectRoot(directory)
     for (const root of [candidate, dirname(candidate)]) {
       const manifest = await this.load(root)
-      if (
-        manifest &&
-        (candidate === root ||
+      if (manifest) {
+        const declared =
+          candidate === root ||
           manifest.workspaces.some(
             (workspace) => resolve(root, workspace.workspace_path) === candidate,
-          ))
-      )
-        return manifest
+          )
+        return { manifest: declared ? manifest : null }
+      }
     }
     return null
   }
@@ -102,7 +107,12 @@ export class FrontendProjectManifestService {
     const updated = registerWorkspaceInManifest(manifest, {
       projectRoot: root,
       workspacePath: canonicalWorkspace,
-      config: { parameters: configData as Record<string, unknown> },
+      config: {
+        parameters: configData as Record<string, unknown>,
+        frontend_design_kind: normalizeFrontendDesignKind(
+          (configData as Record<string, unknown>).frontend_design_kind,
+        ),
+      },
     })
     await writeManifestAtomically(
       join(root, 'project.json'),
@@ -136,6 +146,9 @@ export class FrontendProjectManifestService {
     }
     if (mutation.type === 'import-workspace') {
       throw new Error('Frontend workspace import requires scoped path validation.')
+    }
+    if (mutation.type === 'register-workspace') {
+      mutation = await this.withWorkspaceProfile(root, mutation)
     }
     let directoryReplacement: WorkspaceDirectoryReplacement | null = null
     if (mutation.type === 'delete-workspace' && mutation.deleteDirectory) {
@@ -217,6 +230,56 @@ export class FrontendProjectManifestService {
       return { manifest: updated, cleanupPending: true }
     }
     return { manifest: updated }
+  }
+
+  private async withWorkspaceProfile(
+    root: string,
+    mutation: Extract<ProjectManifestMutation, { type: 'register-workspace' }>,
+  ): Promise<typeof mutation> {
+    let workspacePath: string
+    try {
+      workspacePath = await realpath(resolve(root, mutation.input.workspacePath))
+    } catch (error) {
+      if (isNodeError(error, 'ENOENT')) return mutation
+      throw error
+    }
+    if (!isPathWithinRoot(workspacePath, root) || workspacePath === root) {
+      throw new Error('Frontend workspace registration must be inside its project.')
+    }
+    let parameterPath: string
+    try {
+      parameterPath = await realpath(join(workspacePath, 'home/parameters.json'))
+    } catch (error) {
+      if (isNodeError(error, 'ENOENT')) return mutation
+      throw error
+    }
+    if (!isPathWithinRoot(parameterPath, workspacePath)) {
+      throw new Error('Frontend parameters resolve outside the workspace.')
+    }
+    const text = await readOptionalManifest(parameterPath)
+    if (!text) return mutation
+    const parameters: unknown = JSON.parse(text)
+    if (
+      !parameters ||
+      typeof parameters !== 'object' ||
+      Array.isArray(parameters) ||
+      !('Design Tool' in parameters) ||
+      parameters['Design Tool'] !== 'frontend'
+    ) {
+      throw new Error('The workspace does not have a frontend configuration.')
+    }
+    const values = parameters as Record<string, unknown>
+    return {
+      ...mutation,
+      input: {
+        ...mutation.input,
+        config: {
+          ...mutation.input.config,
+          parameters: { ...mutation.input.config?.parameters, ...values },
+          frontend_design_kind: normalizeFrontendDesignKind(values.frontend_design_kind),
+        },
+      },
+    }
   }
 }
 

@@ -1942,6 +1942,7 @@ async function openWorkspace(
       lastOpened: new Date(),
     },
     {
+      designTool: project.projectType,
       projectContext: {
         projectRoot: project.path,
         projectName: project.name,

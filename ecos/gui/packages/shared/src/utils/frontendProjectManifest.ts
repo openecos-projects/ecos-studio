@@ -1,3 +1,8 @@
+import {
+  frontendDesignKindFromConfig,
+  type FrontendDesignKind,
+} from './frontendDesign.ts'
+import { resolveFrontendProjectKind } from './frontendProjectProfile.ts'
 import type { PdkRequirement } from '../contracts/pdkInventory.ts'
 import {
   projectManifestFlowSteps,
@@ -176,7 +181,13 @@ export function parseProjectManifest(content: string): ProjectManifest {
     base_design: withProjectDesignName(baseDesign, designName),
     objectives,
     workspaces: source.workspaces.map((workspace, index) =>
-      normalizeWorkspace(workspace, index, createdAt, projectType),
+      normalizeWorkspace(
+        workspace,
+        index,
+        createdAt,
+        projectType,
+        projectType === 'frontend' ? frontendDesignKindFromConfig(baseDesign) : undefined,
+      ),
     ),
     mpc: normalizeProjectManifestMpc(source.mpc),
     best_workspace: normalizeBestWorkspace(source.best_workspace),
@@ -234,7 +245,11 @@ export function registerWorkspaceInManifest(
   input: ProjectManifestWorkspaceRegistrationInput,
 ): ProjectManifest {
   const now = input.now ?? new Date().toISOString()
-  const profile = projectManifestProfileFor(manifest.project_type)
+  const designKind =
+    manifest.project_type === 'frontend'
+      ? resolveFrontendProjectKind(manifest, input.config)
+      : undefined
+  const profile = projectManifestProfileFor(manifest.project_type, designKind)
   const workspacePath = normalizeProjectManifestPath(input.workspacePath)
   const workspaceId =
     basenameProjectManifestPath(workspacePath) || nextManifestWorkspaceId(manifest)
@@ -264,7 +279,7 @@ export function registerWorkspaceInManifest(
   const startStep = input.startStep
     ? normalizeProjectManifestStage(manifest.project_type, input.startStep)
     : sourceStep
-      ? nextProjectManifestStage(manifest.project_type, sourceStep)
+      ? nextProjectManifestStage(manifest.project_type, sourceStep, designKind)
       : normalizeProjectManifestStage(
           manifest.project_type,
           existingWorkspace?.start_step ?? profile.defaultStartStep,
@@ -275,9 +290,18 @@ export function registerWorkspaceInManifest(
         manifest.project_type,
         existingWorkspace?.end_step ?? profile.defaultEndStep,
       )
+  if (
+    designKind === 'generic_rtl' &&
+    (!profile.flowSteps.includes(startStep) || !profile.flowSteps.includes(endStep))
+  ) {
+    throw new Error(
+      'General RTL workspaces support prepare, review, elab, and lint only.',
+    )
+  }
   const workspaceName = manifest.design_name
   const workspaceParameters = {
     ...input.config?.parameters,
+    ...(designKind ? { frontend_design_kind: designKind } : {}),
     design: manifest.design_name,
   }
   const parameterPatch = input.config
@@ -334,6 +358,7 @@ export function registerWorkspaceInManifest(
       ? withProjectDesignName(
           mergeBaseDesignConfig(manifest.base_design, {
             ...input.config,
+            ...(designKind ? { frontend_design_kind: designKind } : {}),
             parameters: workspaceParameters,
           }),
           manifest.design_name,
@@ -466,7 +491,12 @@ export function recordReplacementBackupInManifest(
   input: ProjectManifestResolvedReplacementBackupInput,
 ): ProjectManifest {
   const now = new Date().toISOString()
-  const profile = projectManifestProfileFor(manifest.project_type)
+  const profile = projectManifestProfileFor(
+    manifest.project_type,
+    manifest.project_type === 'frontend'
+      ? frontendDesignKindFromConfig(manifest.base_design)
+      : undefined,
+  )
   const backupPath = normalizeProjectManifestPath(input.backupPath)
   const targetPath = normalizeProjectManifestPath(input.targetPath)
   const backupWorkspaceId = basenameProjectManifestPath(backupPath)
@@ -557,8 +587,9 @@ export function normalizeProjectManifestStage(
 export function nextProjectManifestStage(
   projectType: ProjectManifestType,
   step: ProjectManifestStage | string,
+  designKind?: FrontendDesignKind,
 ): ProjectManifestStage {
-  const profile = projectManifestProfileFor(projectType)
+  const profile = projectManifestProfileFor(projectType, designKind)
   const normalized = normalizeProjectManifestStage(projectType, step)
   const index = profile.flowSteps.indexOf(normalized)
   return profile.flowSteps[
@@ -571,6 +602,7 @@ function normalizeWorkspace(
   index: number,
   fallbackTimestamp: string,
   projectType: ProjectManifestType,
+  designKind?: FrontendDesignKind,
 ): ProjectManifestWorkspace {
   const source = recordValue(value)
   if (!source)
@@ -584,7 +616,7 @@ function normalizeWorkspace(
   }
   const branch = recordValue(source.branch_from)
   const sourceWorkspaceId = optionalString(source.source_workspace_id) || null
-  const profile = projectManifestProfileFor(projectType)
+  const profile = projectManifestProfileFor(projectType, designKind)
   const metricsSummary = recordValue(source.metrics_summary)
   const stepMetrics = recordValue(source.step_metrics)
   return {
@@ -847,10 +879,12 @@ function mergeBaseDesignConfig(
   }
   const pdk = optionalString(config.pdk)
   const pdkRoot = optionalString(config.pdk_root)
-  const topModule = optionalString(parameters.top_module)
-  const clock = optionalString(parameters.clock)
+  const topModule = optionalString(parameters.top_module ?? parameters['Top module'])
+  const clock = optionalString(parameters.clock ?? parameters.Clock)
   const originVerilog = optionalString(config.origin_verilog)
   const originDef = optionalString(config.origin_def)
+  if (config.frontend_design_kind) next.frontend_design_kind = config.frontend_design_kind
+  if (config.filelist !== undefined) next.filelist = config.filelist
   if (pdk) next.pdk = pdk
   if (pdkRoot) next.pdk_root = pdkRoot
   if (config.pdk_requirement) {
@@ -858,7 +892,7 @@ function mergeBaseDesignConfig(
     delete next.pdk_root
   }
   if (topModule) next.top_module = topModule
-  if (clock) next.clock = clock
+  if (parameters.clock !== undefined || parameters.Clock !== undefined) next.clock = clock
   if (originVerilog) next.origin_verilog = originVerilog
   if (originDef) next.origin_def = originDef
   if (config.rtl_list && config.rtl_list.length > 0) next.rtl_list = [...config.rtl_list]

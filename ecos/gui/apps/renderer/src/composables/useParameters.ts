@@ -1,3 +1,4 @@
+import { normalizeFrontendDesignKind, type FrontendDesignKind } from '@ecos-studio/shared'
 import { ref, reactive, watch, computed, getCurrentScope, onScopeDispose } from 'vue'
 import { useWorkspace } from './useWorkspace'
 import { getWorkspaceRuntimeSnapshotApi } from '@/api/workspaceResources'
@@ -14,6 +15,7 @@ import { updateManagedWorkspaceConfiguration } from './workspaceConfigurationUpd
 
 /** parameters.json 磁盘结构（ICS55 扁平模板 + 可选 PDK Root） */
 export interface ParametersData {
+  frontend_design_kind?: FrontendDesignKind
   PDK: string
   Design: string
   design?: string
@@ -69,6 +71,7 @@ type ParameterRecord = Record<string, unknown>
 
 /** 前端编辑用（驼峰） */
 export interface FrontendConfigData {
+  designKind?: FrontendDesignKind
   coreId: string
   cpuWrapperId: string
   cpuWrapperContract: string
@@ -329,6 +332,7 @@ function normalizeParametersData(raw: ParameterRecord | ParametersData): Paramet
       record.soc_wrapper_contract != null
         ? String(record.soc_wrapper_contract)
         : undefined,
+    frontend_design_kind: normalizeFrontendDesignKind(record.frontend_design_kind),
     frontend_core_id:
       record.frontend_core_id != null ? String(record.frontend_core_id) : undefined,
     core_id: record.core_id != null ? String(record.core_id) : undefined,
@@ -388,6 +392,9 @@ export function transformParametersToConfig(data: ParametersData): ConfigData {
     bottomLayer: FIXED_BOTTOM_LAYER,
     topLayer: FIXED_TOP_LAYER,
     frontend: {
+      ...(data['Design Tool'] === 'frontend'
+        ? { designKind: normalizeFrontendDesignKind(data.frontend_design_kind) }
+        : {}),
       coreId: data.frontend_core_id || data.core_id || '',
       cpuWrapperId: data.cpu_wrapper_id || data.frontend_core_id || data.core_id || '',
       cpuWrapperContract: data.cpu_wrapper_contract || '',
@@ -440,10 +447,13 @@ export function transformConfigToParameters(config: ConfigData): ParametersData 
   out['Design Tool'] = config.designTool
   out.description = config.description
   if (config.designTool === 'frontend') {
+    out.frontend_design_kind = config.frontend.designKind ?? 'cpu_core'
     out.design = config.design
     out.top_module = config.topModule
     out.clock = config.clock
     out.frequency_max = config.frequencyMax
+    out.input_filelist = config.frontend.inputFilelist
+    if (out.frontend_design_kind === 'generic_rtl') return out
     out.frontend_core_id = config.frontend.coreId
     out.core_id = config.frontend.coreId
     out.cpu_wrapper_id = config.frontend.cpuWrapperId

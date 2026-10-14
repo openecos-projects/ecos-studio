@@ -1,5 +1,7 @@
 import {
   projectManagementFrontendWorkspaceStepAnalysisSpecs,
+  frontendDesignKindFromConfig,
+  frontendFlowSteps,
   projectManagementFrontendWorkspaceSummaryPaths,
   type ProjectManifest,
 } from '@ecos-studio/shared'
@@ -46,6 +48,15 @@ export async function readFrontendProjectWorkspaceData(
   projectRoot: string,
   manifest: ProjectManifest,
 ): Promise<FrontendProjectWorkspaceData> {
+  const allowedSteps = new Set<string>(
+    frontendFlowSteps(frontendDesignKindFromConfig(manifest.base_design)),
+  )
+  const specs = projectManagementFrontendWorkspaceStepAnalysisSpecs.filter((spec) =>
+    allowedSteps.has(spec.step),
+  )
+  const paths = projectManagementFrontendWorkspaceSummaryPaths.filter(
+    (path) => !path.startsWith('sim_') || allowedSteps.has('sim'),
+  )
   const entries = await mapWithConcurrency(
     manifest.workspaces,
     PROJECT_READ_CONCURRENCY,
@@ -54,7 +65,7 @@ export async function readFrontendProjectWorkspaceData(
         const result = await readProjectManagementWorkspaceTexts(
           projectRoot,
           workspace.workspace_path,
-          [...projectManagementFrontendWorkspaceSummaryPaths],
+          [...paths],
         )
         const flowText = result.texts['home/flow.json']
         return [
@@ -62,28 +73,16 @@ export async function readFrontendProjectWorkspaceData(
           {
             analysis: {
               frontendDetailTexts: Object.fromEntries(
-                projectManagementFrontendWorkspaceStepAnalysisSpecs.map((spec) => [
-                  spec.step,
-                  result.texts[spec.detailPath] ?? null,
-                ]),
+                specs.map((spec) => [spec.step, result.texts[spec.detailPath] ?? null]),
               ),
               frontendQorMetricTexts: Object.fromEntries(
-                projectManagementFrontendWorkspaceStepAnalysisSpecs.map((spec) => [
-                  spec.step,
-                  result.texts[spec.metricsPath] ?? null,
-                ]),
+                specs.map((spec) => [spec.step, result.texts[spec.metricsPath] ?? null]),
               ),
               frontendQorSummaryTexts: Object.fromEntries(
-                projectManagementFrontendWorkspaceStepAnalysisSpecs.map((spec) => [
-                  spec.step,
-                  result.texts[spec.summaryPath] ?? null,
-                ]),
+                specs.map((spec) => [spec.step, result.texts[spec.summaryPath] ?? null]),
               ),
               frontendQorHotspotTexts: Object.fromEntries(
-                projectManagementFrontendWorkspaceStepAnalysisSpecs.map((spec) => [
-                  spec.step,
-                  result.texts[spec.hotspotsPath] ?? null,
-                ]),
+                specs.map((spec) => [spec.step, result.texts[spec.hotspotsPath] ?? null]),
               ),
               frontendUnavailablePaths: result.unavailablePaths,
               flowText: flowText ?? null,

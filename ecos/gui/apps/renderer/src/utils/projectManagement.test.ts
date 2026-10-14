@@ -160,6 +160,44 @@ describe('project management V3 model', () => {
     expect(createSelectionState(model).selectedStep).toBe('DRC')
   })
 
+  it('shows four completed steps for a generic RTL project without a simulation column', () => {
+    const manifest = registerWorkspaceInManifest(
+      createProjectManifestDraft({
+        rootPath: '/projects/rtl',
+        name: 'rtl',
+        designName: 'counter',
+        projectType: 'frontend',
+      }),
+      {
+        projectRoot: '/projects/rtl',
+        workspacePath: '/projects/rtl/ws_0001',
+        config: { frontend_design_kind: 'generic_rtl' },
+      },
+    )
+    const model = buildProjectManagementProject(
+      { ...project, projectType: 'frontend' },
+      manifest,
+      {
+        ws_0001: {
+          prepare: 'success',
+          review: 'success',
+          elab: 'success',
+          lint: 'success',
+        },
+      },
+    )
+    expect(model.flowSteps).toEqual(['prepare', 'review', 'elab', 'lint'])
+    expect(model.workspaces[0]?.steps.map((step) => step.step)).toEqual(model.flowSteps)
+    expect(model.frontendAnalysis).toMatchObject({
+      completedSteps: 4,
+      totalSteps: 4,
+      completeWorkspaceCount: 1,
+    })
+    expect(
+      model.frontendAnalysis?.workspaces[0]?.steps.some((step) => step.stage === 'sim'),
+    ).toBe(false)
+  })
+
   it('uses the frontend profile for workspace steps and analysis', () => {
     const manifest = registerWorkspaceInManifest(
       createProjectManifestDraft({

@@ -193,6 +193,7 @@
       :creating="wizardCreating"
       :initial-config="initialWizardConfig"
       :lock-project-context="projectManagementWorkspaceCreation"
+      :lock-workspace-directory="projectManagementWorkspaceCreation"
       @close="closeWizard"
       @create="handleWizardCreate"
     />
