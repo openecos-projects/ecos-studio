@@ -80,6 +80,7 @@ describe('product e2e: rtl2gds without Sizer fails cleanly', () => {
         inputs: design.inputs,
         parameters: design.parameters,
         pdkRoot: PDK_ROOT,
+        rtlImport: design.rtlImport,
       })
       const operation = await runFlow(page, workspace)
       const terminal = await waitFlowTerminal(

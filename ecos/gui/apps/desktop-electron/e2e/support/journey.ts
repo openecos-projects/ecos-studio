@@ -59,7 +59,12 @@ export async function importExternalPdk(page: Page, root: string): Promise<strin
 
 export async function createBackendProject(
   page: Page,
-  input: { projectRoot: string; name: string; designName: string },
+  input: {
+    projectRoot: string
+    name: string
+    designName: string
+    rtlImport?: { filelist?: string; verilog?: string[] }
+  },
 ): Promise<string> {
   await page.evaluate((request) => window.ecosDesktop.projectManifest.mutate(request), {
     projectRoot: input.projectRoot,
@@ -69,6 +74,7 @@ export async function createBackendProject(
       designName: input.designName,
       projectType: 'backend',
       mpc: null,
+      ...(input.rtlImport ? { rtlImport: input.rtlImport } : {}),
     },
   })
   const manifest = await page.evaluate(
@@ -95,13 +101,18 @@ export interface CreateWorkspaceInput {
 
 /**
  * Create the e2e workspace as <projectRoot>/default so produced workspaces
- * satisfy the signoff-lit layout (<name>/default/home/flow.json).
+ * satisfy the signoff-lit layout (<name>/default/home/flow.json). RTL was
+ * imported at project creation; the workspace reuses the project design RTL,
+ * so rtl/filelist inputs are dropped here.
  */
 export async function createDefaultWorkspace(
   page: Page,
   input: CreateWorkspaceInput,
 ): Promise<WorkspaceJourney> {
   const targetDirectory = join(input.projectRoot, 'default')
+  const workspaceInputs = input.inputs.filter(
+    (item) => item.role !== 'rtl' && item.role !== 'filelist',
+  )
   const payload: EccWorkspaceCreateRequest = {
     commandId: randomUUID(),
     targetDirectory,
@@ -110,7 +121,7 @@ export async function createDefaultWorkspace(
     pdkInstallationId: input.pdkInstallationId,
     pdkRequirement: { familyId: 'ics55', version: null, manualConfig: null },
     workspaceBindings: {
-      inputs: Object.fromEntries(input.inputs.map((i) => [i.inputId, i.path])),
+      inputs: Object.fromEntries(workspaceInputs.map((i) => [i.inputId, i.path])),
       pdk: { root: '' },
     },
     workspaceSpec: {
@@ -121,7 +132,7 @@ export async function createDefaultWorkspace(
         clockPort: input.clockPort,
       },
       inputMode: 'rtl',
-      inputs: input.inputs.map(({ inputId, role }) => ({ inputId, role })),
+      inputs: workspaceInputs.map(({ inputId, role }) => ({ inputId, role })),
       pdk: { familyId: 'ics55', mode: 'default' },
       flow: { flowId: 'rtl2gds' },
       parameters: {
@@ -237,6 +248,7 @@ export async function setupBackendWorkspace(
   page: Page,
   input: Omit<CreateWorkspaceInput, 'projectId' | 'pdkInstallationId'> & {
     pdkRoot: string
+    rtlImport?: { filelist?: string; verilog?: string[] }
   },
 ): Promise<WorkspaceJourney> {
   await waitToolchainReady(page)
@@ -244,6 +256,7 @@ export async function setupBackendWorkspace(
     projectRoot: input.projectRoot,
     name: `${input.designName}-e2e`,
     designName: input.designName,
+    ...(input.rtlImport ? { rtlImport: input.rtlImport } : {}),
   })
   const pdkInstallationId = await importExternalPdk(page, input.pdkRoot)
   const workspace = await createDefaultWorkspace(page, {
