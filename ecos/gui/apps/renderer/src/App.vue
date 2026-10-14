@@ -684,6 +684,7 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal, onNarration) => 
             designName: 'gcd',
             projectRoot,
             mpcId: input.mpc?.id ?? '',
+            designPath: input.design?.path,
           },
           signal,
           narrate,
@@ -757,7 +758,9 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal, onNarration) => 
           },
           origin_def: '',
           origin_verilog: '',
-          rtl_list: input.resources.design ? [input.resources.design.path] : [],
+          // The design RTL was imported at project creation (or comes from
+          // the MPC template); the workspace reuses the project design RTL.
+          rtl_list: [],
           design_input_mode: 'rtl',
           pdk_config_mode: 'default',
           pdk_config: { mode: 'default', tech_lef: [], cell_lef: [], liberty: [] },
@@ -1070,7 +1073,7 @@ async function driveQuickStartWorkspaceWizard(
   workspaceWizardInitialConfig.value = { ...config }
   showNewProjectWizard.value = true
   try {
-    for (let step = 1; step < 6; step += 1) {
+    for (let step = 1; step < 7; step += 1) {
       await clickQuickStartWizardButton('Continue', step, signal)
       if (step === 1) {
         narrate?.('正在填写布局密度和 Workspace 目录。')
@@ -1084,7 +1087,7 @@ async function driveQuickStartWorkspaceWizard(
     narrate?.('正在填写顶层模块 gcd 和时钟 clk。')
     await showQuickStartInput('top', 'gcd', signal)
     await showQuickStartInput('clk', 'clk', signal)
-    await clickQuickStartWizardButton('Create Workspace', 6, signal)
+    await clickQuickStartWizardButton('Create Workspace', 7, signal)
     return await created
   } finally {
     quickStartWizardResolve = null
@@ -1161,6 +1164,7 @@ async function showQuickStartProjectDialog(
     designName: string
     projectRoot: string
     mpcId: string
+    designPath?: string
   },
   signal?: AbortSignal,
   narrate?: (message: string) => void,
@@ -1178,6 +1182,21 @@ async function showQuickStartProjectDialog(
     if (!field) throw new Error(`Quick Start could not find the ${name} field.`)
     await moveQuickStartCursor(field, signal)
     await typeQuickStartInput(field, value, signal)
+  }
+
+  // Backend projects without an MPC require an RTL source import; the field
+  // is absent for MPC-backed projects, which take their design from the
+  // managed template.
+  if (input.designPath) {
+    signal?.throwIfAborted()
+    const rtlField = document.querySelector<HTMLInputElement>(
+      '.new-project-dialog input[name="project-rtl-source"]',
+    )
+    if (rtlField) {
+      await moveQuickStartCursor(rtlField, signal)
+      await typeQuickStartInput(rtlField, input.designPath, signal)
+      await delay(250, signal)
+    }
   }
 
   let select: HTMLSelectElement | null = null
