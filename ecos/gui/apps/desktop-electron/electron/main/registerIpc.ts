@@ -2049,8 +2049,16 @@ export function registerIpc(
       }
       await services.settingsStore.set(key as string, value as DesktopSettingsValue)
       services.resourceManagerService.setDownloadSource(source)
-      // ECOS Studio runs a single BrowserWindow, so no cross-window
-      // broadcast is needed: the initiating renderer is the only UI.
+      // The preference is process-wide; keep the switch in every open window
+      // in sync with the committed value.
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) {
+          window.webContents.send(
+            desktopApiEventChannels.settingsDownloadSourceChanged,
+            source,
+          )
+        }
+      }
       return
     }
     await services.settingsStore.set(key as string, value as DesktopSettingsValue)

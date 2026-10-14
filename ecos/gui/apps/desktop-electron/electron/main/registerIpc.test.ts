@@ -3241,6 +3241,31 @@ describe('registerIpc', () => {
     expect(services.resourceManagerService.setDownloadSource).not.toHaveBeenCalled()
   })
 
+  it('broadcasts a committed download source to every open window', async () => {
+    const sends = { first: vi.fn(), second: vi.fn(), destroyed: vi.fn() }
+    getAllWindows.mockReturnValue([
+      { isDestroyed: () => false, webContents: { send: sends.first } },
+      { isDestroyed: () => true, webContents: { send: sends.destroyed } },
+      { isDestroyed: () => false, webContents: { send: sends.second } },
+    ])
+    const { handlers } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+
+    await handlers.get(desktopApiIpcChannels.settingsSet)?.(
+      event,
+      DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY,
+      'github',
+    )
+
+    for (const send of [sends.first, sends.second]) {
+      expect(send).toHaveBeenCalledWith(
+        desktopApiEventChannels.settingsDownloadSourceChanged,
+        'github',
+      )
+    }
+    expect(sends.destroyed).not.toHaveBeenCalled()
+  })
+
   it('rejects malformed replacement ids before calling the workspace service', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }

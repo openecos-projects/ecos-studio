@@ -119,6 +119,7 @@ let confirmedDownloadSource: DesktopDownloadSource = DEFAULT_DESKTOP_DOWNLOAD_SO
 // Generation counter for user selections; a late restore or a failed persist
 // may only touch the switch while no newer selection exists.
 let downloadSourceSelectionSeq = 0
+let unsubscribeDownloadSourceChanged: (() => void) | undefined
 
 const resourceRows = computed<ResourceRow[]>(() => {
   return pluginStore.resources.map((resource) => {
@@ -146,11 +147,25 @@ const frontendSummary = computed(() => frontendReadiness(resourceRows.value))
 
 onMounted(() => {
   void pluginStore.fetchTools()
-  void restoreDownloadSource()
+  // The preference is process-wide: when another window commits a change,
+  // follow it here. An in-flight local selection still wins until its own
+  // persist resolves.
+  const desktopApi = getOptionalDesktopApi()
+  unsubscribeDownloadSourceChanged = desktopApi?.settings.onDownloadSourceChanged?.(
+    (source) => {
+      confirmedDownloadSource = source
+      if (downloadSourceSelectionSeq === 0) {
+        downloadSource.value = source
+      }
+    },
+  )
+  void restoreDownloadSource(desktopApi)
 })
 
 onUnmounted(() => {
   pluginStore.cleanup()
+  unsubscribeDownloadSourceChanged?.()
+  unsubscribeDownloadSourceChanged = undefined
 })
 
 function clearFilters(): void {
@@ -159,8 +174,9 @@ function clearFilters(): void {
   statusFilter.value = 'all'
 }
 
-async function restoreDownloadSource(): Promise<void> {
-  const desktopApi = getOptionalDesktopApi()
+async function restoreDownloadSource(
+  desktopApi = getOptionalDesktopApi(),
+): Promise<void> {
   if (!desktopApi) return
   try {
     const saved = await desktopApi.settings.get(DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY)
