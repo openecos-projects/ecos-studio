@@ -9254,6 +9254,60 @@ describe('ResourceManagerService', () => {
     ).resolves.toBe('VERSION 5.8 ;\n')
   })
 
+  it('falls back to GitHub when the mirror PDK base fails integrity verification', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createPdkArchive(root)
+    const archiveBytes = await readFile(archive.path)
+    const registryPath = join(root, 'registry.json')
+    const githubBaseSha256 = 'a'.repeat(64)
+    const cnbBaseSha256 = 'b'.repeat(64)
+    await writeIcs55Registry(registryPath, {
+      url: 'https://example.com/ics55-base.tar.gz',
+      cnb_url: 'https://mirror.example.com/ics55-base.tar.gz',
+      cnb_sha256: cnbBaseSha256,
+      sha256: githubBaseSha256,
+      size: archive.size,
+      packages: [],
+    })
+    const fetchedUrls: string[] = []
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      downloadSource: 'cnb',
+      fetchImpl: vi.fn(async (url) => {
+        const text = String(url)
+        fetchedUrls.push(text)
+        if (text === 'https://mirror.example.com/ics55-base.tar.gz') {
+          // Corrupt mirror bytes that fail integrity verification.
+          return new Response(new TextEncoder().encode('corrupt mirror bytes'))
+        }
+        if (text === 'https://example.com/ics55-base.tar.gz') {
+          return new Response(archiveBytes)
+        }
+        return new Response(null, { status: 404 })
+      }) as typeof fetch,
+      sha256Verifier: async (path, expected) => {
+        const content = await readFile(path, 'utf8').catch(() => '')
+        if (content === 'corrupt mirror bytes') return false
+        return expected === githubBaseSha256
+      },
+    })
+
+    await service.installResource('pdk:ics55', '1.10.100')
+
+    // The corrupt mirror leg fails verification and the GitHub leg installs.
+    expect(fetchedUrls).toEqual([
+      'https://mirror.example.com/ics55-base.tar.gz',
+      'https://example.com/ics55-base.tar.gz',
+    ])
+    await expect(
+      readFile(
+        join(root, 'data/pdks/ics55/1.10.100/prtech/techLEF', 'N551P6M_ecos.lef'),
+        'utf8',
+      ),
+    ).resolves.toBe('VERSION 5.8 ;\n')
+  })
+
   it('falls back to the differing-bytes PDK base mirror in auto mode despite the unknown mirror size', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createPdkArchive(root, { valid: false })
