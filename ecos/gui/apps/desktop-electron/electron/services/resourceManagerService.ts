@@ -150,6 +150,13 @@ interface PlatformAsset {
    * serves byte-identical content omit this and verify against `sha256`.
    */
   cnb_sha256?: string | null
+  /**
+   * Strip prefix for the CNB mirror archive when its layout differs from the
+   * primary archive (the PDK base git archive has no wrapper directory and
+   * carries an empty string: extract at root). Absent means the mirror
+   * extracts like the primary.
+   */
+  cnb_strip_prefix?: string | null
   sha256: string
   sha256_url?: string | null
   size: number | null
@@ -589,6 +596,22 @@ export class ResourceManagerService {
       return mirrorSha256 ?? asset.sha256
     }
     return asset.sha256
+  }
+
+  /**
+   * The CNB PDK base archive is a git archive without the GitHub wrapper
+   * directory; the registry marks that with an empty cnb_strip_prefix so the
+   * mirror extracts at root instead of stripping one component.
+   */
+  private pdkBaseStripPrefixForUrl(
+    asset: ResolvedPlatformAsset,
+    usedUrl: string,
+  ): string | null {
+    const mirrorUrl = asset.cnb_url?.trim() ? asset.cnb_url.trim() : null
+    if (mirrorUrl !== null && usedUrl === mirrorUrl && asset.cnb_strip_prefix != null) {
+      return asset.cnb_strip_prefix
+    }
+    return asset.strip_prefix ?? null
   }
 
   getPdkInventoryService(): PdkInventoryService {
@@ -2180,7 +2203,7 @@ export class ResourceManagerService {
           await this.archiveExtractor(
             tempArchive,
             tempExtract,
-            resolvedAsset.strip_prefix,
+            this.pdkBaseStripPrefixForUrl(resolvedAsset, usedBaseUrl),
             signal,
           )
         },
@@ -3991,6 +4014,10 @@ function parsePlatformAssets(value: unknown): Record<string, PlatformAsset> {
       url: normalizeRegistryAssetUrl(readString(asset.url)),
       cnb_url: readOptionalString(asset.cnb_url),
       cnb_sha256: readOptionalString(asset.cnb_sha256),
+      // Preserve an explicit empty string: it means the mirror archive has
+      // no wrapper directory and must be extracted at root.
+      cnb_strip_prefix:
+        typeof asset.cnb_strip_prefix === 'string' ? asset.cnb_strip_prefix : null,
       sha256: readString(asset.sha256),
       sha256_url: readOptionalString(asset.sha256_url),
       size: readOptionalPositiveNumber(asset.size) ?? null,

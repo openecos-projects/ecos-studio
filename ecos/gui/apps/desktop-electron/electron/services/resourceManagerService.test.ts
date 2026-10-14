@@ -102,7 +102,7 @@ async function runFixtureCommand(
 
 async function createPdkArchive(
   root: string,
-  options: { makefileContent?: string; valid?: boolean } = {},
+  options: { makefileContent?: string; valid?: boolean; rootless?: boolean } = {},
 ): Promise<{ path: string; sha256: string; size: number }> {
   const sourceRoot = join(root, 'pdk-source')
   const sourceDir = join(sourceRoot, 'icsprout55-pdk-1.10.100')
@@ -156,13 +156,19 @@ async function createPdkArchive(
   if (options.makefileContent) {
     await writeFile(join(sourceDir, 'Makefile'), options.makefileContent, 'utf8')
   }
-  await runFixtureCommand('tar', [
-    '-cf',
-    archive,
-    '-C',
-    sourceRoot,
-    'icsprout55-pdk-1.10.100',
-  ])
+  const entries = [
+    'IP',
+    'prtech',
+    'README.md',
+    ...(options.makefileContent ? ['Makefile'] : []),
+  ]
+  await runFixtureCommand(
+    'tar',
+    options.rootless
+      ? // CNB git archives carry the repository contents at the root.
+        ['-cf', archive, '-C', sourceDir, ...entries]
+      : ['-cf', archive, '-C', sourceRoot, 'icsprout55-pdk-1.10.100'],
+  )
   const size = Buffer.byteLength(await readFile(archive))
   return {
     path: archive,
@@ -502,6 +508,7 @@ async function writeIcs55Registry(
     size: number
     cnb_url?: string
     cnb_sha256?: string
+    cnb_strip_prefix?: string
     packages?: unknown[]
   },
 ): Promise<void> {
@@ -9204,6 +9211,47 @@ describe('ResourceManagerService', () => {
         'utf8',
       ),
     ).resolves.toBe('library(test) {}\n')
+  })
+
+  it('extracts a rootless mirror PDK base at root using cnb_strip_prefix', async () => {
+    const root = await createTempDir('ecos-resources-')
+    // CNB git archives carry the repository contents at the root, without
+    // the GitHub wrapper directory; the registry marks that with an empty
+    // cnb_strip_prefix.
+    const archive = await createPdkArchive(root, { rootless: true })
+    const archiveBytes = await readFile(archive.path)
+    const registryPath = join(root, 'registry.json')
+    const cnbBaseSha256 = 'b'.repeat(64)
+    await writeIcs55Registry(registryPath, {
+      url: 'https://example.com/ics55-base.tar.gz',
+      cnb_url: 'https://mirror.example.com/ics55-base.tar.gz',
+      cnb_sha256: cnbBaseSha256,
+      cnb_strip_prefix: '',
+      sha256: 'a'.repeat(64),
+      size: archive.size + 100,
+      packages: [],
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      downloadSource: 'cnb',
+      fetchImpl: vi.fn(async (url) =>
+        String(url) === 'https://mirror.example.com/ics55-base.tar.gz'
+          ? new Response(archiveBytes)
+          : new Response(null, { status: 404 }),
+      ) as typeof fetch,
+      sha256Verifier: async (_path, expected) => expected === cnbBaseSha256,
+    })
+
+    await service.installResource('pdk:ics55', '1.10.100')
+
+    // Extracted at root: IP/ and prtech/ land directly in the PDK directory.
+    await expect(
+      readFile(
+        join(root, 'data/pdks/ics55/1.10.100/prtech/techLEF', 'N551P6M_ecos.lef'),
+        'utf8',
+      ),
+    ).resolves.toBe('VERSION 5.8 ;\n')
   })
 
   it('falls back to the differing-bytes PDK base mirror in auto mode despite the unknown mirror size', async () => {
