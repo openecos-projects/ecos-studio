@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  ensureBackendProjectManifestForCreate,
+  authorizeBackendProjectRootForCreate,
   prepareWorkspaceCreateBinding,
   prepareWorkspaceOpenBinding,
 } from './workspacePdkBindings'
@@ -140,18 +140,18 @@ describe('prepareWorkspaceOpenBinding', () => {
   })
 })
 
-describe('ensureBackendProjectManifestForCreate', () => {
-  it('creates the manifest before ECC creates a managed workspace', async () => {
-    const writeProjectTextFile = vi.fn()
+describe('authorizeBackendProjectRootForCreate', () => {
+  it('registers an existing project root without writing any project file', async () => {
+    const registerProjectRoot = vi.fn().mockResolvedValue('/projects/test_agent')
     const dependencies = {
       workspaceService: {
-        pathExists: vi.fn().mockResolvedValue(false),
-        registerProjectRoot: vi.fn().mockResolvedValue('/projects/test_agent'),
-        writeProjectTextFile,
+        pathExists: vi.fn().mockResolvedValue(true),
+        registerProjectRoot,
+        writeProjectTextFile: vi.fn(),
       },
     }
 
-    await ensureBackendProjectManifestForCreate(dependencies, {
+    await authorizeBackendProjectRootForCreate(dependencies, {
       commandId: 'create-1',
       projectId: 'proj_test_agent',
       projectRoot: '/projects/test_agent',
@@ -160,10 +160,30 @@ describe('ensureBackendProjectManifestForCreate', () => {
       workspaceSpec: { design: { name: 'test_agent' } },
     })
 
-    expect(writeProjectTextFile).toHaveBeenCalledWith(
-      '/projects/test_agent/project.json',
-      expect.stringContaining('"project_id": "proj_test_agent"'),
-    )
+    expect(registerProjectRoot).toHaveBeenCalledWith('/projects/test_agent')
+    expect(dependencies.workspaceService.writeProjectTextFile).not.toHaveBeenCalled()
+  })
+
+  it('leaves a not-yet-created project root to ecc init', async () => {
+    const registerProjectRoot = vi.fn()
+    const dependencies = {
+      workspaceService: {
+        pathExists: vi.fn().mockResolvedValue(false),
+        registerProjectRoot,
+        writeProjectTextFile: vi.fn(),
+      },
+    }
+
+    await authorizeBackendProjectRootForCreate(dependencies, {
+      commandId: 'create-2',
+      projectRoot: '/projects/fresh',
+      targetDirectory: '/projects/fresh/ws_0001',
+      workspaceBindings: {},
+      workspaceSpec: {},
+    })
+
+    expect(registerProjectRoot).not.toHaveBeenCalled()
+    expect(dependencies.workspaceService.writeProjectTextFile).not.toHaveBeenCalled()
   })
 })
 

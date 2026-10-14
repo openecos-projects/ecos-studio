@@ -12,6 +12,7 @@ export function validateProjectManifestMutation(
       requireString(mutation.name, 'Project manifest create mutation name')
       requireString(mutation.designName, 'Project manifest create mutation designName')
       validateProjectManifestMpc(mutation.mpc)
+      validateProjectManifestRtlImport(mutation.rtlImport)
       return
     case 'register-workspace': {
       const input = requireRecord(
@@ -94,6 +95,33 @@ function validateWorkspaceConfig(value: unknown): void {
   }
   if (config.parameters !== undefined && !isRecord(config.parameters)) {
     throw new Error('Project manifest workspace config parameters must be an object')
+  }
+}
+
+function validateProjectManifestRtlImport(value: unknown): void {
+  if (value === undefined || value === null) return
+  const rtlImport = requireRecord(value, 'Project manifest create rtlImport')
+  requireOptionalString(rtlImport.filelist, 'Project manifest create rtlImport filelist')
+  if (
+    rtlImport.verilog !== undefined &&
+    rtlImport.verilog !== null &&
+    (!Array.isArray(rtlImport.verilog) ||
+      rtlImport.verilog.some((item) => typeof item !== 'string' || !item.trim()))
+  ) {
+    throw new Error(
+      'Project manifest create rtlImport verilog must be an array of non-empty strings',
+    )
+  }
+  const hasFilelist =
+    typeof rtlImport.filelist === 'string' && rtlImport.filelist.trim() !== ''
+  const verilog = Array.isArray(rtlImport.verilog) ? rtlImport.verilog : []
+  if (hasFilelist && verilog.length) {
+    throw new Error(
+      'Project manifest create rtlImport must set either filelist or verilog, not both',
+    )
+  }
+  if (!hasFilelist && !verilog.length) {
+    throw new Error('Project manifest create rtlImport must set filelist or verilog')
   }
 }
 

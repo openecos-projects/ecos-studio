@@ -1,7 +1,5 @@
-import { basename, dirname, resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import {
-  createProjectManifestDraft,
-  serializeProjectManifest,
   type EccWorkspaceCreateRequest,
   type EccWorkspaceOpenRequest,
   type MpcSpecReadResult,
@@ -44,7 +42,14 @@ export interface WorkspacePdkBindingDependencies {
   }
 }
 
-export async function ensureBackendProjectManifestForCreate(
+/**
+ * Authorize the project root for a backend create. The directory and every
+ * project file (ecc.toml, project.json, rtl/) are created by `ecc init` /
+ * `ecc rtl import` — Electron only registers an already-existing root so
+ * later reads and PDK bindings resolve the canonical path. A brand-new
+ * project root is registered after creation succeeds.
+ */
+export async function authorizeBackendProjectRootForCreate(
   dependencies: {
     workspaceService: NonNullable<WorkspacePdkBindingDependencies['workspaceService']>
   },
@@ -52,28 +57,8 @@ export async function ensureBackendProjectManifestForCreate(
 ): Promise<void> {
   const projectRoot = request.projectRoot?.trim()
   if (!projectRoot || resolve(projectRoot) === resolve(request.targetDirectory)) return
-
-  const manifestPath = resolve(projectRoot, 'project.json')
-  if (await dependencies.workspaceService.pathExists(manifestPath)) return
-
+  if (!(await dependencies.workspaceService.pathExists(resolve(projectRoot)))) return
   await dependencies.workspaceService.registerProjectRoot(projectRoot)
-  const design = isRecord(request.workspaceSpec.design)
-    ? request.workspaceSpec.design
-    : {}
-  const manifest = createProjectManifestDraft({
-    rootPath: projectRoot,
-    name: basename(projectRoot),
-    designName:
-      typeof design.name === 'string' && design.name.trim()
-        ? design.name.trim()
-        : basename(projectRoot),
-    projectType: 'backend',
-  })
-  if (request.projectId) manifest.project_id = request.projectId
-  await dependencies.workspaceService.writeProjectTextFile(
-    manifestPath,
-    serializeProjectManifest(manifest),
-  )
 }
 
 export async function prepareWorkspaceCreateBinding(

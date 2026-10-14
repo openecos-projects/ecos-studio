@@ -295,6 +295,8 @@ export class EccCliRuntimeService {
     const type = requireString(requested.type)
     if (type === 'create') {
       await this.cli.run(projectManifestCreateArgs(root, requested))
+      const rtlImport = rtlImportArgs(root, rtlImportSelection(requested.rtlImport))
+      if (rtlImport) await this.cli.run(rtlImport, { cwd: root })
     } else {
       const manifest = await readProjectManifest(root)
       if (type === 'register-workspace') {
@@ -402,6 +404,8 @@ export class EccCliRuntimeService {
       }
       throw error
     })
+    const rtlImport = workspaceCreateRtlImport(request, projectRoot)
+    if (rtlImport) await this.cli.run(rtlImport, { cwd: projectRoot })
     for (const args of workspaceCreateCommands(request, projectRoot)) {
       await this.cli.run(args, { cwd: projectRoot })
     }
@@ -1738,14 +1742,15 @@ function workspaceFlowArgs(spec: Record<string, unknown>): string[] {
   ]
 }
 
-export function projectSettingsArgs(request: EccWorkspaceCreateRequest): string[] {
+/**
+ * Absolute source paths of the request's design inputs, keyed by input role.
+ */
+export function inputRolePaths(
+  request: EccWorkspaceCreateRequest,
+): Map<string, string[]> {
   const spec = request.workspaceSpec
   const bindings = request.workspaceBindings
-  const design = requireRecord(spec.design)
-  const pdk = requireRecord(spec.pdk)
-  const flow = requireRecord(spec.flow)
   const inputBindings = requireRecord(bindings.inputs)
-  const pdkBindings = requireRecord(bindings.pdk)
   const inputs = Array.isArray(spec.inputs) ? spec.inputs : []
   const byRole = new Map<string, string[]>()
   for (const value of inputs) {
@@ -1756,7 +1761,62 @@ export function projectSettingsArgs(request: EccWorkspaceCreateRequest): string[
     if (!role || !path) continue
     byRole.set(role, [...(byRole.get(role) ?? []), path])
   }
-  const rtl = [...(byRole.get('rtl') ?? []), ...(byRole.get('filelist') ?? [])]
+  return byRole
+}
+
+/**
+ * Build the `ecc rtl import` argv that copies the request's pending RTL
+ * selection into the project rtl/ directory. RTL/filelist inputs on a
+ * non-derived create mean "import into the project"; reuse sends none.
+ */
+export function rtlImportArgs(
+  projectRoot: string,
+  selection: { filelist?: string | null; verilog?: string[] | null },
+): string[] | null {
+  const filelist =
+    typeof selection.filelist === 'string' && selection.filelist.trim()
+      ? selection.filelist
+      : null
+  const verilog = (selection.verilog ?? []).filter(
+    (path) => typeof path === 'string' && path.trim(),
+  )
+  if (filelist && verilog.length) {
+    throw new Error('RTL import accepts either a filelist or Verilog files, not both.')
+  }
+  if (filelist) {
+    return ['rtl', 'import', '--project', projectRoot, '--filelist', filelist, '--plain']
+  }
+  if (!verilog.length) return null
+  return [
+    'rtl',
+    'import',
+    '--project',
+    projectRoot,
+    ...verilog.flatMap((path) => ['--verilog', path]),
+    '--plain',
+  ]
+}
+
+function workspaceCreateRtlImport(
+  request: EccWorkspaceCreateRequest,
+  projectRoot: string,
+): string[] | null {
+  if (request.deriveFrom) return null
+  const byRole = inputRolePaths(request)
+  return rtlImportArgs(projectRoot, {
+    filelist: byRole.get('filelist')?.[0],
+    verilog: byRole.get('rtl') ?? [],
+  })
+}
+
+export function projectSettingsArgs(request: EccWorkspaceCreateRequest): string[] {
+  const spec = request.workspaceSpec
+  const bindings = request.workspaceBindings
+  const design = requireRecord(spec.design)
+  const pdk = requireRecord(spec.pdk)
+  const flow = requireRecord(spec.flow)
+  const pdkBindings = requireRecord(bindings.pdk)
+  const byRole = inputRolePaths(request)
   const parameters = isRecord(spec.parameters) ? spec.parameters : {}
   const set = (key: string, value: unknown): string[] => {
     if (typeof value === 'string' && value.trim()) return ['--set', `${key}=${value}`]
@@ -1769,12 +1829,14 @@ export function projectSettingsArgs(request: EccWorkspaceCreateRequest): string[
     return []
   }
   const pdkConfig = request.eccPdkConfig
+  // design.rtl is intentionally absent: RTL sources are imported into the
+  // project rtl/ directory by `ecc rtl import` (see workspaceCreateRtlImport)
+  // and ECC materializes workspaces from the project's ecc.toml.
   return [
     ...set('design.name', design.name),
     ...set('design.top', design.topModule),
     ...set('design.clock_port', design.clockPort),
     ...set('design.frequency_mhz', parameters['design.frequency_mhz']),
-    ...set('design.rtl', rtl),
     ...set('design.netlist', byRole.get('netlist')?.[0]),
     ...set('design.def', byRole.get('def')?.[0]),
     ...set('design.sdc', byRole.get('sdc')?.[0]),
@@ -2236,6 +2298,23 @@ function requireNonNegativeInteger(value: unknown): number {
     throw new Error('Expected a non-negative integer.')
   }
   return Number(value)
+}
+
+/**
+ * Normalize an untyped create-mutation `rtlImport` record into the selection
+ * shape consumed by rtlImportArgs. Shape validity is enforced upstream by
+ * validateProjectManifestMutation.
+ */
+function rtlImportSelection(value: unknown): {
+  filelist?: string | null
+  verilog?: string[] | null
+} {
+  if (!isRecord(value)) return {}
+  const filelist = optionalString(value.filelist)
+  const verilog = Array.isArray(value.verilog)
+    ? value.verilog.filter((item): item is string => typeof item === 'string')
+    : []
+  return { filelist, verilog }
 }
 
 function parseBoolean(value: unknown): boolean {

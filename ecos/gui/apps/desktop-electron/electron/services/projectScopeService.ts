@@ -335,7 +335,10 @@ export class ProjectScopeService {
       return { projectRoot: canonical, targetDirectory: canonical }
     }
 
-    const canonicalRoot = await this.resolveProjectRoot(projectRoot)
+    // The creation journal canonicalizes its target before `ecc init` runs,
+    // so a brand-new project root may not exist yet; resolve it with
+    // creation-root semantics instead of requiring an existing directory.
+    const canonicalRoot = await this.resolveProjectCreationRoot(projectRoot)
     const canonicalTarget = await canonicalizePotentialPathWithinRoot(
       targetDirectory,
       canonicalRoot,
