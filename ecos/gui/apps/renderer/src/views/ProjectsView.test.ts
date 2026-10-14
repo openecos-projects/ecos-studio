@@ -161,6 +161,7 @@ vi.mock('@/platform/desktop', () => ({
 }))
 
 import ProjectsView from './ProjectsView.vue'
+import RtlImportStep from '@/components/RtlImportStep.vue'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
 import { useProjectConsistencyStore } from '@/stores/projectConsistencyStore'
 import { loadProjectHistory, rememberProjectHistoryEntry } from '@/utils/projectHistory'
@@ -565,6 +566,7 @@ describe('ProjectsView background lifecycle integration', () => {
       const wrapper = shallowMount(ProjectsView)
       await flushPromises()
       await openNewProjectDialog(wrapper)
+      selectDialogRtl(wrapper, ['/projects/demo/rtl/gcd.v'])
 
       await wrapper.get('.new-project-dialog .path-picker button').trigger('click')
       await flushPromises()
@@ -577,6 +579,24 @@ describe('ProjectsView background lifecycle integration', () => {
       expect(wrapper.find('.new-project-dialog').exists()).toBe(true)
       expect(wrapper.get('.new-project-dialog .modal-error').text()).toContain(
         'project.json could not be updated',
+      )
+    })
+
+    it('requires an RTL source before creating a backend project', async () => {
+      const wrapper = shallowMount(ProjectsView)
+      await flushPromises()
+      await openNewProjectDialog(wrapper)
+
+      await wrapper.get('.new-project-dialog .path-picker button').trigger('click')
+      await flushPromises()
+      await wrapper
+        .get('.new-project-dialog footer button.primary-button')
+        .trigger('click')
+      await flushPromises()
+
+      expect(testState.mutateProjectManifest).not.toHaveBeenCalled()
+      expect(wrapper.get('.new-project-dialog .modal-error').text()).toContain(
+        'Import RTL files or a filelist',
       )
     })
 
@@ -593,6 +613,7 @@ describe('ProjectsView background lifecycle integration', () => {
       const wrapper = shallowMount(ProjectsView)
       await flushPromises()
       await openNewProjectDialog(wrapper)
+      selectDialogRtl(wrapper, [], '/projects/demo/rtl/design.f')
 
       await wrapper.get('.new-project-dialog .path-picker button').trigger('click')
       await flushPromises()
@@ -601,9 +622,25 @@ describe('ProjectsView background lifecycle integration', () => {
         .trigger('click')
       await flushPromises()
 
-      expect(testState.mutateProjectManifest).toHaveBeenCalledOnce()
+      expect(testState.mutateProjectManifest).toHaveBeenCalledWith(
+        '/projects/demo',
+        expect.objectContaining({
+          type: 'create',
+          rtlImport: { filelist: '/projects/demo/rtl/design.f' },
+        }),
+      )
       expect(wrapper.find('.new-project-dialog').exists()).toBe(false)
     })
+
+    function selectDialogRtl(
+      wrapper: VueWrapper,
+      verilog: string[],
+      filelist = '',
+    ): void {
+      wrapper
+        .findComponent(RtlImportStep)
+        .vm.$emit('update:selection', { verilog, filelist })
+    }
   })
 
   it('exposes the field names used by Quick Start project creation', async () => {
@@ -616,6 +653,7 @@ describe('ProjectsView background lifecycle integration', () => {
     expect(wrapper.find('input[name="design-name"]').exists()).toBe(true)
     expect(wrapper.find('input[name="project-storage-location"]').exists()).toBe(true)
     expect(wrapper.find('select[name="managed-mpc"]').exists()).toBe(true)
+    expect(wrapper.find('.project-rtl-import').exists()).toBe(true)
   })
 
   describe('project consistency repair', () => {

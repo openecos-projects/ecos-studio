@@ -713,6 +713,22 @@
             </label>
             <MpcTemplatePreview :design="selectedProjectMpcDesign" />
           </template>
+          <template v-else>
+            <div class="form-field project-rtl-import">
+              <span>Import RTL</span>
+              <RtlImportStep
+                :verilog="projectRtlSelection.verilog"
+                :filelist="projectRtlSelection.filelist"
+                show-manual-path
+                manual-input-name="project-rtl-source"
+                @update:selection="projectRtlSelection = $event"
+              />
+              <p class="modal-help">
+                Required: the selected RTL files or filelist are copied into the project's
+                rtl/ folder by <code>ecc rtl import</code> at creation.
+              </p>
+            </div>
+          </template>
         </template>
 
         <p class="modal-help">Project manifest: {{ projectManifestPreview }}</p>
@@ -931,6 +947,8 @@ import ProjectResultStatus from './project-management/ProjectResultStatus.vue'
 import ProjectBackgroundOperationPanel from './project-management/ProjectBackgroundOperationPanel.vue'
 import ProjectConsistencyRepairStrip from './project-management/ProjectConsistencyRepairStrip.vue'
 import MpcTemplatePreview from '@/components/MpcTemplatePreview.vue'
+import RtlImportStep from '@/components/RtlImportStep.vue'
+import { exclusiveDesignFilesReady } from '@/components/topModuleConfirmation'
 import { previewList } from './project-management/projectListPreview'
 import { resolveProjectManagementRouteFocus } from './project-management/projectRouteFocus'
 import { mapWithConcurrency } from './project-management/asyncConcurrency'
@@ -1051,6 +1069,14 @@ const projectRootDraft = ref({
   directory: '',
   projectType: 'backend' as ProjectManifestType,
   mpcId: '',
+})
+/** RTL sources imported into the new backend project's rtl/ folder
+ * (`ecc rtl import` runs right after `ecc init`). Exclusive: either a
+ * filelist or Verilog files. MPC-backed projects take their design from the
+ * MPC template and skip the import. */
+const projectRtlSelection = ref<{ verilog: string[]; filelist: string }>({
+  verilog: [],
+  filelist: '',
 })
 const projectMpcs = ref<ProjectManifestMpcCandidate[]>([])
 const isLoadingProjectMpcs = ref(false)
@@ -2357,6 +2383,7 @@ function openNewProjectDialog() {
     projectType: 'backend',
     mpcId: '',
   }
+  projectRtlSelection.value = { verilog: [], filelist: '' }
   projectMpcs.value = []
   projectMpcLoadError.value = ''
   resetProjectMpcSpec()
@@ -2480,8 +2507,29 @@ async function createProjectFolderDraft() {
     return
   }
 
+  const mpcProject =
+    projectRootDraft.value.projectType === 'backend' && Boolean(selectedProjectMpc.value)
+  if (projectRootDraft.value.projectType === 'backend' && !mpcProject) {
+    if (
+      !exclusiveDesignFilesReady(
+        projectRtlSelection.value.verilog,
+        projectRtlSelection.value.filelist,
+      )
+    ) {
+      projectRootError.value =
+        'Import RTL files or a filelist before creating the project.'
+      return
+    }
+  }
+
   const name = projectRootDraft.value.name.trim() || basenamePath(directory) || 'project'
   const designName = projectRootDraft.value.designName.trim() || name
+  const rtlImport =
+    projectRootDraft.value.projectType === 'backend' && !mpcProject
+      ? projectRtlSelection.value.filelist
+        ? { filelist: projectRtlSelection.value.filelist }
+        : { verilog: [...projectRtlSelection.value.verilog] }
+      : undefined
   let manifest: ProjectManifest
   try {
     manifest = await mutateProjectManifest(directory, {
@@ -2490,6 +2538,7 @@ async function createProjectFolderDraft() {
       designName,
       projectType: projectRootDraft.value.projectType,
       mpc: selectedProjectMpc.value,
+      ...(rtlImport ? { rtlImport } : {}),
     })
   } catch (error) {
     console.warn('Failed to create project.', error)
