@@ -114,3 +114,30 @@ describe('frontend project workspace data', () => {
     )
   })
 })
+
+describe('generic RTL project reports', () => {
+  it('does not request simulation reports or count them as unavailable', async () => {
+    testState.readProjectManagementWorkspaceTexts.mockResolvedValue({
+      texts: { 'home/flow.json': '{"steps":[]}' },
+      unavailablePaths: [],
+    })
+    const manifest = registerWorkspaceInManifest(
+      createProjectManifestDraft({
+        rootPath: '/projects/rtl',
+        name: 'rtl',
+        designName: 'counter',
+        projectType: 'frontend',
+      }),
+      {
+        projectRoot: '/projects/rtl',
+        workspacePath: '/projects/rtl/ws_0001',
+        config: { frontend_design_kind: 'generic_rtl' },
+      },
+    )
+    const result = await readFrontendProjectWorkspaceData('/projects/rtl', manifest)
+    const calls = testState.readProjectManagementWorkspaceTexts.mock.calls
+    const lastCall = calls[calls.length - 1]
+    expect(lastCall?.[2].some((path: string) => path.startsWith('sim_'))).toBe(false)
+    expect(result.analysisInputs.ws_0001?.frontendDetailTexts).not.toHaveProperty('sim')
+  })
+})

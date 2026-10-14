@@ -125,6 +125,7 @@
 
                 <div class="space-y-6">
                   <section
+                    v-if="!standaloneWorkspace"
                     class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-5"
                   >
                     <div
@@ -403,6 +404,51 @@
                       ></textarea>
                     </div>
 
+                    <fieldset
+                      class="space-y-3"
+                      :disabled="designKindLocked || isLoadingProjectManifest"
+                    >
+                      <legend class="text-sm font-semibold text-(--text-primary)">
+                        Design Type
+                      </legend>
+                      <div class="grid gap-3 sm:grid-cols-2">
+                        <label
+                          v-for="option in [
+                            {
+                              value: 'cpu_core',
+                              label: 'CPU Core',
+                              detail:
+                                'CPU verification with a SoC harness and simulation.',
+                            },
+                            {
+                              value: 'generic_rtl',
+                              label: 'General RTL',
+                              detail: 'Review, elaboration, and lint for standalone RTL.',
+                            },
+                          ] as const"
+                          :key="option.value"
+                          class="flex items-start gap-3 rounded-lg border border-(--border-color) p-3"
+                        >
+                          <input
+                            type="radio"
+                            name="frontend-design-kind"
+                            :value="option.value"
+                            :checked="designKind === option.value"
+                            @change="setDesignKind(option.value)"
+                          />
+                          <span
+                            ><strong class="block text-sm">{{ option.label }}</strong
+                            ><span class="mt-1 block text-xs text-(--text-secondary)">{{
+                              option.detail
+                            }}</span></span
+                          >
+                        </label>
+                      </div>
+                      <p v-if="designKindLocked" class="text-xs text-(--text-secondary)">
+                        The design type follows the existing project or workspace.
+                      </p>
+                    </fieldset>
+
                     <div>
                       <span
                         class="block text-xs font-semibold tracking-wide text-(--text-secondary) uppercase"
@@ -429,14 +475,27 @@
               >
                 <div class="mb-8">
                   <h2 class="text-2xl font-bold text-(--text-primary)">
-                    Verification Setup
+                    {{ isCpuCore ? 'Verification Setup' : 'RTL Setup' }}
                   </h2>
                   <p class="mt-2 text-(--text-secondary)">
-                    CPU source, harness, toolchain, and tests.
+                    {{
+                      isCpuCore
+                        ? 'CPU source, harness, toolchain, and tests.'
+                        : 'Select the RTL sources and their top module.'
+                    }}
                   </p>
                 </div>
 
-                <div v-if="catalogLoading" class="state-panel">
+                <GenericRtlSetup
+                  v-if="!isCpuCore"
+                  v-model:top-module="config.parameters.top_module"
+                  v-model:clock="config.parameters.clock"
+                  v-model:frequency="config.parameters.frequency_max"
+                  v-model:filelist="config.filelist"
+                  v-model:rtl-files="config.rtl_list"
+                  :issues="genericIssues"
+                />
+                <div v-else-if="catalogLoading" class="state-panel">
                   <i class="ri-loader-4-line animate-spin"></i>
                   <span>Loading catalog</span>
                 </div>
@@ -915,6 +974,7 @@
                   </ReviewSection>
 
                   <ReviewSection
+                    v-if="isCpuCore"
                     title="Verification setup"
                     icon="ri-file-list-3-line"
                     @edit="jumpToStep(2)"
@@ -977,12 +1037,43 @@
                     />
                     <ReviewItem
                       label="Default Flow"
-                      value="prepare -> elab -> lint -> sim"
+                      value="prepare -> review -> elab -> lint -> sim"
                       monospace
                       wide
                     />
                   </ReviewSection>
 
+                  <ReviewSection
+                    v-if="!isCpuCore"
+                    title="General RTL setup"
+                    icon="ri-code-box-line"
+                    @edit="jumpToStep(2)"
+                  >
+                    <ReviewItem
+                      label="Top Module"
+                      :value="config.parameters.top_module"
+                      monospace
+                    />
+                    <ReviewItem
+                      label="Clock"
+                      :value="config.parameters.clock || 'Not specified'"
+                    />
+                    <ReviewItem
+                      label="Frequency (MHz)"
+                      :value="String(config.parameters.frequency_max)"
+                    />
+                    <ReviewItem
+                      label="RTL Sources"
+                      :value="config.filelist || config.rtl_list.join(', ')"
+                      wide
+                      monospace
+                    />
+                    <ReviewItem
+                      label="Flow"
+                      value="prepare → review → elab → lint"
+                      wide
+                    />
+                  </ReviewSection>
                   <section
                     v-if="validationIssues.length"
                     class="validation-panel"
@@ -1069,7 +1160,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, nextTick, onMounted, ref, watch } from 'vue'
+import {
+  computed,
+  defineComponent,
+  h,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  ref,
+  watch,
+} from 'vue'
 import {
   listFrontendCatalogApi,
   validateFrontendConfigApi,
@@ -1084,7 +1184,16 @@ import { getDesktopApi } from '@/platform/desktop'
 import FrontendExperimentalBanner from '@/components/frontend/FrontendExperimentalBanner.vue'
 import { loadProjectHistory } from '@/utils/projectHistory'
 import { readProjectManagementManifest } from '@/utils/projectManagementRead'
-import type { ProjectManifest } from '@ecos-studio/shared'
+import {
+  frontendDesignKindFromConfig,
+  type FrontendDesignKind,
+  type ProjectManifest,
+} from '@ecos-studio/shared'
+import GenericRtlSetup from './frontend/GenericRtlSetup.vue'
+import {
+  genericRtlInputIssues,
+  genericRtlParameters,
+} from '@/utils/frontendWorkspaceConfig'
 import type { Project, WorkspaceConfig } from '../types'
 import {
   formatCpuTopModule,
@@ -1172,6 +1281,12 @@ const isCreating = computed(() => props.creating)
 const lockWorkspaceDirectory = computed(() =>
   Boolean(props.lockWorkspaceDirectory && props.initialConfig?.directory),
 )
+const standaloneWorkspace = computed(
+  () =>
+    lockWorkspaceDirectory.value &&
+    Boolean(props.initialConfig?.replaceExistingWorkspace) &&
+    !props.initialConfig?.project_context,
+)
 const lockProjectContext = computed(
   () => props.lockProjectContext || lockWorkspaceDirectory.value,
 )
@@ -1182,12 +1297,26 @@ const validation = ref<FrontendValidationResult | null>(null)
 const validationFallbackIssues = ref<FrontendValidationIssue[]>([])
 const wizardScrollRef = ref<HTMLElement | null>(null)
 const cpuTopContractRef = ref<HTMLElement | null>(null)
-const selectedCoreId = ref('')
-const selectedSocHarnessId = ref('')
-const selectedToolchainId = ref('')
-const selectedTestSuiteId = ref('')
-const cpuSourceMode = ref<CpuSourceMode>('filelist')
-const selectedCpuRtlFiles = ref<string[]>([])
+const selectedCoreId = ref(
+  String(
+    props.initialConfig?.parameters?.frontend_core_id ||
+      props.initialConfig?.parameters?.core_id ||
+      '',
+  ),
+)
+const selectedSocHarnessId = ref(
+  String(props.initialConfig?.parameters?.soc_harness_id || ''),
+)
+const selectedToolchainId = ref(
+  String(props.initialConfig?.parameters?.toolchain_id || ''),
+)
+const selectedTestSuiteId = ref(
+  String(props.initialConfig?.parameters?.test_suite_id || ''),
+)
+const cpuSourceMode = ref<CpuSourceMode>(
+  props.initialConfig?.cpu_rtl_files?.length ? 'files' : 'filelist',
+)
+const selectedCpuRtlFiles = ref<string[]>([...(props.initialConfig?.cpu_rtl_files ?? [])])
 const cpuSelectionConfirming = ref(false)
 const cpuSelectionMessage = ref('')
 const projectHistory = ref<Project[]>([])
@@ -1224,11 +1353,11 @@ let validationToken = 0
 let cpuTopContractScrollPending = false
 let projectManifestLoadGeneration = 0
 
-const steps = [
+const steps = computed(() => [
   { id: 1, title: 'Project Setup' },
-  { id: 2, title: 'Verification Setup' },
+  { id: 2, title: isCpuCore.value ? 'Verification Setup' : 'RTL Setup' },
   { id: 3, title: 'Review & Create' },
-]
+])
 
 const catalog = ref<FrontendCatalogPayload>(createEmptyCatalog())
 
@@ -1236,21 +1365,60 @@ const config = ref<FrontendWorkspaceConfig>(
   createFrontendWorkspaceConfig(props.initialConfig),
 )
 
+const designKind = computed(() => frontendDesignKindFromConfig(config.value))
+const isCpuCore = computed(() => designKind.value === 'cpu_core')
+const genericIssues = computed(() => genericRtlInputIssues(config.value))
+const designKindLocked = computed(() =>
+  Boolean(
+    props.initialConfig?.replaceExistingWorkspace ||
+    selectedProjectManifest.value?.workspaces.length ||
+    selectedProjectManifest.value?.base_design.frontend_design_kind ||
+    selectedProjectManifest.value?.base_design.parameters?.frontend_design_kind,
+  ),
+)
+const profileInputs = new Map<FrontendDesignKind, { top: string; clock: string }>()
+function setDesignKind(kind: FrontendDesignKind) {
+  if (kind === designKind.value) return
+  profileInputs.set(designKind.value, {
+    top: config.value.parameters.top_module,
+    clock: config.value.parameters.clock,
+  })
+  config.value.frontend_design_kind = kind
+  config.value.parameters.frontend_design_kind = kind
+  const saved = profileInputs.get(kind)
+  config.value.parameters.top_module =
+    saved?.top ?? (kind === 'generic_rtl' ? 'top' : 'ecos_sim_top')
+  config.value.parameters.clock = saved?.clock ?? (kind === 'generic_rtl' ? '' : 'clk')
+  highestStep.value = currentStep.value
+  syncParameters()
+  if (kind === 'cpu_core' && !catalogLoading.value && !catalog.value.cores.length) {
+    void loadCatalog()
+  } else {
+    void refreshValidation()
+  }
+}
+
 function createFrontendWorkspaceConfig(
   initialConfig?: Partial<WorkspaceConfig>,
 ): FrontendWorkspaceConfig {
+  const kind = frontendDesignKindFromConfig(initialConfig)
+  const generic = kind === 'generic_rtl'
   return {
     ...initialConfig,
     directory: initialConfig?.directory ?? '',
     designTool: 'frontend',
+    frontend_design_kind: kind,
+    filelist:
+      initialConfig?.filelist ??
+      (generic ? String(initialConfig?.parameters?.input_filelist || '') : ''),
     pdk: initialConfig?.pdk ?? '',
     pdk_root: initialConfig?.pdk_root ?? '',
     parameters: {
       design: '',
       description: '',
-      top_module: 'ecos_sim_top',
+      top_module: generic ? 'top' : 'ecos_sim_top',
       cpu_top_module: CUSTOM_CPU_TOP_MODULE,
-      clock: 'clk',
+      clock: generic ? '' : 'clk',
       frequency_max: 100,
       cpu_filelist: '',
       soc_variant: '',
@@ -1259,10 +1427,16 @@ function createFrontendWorkspaceConfig(
       toolchain_id: '',
       test_suite_id: '',
       ...initialConfig?.parameters,
+      frontend_design_kind: kind,
     },
     origin_def: initialConfig?.origin_def ?? '',
-    origin_verilog: initialConfig?.origin_verilog ?? '',
-    rtl_list: [...(initialConfig?.rtl_list ?? [])],
+    origin_verilog: generic ? '' : (initialConfig?.origin_verilog ?? ''),
+    rtl_list: [
+      ...(initialConfig?.rtl_list ?? []),
+      ...(generic && initialConfig?.origin_verilog && !initialConfig.filelist
+        ? [initialConfig.origin_verilog]
+        : []),
+    ],
     project_context: initialConfig?.project_context,
   }
 }
@@ -1392,23 +1566,34 @@ const catalogUnavailable = computed(
     visibleSocHarnesses.value.length === 0,
 )
 
-const validationIssues = computed(() => [
-  ...(catalogError.value
-    ? [
-        {
-          severity: catalogUnavailable.value ? ('error' as const) : ('warning' as const),
-          code: 'catalog_load_failed',
-          field: 'catalog',
-          message: catalogError.value,
-        },
-      ]
-    : []),
-  ...validationFallbackIssues.value,
-  ...(validation.value?.issues || []),
-])
+const validationIssues = computed(() =>
+  !isCpuCore.value
+    ? genericIssues.value.map((message) => ({
+        severity: 'error' as const,
+        code: 'generic_rtl_input',
+        field: 'rtl',
+        message,
+      }))
+    : [
+        ...(catalogError.value
+          ? [
+              {
+                severity: catalogUnavailable.value
+                  ? ('error' as const)
+                  : ('warning' as const),
+                code: 'catalog_load_failed',
+                field: 'catalog',
+                message: catalogError.value,
+              },
+            ]
+          : []),
+        ...validationFallbackIssues.value,
+        ...(validation.value?.issues || []),
+      ],
+)
 const validationOk = computed(
   () =>
-    Boolean(validation.value?.ok) &&
+    (!isCpuCore.value || Boolean(validation.value?.ok)) &&
     !validationIssues.value.some((issue) => issue.severity === 'error'),
 )
 const validationTitle = computed(() => {
@@ -1419,6 +1604,10 @@ const validationTitle = computed(() => {
   return 'Compatibility warning'
 })
 const validationSummary = computed(() => {
+  if (!isCpuCore.value)
+    return genericIssues.value.length
+      ? 'Complete the RTL inputs to continue.'
+      : 'Run Prepare, RTL Review, Elaboration, and Lint. Source files and the top module are checked by ECC-FE.'
   if (validationBusy.value) return 'waiting for frontend runtime'
   if (validation.value?.summary) return validation.value.summary
   return 'Select a CPU source, SoC harness, toolchain, and test suite.'
@@ -1483,12 +1672,13 @@ const canProceed = computed(() => {
   switch (currentStep.value) {
     case 1:
       return (
-        projectContext.value.project_root.trim() !== '' &&
-        projectContext.value.project_name.trim() !== '' &&
-        (projectContext.value.mode === 'create' ||
-          Boolean(selectedProjectManifest.value)) &&
-        !projectManifestError.value &&
-        !isLoadingProjectManifest.value &&
+        (standaloneWorkspace.value ||
+          (projectContext.value.project_root.trim() !== '' &&
+            projectContext.value.project_name.trim() !== '' &&
+            (projectContext.value.mode === 'create' ||
+              Boolean(selectedProjectManifest.value)) &&
+            !projectManifestError.value &&
+            !isLoadingProjectManifest.value)) &&
         workspaceName.value.trim() !== '' &&
         config.value.directory.trim() !== '' &&
         config.value.parameters.design.trim() !== '' &&
@@ -1499,6 +1689,7 @@ const canProceed = computed(() => {
       )
     case 2:
     default:
+      if (!isCpuCore.value) return genericIssues.value.length === 0
       return (
         selectedCoreId.value !== '' &&
         selectedSocHarnessId.value !== '' &&
@@ -1512,11 +1703,20 @@ const canProceed = computed(() => {
   }
 })
 
+onUnmounted(() => {
+  validationToken += 1
+  projectManifestLoadGeneration += 1
+})
+
 onMounted(() => {
   syncProjectTarget()
-  void loadCatalog()
+  if (isCpuCore.value) void loadCatalog()
   if (!lockProjectContext.value) void loadProjectHistoryEntries()
-  if (projectContext.value.mode === 'select' && projectContext.value.project_root) {
+  if (
+    !standaloneWorkspace.value &&
+    projectContext.value.mode === 'select' &&
+    projectContext.value.project_root
+  ) {
     void applyProjectDefaultsForProject(projectContext.value.project_root)
   }
 })
@@ -1580,6 +1780,12 @@ async function loadCatalog(): Promise<void> {
 
 async function refreshValidation(): Promise<void> {
   const token = ++validationToken
+  if (!isCpuCore.value) {
+    validationBusy.value = false
+    validation.value = null
+    validationFallbackIssues.value = []
+    return
+  }
   validationFallbackIssues.value = localValidationIssues()
   validation.value = null
   if (
@@ -1663,6 +1869,7 @@ function resetCatalogSelection(): void {
 }
 
 function syncParameters(): void {
+  if (!isCpuCore.value) return
   config.value.parameters.frontend_core_id = selectedCoreId.value
   config.value.parameters.soc_harness_id = selectedSocHarnessId.value
   config.value.parameters.toolchain_id = selectedToolchainId.value
@@ -1833,6 +2040,13 @@ async function applyProjectDefaultsForProject(projectRoot: string): Promise<void
       return
     }
     selectedProjectManifest.value = manifest
+    if (
+      manifest.workspaces.length ||
+      manifest.base_design.frontend_design_kind ||
+      manifest.base_design.parameters?.frontend_design_kind
+    ) {
+      setDesignKind(frontendDesignKindFromConfig(manifest.base_design))
+    }
     projectContext.value.project_id = manifest.project_id
     projectContext.value.project_name = manifest.name
     projectContext.value.project_root = root
@@ -1928,7 +2142,9 @@ function syncProjectTarget(): void {
     lockWorkspaceDirectory.value && props.initialConfig?.directory
       ? normalizePath(props.initialConfig.directory)
       : joinPath(projectContext.value.project_root, workspaceName.value)
-  config.value.project_context = { ...projectContext.value }
+  config.value.project_context = standaloneWorkspace.value
+    ? undefined
+    : { ...projectContext.value }
 }
 
 function nextWorkspaceNameForProject(manifest: ProjectManifest): string {
@@ -2150,6 +2366,21 @@ const handleStepClick = (targetStep: number) => {
 }
 
 const createProject = () => {
+  if (!canProceed.value) return
+  if (!isCpuCore.value) {
+    if (isCreating.value) return
+    emit('create', {
+      ...config.value,
+      frontend_design_kind: 'generic_rtl',
+      cpu_rtl_files: [],
+      origin_verilog: '',
+      parameters: {
+        ...genericRtlParameters(config.value.parameters),
+        frontend_design_kind: 'generic_rtl',
+      },
+    })
+    return
+  }
   if (
     isCreating.value ||
     !validationOk.value ||
@@ -2161,6 +2392,9 @@ const createProject = () => {
   emit('create', {
     ...config.value,
     designTool: 'frontend',
+    frontend_design_kind: 'cpu_core',
+    filelist: '',
+    origin_verilog: '',
     cpu_rtl_files:
       requiresCpuInput.value && cpuSourceMode.value === 'files'
         ? [...selectedCpuRtlFiles.value]

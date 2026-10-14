@@ -657,3 +657,10 @@ export {
   formatTypstReport,
   generateDesignReport,
 } from './utils/designReportFormatters/index.ts'
+export {
+  normalizeFrontendDesignKind,
+  frontendDesignKindFromConfig,
+  frontendFlowSteps,
+  genericRtlFlowSteps,
+  type FrontendDesignKind,
+} from './utils/frontendDesign'

@@ -180,6 +180,16 @@
   border-bottom: 0;
 }
 
+.is-generic-rtl .fe-compare-row {
+  min-width: 560px;
+  grid-template-columns: minmax(150px, 1.35fr) minmax(110px, 1fr) 100px 70px 115px;
+}
+
+.is-generic-rtl .fe-health-metrics,
+.is-generic-rtl .fe-stage-tabs {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .fe-compare-row.is-head {
   min-height: 30px;
   color: var(--text-secondary);

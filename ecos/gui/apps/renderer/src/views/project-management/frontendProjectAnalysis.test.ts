@@ -4,6 +4,61 @@ import { buildFrontendProjectAnalysis } from './frontendProjectAnalysis'
 const inputFingerprint = 'a'.repeat(64)
 
 describe('buildFrontendProjectAnalysis', () => {
+  it('counts generic design diagnostics and accepts its module-only top contract', () => {
+    const analysis = buildFrontendProjectAnalysis([
+      {
+        designKind: 'generic_rtl',
+        workspaceId: 'ws_rtl',
+        workspaceName: 'counter',
+        workspacePath: '/projects/counter/ws_rtl',
+        status: 'failed',
+        steps: [
+          { stage: 'prepare', status: 'success' },
+          { stage: 'review', status: 'success' },
+          { stage: 'lint', status: 'failed' },
+        ],
+        detailTexts: {
+          prepare: JSON.stringify({
+            summary: {
+              contracts: [{ id: 'design_top_contract', status: 'module_only' }],
+            },
+          }),
+          review: JSON.stringify({
+            summary: { rtl_review: { errors: 0, warnings: 1, actionable_warnings: 1 } },
+            review: {
+              issues: [
+                { ownership: 'design', severity: 'warning', title: 'Unused input' },
+              ],
+            },
+          }),
+          lint: JSON.stringify({
+            summary: { lint: { design_errors: 2, design_warnings: 3, warnings: 3 } },
+            lint: {
+              diagnostics: [
+                { ownership: 'design', severity: 'error', code: 'MULTIDRIVEN' },
+              ],
+            },
+          }),
+        },
+      },
+    ])
+
+    expect(analysis.workspaces[0]).toMatchObject({
+      errors: 2,
+      warnings: 4,
+      actionableWarnings: 4,
+    })
+    expect(analysis.findings.map((finding) => finding.title)).toEqual([
+      'Unused input',
+      'MULTIDRIVEN',
+    ])
+    const lint = analysis.workspaces[0]?.steps.find((step) => step.stage === 'lint')
+    expect(lint?.metrics.find((metric) => metric.id === 'design_errors')).toMatchObject({
+      label: 'Design errors',
+      value: 2,
+    })
+  })
+
   it('keeps unreadable detail artifacts unknown instead of treating them as zero', () => {
     const analysis = buildFrontendProjectAnalysis([
       {

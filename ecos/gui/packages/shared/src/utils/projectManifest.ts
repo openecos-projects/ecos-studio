@@ -1,5 +1,10 @@
 import type { PdkRequirement } from '../contracts/pdkInventory.ts'
 import {
+  cpuCoreFlowSteps,
+  genericRtlFlowSteps,
+  type FrontendDesignKind,
+} from './frontendDesign.ts'
+import {
   flowStepCanonicalIds,
   normalizeProjectManifestFlowStep,
 } from './flowStepRegistry.ts'
@@ -8,13 +13,7 @@ export const projectManifestFlowSteps = flowStepCanonicalIds
 
 export type ProjectManifestFlowStep = (typeof projectManifestFlowSteps)[number]
 
-export const projectManifestFrontendFlowSteps = [
-  'prepare',
-  'review',
-  'elab',
-  'lint',
-  'sim',
-] as const
+export const projectManifestFrontendFlowSteps = cpuCoreFlowSteps
 
 export type ProjectManifestFrontendFlowStep =
   (typeof projectManifestFrontendFlowSteps)[number]
@@ -54,7 +53,16 @@ const PROJECT_MANIFEST_PROFILES: Record<ProjectManifestType, ProjectManifestProf
 
 export function projectManifestProfileFor(
   projectType: ProjectManifestType,
+  designKind?: FrontendDesignKind,
 ): ProjectManifestProfile {
+  if (projectType === 'frontend' && designKind === 'generic_rtl') {
+    return {
+      projectType,
+      flowSteps: genericRtlFlowSteps,
+      defaultStartStep: 'prepare',
+      defaultEndStep: 'lint',
+    }
+  }
   return PROJECT_MANIFEST_PROFILES[projectType]
 }
 
@@ -68,6 +76,7 @@ export type ProjectManifestWorkspaceStatus =
   | 'archived'
 
 export interface ProjectManifestBaseDesign {
+  frontend_design_kind?: FrontendDesignKind
   filelist?: string
   pdk?: string
   pdk_root?: string
@@ -172,6 +181,8 @@ export interface ProjectManifestWorkspaceRegistrationInput {
   endStep?: ProjectManifestStage | string
   now?: string
   config?: {
+    frontend_design_kind?: FrontendDesignKind
+    filelist?: string
     pdk?: string
     pdk_root?: string
     pdk_requirement?: PdkRequirement

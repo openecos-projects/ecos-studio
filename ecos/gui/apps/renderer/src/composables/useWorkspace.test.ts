@@ -2944,6 +2944,68 @@ describe('useWorkspace openProject', () => {
     expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-frontend', 'frontend')
   })
 
+  it('keeps the saved frontend runtime when reopening a path-only project after restart', async () => {
+    const workspace = useWorkspace()
+    const directory = '/work/rtl/ws_0001'
+    settingsData.set('recent_projects', [
+      {
+        id: directory,
+        name: 'rtl',
+        path: directory,
+        designTool: 'frontend',
+        lastOpened: '2026-10-13T03:09:38.000Z',
+      },
+    ])
+    await workspace.loadRecentProjects()
+    loadWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: { directory, workspace_handle: 'workspace-rtl' },
+    })
+
+    await expect(
+      workspace.openProject({
+        id: directory,
+        name: 'project_rtl/ws_0001',
+        path: directory,
+        lastOpened: new Date(),
+      }),
+    ).resolves.toBe(true)
+
+    expect(loadWorkspaceApiMock).toHaveBeenCalledExactlyOnceWith(directory, 'frontend')
+    expect(workspace.currentProject.value?.designTool).toBe('frontend')
+    expect(desktopApi.ecc.runtime?.snapshot).not.toHaveBeenCalled()
+  })
+
+  it.each(['frontend', 'backend'] as const)(
+    'uses the explicit %s project type when opening a managed workspace without recent history',
+    async (designTool) => {
+      const workspace = useWorkspace()
+      const directory = '/work/managed/ws_0001'
+      loadWorkspaceApiMock.mockResolvedValueOnce({
+        response: 'success',
+        data: { directory, workspace_handle: 'workspace-managed' },
+      })
+
+      await expect(
+        workspace.openProject(
+          {
+            id: directory,
+            name: 'managed/ws_0001',
+            path: directory,
+            lastOpened: new Date(),
+          },
+          { designTool, projectContext: { projectRoot: '/work/managed' } },
+        ),
+      ).resolves.toBe(true)
+
+      expect(loadWorkspaceApiMock).toHaveBeenCalledExactlyOnceWith(
+        directory,
+        ...(designTool === 'frontend' ? [designTool] : []),
+      )
+      expect(workspace.currentProject.value?.designTool).toBe(designTool)
+    },
+  )
+
   it('forwards selected CPU RTL files when creating a frontend workspace', async () => {
     const workspace = useWorkspace()
     createWorkspaceApiMock.mockResolvedValueOnce({

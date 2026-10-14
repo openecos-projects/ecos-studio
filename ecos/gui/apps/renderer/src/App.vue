@@ -291,6 +291,10 @@ import WorkspaceSnapshotRecoveryDialog from '@/components/WorkspaceSnapshotRecov
 import ResourceStalenessDialog from '@/components/ResourceStalenessDialog.vue'
 import WorkspaceStepConfigDialog from '@/components/WorkspaceStepConfigDialog.vue'
 import type { WorkspaceConfig } from '@/types'
+import {
+  frontendWorkspaceReconfigureConfig,
+  restoreGeneratedRtlSources,
+} from '@/utils/frontendWorkspaceReconfigure'
 import { setWindowResizing } from '@/composables/useWindowResizeState'
 import { useDesignFiles } from '@/composables/useDesignFiles'
 import {
@@ -1517,6 +1521,24 @@ async function buildReconfigureWizardInitialConfig(
   ])
 
   const pdkJson = parseOptionalJson(pdkText)
+  if (parametersJson?.['Design Tool'] === 'frontend') {
+    const frontendConfig = frontendWorkspaceReconfigureConfig(
+      parametersJson,
+      workspacePath,
+      resolvedProjectContext,
+    )
+    if (
+      normalizeLocalPath(frontendConfig.filelist || '') ===
+      `${normalizeLocalPath(workspacePath)}/origin/.rtl_sources.f`
+    ) {
+      const sourceList = await readOptionalProjectTextFile('origin/.rtl_sources.f', {
+        projectPath: workspacePath,
+      })
+      if (!sourceList) throw new Error('The workspace RTL filelist is missing.')
+      restoreGeneratedRtlSources(frontendConfig, sourceList)
+    }
+    return frontendConfig
+  }
   const dbConfigJson = parseOptionalJson(dbConfigText)
   const flowConfig = normalizeWorkspaceFlowConfig(flowText)
   const normalizedParameters = normalizeWorkspaceParameters(parametersJson, workspacePath)

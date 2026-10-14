@@ -21,6 +21,39 @@ function restoreWindow() {
 }
 
 describe('workspace desktop bridge', () => {
+  it('sends the generic RTL profile and inputs through the frontend RPC bridge', async () => {
+    const create = vi.fn(async (payload: unknown) => {
+      expect(() => structuredClone(payload)).not.toThrow()
+      return { directory: '/project/ws_0001', workspaceHandle: 'generic-handle' }
+    })
+    setWindow({ ecosDesktop: { runtime: { workspace: { create } } } })
+    const { createWorkspaceApi } = await import('./workspace')
+    await createWorkspaceApi({
+      designTool: 'frontend',
+      directory: '/project/ws_0001',
+      frontend_design_kind: 'generic_rtl',
+      filelist: '/rtl/design.f',
+      parameters: { top_module: 'counter', clock: '', frequency_max: 75 },
+    })
+    expect(create).toHaveBeenCalledWith({
+      designTool: 'frontend',
+      payload: {
+        directory: '/project/ws_0001',
+        designTool: 'frontend',
+        frontend_design_kind: 'generic_rtl',
+        filelist: '/rtl/design.f',
+        origin_verilog: '',
+        rtl_list: [],
+        parameters: {
+          frontend_design_kind: 'generic_rtl',
+          top_module: 'counter',
+          clock: '',
+          frequency_max: 75,
+        },
+      },
+    })
+  })
+
   afterEach(() => {
     restoreWindow()
     vi.resetModules()

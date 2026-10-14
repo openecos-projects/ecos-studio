@@ -1,6 +1,7 @@
 import {
   projectManagementFrontendWorkspaceStepAnalysisSpecs,
   type ProjectManifestFrontendFlowStep,
+  type FrontendDesignKind,
 } from '@ecos-studio/shared'
 import {
   frontendQorForStepState,
@@ -102,6 +103,7 @@ export interface FrontendProjectAnalysis {
 }
 
 export interface FrontendWorkspaceAnalysisSource {
+  designKind?: FrontendDesignKind
   workspaceId: string
   workspaceName: string
   workspacePath: string
@@ -128,7 +130,12 @@ const FRONTEND_STAGE_LABELS: Record<FrontendAnalysisStage, string> = {
 }
 
 const COMPLETED_STATUSES = new Set<FrontendAnalysisStepStatus>(['success', 'reused'])
-const PREPARE_CONTRACT_SUCCESS_STATUSES = new Set(['ok', 'pass', 'success'])
+const PREPARE_CONTRACT_SUCCESS_STATUSES = new Set([
+  'ok',
+  'pass',
+  'success',
+  'module_only',
+])
 const PREPARE_CONTRACT_WARNING_STATUSES = new Set(['warning', 'stub', 'disabled'])
 
 export function buildFrontendProjectAnalysis(
@@ -180,6 +187,8 @@ export function buildFrontendProjectAnalysis(
 function buildFrontendWorkspaceAnalysis(
   source: FrontendWorkspaceAnalysisSource,
 ): FrontendWorkspaceAnalysis {
+  const designKind = source.designKind ?? 'cpu_core'
+  const owner = designKind === 'generic_rtl' ? 'design' : 'cpu'
   const unavailablePaths = new Set(source.unavailablePaths ?? [])
   const steps = source.steps
     .filter(({ stage, status }) =>
@@ -195,6 +204,7 @@ function buildFrontendWorkspaceAnalysis(
         source.qorSummaryTexts?.[stage] ?? null,
         source.qorHotspotTexts?.[stage] ?? null,
         unavailableArtifactsForStage(stage, unavailablePaths),
+        designKind,
       ),
     )
   const completedSteps = steps.filter((step) =>
@@ -229,7 +239,7 @@ function buildFrontendWorkspaceAnalysis(
       unavailablePaths,
       stepStatusByStage.get('lint'),
       lint,
-      ['summary', 'lint', 'cpu_errors'],
+      ['summary', 'lint', `${owner}_errors`],
     ),
   ])
   const warnings = sumKnown([
@@ -273,7 +283,7 @@ function buildFrontendWorkspaceAnalysis(
       unavailablePaths,
       stepStatusByStage.get('lint'),
       lint,
-      ['summary', 'lint', 'cpu_warnings'],
+      ['summary', 'lint', `${owner}_warnings`],
     ),
   ])
   const totalCases = aggregateNumber(
@@ -377,6 +387,7 @@ function buildFrontendStepAnalysis(
   qorSummaryText: string | null,
   qorHotspotsText: string | null,
   unavailable: FrontendStepArtifactAvailability,
+  designKind: FrontendDesignKind,
 ): FrontendStepAnalysis {
   const detail = parseRecord(text)
   const runtime =
@@ -392,8 +403,8 @@ function buildFrontendStepAnalysis(
     status,
     runtime: runtime || '-',
     runtimeSeconds: parseRuntimeSeconds(runtime),
-    metrics: stageMetrics(stage, detail),
-    findings: stageFindings(workspaceId, stage, detail),
+    metrics: stageMetrics(stage, detail, designKind),
+    findings: stageFindings(workspaceId, stage, detail, designKind),
     qor: frontendQorForStepState(parsedQor, status),
     available: detail !== null && !unavailable.detail,
     unavailable: Object.values(unavailable).some(Boolean),
@@ -458,7 +469,10 @@ function aggregateNumber(
 function stageMetrics(
   stage: FrontendAnalysisStage,
   detail: JsonRecord | null,
+  designKind: FrontendDesignKind,
 ): FrontendAnalysisMetric[] {
+  const owner = designKind === 'generic_rtl' ? 'design' : 'cpu'
+  const ownerLabel = designKind === 'generic_rtl' ? 'Design' : 'CPU'
   if (stage === 'prepare') {
     return [
       metric(
@@ -530,15 +544,15 @@ function stageMetrics(
   if (stage === 'lint') {
     return [
       metric(
-        'cpu_errors',
-        'CPU errors',
-        metricNumber(detail, ['summary', 'lint', 'cpu_errors']),
+        `${owner}_errors`,
+        `${ownerLabel} errors`,
+        metricNumber(detail, ['summary', 'lint', `${owner}_errors`]),
         true,
       ),
       metric(
-        'cpu_warnings',
-        'CPU warnings',
-        metricNumber(detail, ['summary', 'lint', 'cpu_warnings']),
+        `${owner}_warnings`,
+        `${ownerLabel} warnings`,
+        metricNumber(detail, ['summary', 'lint', `${owner}_warnings`]),
         true,
       ),
       metric(
@@ -585,7 +599,9 @@ function stageFindings(
   workspaceId: string,
   stage: FrontendAnalysisStage,
   detail: JsonRecord | null,
+  designKind: FrontendDesignKind,
 ): FrontendAnalysisFinding[] {
+  const owner = designKind === 'generic_rtl' ? 'design' : 'cpu'
   if (!detail) return []
   if (stage === 'prepare') {
     return arrayAt(detail, ['summary', 'contracts']).flatMap((contract, index) => {
@@ -612,7 +628,7 @@ function stageFindings(
       const item = recordValue(issue)
       if (!item || item.waived === true) return []
       const ownership = stringValue(item.ownership).toLowerCase()
-      if (ownership && ownership !== 'cpu') return []
+      if (ownership && ownership !== owner) return []
       return [
         finding(workspaceId, stage, index, {
           severity: severityValue(item.severity),
@@ -642,7 +658,7 @@ function stageFindings(
   if (stage === 'lint') {
     return arrayAt(detail, ['lint', 'diagnostics']).flatMap((diagnostic, index) => {
       const item = recordValue(diagnostic)
-      if (!item || (item.actionable !== true && stringValue(item.ownership) !== 'cpu')) {
+      if (!item || (item.actionable !== true && stringValue(item.ownership) !== owner)) {
         return []
       }
       return [

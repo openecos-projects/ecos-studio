@@ -1,5 +1,6 @@
 import type { ProjectManifestMpc, ProjectManifestType } from '../utils/projectManifest'
 import type { PdkRequirement } from '../contracts/pdkInventory'
+import type { FrontendDesignKind } from '../utils/frontendDesign'
 
 export type WorkspaceStatus =
   | 'success'
@@ -36,6 +37,7 @@ export interface WorkspaceSummary {
 }
 
 export interface WorkspaceParameters {
+  frontend_design_kind?: FrontendDesignKind
   design: string
   description?: string
   top_module: string
@@ -57,6 +59,7 @@ export interface WorkspaceParameters {
 export interface WorkspaceConfig {
   directory: string
   designTool?: DesignTool
+  frontend_design_kind?: FrontendDesignKind
   cpu_rtl_files?: string[]
   pdk: string
   pdk_root: string

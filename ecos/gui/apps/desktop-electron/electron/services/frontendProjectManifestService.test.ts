@@ -15,6 +15,8 @@ import { FrontendProjectManifestService } from './frontendProjectManifestService
 import { ProjectManifestService } from './projectManifestService'
 import { ProjectManagementReadService } from './projectManagementReadService'
 import { ProjectWorkspaceImportService } from './projectWorkspaceImportService'
+import { ProjectScopeService } from './projectScopeService'
+import { runWithWindowScope } from './windowScopeContext'
 
 const directories: string[] = []
 
@@ -41,6 +43,61 @@ async function createServices() {
 }
 
 describe('frontend project management on the main ECC runtime', () => {
+  it('does not send an unregistered frontend workspace discovery to backend ECC', async () => {
+    const { root, manifestService, readService, callRuntime } = await createServices()
+    const workspacePath = join(root, 'ws_0001')
+    await mkdir(workspacePath)
+    await manifestService.mutate({
+      projectRoot: root,
+      mutation: {
+        type: 'create',
+        name: 'rtl',
+        designName: 'counter',
+        projectType: 'frontend',
+      },
+    })
+    // Discovery may run while the workspace registration is still being committed.
+    await expect(readService.discoverProject(workspacePath)).resolves.toBeNull()
+    expect(callRuntime).not.toHaveBeenCalled()
+  })
+
+  it('registers a generic project read scope through the frontend manifest service', async () => {
+    const { root, manifestService, callRuntime } = await createServices()
+    const workspacePath = join(root, 'ws_0001')
+    await mkdir(workspacePath)
+    await manifestService.mutate({
+      projectRoot: root,
+      mutation: {
+        type: 'create',
+        name: 'rtl',
+        designName: 'counter',
+        projectType: 'frontend',
+      },
+    })
+    await manifestService.mutate({
+      projectRoot: root,
+      mutation: {
+        type: 'register-workspace',
+        input: {
+          projectRoot: root,
+          workspacePath,
+          config: { frontend_design_kind: 'generic_rtl' },
+        },
+      },
+    })
+    const scope = new ProjectScopeService({
+      loadProjectManifest: (projectRoot) => manifestService.load(projectRoot),
+    })
+    await runWithWindowScope(1, async () => {
+      await scope.registerProjectRoot(workspacePath)
+      await expect(scope.registerProjectReadRoot(root)).resolves.toBe(root)
+      await expect(
+        scope.requestProjectPathAccess(join(root, 'project.json')),
+      ).resolves.toBe(join(root, 'project.json'))
+    })
+    expect(callRuntime).not.toHaveBeenCalled()
+  })
+
   it('creates and registers a frontend workspace without invoking backend manifest RPC', async () => {
     const { root, manifestService, readService, callRuntime } = await createServices()
     const workspacePath = join(root, 'ws_0001')
@@ -195,5 +252,106 @@ describe('frontend project management on the main ECC runtime', () => {
       'already_registered',
     )
     expect(callRuntime).not.toHaveBeenCalled()
+  })
+})
+
+describe('frontend design profiles from workspace files', () => {
+  it('uses the persisted workspace profile for registration and import', async () => {
+    const { root, manifestService } = await createServices()
+    await manifestService.mutate({
+      projectRoot: root,
+      mutation: {
+        type: 'create',
+        name: 'rtl',
+        designName: 'counter',
+        projectType: 'frontend',
+      },
+    })
+    const workspacePath = join(root, 'ws_0001')
+    await mkdir(join(workspacePath, 'home'), { recursive: true })
+    await writeFile(
+      join(workspacePath, 'home/parameters.json'),
+      JSON.stringify({
+        'Design Tool': 'frontend',
+        frontend_design_kind: 'generic_rtl',
+        'Top module': 'counter',
+        Clock: '',
+      }),
+    )
+    await writeFile(
+      join(workspacePath, 'home/flow.json'),
+      JSON.stringify({
+        steps: [
+          { name: 'prepare' },
+          { name: 'review' },
+          { name: 'elab' },
+          { name: 'lint' },
+        ],
+      }),
+    )
+    const registered = await manifestService.mutate({
+      projectRoot: root,
+      mutation: {
+        type: 'register-workspace',
+        input: {
+          projectRoot: root,
+          workspacePath,
+          config: { frontend_design_kind: 'cpu_core' },
+        },
+      },
+    })
+    expect(registered.manifest.base_design).toMatchObject({
+      frontend_design_kind: 'generic_rtl',
+      top_module: 'counter',
+      clock: '',
+    })
+    expect(registered.manifest.workspaces[0]?.end_step).toBe('lint')
+
+    const importedPath = join(root, 'ws_0002')
+    await mkdir(join(importedPath, 'home'), { recursive: true })
+    await writeFile(
+      join(importedPath, 'home/parameters.json'),
+      JSON.stringify({ 'Design Tool': 'frontend', frontend_design_kind: 'generic_rtl' }),
+    )
+    await writeFile(join(importedPath, 'home/flow.json'), '{"steps": []}')
+    const importer = new ProjectWorkspaceImportService(manifestService)
+    expect((await importer.importWorkspace(root, importedPath)).status).toBe('imported')
+    const persisted = JSON.parse(await readFile(join(root, 'project.json'), 'utf8'))
+    expect(persisted.workspaces[1].end_step).toBe('lint')
+  })
+
+  it('rejects an imported legacy CPU workspace in a generic RTL project', async () => {
+    const { root, frontend, manifestService } = await createServices()
+    await manifestService.mutate({
+      projectRoot: root,
+      mutation: {
+        type: 'create',
+        name: 'rtl',
+        designName: 'counter',
+        projectType: 'frontend',
+      },
+    })
+    await manifestService.mutate({
+      projectRoot: root,
+      mutation: {
+        type: 'register-workspace',
+        input: {
+          projectRoot: root,
+          workspacePath: join(root, 'ws_0001'),
+          config: { frontend_design_kind: 'generic_rtl' },
+        },
+      },
+    })
+    const candidate = join(root, 'ws_0002')
+    await mkdir(join(candidate, 'home'), { recursive: true })
+    await writeFile(join(candidate, 'home/flow.json'), '{"steps": []}')
+    await writeFile(
+      join(candidate, 'home/parameters.json'),
+      '{"Design Tool": "frontend"}',
+    )
+    await expect(frontend.importWorkspace(root, candidate, 'ws_0002')).rejects.toThrow(
+      'locked to generic_rtl',
+    )
+    expect((await frontend.load(root))?.workspaces).toHaveLength(1)
   })
 })

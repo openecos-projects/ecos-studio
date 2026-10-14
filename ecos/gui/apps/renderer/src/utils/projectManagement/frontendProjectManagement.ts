@@ -1,5 +1,7 @@
 import {
   normalizeProjectManifestStage,
+  frontendDesignKindFromConfig,
+  frontendFlowSteps,
   projectManifestFrontendFlowSteps,
   type ProjectManifest,
   type ProjectManifestFrontendFlowStep,
@@ -33,16 +35,20 @@ export function buildFrontendProjectManagementProject(
   workspaceAnalysisInputs: ProjectWorkspaceAnalysisInputsById = {},
 ): ProjectManagementProject {
   const base = buildBackendProjectManagementProject(project, null)
+  const designKind = frontendDesignKindFromConfig(manifest.base_design)
+  const flowSteps = frontendFlowSteps(designKind)
   const lineage = sortWorkspacesByLineage(manifest.workspaces)
   const workspaces = lineage.map(({ workspace, depth }) =>
     buildFrontendWorkspace(
       workspace,
       workspaceFlowStates[workspace.workspace_id] ?? {},
       depth,
+      flowSteps,
     ),
   )
   const frontendAnalysis = buildFrontendProjectAnalysis(
     workspaces.map((workspace) => ({
+      designKind,
       workspaceId: workspace.id,
       workspaceName: workspace.name,
       workspacePath: workspace.workspacePath,
@@ -82,7 +88,7 @@ export function buildFrontendProjectManagementProject(
     objective: manifest.objectives.primary
       ? `${manifest.objectives.primary} objective`
       : 'verification objective',
-    flowSteps: FRONTEND_FLOW_STEPS,
+    flowSteps,
     bestWorkspaceId,
     workspaces,
     metricsRows: [],
@@ -101,6 +107,7 @@ function buildFrontendWorkspace(
   workspace: ProjectManifestWorkspace,
   flowStates: ProjectWorkspaceFlowStateMap,
   depth: number,
+  flowSteps: readonly ProjectManifestFrontendFlowStep[],
 ): ProjectWorkspace {
   const startStep = normalizeFrontendStage(workspace.start_step)
   const endStep = normalizeFrontendStage(workspace.end_step)
@@ -108,7 +115,7 @@ function buildFrontendWorkspace(
     ? normalizeFrontendStage(workspace.branch_from.source_step)
     : null
   const status = workspaceStatusFromFlow(workspace.status, flowStates)
-  const steps = FRONTEND_FLOW_STEPS.map((step) =>
+  const steps = flowSteps.map((step) =>
     buildFrontendStep(
       workspace,
       status,
