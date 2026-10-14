@@ -302,6 +302,16 @@ export interface ProjectManifestWorkspaceImportInput {
   workspacePath: string
 }
 
+/**
+ * RTL sources to import into the created project's rtl/ directory via
+ * `ecc rtl import` right after `ecc init`. Exactly one of filelist or
+ * verilog must be non-empty, mirroring the ECC CLI exclusivity.
+ */
+export interface ProjectManifestRtlImport {
+  filelist?: string
+  verilog?: string[]
+}
+
 export type ProjectManifestMutation =
   | {
       type: 'create'
@@ -309,6 +319,7 @@ export type ProjectManifestMutation =
       designName: string
       projectType?: ProjectManifestType
       mpc?: ProjectManifestMpc | null
+      rtlImport?: ProjectManifestRtlImport
     }
   | { input: ProjectManifestWorkspaceRegistrationInput; type: 'register-workspace' }
   | { input: ProjectManifestWorkspaceImportInput; type: 'import-workspace' }

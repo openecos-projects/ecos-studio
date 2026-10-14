@@ -4,6 +4,13 @@ import type { PdkRequirement } from './pdkInventory.ts'
 export interface EccWorkspaceCreateRequest {
   commandId: string
   targetDirectory: string
+  /**
+   * Design inputs with role `rtl`/`filelist` on a non-derived create mean
+   * "import these sources into the project rtl/ directory" (`ecc rtl import`
+   * runs after `ecc init` / before `ecc project apply`, which no longer sets
+   * design.rtl). A project that already declares design RTL sends no
+   * rtl/filelist inputs; ECC materializes the workspace from ecc.toml.
+   */
   workspaceBindings: Record<string, unknown>
   workspaceSpec: Record<string, unknown>
   pdkInstallationId?: string
