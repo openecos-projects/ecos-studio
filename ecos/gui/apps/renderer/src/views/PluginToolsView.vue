@@ -114,11 +114,15 @@ const statusFilter = ref<StatusFilter>('all')
 const importingResourceIds = ref<Set<string>>(new Set())
 const downloadSource = ref<DesktopDownloadSource>(DEFAULT_DESKTOP_DOWNLOAD_SOURCE)
 // The value last confirmed in the settings store: what the switch rolls back
-// to when persisting a new selection fails.
+// to when persisting a new selection fails. Broadcasts from other windows
+// also confirm their committed value here.
 let confirmedDownloadSource: DesktopDownloadSource = DEFAULT_DESKTOP_DOWNLOAD_SOURCE
-// Generation counter for user selections; a late restore or a failed persist
-// may only touch the switch while no newer selection exists.
+// Generation counters for user selections: the mount-time restore applies
+// only before the first click, a failed persist may roll back only the
+// still-current selection, and broadcasts update the switch only while no
+// local persist is in flight.
 let downloadSourceSelectionSeq = 0
+let downloadSourceSettledSeq = 0
 let unsubscribeDownloadSourceChanged: (() => void) | undefined
 
 const resourceRows = computed<ResourceRow[]>(() => {
@@ -154,7 +158,9 @@ onMounted(() => {
   unsubscribeDownloadSourceChanged = desktopApi?.settings.onDownloadSourceChanged?.(
     (source) => {
       confirmedDownloadSource = source
-      if (downloadSourceSelectionSeq === 0) {
+      // An in-flight local selection keeps the switch until its own persist
+      // resolves; afterwards the latest committed value wins again.
+      if (downloadSourceSettledSeq === downloadSourceSelectionSeq) {
         downloadSource.value = source
       }
     },
@@ -200,8 +206,16 @@ async function handleDownloadSourceChange(source: DesktopDownloadSource): Promis
     // Electron main validates the value and applies it to the resource
     // manager once the setting is durably stored.
     await getDesktopApi().settings.set(DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY, source)
-    confirmedDownloadSource = source
+    // Only the newest settled persist confirms the stored value; an older
+    // late-resolving write was superseded by a newer committed one.
+    if (selection > downloadSourceSettledSeq) {
+      confirmedDownloadSource = source
+      downloadSourceSettledSeq = selection
+    }
   } catch (error) {
+    if (selection > downloadSourceSettledSeq) {
+      downloadSourceSettledSeq = selection
+    }
     // Roll back only the still-current selection, and only to the last value
     // confirmed in the store; a newer selection owns the switch.
     if (selection === downloadSourceSelectionSeq) {

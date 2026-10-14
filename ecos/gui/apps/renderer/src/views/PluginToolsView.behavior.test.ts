@@ -272,6 +272,35 @@ describe('PluginToolsView download source', () => {
     expect(buttons[2].classes()).toContain('active')
     wrapper.unmount()
   })
+
+  it('keeps following broadcast changes after a local selection settles', async () => {
+    viewMocks.store.resources = []
+    let sourceListener: ((source: string) => void) | undefined
+    viewMocks.getOptionalDesktopApi.mockReturnValueOnce({
+      settings: {
+        get: viewMocks.settingsGet,
+        set: viewMocks.settingsSet,
+        onDownloadSourceChanged: (listener: (source: string) => void) => {
+          sourceListener = listener
+          return () => undefined
+        },
+      },
+    })
+    const wrapper = mount(PluginToolsView)
+    await flushPromises()
+    const buttons = wrapper.findAll('.download-source button')
+
+    // The local selection settles, then another window commits a change.
+    await buttons[2].trigger('click')
+    await flushPromises()
+    expect(buttons[2].classes()).toContain('active')
+    sourceListener?.('github')
+    await flushPromises()
+
+    expect(buttons[1].classes()).toContain('active')
+    expect(buttons[2].classes()).not.toContain('active')
+    wrapper.unmount()
+  })
 })
 
 describe('PluginToolsView structure', () => {
