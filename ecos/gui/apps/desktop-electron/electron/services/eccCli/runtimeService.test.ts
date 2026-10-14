@@ -8,6 +8,7 @@ import {
   projectInitArgs,
   projectManifestCreateArgs,
   projectSettingsArgs,
+  rtlImportArgs,
   workspaceCreateCommands,
   workspaceParameterValue,
   workspaceRefreshArgs,
@@ -116,7 +117,6 @@ function request(
     workspaceBindings: {
       inputs: {
         def: '/inputs/design.def',
-        filelist: '/inputs/files.f',
         netlist: '/inputs/design.vg',
         rtl: '/inputs/design.v',
         sdc: '/inputs/design.sdc',
@@ -132,7 +132,6 @@ function request(
       flow: { flowId: 'rtl2gds', fromStepId: 'synthesis', throughStepId: 'routing' },
       inputs: [
         { inputId: 'rtl', role: 'rtl' },
-        { inputId: 'filelist', role: 'filelist' },
         { inputId: 'netlist', role: 'netlist' },
         { inputId: 'def', role: 'def' },
         { inputId: 'sdc', role: 'sdc' },
@@ -204,11 +203,11 @@ describe('ECC CLI workspace command planning', () => {
     ])
     expect(commands[0]).toEqual(
       expect.arrayContaining([
-        'design.rtl=["/inputs/design.v","/inputs/files.f"]',
         'pdk.external_paths=["/macros"]',
         'pdk.overrides.lefs=["/macros/sram.lef"]',
       ]),
     )
+    expect(commands[0]).not.toContainEqual(expect.stringMatching(/^design\.rtl=/))
     expect(commands[1]).toEqual(
       expect.arrayContaining([
         '--from',
@@ -259,8 +258,6 @@ describe('ECC CLI workspace command planning', () => {
       'design.clock_port=clk',
       '--set',
       'design.frequency_mhz=500',
-      '--set',
-      'design.rtl=["/inputs/design.v","/inputs/files.f"]',
       '--set',
       'design.netlist=/inputs/design.vg',
       '--set',
@@ -331,6 +328,195 @@ describe('ECC CLI workspace command planning', () => {
       '/resources/frame/2.0.0',
       '--mpc-design-index',
       '1',
+    ])
+  })
+})
+
+describe('ECC CLI RTL import planning', () => {
+  const mockCliRun = (commands: string[][]) =>
+    vi.spyOn(EccCliProcess.prototype, 'run').mockImplementation(async (args) => {
+      if (args[0] !== 'version') commands.push([...args])
+      if (args[0] === 'version') {
+        return {
+          exitCode: 0,
+          stderr: '',
+          stdout: JSON.stringify({
+            schema_version: 2,
+            runtime: 'ECC CLI',
+            cli_contract: 1,
+          }),
+        }
+      }
+      return { exitCode: 0, stderr: '', stdout: '' }
+    })
+
+  it('builds the import argv for exclusive filelist or verilog selections', () => {
+    expect(rtlImportArgs('/projects/demo', { filelist: '/inputs/files.f' })).toEqual([
+      'rtl',
+      'import',
+      '--project',
+      '/projects/demo',
+      '--filelist',
+      '/inputs/files.f',
+      '--plain',
+    ])
+    expect(
+      rtlImportArgs('/projects/demo', { verilog: ['/inputs/a.v', '/inputs/b.v'] }),
+    ).toEqual([
+      'rtl',
+      'import',
+      '--project',
+      '/projects/demo',
+      '--verilog',
+      '/inputs/a.v',
+      '--verilog',
+      '/inputs/b.v',
+      '--plain',
+    ])
+    expect(rtlImportArgs('/projects/demo', {})).toBeNull()
+    expect(
+      rtlImportArgs('/projects/demo', { filelist: '/inputs/files.f', verilog: [] }),
+    ).toEqual([
+      'rtl',
+      'import',
+      '--project',
+      '/projects/demo',
+      '--filelist',
+      '/inputs/files.f',
+      '--plain',
+    ])
+    expect(() =>
+      rtlImportArgs('/projects/demo', {
+        filelist: '/inputs/files.f',
+        verilog: ['/inputs/a.v'],
+      }),
+    ).toThrow('not both')
+  })
+
+  it('imports pending RTL after init and before the workspace commands', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ecc-rtl-import-'))
+    temporaryDirectories.push(root)
+    await writeFile(join(root, 'project.json'), '{"schema_version":1}')
+    const commands: string[][] = []
+    mockCliRun(commands)
+    const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
+    vi.spyOn(service, 'openWorkspace').mockResolvedValue({
+      directory: join(root, 'runs', 'ws_1'),
+      workspaceHandle: 'handle-1',
+      workspaceRevision: 1,
+    })
+    await service.createWorkspace(
+      request({ projectRoot: root, targetDirectory: join(root, 'runs', 'ws_1') }),
+    )
+
+    expect(commands.map((args) => args.slice(0, 2))).toEqual([
+      ['init', root],
+      ['rtl', 'import'],
+      ['project', 'apply'],
+      ['workspace', 'create'],
+    ])
+    expect(commands[1]).toContain('--verilog')
+    expect(commands[1]).toContain('/inputs/design.v')
+    expect(commands[2]).not.toContainEqual(expect.stringMatching(/^design\.rtl=/))
+  })
+
+  it('skips the import when the project design RTL is reused', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ecc-rtl-reuse-'))
+    temporaryDirectories.push(root)
+    await writeFile(join(root, 'project.json'), '{"schema_version":1}')
+    const commands: string[][] = []
+    mockCliRun(commands)
+    const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
+    vi.spyOn(service, 'openWorkspace').mockResolvedValue({
+      directory: join(root, 'runs', 'ws_1'),
+      workspaceHandle: 'handle-1',
+      workspaceRevision: 1,
+    })
+    const input = request({
+      projectRoot: root,
+      targetDirectory: join(root, 'runs', 'ws_1'),
+    })
+    const inputs = (input.workspaceSpec.inputs as Array<Record<string, unknown>>) ?? []
+    input.workspaceSpec.inputs = inputs.filter((value) => value.role !== 'rtl')
+    delete (input.workspaceBindings.inputs as Record<string, unknown>).rtl
+    await service.createWorkspace(input)
+
+    expect(commands.map((args) => args.slice(0, 2))).toEqual([
+      ['init', root],
+      ['project', 'apply'],
+      ['workspace', 'create'],
+    ])
+  })
+
+  it('never imports for derived workspaces', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ecc-rtl-derive-'))
+    temporaryDirectories.push(root)
+    await writeFile(join(root, 'project.json'), '{"schema_version":1}')
+    const commands: string[][] = []
+    mockCliRun(commands)
+    const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
+    vi.spyOn(service, 'openWorkspace').mockResolvedValue({
+      directory: join(root, 'runs', 'ws_1'),
+      workspaceHandle: 'handle-1',
+      workspaceRevision: 1,
+    })
+    await service.createWorkspace(
+      request({
+        deriveFrom: { sourceStep: 'placement', workspaceId: 'ws_source' },
+        projectMode: 'select',
+        projectRoot: root,
+        targetDirectory: join(root, 'runs', 'ws_1'),
+      }),
+    )
+
+    expect(commands.map((args) => args.slice(0, 2))).toEqual([['workspace', 'derive']])
+  })
+
+  it('imports RTL after init for a standalone Project creation mutation', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ecc-rtl-mutate-'))
+    temporaryDirectories.push(root)
+    const commands: string[][] = []
+    vi.spyOn(EccCliProcess.prototype, 'run').mockImplementation(async (args) => {
+      if (args[0] !== 'version') commands.push([...args])
+      if (args[0] === 'version') {
+        return {
+          exitCode: 0,
+          stderr: '',
+          stdout: JSON.stringify({
+            schema_version: 2,
+            runtime: 'ECC CLI',
+            cli_contract: 1,
+          }),
+        }
+      }
+      if (args[0] === 'init') {
+        await writeFile(
+          join(root, 'project.json'),
+          JSON.stringify({
+            schema_version: 1,
+            project_id: 'proj_demo_ab12cd34ef56',
+            name: 'Demo',
+            design_name: 'gcd',
+            root_path: root,
+            base_design: {},
+            objectives: {},
+            workspaces: [],
+          }),
+        )
+      }
+      return { exitCode: 0, stderr: '', stdout: '' }
+    })
+    const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
+    await service.mutateProjectManifest(root, {
+      type: 'create',
+      name: 'Demo',
+      designName: 'gcd',
+      rtlImport: { verilog: ['/inputs/design.v'] },
+    })
+
+    expect(commands).toEqual([
+      ['init', root, '--project-name', 'Demo', '--design-name', 'gcd'],
+      ['rtl', 'import', '--project', root, '--verilog', '/inputs/design.v', '--plain'],
     ])
   })
 })

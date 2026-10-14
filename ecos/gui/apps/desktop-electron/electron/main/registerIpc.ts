@@ -148,7 +148,7 @@ import {
 import { buildWorkspaceCreationModel } from '../services/workspaceCreationModel'
 import { rememberWorkspaceParameterCatalog } from '../services/workspaceParameterCatalogCache'
 import {
-  ensureBackendProjectManifestForCreate,
+  authorizeBackendProjectRootForCreate,
   prepareWorkspaceCreateBinding,
   prepareWorkspaceOpenBinding,
 } from '../services/workspacePdkBindings'
@@ -2989,7 +2989,7 @@ export function registerIpc(
         services.backendProjectComparisonService.invalidateWorkspace(workspaceDirectory)
       },
       prepareCreate: async (createRequest) => {
-        await ensureBackendProjectManifestForCreate(services, createRequest)
+        await authorizeBackendProjectRootForCreate(services, createRequest)
         return await prepareWorkspaceCreateBinding(services, createRequest)
       },
       runtime: services.eccRuntimeService,

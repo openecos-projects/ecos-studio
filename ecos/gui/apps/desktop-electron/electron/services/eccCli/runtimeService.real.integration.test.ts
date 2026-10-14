@@ -137,7 +137,9 @@ describeReal('ECC CLI runtime real integration', () => {
 
     const secondRoot = join(projectRoot, 'ws_0002')
     const second = await service.createWorkspace(
-      workspaceRequest(projectRoot, secondRoot, pdkRoot, rtl, 'ws-2'),
+      // The project already imported its design RTL with the first create;
+      // this workspace reuses it (no rtl input).
+      workspaceRequest(projectRoot, secondRoot, pdkRoot, undefined, 'ws-2'),
     )
     expect(second.workspaceId).toBe('ws_0002')
     await service.closeWorkspace({ workspaceHandle: second.workspaceHandle })
@@ -198,16 +200,20 @@ function workspaceRequest(
   projectRoot: string,
   targetDirectory: string,
   pdkRoot: string,
-  rtl: string,
+  rtl?: string,
   commandId = 'ws-1',
 ): EccWorkspaceCreateRequest {
+  // A fresh project passes the RTL source once (imported into the project
+  // rtl/ folder); later workspaces in the same project reuse it.
+  const rtlInputs = rtl ? [{ inputId: 'rtl', role: 'rtl' }] : []
+  const rtlBindings = rtl ? { rtl } : {}
   return {
     commandId,
     projectMode: 'select',
     projectName: 'GUI CLI Integration',
     projectRoot,
     targetDirectory,
-    workspaceBindings: { inputs: { rtl }, pdk: { root: pdkRoot } },
+    workspaceBindings: { inputs: rtlBindings, pdk: { root: pdkRoot } },
     workspaceSpec: {
       design: { clockPort: 'clk', name: 'gcd', topModule: 'gcd' },
       flow: {
@@ -215,7 +221,7 @@ function workspaceRequest(
         fromStepId: 'synthesis',
         throughStepId: 'synthesis',
       },
-      inputs: [{ inputId: 'rtl', role: 'rtl' }],
+      inputs: rtlInputs,
       parameters: { 'design.frequency_mhz': 100 },
       pdk: { familyId: 'ics55' },
     },

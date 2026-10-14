@@ -135,11 +135,21 @@ export class ProjectManifestService {
     workspacePath: string,
     expectedProjectId?: string,
   ): Promise<WorkspaceRegistrationEvidence | null> {
-    const projectRoot =
-      await this.projectScopeProvider.resolveProjectRoot(requestedProjectRoot)
+    let projectRoot: string
+    try {
+      projectRoot =
+        await this.projectScopeProvider.resolveProjectRoot(requestedProjectRoot)
+    } catch {
+      // A workspace-creation journal captures registration state before
+      // `ecc init` runs, when the project root and manifest do not exist
+      // yet; an unresolvable root simply means there is no evidence.
+      return null
+    }
     return await this.enqueue(projectRoot, async () => {
       const manifest =
-        (await this.frontend?.load(projectRoot)) ?? (await this.loadManifest(projectRoot))
+        (await this.frontend?.load(projectRoot).catch(() => null)) ??
+        (await this.loadManifest(projectRoot).catch(() => null))
+      if (!manifest) return null
       requireProjectIdentity(manifest, expectedProjectId)
       return workspaceRegistrationEvidence(manifest, workspacePath, projectRoot)
     })
