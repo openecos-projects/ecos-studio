@@ -119,8 +119,8 @@ interface DownloadProgress {
 interface DownloadHooks {
   /** Fired when a failed attempt is about to be retried (attempt = failed attempt). */
   onRetry?: (attempt: number, maxAttempts: number) => void
-  /** Fired once when the download falls back to the mirror URL. */
-  onMirrorSwitch?: (mirrorUrl: string) => void
+  /** Fired once when the download falls through to the next planned source; the argument is that source's URL (the mirror or the primary, depending on the planned order). */
+  onMirrorSwitch?: (nextSourceUrl: string) => void
 }
 
 class DownloadResponseError extends Error {
@@ -2077,14 +2077,18 @@ export class ResourceManagerService {
               message: `Downloading ${displayName} v${version} (auto-retry ${attempt}/${maxAttempts})...`,
             })
           },
-          onMirrorSwitch: () => {
+          onMirrorSwitch: (nextSourceUrl) => {
             archiveFraction = 0
+            const nextLabel =
+              nextSourceUrl === resolvedAsset.cnb_url?.trim()
+                ? 'switching to mirror'
+                : 'switching to GitHub'
             this.publish(listener, {
               resource_id: resourceId,
               action,
               phase: 'downloading',
               progress: 0,
-              message: `Downloading ${displayName} v${version} (switching to mirror)...`,
+              message: `Downloading ${displayName} v${version} (${nextLabel})...`,
             })
           },
         },
@@ -2658,9 +2662,13 @@ export class ResourceManagerService {
           {
             onRetry: (attempt, maxAttempts) =>
               publishPackage(`auto-retry ${attempt}/${maxAttempts}`),
-            onMirrorSwitch: () => {
+            onMirrorSwitch: (nextSourceUrl) => {
               packageFraction = 0
-              publishPackage('switching to mirror')
+              publishPackage(
+                nextSourceUrl === packageAsset.cnb_url?.trim()
+                  ? 'switching to mirror'
+                  : 'switching to GitHub',
+              )
             },
           },
           this.mirrorFallback,

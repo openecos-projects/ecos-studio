@@ -123,6 +123,9 @@ let confirmedDownloadSource: DesktopDownloadSource = DEFAULT_DESKTOP_DOWNLOAD_SO
 // local persist is in flight.
 let downloadSourceSelectionSeq = 0
 let downloadSourceSettledSeq = 0
+// A broadcast committed from another window invalidates a pending mount-time
+// restore: the broadcast already reflects the newer stored value.
+let downloadSourceBroadcastReceived = false
 let unsubscribeDownloadSourceChanged: (() => void) | undefined
 
 const resourceRows = computed<ResourceRow[]>(() => {
@@ -157,6 +160,7 @@ onMounted(() => {
   const desktopApi = getOptionalDesktopApi()
   unsubscribeDownloadSourceChanged = desktopApi?.settings.onDownloadSourceChanged?.(
     (source) => {
+      downloadSourceBroadcastReceived = true
       confirmedDownloadSource = source
       // An in-flight local selection keeps the switch until its own persist
       // resolves; afterwards the latest committed value wins again.
@@ -188,9 +192,9 @@ async function restoreDownloadSource(
     const saved = await desktopApi.settings.get(DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY)
     const restored =
       normalizeDesktopDownloadSource(saved) ?? DEFAULT_DESKTOP_DOWNLOAD_SOURCE
-    // A user selection made while the read was in flight wins: leave both the
-    // switch and the rollback target to the user's own persist result.
-    if (downloadSourceSelectionSeq === 0) {
+    // A user selection or a broadcast committed while the read was in flight
+    // wins: both already reflect a newer value than this read can return.
+    if (downloadSourceSelectionSeq === 0 && !downloadSourceBroadcastReceived) {
       confirmedDownloadSource = restored
       downloadSource.value = restored
     }

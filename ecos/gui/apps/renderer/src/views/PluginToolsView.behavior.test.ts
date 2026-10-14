@@ -301,6 +301,39 @@ describe('PluginToolsView download source', () => {
     expect(buttons[2].classes()).not.toContain('active')
     wrapper.unmount()
   })
+
+  it('does not let a late restore overwrite a broadcast value', async () => {
+    viewMocks.store.resources = []
+    let sourceListener: ((source: string) => void) | undefined
+    let resolveGet: (value: unknown) => void = () => undefined
+    viewMocks.settingsGet.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveGet = resolve
+        }),
+    )
+    viewMocks.getOptionalDesktopApi.mockReturnValueOnce({
+      settings: {
+        get: viewMocks.settingsGet,
+        set: viewMocks.settingsSet,
+        onDownloadSourceChanged: (listener: (source: string) => void) => {
+          sourceListener = listener
+          return () => undefined
+        },
+      },
+    })
+    const wrapper = mount(PluginToolsView)
+    const buttons = wrapper.findAll('.download-source button')
+
+    // Another window commits cnb while this window's restore read is pending;
+    // the read then resolves with the stale pre-commit value.
+    sourceListener?.('cnb')
+    resolveGet('github')
+    await flushPromises()
+
+    expect(buttons[2].classes()).toContain('active')
+    wrapper.unmount()
+  })
 })
 
 describe('PluginToolsView structure', () => {
