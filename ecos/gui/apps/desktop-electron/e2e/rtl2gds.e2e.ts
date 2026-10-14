@@ -108,7 +108,20 @@ describe('product e2e: backend rtl2gds journey', () => {
       projectRoot: design.projectRoot,
       name: `${design.name}-e2e`,
       designName: design.designName,
+      rtlImport: design.rtlImport,
     })
+    // The design RTL was imported into the project rtl/ folder by the CLI.
+    const manifest = await page.evaluate(
+      (root) => window.ecosDesktop.projectManagement.readManifest(root),
+      design.projectRoot,
+    )
+    const rtlList: string[] =
+      ((manifest as { base_design?: { rtl_list?: string[] } } | null)?.base_design
+        ?.rtl_list as string[] | undefined) ?? []
+    expect(rtlList.length).toBeGreaterThan(0)
+    for (const entry of rtlList) {
+      expect(entry.startsWith('rtl/')).toBe(true)
+    }
     const pdkInstallationId = await importExternalPdk(page, PDK_ROOT)
     workspace = await createDefaultWorkspace(page, {
       projectRoot: design.projectRoot,

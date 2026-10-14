@@ -50,6 +50,7 @@ describe('product e2e: cancelling a running flow', () => {
       inputs: design.inputs,
       parameters: design.parameters,
       pdkRoot: PDK_ROOT,
+      rtlImport: design.rtlImport,
     })
     const operation = await runFlow(page, workspace)
     operationId = operation.operationId

@@ -30,6 +30,7 @@ describe('RTL workspace dashboard', () => {
       projectRoot,
       name: `${design.name}-dashboard`,
       designName: design.designName,
+      rtlImport: design.rtlImport,
     })
     const pdkInstallationId = await importExternalPdk(
       page,
