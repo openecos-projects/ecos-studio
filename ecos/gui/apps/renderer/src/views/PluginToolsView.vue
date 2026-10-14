@@ -166,12 +166,15 @@ async function restoreDownloadSource(): Promise<void> {
 }
 
 async function handleDownloadSourceChange(source: DesktopDownloadSource): Promise<void> {
+  const previous = downloadSource.value
   downloadSource.value = source
   try {
     // Electron main validates the value and applies it to the resource
     // manager once the setting is durably stored.
     await getDesktopApi().settings.set(DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY, source)
   } catch (error) {
+    // Keep the switch in sync with the setting that actually took effect.
+    downloadSource.value = previous
     console.warn('[PluginToolsView] Failed to persist the download source:', error)
   }
 }

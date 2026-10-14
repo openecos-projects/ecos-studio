@@ -546,32 +546,47 @@ export class ResourceManagerService {
     sha256: string
     size: number | null
     fallbackUrl: string | null
+    fallbackSize: number | null
   } {
     const mirrorUrl = asset.cnb_url?.trim() ? asset.cnb_url.trim() : null
-    const mirrorSha256 = asset.cnb_sha256?.trim().toLowerCase() || null
-    const mirrorUsable =
-      mirrorUrl !== null && mirrorSha256 !== null && this.downloadSource !== 'github'
+    const mirrorDiffers = Boolean(asset.cnb_sha256?.trim())
+    // A mirror carrying cnb_sha256 serves different bytes (a git archive):
+    // verify against cnb_sha256 and skip the size check because the mirror
+    // size is unknown. Without cnb_sha256 the mirror is byte-identical, so
+    // the shared sha256 and size apply. The sha256 check stays the
+    // authoritative integrity gate either way.
+    const mirrorSha256 = mirrorDiffers
+      ? asset.cnb_sha256!.trim().toLowerCase()
+      : asset.sha256
+    const mirrorSize = mirrorDiffers ? null : asset.size
+    const mirrorUsable = mirrorUrl !== null && this.downloadSource !== 'github'
     const preferMirror =
       mirrorUsable &&
       (this.downloadSource === 'cnb' || this.mirrorFallback.prefersMirror(asset.url))
     if (preferMirror) {
-      // The mirror serves different bytes with an unknown size; the sha256
-      // check below stays the authoritative integrity gate.
-      return { url: mirrorUrl, sha256: mirrorSha256, size: null, fallbackUrl: asset.url }
+      return {
+        url: mirrorUrl,
+        sha256: mirrorSha256,
+        size: mirrorSize,
+        fallbackUrl: asset.url,
+        fallbackSize: asset.size,
+      }
     }
     return {
       url: asset.url,
       sha256: asset.sha256,
       size: asset.size,
       fallbackUrl: mirrorUsable ? mirrorUrl : null,
+      fallbackSize: mirrorSize,
     }
   }
 
   private pdkBaseSha256ForUrl(asset: ResolvedPlatformAsset, usedUrl: string): string {
     const mirrorUrl = asset.cnb_url?.trim() ? asset.cnb_url.trim() : null
     const mirrorSha256 = asset.cnb_sha256?.trim().toLowerCase() || null
-    if (mirrorUrl !== null && mirrorSha256 !== null && usedUrl === mirrorUrl) {
-      return mirrorSha256
+    if (mirrorUrl !== null && usedUrl === mirrorUrl) {
+      // Without cnb_sha256 the mirror serves byte-identical content.
+      return mirrorSha256 ?? asset.sha256
     }
     return asset.sha256
   }
@@ -2128,6 +2143,7 @@ export class ResourceManagerService {
           },
         },
         this.mirrorFallback,
+        basePlan.fallbackSize,
       )
       await rename(partialArchive, tempArchive)
       throwIfAborted(signal)
@@ -2640,7 +2656,11 @@ export class ResourceManagerService {
   ): Promise<void> {
     const seenPaths = new Set<string>()
     const packageDestinations = packages.map((packageAsset) => {
-      validatePdkPackage(packageAsset)
+      // A mirror-less registry stays installable when downloads are pinned
+      // to GitHub; every other mode keeps requiring the mirror.
+      validatePdkPackage(packageAsset, {
+        requireMirror: this.downloadSource !== 'github',
+      })
       if (seenPaths.has(packageAsset.path)) {
         throw new Error(`Duplicate PDK package path: ${packageAsset.path}`)
       }
@@ -5176,8 +5196,13 @@ async function downloadAssetWithMirror(
   signal?: AbortSignal,
   hooks?: DownloadHooks,
   mirrorFallback?: MirrorFallbackPreference,
+  // Size check for the mirror leg; defaults to expectedSize. Pass null when
+  // the mirror serves different bytes of unknown size (the PDK base git
+  // archive) — the caller's checksum verification stays authoritative.
+  mirrorExpectedSize?: number | null,
 ): Promise<string> {
   const mirror = mirrorUrl?.trim() || null
+  const mirrorSize = mirrorExpectedSize === undefined ? expectedSize : mirrorExpectedSize
   if (mirror && mirrorFallback?.prefersMirror(url)) {
     electronLogger.info(
       '[resources] Skipping primary URL %s; using mirror %s (primary host failed earlier this session)',
@@ -5189,7 +5214,7 @@ async function downloadAssetWithMirror(
         mirror,
         destination,
         fetchImpl,
-        expectedSize,
+        mirrorSize,
         onProgress,
         signal,
         hooks,
@@ -5244,7 +5269,7 @@ async function downloadAssetWithMirror(
       mirror,
       destination,
       fetchImpl,
-      expectedSize,
+      mirrorSize,
       onProgress,
       signal,
       hooks,
@@ -5708,9 +5733,12 @@ function validateSupplementalAsset(asset: RegistrySupplementalAsset): void {
   }
 }
 
-function validatePdkPackage(packageAsset: RegistryPdkPackage): void {
+function validatePdkPackage(
+  packageAsset: RegistryPdkPackage,
+  options: { requireMirror?: boolean } = {},
+): void {
   validateSupplementalAsset(packageAsset)
-  if (!packageAsset.cnb_url) {
+  if ((options.requireMirror ?? true) && !packageAsset.cnb_url) {
     throw new Error(
       `Missing mirror URL for PDK package ${packageAsset.path || '(unknown)'}`,
     )

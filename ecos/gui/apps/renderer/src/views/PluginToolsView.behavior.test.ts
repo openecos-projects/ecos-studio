@@ -183,6 +183,22 @@ describe('PluginToolsView download source', () => {
     expect(buttons[2].classes()).toContain('active')
     wrapper.unmount()
   })
+
+  it('reverts the selection when persisting the download source fails', async () => {
+    viewMocks.store.resources = []
+    viewMocks.settingsSet.mockRejectedValueOnce(new Error('store unavailable'))
+    const wrapper = mount(PluginToolsView)
+    await flushPromises()
+
+    const buttons = wrapper.findAll('.download-source button')
+    await buttons[2].trigger('click')
+    await flushPromises()
+
+    // The switch reflects the setting that actually took effect (auto).
+    expect(buttons[0].classes()).toContain('active')
+    expect(buttons[2].classes()).not.toContain('active')
+    wrapper.unmount()
+  })
 })
 
 describe('PluginToolsView structure', () => {
