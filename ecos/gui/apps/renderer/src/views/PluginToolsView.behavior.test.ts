@@ -199,6 +199,55 @@ describe('PluginToolsView download source', () => {
     expect(buttons[2].classes()).not.toContain('active')
     wrapper.unmount()
   })
+
+  it('keeps a user selection made while the persisted value is still loading', async () => {
+    viewMocks.store.resources = []
+    let resolveGet: (value: unknown) => void = () => undefined
+    viewMocks.settingsGet.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveGet = resolve
+        }),
+    )
+    viewMocks.getOptionalDesktopApi.mockReturnValueOnce({
+      settings: { get: viewMocks.settingsGet, set: viewMocks.settingsSet },
+    })
+    const wrapper = mount(PluginToolsView)
+    const buttons = wrapper.findAll('.download-source button')
+
+    // The user switches to CNB before the persisted value arrives.
+    await buttons[2].trigger('click')
+    resolveGet('github')
+    await flushPromises()
+
+    expect(buttons[2].classes()).toContain('active')
+    wrapper.unmount()
+  })
+
+  it('does not roll back a newer selection when an older persist fails', async () => {
+    viewMocks.store.resources = []
+    let rejectFirst: (error: unknown) => void = () => undefined
+    viewMocks.settingsSet
+      .mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            rejectFirst = reject
+          }),
+      )
+      .mockResolvedValueOnce(undefined)
+    const wrapper = mount(PluginToolsView)
+    await flushPromises()
+    const buttons = wrapper.findAll('.download-source button')
+
+    await buttons[2].trigger('click') // CNB, still pending
+    await buttons[1].trigger('click') // GitHub, persists successfully
+    rejectFirst(new Error('offline')) // the older CNB write fails last
+    await flushPromises()
+
+    expect(buttons[1].classes()).toContain('active')
+    expect(buttons[2].classes()).not.toContain('active')
+    wrapper.unmount()
+  })
 })
 
 describe('PluginToolsView structure', () => {

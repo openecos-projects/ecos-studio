@@ -113,6 +113,12 @@ const categoryFilter = ref<CategoryFilter>('all')
 const statusFilter = ref<StatusFilter>('all')
 const importingResourceIds = ref<Set<string>>(new Set())
 const downloadSource = ref<DesktopDownloadSource>(DEFAULT_DESKTOP_DOWNLOAD_SOURCE)
+// The value last confirmed in the settings store: what the switch rolls back
+// to when persisting a new selection fails.
+let confirmedDownloadSource: DesktopDownloadSource = DEFAULT_DESKTOP_DOWNLOAD_SOURCE
+// Generation counter for user selections; a late restore or a failed persist
+// may only touch the switch while no newer selection exists.
+let downloadSourceSelectionSeq = 0
 
 const resourceRows = computed<ResourceRow[]>(() => {
   return pluginStore.resources.map((resource) => {
@@ -158,23 +164,33 @@ async function restoreDownloadSource(): Promise<void> {
   if (!desktopApi) return
   try {
     const saved = await desktopApi.settings.get(DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY)
-    downloadSource.value =
+    const restored =
       normalizeDesktopDownloadSource(saved) ?? DEFAULT_DESKTOP_DOWNLOAD_SOURCE
+    // A user selection made while the read was in flight wins: leave both the
+    // switch and the rollback target to the user's own persist result.
+    if (downloadSourceSelectionSeq === 0) {
+      confirmedDownloadSource = restored
+      downloadSource.value = restored
+    }
   } catch (error) {
     console.warn('[PluginToolsView] Failed to restore the download source:', error)
   }
 }
 
 async function handleDownloadSourceChange(source: DesktopDownloadSource): Promise<void> {
-  const previous = downloadSource.value
+  const selection = ++downloadSourceSelectionSeq
   downloadSource.value = source
   try {
     // Electron main validates the value and applies it to the resource
     // manager once the setting is durably stored.
     await getDesktopApi().settings.set(DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY, source)
+    confirmedDownloadSource = source
   } catch (error) {
-    // Keep the switch in sync with the setting that actually took effect.
-    downloadSource.value = previous
+    // Roll back only the still-current selection, and only to the last value
+    // confirmed in the store; a newer selection owns the switch.
+    if (selection === downloadSourceSelectionSeq) {
+      downloadSource.value = confirmedDownloadSource
+    }
     console.warn('[PluginToolsView] Failed to persist the download source:', error)
   }
 }
