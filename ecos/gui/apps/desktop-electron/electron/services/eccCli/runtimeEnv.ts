@@ -187,6 +187,11 @@ function packagedSizerEnv(
   return { CHIPCOMPILER_ECC_SIZER_ROOT: root }
 }
 
+function packagedChipViewerEnv(resourcesPath: string): NodeJS.ProcessEnv {
+  const viewerPath = join(resourcesPath, 'binaries', 'chip-viewer-native')
+  return existsSync(viewerPath) ? { ECOS_CHIP_VIEWER_BIN: viewerPath } : {}
+}
+
 /** POSIX single-quote a value so it stays literal in the generated shim. */
 function shQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
@@ -315,6 +320,7 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
       resolvePackagedBinariesPath(options),
       options.platform,
     )
+    const chipViewerEnv = packagedChipViewerEnv(resourcesPath)
 
     if (runtimeBin) {
       const nextPath = prependPath(baseEnv, runtimeBin, options.platform)
@@ -323,6 +329,7 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
         ...baseEnv,
         ...libraryEnv,
         ...sizerEnv,
+        ...chipViewerEnv,
         ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
         [nextPath.key]: nextPath.value,
       }
@@ -333,11 +340,12 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
         ...baseEnv,
         ...libraryEnv,
         ...sizerEnv,
+        ...chipViewerEnv,
         ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
       }
     }
 
-    return { ...baseEnv, ...sizerEnv }
+    return { ...baseEnv, ...sizerEnv, ...chipViewerEnv }
   }
 
   const developmentBinDir = externalRuntimeBin ?? resolveDevelopmentEccBinDir(options)
