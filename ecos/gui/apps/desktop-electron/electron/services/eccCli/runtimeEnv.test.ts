@@ -195,6 +195,28 @@ describe('createEccRuntimeEnv', () => {
     expect(env.PATH).toBe(`${join(resourcesPath, 'binaries')}:/usr/bin`)
   })
 
+  it('exposes the packaged chip viewer to the built-in terminal', () => {
+    const fixture = createRepoFixture()
+    const resourcesPath = join(fixture.repoRoot, 'packaged-resources')
+    const binariesPath = join(resourcesPath, 'binaries')
+    mkdirSync(binariesPath, { recursive: true })
+    writeFileSync(join(binariesPath, 'chip-viewer-native'), '#!/usr/bin/env bash\n')
+
+    const env = createEccRuntimeEnv({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: {
+        ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
+        PATH: '/usr/bin',
+      },
+      isPackaged: true,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+    })
+
+    expect(env.ECOS_CHIP_VIEWER_BIN).toBe(join(binariesPath, 'chip-viewer-native'))
+  })
+
   it('adds packaged ECC libraries for geometry snapshot subprocesses on Linux', () => {
     const fixture = createRepoFixture()
     const resourcesPath = join(fixture.repoRoot, 'packaged-resources')
