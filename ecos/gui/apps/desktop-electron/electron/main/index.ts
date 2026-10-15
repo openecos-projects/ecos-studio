@@ -33,7 +33,12 @@ import {
 import { FrontendRpcRuntimeService } from '../services/frontendRpcRuntimeService'
 import { ChipViewerService } from '../services/chipViewerService'
 import { CliInstallerService } from '../services/cliInstallerService'
-import { desktopApiEventChannels, type DesignTool } from '@ecos-studio/shared'
+import {
+  desktopApiEventChannels,
+  DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY,
+  normalizeDesktopDownloadSource,
+  type DesignTool,
+} from '@ecos-studio/shared'
 import { configureElectronLoggerFile, electronLogger } from '../services/logger'
 import {
   applyWindowMenuState,
@@ -89,6 +94,7 @@ if (!gotSingleInstanceLock) {
 let ipcRegistered = false
 let workspaceReplacementRecoveryComplete = false
 let workspaceReplacementRecovery: Promise<void> | null = null
+let downloadSourceRestorePromise: Promise<void> | null = null
 let projectScopeService: ProjectScopeService | null = null
 let services: {
   appInfoService: AppInfoService
@@ -434,8 +440,37 @@ function getDesktopServices() {
   return services
 }
 
+/**
+ * Restore the persisted download-source preference into the resource manager
+ * exactly once per session. The memoized promise is shared by every entry
+ * point that can start a download (window launch, CLI installer startup
+ * tasks); a failed read clears the memo so the next entry point retries.
+ */
+function restoreDownloadSourcePreference(): Promise<void> {
+  downloadSourceRestorePromise ??= (async () => {
+    const desktopServices = getDesktopServices()
+    try {
+      const stored = await desktopServices.settingsStore.get(
+        DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY,
+      )
+      const source = normalizeDesktopDownloadSource(stored)
+      if (source) {
+        desktopServices.resourceManagerService.setDownloadSource(source)
+      }
+    } catch (error) {
+      downloadSourceRestorePromise = null
+      electronLogger.warn(
+        '[desktop] Failed to restore the download source preference: %s',
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  })()
+  return downloadSourceRestorePromise
+}
+
 async function ensureDesktopBridgeReady(): Promise<void> {
   const desktopServices = getDesktopServices()
+  await restoreDownloadSourcePreference()
   if (!workspaceReplacementRecoveryComplete) {
     workspaceReplacementRecovery ??= desktopServices.workspaceCreationJournal
       .initialize()
@@ -640,26 +675,39 @@ function startCliInstallerStartupTasks(): void {
       }
     }
   })
-  void cliInstaller.checkSyncOnStartup()
-  if (!resolveEccExecutable(cliEccRuntimeOptions())) {
-    electronLogger.info('[cli-installer] No ECC bundle resolved; acquiring on first use')
-    // installShim so the host command is usable immediately after the
-    // first-use download instead of waiting for an explicit reinstall.
-    void cliInstaller
-      .ensureBundle({ installShim: true })
-      .then((versionDir) => {
-        electronLogger.info(
-          '[cli-installer] First-use acquisition installed %s',
-          versionDir,
-        )
-      })
-      .catch((error: unknown) => {
-        electronLogger.warn(
-          '[cli-installer] First-use acquisition failed: %s',
-          error instanceof Error ? error.message : String(error),
-        )
-      })
-  }
+  // Restore the persisted download-source preference before any startup
+  // download so the first acquisition already honors it. The sync check and
+  // the first-use acquisition stay independent tasks: a failure of one must
+  // not suppress the other.
+  void restoreDownloadSourcePreference().then(() => {
+    void cliInstaller.checkSyncOnStartup().catch((error: unknown) => {
+      electronLogger.warn(
+        '[cli-installer] Startup sync check failed: %s',
+        error instanceof Error ? error.message : String(error),
+      )
+    })
+    if (!resolveEccExecutable(cliEccRuntimeOptions())) {
+      electronLogger.info(
+        '[cli-installer] No ECC bundle resolved; acquiring on first use',
+      )
+      // installShim so the host command is usable immediately after the
+      // first-use download instead of waiting for an explicit reinstall.
+      void cliInstaller
+        .ensureBundle({ installShim: true })
+        .then((versionDir) => {
+          electronLogger.info(
+            '[cli-installer] First-use acquisition installed %s',
+            versionDir,
+          )
+        })
+        .catch((error: unknown) => {
+          electronLogger.warn(
+            '[cli-installer] First-use acquisition failed: %s',
+            error instanceof Error ? error.message : String(error),
+          )
+        })
+    }
+  })
 }
 
 if (cliInvocation) {

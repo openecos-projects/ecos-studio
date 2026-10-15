@@ -13,6 +13,8 @@ import { dirname, join } from 'node:path'
 import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
+  DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY,
+  normalizeDesktopDownloadSource,
   type DesktopProjectDirectoryEntry,
   type DesktopProjectManagementWorkspaceStepConfigurationRequest,
   type DesktopProjectManagementWorkspaceStepConfigurationResult,
@@ -28,6 +30,7 @@ import {
   type DesignRuntimeWorkspaceStepOutputsRequest,
   type DesignTool,
   type DesktopDirectoryDialogOptions,
+  type DesktopDownloadSource,
   type EccFlowRunRequest,
   type EccFlowRunStepRequest,
   type EccBackgroundOperationProjection,
@@ -488,6 +491,7 @@ export interface DesktopBridgeServices {
       refreshRegistry?: boolean
     }): Promise<unknown>
     onRegistryChanged(listener: () => void): () => void
+    setDownloadSource(source: DesktopDownloadSource): void
   }
   pdkInventoryService: {
     bindInstallation(request: PdkBindRequest): Promise<PdkBinding>
@@ -2035,6 +2039,28 @@ export function registerIpc(
   })
 
   handle(desktopApiIpcChannels.settingsSet, async (_event, key, value) => {
+    // The download-source preference takes effect in this process, so apply
+    // it to the resource manager once it is durably stored. Invalid values
+    // are rejected before they reach the settings file.
+    if (key === DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY) {
+      const source = normalizeDesktopDownloadSource(value)
+      if (!source) {
+        throw new Error(`Invalid download source preference: ${JSON.stringify(value)}`)
+      }
+      await services.settingsStore.set(key as string, value as DesktopSettingsValue)
+      services.resourceManagerService.setDownloadSource(source)
+      // The preference is process-wide; keep the switch in every open window
+      // in sync with the committed value.
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) {
+          window.webContents.send(
+            desktopApiEventChannels.settingsDownloadSourceChanged,
+            source,
+          )
+        }
+      }
+      return
+    }
     await services.settingsStore.set(key as string, value as DesktopSettingsValue)
   })
 

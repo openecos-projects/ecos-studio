@@ -28,6 +28,24 @@
   <div class="manager-table-meta">
     <strong>{{ resultCount }} Resources</strong>
     <div class="manager-table-actions">
+      <div
+        class="download-source"
+        role="group"
+        aria-label="Download source"
+        title="Where tools and PDKs are downloaded from. Auto tries GitHub first and falls back to the CNB mirror; choose CNB Mirror when GitHub is unreachable."
+      >
+        <span class="download-source-label">Source</span>
+        <button
+          v-for="option in downloadSourceOptions"
+          :key="option.id"
+          type="button"
+          :class="{ active: downloadSource === option.id }"
+          :aria-pressed="downloadSource === option.id"
+          @click="emit('selectDownloadSource', option.id)"
+        >
+          {{ option.label }}
+        </button>
+      </div>
       <button type="button" :disabled="refreshing" @click="emit('refresh')">
         <i
           :class="refreshing ? 'ri-loader-4-line spin' : 'ri-refresh-line'"
@@ -41,9 +59,19 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import type { DesktopDownloadSource } from '@ecos-studio/shared'
 import type { StatusFilter, StatusTabItem } from '@/views/pluginManagerFilters'
 
 const SEARCH_DEBOUNCE_MS = 200
+
+const downloadSourceOptions: ReadonlyArray<{
+  id: DesktopDownloadSource
+  label: string
+}> = [
+  { id: 'auto', label: 'Auto' },
+  { id: 'github', label: 'GitHub' },
+  { id: 'cnb', label: 'CNB Mirror' },
+]
 
 const props = defineProps<{
   search: string
@@ -51,12 +79,14 @@ const props = defineProps<{
   activeTab: StatusFilter
   resultCount: number
   refreshing: boolean
+  downloadSource: DesktopDownloadSource
 }>()
 
 const emit = defineEmits<{
   'update:search': [value: string]
   selectTab: [id: StatusFilter]
   refresh: []
+  selectDownloadSource: [source: DesktopDownloadSource]
 }>()
 
 const searchInput = ref(props.search)
@@ -218,6 +248,44 @@ watch(searchInput, (value) => {
 .manager-table-meta button:disabled {
   cursor: default;
   opacity: 0.55;
+}
+
+.download-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 26px;
+  padding: 2px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-primary) 80%, transparent);
+}
+
+.download-source-label {
+  padding: 0 6px 0 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.manager-table-meta .download-source button {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.manager-table-meta .download-source button.active {
+  color: var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 46%, transparent);
 }
 
 .spin {
