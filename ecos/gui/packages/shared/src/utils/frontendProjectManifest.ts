@@ -62,6 +62,8 @@ const FLOW_STEP_ALIASES: Record<string, ProjectManifestFlowStep> = {
   route: 'Route',
   routing: 'Route',
   drc: 'DRC',
+  antennacheck: 'Antenna Check',
+  antenna: 'Antenna Check',
   lvs: 'LVS',
   filler: 'Filler',
   // postRouteLec runs between Filler and RCX; same preceding-step rationale.
@@ -71,6 +73,7 @@ const FLOW_STEP_ALIASES: Record<string, ProjectManifestFlowStep> = {
   sta: 'STA',
   // Power Analysis runs between STA and LVS; same preceding-step rationale.
   poweranalysis: 'STA',
+  emir: 'EMIR',
   gds: 'Harden',
   signoff: 'Harden',
   harden: 'Harden',

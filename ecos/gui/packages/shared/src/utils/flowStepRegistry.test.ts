@@ -24,10 +24,12 @@ describe('flow step registry', () => {
       'filler',
       'lvs',
       'drc',
+      'antennaCheck',
       'postRouteLec',
       'RCX',
       'sta',
       'powerAnalysis',
+      'emir',
       'Harden',
     ])
   })
@@ -124,6 +126,8 @@ describe('parseProjectManifestFlowStep', () => {
     expect(parseProjectManifestFlowStep('legalization')).toBe('Legal')
     expect(parseProjectManifestFlowStep('Timing optimization')).toBe('Timing Opt')
     expect(parseProjectManifestFlowStep('powerAnalysis')).toBe('Power Analysis')
+    expect(parseProjectManifestFlowStep('antennaCheck')).toBe('Antenna Check')
+    expect(parseProjectManifestFlowStep('emir')).toBe('EMIR')
     expect(parseProjectManifestFlowStep('postRouteLec')).toBe('Post-route LEC')
   })
 
@@ -137,6 +141,7 @@ describe('parseProjectManifestFlowStep', () => {
     expect(parseProjectManifestFlowStep('gds')).toBe('Harden')
     expect(parseProjectManifestFlowStep('signoff')).toBe('Harden')
     expect(parseProjectManifestFlowStep('postlec')).toBe('Post-route LEC')
+    expect(parseProjectManifestFlowStep('antenna')).toBe('Antenna Check')
   })
 
   it('resolves normalized spellings the diverged alias tables disagreed on', () => {

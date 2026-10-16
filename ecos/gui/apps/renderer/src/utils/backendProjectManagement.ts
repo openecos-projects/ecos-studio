@@ -1289,11 +1289,13 @@ function detailHintForStep(step: FlowStep): string {
     Route: 'Open workspace Route for route iterations and layer pressure.',
     'Power Analysis': 'Open workspace Power Analysis for power and budget details.',
     DRC: 'Open workspace DRC for rule/layer heatmaps and violation maps.',
+    'Antenna Check': 'Open workspace Antenna Check for advisory antenna-rule results.',
     LVS: 'Open workspace LVS for netlist-to-layout connectivity and violation count.',
     Filler: 'Open workspace Filler for final filler impact details.',
     'Post-route LEC': 'Open workspace post-route LEC for equivalence evidence.',
     RCX: 'Open workspace RCX for extraction readiness details.',
     STA: 'Open workspace STA for path detail and corner matrix.',
+    EMIR: 'Open workspace EMIR for advisory power-integrity analysis results.',
     Harden: 'Open workspace Harden for final artifact details.',
   }
   return hints[step]

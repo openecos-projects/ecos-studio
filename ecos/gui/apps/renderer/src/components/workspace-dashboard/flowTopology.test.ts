@@ -11,10 +11,12 @@ const ids = [
   'filler',
   'lvs',
   'drc',
+  'antennaCheck',
   'postRouteLec',
   'RCX',
   'sta',
   'powerAnalysis',
+  'emir',
   'Harden',
   'Signoff',
 ]
@@ -37,7 +39,7 @@ describe('workspace flow topology', () => {
     const empty = buildFlowTopology([])
     expect(withSignoffMilestone(empty, [])).toBe(empty)
   })
-  it('forks five equal verification branches and joins every tail before Harden', () => {
+  it('forks five verification branches and joins every tail before Harden', () => {
     const topology = buildFlowTopology(steps)
     expect(topology.rows).toBe(5)
     expect(topology.nodes.map((node) => node.id).sort()).toEqual([...ids].sort())
@@ -46,7 +48,9 @@ describe('workspace flow topology', () => {
     ).toEqual(['lvs', 'drc', 'postRouteLec', 'RCX', 'powerAnalysis'])
     expect(
       topology.edges.filter((edge) => edge.to === 'Harden').map((edge) => edge.from),
-    ).toEqual(['lvs', 'drc', 'postRouteLec', 'sta', 'powerAnalysis'])
+    ).toEqual(['lvs', 'antennaCheck', 'postRouteLec', 'sta', 'emir'])
+    expect(topology.edges).toContainEqual({ from: 'drc', to: 'antennaCheck' })
+    expect(topology.edges).toContainEqual({ from: 'powerAnalysis', to: 'emir' })
     expect(topology.edges).toContainEqual({ from: 'RCX', to: 'sta' })
     expect(topology.edges).toContainEqual({ from: 'Harden', to: 'Signoff' })
     const extraction = topology.nodes.find((node) => node.id === 'RCX')!

@@ -18,10 +18,12 @@ export const ECC_FLOW_STEPS = [
   'filler',
   'lvs',
   'drc',
+  'antennaCheck',
   'postRouteLec',
   'RCX',
   'sta',
   'powerAnalysis',
+  'emir',
   'Harden',
 ] as const
 
@@ -44,11 +46,13 @@ export const ECC_DEFAULT_STEP_TOOLS: Record<EccFlowStep, string> = {
   'Timing optimization': 'sizer',
   route: 'ecc',
   drc: 'ecc',
+  antennaCheck: 'ecc',
   lvs: 'ecc',
   filler: 'ecc',
   postRouteLec: 'yosys_lec',
   RCX: 'ecc',
   sta: 'ecc',
   powerAnalysis: 'ecc',
+  emir: 'ecc',
   Harden: 'ecc',
 }

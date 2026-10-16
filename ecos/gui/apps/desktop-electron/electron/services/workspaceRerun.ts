@@ -41,10 +41,12 @@ const LEGACY_STEP_SEQUENCE = [
   'filler',
   'lvs',
   'drc',
+  'antennaCheck',
   'postRouteLec',
   'RCX',
   'sta',
   'powerAnalysis',
+  'emir',
   'Harden',
 ] as const
 const LEGACY_STEP_INDEX: ReadonlyMap<string, number> = new Map(
@@ -60,12 +62,14 @@ const LEGACY_STEP_TOOLS: Record<string, string> = {
   'Timing optimization': 'sizer',
   route: 'ecc',
   drc: 'ecc',
+  antennaCheck: 'ecc',
   lvs: 'ecc',
   filler: 'ecc',
   postRouteLec: 'yosys_lec',
   RCX: 'ecc',
   sta: 'ecc',
   powerAnalysis: 'ecc',
+  emir: 'ecc',
   Harden: 'ecc',
 }
 const LEGACY_HOME_FILES = [
