@@ -22,6 +22,7 @@ import {
   type WorkspaceJourney,
 } from './support/journey'
 
+const ADVISORY_STEPS = new Set(['antennaCheck', 'emir'])
 const FLOW_TIMEOUT_MS = 75 * 60_000
 const PDK_ROOT = process.env.ECOS_E2E_PDK_ROOT ?? join(repoRoot, 'pdk/icsprout55-pdk')
 
@@ -137,6 +138,12 @@ describe('product e2e: backend rtl2gds journey', () => {
     expect(workspace.workspaceDir).toBe(join(design.projectRoot, 'default'))
     await registerWorkspaceRoot(page, workspace.workspaceDir)
     await openWorkspaceInUi(page, workspace)
+    for (const step of ADVISORY_STEPS) {
+      const card = page.locator(`.flow-step-card[data-step="${step}"]`)
+      await card.waitFor({ state: 'attached' })
+      await card.scrollIntoViewIfNeeded()
+      await shot(`workspace-dashboard-${step}`)
+    }
     await shot('workspace-created', '#/projects')
   }, 180_000)
 
@@ -167,19 +174,25 @@ describe('product e2e: backend rtl2gds journey', () => {
     FLOW_TIMEOUT_MS + 120_000,
   )
 
-  it('reports every step successful with passing quality gates', async () => {
+  it('reports mandatory steps successful with passing quality gates', async () => {
     const page = launched!.page
     const steps = await readOverviewStepStates(page)
     console.log(`overview steps: ${JSON.stringify(steps)}`)
     expect(steps.length).toBeGreaterThan(0)
     for (const step of steps) {
-      expect(step.state.toLowerCase(), `overview step ${step.id}`).toBe('succeeded')
+      expect(
+        ADVISORY_STEPS.has(step.id) ? ['succeeded', 'failed'] : ['succeeded'],
+        `overview step ${step.id}`,
+      ).toContain(step.state.toLowerCase())
     }
 
     const fileSteps = await readFlowSteps(workspace!.workspaceDir)
     expect(fileSteps.length).toBeGreaterThan(0)
     for (const step of fileSteps) {
-      expect(step.state, `flow.json step ${step.name}`).toBe('Success')
+      expect(
+        ADVISORY_STEPS.has(step.name) ? ['Success', 'Incomplete'] : ['Success'],
+        `flow.json step ${step.name}`,
+      ).toContain(step.state)
     }
 
     const gateFailures = await readQualityGateFailures(workspace!.workspaceDir)

@@ -165,7 +165,8 @@
           v-if="selectedStep && isFinalizationStep(selectedStep) && !checksPassed"
           role="status"
         >
-          Harden and Signoff require all verification steps and their checklists to pass.
+          Harden and Signoff require mandatory verification steps and their checklists to
+          pass.
         </p>
         <div v-else-if="selectedStep && detailKind === 'run'" class="step-run-action">
           <span

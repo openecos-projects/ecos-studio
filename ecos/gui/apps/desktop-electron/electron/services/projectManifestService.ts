@@ -117,7 +117,7 @@ export class ProjectManifestService {
 
   async discover(directory: string): Promise<ProjectManifest | null> {
     const frontendManifest = await this.frontend?.discover(directory)
-    if (frontendManifest) return frontendManifest
+    if (frontendManifest) return frontendManifest.manifest
     const discovered = await this.runtime.discoverProject(directory)
     if (!discovered) return null
     const projectRoot = await this.projectScopeProvider.resolveProjectRoot(

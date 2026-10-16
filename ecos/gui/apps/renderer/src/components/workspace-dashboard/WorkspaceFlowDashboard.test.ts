@@ -27,10 +27,12 @@ describe('workspace flow diagram', () => {
         'filler',
         'lvs',
         'drc',
+        'antennaCheck',
         'postRouteLec',
         'RCX',
         'sta',
         'powerAnalysis',
+        'emir',
         'Harden',
         'Signoff',
       ].map((stepId, order) => ({ stepId, name: stepId, order, state: 'succeeded' })),
@@ -81,15 +83,24 @@ describe('workspace flow diagram', () => {
   it('renders every node and dependency and opens step-specific dialogs without routing', async () => {
     const wrapper = render()
     expect(wrapper.text()).not.toContain('Checks converge before Harden and Signoff')
-    expect(wrapper.findAll('.flow-step-card')).toHaveLength(10)
+    expect(wrapper.findAll('.flow-step-card')).toHaveLength(12)
     expect(wrapper.get('svg').text()).toContain('RCX → sta')
     for (const [label, dialog] of [
       ['LVS checklist details', '.checklist-dialog'],
       ['LVS reports', '.reports-dialog'],
       ['LVS log', '.log-dialog'],
+      ['Antenna Check checklist details', '.checklist-dialog'],
+      ['EMIR reports', '.reports-dialog'],
+      ['EMIR log', '.log-dialog'],
     ]) {
       await wrapper.get(`button[aria-label="${label}"]`).trigger('click')
-      expect(wrapper.get(dialog).text()).toBe('lvs')
+      expect(wrapper.get(dialog).text()).toBe(
+        label.startsWith('Antenna')
+          ? 'antennaCheck'
+          : label.startsWith('EMIR')
+            ? 'emir'
+            : 'lvs',
+      )
     }
     state.session.workspaceContextId = 'context-b'
     await nextTick()
@@ -122,10 +133,16 @@ describe('workspace flow diagram', () => {
   it('keeps finalization gated when execution succeeded but verification evidence is absent', async () => {
     const wrapper = render()
     await wrapper.get('button[aria-label="Succeeded — run Harden"]').trigger('click')
-    expect(wrapper.get('.test-dialog').text()).toContain('require all verification steps')
+    expect(wrapper.get('.test-dialog').text()).toContain(
+      'require mandatory verification steps',
+    )
     expect(wrapper.findAll('.run-control')).toHaveLength(1)
     state.session.projection.data.checklist.data.findings = state.steps.value
-      .slice(2, 8)
+      .filter((step: { stepId: string }) =>
+        ['lvs', 'drc', 'postRouteLec', 'RCX', 'sta', 'powerAnalysis'].includes(
+          step.stepId,
+        ),
+      )
       .map((step: { stepId: string }) => ({
         id: step.stepId,
         step: step.stepId,
@@ -140,13 +157,44 @@ describe('workspace flow diagram', () => {
     expect(wrapper.findAll('.run-control')).toHaveLength(2)
   })
 
+  it('shows advisory attention without preventing Harden when mandatory checks pass', async () => {
+    const required = ['lvs', 'drc', 'postRouteLec', 'RCX', 'sta', 'powerAnalysis']
+    const advisory = ['antennaCheck', 'emir']
+    state.steps.value = state.steps.value.map((step: { stepId: string }) => ({
+      ...step,
+      state: advisory.includes(step.stepId) ? 'failed' : 'succeeded',
+    }))
+    state.session.projection.data.checklist.data.findings = [
+      ...required,
+      ...advisory,
+    ].map((step) => ({
+      id: `flow.${step}.completed`,
+      step,
+      state: advisory.includes(step) ? 'warning' : 'pass',
+      blocked: false,
+      title: step,
+      summary: '',
+      category: 'flow',
+    }))
+    const wrapper = render()
+    for (const label of ['Antenna Check', 'EMIR']) {
+      const button = wrapper.get(`button[aria-label="${label} checklist details"]`)
+      expect(
+        button.element.closest('.flow-step-card')?.getAttribute('data-check-state'),
+      ).toBe('warning')
+    }
+    await wrapper.get('button[aria-label="Succeeded — run Harden"]').trigger('click')
+    expect(wrapper.get('.step-run-action').text()).toContain('Harden')
+    wrapper.unmount()
+  })
+
   it('shows Signoff as a delivery milestone when ECC ends at Harden, without adding a runtime step', () => {
     state.steps.value = state.steps.value.filter(
       (step: { stepId: string }) => step.stepId !== 'Signoff',
     )
     const wrapper = render()
     expect(wrapper.find('.signoff-milestone').exists()).toBe(true)
-    expect(wrapper.findAll('.flow-step-card')).toHaveLength(9)
+    expect(wrapper.findAll('.flow-step-card')).toHaveLength(11)
     expect(wrapper.get('svg').text()).toContain('Harden → signoff-package-review')
   })
 

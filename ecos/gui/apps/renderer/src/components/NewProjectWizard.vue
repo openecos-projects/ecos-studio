@@ -1767,6 +1767,8 @@ const FLOW_STEP_NAME_ALIASES: Record<string, FlowStepName> = {
   route: 'route',
   routing: 'route',
   drc: 'drc',
+  antenna: 'antennaCheck',
+  antennacheck: 'antennaCheck',
   lvs: 'lvs',
   filler: 'filler',
   postlec: 'postRouteLec',
@@ -1774,6 +1776,7 @@ const FLOW_STEP_NAME_ALIASES: Record<string, FlowStepName> = {
   rcx: 'RCX',
   sta: 'sta',
   poweranalysis: 'powerAnalysis',
+  emir: 'emir',
   harden: 'Harden',
 }
 const KNOWN_FLOW_STEP_NAMES: ReadonlySet<string> = new Set(

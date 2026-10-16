@@ -52,7 +52,10 @@ export function useCenteredFlowViewport(
         : { x: graphWidth.value / 2, y: graphHeight.value / 2 }
     const sizeChanged = width !== size.value.width || height !== size.value.height
     size.value = { width, height }
-    if (sizeChanged && (width !== lastCenteredSize.width || height !== lastCenteredSize.height)) {
+    if (
+      sizeChanged &&
+      (width !== lastCenteredSize.width || height !== lastCenteredSize.height)
+    ) {
       lastCenteredSize = { width, height }
       void positionCenter(element, center)
     }
