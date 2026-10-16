@@ -25,10 +25,12 @@ def test_gui_workspace_flow_steps_are_the_ecc_catalog_in_order() -> None:
         "filler",
         "lvs",
         "drc",
+        "antennaCheck",
         "postRouteLec",
         "RCX",
         "sta",
         "powerAnalysis",
+        "emir",
         "Harden",
     )
 

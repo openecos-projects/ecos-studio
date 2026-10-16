@@ -17,10 +17,12 @@ def test_workspace_setup_and_rerun_share_the_default_post_route_order() -> None:
         "filler",
         "lvs",
         "drc",
+        "antennaCheck",
         "postRouteLec",
         "RCX",
         "sta",
         "powerAnalysis",
+        "emir",
         "Harden",
     )
     assert GUI_WORKSPACE_FLOW_STEPS[GUI_WORKSPACE_FLOW_STEPS.index("route") :] == expected
@@ -32,10 +34,23 @@ def test_workspace_setup_and_rerun_share_the_default_post_route_order() -> None:
     ("end_step", "expected_steps"),
     [
         ("lvs", ["route", "filler", "lvs"]),
-        ("postRouteLec", ["route", "filler", "lvs", "drc", "postRouteLec"]),
+        (
+            "postRouteLec",
+            ["route", "filler", "lvs", "drc", "antennaCheck", "postRouteLec"],
+        ),
         (
             "powerAnalysis",
-            ["route", "filler", "lvs", "drc", "postRouteLec", "RCX", "sta", "powerAnalysis"],
+            [
+                "route",
+                "filler",
+                "lvs",
+                "drc",
+                "antennaCheck",
+                "postRouteLec",
+                "RCX",
+                "sta",
+                "powerAnalysis",
+            ],
         ),
     ],
 )

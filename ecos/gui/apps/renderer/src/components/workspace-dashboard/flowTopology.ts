@@ -64,7 +64,13 @@ export function buildFlowTopology(steps: readonly TopologyStep[]): FlowTopology 
     return { nodes, edges, columns: steps.length, rows: 1 }
   }
 
-  const groups = [['lvs'], ['drc'], ['postRouteLec'], ['RCX', 'sta'], ['powerAnalysis']]
+  const groups = [
+    ['lvs'],
+    ['drc', 'antennaCheck'],
+    ['postRouteLec'],
+    ['RCX', 'sta'],
+    ['powerAnalysis', 'emir'],
+  ]
   const branches: TopologyStep[][] = []
   const checks = steps.slice(fillerIndex + 1, hardenIndex)
   if (

@@ -235,10 +235,12 @@ describe('quick start resources', () => {
       'filler',
       'lvs',
       'drc',
+      'antennaCheck',
       'postRouteLec',
       'RCX',
       'sta',
       'powerAnalysis',
+      'emir',
       'Harden',
     ])
     expect(workspaceSource).toContain("top_module: ''")

@@ -56,9 +56,11 @@ export enum StepEnum {
   STA = 'sta',
   POWER_ANALYSIS = 'powerAnalysis',
   DRC = 'drc',
+  ANTENNA_CHECK = 'antennaCheck',
   LVS = 'lvs',
   RCX = 'RCX',
   ABSTRACT_LEF = 'Abstract lef',
+  EMIR = 'emir',
 }
 
 /**
@@ -181,6 +183,13 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
     showInSidebar: true,
     group: 'run',
   },
+  [StepEnum.ANTENNA_CHECK.toLowerCase()]: {
+    label: 'Antenna Check',
+    icon: 'ri-shield-check-line',
+    path: StepEnum.ANTENNA_CHECK,
+    showInSidebar: true,
+    group: 'run',
+  },
   [StepEnum.LVS.toLowerCase()]: {
     label: 'LVS',
     icon: 'ri-exchange-line',
@@ -220,6 +229,13 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
     label: 'Power Analysis',
     icon: 'ri-flashlight-line',
     path: StepEnum.POWER_ANALYSIS,
+    showInSidebar: true,
+    group: 'run',
+  },
+  [StepEnum.EMIR.toLowerCase()]: {
+    label: 'EMIR',
+    icon: 'ri-flashlight-line',
+    path: StepEnum.EMIR,
     showInSidebar: true,
     group: 'run',
   },
