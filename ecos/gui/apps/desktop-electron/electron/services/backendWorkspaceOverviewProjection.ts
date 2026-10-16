@@ -201,7 +201,10 @@ export function flowSection(
             ...(runtimeSeconds === null ? {} : { runtimeSeconds }),
             ...(peakMemoryMb === null ? {} : { peakMemoryMb }),
             ...(['passed', 'blocked', 'attention', 'unknown'].includes(checklistStatus)
-              ? { checklistStatus: checklistStatus as WorkspaceFlowSummary['steps'][number]['checklistStatus'] }
+              ? {
+                  checklistStatus:
+                    checklistStatus as WorkspaceFlowSummary['steps'][number]['checklistStatus'],
+                }
               : {}),
           },
         ]

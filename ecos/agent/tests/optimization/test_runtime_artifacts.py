@@ -125,6 +125,21 @@ def test_optimization_runtime_uses_the_earliest_rerun_stage(tmp_path: Path) -> N
     assert _optimization_rerun_runtime_seconds(tmp_path) == sum(range(16))
 
 
+@pytest.mark.parametrize("state", ["Incomplete", "Unstart", "Success"])
+def test_advisory_analysis_does_not_gate_runtime_evidence(tmp_path: Path, state: str) -> None:
+    _write_flow(tmp_path)
+    path = tmp_path / "home" / "flow.json"
+    payload = json.loads(path.read_text())
+    payload["steps"].extend(
+        {"name": name, "state": state, "runtime": "0:0:2"}
+        for name in ("antennaCheck", "emir")
+    )
+    path.write_text(json.dumps(payload))
+    assert _optimization_rerun_runtime_seconds(tmp_path) == sum(range(16)) + (
+        4 if state == "Success" else 0
+    )
+
+
 def test_optimization_runtime_fails_closed_on_incomplete_stage(tmp_path: Path) -> None:
     _write_flow(tmp_path, states={"place": "Ongoing"})
 

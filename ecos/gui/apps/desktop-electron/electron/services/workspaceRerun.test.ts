@@ -462,10 +462,12 @@ describe('prepareWorkspaceRerun', () => {
       'filler',
       'lvs',
       'drc',
+      'antennaCheck',
       'postRouteLec',
       'RCX',
       'sta',
       'powerAnalysis',
+      'emir',
       'Harden',
     ])
     expect(targetFlow.steps.find((step) => step.name === 'place')?.state).toBe('Unstart')
@@ -513,10 +515,12 @@ describe('prepareWorkspaceRerun', () => {
       'filler',
       'lvs',
       'drc',
+      'antennaCheck',
       'postRouteLec',
       'RCX',
       'sta',
       'powerAnalysis',
+      'emir',
       'Harden',
     ])
     await expect(readFile(join(source, 'home', 'flow.json'), 'utf8')).resolves.toBe(

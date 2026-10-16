@@ -46,7 +46,9 @@ function stepKey(value: string): string {
   return value.trim().toLowerCase()
 }
 
-function checklistStatusValue(value: unknown): FlowStepSummary['checklistStatus'] | undefined {
+function checklistStatusValue(
+  value: unknown,
+): FlowStepSummary['checklistStatus'] | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const status = (value as Record<string, unknown>).status
   return ['passed', 'blocked', 'attention', 'unknown'].includes(status as string)
