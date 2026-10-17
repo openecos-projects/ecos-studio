@@ -59,6 +59,35 @@ describe('ECC CLI platform gate', () => {
 })
 
 describe('legacy project migration', () => {
+  it('reads an existing Project index without launching ECC or reconciling hidden Workspaces', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ecc-read-only-index-'))
+    temporaryDirectories.push(root)
+    await mkdir(join(root, 'hidden', 'home'), { recursive: true })
+    await writeFile(join(root, 'hidden', 'home', 'flow.json'), '{not-readable')
+    await writeFile(
+      join(root, 'project.json'),
+      JSON.stringify({
+        schema_version: 1,
+        project_id: 'project',
+        name: 'demo',
+        design_name: 'gcd',
+        root_path: root,
+        base_design: {},
+        objectives: {},
+        workspaces: [
+          { workspace_id: 'hidden', workspace_path: 'hidden', status: 'running' },
+        ],
+      }),
+    )
+    const run = vi.spyOn(EccCliProcess.prototype, 'run')
+    const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
+    await expect(service.readProjectManifest(root)).resolves.toMatchObject({
+      project_id: 'project',
+      workspaces: [{ workspace_id: 'hidden', status: 'running' }],
+    })
+    expect(run).not.toHaveBeenCalled()
+  })
+
   it('returns a transient read-only projection when ECC migration is blocked', async () => {
     const root = await mkdtemp(join(tmpdir(), 'ecc-runtime-legacy-'))
     temporaryDirectories.push(root)

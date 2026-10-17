@@ -16,6 +16,7 @@ import { AppInfoService } from '../services/appInfoService'
 import { BackendWorkspaceService } from '../services/backendWorkspaceService'
 import { ProjectComparisonFileWatcher } from '../services/projectComparisonFileWatcher'
 import { BackendProjectComparisonService } from '../services/backendProjectComparisonService'
+import { ProjectWorkspaceFlowService } from '../services/projectWorkspaceFlowService'
 import { prepareDesktopLogs } from '../services/desktopLogPaths'
 import {
   createEccRuntimeEnv,
@@ -95,6 +96,7 @@ let services: {
   appInfoService: AppInfoService
   backendWorkspaceService: BackendWorkspaceService
   backendProjectComparisonService: BackendProjectComparisonService
+  projectWorkspaceFlowService: ProjectWorkspaceFlowService
   cliInstallerService: CliInstallerService
   codexDependencyService: CodexDependencyService
   eccRuntimeService: EccCliRuntimeService
@@ -253,7 +255,7 @@ function getDesktopServices() {
   )
   projectScopeService = new ProjectScopeService({
     loadProjectManifest: (projectRoot) =>
-      eccRuntimeService.loadProjectManifest(projectRoot),
+      eccRuntimeService.readProjectManifest(projectRoot),
     readGrantProvider: projectReadGrantStore,
   })
   const workspaceResourceService = new WorkspaceResourceService({
@@ -344,10 +346,17 @@ function getDesktopServices() {
     undefined,
     () => eccRuntimeService.operationProjection().operations,
   )
+  const projectWorkspaceFlowService = new ProjectWorkspaceFlowService(
+    (root) => projectScopeService!.authorizeProjectManagementReadRoot(root),
+    (root, id, runId) => eccRuntimeService.isProjectProcessAlive(root, id, runId),
+  )
   const backendWorkspaceService = new BackendWorkspaceService({
     projectManagementReadService,
-    runtimeStateProvider: eccRuntimeService,
-    snapshotWatcherFactory: (callbacks) => new ProjectComparisonFileWatcher(callbacks),
+    snapshotWatcherFactory: (callbacks) =>
+      new ProjectComparisonFileWatcher(callbacks, undefined, undefined, [
+        'engineering-snapshot.json',
+        'flow.json',
+      ]),
     workspaceRootProvider: projectScopeService,
   })
   const projectWorkspaceImportService = new ProjectWorkspaceImportService(
@@ -397,6 +406,7 @@ function getDesktopServices() {
     appInfoService,
     backendWorkspaceService,
     backendProjectComparisonService,
+    projectWorkspaceFlowService,
     cliInstallerService,
     frontendRpcRuntimeService,
     chipViewerService,
@@ -494,6 +504,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       appInfoService: desktopServices.appInfoService,
       backendWorkspaceService: desktopServices.backendWorkspaceService,
       backendProjectComparisonService: desktopServices.backendProjectComparisonService,
+      projectWorkspaceFlowService: desktopServices.projectWorkspaceFlowService,
       cliInstallerService: desktopServices.cliInstallerService,
       codexDependencyService: desktopServices.codexDependencyService,
       createWindow: async (options) => {
@@ -552,6 +563,7 @@ async function launchWindow(
     workspaceWindowRegistry.unregisterByWindow(mainWindow as WorkspaceWindowLike)
     services?.backendWorkspaceService.clearWindow(windowId)
     services?.backendProjectComparisonService.disposeWindow(windowId)
+    services?.projectWorkspaceFlowService.clearWindow(windowId)
     projectScopeService?.clearWindow(windowId)
     clearWindowMenuState(windowId)
   })

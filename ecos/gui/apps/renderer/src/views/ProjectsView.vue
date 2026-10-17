@@ -186,13 +186,16 @@
                       :aria-expanded="projectActionMenuId === project.model.id"
                       :aria-label="`More actions for ${project.model.name}`"
                       aria-haspopup="menu"
-                      @click="toggleProjectActionMenu(project.model.id)"
+                      @click="toggleProjectActionMenu(project.model.id, $event)"
                     >
                       <i class="ri-more-2-fill" aria-hidden="true"></i>
                     </button>
                     <div
                       v-if="projectActionMenuId === project.model.id"
                       class="row-action-menu"
+                      :class="{
+                        'row-action-menu--above': rowActionMenuPlacement === 'above',
+                      }"
                       role="group"
                       :aria-label="`More actions for ${project.model.name}`"
                     >
@@ -204,6 +207,15 @@
                       >
                         <i class="ri-file-add-line" aria-hidden="true"></i>
                         <span>Import workspace</span>
+                      </button>
+                      <button
+                        v-if="project.model.projectType === 'backend'"
+                        type="button"
+                        class="row-action-menu-item"
+                        @click="checkProjectRegistration(project.source.path)"
+                      >
+                        <i class="ri-shield-check-line" aria-hidden="true"></i>
+                        <span>Check project</span>
                       </button>
                       <button
                         type="button"
@@ -239,7 +251,11 @@
                     v-for="workspace in visibleProjectWorkspaces(project.model)"
                     :key="workspace.id"
                     class="workspace-tree-item"
-                    :class="flowStatusHintClass(workspace.flowStatusHint.state)"
+                    :class="
+                      flowStatusHintClass(
+                        workspaceListFlowHint(project.source.path, workspace).state,
+                      )
+                    "
                     :style="workspaceDepthStyle(workspace)"
                   >
                     <div
@@ -279,10 +295,13 @@
                           :operations="
                             projectExecutionOperations(project.source.path, workspace.id)
                           "
+                          :flow-hint="
+                            workspaceListFlowHint(project.source.path, workspace)
+                          "
                         />
                         <ProjectResultStatus
                           v-else
-                          :hint="workspace.flowStatusHint"
+                          :hint="workspaceListFlowHint(project.source.path, workspace)"
                           :result-state="workspace.resultState"
                         />
                       </button>
@@ -312,7 +331,11 @@
                           :aria-label="`More actions for ${workspace.id}`"
                           aria-haspopup="menu"
                           @click="
-                            toggleWorkspaceActionMenu(project.model.id, workspace.id)
+                            toggleWorkspaceActionMenu(
+                              project.model.id,
+                              workspace.id,
+                              $event,
+                            )
                           "
                         >
                           <i class="ri-more-2-fill" aria-hidden="true"></i>
@@ -326,6 +349,9 @@
                             )
                           "
                           class="row-action-menu"
+                          :class="{
+                            'row-action-menu--above': rowActionMenuPlacement === 'above',
+                          }"
                           role="group"
                           :aria-label="`More actions for ${workspace.id}`"
                         >
@@ -957,6 +983,8 @@ import {
   type FrontendProjectWorkspaceData,
 } from './project-management/frontendProjectWorkspaceData'
 import { getDesktopApi } from '@/platform/desktop'
+import { useVisibleWorkspaceFlows } from '@/composables/useVisibleWorkspaceFlows'
+import { workspaceFlowHint } from '@/utils/projectWorkspaceFlowPresentation'
 import { listResourcesApi, readMpcSpecApi } from '@/api/plugin'
 import { mutateProjectManifest } from '@/api/projectManifest'
 import { readWorkspaceStepOutputsApi } from '@/api/workspace'
@@ -1051,6 +1079,7 @@ const workspacePopoverStyle = ref<Record<string, string>>({})
 let workspaceStepOutputRequestQueue = Promise.resolve()
 const projectActionMenuId = ref<string | null>(null)
 const workspaceActionMenuTarget = ref<WorkspaceTarget | null>(null)
+const rowActionMenuPlacement = ref<'above' | 'below'>('below')
 const pendingDeleteWorkspaceTarget = ref<WorkspaceTarget | null>(null)
 const keepWorkspaceDataOnDelete = ref(true)
 const deleteWorkspaceError = ref('')
@@ -1221,6 +1250,30 @@ const visibleProjectCards = computed(() =>
 const projectListCanToggle = computed(
   () => !searchShowsAll.value && projectCards.value.length > PROJECT_PREVIEW_LIMIT,
 )
+
+const visibleWorkspaceFlows = useVisibleWorkspaceFlows(() => ({
+  projects: visibleProjectCards.value.flatMap((project) => {
+    if (
+      project.model.projectType !== 'backend' ||
+      !projectWorkspaceListExpanded(project.model.id)
+    )
+      return []
+    const workspaceIds = visibleProjectWorkspaces(project.model).map(
+      (workspace) => workspace.id,
+    )
+    return workspaceIds.length ? [{ projectRoot: project.source.path, workspaceIds }] : []
+  }),
+}))
+
+function workspaceListFlowHint(
+  projectRoot: string,
+  workspace: ProjectWorkspace,
+): ProjectFlowStatusHint {
+  if (projectManifests.value[projectRoot]?.project_type === 'frontend')
+    return workspace.flowStatusHint
+  if (workspace.status === 'archived') return { state: 'skipped', label: 'Archived' }
+  return workspaceFlowHint(visibleWorkspaceFlows.value[projectRoot]?.[workspace.id])
+}
 
 function projectCardMatchesSearch(project: ProjectCard, query: string): boolean {
   const projectFields = [
@@ -1804,13 +1857,19 @@ function updateWorkspaceFlowPopoverPosition() {
   }
 }
 
-function toggleProjectActionMenu(projectId: string) {
-  projectActionMenuId.value = projectActionMenuId.value === projectId ? null : projectId
+function toggleProjectActionMenu(projectId: string, event: MouseEvent) {
+  const wasOpen = projectActionMenuId.value === projectId
+  projectActionMenuId.value = wasOpen ? null : projectId
   workspaceActionMenuTarget.value = null
   closeWorkspaceFlowPopover()
+  rowActionMenuPlacement.value = wasOpen ? 'below' : rowActionMenuPlacementFor(event)
 }
 
-function toggleWorkspaceActionMenu(projectId: string, workspaceId: string) {
+function toggleWorkspaceActionMenu(
+  projectId: string,
+  workspaceId: string,
+  event: MouseEvent,
+) {
   const wasOpen = workspaceTargetMatches(
     workspaceActionMenuTarget.value,
     projectId,
@@ -1820,11 +1879,32 @@ function toggleWorkspaceActionMenu(projectId: string, workspaceId: string) {
   workspaceActionMenuTarget.value = wasOpen ? null : { projectId, workspaceId }
   projectActionMenuId.value = null
   closeWorkspaceFlowPopover()
+  rowActionMenuPlacement.value = wasOpen ? 'below' : rowActionMenuPlacementFor(event)
 }
 
 function closeRowActionMenus() {
   projectActionMenuId.value = null
   workspaceActionMenuTarget.value = null
+  rowActionMenuPlacement.value = 'below'
+}
+
+function rowActionMenuPlacementFor(event: MouseEvent): 'above' | 'below' {
+  const trigger = event.currentTarget
+  if (!(trigger instanceof HTMLElement)) return 'below'
+  const scrollContainer = trigger.closest<HTMLElement>('.project-list')
+  const triggerRect = trigger.getBoundingClientRect()
+  const containerRect = scrollContainer?.getBoundingClientRect()
+  const topBoundary = Math.max(containerRect?.top ?? 0, 0)
+  const bottomBoundary = Math.min(
+    containerRect?.bottom ?? window.innerHeight,
+    window.innerHeight,
+  )
+  // shortcut: 112px covers the current menus; measure dynamically if more actions are added.
+  const estimatedHeight = 112
+
+  if (triggerRect.bottom + 6 + estimatedHeight <= bottomBoundary) return 'below'
+  if (triggerRect.top - 6 - estimatedHeight >= topBoundary) return 'above'
+  return 'below'
 }
 
 function modalElement(modal: ModalId): HTMLElement | null {
@@ -2086,8 +2166,27 @@ async function refreshProjectManifestsNow() {
   workspaceFlowStates.value = Object.fromEntries(
     entries.map(([path]) => [path, workspaceFlowStates.value[path] ?? {}]),
   )
-  void projectConsistency.refresh(projectSources.value)
   void loadSelectedProjectWorkspaceData()
+}
+
+async function checkProjectRegistration(projectRoot: string) {
+  closeRowActionMenus()
+  try {
+    await projectConsistency.check(projectRoot)
+    showToast({
+      severity: 'info',
+      summary: 'Project checked',
+      detail: 'The project consistency report has been refreshed.',
+      life: 3000,
+    })
+  } catch (error) {
+    showToast({
+      severity: 'warn',
+      summary: 'Project check failed',
+      detail: error instanceof Error ? error.message : String(error),
+      life: 5000,
+    })
+  }
 }
 
 async function handleProjectConsistencyRepaired(projectRoot: string) {
@@ -2690,6 +2789,7 @@ function projectFromManifest(manifest: ProjectManifest, fallbackRoot: string): P
 
 function projectStatusFromManifest(manifest: ProjectManifest): ProjectStatus {
   if (Object.keys(manifest.runtime_processes ?? {}).length > 0) return 'running'
+  if (manifest.project_type !== 'frontend') return 'not_started'
   if (manifest.workspaces.some((workspace) => workspace.status === 'failed'))
     return 'failed'
   if (

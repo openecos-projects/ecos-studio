@@ -10,7 +10,7 @@ on:
     # heavy jobs guard on github.event.action != 'edited' and skip it.
     types: [opened, synchronize, reopened, ready_for_review, edited]
   workflow_dispatch:
-  # Nightly on main: the e2e-product matrix runs the full design set
+  # Nightly on main: the E2E matrix runs the full design set
   # (including aes) and catches drift in the unpinned inputs
   # (daily oss-cad-suite builds, the ecc-ci-designs default branch)
   # before it ambushes an unrelated PR.
@@ -215,22 +215,23 @@ jobs:
       - name: Run Rust Tests
         run: cargo test --workspace
 
-  # Mirror ECC CI's e2e-designs listing so the product matrix tracks the
-  # upstream design set automatically.
+  # Mirror ECC CI's e2e-designs listing so the desktop flow matrix tracks the
+  # upstream design set automatically. The local GCD configuration exercises the
+  # additional GUI, concurrent-workspace, and built-in-CLI journeys.
   e2e-designs:
-    name: List Product E2E Designs
+    name: List e2e designs
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     outputs:
       designs: ${{ steps.list.outputs.designs }}
     steps:
-      - name: Checkout Designs
+      - name: Checkout designs
         uses: actions/checkout@v4
         with:
           repository: openecos-projects/ecc-ci-designs
           path: designs
 
-      - name: List rtl2gds-Capable Designs
+      - name: List designs
         id: list
         run: |
           # gcd_icg is a gate-level syn_sta fixture, not an rtl2gds journey.
@@ -244,10 +245,11 @@ jobs:
           designs="$(find designs -mindepth 2 -maxdepth 2 -name ecc.toml -printf '%h\n' \
             | xargs -n1 basename | grep -vxFf <(printf '%s\n' "${excludes[@]}") \
             | jq -R . | jq -cs .)"
+          designs="$(jq -c '. + ["gcd"]' <<<"$designs")"
           echo "designs=$designs" >> "$GITHUB_OUTPUT"
 
-  e2e-product:
-    name: Product E2E (rtl2gds / ${{ matrix.design }})
+  e2e-desktop-flow:
+    name: E2E Desktop Flow (${{ matrix.design }})
     needs: [changes, e2e-designs]
     if: >-
       ${{
@@ -397,13 +399,13 @@ jobs:
           echo "CHIPCOMPILER_OSS_CAD_DIR=$(dirname "$(dirname "$(readlink -f "$(command -v yosys)")")")"
           >> "$GITHUB_ENV"
 
-      - name: Checkout E2E Designs
+      - name: Checkout designs
         uses: actions/checkout@v4
         with:
           repository: openecos-projects/ecc-ci-designs
           path: .scratch/ecc-ci-designs
 
-      - name: Run Product E2E (rtl2gds Journey + Signoff-lit Gate)
+      - name: Run design flows
         working-directory: ecos/gui
         env:
           ELECTRON_DISABLE_SANDBOX: '1'
@@ -413,8 +415,15 @@ jobs:
           ECOS_E2E_LIT_SUITE: ${{ github.workspace }}/.scratch/ecc-ci-designs
         run: |
           if [ "${{ matrix.design }}" = "usb" ]; then
-            # The usb leg is the fast one; it also carries the flow-cancel and
-            # missing-Sizer control cases so big designs stay journey-only.
+            # USB uses the fast journey configuration; large designs stay
+            # journey-only.
+            xvfb-run --auto-servernum pnpm --filter @ecos-studio/desktop-electron \
+              exec vitest run --config vitest.e2e.config.ts \
+              rtl2gds
+          elif [ "${{ matrix.design }}" = "gcd" ]; then
+            # The local GCD configuration uses the existing package script, which runs
+            # every desktop E2E file, including concurrency and CLI journeys.
+            unset ECOS_E2E_DESIGN_DIR ECOS_E2E_LIT_SUITE
             xvfb-run --auto-servernum pnpm run desktop:e2e
           else
             xvfb-run --auto-servernum pnpm --filter @ecos-studio/desktop-electron \
@@ -422,6 +431,7 @@ jobs:
           fi
 
       - name: Run Packaged Reproducible CLI Smoke
+        if: ${{ matrix.design != 'gcd' }}
         run: |
           python3 ecc/packaging/reproducible_cli_smoke.py \
             --binary "$ECOS_E2E_ECC_BIN_DIR/ecc" \
@@ -432,18 +442,18 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: product-e2e-evidence-${{ matrix.design }}
+          name: e2e-flow-workspace-${{ matrix.design }}
           if-no-files-found: ignore
           retention-days: 14
           path: ${{ runner.temp }}/e2e-out
 
   # Fan-in: one stable check name covering the whole design matrix, so branch
-  # rulesets can require "Product E2E" without naming every dynamic matrix leg.
-  e2e-product-summary:
-    name: Product E2E
-    needs: [changes, e2e-designs, e2e-product]
-    # Mirrors e2e-product's gate so a skipped matrix yields a skipped summary
-    # (neutral for rulesets); always() lets it run to report leg failures.
+  # rulesets can require one E2E check without naming every dynamic entry.
+  e2e-desktop-flow-summary:
+    name: E2E Desktop Flow
+    needs: [changes, e2e-designs, e2e-desktop-flow]
+    # Mirrors e2e-desktop-flow's gate so a skipped matrix yields a skipped summary
+    # (neutral for rulesets); always() lets it run to report matrix failures.
     if: >-
       ${{
         always() &&
@@ -460,8 +470,8 @@ jobs:
     steps:
       - name: Aggregate Matrix Results
         run: |
-          result="${{ needs.e2e-product.result }}"
-          echo "e2e-product matrix result: ${result}"
+          result="${{ needs.e2e-desktop-flow.result }}"
+          echo "e2e-desktop-flow matrix result: ${result}"
           [ "${result}" = "success" ]
 
   build-appimage:

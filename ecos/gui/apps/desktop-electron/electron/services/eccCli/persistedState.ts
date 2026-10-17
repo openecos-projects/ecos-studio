@@ -1,3 +1,4 @@
+import { constants } from 'node:fs'
 import { open, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import {
@@ -64,7 +65,11 @@ export async function discoverProject(
 }
 
 export async function readWorkspaceFlow(directory: string): Promise<PersistedFlow> {
-  const raw = await readBoundedJson(join(directory, 'home', 'flow.json'), FLOW_MAX_BYTES)
+  return await readWorkspaceFlowFile(join(directory, 'home', 'flow.json'))
+}
+
+export async function readWorkspaceFlowFile(path: string): Promise<PersistedFlow> {
+  const raw = await readBoundedJson(path, FLOW_MAX_BYTES)
   if (
     !isRecord(raw) ||
     raw.schema_version !== 1 ||
@@ -147,7 +152,8 @@ async function readBoundedJson(path: string, maxBytes: number): Promise<unknown>
 }
 
 async function readBoundedJsonOnce(path: string, maxBytes: number): Promise<unknown> {
-  const handle = await open(path, 'r')
+  const flags = constants.O_NOFOLLOW ? constants.O_RDONLY | constants.O_NOFOLLOW : 'r'
+  const handle = await open(path, flags)
   try {
     const info = await handle.stat()
     if (!info.isFile() || info.size > maxBytes)

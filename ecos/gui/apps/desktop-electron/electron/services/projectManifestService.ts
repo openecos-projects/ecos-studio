@@ -43,6 +43,7 @@ export interface ProjectManifestRuntime {
     projectRoot: string
   } | null>
   loadProjectManifest(projectRoot: string): Promise<ProjectManifest>
+  readProjectManifest?(projectRoot: string): Promise<ProjectManifest>
   mutateProjectManifest(
     projectRoot: string,
     mutation: ProjectManifestMutation | Record<string, unknown>,
@@ -97,7 +98,9 @@ export class ProjectManifestService {
     const frontendManifest = await this.frontend?.load(projectRoot)
     if (frontendManifest) return frontendManifest
     return projectManifestForPresentation(
-      await this.loadManifest(projectRoot),
+      this.runtime.readProjectManifest
+        ? await this.runtime.readProjectManifest(projectRoot)
+        : await this.loadManifest(projectRoot),
       projectRoot,
     )
   }
@@ -116,8 +119,8 @@ export class ProjectManifestService {
   }
 
   async discover(directory: string): Promise<ProjectManifest | null> {
-    const frontendManifest = await this.frontend?.discover(directory)
-    if (frontendManifest) return frontendManifest.manifest
+    const frontendDiscovery = await this.frontend?.discover(directory)
+    if (frontendDiscovery) return frontendDiscovery.manifest
     const discovered = await this.runtime.discoverProject(directory)
     if (!discovered) return null
     const projectRoot = await this.projectScopeProvider.resolveProjectRoot(

@@ -452,7 +452,7 @@ describe('project management V3 model', () => {
     })
   })
 
-  it('floors an optimistic flow hint at a failed manifest status', () => {
+  it('uses the committed flow when the manifest still records a failure', () => {
     const source = manifestWithWorkspace('ws_dirty')
     const manifest = {
       ...source,
@@ -464,20 +464,19 @@ describe('project management V3 model', () => {
     })
 
     expect(model.workspaces[0]).toMatchObject({
-      status: 'failed',
-      flowStatusHint: { state: 'failed', label: 'Failed' },
+      status: 'success',
+      flowStatusHint: { state: 'success', label: 'Success' },
     })
     expect(model.workspaces[0]?.flowStatusHint.step).toBeUndefined()
-    // Step cells keep the recorded flow facts; only the display reduction is floored.
     expect(
       model.workspaces[0]?.steps.find((step) => step.step === 'Synth'),
     ).toMatchObject({ status: 'success' })
     expect(model.dashboardSummary.runStateSlices).toEqual([
-      { state: 'failed', label: 'Failed', count: 1, percent: 100 },
+      { state: 'success', label: 'Success', count: 1, percent: 100 },
     ])
   })
 
-  it('floors an all-success flow hint at a warning manifest status', () => {
+  it('uses the committed flow when the manifest still records a warning', () => {
     const source = manifestWithWorkspace('ws_dirty_warning')
     const manifest = {
       ...source,
@@ -489,13 +488,13 @@ describe('project management V3 model', () => {
     })
 
     expect(model.workspaces[0]).toMatchObject({
-      status: 'warning',
-      flowStatusHint: { state: 'warning', label: 'Completed with warnings' },
+      status: 'success',
+      flowStatusHint: { state: 'success', label: 'Success' },
     })
     expect(model.workspaces[0]?.flowStatusHint.step).toBeUndefined()
   })
 
-  it('drops the step attribution when the floor overrides an active hint', () => {
+  it('shows the current running step instead of a stale manifest failure', () => {
     const source = manifestWithWorkspace('ws_stale_running')
     const manifest = {
       ...source,
@@ -507,10 +506,74 @@ describe('project management V3 model', () => {
     })
 
     expect(model.workspaces[0]).toMatchObject({
-      status: 'failed',
-      flowStatusHint: { state: 'failed', label: 'Failed' },
+      status: 'running',
+      flowStatusHint: { state: 'running', step: 'Place', label: 'Place running' },
     })
-    expect(model.workspaces[0]?.flowStatusHint.step).toBeUndefined()
+  })
+
+  it.each(['success', 'failed', 'warning', 'running'] as const)(
+    'does not invent flow results from a cached %s manifest status',
+    (status) => {
+      const source = manifestWithWorkspace()
+      const model = buildProjectManagementProject(project, {
+        ...source,
+        workspaces: [{ ...source.workspaces[0]!, status }],
+      })
+
+      expect(model.workspaces[0]).toMatchObject({
+        status: 'not_started',
+        flowStatusHint: { state: 'unstart' },
+      })
+      expect(model.workspaces[0]?.steps.some((step) => step.canCreateWorkspace)).toBe(
+        false,
+      )
+    },
+  )
+
+  it('keeps a fresh committed flow unstarted despite a cached success', () => {
+    const source = manifestWithWorkspace()
+    const model = buildProjectManagementProject(
+      project,
+      { ...source, workspaces: [{ ...source.workspaces[0]!, status: 'success' }] },
+      { ws_0004: { Synth: 'unstart', Harden: 'unstart' } },
+    )
+
+    expect(model.workspaces[0]).toMatchObject({
+      status: 'not_started',
+      flowStatusHint: { state: 'unstart' },
+    })
+  })
+
+  it('shows an active CLI process while its committed flow still shows success', () => {
+    const source = manifestWithWorkspace()
+    const runId = '12345678-1234-4123-8123-123456789abc'
+    const model = buildProjectManagementProject(
+      project,
+      {
+        ...source,
+        runtime_processes: {
+          ws_0004: {
+            schema_version: 1,
+            run_id: runId,
+            pid: 1234,
+            pgid: 1234,
+            process_start_id: 'start-1',
+            boot_id: 'boot-1',
+            host_id: 'host-1',
+            workspace_path: '/projects/gcd/ws_0004',
+            started_at: 1,
+            runtime_id: 'ecc-cli-contract-1',
+            log_path: `log/${runId}.log`,
+          },
+        },
+      },
+      { ws_0004: { Synth: 'success', Harden: 'success' } },
+    )
+
+    expect(model.workspaces[0]).toMatchObject({
+      status: 'running',
+      flowStatusHint: { state: 'running', label: 'Running' },
+    })
   })
 
   it('does not floor flow-driven display for progress manifest statuses', () => {

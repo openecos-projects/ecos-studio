@@ -242,6 +242,14 @@ _Avoid_: best-effort parsing, silent field ignore, runtime schema drift
 The workspace-level view of the configured flow, including every configured step regardless of whether that step has started or produced artifacts.
 _Avoid_: executed-step list, current-step subflow
 
+**Project Management Flow Status**:
+The current execution state of a Workspace's configured Flow, summarized for its Project Management row. Unavailable state is distinct from a Flow that has not started.
+_Avoid_: last command exit status, Project registration state
+
+**Visible Workspace**:
+A Workspace whose row is currently rendered in an expanded Project list, including the current preview or search selection. Workspaces hidden by collapse, filtering, or preview limits are excluded.
+_Avoid_: registered Workspace, selected Project's entire Workspace collection
+
 **Step Subflow**:
 The execution detail for the currently selected flow step, shown independently from the workspace-level flow status.
 _Avoid_: complete flow, dashboard flow

@@ -108,6 +108,8 @@ async function loadDesktopBridge() {
       setLeftPanelExtension(widthPx: number): Promise<number>
     }
     projectManagement: {
+      watchWorkspaceFlows(request: unknown): Promise<unknown>
+      onWorkspaceFlowsChanged(listener: () => void): () => void
       importWorkspace(projectRoot: string): Promise<unknown>
       checkConsistency(projectRoot: string): Promise<unknown>
       repairConsistency(projectRoot: string): Promise<unknown>
@@ -172,6 +174,27 @@ describe('preload desktop bridge contract', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
       desktopApiIpcChannels.backendProjectComparisonCloseProject,
       request,
+    )
+  })
+
+  it('routes visible workspace Flow reads and change subscriptions through scoped channels', async () => {
+    const bridge = await loadDesktopBridge()
+    const request = { projects: [{ projectRoot: '/project', workspaceIds: ['ws_1'] }] }
+    ipcRenderer.invoke.mockResolvedValueOnce({})
+    await bridge.projectManagement.watchWorkspaceFlows(request)
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.projectManagementWatchWorkspaceFlows,
+      request,
+    )
+    const unsubscribe = bridge.projectManagement.onWorkspaceFlowsChanged(vi.fn())
+    expect(ipcRenderer.on).toHaveBeenCalledWith(
+      desktopApiEventChannels.projectWorkspaceFlowsChanged,
+      expect.any(Function),
+    )
+    unsubscribe()
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
+      desktopApiEventChannels.projectWorkspaceFlowsChanged,
+      expect.any(Function),
     )
   })
 

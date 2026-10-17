@@ -43,6 +43,26 @@ function createService(
 }
 
 describe('ProjectManifestService', () => {
+  it('uses the read-only index path for browsing an existing backend Project', async () => {
+    const readProjectManifest = vi.fn(async () => emptyManifest as never)
+    const loadProjectManifest = vi.fn()
+    const service = new ProjectManifestService(
+      { resolveProjectRoot: async (path) => path },
+      undefined,
+      {
+        readProjectManifest,
+        loadProjectManifest,
+        discoverProject: vi.fn(),
+        mutateProjectManifest: vi.fn(),
+      },
+    )
+    await expect(service.load(projectRoot)).resolves.toMatchObject({
+      project_id: 'proj_gcd',
+    })
+    expect(readProjectManifest).toHaveBeenCalledWith(projectRoot)
+    expect(loadProjectManifest).not.toHaveBeenCalled()
+  })
+
   it('discovers a nested Workspace through the ECC Runtime', async () => {
     const { callRuntime, service } = createService(
       vi

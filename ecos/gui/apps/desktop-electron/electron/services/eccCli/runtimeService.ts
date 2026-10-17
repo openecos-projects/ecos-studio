@@ -168,6 +168,19 @@ export class EccCliRuntimeService {
     return () => this.releasedListeners.delete(listener)
   }
 
+  async readProjectManifest(projectRoot: string): Promise<ProjectManifest> {
+    const root = await realpath(projectRoot)
+    try {
+      const manifest = await readProjectManifest(root)
+      this.knownProjectRoots.add(root)
+      return manifest
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      // Only projects without an index need the existing one-time migration.
+      return await this.loadProjectManifest(root)
+    }
+  }
+
   async loadProjectManifest(
     projectRoot: string,
     forceLegacyRunsMigration = false,
@@ -1317,16 +1330,28 @@ export class EccCliRuntimeService {
     session: WorkspaceSession,
     entry: ProjectRuntimeProcessEntry,
   ): Promise<boolean> {
+    return this.isProjectProcessAlive(
+      session.projectRoot,
+      session.workspaceId,
+      entry.run_id,
+    )
+  }
+
+  async isProjectProcessAlive(
+    projectRoot: string,
+    workspaceId: string,
+    runId: string,
+  ): Promise<boolean> {
     try {
       await this.cli.run([
         'process',
         'inspect',
         '--project',
-        session.projectRoot,
+        projectRoot,
         '--workspace',
-        session.workspaceId,
+        workspaceId,
         '--run-id',
-        entry.run_id,
+        runId,
       ])
       return true
     } catch (error) {

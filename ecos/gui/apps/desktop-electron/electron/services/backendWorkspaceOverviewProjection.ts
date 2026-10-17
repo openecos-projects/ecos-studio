@@ -161,6 +161,15 @@ function normalizeFlowState(value: string): FlowStepState {
 
 export function flowSection(
   snapshot: EngineeringSnapshotValidationResult | null,
+  liveFlow?: {
+    steps: ReadonlyArray<{
+      name: string
+      state: string
+      runtime?: string
+      peakMemory?: number
+      tool?: string
+    }>
+  },
 ): ReadSection<WorkspaceFlowSummary> {
   if (!snapshot?.ok) {
     return {
@@ -176,6 +185,7 @@ export function flowSection(
   if (!Array.isArray(steps)) {
     return { status: 'error', issues: [{ code: 'WORKSPACE_FLOW_INVALID' }] }
   }
+  const liveSteps = new Map(liveFlow?.steps.map((step) => [step.name, step]))
   return {
     status: 'ready',
     data: {
@@ -183,9 +193,15 @@ export function flowSection(
         const step = record(value)
         if (!step || typeof step.name !== 'string') return []
         if (isObsoleteFlowStepName(step.name)) return []
-        const runtimeSeconds = parseRuntimeSeconds(String(step.runtime ?? ''))
+        const liveStep = liveSteps.get(step.name)
+        const toolId = liveStep?.tool ?? (typeof step.tool === 'string' ? step.tool : '')
+        const runtimeSeconds = parseRuntimeSeconds(
+          String(liveStep?.runtime ?? step.runtime ?? ''),
+        )
         const peakMemoryMb = finiteNumber(
-          step['peak memory (mb)'] ?? record(step.info)?.['peak memory (mb)'],
+          liveStep?.peakMemory ??
+            step['peak memory (mb)'] ??
+            record(step.info)?.['peak memory (mb)'],
         )
         const checklistStatusRecord = record(step.checklist_status)
         const checklist = record(step.checklist)
@@ -196,8 +212,8 @@ export function flowSection(
             stepId: step.name,
             order,
             name: step.name,
-            state: normalizeFlowState(String(step.state ?? '')),
-            ...(typeof step.tool === 'string' && step.tool ? { toolId: step.tool } : {}),
+            state: normalizeFlowState(String(liveStep?.state ?? step.state ?? '')),
+            ...(toolId ? { toolId } : {}),
             ...(runtimeSeconds === null ? {} : { runtimeSeconds }),
             ...(peakMemoryMb === null ? {} : { peakMemoryMb }),
             ...(['passed', 'blocked', 'attention', 'unknown'].includes(checklistStatus)

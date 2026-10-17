@@ -148,15 +148,48 @@ describe('product e2e: backend rtl2gds journey', () => {
   }, 180_000)
 
   it(
-    'runs the rtl2gds flow to a terminal state',
+    'keeps Workspace Flow cards and the run control synchronized during the rtl2gds flow',
     async () => {
       const page = launched!.page
+      const flowDashboard = page.locator('.workspace-flow-dashboard')
+      const runControl = flowDashboard.locator('.flow-header .flow-run-icon-button')
+      const readFlowCardStatus = async (stepName: string) =>
+        flowDashboard.locator('.flow-step-card').evaluateAll((cards, name) => {
+          const card = cards.find(
+            (item) =>
+              item.getAttribute('data-step') === name ||
+              item.querySelector('header')?.textContent?.trim() === name,
+          )
+          return card?.getAttribute('data-status') ?? null
+        }, stepName)
+      const deadline = Date.now() + FLOW_TIMEOUT_MS
       const operation = await runFlow(page, workspace!)
       operationId = operation.operationId
-      await shot('flow-running', '#/workspace/home')
       let terminal
       try {
-        terminal = await waitFlowTerminal(page, workspace!, operationId, FLOW_TIMEOUT_MS)
+        await shot('flow-running', '#/workspace/home')
+        await expect
+          .poll(
+            async () => {
+              const step = (await readFlowSteps(workspace!.workspaceDir)).find(
+                (candidate) => candidate.state === 'Ongoing',
+              )
+              return {
+                step: step?.name ?? null,
+                cardStatus: step ? await readFlowCardStatus(step.name) : null,
+                runBusy: await runControl.getAttribute('aria-busy'),
+              }
+            },
+            { timeout: Math.max(1, deadline - Date.now()) },
+          )
+          .toMatchObject({ cardStatus: 'running', runBusy: 'true' })
+        await shot('workspace-flow-running')
+        terminal = await waitFlowTerminal(
+          page,
+          workspace!,
+          operationId,
+          Math.max(1, deadline - Date.now()),
+        )
       } catch (error) {
         await cancelFlow(page, workspace!, operationId).catch(() => undefined)
         operationTerminal = true
@@ -170,6 +203,31 @@ describe('product e2e: backend rtl2gds journey', () => {
         await shot('flow-failed')
       }
       expect(terminal.state).toBe('succeeded')
+      await expect
+        .poll(
+          async () => {
+            const steps = await readFlowSteps(workspace!.workspaceDir)
+            const cards = await flowDashboard
+              .locator('.flow-step-card')
+              .evaluateAll((items) =>
+                items.map((item) => ({
+                  step: item.getAttribute('data-step'),
+                  status: item.getAttribute('data-status'),
+                })),
+              )
+            return {
+              allSuccess:
+                steps.length > 0 && steps.every((step) => step.state === 'Success'),
+              cardsSucceeded:
+                cards.length === steps.length &&
+                cards.every((card) => card.status === 'succeeded'),
+              runBusy: await runControl.getAttribute('aria-busy'),
+            }
+          },
+          { timeout: 30_000 },
+        )
+        .toEqual({ allSuccess: true, cardsSucceeded: true, runBusy: 'false' })
+      await shot('workspace-flow-completed')
     },
     FLOW_TIMEOUT_MS + 120_000,
   )

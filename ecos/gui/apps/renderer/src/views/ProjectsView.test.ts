@@ -23,6 +23,7 @@ const testState = vi.hoisted(() => ({
   projectManifestOverride: null as unknown,
   mutateProjectManifest: vi.fn(),
   selectProject: vi.fn(async (_projectRoot: string) => undefined),
+  watchWorkspaceFlows: vi.fn(),
   pickDirectory: vi.fn(async (_options?: unknown) => '/projects/demo'),
   stepOutputs: vi.fn(
     async (_request: unknown): Promise<EccWorkspaceStepOutputsResult> => ({
@@ -142,6 +143,12 @@ vi.mock('@/api/projectManifest', () => ({
   mutateProjectManifest: (...args: unknown[]) => testState.mutateProjectManifest(...args),
 }))
 vi.mock('@/platform/desktop', () => ({
+  getOptionalDesktopApi: () => ({
+    projectManagement: {
+      watchWorkspaceFlows: (request: unknown) => testState.watchWorkspaceFlows(request),
+      onWorkspaceFlowsChanged: () => () => undefined,
+    },
+  }),
   getDesktopApi: () => ({
     dialog: { pickDirectory: (options: unknown) => testState.pickDirectory(options) },
     resources: { list: vi.fn(async () => ({ resources: [] })) },
@@ -209,6 +216,22 @@ describe('ProjectsView background lifecycle integration', () => {
     testState.projectManifestOverride = null
     testState.selectProject.mockReset()
     testState.selectProject.mockImplementation(async () => undefined)
+    testState.watchWorkspaceFlows.mockReset()
+    testState.watchWorkspaceFlows.mockImplementation(async (request) =>
+      Object.fromEntries(
+        request.projects.map(
+          (project: { projectRoot: string; workspaceIds: string[] }) => [
+            project.projectRoot,
+            Object.fromEntries(
+              project.workspaceIds.map((id) => [
+                id,
+                { steps: { Synth: 'unstart' }, running: false },
+              ]),
+            ),
+          ],
+        ),
+      ),
+    )
     vi.mocked(readFrontendProjectWorkspaceData).mockClear()
     vi.mocked(checkProjectConsistency).mockReset()
     vi.mocked(checkProjectConsistency).mockResolvedValue({
@@ -244,6 +267,33 @@ describe('ProjectsView background lifecycle integration', () => {
     expect(testState.showToast).not.toHaveBeenCalledWith(
       expect.objectContaining({ summary: 'Workspace not imported' }),
     )
+  })
+
+  it('opens row action menus upward when the trigger is near the list bottom', async () => {
+    const wrapper = shallowMount(ProjectsView)
+    await flushPromises()
+
+    const projectTrigger = wrapper.get('button[aria-label="More actions for demo"]')
+    const projectList = wrapper.get('.project-list')
+    vi.spyOn(projectTrigger.element, 'getBoundingClientRect').mockReturnValue({
+      top: 700,
+      bottom: 728,
+    } as DOMRect)
+    vi.spyOn(projectList.element, 'getBoundingClientRect').mockReturnValue({
+      top: 120,
+      bottom: 740,
+    } as DOMRect)
+
+    await projectTrigger.trigger('click')
+    expect(wrapper.find('.row-action-menu').classes()).toContain('row-action-menu--above')
+
+    const workspaceTrigger = wrapper.get('button[aria-label="More actions for ws_0001"]')
+    vi.spyOn(workspaceTrigger.element, 'getBoundingClientRect').mockReturnValue({
+      top: 700,
+      bottom: 728,
+    } as DOMRect)
+    await workspaceTrigger.trigger('click')
+    expect(wrapper.find('.row-action-menu').classes()).toContain('row-action-menu--above')
   })
 
   it('requests the workspace wizard from a project row New action', async () => {
@@ -360,6 +410,21 @@ describe('ProjectsView background lifecycle integration', () => {
   })
 
   async function mountWithKnownProgress(shouldBlock: () => boolean) {
+    testState.watchWorkspaceFlows.mockImplementation(async (request) =>
+      Object.fromEntries(
+        request.projects.map(
+          (project: { projectRoot: string; workspaceIds: string[] }) => [
+            project.projectRoot,
+            Object.fromEntries(
+              project.workspaceIds.map((id) => [
+                id,
+                { steps: { Synth: 'success' }, running: false },
+              ]),
+            ),
+          ],
+        ),
+      ),
+    )
     testState.selectProject.mockImplementation(async () => {
       if (shouldBlock()) {
         await new Promise<void>(() => undefined)
@@ -390,7 +455,7 @@ describe('ProjectsView background lifecycle integration', () => {
     let blockSelects = false
     const wrapper = await mountWithKnownProgress(() => blockSelects)
     expect(knownProgressHint(wrapper)).toMatchObject({
-      label: 'Success',
+      label: 'Completed',
       state: 'success',
     })
 
@@ -442,7 +507,7 @@ describe('ProjectsView background lifecycle integration', () => {
     await flushPromises()
 
     expect(knownProgressHint(wrapper)).toMatchObject({
-      label: 'Success',
+      label: 'Completed',
       state: 'success',
     })
   })
@@ -451,7 +516,7 @@ describe('ProjectsView background lifecycle integration', () => {
     let blockSelects = false
     const wrapper = await mountWithKnownProgress(() => blockSelects)
     expect(knownProgressHint(wrapper)).toMatchObject({
-      label: 'Success',
+      label: 'Completed',
       state: 'success',
     })
 
@@ -464,7 +529,7 @@ describe('ProjectsView background lifecycle integration', () => {
 
     expect(testState.pickDirectory).toHaveBeenCalledOnce()
     expect(knownProgressHint(wrapper)).toMatchObject({
-      label: 'Success',
+      label: 'Completed',
       state: 'success',
     })
   })
@@ -548,6 +613,72 @@ describe('ProjectsView background lifecycle integration', () => {
 
     expect(wrapper.findAll('.project-workspace-tree')).toHaveLength(1)
     expect(wrapper.find('.project-list-preview-toggle').exists()).toBe(false)
+  })
+
+  it('loads Flow files only for rendered workspace rows and stops when collapsed', async () => {
+    const manifest = await readProjectManagementManifest('/projects/demo')
+    if (!manifest) throw new Error('Missing test manifest')
+    testState.projectManifestOverride = {
+      ...manifest,
+      workspaces: Array.from({ length: 21 }, (_, index) => {
+        const id = `ws_${String(index + 1).padStart(4, '0')}`
+        return {
+          ...manifest.workspaces[0],
+          workspace_id: id,
+          name: id,
+          workspace_path: `/projects/demo/${id}`,
+        }
+      }),
+    }
+    const wrapper = shallowMount(ProjectsView)
+    await flushPromises()
+    const request = () => testState.watchWorkspaceFlows.mock.lastCall![0]
+    expect(request().projects).toHaveLength(1)
+    expect(request().projects[0].workspaceIds).toHaveLength(20)
+    expect(request().projects[0].workspaceIds).not.toContain('ws_0021')
+
+    await wrapper.get('.workspace-list-preview-toggle').trigger('click')
+    await flushPromises()
+    expect(request().projects[0].workspaceIds).toHaveLength(21)
+
+    await wrapper
+      .get('button[aria-label="Collapse workspaces for demo"]')
+      .trigger('click')
+    await flushPromises()
+    expect(request()).toEqual({ projects: [] })
+    await wrapper.get('button[aria-label="Expand workspaces for demo"]').trigger('click')
+    await flushPromises()
+    expect(request().projects[0].workspaceIds).toHaveLength(21)
+    await wrapper
+      .get('input[aria-label="Search projects or workspaces"]')
+      .setValue('no-matching-project')
+    await flushPromises()
+    expect(request()).toEqual({ projects: [] })
+    wrapper.unmount()
+    expect(request()).toEqual({ projects: [] })
+  })
+
+  it('does not request Flow files from collapsed projects', async () => {
+    vi.mocked(loadProjectHistory).mockResolvedValue([
+      historyProject(1),
+      historyProject(2),
+    ])
+    const wrapper = shallowMount(ProjectsView)
+    await flushPromises()
+    const request = () => testState.watchWorkspaceFlows.mock.lastCall![0]
+    expect(request().projects).toHaveLength(1)
+    const collapsed = wrapper
+      .findAll('button.project-collapse-toggle')
+      .find((button) => button.attributes('aria-expanded') === 'false')!
+    await collapsed.trigger('click')
+    await flushPromises()
+    expect(request().projects).toHaveLength(2)
+    expect(
+      new Set(
+        request().projects.map((project: { projectRoot: string }) => project.projectRoot),
+      ),
+    ).toEqual(new Set(['/projects/project-1', '/projects/project-2']))
+    wrapper.unmount()
   })
 
   describe('new project dialog', () => {
@@ -674,10 +805,18 @@ describe('ProjectsView background lifecycle integration', () => {
       ],
     }
 
-    it('checks backend projects on load and surfaces findings on the project card', async () => {
+    it('checks a backend project explicitly without scanning hidden workspaces on load', async () => {
       vi.mocked(checkProjectConsistency).mockResolvedValue(inconsistentReport)
 
       const wrapper = shallowMount(ProjectsView)
+      await flushPromises()
+
+      expect(checkProjectConsistency).not.toHaveBeenCalled()
+      await wrapper.get('button[aria-label="More actions for demo"]').trigger('click')
+      await wrapper
+        .findAll('.row-action-menu-item')
+        .find((item) => item.text() === 'Check project')!
+        .trigger('click')
       await flushPromises()
 
       expect(checkProjectConsistency).toHaveBeenCalledWith('/projects/demo')
@@ -690,6 +829,8 @@ describe('ProjectsView background lifecycle integration', () => {
     it('refreshes the displayed project data after a repair', async () => {
       vi.mocked(checkProjectConsistency).mockResolvedValue(inconsistentReport)
       const wrapper = shallowMount(ProjectsView)
+      await flushPromises()
+      await useProjectConsistencyStore().check('/projects/demo')
       await flushPromises()
       vi.mocked(readProjectManagementManifest).mockClear()
 

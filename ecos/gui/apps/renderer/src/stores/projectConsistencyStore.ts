@@ -73,5 +73,14 @@ export const useProjectConsistencyStore = defineStore('projectConsistency', () =
     return result
   }
 
-  return { inconsistentProjects, refresh, repair, reports }
+  async function check(projectRoot: string): Promise<void> {
+    const report = await checkProjectConsistency(projectRoot)
+    const next = { ...reports.value }
+    if (report.status === 'failed' && report.findings.length > 0)
+      next[projectRoot] = report
+    else delete next[projectRoot]
+    reports.value = next
+  }
+
+  return { inconsistentProjects, refresh, check, repair, reports }
 })

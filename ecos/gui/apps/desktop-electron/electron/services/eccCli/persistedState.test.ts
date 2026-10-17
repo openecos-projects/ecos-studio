@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rename, rm, unlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -99,5 +99,17 @@ describe('readWorkspaceFlow', () => {
     const root = await writeFlow({ schema_version: 1, steps: [] })
     await rm(join(root, 'home', 'flow.json'))
     await expect(readWorkspaceFlow(root)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('does not follow a flow file symlink while opening it', async () => {
+    const root = await writeFlow({ schema_version: 1, steps: [] })
+    const outside = await writeFlow({
+      schema_version: 1,
+      steps: [{ name: 'outside', state: 'Success' }],
+    })
+    await rm(join(root, 'home', 'flow.json'))
+    await symlink(join(outside, 'home', 'flow.json'), join(root, 'home', 'flow.json'))
+
+    await expect(readWorkspaceFlow(root)).rejects.toMatchObject({ code: 'ELOOP' })
   })
 })

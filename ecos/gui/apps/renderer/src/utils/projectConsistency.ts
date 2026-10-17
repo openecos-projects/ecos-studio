@@ -31,10 +31,7 @@ export async function repairProjectConsistency(
 }
 
 const CHECK_LABELS: Record<string, [string, string]> = {
-  'derived-field-mismatch': [
-    'out-of-sync manifest entry',
-    'out-of-sync manifest entries',
-  ],
+  'invalid-workspace': ['unreadable workspace', 'unreadable workspaces'],
   'missing-directory': ['missing workspace directory', 'missing workspace directories'],
   'unregistered-directory': [
     'unregistered workspace directory',

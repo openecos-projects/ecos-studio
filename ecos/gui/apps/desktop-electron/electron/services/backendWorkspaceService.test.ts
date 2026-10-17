@@ -7,6 +7,7 @@ import {
 } from '@ecos-studio/shared'
 import { describe, expect, it, vi } from 'vitest'
 import { BackendWorkspaceService } from './backendWorkspaceService'
+import { flowSection } from './backendWorkspaceOverviewProjection'
 import { electronLogger } from './logger'
 import type {
   ProjectComparisonFileWatcher,
@@ -209,6 +210,39 @@ function manifestForWorkspaces(workspaceIds: string[], baselineId: string) {
 }
 
 describe('BackendWorkspaceService', () => {
+  it('overlays the live flow state over the last engineering snapshot', () => {
+    const snapshot = engineeringSnapshot()
+    snapshot.flow = {
+      steps: [
+        {
+          name: 'Synthesis',
+          state: 'Success',
+          runtime: '0:0:1',
+          'peak memory (mb)': 1,
+          tool: 'yosys',
+          info: {},
+        },
+      ],
+    }
+    const persisted = persistedSnapshotResult(snapshot)
+    const flow = flowSection(persisted, {
+      steps: [
+        {
+          name: 'Synthesis',
+          state: 'Ongoing',
+          runtime: '',
+          peakMemory: 2,
+          tool: 'yosys',
+        },
+      ],
+    })
+
+    expect(flow).toMatchObject({
+      status: 'ready',
+      data: { steps: [{ name: 'Synthesis', state: 'running', peakMemoryMb: 2 }] },
+    })
+  })
+
   it('invalidates the previous Context when its window scope is cleared', async () => {
     const service = new BackendWorkspaceService({
       projectManagementReadService: persistedReadService(engineeringSnapshot()),

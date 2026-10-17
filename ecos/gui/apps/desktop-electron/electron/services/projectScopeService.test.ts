@@ -401,6 +401,56 @@ describe('ProjectScopeService', () => {
     })
   })
 
+  it('authorizes only previously registered Project Management roots', async () => {
+    const projectRoot = await createTempDir('ecos-managed-project-root-')
+    await writeProjectManifest(projectRoot, [])
+    const otherRoot = await createTempDir('ecos-unmanaged-project-root-')
+    const service = projectScopeWithManifest()
+
+    await runWithWindowScope(1, async () => {
+      await service.registerProjectManagementReadRoot(projectRoot)
+      await expect(service.authorizeProjectManagementReadRoot(projectRoot)).resolves.toBe(
+        projectRoot,
+      )
+      await expect(service.authorizeProjectManagementReadRoot(otherRoot)).rejects.toThrow(
+        'outside current project project management scope',
+      )
+    })
+  })
+
+  it('authorizes the active project root for visible Workspace Flows', async () => {
+    const projectRoot = await createTempDir('ecos-active-flow-project-')
+    await writeProjectManifest(projectRoot, [])
+    const service = projectScopeWithManifest()
+
+    await runWithWindowScope(1, async () => {
+      await service.registerProjectRoot(projectRoot)
+      await expect(service.authorizeProjectManagementReadRoot(projectRoot)).resolves.toBe(
+        projectRoot,
+      )
+    })
+  })
+
+  it('authorizes the project that declares the active workspace for visible Workspace Flows', async () => {
+    const projectRoot = await createTempDir('ecos-active-flow-project-')
+    const workspaceRoot = join(projectRoot, 'runs', 'ws_0001')
+    const otherRoot = await createTempDir('ecos-other-flow-project-')
+    await mkdir(join(workspaceRoot, 'home'), { recursive: true })
+    await writeProjectManifest(projectRoot, [workspaceRoot])
+    await writeProjectManifest(otherRoot, [join(otherRoot, 'runs', 'ws_0002')])
+    const service = projectScopeWithManifest()
+
+    await runWithWindowScope(1, async () => {
+      await service.registerProjectRoot(workspaceRoot)
+      await expect(service.authorizeProjectManagementReadRoot(projectRoot)).resolves.toBe(
+        projectRoot,
+      )
+      await expect(service.authorizeProjectManagementReadRoot(otherRoot)).rejects.toThrow(
+        'outside current project project management scope',
+      )
+    })
+  })
+
   it('rejects a Project Management read root without a valid manifest', async () => {
     const activeWorkspaceRoot = await createTempDir('ecos-active-workspace-root-')
     const projectRoot = await createTempDir('ecos-manifestless-project-root-')

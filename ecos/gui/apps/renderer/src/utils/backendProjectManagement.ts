@@ -352,9 +352,13 @@ export function buildProjectManagementProject(
     return buildProjectWorkspace(
       {
         ...workspace,
-        status: process
-          ? 'running'
-          : workspaceStatusFromFlow(workspace.status, flowStates),
+        // CLI runs update workspace snapshots, not the manifest's cached status.
+        status:
+          workspace.status === 'archived'
+            ? 'archived'
+            : process
+              ? 'running'
+              : workspaceStatusFromFlow('not_started', flowStates),
       },
       flowStates,
       depth,
@@ -922,7 +926,9 @@ export function workspaceStatusFromFlow(
   if (states.includes('failed')) return 'failed'
   if (manifestStatus === 'warning') return 'warning'
   if (states.includes('running')) return 'running'
-  if (states.includes('unstart')) return 'in_progress'
+  if (states.includes('unstart')) {
+    return states.some(isCompletedStepStatus) ? 'in_progress' : 'not_started'
+  }
   if (states.includes('warning')) return 'warning'
   if (states.some((state) => state === 'success' || state === 'reused')) return 'success'
   return manifestStatus
@@ -936,6 +942,9 @@ function projectFlowStatusHint(
   flowStateMap: ProjectWorkspaceFlowStateMap,
 ): ProjectFlowStatusHint {
   const flowHint = buildFlowStatusHint(steps, startStep, endStep, flowStateMap)
+  if (workspaceStatus === 'running' && flowHint.state !== 'running') {
+    return { state: 'running', label: 'Running' }
+  }
   const hasRecordedFailure = Object.values(flowStateMap).includes('failed')
   if (workspaceStatus === 'failed' && !hasRecordedFailure) {
     return { state: 'failed', label: 'Failed' }
@@ -1079,12 +1088,8 @@ function buildStepCell(
     // A partially written flow.json is authoritative for execution state.
     // Steps absent from it have not run in this workspace yet.
     status = 'skipped'
-  } else if (workspace.status === 'failed' && stepIndex === endIndex) {
-    status = 'failed'
-  } else if (workspace.status === 'not_started') {
-    status = 'unstart'
   } else {
-    status = 'success'
+    status = 'unstart'
   }
 
   return {
