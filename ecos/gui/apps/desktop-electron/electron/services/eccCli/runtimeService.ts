@@ -64,6 +64,7 @@ import {
   type EccCliProcessOptions,
 } from './cliProcess'
 import { parseEccLineRecords, parseJsonLiteral } from './lineRecords'
+import { terminalState } from './operationOutcome'
 import {
   discoverProject,
   readProjectManifest,
@@ -1583,28 +1584,6 @@ export function operationFlowMatches(
       step.peakMemory === candidate.peakMemory
     )
   })
-}
-
-function terminalState(
-  flow: PersistedFlow,
-  cancelled: boolean,
-): EccRuntimeOperation['state'] {
-  if (cancelled) return 'cancelled'
-  if (flow.steps.some((step) => ['Failed', 'Error'].includes(step.state))) return 'failed'
-  if (
-    flow.steps.some((step) =>
-      ['Interrupted', 'Incomplete', 'Imcomplete'].includes(step.state),
-    )
-  ) {
-    return 'interrupted'
-  }
-  if (
-    flow.steps.length > 0 &&
-    flow.steps.every((step) => ['Success', 'Skipped', 'Unstart'].includes(step.state))
-  ) {
-    return 'succeeded'
-  }
-  return 'interrupted'
 }
 
 export function registeredRunMatches(
