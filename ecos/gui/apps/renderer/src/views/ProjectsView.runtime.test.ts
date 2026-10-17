@@ -34,6 +34,7 @@ vi.mock('@/utils/projectManagementRead', () => ({
 
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: mocks.getDesktopApi,
+  getOptionalDesktopApi: mocks.getDesktopApi,
 }))
 
 vi.mock('@/api/plugin', () => ({

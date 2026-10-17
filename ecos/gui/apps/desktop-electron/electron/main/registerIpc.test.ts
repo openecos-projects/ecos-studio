@@ -132,6 +132,10 @@ function registerHandlers(
       listProjectEntries: vi.fn(),
       readWorkspaceStepConfiguration: vi.fn(),
     },
+    projectWorkspaceFlowService: {
+      watch: vi.fn().mockResolvedValue({}),
+      onChanged: vi.fn(),
+    },
     backendWorkspaceService: {
       clearWindow: vi.fn(),
       getArtifact: vi.fn(),
@@ -172,6 +176,7 @@ function registerHandlers(
       readProjectTextFile: vi.fn(),
       readProjectTextFileTail: vi.fn(),
       registerProjectManagementReadRoot: vi.fn(),
+      authorizeProjectManagementReadRoot: vi.fn(),
       registerProjectReadRoot: vi.fn(),
       registerProjectRoot: vi.fn(),
       listProjectDirectory: vi.fn(),
@@ -887,6 +892,21 @@ describe('registerIpc', () => {
     expect(
       services.backendProjectComparisonService.getExecutionSnapshot,
     ).toHaveBeenCalledWith(7, 'context-1')
+  })
+
+  it('scopes visible Workspace Flow reads and notifications to their sending window', async () => {
+    const { handlers, services } = registerHandlers()
+    const request = { projects: [{ projectRoot: '/project', workspaceIds: ['ws_1'] }] }
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementWatchWorkspaceFlows)?.(
+        { sender: { id: 7 } },
+        request,
+      ),
+    ).resolves.toEqual({})
+    expect(services.projectWorkspaceFlowService.watch).toHaveBeenCalledWith(7, request)
+    expect(services.projectWorkspaceFlowService.onChanged).toHaveBeenCalledWith(
+      expect.any(Function),
+    )
   })
 
   it('queries Step Findings without accepting a Renderer path', async () => {

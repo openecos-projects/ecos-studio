@@ -3,7 +3,12 @@
  * consumed by the e2e harness. Only the methods the harness drives are
  * declared; payloads cross as plain JSON exactly as the renderer sends them.
  */
-import type { DesktopApi } from '@ecos-studio/shared'
+import type {
+  DesktopApi,
+  EccBackgroundOperationProjection,
+  ProjectWorkspaceFlows,
+  ProjectWorkspaceFlowsRequest,
+} from '@ecos-studio/shared'
 
 export interface E2EBridge {
   app: {
@@ -24,6 +29,12 @@ export interface E2EBridge {
   }
   projectManagement: {
     readManifest(projectRoot: string): Promise<{ project_id?: string } | null>
+    watchWorkspaceFlows(
+      request: ProjectWorkspaceFlowsRequest,
+    ): Promise<ProjectWorkspaceFlows>
+  }
+  backendProjectComparison: {
+    selectProject(request: { projectRootLocator: string }): Promise<unknown>
   }
   productCommands: {
     execute(request: { command: string; payload: unknown }): Promise<unknown>
@@ -41,6 +52,7 @@ export interface E2EBridge {
   }
   ecc: {
     runtime: {
+      operationProjection(): Promise<EccBackgroundOperationProjection>
       waitForOperation(request: {
         workspaceHandle: string
         operationId: string

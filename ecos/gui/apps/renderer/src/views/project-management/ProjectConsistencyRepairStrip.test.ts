@@ -29,11 +29,11 @@ function failedReport(
     inconsistent: 2,
     findings: [
       {
-        check: 'derived-field-mismatch',
+        check: 'unregistered-directory',
         status: 'fail',
         workspace_id: 'ws_0001',
         workspace: '/projects/demo/ws_0001',
-        detail: 'derived fields disagree with directory facts: status',
+        detail: 'workspace directory has no manifest entry',
       },
       {
         check: 'missing-directory',
@@ -83,7 +83,7 @@ describe('ProjectConsistencyRepairStrip', () => {
       props: { projectRoot: '/projects/demo' },
     })
 
-    expect(wrapper.text()).toContain('1 out-of-sync manifest entry')
+    expect(wrapper.text()).toContain('1 unregistered workspace directory')
     expect(wrapper.text()).toContain('1 missing workspace directory')
     expect(wrapper.findAll('button')).toHaveLength(1)
   })
@@ -99,7 +99,7 @@ describe('ProjectConsistencyRepairStrip', () => {
       inconsistent: 2,
       fixed: 2,
       findings: [
-        { ...failedReport().findings[0]!, fix: 'rebuilt' },
+        { ...failedReport().findings[0]!, fix: 'registered' },
         { ...failedReport().findings[1]!, fix: 'removed' },
       ],
     })
@@ -135,7 +135,7 @@ describe('ProjectConsistencyRepairStrip', () => {
       inconsistent: 2,
       fixed: 1,
       findings: [
-        { ...failedReport().findings[0]!, fix: 'rebuilt' },
+        { ...failedReport().findings[0]!, fix: 'registered' },
         {
           ...failedReport().findings[1]!,
           fix: 'failed',

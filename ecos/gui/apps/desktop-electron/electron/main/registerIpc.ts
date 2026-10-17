@@ -313,6 +313,13 @@ export interface DesktopBridgeServices {
       request: DesktopProjectManagementWorkspaceStepConfigurationRequest,
     ): Promise<DesktopProjectManagementWorkspaceStepConfigurationResult>
   }
+  projectWorkspaceFlowService?: {
+    watch(
+      windowId: number,
+      request: import('@ecos-studio/shared').ProjectWorkspaceFlowsRequest,
+    ): Promise<import('@ecos-studio/shared').ProjectWorkspaceFlows>
+    onChanged(listener: (windowId: number) => void): () => void
+  }
   backendWorkspaceService: {
     clearWindow(windowId: number): void
     getArtifact(
@@ -409,6 +416,7 @@ export interface DesktopBridgeServices {
     ): Promise<DesktopProjectTextFileChunk | null>
     listPendingExternalReadRoots?(): Promise<string[]>
     registerProjectManagementReadRoot(path: string): Promise<string>
+    authorizeProjectManagementReadRoot(path: string): Promise<string>
     registerProjectReadRoot(path: string): Promise<string>
     registerProjectRoot(path: string): Promise<string>
     requestProjectPathAccess(path: string): Promise<string>
@@ -992,6 +1000,13 @@ export function registerIpc(
       desktopApiEventChannels.backendProjectComparisonInvalidated,
       event,
     )
+  })
+  services.projectWorkspaceFlowService?.onChanged((windowId) => {
+    const window = BrowserWindow.getAllWindows().find(
+      (item) => item.webContents.id === windowId,
+    )
+    if (window && !window.isDestroyed())
+      window.webContents.send(desktopApiEventChannels.projectWorkspaceFlowsChanged)
   })
   services.backendProjectComparisonService.onExecutionInvalidated((windowId, event) => {
     const targetWindow = BrowserWindow.getAllWindows().find(
@@ -2232,6 +2247,18 @@ export function registerIpc(
         throw new Error('Project management projectRoot must be a string.')
       }
       return await services.projectManagementReadService.readManifest(projectRoot)
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.projectManagementWatchWorkspaceFlows,
+    async (event, request) => {
+      if (!services.projectWorkspaceFlowService)
+        throw new Error('Workspace Flow reads are unavailable.')
+      return await services.projectWorkspaceFlowService.watch(
+        event.sender.id,
+        request as import('@ecos-studio/shared').ProjectWorkspaceFlowsRequest,
+      )
     },
   )
 

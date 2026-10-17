@@ -90,6 +90,7 @@ export async function createBackendProject(
 export interface CreateWorkspaceInput {
   projectRoot: string
   projectId: string
+  workspaceName?: string
   designName: string
   topModule: string
   clockPort: string
@@ -100,7 +101,7 @@ export interface CreateWorkspaceInput {
 }
 
 /**
- * Create the e2e workspace as <projectRoot>/default so produced workspaces
+ * Default to <projectRoot>/default so produced workspaces
  * satisfy the signoff-lit layout (<name>/default/home/flow.json). RTL was
  * imported at project creation; the workspace reuses the project design RTL,
  * so rtl/filelist inputs are dropped here.
@@ -109,7 +110,7 @@ export async function createDefaultWorkspace(
   page: Page,
   input: CreateWorkspaceInput,
 ): Promise<WorkspaceJourney> {
-  const targetDirectory = join(input.projectRoot, 'default')
+  const targetDirectory = join(input.projectRoot, input.workspaceName ?? 'default')
   const workspaceInputs = input.inputs.filter(
     (item) => item.role !== 'rtl' && item.role !== 'filelist',
   )
@@ -172,13 +173,12 @@ export async function registerWorkspaceRoot(
 
 /**
  * Perform the renderer-side bookkeeping the creation wizard would have done
- * (recent-Workspaces entry + creation journal completion), then open the
- * workspace through the real Project Management "Open" action. This drives
- * useWorkspace.openProject so currentProject, the workspace session, and the
- * dashboard panels are live — without it the UI renders empty placeholder
- * views and milestone screenshots carry no evidence.
+ * (recent-Workspaces entry + creation journal completion).
  */
-export async function openWorkspaceInUi(page: Page, ws: WorkspaceJourney): Promise<void> {
+export async function registerWorkspaceInApp(
+  page: Page,
+  ws: WorkspaceJourney,
+): Promise<void> {
   await page.evaluate(
     async ({ workspaceDir, creationId }) => {
       const entry = {
@@ -207,6 +207,11 @@ export async function openWorkspaceInUi(page: Page, ws: WorkspaceJourney): Promi
     },
     { workspaceDir: ws.workspaceDir, creationId: ws.creationId },
   )
+}
+
+/** Open through Project Management so the dashboard shows live Workspace data. */
+export async function openWorkspaceInUi(page: Page, ws: WorkspaceJourney): Promise<void> {
+  await registerWorkspaceInApp(page, ws)
 
   // Project Management loads its list on mount (migrating recent_projects on
   // first run), so a fresh navigation makes the created workspace visible.

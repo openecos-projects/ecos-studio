@@ -500,6 +500,39 @@ export class ProjectScopeService {
     return canonicalPath
   }
 
+  async authorizeProjectManagementReadRoot(path: string): Promise<string> {
+    const windowId = requireWindowScopeId()
+    const canonicalPath = await this.resolveProjectRoot(path)
+    if (
+      this.rootsByWindowId.get(windowId) === canonicalPath ||
+      this.readScopesByWindowId.get(windowId)?.projectRoot === canonicalPath ||
+      this.projectManagementReadScopesByWindowId.get(windowId)?.projectRoot ===
+        canonicalPath
+    ) {
+      return canonicalPath
+    }
+
+    // Project Management may inspect the project that owns the active workspace.
+    // The active root is a workspace after opening one, so exact-root checks above
+    // cannot authorize its containing project.
+    const activeRoot = this.rootsByWindowId.get(windowId)
+    if (activeRoot && this.loadProjectManifest) {
+      try {
+        const manifest = await this.loadProjectManifest(canonicalPath)
+        const workspaceRoots = await manifestWorkspaceRoots(manifest, canonicalPath)
+        if (
+          workspaceRoots.some((workspaceRoot) => pathsEqual(workspaceRoot, activeRoot))
+        ) {
+          return canonicalPath
+        }
+      } catch {
+        // Fall through to the existing project-management scope error.
+      }
+    }
+
+    throw projectPathAccessDeniedError(canonicalPath, 'project management scope')
+  }
+
   async clearProjectRoot(): Promise<void> {
     const windowId = requireWindowScopeId()
     this.rootsByWindowId.delete(windowId)

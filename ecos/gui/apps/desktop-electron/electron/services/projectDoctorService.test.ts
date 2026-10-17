@@ -43,6 +43,50 @@ const findingsReport = {
 }
 
 describe('ProjectDoctorService', () => {
+  it('preserves failure status while ignoring obsolete execution-cache findings', async () => {
+    const { root, service, callRuntime } = await createService()
+    callRuntime.mockResolvedValue({
+      ...findingsReport,
+      findings: [
+        {
+          ...findingsReport.findings[0],
+          check: 'derived-field-mismatch',
+          detail: 'derived fields disagree with directory facts: status, parameter_patch',
+        },
+      ],
+    })
+
+    expect(await service.check(root)).toMatchObject({
+      status: 'failed',
+      inconsistent: 0,
+      findings: [],
+    })
+  })
+
+  it.each(['invalid-workspace', 'derived-field-mismatch'])(
+    'reports unreadable workspace files from a %s finding',
+    async (check) => {
+      const { root, service, callRuntime } = await createService()
+      const report = {
+        ...findingsReport,
+        findings: [
+          {
+            ...findingsReport.findings[0],
+            check: 'invalid-workspace',
+            detail:
+              'workspace facts unreadable: workspace flow.json is missing or malformed',
+          },
+        ],
+      }
+      callRuntime.mockResolvedValue({
+        ...report,
+        findings: [{ ...report.findings[0], check }],
+      })
+
+      expect(await service.check(root)).toEqual(report)
+    },
+  )
+
   it('checks consistency through the ECC runtime with the canonical project root', async () => {
     const { root, service, callRuntime } = await createService()
     callRuntime.mockResolvedValue(findingsReport)

@@ -432,14 +432,25 @@ Show fewer**):
 - **New** — create a workspace under this project (opens the wizard with the
   directory locked to the project).
 - **⋯** — **Import workspace** (register an on-disk workspace into the
-  project's `project.json`; already-registered workspaces are reported) or
+  project's `project.json`; already-registered workspaces are reported),
+  **Check project** (backend projects only; explicitly run the full consistency
+  check and show repair actions for any findings), or
   **Remove project** (removes the project from the list only — files stay on
   disk and can be re-imported).
 
 **Workspace rows** show the workspace ID, its step range
 (`startStep -> endStep`), provenance (`from <workspace> / <step>` when derived),
 and status: while executing, the current operation and a running/queued/
-cancelling badge; otherwise the flow status plus the last verification time.
+cancelling badge; otherwise the current flow status.
+Running backend rows name the actual executing flow step, for example
+**Synthesis running** or **macroPlacement running**, and update as the flow advances.
+
+Backend flow status is loaded only for displayed workspace rows. Collapsed
+projects and rows hidden by the preview limit do not load their flow files;
+expanding them loads their current state. Displayed rows update when their flow
+files change. Unreadable or missing state shows **Status unavailable**, while
+an unfinished execution whose process is gone shows **Interrupted**. Browsing
+the list does not run a full consistency scan or repair workspace state.
 
 - **Open** — open the workspace.
 - **⋯** — **Create from output** or **Delete workspace** (red).

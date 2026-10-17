@@ -13,8 +13,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { BackendProjectActiveOperation } from '@ecos-studio/shared'
+import type { ProjectWorkspace } from '@/utils/projectManagement'
 
-const props = defineProps<{ operations: BackendProjectActiveOperation[] }>()
+const props = defineProps<{
+  operations: BackendProjectActiveOperation[]
+  flowHint?: ProjectWorkspace['flowStatusHint']
+}>()
 
 const current = computed(
   () =>
@@ -31,6 +35,8 @@ const label = computed(() => {
   if (!current.value) return ''
   const operation = current.value
   const count = props.operations.length > 1 ? ` +${props.operations.length - 1}` : ''
+  if (action.value === 'running' && props.flowHint?.state === 'running')
+    return `${props.flowHint.label}${count}`
   return `${operation.step ? `${operation.step} ` : ''}${action.value}${count}`
 })
 const icon = computed(() =>

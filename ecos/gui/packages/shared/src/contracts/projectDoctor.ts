@@ -1,9 +1,9 @@
 /**
  * Project doctor (project.json ↔ workspace-directory consistency) contracts.
  *
- * Field names mirror ECC's `project.doctor.check` / `project.doctor.repair`
- * RPC records verbatim (`workspace_id`, `fix_detail`, ...) so the Electron
- * bridge can pass results through without a translation layer.
+ * Field names mirror ECC CLI doctor records (`workspace_id`, `fix_detail`, ...).
+ * Execution state and parameters are read from workspace files; cached manifest
+ * fields are not consistency findings.
  */
 
 export type ProjectDoctorCheckStatus = 'ok' | 'failed' | 'not_applicable'
@@ -19,7 +19,7 @@ export type ProjectDoctorFixAction =
   | 'failed'
 
 export interface ProjectDoctorFinding {
-  check: 'derived-field-mismatch' | 'missing-directory' | 'unregistered-directory'
+  check: 'invalid-workspace' | 'missing-directory' | 'unregistered-directory'
   status: 'fail'
   workspace_id: string
   workspace: string
