@@ -5,6 +5,7 @@ import { mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { launchE2EApp, repoRoot, resolveOutDir, type E2EApp } from './support/launch'
 import { prepareDesign, type E2EDesign } from './support/design'
+import { readChecklistCardMismatches, readFlowSteps } from './support/flow'
 import { createMilestoneShots } from './support/screenshots'
 import {
   cancelFlow,
@@ -16,7 +17,6 @@ import {
   readOperationLog,
   readOverviewStepStates,
   registerWorkspaceRoot,
-  runFlow,
   waitFlowTerminal,
   waitToolchainReady,
   type WorkspaceJourney,
@@ -35,20 +35,6 @@ async function expectedEccVersion(): Promise<string> {
     /-(alpha|beta|rc)\./,
     (_, label) => `${{ alpha: 'a', beta: 'b', rc: 'rc' }[label as string]}`,
   )
-}
-
-async function readFlowSteps(
-  workspaceDir: string,
-): Promise<Array<{ name: string; state: string }>> {
-  const flow = JSON.parse(
-    await readFile(join(workspaceDir, 'home/flow.json'), 'utf8'),
-  ) as {
-    steps?: Array<{ name?: string; id?: string; state?: string }>
-  }
-  return (flow.steps ?? []).map((step) => ({
-    name: step.name ?? step.id ?? '?',
-    state: step.state ?? '?',
-  }))
 }
 
 async function readQualityGateFailures(workspaceDir: string): Promise<string[]> {
@@ -151,7 +137,11 @@ describe('product e2e: backend rtl2gds journey', () => {
     'keeps Workspace Flow cards and the run control synchronized during the rtl2gds flow',
     async () => {
       const page = launched!.page
+      await page.evaluate(() => {
+        window.location.hash = '#/workspace/home'
+      })
       const flowDashboard = page.locator('.workspace-flow-dashboard')
+      await flowDashboard.waitFor({ state: 'visible' })
       const runControl = flowDashboard.locator('.flow-header .flow-run-icon-button')
       const readFlowCardStatus = async (stepName: string) =>
         flowDashboard.locator('.flow-step-card').evaluateAll((cards, name) => {
@@ -163,8 +153,22 @@ describe('product e2e: backend rtl2gds journey', () => {
           return card?.getAttribute('data-status') ?? null
         }, stepName)
       const deadline = Date.now() + FLOW_TIMEOUT_MS
-      const operation = await runFlow(page, workspace!)
-      operationId = operation.operationId
+      await runControl.click()
+      await expect
+        .poll(
+          async () => {
+            const projection = await page.evaluate(() =>
+              window.ecosDesktop.ecc.runtime.operationProjection(),
+            )
+            operationId = projection.operations.find(
+              (operation) => operation.workspaceDirectory === workspace!.workspaceDir,
+            )?.operationId
+            return operationId
+          },
+          { timeout: 30_000 },
+        )
+        .toBeTruthy()
+      if (!operationId) throw new Error('GUI run control did not start an ECC operation')
       let terminal
       try {
         await shot('flow-running', '#/workspace/home')
@@ -228,6 +232,11 @@ describe('product e2e: backend rtl2gds journey', () => {
         )
         .toEqual({ allSuccess: true, cardsSucceeded: true, runBusy: 'false' })
       await shot('workspace-flow-completed')
+      await expect
+        .poll(() => readChecklistCardMismatches(page, workspace!.workspaceDir), {
+          timeout: 30_000,
+        })
+        .toEqual([])
     },
     FLOW_TIMEOUT_MS + 120_000,
   )

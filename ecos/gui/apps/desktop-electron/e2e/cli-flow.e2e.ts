@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { launchE2EApp, repoRoot, resolveOutDir, type E2EApp } from './support/launch'
 import { prepareDesign, type E2EDesign } from './support/design'
+import { readChecklistCardMismatches, readFlowSteps } from './support/flow'
+import { shellQuote } from '../electron/services/cliInstallerArtifacts'
 import { createMilestoneShots } from './support/screenshots'
 import {
   openWorkspaceInUi,
@@ -26,20 +28,6 @@ async function waitForFile(path: string, timeoutMs: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 500))
   }
   throw new Error(`file did not appear within ${timeoutMs}ms: ${path}`)
-}
-
-async function readFlowSteps(
-  workspaceDir: string,
-): Promise<Array<{ name: string; state: string }>> {
-  const flow = JSON.parse(
-    await readFile(join(workspaceDir, 'home/flow.json'), 'utf8'),
-  ) as {
-    steps?: Array<{ name?: string; id?: string; state?: string }>
-  }
-  return (flow.steps ?? []).map((step) => ({
-    name: step.name ?? step.id ?? '?',
-    state: step.state ?? '?',
-  }))
 }
 
 async function typeTerminalCommand(page: E2EApp['page'], command: string): Promise<void> {
@@ -83,23 +71,63 @@ describe('product e2e: CLI-started rtl2gds journey', () => {
       const runLog = join(outDir, 'cli-run.log')
       const pdkRoot =
         process.env.ECOS_E2E_PDK_ROOT ?? join(repoRoot, 'pdk/icsprout55-pdk')
-      const rtlSource = design.rtlImport.verilog?.[0]
-      if (!rtlSource) throw new Error('The CLI E2E requires a Verilog RTL source.')
-
-      const setupCommand = [
-        `rm -rf "${projectRoot}"`,
-        `mkdir -p "${projectRoot}"`,
-        `ecc init "${projectRoot}" --project-name gcd-cli-e2e --design-name ${design.designName} --plain > "${outDir}/cli-init.log" 2>&1; a=$?`,
-        `ecc rtl import --project "${projectRoot}" --verilog "${rtlSource}" --plain > "${outDir}/cli-rtl.log" 2>&1; b=$?`,
-        `ecc pdk set-root "${pdkRoot}" --project "${projectRoot}" --plain > "${outDir}/cli-pdk.log" 2>&1; c=$?`,
-        `ecc workspace create default --project "${projectRoot}" --plain > "${outDir}/cli-workspace.log" 2>&1; d=$?`,
-        `printf 'init=%s rtl=%s pdk=%s workspace=%s\n' "$a" "$b" "$c" "$d" > "${setupMarker}"`,
-      ].join('; ')
+      const setupScript = join(outDir, 'cli-setup.sh')
+      const setupLog = join(outDir, 'cli-setup.log')
+      const eccCommand = (...args: string[]) =>
+        ['ecc', ...args, '--project', projectRoot, '--plain'].map(shellQuote).join(' ')
+      const rtlArgs = design.rtlImport.filelist
+        ? ['--filelist', design.rtlImport.filelist]
+        : (design.rtlImport.verilog ?? []).flatMap((path) => ['--verilog', path])
+      if (!rtlArgs.length) throw new Error('The CLI E2E requires RTL sources.')
+      const parameters = {
+        'design.frequency_mhz': design.frequencyMhz,
+        ...design.parameters,
+      }
+      await writeFile(
+        setupScript,
+        [
+          'set -euo pipefail',
+          [
+            'ecc',
+            'init',
+            projectRoot,
+            '--project-name',
+            `${design.name}-cli-e2e`,
+            '--design-name',
+            design.designName,
+            '--plain',
+          ]
+            .map(shellQuote)
+            .join(' '),
+          eccCommand('rtl', 'import', ...rtlArgs),
+          eccCommand('pdk', 'set-root', pdkRoot),
+          eccCommand('project', 'set', 'design.top', design.topModule),
+          eccCommand('project', 'set', 'design.clock_port', design.clockPort),
+          ...design.inputs.map((input) => {
+            if (input.role !== 'sdc')
+              throw new Error(`Unsupported CLI E2E input: ${input.role}`)
+            return eccCommand('project', 'set', 'design.sdc', input.path)
+          }),
+          ...Object.entries(parameters).map(([key, value]) =>
+            eccCommand(
+              'param',
+              'set',
+              key,
+              typeof value === 'string' ? value : JSON.stringify(value),
+            ),
+          ),
+          eccCommand('workspace', 'create', 'default'),
+          '',
+        ].join('\n'),
+      )
+      const setupCommand = `bash ${shellQuote(setupScript)} > ${shellQuote(setupLog)} 2>&1; printf 'setup=%s\\n' "$?" > ${shellQuote(setupMarker)}`
       await typeTerminalCommand(page, setupCommand)
       await waitForFile(setupMarker, 180_000)
-      expect(await readFile(setupMarker, 'utf8')).toContain(
-        'init=0 rtl=0 pdk=0 workspace=0',
-      )
+      const setupOutput = await readFile(setupLog, 'utf8')
+      expect(
+        await readFile(setupMarker, 'utf8'),
+        `CLI setup output:\n${setupOutput}`,
+      ).toContain('setup=0')
 
       workspace = {
         projectRoot,
@@ -124,9 +152,7 @@ describe('product e2e: CLI-started rtl2gds journey', () => {
           return card?.getAttribute('data-status') ?? null
         }, stepName)
 
-      const command = [
-        `ecc run --project "${projectRoot}" --workspace default --plain > "${runLog}" 2>&1; printf 'run=%s\n' "$?" > "${runMarker}"`,
-      ].join('; ')
+      const command = `${eccCommand('run', '--workspace', 'default')} > ${shellQuote(runLog)} 2>&1; printf 'run=%s\\n' "$?" > ${shellQuote(runMarker)}`
       await typeTerminalCommand(page, command)
       if (await page.locator('.ecos-terminal-panel').isVisible()) {
         await page.locator('.status-terminal-toggle').click()
@@ -177,6 +203,11 @@ describe('product e2e: CLI-started rtl2gds journey', () => {
         )
         .toEqual({ allSuccess: true, cardsSucceeded: true, runBusy: 'false' })
       await shot('cli-flow-completed')
+      await expect
+        .poll(() => readChecklistCardMismatches(page, workspaceDir), {
+          timeout: 30_000,
+        })
+        .toEqual([])
     },
     FLOW_TIMEOUT_MS + 300_000,
   )

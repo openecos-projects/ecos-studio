@@ -85,13 +85,27 @@ In CI the `e2e-desktop-flow` job fans out over the rtl2gds-capable ecc-ci-design
 excluded on pull requests). The job also runs on the nightly schedule, which
 is the main coverage for aes and for drift in the ecc-ci-designs default branch.
 OSS CAD Suite uses the known-good version pinned in `.github/workflows/ci.yml`,
-aligned with the pinned ECC runtime's CI. The local GCD
+aligned with the pinned ECC runtime's CI. Desktop E2E also uses ECC CI's
+`ubuntu-latest` runner, Kepler installer action, and Nix-pinned lit and LLVM
+FileCheck from `ecc#signoff-tools`. The ECC bundle, PDK, and Sizer all come from
+the same workflow run for the exact pinned ECC commit. Designs without an EMIR
+technology file use ECC's synthetic ICS55 fixture for flow testing; it is not
+foundry signoff data. The local GCD
 configuration runs the complete E2E Desktop Flow suite, including concurrent
 Workspace and built-in CLI journeys; every upstream matrix entry runs only the rtl2gds journey
 (`vitest run --config vitest.e2e.config.ts rtl2gds`). Each matrix entry uploads its own
 `e2e-flow-workspace-<design>` artifact. A fan-in `E2E Desktop Flow` job
 aggregates the matrix into a single stable check name that branch rulesets
 require.
+
+The rtl2gds journey starts execution with the visible Flow run button and
+observes the resulting ECC operation. The terminal journey initializes the
+project with ECC CLI commands, applies design declarations and parameters before
+workspace creation, and starts the flow in the built-in terminal. Both verify
+running/completed cards and checklist badges against the persisted
+`home/flow.json`, including advisory `attention` states shown as warnings.
+Each app launch uses an isolated HOME and XDG directories so host shell startup
+files and user-installed ECC commands cannot replace the selected test runtime.
 
 Before publishing GUI source or configuration changes, run `pnpm run check`.
 Also run the production build when changing build configuration, preload/main

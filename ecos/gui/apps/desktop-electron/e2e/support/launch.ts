@@ -51,6 +51,10 @@ export async function launchE2EApp(
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined) env[key] = value
   }
+  const isolatedHome = join(outDir, 'home')
+  await mkdir(isolatedHome, { recursive: true })
+  env.HOME = isolatedHome
+  delete env.ELECTRON_RUN_AS_NODE
   for (const [key, sub] of [
     ['XDG_DATA_HOME', 'data'],
     ['XDG_STATE_HOME', 'state'],

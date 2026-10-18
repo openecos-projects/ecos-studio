@@ -75,6 +75,7 @@ jobs:
               - 'ecos/agent/**'
               - '.github/scripts/**'
             ci:
+              - '.github/actions/**'
               - '.github/workflows/**'
             e2e:
               - 'ecos/gui/apps/desktop-electron/e2e/**'
@@ -290,7 +291,10 @@ jobs:
           needs.changes.outputs.e2e == 'true' ||
           needs.changes.outputs.ci == 'true'))
       }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
+    env:
+      ECOS_E2E_DESIGN_DIR: ${{ github.workspace }}/.scratch/ecc-ci-designs/${{ matrix.design }}
+      ECOS_E2E_LIT_SUITE: ${{ github.workspace }}/.scratch/ecc-ci-designs
     # Must stay above the in-test flow watchdog (75min) so its catch block can capture evidence first.
     timeout-minutes: 90
     strategy:
@@ -307,18 +311,16 @@ jobs:
         # ecc/nix/scripts/signoff-lit.sh; only ecc is needed.
         run: git -C "${{ github.workspace }}" submodule update --init ecc
 
+      - name: Configure E2E Environment
+        run: echo "ECOS_E2E_OUT=$RUNNER_TEMP/e2e-out" >> "$GITHUB_ENV"
+
       - name: Install Linux GUI Dependencies
         uses: ./.github/actions/install-gui-linux-deps
         with:
-          extra-packages: xvfb libasound2 jq
+          extra-packages: xvfb jq
 
       - name: Set Up Node.js
         uses: ./.github/actions/setup-node-pnpm
-
-      - name: Set Up uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: 0.11.12
 
       - name: Install Dependencies
         working-directory: ecos/gui
@@ -328,12 +330,20 @@ jobs:
         working-directory: ecos/gui
         run: pnpm run desktop:build
 
-      - name: Install Signoff Tools
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v19
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Nix store
+        uses: DeterminateSystems/magic-nix-cache-action@v15
+
+      - name: Install ECC Signoff Tools
         run: |
-          uv venv "$RUNNER_TEMP/lit-tools"
-          # ecc-ci-designs uses ShTest(execute_external=True), rejected by lit>=23.
-          uv pip install --python "$RUNNER_TEMP/lit-tools/bin/python" 'lit<23' filecheck
-          echo "$RUNNER_TEMP/lit-tools/bin" >> "$GITHUB_PATH"
+          nix build -L ./ecc#signoff-tools --out-link "$RUNNER_TEMP/signoff-tools"
+          echo "$RUNNER_TEMP/signoff-tools/bin" >> "$GITHUB_PATH"
+          echo "FILECHECK=$RUNNER_TEMP/signoff-tools/bin/FileCheck" >> "$GITHUB_ENV"
+          echo "LIT=$RUNNER_TEMP/signoff-tools/bin/lit" >> "$GITHUB_ENV"
 
       - name: Download ECC Runtime Artifacts for the Pinned Submodule
         env:
@@ -379,39 +389,16 @@ jobs:
           echo "CHIPCOMPILER_ECC_SIZER_ROOT=$RUNNER_TEMP/ecc-sizer" >> "$GITHUB_ENV"
 
       - name: Set Up kepler-formal
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          run_id=""
-          # TODO: drop the fallback once the kepler-formal package workflow
-          # publishes successful runs on main (mirrors ECC CI).
-          for branch in main emin/add-ci-pkgs; do
-            run_id="$(
-              gh api "repos/openecos-projects/kepler-formal/actions/workflows/package.yml/runs?branch=${branch}&status=success&per_page=1" \
-                --jq '[.workflow_runs[] | select(.conclusion == "success") | .id][0] // empty'
-            )"
-            [ -n "$run_id" ] && break
-          done
-          if [ -z "$run_id" ]; then
-            echo "::error::No successful kepler-formal package run found"
-            exit 1
-          fi
-          install_root="$RUNNER_TEMP/kepler-formal"
-          mkdir -p "$install_root"
-          gh run download "$run_id" \
-            --repo openecos-projects/kepler-formal \
-            --name kepler-formal-linux-x64 \
-            --dir "$install_root"
-          tar -xzf "$install_root/kepler-formal-linux-x64.tar.gz" -C "$install_root"
-          marker="$(find "$install_root" -type f -path '*/bin/kepler-formal' -print -quit)"
-          if [ -z "$marker" ]; then
-            echo "::error::Extracted kepler-formal is missing bin/kepler-formal"
-            exit 1
-          fi
-          tool_root="${marker%/bin/kepler-formal}"
-          echo "${tool_root}/bin" >> "$GITHUB_PATH"
-          echo "CHIPCOMPILER_KEPLER_FORMAL_ROOT=${tool_root}" >> "$GITHUB_ENV"
+        uses: ./ecc/.github/actions/install-ci-tool
+        with:
+          repo: openecos-projects/kepler-formal
+          workflow: package.yml
+          artifact: kepler-formal-linux-x64
+          archive: kepler-formal-linux-x64.tar.gz
+          root-marker: bin/kepler-formal
+          root-env: CHIPCOMPILER_KEPLER_FORMAL_ROOT
+          fallback-branch: emin/add-ci-pkgs
+          github-token: ${{ github.token }}
 
       - name: Set Up OSS CAD Suite
         uses: YosysHQ/setup-oss-cad-suite@v4
@@ -435,9 +422,6 @@ jobs:
         env:
           ELECTRON_DISABLE_SANDBOX: '1'
           ECOS_ELECTRON_DISABLE_GPU: '1'
-          ECOS_E2E_OUT: ${{ runner.temp }}/e2e-out
-          ECOS_E2E_DESIGN_DIR: ${{ github.workspace }}/.scratch/ecc-ci-designs/${{ matrix.design }}
-          ECOS_E2E_LIT_SUITE: ${{ github.workspace }}/.scratch/ecc-ci-designs
         run: |
           if [ "${{ matrix.design }}" = "usb" ]; then
             # USB uses the fast journey configuration; large designs stay
