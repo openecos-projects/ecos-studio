@@ -147,7 +147,15 @@ export async function prepareGcdProject(workRoot: string): Promise<E2EDesign> {
 /** ECOS_E2E_DESIGN_DIR selects an ecc-ci-designs style design; gcd otherwise. */
 export async function prepareDesign(workRoot: string): Promise<E2EDesign> {
   const designDir = process.env.ECOS_E2E_DESIGN_DIR
-  return designDir
+  const design = await (designDir
     ? prepareDesignProject(designDir, workRoot)
-    : prepareGcdProject(workRoot)
+    : prepareGcdProject(workRoot))
+  if (design.parameters['emir.technology_file_path'] == null) {
+    design.parameters['emir.technology_file_path'] = join(
+      repoRoot,
+      'ecc/test/fixtures/emir/ics55_synthetic.tech',
+    )
+    console.warn('EMIR uses synthetic process data for flow testing, not signoff.')
+  }
+  return design
 }
