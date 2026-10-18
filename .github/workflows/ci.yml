@@ -8,9 +8,6 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
-  # Nightly on main: the E2E matrix runs the full design set
-  # (including aes) and catches drift in the ecc-ci-designs default branch
-  # before it ambushes an unrelated PR.
   schedule:
     - cron: "43 19 * * *"
 
@@ -70,6 +67,7 @@ jobs:
             ci:
               - '.github/actions/**'
               - '.github/workflows/**'
+              - '.github/ecc-ci-toolchain.json'
             e2e:
               - 'ecos/gui/apps/desktop-electron/e2e/**'
               - 'ecos/gui/apps/desktop-electron/vitest.e2e.config.ts'
