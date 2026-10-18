@@ -6,9 +6,7 @@ on:
       - main
       - 'release/v*'
   pull_request:
-    # edited is included so Check Commit Messages re-lints the PR title; the
-    # heavy jobs guard on github.event.action != 'edited' and skip it.
-    types: [opened, synchronize, reopened, ready_for_review, edited]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
   # Nightly on main: the E2E matrix runs the full design set
   # (including aes) and catches drift in the ecc-ci-designs default branch
@@ -19,14 +17,9 @@ on:
 permissions:
   contents: read
 
-env:
-  OSS_CAD_SUITE_VERSION: "2026-10-14"
-
 concurrency:
-  # Edited-event runs (PR title/body lint) get their own group and never
-  # cancel others, so a metadata edit cannot kill an in-progress full run.
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event_name == 'pull_request' && github.event.action == 'edited' && '-edited' || '' }}
-  cancel-in-progress: ${{ github.event.action != 'edited' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   changes:
@@ -86,36 +79,6 @@ jobs:
               - 'ecos/README.md'
               - 'ecos/docs/**'
 
-  # PR-only lint: every commit in the PR range plus the PR title must satisfy
-  # the conventional-commit rules (commitlint.config.cjs), mirroring what the
-  # local lefthook commit-msg hook enforces.
-  commit-message:
-    name: Check Commit Messages
-    runs-on: ubuntu-22.04
-    timeout-minutes: 10
-    if: github.event_name == 'pull_request'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set Up Node.js
-        uses: ./.github/actions/setup-node-pnpm
-
-      - name: Install Dependencies
-        working-directory: ecos/gui
-        run: pnpm install --frozen-lockfile
-
-      - name: Lint Commit Messages and PR Title
-        working-directory: ecos/gui
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
-        run: |
-          pnpm exec commitlint --from "$PR_BASE" --to HEAD
-          printf '%s\n' "$PR_TITLE" | pnpm exec commitlint
-
   check-version:
     name: Check Version Consistency
     runs-on: ubuntu-22.04
@@ -123,7 +86,6 @@ jobs:
     needs: changes
     if: >-
       ${{
-        github.event.action != 'edited' &&
         (startsWith(github.ref, 'refs/heads/release/v') ||
         startsWith(github.base_ref, 'release/v') ||
         needs.changes.outputs.gui == 'true' ||
@@ -149,7 +111,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     needs: changes
-    if: ${{ github.event.action != 'edited' && (needs.changes.outputs.gui == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true') }}
+    if: ${{ needs.changes.outputs.gui == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
     defaults:
       run:
         working-directory: ecos/gui
@@ -199,7 +161,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     needs: changes
-    if: ${{ github.event.action != 'edited' && (needs.changes.outputs.chip_viewer == 'true' || needs.changes.outputs.ci == 'true') }}
+    if: ${{ needs.changes.outputs.chip_viewer == 'true' || needs.changes.outputs.ci == 'true' }}
     defaults:
       run:
         working-directory: ecos/chip-viewer
@@ -218,11 +180,9 @@ jobs:
       - name: Run Rust Tests
         run: cargo test --workspace
 
-  # Mirror ECC CI's e2e-designs listing so the desktop flow matrix tracks the
-  # upstream design set automatically. The local GCD configuration exercises the
-  # additional GUI, concurrent-workspace, and built-in-CLI journeys.
   e2e-designs:
     name: List e2e designs
+    needs: ecc-runtime
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     outputs:
@@ -232,6 +192,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: openecos-projects/ecc-ci-designs
+          ref: ${{ needs.ecc-runtime.outputs.designs_sha }}
           path: designs
 
       - name: List designs
@@ -258,16 +219,18 @@ jobs:
       ${{
         github.event_name == 'workflow_dispatch' ||
         github.event_name == 'schedule' ||
-        (github.event.action != 'edited' &&
-         (needs.changes.outputs.gui == 'true' ||
+        (needs.changes.outputs.gui == 'true' ||
           needs.changes.outputs.version == 'true' ||
           needs.changes.outputs.e2e == 'true' ||
-          needs.changes.outputs.ci == 'true'))
+          needs.changes.outputs.ci == 'true')
       }}
     runs-on: ubuntu-22.04
     timeout-minutes: 65
     outputs:
       run_id: ${{ steps.runtime.outputs.run_id }}
+      oss_cad_suite_version: ${{ steps.toolchain.outputs.oss_cad_suite_version }}
+      kepler_run_id: ${{ steps.toolchain.outputs.kepler_run_id }}
+      designs_sha: ${{ steps.toolchain.outputs.designs_sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -278,6 +241,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/wait-ecc-ci.sh "$(git rev-parse HEAD:ecc)"
 
+      - name: Test ECC Toolchain Resolution
+        run: python3 -B -m unittest discover -s .github/scripts/tests -p 'test_ecc_toolchain.py'
+
+      - name: Resolve the Toolchain Validated by ECC
+        id: toolchain
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ECC_CI_RUN_ID: ${{ steps.runtime.outputs.run_id }}
+        run: >-
+          python3 .github/scripts/resolve-ecc-toolchain.py "$ECC_CI_RUN_ID"
+          "$(git rev-parse HEAD:ecc)" --output "$RUNNER_TEMP/ecc-toolchain.json"
+
+      - name: Upload ECC Toolchain Provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecc-toolchain-provenance
+          path: ${{ runner.temp }}/ecc-toolchain.json
+          if-no-files-found: error
+          retention-days: 14
+
   e2e-desktop-flow:
     name: E2E Desktop Flow (${{ matrix.design }})
     needs: [changes, e2e-designs, ecc-runtime]
@@ -285,16 +268,18 @@ jobs:
       ${{
         github.event_name == 'workflow_dispatch' ||
         github.event_name == 'schedule' ||
-        (github.event.action != 'edited' &&
-         (needs.changes.outputs.gui == 'true' ||
+        (needs.changes.outputs.gui == 'true' ||
           needs.changes.outputs.version == 'true' ||
           needs.changes.outputs.e2e == 'true' ||
-          needs.changes.outputs.ci == 'true'))
+          needs.changes.outputs.ci == 'true')
       }}
     runs-on: ubuntu-latest
     env:
       ECOS_E2E_DESIGN_DIR: ${{ github.workspace }}/.scratch/ecc-ci-designs/${{ matrix.design }}
       ECOS_E2E_LIT_SUITE: ${{ github.workspace }}/.scratch/ecc-ci-designs
+      MALLOC_ARENA_MAX: '2'
+      MALLOC_TRIM_THRESHOLD_: '131072'
+      MALLOC_MMAP_THRESHOLD_: '131072'
     # Must stay above the in-test flow watchdog (75min) so its catch block can capture evidence first.
     timeout-minutes: 90
     strategy:
@@ -389,21 +374,30 @@ jobs:
           echo "CHIPCOMPILER_ECC_SIZER_ROOT=$RUNNER_TEMP/ecc-sizer" >> "$GITHUB_ENV"
 
       - name: Set Up kepler-formal
-        uses: ./ecc/.github/actions/install-ci-tool
-        with:
-          repo: openecos-projects/kepler-formal
-          workflow: package.yml
-          artifact: kepler-formal-linux-x64
-          archive: kepler-formal-linux-x64.tar.gz
-          root-marker: bin/kepler-formal
-          root-env: CHIPCOMPILER_KEPLER_FORMAL_ROOT
-          fallback-branch: emin/add-ci-pkgs
-          github-token: ${{ github.token }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEPLER_CI_RUN_ID: ${{ needs.ecc-runtime.outputs.kepler_run_id }}
+        run: |
+          set -euo pipefail
+          install_root="$RUNNER_TEMP/kepler-formal-linux-x64"
+          mkdir -p "$install_root"
+          gh run download "$KEPLER_CI_RUN_ID" --repo openecos-projects/kepler-formal \
+            --name kepler-formal-linux-x64 --dir "$install_root"
+          archive="$(find "$install_root" -name kepler-formal-linux-x64.tar.gz -print -quit)"
+          test -n "$archive"
+          python3 -c 'import sys, tarfile; tarfile.open(sys.argv[1]).extractall(sys.argv[2], filter="data")' \
+            "$archive" "$install_root"
+          marker="$(find "$install_root" -type f -path '*/bin/kepler-formal' -print -quit)"
+          test -n "$marker"
+          tool_root="${marker%/bin/kepler-formal}"
+          test -x "$marker"
+          echo "$tool_root/bin" >> "$GITHUB_PATH"
+          echo "CHIPCOMPILER_KEPLER_FORMAL_ROOT=$tool_root" >> "$GITHUB_ENV"
 
       - name: Set Up OSS CAD Suite
         uses: YosysHQ/setup-oss-cad-suite@v4
         with:
-          version: ${{ env.OSS_CAD_SUITE_VERSION }}
+          version: ${{ needs.ecc-runtime.outputs.oss_cad_suite_version }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Point ECC at OSS CAD Suite
@@ -415,6 +409,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: openecos-projects/ecc-ci-designs
+          ref: ${{ needs.ecc-runtime.outputs.designs_sha }}
           path: .scratch/ecc-ci-designs
 
       - name: Run design flows
@@ -456,23 +451,18 @@ jobs:
           retention-days: 14
           path: ${{ runner.temp }}/e2e-out
 
-  # Fan-in: one stable check name covering the whole design matrix, so branch
-  # rulesets can require one E2E check without naming every dynamic entry.
   e2e-desktop-flow-summary:
-    name: E2E Desktop Flow
+    name: Product E2E
     needs: [changes, e2e-designs, e2e-desktop-flow]
-    # Mirrors e2e-desktop-flow's gate so a skipped matrix yields a skipped summary
-    # (neutral for rulesets); always() lets it run to report matrix failures.
     if: >-
       ${{
         always() &&
         (github.event_name == 'workflow_dispatch' ||
          github.event_name == 'schedule' ||
-         (github.event.action != 'edited' &&
-          (needs.changes.outputs.gui == 'true' ||
+         (needs.changes.outputs.gui == 'true' ||
            needs.changes.outputs.version == 'true' ||
            needs.changes.outputs.e2e == 'true' ||
-           needs.changes.outputs.ci == 'true')))
+           needs.changes.outputs.ci == 'true'))
       }}
     runs-on: ubuntu-22.04
     timeout-minutes: 5
@@ -489,7 +479,6 @@ jobs:
     if: >-
       ${{
         always() &&
-        github.event.action != 'edited' &&
         (needs.changes.outputs.gui == 'true' ||
          needs.changes.outputs.chip_viewer == 'true' ||
          needs.changes.outputs.version == 'true' ||
@@ -576,7 +565,6 @@ jobs:
     if: >-
       ${{
         always() &&
-        github.event.action != 'edited' &&
         (needs.changes.outputs.gui == 'true' ||
          needs.changes.outputs.chip_viewer == 'true' ||
          needs.changes.outputs.version == 'true' ||
@@ -658,7 +646,6 @@ jobs:
     if: >-
       ${{
         always() &&
-        github.event.action != 'edited' &&
         (needs.changes.outputs.gui == 'true' ||
          needs.changes.outputs.chip_viewer == 'true' ||
          needs.changes.outputs.version == 'true' ||

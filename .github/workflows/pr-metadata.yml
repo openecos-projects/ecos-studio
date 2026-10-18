@@ -1,0 +1,39 @@
+name: PR Metadata
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  commit-message:
+    name: Check Commit Messages
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set Up Node.js
+        uses: ./.github/actions/setup-node-pnpm
+
+      - name: Install Dependencies
+        working-directory: ecos/gui
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint Commit Messages and PR Title
+        working-directory: ecos/gui
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          pnpm exec commitlint --from "$PR_BASE" --to HEAD
+          printf '%s\n' "$PR_TITLE" | pnpm exec commitlint

@@ -38,13 +38,21 @@ and [CONTRIBUTING.md](CONTRIBUTING.md) for setup and development workflows.
 
 ## Validation And CI
 
-- Treat `.github/workflows/ci.yml` as the source of truth for required CI jobs.
-  This includes the `e2e-product` job, which runs the product e2e suite
+- Treat `.github/workflows/ci.yml` as the source of truth for product CI jobs
+  and `.github/workflows/pr-metadata.yml` for commit and PR-title checks.
+  The `e2e-desktop-flow` job runs the product e2e suite
   (`ecos/gui/apps/desktop-electron/e2e/`, invoked via `pnpm run desktop:e2e`)
   across a matrix of ecc-ci-designs rtl2gds designs against the pinned ECC
   runtime artifacts (also on the nightly schedule, which covers the full
   design set including aes); see `ecos/gui/AGENTS.md` for the local
-  environment requirements.
+  environment requirements. Its `Product E2E` summary matches the required
+  main-branch check. PR title or description edits only run PR Metadata and
+  do not replace or cancel product CI results.
+- Resolve third-party E2E inputs from a successful packaged-design job in the
+  pinned ECC CI run. Keep PDK and Sizer artifacts in that same run, and reuse
+  its OSS CAD Suite release, Kepler artifact run, and design-suite commit.
+  Preserve the uploaded `ecc-toolchain-provenance` manifest when diagnosing
+  toolchain differences; do not substitute the latest available tools.
 - Run the narrowest relevant check while iterating, then run the local equivalent
   of every non-packaging CI job enabled by the changed paths. Use the commands in
   the affected component's scoped instructions.

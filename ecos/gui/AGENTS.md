@@ -94,9 +94,16 @@ foundry signoff data. The local GCD
 configuration runs the complete E2E Desktop Flow suite, including concurrent
 Workspace and built-in CLI journeys; every upstream matrix entry runs only the rtl2gds journey
 (`vitest run --config vitest.e2e.config.ts rtl2gds`). Each matrix entry uploads its own
-`e2e-flow-workspace-<design>` artifact. A fan-in `E2E Desktop Flow` job
+`e2e-flow-workspace-<design>` artifact. A fan-in `Product E2E` job
 aggregates the matrix into a single stable check name that branch rulesets
 require.
+
+Linux CI sets `MALLOC_ARENA_MAX=2`, `MALLOC_TRIM_THRESHOLD_=131072`, and
+`MALLOC_MMAP_THRESHOLD_=131072` to reduce native heap retention between EDA
+phases. These allocator limits
+do not change design parameters or signoff assertions. When reproducing memory
+failures locally, apply the memory limit to the Electron application scope and
+verify that its ECC children remain within that scope.
 
 The rtl2gds journey starts execution with the visible Flow run button and
 observes the resulting ECC operation. The terminal journey initializes the
