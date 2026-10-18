@@ -275,12 +275,17 @@ describe('product e2e: backend rtl2gds journey', () => {
     }
     const litCase = join(suite, design.name, `${design.name}.lit`)
     if (!existsSync(litCase)) {
-      console.log(`no lit case for design ${design.name}; skipping the signoff-lit gate`)
-      return
+      throw new Error(`Missing signoff-lit case for design ${design.name}: ${litCase}`)
     }
+    const escapedName = design.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const result = spawnSync(
       'bash',
-      [join(repoRoot, 'ecc/nix/scripts/signoff-lit.sh'), suite, '--filter', design.name],
+      [
+        join(repoRoot, 'ecc/nix/scripts/signoff-lit.sh'),
+        suite,
+        '--filter',
+        `${escapedName}/${escapedName}\\.lit$`,
+      ],
       {
         env: {
           ...process.env,
@@ -296,5 +301,6 @@ describe('product e2e: backend rtl2gds journey', () => {
       if (result.error) console.error(`signoff-lit spawn error: ${result.error.message}`)
     }
     expect(result.status).toBe(0)
+    expect(result.stdout).toMatch(/Passed\s*:\s*1\b/)
   }, 300_000)
 })

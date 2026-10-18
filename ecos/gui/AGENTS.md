@@ -106,6 +106,10 @@ running/completed cards and checklist badges against the persisted
 `home/flow.json`, including advisory `attention` states shown as warnings.
 Each app launch uses an isolated HOME and XDG directories so host shell startup
 files and user-installed ECC commands cannot replace the selected test runtime.
+The source directory name identifies each CI case and its workspace output;
+`design.name` and `design.top` remain the chip design declarations. With a lit
+suite configured, the matching case must exist and exactly one lit test must
+pass; missing or unsupported cases fail the gate.
 
 Before publishing GUI source or configuration changes, run `pnpm run check`.
 Also run the production build when changing build configuration, preload/main

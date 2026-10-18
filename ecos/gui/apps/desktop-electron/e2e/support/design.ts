@@ -68,7 +68,7 @@ export async function prepareDesignProject(
 ): Promise<E2EDesign> {
   const toml = parse(await readFile(join(designDir, 'ecc.toml'), 'utf8')) as EccTomlDesign
   const design = toml.design ?? {}
-  const name = design.name ?? basename(designDir)
+  const name = basename(designDir)
   const projectRoot = join(workRoot, name)
   const sourceRoot = join(workRoot, `${name}-src`)
   await mkdir(workRoot, { recursive: true })
