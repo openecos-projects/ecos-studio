@@ -480,7 +480,7 @@ jobs:
     needs: [changes, check-version, gui-checks, chip-viewer-rust]
     if: >-
       ${{
-        always() &&
+        !cancelled() &&
         (needs.changes.outputs.gui == 'true' ||
          needs.changes.outputs.chip_viewer == 'true' ||
          needs.changes.outputs.version == 'true' ||
@@ -566,7 +566,7 @@ jobs:
     needs: [changes, check-version, gui-checks, chip-viewer-rust]
     if: >-
       ${{
-        always() &&
+        !cancelled() &&
         (needs.changes.outputs.gui == 'true' ||
          needs.changes.outputs.chip_viewer == 'true' ||
          needs.changes.outputs.version == 'true' ||
@@ -647,7 +647,7 @@ jobs:
     needs: [changes, check-version, gui-checks, chip-viewer-rust]
     if: >-
       ${{
-        always() &&
+        !cancelled() &&
         (needs.changes.outputs.gui == 'true' ||
          needs.changes.outputs.chip_viewer == 'true' ||
          needs.changes.outputs.version == 'true' ||
