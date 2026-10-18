@@ -42,15 +42,16 @@ and [CONTRIBUTING.md](CONTRIBUTING.md) for setup and development workflows.
   and `.github/workflows/pr-metadata.yml` for commit and PR-title checks.
   The `e2e-desktop-flow` job runs the product e2e suite
   (`ecos/gui/apps/desktop-electron/e2e/`, invoked via `pnpm run desktop:e2e`)
-  across a matrix of ecc-ci-designs rtl2gds designs against the pinned ECC
-  runtime artifacts (also on the nightly schedule, which covers the full
-  design set including aes); see `ecos/gui/AGENTS.md` for the local
-  environment requirements. Its `Product E2E` summary matches the required
+  with the GCD example against the pinned ECC runtime artifacts on PRs,
+  main pushes, nightly schedules, and manual runs. ECC owns the full design
+  matrix and physical-signoff regression coverage; see `ecos/gui/AGENTS.md`
+  for the local environment requirements. Its `Product E2E` summary matches the required
   main-branch check. PR title or description edits only run PR Metadata and
   do not replace or cancel product CI results.
 - Resolve third-party E2E inputs from a successful packaged-design job in the
   pinned ECC CI run. Keep PDK and Sizer artifacts in that same run, and reuse
-  its OSS CAD Suite release, Kepler artifact run, and design-suite commit.
+  its OSS CAD Suite release and Kepler artifact run. The original ECC
+  design-suite commit remains recorded as provenance.
   Preserve the uploaded `ecc-toolchain-provenance` manifest when diagnosing
   toolchain differences; do not substitute the latest available tools.
   Update `.github/ecc-ci-toolchain.json` alongside an ECC pin change using

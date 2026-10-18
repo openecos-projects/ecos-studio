@@ -267,40 +267,45 @@ describe('product e2e: backend rtl2gds journey', () => {
     await shot('flow-success', '#/workspace/home')
   }, 120_000)
 
-  it('passes the signoff-lit artifact gate', () => {
-    const suite = process.env.ECOS_E2E_LIT_SUITE
-    if (!suite) {
-      console.log('ECOS_E2E_LIT_SUITE unset; skipping the signoff-lit gate')
-      return
-    }
-    const litCase = join(suite, design.name, `${design.name}.lit`)
-    if (!existsSync(litCase)) {
-      throw new Error(`Missing signoff-lit case for design ${design.name}: ${litCase}`)
-    }
-    const escapedName = design.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const result = spawnSync(
-      'bash',
-      [
-        join(repoRoot, 'ecc/nix/scripts/signoff-lit.sh'),
-        suite,
-        '--filter',
-        `${escapedName}/${escapedName}\\.lit$`,
-      ],
-      {
-        env: {
-          ...process.env,
-          ECC_REPO_ROOT: join(repoRoot, 'ecc'),
-          ECC_FLOW_WORKSPACES: join(outDir, 'work'),
+  it.skipIf(!process.env.ECOS_E2E_LIT_SUITE)(
+    'passes the signoff-lit artifact gate',
+    () => {
+      const suite = process.env.ECOS_E2E_LIT_SUITE
+      if (!suite) {
+        console.log('ECOS_E2E_LIT_SUITE unset; skipping the signoff-lit gate')
+        return
+      }
+      const litCase = join(suite, design.name, `${design.name}.lit`)
+      if (!existsSync(litCase)) {
+        throw new Error(`Missing signoff-lit case for design ${design.name}: ${litCase}`)
+      }
+      const escapedName = design.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const result = spawnSync(
+        'bash',
+        [
+          join(repoRoot, 'ecc/nix/scripts/signoff-lit.sh'),
+          suite,
+          '--filter',
+          `${escapedName}/${escapedName}\\.lit$`,
+        ],
+        {
+          env: {
+            ...process.env,
+            ECC_REPO_ROOT: join(repoRoot, 'ecc'),
+            ECC_FLOW_WORKSPACES: join(outDir, 'work'),
+          },
+          encoding: 'utf8',
         },
-        encoding: 'utf8',
-      },
-    )
-    if (result.status !== 0) {
-      console.error(`signoff-lit stdout:\n${result.stdout}`)
-      console.error(`signoff-lit stderr:\n${result.stderr}`)
-      if (result.error) console.error(`signoff-lit spawn error: ${result.error.message}`)
-    }
-    expect(result.status).toBe(0)
-    expect(result.stdout).toMatch(/Passed\s*:\s*1\b/)
-  }, 300_000)
+      )
+      if (result.status !== 0) {
+        console.error(`signoff-lit stdout:\n${result.stdout}`)
+        console.error(`signoff-lit stderr:\n${result.stderr}`)
+        if (result.error)
+          console.error(`signoff-lit spawn error: ${result.error.message}`)
+      }
+      expect(result.status).toBe(0)
+      expect(result.stdout).toMatch(/Passed\s*:\s*1\b/)
+    },
+    300_000,
+  )
 })

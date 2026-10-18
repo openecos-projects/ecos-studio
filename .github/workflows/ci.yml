@@ -179,38 +179,6 @@ jobs:
       - name: Run Rust Tests
         run: cargo test --workspace
 
-  e2e-designs:
-    name: List e2e designs
-    needs: ecc-runtime
-    runs-on: ubuntu-22.04
-    timeout-minutes: 10
-    outputs:
-      designs: ${{ steps.list.outputs.designs }}
-    steps:
-      - name: Checkout designs
-        uses: actions/checkout@v4
-        with:
-          repository: openecos-projects/ecc-ci-designs
-          ref: ${{ needs.ecc-runtime.outputs.designs_sha }}
-          path: designs
-
-      - name: List designs
-        id: list
-        run: |
-          # gcd_icg is a gate-level syn_sta fixture, not an rtl2gds journey.
-          # xtea is red upstream (hold WNS < 0). aes is ~50min of flow:
-          # excluded on pull requests, covered on main pushes, nightly,
-          # and manual runs.
-          excludes=(gcd_icg xtea)
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            excludes+=(aes)
-          fi
-          designs="$(find designs -mindepth 2 -maxdepth 2 -name ecc.toml -printf '%h\n' \
-            | xargs -n1 basename | grep -vxFf <(printf '%s\n' "${excludes[@]}") \
-            | jq -R . | jq -cs .)"
-          designs="$(jq -c '. + ["gcd"]' <<<"$designs")"
-          echo "designs=$designs" >> "$GITHUB_OUTPUT"
-
   ecc-runtime:
     name: Wait for Pinned ECC Runtime
     needs: changes
@@ -229,7 +197,6 @@ jobs:
       run_id: ${{ steps.runtime.outputs.run_id }}
       oss_cad_suite_version: ${{ steps.toolchain.outputs.oss_cad_suite_version }}
       kepler_run_id: ${{ steps.toolchain.outputs.kepler_run_id }}
-      designs_sha: ${{ steps.toolchain.outputs.designs_sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -263,8 +230,8 @@ jobs:
           retention-days: 14
 
   e2e-desktop-flow:
-    name: E2E Desktop Flow (${{ matrix.design }})
-    needs: [changes, e2e-designs, ecc-runtime]
+    name: E2E Desktop Flow (gcd)
+    needs: [changes, ecc-runtime]
     if: >-
       ${{
         github.event_name == 'workflow_dispatch' ||
@@ -276,25 +243,17 @@ jobs:
       }}
     runs-on: ubuntu-latest
     env:
-      ECOS_E2E_DESIGN_DIR: ${{ github.workspace }}/.scratch/ecc-ci-designs/${{ matrix.design }}
-      ECOS_E2E_LIT_SUITE: ${{ github.workspace }}/.scratch/ecc-ci-designs
+      ECOS_E2E_CONCURRENCY_START_AFTER_STEP: sta
       MALLOC_ARENA_MAX: '2'
       MALLOC_TRIM_THRESHOLD_: '131072'
       MALLOC_MMAP_THRESHOLD_: '131072'
     # Must stay above the in-test flow watchdog (75min) so its catch block can capture evidence first.
     timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        design: ${{ fromJSON(needs.e2e-designs.outputs.designs) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Checkout ECC Submodule
-        # The version assertion compares the app-reported ECC version against
-        # ecc/pyproject.toml, and the signoff gate reuses
-        # ecc/nix/scripts/signoff-lit.sh; only ecc is needed.
         run: git -C "${{ github.workspace }}" submodule update --init ecc
 
       - name: Configure E2E Environment
@@ -315,21 +274,6 @@ jobs:
       - name: Build Electron Bundles
         working-directory: ecos/gui
         run: pnpm run desktop:build
-
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v19
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Cache Nix store
-        uses: DeterminateSystems/magic-nix-cache-action@v15
-
-      - name: Install ECC Signoff Tools
-        run: |
-          nix build -L ./ecc#signoff-tools --out-link "$RUNNER_TEMP/signoff-tools"
-          echo "$RUNNER_TEMP/signoff-tools/bin" >> "$GITHUB_PATH"
-          echo "FILECHECK=$RUNNER_TEMP/signoff-tools/bin/FileCheck" >> "$GITHUB_ENV"
-          echo "LIT=$RUNNER_TEMP/signoff-tools/bin/lit" >> "$GITHUB_ENV"
 
       - name: Download ECC Runtime Artifacts for the Pinned Submodule
         env:
@@ -406,61 +350,38 @@ jobs:
           echo "CHIPCOMPILER_OSS_CAD_DIR=$(dirname "$(dirname "$(readlink -f "$(command -v yosys)")")")"
           >> "$GITHUB_ENV"
 
-      - name: Checkout designs
-        uses: actions/checkout@v4
-        with:
-          repository: openecos-projects/ecc-ci-designs
-          ref: ${{ needs.ecc-runtime.outputs.designs_sha }}
-          path: .scratch/ecc-ci-designs
-
       - name: Record Runner Memory
         run: |
           mkdir -p "$ECOS_E2E_OUT"
           free -b | tee "$ECOS_E2E_OUT/runner-memory.txt"
           nproc | tee "$ECOS_E2E_OUT/runner-cpu-count.txt"
 
-      - name: Run design flows
+      - name: Run GCD Product Journeys
         working-directory: ecos/gui
         env:
           ELECTRON_DISABLE_SANDBOX: '1'
           ECOS_ELECTRON_DISABLE_GPU: '1'
-        run: |
-          if [ "${{ matrix.design }}" = "usb" ]; then
-            # USB uses the fast journey configuration; large designs stay
-            # journey-only.
-            xvfb-run --auto-servernum pnpm --filter @ecos-studio/desktop-electron \
-              exec vitest run --config vitest.e2e.config.ts \
-              rtl2gds
-          elif [ "${{ matrix.design }}" = "gcd" ]; then
-            # The local GCD configuration uses the existing package script, which runs
-            # every desktop E2E file, including concurrency and CLI journeys.
-            unset ECOS_E2E_DESIGN_DIR ECOS_E2E_LIT_SUITE
-            xvfb-run --auto-servernum pnpm run desktop:e2e
-          else
-            xvfb-run --auto-servernum pnpm --filter @ecos-studio/desktop-electron \
-              exec vitest run --config vitest.e2e.config.ts rtl2gds
-          fi
+        run: xvfb-run --auto-servernum pnpm run desktop:e2e
 
       - name: Run Packaged Reproducible CLI Smoke
-        if: ${{ matrix.design != 'gcd' }}
         run: |
           python3 ecc/packaging/reproducible_cli_smoke.py \
             --binary "$ECOS_E2E_ECC_BIN_DIR/ecc" \
-            --design "$ECOS_E2E_DESIGN_DIR" \
-            --e2e-out "$ECOS_E2E_OUT"
+            --design "$ECOS_E2E_OUT/rtl2gds/work/gcd" \
+            --e2e-out "$ECOS_E2E_OUT/rtl2gds"
 
       - name: Upload E2E Evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-flow-workspace-${{ matrix.design }}
+          name: e2e-flow-workspace-gcd
           if-no-files-found: ignore
           retention-days: 14
           path: ${{ runner.temp }}/e2e-out
 
   e2e-desktop-flow-summary:
     name: Product E2E
-    needs: [changes, e2e-designs, e2e-desktop-flow]
+    needs: [changes, e2e-desktop-flow]
     if: >-
       ${{
         always() &&
@@ -474,10 +395,10 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 5
     steps:
-      - name: Aggregate Matrix Results
+      - name: Check Product E2E Result
         run: |
           result="${{ needs.e2e-desktop-flow.result }}"
-          echo "e2e-desktop-flow matrix result: ${result}"
+          echo "GCD product E2E result: ${result}"
           [ "${result}" = "success" ]
 
   build-appimage:

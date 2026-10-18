@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type { EccRuntimeOperation } from '@ecos-studio/shared'
@@ -127,6 +127,46 @@ describe('product e2e: concurrent workspace flows', () => {
 
         if (scenario !== 'simultaneous-start') {
           for (const workspace of workspaces) {
+            const startAfterStep = process.env.ECOS_E2E_CONCURRENCY_START_AFTER_STEP
+            if (scenario === 'finish-both' && operations.length === 1 && startAfterStep) {
+              await vi.waitUntil(
+                async () => {
+                  const projection = await page.evaluate(() =>
+                    window.ecosDesktop.ecc.runtime.operationProjection(),
+                  )
+                  const first = projection.operations.find(
+                    (operation) => operation.operationId === operations[0].operationId,
+                  )
+                  if (!first || first.state !== 'running') {
+                    throw new Error(
+                      'First workspace flow stopped before the overlap window',
+                    )
+                  }
+                  const step = first.flow?.steps.find(
+                    (entry) => entry.name === startAfterStep,
+                  )
+                  if (first.flow?.steps.length && !step) {
+                    throw new Error(`Unknown concurrency start step: ${startAfterStep}`)
+                  }
+                  return step?.state === 'Success'
+                },
+                { timeout: FLOW_TIMEOUT_MS, interval: 250 },
+              )
+              const startWindow = await page.evaluate(() =>
+                window.ecosDesktop.ecc.runtime.operationProjection(),
+              )
+              expect(
+                startWindow.operations
+                  .find(
+                    (operation) => operation.operationId === operations[0].operationId,
+                  )
+                  ?.flow?.steps.find((step) => step.name === startAfterStep)?.state,
+              ).toBe('Success')
+              await writeFile(
+                join(outDir, `${scenario}-start-window.json`),
+                JSON.stringify(startWindow, null, 2),
+              )
+            }
             operations.push(await runFlow(page, workspace))
           }
         } else {
