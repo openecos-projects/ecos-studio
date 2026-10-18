@@ -83,8 +83,9 @@ the repo dev runtime).
 In CI the `e2e-desktop-flow` job fans out over the rtl2gds-capable ecc-ci-designs
 (the list is derived upstream each run; gcd_icg and xtea are excluded, aes is
 excluded on pull requests). The job also runs on the nightly schedule, which
-is the main coverage for aes and for drift in the unpinned inputs (daily
-oss-cad-suite builds, the ecc-ci-designs default branch). The local GCD
+is the main coverage for aes and for drift in the ecc-ci-designs default branch.
+OSS CAD Suite uses the known-good version pinned in `.github/workflows/ci.yml`,
+aligned with the pinned ECC runtime's CI. The local GCD
 configuration runs the complete E2E Desktop Flow suite, including concurrent
 Workspace and built-in CLI journeys; every upstream matrix entry runs only the rtl2gds journey
 (`vitest run --config vitest.e2e.config.ts rtl2gds`). Each matrix entry uploads its own

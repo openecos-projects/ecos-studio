@@ -11,14 +11,16 @@ on:
     types: [opened, synchronize, reopened, ready_for_review, edited]
   workflow_dispatch:
   # Nightly on main: the E2E matrix runs the full design set
-  # (including aes) and catches drift in the unpinned inputs
-  # (daily oss-cad-suite builds, the ecc-ci-designs default branch)
+  # (including aes) and catches drift in the ecc-ci-designs default branch
   # before it ambushes an unrelated PR.
   schedule:
     - cron: "43 19 * * *"
 
 permissions:
   contents: read
+
+env:
+  OSS_CAD_SUITE_VERSION: "2026-10-14"
 
 concurrency:
   # Edited-event runs (PR title/body lint) get their own group and never
@@ -414,6 +416,7 @@ jobs:
       - name: Set Up OSS CAD Suite
         uses: YosysHQ/setup-oss-cad-suite@v4
         with:
+          version: ${{ env.OSS_CAD_SUITE_VERSION }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Point ECC at OSS CAD Suite
