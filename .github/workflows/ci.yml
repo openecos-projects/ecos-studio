@@ -66,6 +66,7 @@ jobs:
               - '.github/scripts/**'
             ci:
               - '.github/actions/**'
+              - '.github/scripts/**'
               - '.github/workflows/**'
               - '.github/ecc-ci-toolchain.json'
             e2e:
@@ -241,8 +242,8 @@ jobs:
           run_id="$(python3 -c 'import json; print(json.load(open(".github/ecc-ci-toolchain.json"))["ecc_run_id"])')"
           bash .github/scripts/wait-ecc-ci.sh "$(git rev-parse HEAD:ecc)" "$run_id"
 
-      - name: Test ECC Toolchain Resolution
-        run: python3 -B -m unittest discover -s .github/scripts/tests -p 'test_ecc_toolchain.py'
+      - name: Test ECC Toolchain Installation
+        run: python3 -B -m unittest discover -s .github/scripts/tests -p 'test_*.py'
 
       - name: Verify the Toolchain Validated by ECC
         id: toolchain
@@ -385,12 +386,12 @@ jobs:
             --name kepler-formal-linux-x64 --dir "$install_root"
           archive="$(find "$install_root" -name kepler-formal-linux-x64.tar.gz -print -quit)"
           test -n "$archive"
-          python3 -c 'import sys, tarfile; tarfile.open(sys.argv[1]).extractall(sys.argv[2], filter="data")' \
-            "$archive" "$install_root"
+          python3 .github/scripts/extract-kepler.py "$archive" "$install_root"
           marker="$(find "$install_root" -type f -path '*/bin/kepler-formal' -print -quit)"
           test -n "$marker"
           tool_root="${marker%/bin/kepler-formal}"
           test -x "$marker"
+          "$marker" --help > "$RUNNER_TEMP/kepler-formal-help.txt"
           echo "$tool_root/bin" >> "$GITHUB_PATH"
           echo "CHIPCOMPILER_KEPLER_FORMAL_ROOT=$tool_root" >> "$GITHUB_ENV"
 
@@ -411,6 +412,12 @@ jobs:
           repository: openecos-projects/ecc-ci-designs
           ref: ${{ needs.ecc-runtime.outputs.designs_sha }}
           path: .scratch/ecc-ci-designs
+
+      - name: Record Runner Memory
+        run: |
+          mkdir -p "$ECOS_E2E_OUT"
+          free -b | tee "$ECOS_E2E_OUT/runner-memory.txt"
+          nproc | tee "$ECOS_E2E_OUT/runner-cpu-count.txt"
 
       - name: Run design flows
         working-directory: ecos/gui
