@@ -9700,7 +9700,12 @@ describe('ResourceManagerService', () => {
         health: 'ok',
       },
     })
-    const service = new ResourceManagerService(dirs)
+    const service = new ResourceManagerService({
+      ...dirs,
+      fetchImpl: vi.fn(async () => {
+        throw new Error('offline')
+      }),
+    })
 
     await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
       id: 'pdk:ics55',
@@ -9726,7 +9731,12 @@ describe('ResourceManagerService', () => {
         health: 'ok',
       },
     })
-    const service = new ResourceManagerService(dirs)
+    const service = new ResourceManagerService({
+      ...dirs,
+      fetchImpl: vi.fn(async () => {
+        throw new Error('offline')
+      }),
+    })
 
     await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
       id: 'pdk:ics55',
@@ -9756,7 +9766,12 @@ describe('ResourceManagerService', () => {
         health: 'ok',
       },
     })
-    const service = new ResourceManagerService(dirs)
+    const service = new ResourceManagerService({
+      ...dirs,
+      fetchImpl: vi.fn(async () => {
+        throw new Error('offline')
+      }),
+    })
 
     await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
       status: 'invalid',
