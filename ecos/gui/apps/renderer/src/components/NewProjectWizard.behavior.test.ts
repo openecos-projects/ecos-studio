@@ -12,6 +12,7 @@ import NewProjectWizard from './NewProjectWizard.vue'
 import WorkspaceWizard from './WorkspaceWizard.vue'
 import FrontendProjectWizard from './FrontendProjectWizard.vue'
 import PdkResourcePickerDialog from './PdkResourcePickerDialog.vue'
+import RtlImportStep from './RtlImportStep.vue'
 
 const wizardMocks = vi.hoisted(() => {
   // Mirrors the live ECC rtl2gds discovery payload
@@ -94,6 +95,7 @@ const wizardMocks = vi.hoisted(() => {
       }
     }),
     getWorkspaceCreationModel: vi.fn(async () => defaultWorkspaceCreationModel()),
+    pathExists: vi.fn(async () => true),
   }
 })
 
@@ -120,6 +122,7 @@ vi.mock('@/platform/desktop', () => ({
     workspace: {
       scanPdkDirectory: wizardMocks.scanPdkDirectory,
       discoverHdlModules: wizardMocks.discoverHdlModules,
+      pathExists: wizardMocks.pathExists,
     },
   }),
 }))
@@ -158,7 +161,7 @@ const primevueStubs = {
 }
 
 describe('NewProjectWizard behavior', () => {
-  it('accepts the preselected Quick Start GCD RTL on Design Files', async () => {
+  it('accepts the preselected Quick Start GCD RTL on Import RTL', async () => {
     const projectContext = {
       mode: 'select' as const,
       project_name: 'gcd',
@@ -200,7 +203,7 @@ describe('NewProjectWizard behavior', () => {
       },
     })
     const wizard = quickStartWizard.vm as unknown as { currentStep: number }
-    wizard.currentStep = 4
+    wizard.currentStep = 2
     await flushPromises()
 
     expect(quickStartWizard.text()).toContain('/resources/gcd/gcd.v')
@@ -223,17 +226,17 @@ describe('NewProjectWizard behavior', () => {
       },
     })
     const wizard = wrapper.vm as unknown as { currentStep: number }
-    wizard.currentStep = 5
+    wizard.currentStep = 6
     await flushPromises()
     await wrapper.find('button[aria-label="Maximize window"]').trigger('click')
     expect(wrapper.find('.new-workspace-wizard-panel').classes()).toContain('max-w-none')
     expect(wrapper.find('.new-workspace-wizard-overlay').classes()).toContain('p-0')
-    expect(wizard.currentStep).toBe(5)
+    expect(wizard.currentStep).toBe(6)
     await wrapper.find('button[aria-label="Restore window"]').trigger('click')
     expect(wrapper.find('.new-workspace-wizard-panel').classes()).not.toContain(
       'max-w-none',
     )
-    expect(wizard.currentStep).toBe(5)
+    expect(wizard.currentStep).toBe(6)
     wrapper.unmount()
   })
 
@@ -278,7 +281,7 @@ describe('NewProjectWizard behavior', () => {
       activePdkWizardStep: 'tech_lef' | 'cell_lef' | 'liberty'
       pdkSelections: Record<'tech_lef' | 'cell_lef' | 'liberty', string[]>
     }
-    wizard.currentStep = 5
+    wizard.currentStep = 6
     await flushPromises()
     wizard.pdkConfigMode = 'manual'
     wizard.activePdkWizardStep = 'liberty'
@@ -344,7 +347,7 @@ describe('NewProjectWizard behavior', () => {
       currentStep: number
       projectContext: { project_root: string; project_name: string }
     }
-    wizard.currentStep = 5
+    wizard.currentStep = 6
     await flushPromises()
     expect(wizardMocks.readProjectEccPdkConfig).toHaveBeenCalledWith('/projects/old')
     wizard.projectContext.project_root = '/projects/new'
@@ -392,7 +395,7 @@ describe('NewProjectWizard behavior', () => {
       externalPdkPaths: string[]
       projectContext: { project_root: string }
     }
-    wizard.currentStep = 5
+    wizard.currentStep = 6
     await flushPromises()
     expect(wizard.externalPdkPaths).toEqual(['/old/macros'])
 
@@ -465,7 +468,7 @@ describe('NewProjectWizard behavior', () => {
       config: { pdk_effective_resources?: unknown }
     }
     await wizard.ensurePdksLoaded()
-    wizard.currentStep = 5
+    wizard.currentStep = 6
     await flushPromises()
     expect(wrapper.text()).toContain('/pdks/ics55')
     expect(wrapper.text()).toContain('/pdks/ics55/prtech/tech.lef')
@@ -514,7 +517,7 @@ describe('NewProjectWizard behavior', () => {
       selectedPdkId: string
       canProceed: boolean
     }
-    wizard.currentStep = 5
+    wizard.currentStep = 6
     await flushPromises()
     expect(wizard.selectedPdkId).toBe('pdk:ics55:canonical')
     expect(wrapper.text()).toContain('/link/pdk')
@@ -565,7 +568,7 @@ describe('NewProjectWizard behavior', () => {
       selectedPdkId: string
       canProceed: boolean
     }
-    wizard.currentStep = 5
+    wizard.currentStep = 6
     await flushPromises()
     expect(wizardMocks.readProjectEccPdkConfig).toHaveBeenCalled()
     expect(wizardMocks.scanPdkDirectory).toHaveBeenCalled()
@@ -637,7 +640,7 @@ describe('NewProjectWizard behavior', () => {
       }
       updatePdkResourceSelection(files: string[]): void
     }
-    wizard.currentStep = 5
+    wizard.currentStep = 6
     await flushPromises()
     expect(wizard.selectedPdkId).toBe('pdk:ics55:local')
     expect(wrapper.text()).toContain('/pdks/ics55')
@@ -713,7 +716,7 @@ describe('NewProjectWizard behavior', () => {
       },
     })
     const wizard = wrapper.vm as unknown as { currentStep: number; canProceed: boolean }
-    wizard.currentStep = 5
+    wizard.currentStep = 6
     await flushPromises()
     expect(wrapper.text()).toContain('/pdks/other')
     expect(wrapper.text()).toContain('/macros/memory')
@@ -790,7 +793,7 @@ describe('NewProjectWizard behavior', () => {
 
     await flushPromises()
 
-    for (let step = 1; step < 5; step += 1) {
+    for (let step = 1; step < 6; step += 1) {
       const continueButton = wrapper
         .findAll('button')
         .find((button) => button.text().includes('Continue'))
@@ -934,7 +937,7 @@ describe('NewProjectWizard behavior', () => {
       ensurePdksLoaded(): Promise<void>
     }
     await wizard.ensurePdksLoaded()
-    wizard.currentStep = 5
+    wizard.currentStep = 6
     await flushPromises()
 
     const locate = wrapper.findAll('button').find((button) => button.text() === 'Locate')
@@ -982,12 +985,74 @@ describe('NewProjectWizard behavior', () => {
       stepFiveBlockedReason: string
     }
     await wizard.ensurePdksLoaded()
-    wizard.currentStep = 5
+    wizard.currentStep = 6
     await flushPromises()
 
     expect(wrapper.text()).toContain('Unverified')
     expect(wizard.canProceed).toBe(false)
     expect(wizard.stepFiveBlockedReason).toContain('Tech LEF, Cell LEF, Liberty')
+    wrapper.unmount()
+  })
+
+  it('requires RTL import when the project only has the init placeholder RTL', async () => {
+    wizardMocks.readProjectManagementManifest.mockResolvedValueOnce({
+      schema_version: 1,
+      project_type: 'backend',
+      project_id: 'proj_gcd',
+      name: 'gcd',
+      design_name: 'gcd',
+      description: '',
+      root_path: '/projects/gcd',
+      created_at: '2026-09-01T00:00:00.000Z',
+      updated_at: '2026-09-01T00:00:00.000Z',
+      // ecc init scaffolds rtl/<design>.v without creating the file.
+      base_design: {
+        rtl_list: ['rtl/gcd.v'],
+        parameters: { design: 'gcd' },
+      },
+      objectives: { primary: 'timing', directions: {} },
+      workspaces: [],
+      mpc: null,
+      best_workspace: null,
+      qor_baseline: null,
+    })
+    wizardMocks.pathExists.mockResolvedValueOnce(false)
+    const wrapper = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          directory: '/projects/gcd/ws_0002',
+          project_context: {
+            mode: 'select',
+            project_id: 'proj_gcd',
+            project_name: 'gcd',
+            project_root: '/projects/gcd',
+            project_json_path: '/projects/gcd/project.json',
+          },
+        },
+      },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const wizard = wrapper.vm as unknown as {
+      canProceed: boolean
+      currentStep: number
+      importedDesignSource: { rtlList: string[]; filelist: string } | null
+    }
+    wizard.currentStep = 2
+    await flushPromises()
+    expect(wizard.importedDesignSource).toBeNull()
+    expect(wizard.canProceed).toBe(false)
+    expect(wrapper.text()).toContain(
+      'Select RTL files or a filelist to import into the project rtl/ folder.',
+    )
     wrapper.unmount()
   })
 
@@ -1048,16 +1113,22 @@ describe('NewProjectWizard behavior', () => {
         rtl_list: string[]
         sdc?: string
       }
+      importedDesignSource: { rtlList: string[]; filelist: string } | null
     }
+    // The project's imported RTL is reused as the design source; it is not
+    // resubmitted as a pending import selection.
     expect(wizard.config).toMatchObject({
       parameters: { top_module: 'gcd_top', clock: 'clk_i' },
-      rtl_list: ['/projects/gcd/ws_0001/origin/gcd.v'],
+      rtl_list: [],
       sdc: '/projects/gcd/ws_0001/origin/gcd.sdc',
+    })
+    expect(wizard.importedDesignSource).toMatchObject({
+      rtlList: ['/projects/gcd/ws_0001/origin/gcd.v'],
     })
     wrapper.unmount()
   })
 
-  it('prefills filelist only when the Project Manifest has both RTL and filelist', async () => {
+  it('reuses the project filelist when the manifest declares both RTL and filelist', async () => {
     wizardMocks.readProjectManagementManifest.mockResolvedValueOnce({
       schema_version: 1,
       project_type: 'backend',
@@ -1110,13 +1181,27 @@ describe('NewProjectWizard behavior', () => {
     const wizard = wrapper.vm as unknown as {
       config: { rtl_list: string[]; filelist?: string }
       filelistPath: string
+      importedDesignSource: { rtlList: string[]; filelist: string } | null
+      effectiveSynthesisDesignInputs(): {
+        rtlPaths: string[]
+        filelistPath: string
+      } | null
     }
+    // Reuse, not a pending import: both manifest sources are exposed and the
+    // filelist wins as the effective design source.
     expect(wizard.config.rtl_list).toEqual([])
-    expect(wizard.filelistPath).toBe('/projects/gcd/sources.f')
+    expect(wizard.filelistPath).toBe('')
+    expect(wizard.importedDesignSource).toMatchObject({
+      rtlList: ['/projects/gcd/ws_0001/origin/gcd.v'],
+      filelist: '/projects/gcd/sources.f',
+    })
+    expect(wizard.effectiveSynthesisDesignInputs()).toMatchObject({
+      filelistPath: '/projects/gcd/sources.f',
+    })
     wrapper.unmount()
   })
 
-  it('does not leave Design Files when both RTL and filelist are set', async () => {
+  it('prefers the filelist as the design source when both sources are pending', async () => {
     const wrapper = mount(NewProjectWizard, {
       props: { initialConfig: { standaloneWorkspace: true } },
       global: {
@@ -1133,12 +1218,21 @@ describe('NewProjectWizard behavior', () => {
       config: { rtl_list: string[] }
       currentStep: number
       filelistPath: string
+      effectiveSynthesisDesignInputs(): {
+        rtlPaths: string[]
+        filelistPath: string
+      } | null
     }
-    wizard.currentStep = 4
+    wizard.currentStep = 5
     wizard.config.rtl_list = ['/rtl/top.v']
     wizard.filelistPath = '/rtl/sources.f'
     await flushPromises()
-    expect(wizard.canProceed).toBe(false)
+    // Exclusivity is enforced by the Import RTL step; a programmatic both-set
+    // state deterministically resolves to the filelist.
+    expect(wizard.effectiveSynthesisDesignInputs()).toMatchObject({
+      filelistPath: '/rtl/sources.f',
+    })
+    expect(wizard.canProceed).toBe(true)
     wrapper.unmount()
   })
 
@@ -1155,22 +1249,30 @@ describe('NewProjectWizard behavior', () => {
     })
     await flushPromises()
     const wizard = wrapper.vm as unknown as {
-      designFileError: string
+      config: { rtl_list: string[] }
+      currentStep: number
       filelistPath: string
-      importDesignInput: (type: string) => Promise<void>
+    }
+    wizard.currentStep = 2
+    await flushPromises()
+    const picker = wrapper.findComponent(RtlImportStep)
+    expect(picker.exists()).toBe(true)
+    const pickerVm = picker.vm as unknown as {
+      pickFilelist(): Promise<void>
+      manualFilePickError: string
     }
 
     wizardMocks.pickFiles.mockResolvedValueOnce(['/projects/gcd/ws_0001/origin/filelist'])
-    await wizard.importDesignInput('filelist')
+    await pickerVm.pickFilelist()
     await flushPromises()
     expect(wizard.filelistPath).toBe('/projects/gcd/ws_0001/origin/filelist')
-    expect(wizard.designFileError).toBe('')
+    expect(pickerVm.manualFilePickError).toBe('')
 
     wizardMocks.pickFiles.mockResolvedValueOnce(['/projects/gcd/design.exe'])
-    await wizard.importDesignInput('filelist')
+    await pickerVm.pickFilelist()
     await flushPromises()
     expect(wizard.filelistPath).toBe('/projects/gcd/ws_0001/origin/filelist')
-    expect(wizard.designFileError).toContain('FILELIST')
+    expect(pickerVm.manualFilePickError).toContain('filelist')
     wrapper.unmount()
   })
 
@@ -1196,7 +1298,7 @@ describe('NewProjectWizard behavior', () => {
       currentStep: number
       refreshTopModuleDiscovery(): Promise<void>
     }
-    wizard.currentStep = 6
+    wizard.currentStep = 7
     await wizard.refreshTopModuleDiscovery()
     await flushPromises()
     expect(wizardMocks.discoverHdlModules).toHaveBeenCalled()
@@ -1230,21 +1332,21 @@ describe('NewProjectWizard behavior', () => {
       currentStep: number
       refreshTopModuleDiscovery(): Promise<void>
     }
-    wizard.currentStep = 6
+    wizard.currentStep = 7
     await wizard.refreshTopModuleDiscovery()
     await flushPromises()
     expect(wizardMocks.discoverHdlModules).toHaveBeenLastCalledWith(
       expect.objectContaining({ rtlPaths: ['/rtl/empty.v'] }),
     )
     expect(wizard.canProceed).toBe(false)
-    expect(wrapper.text()).toContain('Return to Design Files')
+    expect(wrapper.text()).toContain('Return to Import RTL')
     const returnButton = wrapper
       .findAll('button')
-      .find((button) => button.text().includes('Return to Design Files'))
+      .find((button) => button.text().includes('Return to Import RTL'))
     expect(returnButton).toBeTruthy()
     await returnButton!.trigger('click')
     await flushPromises()
-    expect(wizard.currentStep).toBe(4)
+    expect(wizard.currentStep).toBe(2)
     wrapper.unmount()
   })
 
@@ -1274,7 +1376,7 @@ describe('NewProjectWizard behavior', () => {
       topModuleIsReadOnly: boolean
       config: { parameters: Record<string, unknown> }
     }
-    wizard.currentStep = 6
+    wizard.currentStep = 7
     await wizard.refreshTopModuleDiscovery()
     await flushPromises()
     expect(wizard.topModuleIsReadOnly).toBe(true)
@@ -1312,7 +1414,7 @@ describe('NewProjectWizard behavior', () => {
       refreshTopModuleDiscovery(): Promise<void>
     }
     wizard.config.rtl_list = ['/rtl/new.v']
-    wizard.currentStep = 6
+    wizard.currentStep = 7
     await wizard.refreshTopModuleDiscovery()
     await flushPromises()
     expect(wrapper.find('input[placeholder="top"]').exists()).toBe(false)
@@ -1352,10 +1454,14 @@ describe('NewProjectWizard behavior', () => {
       selectedFlowSteps: string[]
       isFlowStepSelected(stepName: string): boolean
     }
-    wizard.currentStep = 3
+    wizard.currentStep = 4
     await flushPromises()
 
     const startSelect = wrapper.get('select')
+    const parallelCorners = wrapper.get('#sta-max-parallel-corners')
+    expect((parallelCorners.element as HTMLSelectElement).value).toBe('1')
+    await parallelCorners.setValue('3')
+    expect((parallelCorners.element as HTMLSelectElement).value).toBe('3')
     expect(wizard.flowStartStep).toBe('Synthesis')
     await startSelect.setValue('CTS')
     await flushPromises()
@@ -1395,7 +1501,7 @@ describe('NewProjectWizard behavior', () => {
       currentStep: number
       flowStepOptions: Array<{ name: string; description: string }>
     }
-    wizard.currentStep = 3
+    wizard.currentStep = 4
     await flushPromises()
 
     expect(wizard.flowStepOptions).toEqual([])
@@ -1453,7 +1559,7 @@ describe('NewProjectWizard behavior', () => {
       currentStep: number
       flowStepOptions: Array<{ name: string; description: string }>
     }
-    wizard.currentStep = 3
+    wizard.currentStep = 4
     await flushPromises()
 
     expect(wizard.flowStepOptions.map((step) => step.name)).toEqual([
@@ -1512,7 +1618,7 @@ describe('NewProjectWizard behavior', () => {
       defaultSkippedFlowStepNames: ReadonlySet<string>
       runnableFlowSteps: string[]
     }
-    wizard.currentStep = 3
+    wizard.currentStep = 4
     await flushPromises()
 
     expect([...wizard.skippableFlowStepNames]).toEqual(['lec', 'Timing optimization'])
@@ -1578,7 +1684,7 @@ describe('NewProjectWizard behavior', () => {
       flowEndStep: string
       flowStepOptions: Array<{ name: string; description: string }>
     }
-    wizard.currentStep = 3
+    wizard.currentStep = 4
     await flushPromises()
 
     // Default end step 'Harden' is absent from the discovered chain, so the
@@ -1619,7 +1725,7 @@ describe('NewProjectWizard behavior', () => {
       flowStartStep: string
       selectedFlowSteps: string[]
     }
-    wizard.currentStep = 3
+    wizard.currentStep = 4
     await flushPromises()
 
     expect(wizard.flowStartStep).toBe('preFloorplan')
@@ -1870,6 +1976,10 @@ describe('workspace wizard project type routing', () => {
     wizardMocks.readProjectManagementManifest.mockResolvedValue({
       ...frontendManifest,
       project_type: 'backend',
+      base_design: {
+        ...frontendManifest.base_design,
+        rtl_list: [`${projectRoot}/rtl/top.v`],
+      },
     })
     const wrapper = mount(WorkspaceWizard, {
       props: {
@@ -1886,7 +1996,7 @@ describe('workspace wizard project type routing', () => {
       global,
     })
     await flushPromises()
-    for (let step = 0; step < 2; step += 1) {
+    for (let step = 0; step < 3; step += 1) {
       await wrapper
         .findAll('button')
         .find((item) => item.text() === 'Continue')!

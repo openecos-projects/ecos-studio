@@ -122,6 +122,7 @@ import {
 } from '../services/agent/agentWorkspaceParameterUpdates'
 import { recordAgentOperationAssociation } from '../services/agent/agentOperationAssociations'
 import type { ChipViewerWorkspaceRevisionNotification } from '../services/chipViewerService'
+import type { ProjectWorkspaceConfiguration } from '../services/projectManagementReadService'
 import {
   closeWindow,
   isWindowMaximized,
@@ -138,10 +139,7 @@ import {
   workspaceWindowRegistry,
   type WorkspaceWindowLike,
 } from '../services/workspaceWindowRegistry'
-import {
-  executeWorkspaceRerun,
-  verifyWorkspaceRerunContract,
-} from '../services/eccRpc/workspaceRerun'
+import { executeWorkspaceRerun, prepareWorkspaceRerun } from '../services/workspaceRerun'
 import { executeProductCommand } from '../services/productCommandService'
 import {
   assessRunStaleness,
@@ -150,8 +148,7 @@ import {
 import { buildWorkspaceCreationModel } from '../services/workspaceCreationModel'
 import { rememberWorkspaceParameterCatalog } from '../services/workspaceParameterCatalogCache'
 import {
-  ensureBackendProjectManifestForCreate,
-  persistEccPdkConfigFromCreate,
+  authorizeBackendProjectRootForCreate,
   prepareWorkspaceCreateBinding,
   prepareWorkspaceOpenBinding,
 } from '../services/workspacePdkBindings'
@@ -316,6 +313,13 @@ export interface DesktopBridgeServices {
       request: DesktopProjectManagementWorkspaceStepConfigurationRequest,
     ): Promise<DesktopProjectManagementWorkspaceStepConfigurationResult>
   }
+  projectWorkspaceFlowService?: {
+    watch(
+      windowId: number,
+      request: import('@ecos-studio/shared').ProjectWorkspaceFlowsRequest,
+    ): Promise<import('@ecos-studio/shared').ProjectWorkspaceFlows>
+    onChanged(listener: (windowId: number) => void): () => void
+  }
   backendWorkspaceService: {
     clearWindow(windowId: number): void
     getArtifact(
@@ -412,6 +416,7 @@ export interface DesktopBridgeServices {
     ): Promise<DesktopProjectTextFileChunk | null>
     listPendingExternalReadRoots?(): Promise<string[]>
     registerProjectManagementReadRoot(path: string): Promise<string>
+    authorizeProjectManagementReadRoot(path: string): Promise<string>
     registerProjectReadRoot(path: string): Promise<string>
     registerProjectRoot(path: string): Promise<string>
     requestProjectPathAccess(path: string): Promise<string>
@@ -534,11 +539,6 @@ export interface DesktopBridgeServices {
     workspaceInfo(workspaceHandle: string, step: string, id: string): Promise<unknown>
   }
   eccRuntimeService: {
-    callRuntime?<T>(
-      method: string,
-      params?: Record<string, unknown>,
-      options?: { timeoutMs?: number },
-    ): Promise<T>
     cancelOperation(request: EccRuntimeOperationRequest): Promise<unknown>
     candidateCapabilities(request: EccCandidateCapabilitiesRequest): Promise<unknown>
     candidateRerun(request: EccCandidateRerunRequest): Promise<unknown>
@@ -548,6 +548,10 @@ export interface DesktopBridgeServices {
     ): Promise<{ cancelled: boolean; operationId?: string }>
     closeWorkspace(request: EccWorkspaceHandleRequest): Promise<unknown>
     createWorkspace(request: EccWorkspaceCreateRequest): Promise<unknown>
+    discoverProject(directory: string): Promise<{
+      projectId: string
+      projectRoot: string
+    } | null>
     describeWorkspaceSpec(): Promise<unknown>
     deriveWorkspace(
       request: EccWorkspaceDeriveRequest & { workspaceHandle: string },
@@ -565,6 +569,8 @@ export interface DesktopBridgeServices {
     openWorkspace(
       request: EccWorkspaceOpenRequest,
     ): Promise<{ directory: string; workspaceHandle: string }>
+    readWorkspaceBindingRequirement(directory: string): Promise<Record<string, unknown>>
+    readWorkspaceConfiguration(directory: string): Promise<ProjectWorkspaceConfiguration>
     refreshConfig(request: EccWorkspaceHandleRequest): Promise<unknown>
     releaseWorkspace(
       request: EccWorkspaceHandleRequest,
@@ -995,6 +1001,13 @@ export function registerIpc(
       event,
     )
   })
+  services.projectWorkspaceFlowService?.onChanged((windowId) => {
+    const window = BrowserWindow.getAllWindows().find(
+      (item) => item.webContents.id === windowId,
+    )
+    if (window && !window.isDestroyed())
+      window.webContents.send(desktopApiEventChannels.projectWorkspaceFlowsChanged)
+  })
   services.backendProjectComparisonService.onExecutionInvalidated((windowId, event) => {
     const targetWindow = BrowserWindow.getAllWindows().find(
       (window) => window.webContents.id === windowId,
@@ -1061,6 +1074,9 @@ export function registerIpc(
       releasedWorkspaceHandleOwnerIds.get(workspaceHandle) === sender.id,
     runtime: services.eccRuntimeService,
     shutdown: services.shutdownCoordinator,
+  })
+  services.eccRuntimeService.onOperationProjectionInvalidated(() => {
+    services.backendProjectComparisonService.invalidateExecution()
   })
   services.eccRuntimeService.onWorkspaceReleased?.((workspaceHandle) => {
     services.shutdownCoordinator?.untrackWorkspaceHandle(workspaceHandle)
@@ -1883,48 +1899,10 @@ export function registerIpc(
       throw new Error('Workspace rerun source is not bound to this window.')
     }
     pendingWorkspaceReruns.delete(token)
-    // Isolated rerun preparation is delegated to the ECC workspace.derive
-    // domain command; Electron only verifies the frozen contract evidence.
-    const verified = await verifyWorkspaceRerunContract(pending.contract)
-    // openWorkspace reuses the live handle or reopens one released by idle
-    // cleanup, so a stale source binding self-heals before ownership checks.
-    const openedSource = await services.eccRuntimeService.openWorkspace({
-      directory: verified.sourceWorkspace,
-    })
-    const sourceWorkspaceHandle = workspaceHandleFromResult(openedSource)
-    const openedSourceDirectory = workspaceDirectoryFromResult(openedSource)
-    if (!sourceWorkspaceHandle || !openedSourceDirectory) {
-      throw new Error('Workspace rerun source is not active in this window.')
-    }
-    trackWorkspaceHandle(event.sender, sourceWorkspaceHandle, openedSourceDirectory)
-    const derived = (await executeProductCommand(
-      {
-        command: 'workspace.derive',
-        payload: {
-          workspaceHandle: sourceWorkspaceHandle,
-          directory: verified.sourceWorkspace,
-          targetDirectory: verified.targetWorkspace,
-          resetFromStep: pending.contract.target_step,
-        },
-      },
-      {
-        ownsWorkspaceHandle: (workspaceHandle) =>
-          workspaceHandleSubscriptions.get(workspaceHandle)?.sender === event.sender,
-        prepareCreate: async (createRequest) => createRequest,
-        runtime: services.eccRuntimeService,
-        trackCreateResult: () => undefined,
-      },
-    )) as { directory?: unknown }
-    if (
-      typeof derived.directory !== 'string' ||
-      normalizeWorkspacePath(derived.directory) !==
-        normalizeWorkspacePath(verified.targetWorkspace)
-    ) {
-      throw new Error('Workspace derive returned an unexpected target directory.')
-    }
+    const prepared = await prepareWorkspaceRerun(pending.contract)
     const executionToken = randomUUID()
     pendingWorkspaceRerunExecutions.set(executionToken, pending)
-    return { directory: derived.directory, executionToken }
+    return { ...prepared, executionToken }
   })
 
   handle(desktopApiIpcChannels.workspaceExecuteFlowAgentRerun, async (event, request) => {
@@ -2269,6 +2247,18 @@ export function registerIpc(
         throw new Error('Project management projectRoot must be a string.')
       }
       return await services.projectManagementReadService.readManifest(projectRoot)
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.projectManagementWatchWorkspaceFlows,
+    async (event, request) => {
+      if (!services.projectWorkspaceFlowService)
+        throw new Error('Workspace Flow reads are unavailable.')
+      return await services.projectWorkspaceFlowService.watch(
+        event.sender.id,
+        request as import('@ecos-studio/shared').ProjectWorkspaceFlowsRequest,
+      )
     },
   )
 
@@ -3026,11 +3016,8 @@ export function registerIpc(
         services.backendProjectComparisonService.invalidateWorkspace(workspaceDirectory)
       },
       prepareCreate: async (createRequest) => {
-        await ensureBackendProjectManifestForCreate(services, createRequest)
-        const prepared = await prepareWorkspaceCreateBinding(services, createRequest)
-        const { eccPdkConfig: persistConfig, ...runtimeRequest } = prepared
-        await persistEccPdkConfigFromCreate(services, runtimeRequest, persistConfig)
-        return runtimeRequest
+        await authorizeBackendProjectRootForCreate(services, createRequest)
+        return await prepareWorkspaceCreateBinding(services, createRequest)
       },
       runtime: services.eccRuntimeService,
       trackCreateResult: (result) => {

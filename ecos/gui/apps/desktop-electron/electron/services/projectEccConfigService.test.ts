@@ -1,9 +1,82 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { ProjectEccConfigService } from './projectEccConfigService'
+
+/**
+ * Minimal `ecc project apply` stand-in for the tests: applies --set/--unset
+ * assignments to simple `[table]` / `key = value` documents while preserving
+ * unrelated lines such as comments.
+ */
+function formatTomlValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => JSON.stringify(entry)).join(', ')}]`
+  }
+  return JSON.stringify(value)
+}
+
+function setScopedKeyText(
+  text: string,
+  table: string,
+  key: string,
+  value: unknown,
+): string {
+  const lines = text.split('\n')
+  const header = `[${table}]`
+  const assignment = `${key} = ${formatTomlValue(value)}`
+  let tableStart = -1
+  let insertAt = -1
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!.trim()
+    if (line === header) {
+      tableStart = index
+      insertAt = index + 1
+      continue
+    }
+    if (tableStart >= 0) {
+      if (line.startsWith('[') && line.endsWith(']')) break
+      if (line.startsWith(`${key} =`)) {
+        lines[index] = assignment
+        return lines.join('\n')
+      }
+      insertAt = index + 1
+    }
+  }
+  if (tableStart < 0) {
+    if (lines[lines.length - 1]?.trim() !== '') lines.push('')
+    lines.push(header, assignment)
+  } else {
+    lines.splice(insertAt, 0, assignment)
+  }
+  return lines.join('\n')
+}
+
+function removeScopedKeyText(text: string, table: string, key: string): string {
+  const lines = text.split('\n')
+  const kept: string[] = []
+  let inTable = false
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      inTable = trimmed === `[${table}]`
+      kept.push(line)
+      continue
+    }
+    if (inTable && trimmed.startsWith(`${key} =`)) continue
+    kept.push(line)
+  }
+  // Drop table headers whose body became empty.
+  return kept
+    .filter((line, index) => {
+      const trimmed = line.trim()
+      if (!(trimmed.startsWith('[') && trimmed.endsWith(']'))) return true
+      const next = kept.slice(index + 1).find((candidate) => candidate.trim() !== '')
+      return Boolean(next && !(next.trim().startsWith('[') && next.trim().endsWith(']')))
+    })
+    .join('\n')
+}
 
 const CLI_ECC_TOML = `# preset: rtl2gds | pdk: ics55
 [design]
@@ -24,6 +97,7 @@ describe('ProjectEccConfigService', () => {
   let pdkRoot: string
   let externalRoot: string
   let service: ProjectEccConfigService
+  const applyProject = vi.fn()
 
   const eccTomlPath = () => join(projectRoot, 'ecc.toml')
 
@@ -31,7 +105,32 @@ describe('ProjectEccConfigService', () => {
     projectRoot = await mkdtemp(join(tmpdir(), 'ecc-config-project-'))
     pdkRoot = await mkdtemp(join(tmpdir(), 'ecc-config-pdk-'))
     externalRoot = await mkdtemp(join(tmpdir(), 'ecc-config-macros-'))
-    service = new ProjectEccConfigService()
+    applyProject.mockImplementation(
+      async (root: string, sets: readonly string[], unsets: readonly string[]) => {
+        const target = join(root, 'ecc.toml')
+        let text = await readFile(target, 'utf-8').catch(() => '[pdk]\n')
+        for (const assignment of sets) {
+          const separator = assignment.indexOf('=')
+          const path = assignment.slice(0, separator)
+          const raw = assignment.slice(separator + 1)
+          const split = path.lastIndexOf('.')
+          const value = raw.startsWith('[') ? JSON.parse(raw) : raw
+          text = setScopedKeyText(
+            text,
+            path.slice(0, split),
+            path.slice(split + 1),
+            value,
+          )
+        }
+        for (const path of unsets) {
+          const split = path.lastIndexOf('.')
+          text =
+            removeScopedKeyText(text, path.slice(0, split), path.slice(split + 1)) ?? text
+        }
+        await writeFile(target, text, 'utf-8')
+      },
+    )
+    service = new ProjectEccConfigService(applyProject)
     await mkdir(join(pdkRoot, 'lef'), { recursive: true })
     await writeFile(join(pdkRoot, 'lef', 'tech.lef'), 'tech\n')
     await writeFile(join(pdkRoot, 'lef', 'std.lef'), 'std\n')
@@ -92,7 +191,7 @@ describe('ProjectEccConfigService', () => {
 
     expect(result.exists).toBe(true)
     expect(result.pdkName).toBe('ics55')
-    expect(result.pdkRoot).toBe('/nonexistent/pdk')
+    expect(result.pdkRoot).toBe(pdkRoot)
     expect(result.externalPaths).toEqual([externalRoot])
     // In-root entries relativize; external macro files stay absolute.
     expect(result.overrides).toEqual({
@@ -107,6 +206,14 @@ describe('ProjectEccConfigService', () => {
     expect(text).toContain('target_density = 0.2')
     expect(text).toContain(`external_paths = ["${externalRoot}"]`)
     expect(text).toContain(`lefs = ["lef/std.lef", "${join(externalRoot, 'sram.lef')}"]`)
+    expect(applyProject).toHaveBeenLastCalledWith(
+      projectRoot,
+      expect.arrayContaining([
+        `pdk.external_paths=["${externalRoot}"]`,
+        'pdk.overrides.tech=lef/tech.lef',
+      ]),
+      [],
+    )
   })
 
   it('clears external paths and override keys on empty writes', async () => {

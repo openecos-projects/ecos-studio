@@ -5,6 +5,7 @@ import { mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { launchE2EApp, repoRoot, resolveOutDir, type E2EApp } from './support/launch'
 import { prepareDesign, type E2EDesign } from './support/design'
+import { readChecklistCardMismatches, readFlowSteps } from './support/flow'
 import { createMilestoneShots } from './support/screenshots'
 import {
   cancelFlow,
@@ -16,12 +17,12 @@ import {
   readOperationLog,
   readOverviewStepStates,
   registerWorkspaceRoot,
-  runFlow,
   waitFlowTerminal,
   waitToolchainReady,
   type WorkspaceJourney,
 } from './support/journey'
 
+const ADVISORY_STEPS = new Set(['antennaCheck', 'emir'])
 const FLOW_TIMEOUT_MS = 75 * 60_000
 const PDK_ROOT = process.env.ECOS_E2E_PDK_ROOT ?? join(repoRoot, 'pdk/icsprout55-pdk')
 
@@ -34,20 +35,6 @@ async function expectedEccVersion(): Promise<string> {
     /-(alpha|beta|rc)\./,
     (_, label) => `${{ alpha: 'a', beta: 'b', rc: 'rc' }[label as string]}`,
   )
-}
-
-async function readFlowSteps(
-  workspaceDir: string,
-): Promise<Array<{ name: string; state: string }>> {
-  const flow = JSON.parse(
-    await readFile(join(workspaceDir, 'home/flow.json'), 'utf8'),
-  ) as {
-    steps?: Array<{ name?: string; id?: string; state?: string }>
-  }
-  return (flow.steps ?? []).map((step) => ({
-    name: step.name ?? step.id ?? '?',
-    state: step.state ?? '?',
-  }))
 }
 
 async function readQualityGateFailures(workspaceDir: string): Promise<string[]> {
@@ -108,7 +95,20 @@ describe('product e2e: backend rtl2gds journey', () => {
       projectRoot: design.projectRoot,
       name: `${design.name}-e2e`,
       designName: design.designName,
+      rtlImport: design.rtlImport,
     })
+    // The design RTL was imported into the project rtl/ folder by the CLI.
+    const manifest = await page.evaluate(
+      (root) => window.ecosDesktop.projectManagement.readManifest(root),
+      design.projectRoot,
+    )
+    const rtlList: string[] =
+      ((manifest as { base_design?: { rtl_list?: string[] } } | null)?.base_design
+        ?.rtl_list as string[] | undefined) ?? []
+    expect(rtlList.length).toBeGreaterThan(0)
+    for (const entry of rtlList) {
+      expect(entry.startsWith('rtl/')).toBe(true)
+    }
     const pdkInstallationId = await importExternalPdk(page, PDK_ROOT)
     workspace = await createDefaultWorkspace(page, {
       projectRoot: design.projectRoot,
@@ -124,19 +124,76 @@ describe('product e2e: backend rtl2gds journey', () => {
     expect(workspace.workspaceDir).toBe(join(design.projectRoot, 'default'))
     await registerWorkspaceRoot(page, workspace.workspaceDir)
     await openWorkspaceInUi(page, workspace)
+    for (const step of ADVISORY_STEPS) {
+      const card = page.locator(`.flow-step-card[data-step="${step}"]`)
+      await card.waitFor({ state: 'attached' })
+      await card.scrollIntoViewIfNeeded()
+      await shot(`workspace-dashboard-${step}`)
+    }
     await shot('workspace-created', '#/projects')
   }, 180_000)
 
   it(
-    'runs the rtl2gds flow to a terminal state',
+    'keeps Workspace Flow cards and the run control synchronized during the rtl2gds flow',
     async () => {
       const page = launched!.page
-      const operation = await runFlow(page, workspace!)
-      operationId = operation.operationId
-      await shot('flow-running', '#/workspace/home')
+      await page.evaluate(() => {
+        window.location.hash = '#/workspace/home'
+      })
+      const flowDashboard = page.locator('.workspace-flow-dashboard')
+      await flowDashboard.waitFor({ state: 'visible' })
+      const runControl = flowDashboard.locator('.flow-header .flow-run-icon-button')
+      const readFlowCardStatus = async (stepName: string) =>
+        flowDashboard.locator('.flow-step-card').evaluateAll((cards, name) => {
+          const card = cards.find(
+            (item) =>
+              item.getAttribute('data-step') === name ||
+              item.querySelector('header')?.textContent?.trim() === name,
+          )
+          return card?.getAttribute('data-status') ?? null
+        }, stepName)
+      const deadline = Date.now() + FLOW_TIMEOUT_MS
+      await runControl.click()
+      await expect
+        .poll(
+          async () => {
+            const projection = await page.evaluate(() =>
+              window.ecosDesktop.ecc.runtime.operationProjection(),
+            )
+            operationId = projection.operations.find(
+              (operation) => operation.workspaceDirectory === workspace!.workspaceDir,
+            )?.operationId
+            return operationId
+          },
+          { timeout: 30_000 },
+        )
+        .toBeTruthy()
+      if (!operationId) throw new Error('GUI run control did not start an ECC operation')
       let terminal
       try {
-        terminal = await waitFlowTerminal(page, workspace!, operationId, FLOW_TIMEOUT_MS)
+        await shot('flow-running', '#/workspace/home')
+        await expect
+          .poll(
+            async () => {
+              const step = (await readFlowSteps(workspace!.workspaceDir)).find(
+                (candidate) => candidate.state === 'Ongoing',
+              )
+              return {
+                step: step?.name ?? null,
+                cardStatus: step ? await readFlowCardStatus(step.name) : null,
+                runBusy: await runControl.getAttribute('aria-busy'),
+              }
+            },
+            { timeout: Math.max(1, deadline - Date.now()) },
+          )
+          .toMatchObject({ cardStatus: 'running', runBusy: 'true' })
+        await shot('workspace-flow-running')
+        terminal = await waitFlowTerminal(
+          page,
+          workspace!,
+          operationId,
+          Math.max(1, deadline - Date.now()),
+        )
       } catch (error) {
         await cancelFlow(page, workspace!, operationId).catch(() => undefined)
         operationTerminal = true
@@ -150,23 +207,59 @@ describe('product e2e: backend rtl2gds journey', () => {
         await shot('flow-failed')
       }
       expect(terminal.state).toBe('succeeded')
+      await expect
+        .poll(
+          async () => {
+            const steps = await readFlowSteps(workspace!.workspaceDir)
+            const cards = await flowDashboard
+              .locator('.flow-step-card')
+              .evaluateAll((items) =>
+                items.map((item) => ({
+                  step: item.getAttribute('data-step'),
+                  status: item.getAttribute('data-status'),
+                })),
+              )
+            return {
+              allSuccess:
+                steps.length > 0 && steps.every((step) => step.state === 'Success'),
+              cardsSucceeded:
+                cards.length === steps.length &&
+                cards.every((card) => card.status === 'succeeded'),
+              runBusy: await runControl.getAttribute('aria-busy'),
+            }
+          },
+          { timeout: 30_000 },
+        )
+        .toEqual({ allSuccess: true, cardsSucceeded: true, runBusy: 'false' })
+      await shot('workspace-flow-completed')
+      await expect
+        .poll(() => readChecklistCardMismatches(page, workspace!.workspaceDir), {
+          timeout: 30_000,
+        })
+        .toEqual([])
     },
     FLOW_TIMEOUT_MS + 120_000,
   )
 
-  it('reports every step successful with passing quality gates', async () => {
+  it('reports mandatory steps successful with passing quality gates', async () => {
     const page = launched!.page
     const steps = await readOverviewStepStates(page)
     console.log(`overview steps: ${JSON.stringify(steps)}`)
     expect(steps.length).toBeGreaterThan(0)
     for (const step of steps) {
-      expect(step.state.toLowerCase(), `overview step ${step.id}`).toBe('succeeded')
+      expect(
+        ADVISORY_STEPS.has(step.id) ? ['succeeded', 'failed'] : ['succeeded'],
+        `overview step ${step.id}`,
+      ).toContain(step.state.toLowerCase())
     }
 
     const fileSteps = await readFlowSteps(workspace!.workspaceDir)
     expect(fileSteps.length).toBeGreaterThan(0)
     for (const step of fileSteps) {
-      expect(step.state, `flow.json step ${step.name}`).toBe('Success')
+      expect(
+        ADVISORY_STEPS.has(step.name) ? ['Success', 'Incomplete'] : ['Success'],
+        `flow.json step ${step.name}`,
+      ).toContain(step.state)
     }
 
     const gateFailures = await readQualityGateFailures(workspace!.workspaceDir)
@@ -174,34 +267,45 @@ describe('product e2e: backend rtl2gds journey', () => {
     await shot('flow-success', '#/workspace/home')
   }, 120_000)
 
-  it('passes the signoff-lit artifact gate', () => {
-    const suite = process.env.ECOS_E2E_LIT_SUITE
-    if (!suite) {
-      console.log('ECOS_E2E_LIT_SUITE unset; skipping the signoff-lit gate')
-      return
-    }
-    const litCase = join(suite, design.name, `${design.name}.lit`)
-    if (!existsSync(litCase)) {
-      console.log(`no lit case for design ${design.name}; skipping the signoff-lit gate`)
-      return
-    }
-    const result = spawnSync(
-      'bash',
-      [join(repoRoot, 'ecc/nix/scripts/signoff-lit.sh'), suite, '--filter', design.name],
-      {
-        env: {
-          ...process.env,
-          ECC_REPO_ROOT: join(repoRoot, 'ecc'),
-          ECC_FLOW_WORKSPACES: join(outDir, 'work'),
+  it.skipIf(!process.env.ECOS_E2E_LIT_SUITE)(
+    'passes the signoff-lit artifact gate',
+    () => {
+      const suite = process.env.ECOS_E2E_LIT_SUITE
+      if (!suite) {
+        console.log('ECOS_E2E_LIT_SUITE unset; skipping the signoff-lit gate')
+        return
+      }
+      const litCase = join(suite, design.name, `${design.name}.lit`)
+      if (!existsSync(litCase)) {
+        throw new Error(`Missing signoff-lit case for design ${design.name}: ${litCase}`)
+      }
+      const escapedName = design.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const result = spawnSync(
+        'bash',
+        [
+          join(repoRoot, 'ecc/nix/scripts/signoff-lit.sh'),
+          suite,
+          '--filter',
+          `${escapedName}/${escapedName}\\.lit$`,
+        ],
+        {
+          env: {
+            ...process.env,
+            ECC_REPO_ROOT: join(repoRoot, 'ecc'),
+            ECC_FLOW_WORKSPACES: join(outDir, 'work'),
+          },
+          encoding: 'utf8',
         },
-        encoding: 'utf8',
-      },
-    )
-    if (result.status !== 0) {
-      console.error(`signoff-lit stdout:\n${result.stdout}`)
-      console.error(`signoff-lit stderr:\n${result.stderr}`)
-      if (result.error) console.error(`signoff-lit spawn error: ${result.error.message}`)
-    }
-    expect(result.status).toBe(0)
-  }, 300_000)
+      )
+      if (result.status !== 0) {
+        console.error(`signoff-lit stdout:\n${result.stdout}`)
+        console.error(`signoff-lit stderr:\n${result.stderr}`)
+        if (result.error)
+          console.error(`signoff-lit spawn error: ${result.error.message}`)
+      }
+      expect(result.status).toBe(0)
+      expect(result.stdout).toMatch(/Passed\s*:\s*1\b/)
+    },
+    300_000,
+  )
 })

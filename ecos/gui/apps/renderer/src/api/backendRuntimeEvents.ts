@@ -73,7 +73,11 @@ export function connectBackendRuntimeEventSession(
     const payload = backendRuntimeEventPayload(event)
     const protocol = event.type === 'runtime.protocol' ? event.event : null
     const revision =
-      protocol?.workspaceRevision ?? finiteNumber(payload.workspaceRevision)
+      protocol?.workspaceRevision ??
+      ('workspaceRevision' in event
+        ? finiteNumber(event.workspaceRevision)
+        : undefined) ??
+      finiteNumber(payload.workspaceRevision)
     if (revision !== undefined) sink.onRevision(revision)
     sink.onEvent(event)
 

@@ -31,6 +31,9 @@ export function createShutdownCoordinator(
   runtime: RuntimeHost,
   journal: CreationJournal,
 ): ShutdownCoordinator {
+  const withoutDetachedFlows = (
+    projection: EccBackgroundOperationProjection,
+  ): EccBackgroundOperationProjection => ({ ...projection, operations: [] })
   const showDialog = async (scope: ShutdownScope, options: MessageBoxOptions) => {
     const parent =
       scope.kind === 'window'
@@ -61,13 +64,14 @@ export function createShutdownCoordinator(
     cancelOperation: (workspaceHandle, operationId) =>
       runtime.cancelOperation({ operationId, workspaceHandle }),
     creationEntries: () => journal.allEntries(),
-    currentOperationProjection: () => runtime.operationProjection(),
+    currentOperationProjection: () => withoutDetachedFlows(runtime.operationProjection()),
     forceTerminate: (workspaceHandles) => runtime.forceShutdown(workspaceHandles),
     flushRuntimeState: () => runtime.flushPendingState(),
     listWindowIds: () =>
       BrowserWindow.getAllWindows().map((window) => window.webContents.id),
     markCreationsUnfinished: (windowIds) => journal.markActiveUnfinished(windowIds),
-    operationProjection: () => runtime.reconcileOperationProjection(),
+    operationProjection: async () =>
+      withoutDetachedFlows(await runtime.reconcileOperationProjection()),
     promptForce: async (blockers) => {
       const result = await showDialog(coordinator.scope(), {
         buttons: ['Keep Waiting', 'Force Quit'],

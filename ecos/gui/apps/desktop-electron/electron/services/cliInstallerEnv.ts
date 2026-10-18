@@ -6,7 +6,7 @@ import {
   buildEnvFileContent as composeEnvFileContent,
   pathSeparator,
 } from './cliInstallerArtifacts'
-import { createEccRuntimeEnv, type EccRuntimeEnvOptions } from './eccRpc/runtimeEnv'
+import { createEccRuntimeEnv, type EccRuntimeEnvOptions } from './eccCli/runtimeEnv'
 
 /** The subset of ResourceManagerService the env writer consumes. */
 export interface CliEnvWriterResourceManager {

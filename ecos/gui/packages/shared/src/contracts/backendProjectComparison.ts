@@ -4,7 +4,7 @@ import type {
 } from '../utils/projectManifest.ts'
 import type { DesktopEventUnsubscribe } from './desktopEvents.ts'
 import type { ReadIssue, ReadSection } from './backendWorkspace.ts'
-import type { EccQorSnapshotExtension } from './eccRuntime.ts'
+import type { EccQorSnapshotExtension, EccRuntimeStepSnapshot } from './eccRuntime.ts'
 
 export type ProjectStepStatus =
   | 'success'
@@ -237,6 +237,7 @@ export interface ProjectQorTrendSummary {
   trendPoints: ProjectQorTrendPoint[]
   baselineWorkspaceId: string | null
   baselineLabel: string
+  scoreThreshold?: number
   regressions: ProjectQorRegression[]
   improvements: ProjectQorDelta[]
   risks: ProjectQorRisk[]
@@ -479,6 +480,7 @@ export interface BackendProjectComparisonInvalidatedEvent {
 export interface BackendProjectActiveOperation {
   cancelRequested: boolean
   engineeringWorkspaceId: string
+  flow?: { steps: EccRuntimeStepSnapshot[] }
   kind: 'flow' | 'step'
   operationId: string
   projectWorkspaceId: string

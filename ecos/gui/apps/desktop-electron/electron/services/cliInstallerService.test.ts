@@ -120,6 +120,7 @@ function createService(
     resourceManager?: CliInstallerResourceManager
     expectedVersion?: string
     externalBinDir?: string | null
+    runtimeInUse?: () => boolean | Promise<boolean>
   } = {},
 ): ServiceFixture {
   const root = createTempDir('ecos-cli-installer-')
@@ -140,6 +141,7 @@ function createService(
     spawn: spawnLike(spawn),
     expectedVersion: options.expectedVersion ?? STUB_VERSION,
     externalBinDir: options.externalBinDir ?? null,
+    runtimeInUse: options.runtimeInUse,
   })
   return { root, dataDir, binDir, service, resourceManager, spawn }
 }
@@ -580,6 +582,13 @@ describe('CliInstallerService', () => {
     expect(existsSync(join(fixture.binDir, 'ecos-ecc'))).toBe(true)
     const status = await fixture.service.status()
     expect(status.status).toBe('ready')
+  })
+
+  it('blocks bundle update and uninstall while an ECC run uses the runtime', async () => {
+    const fixture = createService({ runtimeInUse: () => true })
+
+    await expect(fixture.service.ensureBundle()).rejects.toThrow('runtime is in use')
+    await expect(fixture.service.uninstall()).rejects.toThrow('runtime is in use')
   })
 
   it('records the shim failure remediation when the shim cannot be written', async () => {

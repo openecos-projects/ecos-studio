@@ -100,7 +100,7 @@
           <section
             class="custom-scrollbar min-h-0 flex-1"
             :class="
-              currentStep === 5
+              currentStep === 6
                 ? 'overflow-y-auto p-4 md:p-5'
                 : 'overflow-y-auto p-6 md:p-8'
             "
@@ -376,6 +376,34 @@
 
               <div
                 v-else-if="currentStep === 2"
+                key="import-rtl"
+                class="mx-auto w-full max-w-5xl"
+              >
+                <header class="mb-7">
+                  <h2 class="text-2xl font-bold text-(--text-primary)">Import RTL</h2>
+                  <p class="mt-2 text-sm text-(--text-secondary)">
+                    A required project phase: the selected RTL files or filelist are
+                    copied into the project's rtl/ folder by the ECC CLI at creation.
+                  </p>
+                </header>
+
+                <div
+                  class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-5"
+                >
+                  <RtlImportStep
+                    :verilog="config.rtl_list"
+                    :filelist="filelistPath"
+                    :imported-source="importedDesignSource"
+                    @update:selection="onPendingRtlChange"
+                  />
+                </div>
+                <p v-if="rtlImportBlockedReason" class="mt-4 text-xs text-red-500">
+                  {{ rtlImportBlockedReason }}
+                </p>
+              </div>
+
+              <div
+                v-else-if="currentStep === 3"
                 key="basic-info"
                 class="mx-auto w-full max-w-3xl"
               >
@@ -456,7 +484,7 @@
               </div>
 
               <div
-                v-else-if="currentStep === 3"
+                v-else-if="currentStep === 4"
                 key="flow-setup"
                 class="mx-auto w-full max-w-5xl"
               >
@@ -515,6 +543,28 @@
                         {{ runnableFlowSteps.length }}
                       </p>
                     </div>
+                  </div>
+
+                  <div v-if="isFlowStepRunnable('sta')" class="mb-5">
+                    <label
+                      for="sta-max-parallel-corners"
+                      class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                    >
+                      STA maximum parallel corners
+                    </label>
+                    <select
+                      id="sta-max-parallel-corners"
+                      v-model.number="config.parameters.sta_max_parallel_corners"
+                      class="rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2 text-sm text-(--text-primary)"
+                    >
+                      <option v-for="count in 4" :key="count" :value="count">
+                        {{ count }}
+                      </option>
+                    </select>
+                    <p class="mt-2 text-xs text-(--text-secondary)">
+                      Defaults to 1 (serial). Available memory may reduce concurrency;
+                      parallel STA requires Linux.
+                    </p>
                   </div>
 
                   <p
@@ -617,7 +667,7 @@
               </div>
 
               <div
-                v-else-if="currentStep === 4"
+                v-else-if="currentStep === 5"
                 key="design-files"
                 class="mx-auto w-full max-w-5xl"
               >
@@ -666,135 +716,50 @@
                   </nav>
 
                   <div class="min-w-0 p-5">
-                    <div v-if="activeDesignInputType === 'rtl'" class="space-y-5">
-                      <div
-                        @dragover.prevent="isDraggingFiles = true"
-                        @dragleave.prevent="isDraggingFiles = false"
-                        @drop.prevent="handleFileDrop"
-                        class="rounded-xl border-2 border-dashed p-8 text-center transition-colors duration-200"
-                        :class="
-                          isDraggingFiles
-                            ? 'border-(--accent-color) bg-(--accent-color)/5'
-                            : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'
-                        "
-                      >
-                        <div
-                          class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl border border-(--border-color) bg-(--bg-secondary)/50 text-(--text-secondary)"
-                        >
-                          <i class="ri-upload-cloud-2-line text-3xl"></i>
-                        </div>
-                        <h3 class="text-base font-bold text-(--text-primary)">
-                          Add RTL Design Files
-                        </h3>
-                        <p class="mt-2 text-sm text-(--text-secondary)">
-                          Supports .v, .sv, .vhd, .vhdl, and .gz-compressed RTL files or a
-                          design folder.
-                        </p>
-                        <div class="relative mt-5 inline-block">
-                          <button
-                            type="button"
-                            class="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-(--accent-color) px-5 py-2.5 text-sm font-semibold text-white transition-opacity duration-200 hover:opacity-90"
-                            @click="toggleBrowseMenu"
-                          >
-                            Browse
-                            <i
-                              class="ri-arrow-down-s-line"
-                              :class="{ 'rotate-180': showBrowseMenu }"
-                            ></i>
-                          </button>
-                          <div
-                            v-if="showBrowseMenu"
-                            class="absolute top-[calc(100%+0.5rem)] left-1/2 z-20 w-60 -translate-x-1/2 overflow-hidden rounded-lg border border-(--border-color) bg-(--bg-primary) shadow-lg"
-                          >
-                            <button
-                              type="button"
-                              class="flex w-full cursor-pointer items-center gap-2 px-4 py-3 text-left text-sm text-(--text-primary) transition-colors duration-200 hover:bg-(--bg-secondary)/60"
-                              @click="browseRtlFiles"
-                            >
-                              <i class="ri-file-code-line text-blue-500"></i>
-                              Select RTL files...
-                            </button>
-                            <button
-                              type="button"
-                              class="flex w-full cursor-pointer items-center gap-2 border-t border-(--border-color)/60 px-4 py-3 text-left text-sm text-(--text-primary) transition-colors duration-200 hover:bg-(--bg-secondary)/60"
-                              @click="browseRtlFolder"
-                            >
-                              <i class="ri-folder-open-line text-yellow-500"></i>
-                              Select design folder...
-                            </button>
-                          </div>
-                        </div>
-                        <p v-if="manualFilePickError" class="mt-5 text-xs text-red-500">
-                          {{ manualFilePickError }}
-                        </p>
-                        <p
-                          v-else-if="directoryScanError"
-                          class="mt-5 text-xs text-red-500"
-                        >
-                          {{ directoryScanError }}
-                        </p>
-                        <p
-                          v-else-if="isScanningDirectory"
-                          class="mt-5 text-xs text-(--text-secondary)"
-                        >
-                          <i class="ri-loader-4-line animate-spin"></i>
-                          Scanning RTL files in the selected directory...
-                        </p>
-                      </div>
-
-                      <DesignFileTransfer
-                        v-if="rtlSourceDirectory && scannedRtlFiles.length > 0"
-                        :root-path="rtlSourceDirectory"
-                        :all-files="scannedRtlFiles"
-                        :selected-files="directorySelectedFiles"
-                        @update:selected-files="updateDirectorySelectedFiles"
-                      />
-
-                      <div
-                        v-if="manuallyAddedFiles.length > 0"
-                        class="rounded-xl border border-(--border-color) bg-(--bg-primary)/65 p-4"
-                      >
-                        <div class="mb-3 flex items-center justify-between">
+                    <div
+                      v-if="startsFromSynthesis"
+                      class="mb-5 rounded-xl border border-(--border-color) bg-(--bg-primary)/65 p-4"
+                    >
+                      <div class="flex items-start justify-between gap-4">
+                        <div class="min-w-0">
                           <h4 class="text-sm font-semibold text-(--text-primary)">
-                            Added RTL Files
+                            Design Source
                           </h4>
-                          <span
-                            class="rounded-md bg-(--bg-secondary) px-2 py-0.5 text-xs text-(--text-secondary)"
-                            >{{ manuallyAddedFiles.length }}</span
+                          <p class="mt-1 text-xs text-(--text-secondary)">
+                            Reused from the project's imported RTL
+                            {{
+                              designSourceSummary?.filelistPath ? 'filelist' : 'files'
+                            }}.
+                          </p>
+                          <p
+                            v-if="designSourceSummary?.filelistPath"
+                            class="mt-2 truncate text-xs text-(--text-secondary)"
                           >
+                            {{ designSourceSummary.filelistPath }}
+                          </p>
+                          <p
+                            v-else-if="designSourceSummary"
+                            class="mt-2 text-xs text-(--text-secondary)"
+                          >
+                            {{ designSourceSummary.rtlPaths.length }} RTL file{{
+                              designSourceSummary.rtlPaths.length === 1 ? '' : 's'
+                            }}
+                          </p>
+                          <p v-else class="mt-2 text-xs text-red-500">
+                            No design source available — complete the Import RTL step.
+                          </p>
                         </div>
-                        <div
-                          class="custom-scrollbar max-h-44 space-y-2 overflow-y-auto pr-1"
+                        <button
+                          type="button"
+                          class="shrink-0 cursor-pointer rounded-lg border border-(--border-color) px-3 py-1.5 text-xs font-semibold text-(--text-primary) transition-colors duration-200 hover:bg-(--bg-secondary)/60"
+                          @click="jumpToStep(2)"
                         >
-                          <div
-                            v-for="file in manuallyAddedFiles"
-                            :key="file"
-                            class="flex items-center justify-between gap-3 rounded-lg border border-(--border-color) bg-(--bg-secondary)/25 px-3 py-2"
-                          >
-                            <div class="min-w-0">
-                              <p
-                                class="truncate text-sm font-medium text-(--text-primary)"
-                              >
-                                {{ getFileName(file) }}
-                              </p>
-                              <p class="truncate text-xs text-(--text-secondary)">
-                                {{ file }}
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-(--text-secondary) transition-colors duration-200 hover:bg-red-500/10 hover:text-red-500"
-                              @click="removeManualFile(file)"
-                            >
-                              <i class="ri-delete-bin-line"></i>
-                            </button>
-                          </div>
-                        </div>
+                          Change in Import RTL
+                        </button>
                       </div>
                     </div>
 
                     <div
-                      v-else
                       class="rounded-xl border border-(--border-color) bg-(--bg-primary)/65 p-5"
                     >
                       <div class="mb-5 flex items-start justify-between gap-4">
@@ -849,7 +814,7 @@
               </div>
 
               <div
-                v-else-if="currentStep === 5"
+                v-else-if="currentStep === 6"
                 key="pdk-config"
                 class="mx-auto flex min-h-full w-full max-w-5xl flex-col"
               >
@@ -1404,7 +1369,7 @@
               </div>
 
               <div
-                v-else-if="currentStep === 6"
+                v-else-if="currentStep === 7"
                 key="spec-setting"
                 class="mx-auto w-full max-w-4xl"
               >
@@ -1637,14 +1602,14 @@
               Back
             </button>
             <p
-              v-else-if="currentStep === 5 && !canProceed && stepFiveBlockedReason"
+              v-else-if="currentStep === 6 && !canProceed && stepFiveBlockedReason"
               class="max-w-[52%] text-xs leading-5 text-red-500"
             >
               <i class="ri-error-warning-line mr-1" aria-hidden="true"></i>
               {{ stepFiveBlockedReason }}
             </p>
             <p
-              v-else-if="currentStep === 6 && topModuleReturnToDesignFiles"
+              v-else-if="currentStep === 7 && topModuleReturnToDesignFiles"
               class="max-w-[52%] text-xs leading-5 text-red-500"
             >
               <i class="ri-error-warning-line mr-1" aria-hidden="true"></i>
@@ -1661,12 +1626,12 @@
                 Cancel
               </button>
               <button
-                v-if="currentStep === 6 && topModuleReturnToDesignFiles"
+                v-if="currentStep === 7 && topModuleReturnToDesignFiles"
                 type="button"
                 class="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-(--accent-color) px-5 py-2.5 text-sm font-semibold text-white transition-opacity duration-200 hover:opacity-90"
-                @click="jumpToStep(4)"
+                @click="jumpToStep(topModuleReturnTargetStep)"
               >
-                Return to Design Files
+                Return to {{ startsFromSynthesis ? 'Import RTL' : 'Design Files' }}
                 <i class="ri-arrow-left-line"></i>
               </button>
               <button
@@ -1675,7 +1640,7 @@
                 class="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-(--accent-color) px-5 py-2.5 text-sm font-semibold text-white transition-opacity duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
                 :disabled="!canProceed"
                 :title="
-                  currentStep === 5 && !canProceed ? stepFiveBlockedReason : undefined
+                  currentStep === 6 && !canProceed ? stepFiveBlockedReason : undefined
                 "
                 @click="nextStep"
               >
@@ -1730,24 +1695,20 @@ import { readProjectManagementManifest } from '@/utils/projectManagementRead'
 import { validateMpcDieArea } from '@/utils/mpcWorkspace'
 import { FLOW_START_DISABLED_STEPS, getStepMetadata } from '@/api/type'
 import {
-  isHdlFilePath,
   projectIdFromName,
   type DesktopFileDialogOptions,
   type EccPdkOverrides,
   type PdkDetectedFiles,
-  type PickedRtlSources,
   type ProjectEccPdkConfigReadResult,
   type ProjectManifest,
   type ProjectManifestMpc,
 } from '@ecos-studio/shared'
-import DesignFileTransfer from './DesignFileTransfer.vue'
 import PdkResourcePickerDialog from './PdkResourcePickerDialog.vue'
+import RtlImportStep from './RtlImportStep.vue'
 import TopModuleField from './TopModuleField.vue'
 import {
   canSubmitTopModule,
   designInputFingerprint,
-  exclusiveDesignFilesReady,
-  exclusiveRtlFilelistPrefill,
   nextTopModuleSelection,
   topModuleBlockedReason,
 } from './topModuleConfirmation'
@@ -1806,6 +1767,8 @@ const FLOW_STEP_NAME_ALIASES: Record<string, FlowStepName> = {
   route: 'route',
   routing: 'route',
   drc: 'drc',
+  antenna: 'antennaCheck',
+  antennacheck: 'antennaCheck',
   lvs: 'lvs',
   filler: 'filler',
   postlec: 'postRouteLec',
@@ -1813,6 +1776,7 @@ const FLOW_STEP_NAME_ALIASES: Record<string, FlowStepName> = {
   rcx: 'RCX',
   sta: 'sta',
   poweranalysis: 'powerAnalysis',
+  emir: 'emir',
   harden: 'Harden',
 }
 const KNOWN_FLOW_STEP_NAMES: ReadonlySet<string> = new Set(
@@ -1927,22 +1891,19 @@ const { model: workspaceCreationModel, refresh: refreshWorkspaceCreationModel } 
         : null,
     projectPresetParameters: () => projectPresetParameters.value,
   })
-const isDraggingFiles = ref(false)
-const isScanningDirectory = ref(false)
-const directoryScanError = ref('')
-const manualFilePickError = ref('')
 const designFileError = ref('')
-const rtlSourceDirectory = ref<string | null>(null)
-const scannedRtlFiles = ref<string[]>([])
-const directorySelectedFiles = ref<string[]>([])
 const initialRtlFiles = uniquePaths([
   ...(props.initialConfig?.rtl_list ?? []),
   ...(props.initialConfig?.source_config?.rtl_list ?? []),
 ])
 const initialFilelistPath =
   props.initialConfig?.filelist ?? props.initialConfig?.source_config?.filelist ?? ''
-const manuallyAddedFiles = ref<string[]>([...initialRtlFiles])
-const showBrowseMenu = ref(false)
+/**
+ * Design RTL already imported in the selected project (manifest
+ * base_design), displayed for reuse. The wizard only submits a pending
+ * import when the user selects new sources in the Import RTL step.
+ */
+const importedDesignSource = ref<{ rtlList: string[]; filelist: string } | null>(null)
 const initialWorkspaceNameValue = initialWorkspaceName(props.initialConfig)
 const workspaceName = ref(initialWorkspaceNameValue || defaultWorkspaceName())
 const workspaceNameTouched = ref(initialWorkspaceNameValue !== '')
@@ -2008,11 +1969,12 @@ const steps = [
     id: 1,
     title: standaloneWorkspace.value ? 'Workspace Setup' : 'Project Setup',
   },
-  { id: 2, title: 'Basic Info' },
-  { id: 3, title: 'Flow Setup' },
-  { id: 4, title: 'Design Files' },
-  { id: 5, title: 'PDK Config' },
-  { id: 6, title: 'Spec Setting' },
+  { id: 2, title: 'Import RTL' },
+  { id: 3, title: 'Basic Info' },
+  { id: 4, title: 'Flow Setup' },
+  { id: 5, title: 'Design Files' },
+  { id: 6, title: 'PDK Config' },
+  { id: 7, title: 'Spec Setting' },
 ]
 
 const discoveredFlowDefinition = computed<Record<string, unknown> | null>(() => {
@@ -2202,6 +2164,7 @@ function createInitialConfig(
       clock: '',
       frequency_max: 50,
       max_fanout: 32,
+      sta_max_parallel_corners: 1,
       die_area_mode: dieAreaMode.value,
       die_width: 100,
       die_height: 100,
@@ -2323,6 +2286,7 @@ async function readProjectManifestForProject(
 const SYSTEM_PARAMETER_DEFAULTS: Record<string, number> = {
   frequency_max: 50,
   max_fanout: 32,
+  sta_max_parallel_corners: 1,
   die_width: 100,
   die_height: 100,
   utilization: 0.6,
@@ -2332,7 +2296,9 @@ const SYSTEM_PARAMETER_DEFAULTS: Record<string, number> = {
 function initialDesignInputType(startStep: FlowStepName): DesignInputKey {
   if (startStep === 'preFloorplan') return 'verilog'
   if (startStep !== 'Synthesis') return 'def'
-  return initialRtlFiles.length > 0 || !initialFilelistPath ? 'rtl' : 'filelist'
+  // The RTL/filelist selection moved to the Import RTL step; synthesis entry
+  // only offers workspace-level SDC here.
+  return 'sdc'
 }
 
 function parentPath(path: string) {
@@ -2428,8 +2394,6 @@ function syncManagedWorkspaceDirectory() {
 }
 const CHINESE_CHAR_RE = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/
 const HAS_SPACE_RE = /\s/
-const DIRECTORY_UPLOAD_FAILURE_MESSAGE =
-  'Folders cannot be uploaded from Select RTL files. Use Select design folder to scan a folder.'
 const projectNameError = computed(() =>
   validateName(projectContext.value.project_name, 'Project name'),
 )
@@ -2490,20 +2454,6 @@ const hasSelectedPdkConfig = computed(
 const designInputTypes = computed<DesignInputType[]>(() => {
   if (startsFromSynthesis.value) {
     return [
-      {
-        key: 'rtl',
-        label: 'RTL',
-        required: true,
-        description:
-          'Import RTL source files or scan an RTL source folder. RTL and filelist are exclusive.',
-      },
-      {
-        key: 'filelist',
-        label: 'Filelist',
-        required: false,
-        description:
-          'Use an existing filelist instead of selecting RTL files. RTL and filelist are exclusive.',
-      },
       {
         key: 'sdc',
         label: 'SDC',
@@ -2756,16 +2706,20 @@ const canProceed = computed(() => {
       )
     case 2:
       return (
+        rtlImportReady() && !isLoadingProjectManifest.value && !projectManifestError.value
+      )
+    case 3:
+      return (
         workspaceName.value.trim() !== '' &&
         workspaceLocation.value.trim() !== '' &&
         !workspaceNameError.value &&
         !workspaceLocationError.value
       )
-    case 3:
-      return selectedFlowSteps.value.length > 0
     case 4:
-      return designFilesReady()
+      return selectedFlowSteps.value.length > 0
     case 5:
+      return designFilesReady()
+    case 6:
       if (
         !hasSelectedPdkConfig.value ||
         projectPdkMismatch.value ||
@@ -2783,14 +2737,14 @@ const canProceed = computed(() => {
         pdkSelections.value.cell_lef.length > 0 &&
         pdkSelections.value.liberty.length > 0
       )
-    case 6:
+    case 7:
       return specReady()
     default:
       return true
   }
 })
 const stepFiveBlockedReason = computed(() => {
-  if (currentStep.value !== 5 || canProceed.value) return ''
+  if (currentStep.value !== 6 || canProceed.value) return ''
   if (isLoadingProjectEccPdk.value) return 'Loading the project PDK configuration.'
   if (projectEccPdkError.value) return projectEccPdkError.value
   if (projectPdkMismatch.value) return 'Select the PDK installation declared in ecc.toml.'
@@ -2864,15 +2818,13 @@ watch(flowStepOptions, (options) => {
 
 watch([flowStartStep, flowEndStep], () => {
   if (!designInputTypes.value.some((item) => item.key === activeDesignInputType.value)) {
-    activeDesignInputType.value = designInputTypes.value[0]?.key ?? 'rtl'
+    activeDesignInputType.value = designInputTypes.value[0]?.key ?? 'sdc'
   }
   if (startsFromSynthesis.value) {
     config.value.origin_def = ''
     config.value.origin_verilog = ''
   } else {
     config.value.rtl_list = []
-    manuallyAddedFiles.value = []
-    directorySelectedFiles.value = []
     filelistPath.value = ''
     if (startsFromPreFloorplan.value) {
       config.value.origin_def = ''
@@ -3019,7 +2971,7 @@ async function applyProjectDefaultsForProject(projectRoot: string) {
     return
   }
   if (manifest) {
-    applyProjectManifestDefaults(manifest)
+    await applyProjectManifestDefaults(manifest)
   }
   projectMpc.value = manifest?.mpc ?? null
   projectPresetParameters.value = isRecord(manifest?.base_design.parameters)
@@ -3030,7 +2982,7 @@ async function applyProjectDefaultsForProject(projectRoot: string) {
   syncWorkspaceConfig()
 }
 
-function applyProjectManifestDefaults(manifest: ProjectManifest) {
+async function applyProjectManifestDefaults(manifest: ProjectManifest) {
   projectContext.value.project_id = manifest.project_id
   projectDesignName.value = manifest.design_name
   config.value.parameters.design = manifest.design_name
@@ -3053,7 +3005,7 @@ function applyProjectManifestDefaults(manifest: ProjectManifest) {
     config.value.pdk_requirement = baseDesign.pdk_requirement
   }
 
-  applyProjectDesignFileDefaults(baseDesignRecord, parameters)
+  await applyProjectDesignFileDefaults(baseDesignRecord, parameters)
   applyProjectPdkResourceDefaults(baseDesignRecord)
   applyProjectParameterDefaults(manifest, parameters)
 }
@@ -3075,37 +3027,61 @@ function applyProjectFlowDefaults(
   activeDesignInputType.value = initialDesignInputType(flowStartStep.value)
 }
 
-function applyProjectDesignFileDefaults(
+async function projectPathExists(path: string): Promise<boolean> {
+  try {
+    return Boolean(await getDesktopApi().workspace.pathExists(path))
+  } catch {
+    return false
+  }
+}
+
+async function applyProjectDesignFileDefaults(
   baseDesign: ProjectManifest['base_design'] & Record<string, unknown>,
   parameters: Record<string, unknown>,
 ) {
+  const projectRoot = projectContext.value.project_root
   const projectFilelist = firstString(baseDesign.filelist, parameters.filelist)
-  const projectRtl =
-    startsFromSynthesis.value &&
-    Array.isArray(baseDesign.rtl_list) &&
-    baseDesign.rtl_list.length > 0 &&
-    !hasInitialRtlList()
-      ? uniquePaths(baseDesign.rtl_list)
-      : []
-  if (startsFromSynthesis.value) {
-    const exclusive = exclusiveRtlFilelistPrefill(
-      projectRtl,
-      hasInitialConfigValue('filelist') ? filelistPath.value : projectFilelist,
-    )
-    if (!hasInitialRtlList()) {
-      manuallyAddedFiles.value = exclusive.rtlList
-      config.value.rtl_list = exclusive.rtlList
+  const projectRtl = Array.isArray(baseDesign.rtl_list)
+    ? uniquePaths(
+        baseDesign.rtl_list.map((path) => resolveProjectRelativePath(projectRoot, path)),
+      )
+    : []
+  const resolvedFilelist = projectFilelist
+    ? resolveProjectRelativePath(projectRoot, projectFilelist)
+    : ''
+  // `ecc init` scaffolds a placeholder rtl_list entry (rtl/<design>.v) that
+  // does not exist on disk; only sources really present count as an
+  // imported, reusable design source.
+  const filelistUsable = resolvedFilelist
+    ? await projectPathExists(resolvedFilelist)
+    : false
+  let anyRtlUsable = false
+  for (const path of projectRtl) {
+    if (await projectPathExists(path)) {
+      anyRtlUsable = true
+      break
     }
-    if (!filelistPath.value && !hasInitialConfigValue('filelist')) {
-      filelistPath.value = exclusive.filelist
-    } else if (
-      exclusive.filelist &&
-      exclusive.rtlList.length === 0 &&
-      !hasInitialRtlList()
+  }
+  importedDesignSource.value =
+    (filelistUsable || anyRtlUsable) && (resolvedFilelist || projectRtl.length)
+      ? { rtlList: projectRtl, filelist: resolvedFilelist }
+      : null
+
+  if (startsFromSynthesis.value) {
+    // The project's imported design RTL is reused by default; a preseeded
+    // pending selection is cleared unless this wizard reconfigures a locked
+    // workspace or the user already changed the selection.
+    const selectionUntouched =
+      config.value.rtl_list.length === initialRtlFiles.length &&
+      initialRtlFiles.every((path) => config.value.rtl_list.includes(path)) &&
+      filelistPath.value === initialFilelistPath
+    if (
+      importedDesignSource.value &&
+      selectionUntouched &&
+      !lockWorkspaceDirectory.value
     ) {
-      filelistPath.value = exclusive.filelist
-      manuallyAddedFiles.value = []
       config.value.rtl_list = []
+      filelistPath.value = ''
     }
   }
 
@@ -3258,13 +3234,6 @@ function hasInitialParameterValue(key: string) {
   return (
     props.initialConfig?.parameters?.[key] !== undefined ||
     props.initialConfig?.source_config?.parameters?.[key] !== undefined
-  )
-}
-
-function hasInitialRtlList() {
-  return (
-    (props.initialConfig?.rtl_list?.length ?? 0) > 0 ||
-    (props.initialConfig?.source_config?.rtl_list?.length ?? 0) > 0
   )
 }
 
@@ -3502,148 +3471,15 @@ function applySourceWorkspaceDefaults(initialConfig?: WorkspaceWizardInitialConf
   syncWorkspaceConfig()
 }
 
-function closeBrowseMenu() {
-  showBrowseMenu.value = false
-}
-
-function toggleBrowseMenu() {
-  showBrowseMenu.value = !showBrowseMenu.value
-}
-
-function showDirectoryUploadFailurePrompt() {
-  manualFilePickError.value = DIRECTORY_UPLOAD_FAILURE_MESSAGE
-  showToast({
-    severity: 'warn',
-    summary: 'Folder Upload Failed',
-    detail: DIRECTORY_UPLOAD_FAILURE_MESSAGE,
-    life: 15000,
-  })
-}
-
-async function browseRtlFiles() {
-  closeBrowseMenu()
-  manualFilePickError.value = ''
-  directoryScanError.value = ''
-
-  let result: PickedRtlSources | null = null
-  try {
-    result = await getDesktopApi().dialog.pickRtlSources({
-      multiple: false,
-      title: 'Select RTL Design Files',
-    })
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('not folders')) {
-      showDirectoryUploadFailurePrompt()
-      return
-    }
-    manualFilePickError.value =
-      error instanceof Error ? error.message : 'Failed to select RTL design files.'
-    return
-  }
-
-  if (!result || result.files.length === 0) return
-  if (result.directories.length > 0) {
-    showDirectoryUploadFailurePrompt()
-    return
-  }
-
-  const hdlFiles = result.files.filter((path) => isHdlFilePath(path))
-  if (hdlFiles.length === 0) {
-    manualFilePickError.value =
-      'Please select RTL design files only (.v, .sv, .vhd, .vhdl, or .gz-compressed HDL).'
-    return
-  }
-
-  addManualFiles(hdlFiles)
-}
-
-async function browseRtlFolder() {
-  closeBrowseMenu()
-  manualFilePickError.value = ''
-  directoryScanError.value = ''
-
-  let directoryPath: string | null = null
-  try {
-    directoryPath = await getDesktopApi().dialog.pickDirectory({
-      title: 'Select RTL Design Folder',
-    })
-  } catch (error) {
-    directoryScanError.value =
-      error instanceof Error ? error.message : 'Please select a folder, not a file.'
-    return
-  }
-
-  if (!directoryPath) return
-  await loadRtlDirectory(directoryPath)
-}
-
-async function loadRtlDirectory(directoryPath: string) {
-  isScanningDirectory.value = true
-  directoryScanError.value = ''
-  try {
-    const scanned = await getDesktopApi().workspace.scanRtlDirectory(directoryPath)
-    rtlSourceDirectory.value = scanned.rootPath
-    scannedRtlFiles.value = scanned.files
-    directorySelectedFiles.value = [...scanned.files]
-    syncRtlList()
-  } catch (error) {
-    directoryScanError.value =
-      error instanceof Error ? error.message : 'Failed to scan the selected directory.'
-  } finally {
-    isScanningDirectory.value = false
-  }
-}
-
-function updateDirectorySelectedFiles(files: string[]) {
-  directorySelectedFiles.value = files
-  syncRtlList()
-}
-
-function syncRtlList() {
-  config.value.rtl_list = uniquePaths([
-    ...directorySelectedFiles.value,
-    ...manuallyAddedFiles.value,
-  ])
-  if (startsFromSynthesis.value && config.value.rtl_list.length > 0) {
-    filelistPath.value = ''
-  }
+/**
+ * Pending RTL selection from the Import RTL step. RTL files and a filelist
+ * are mutually exclusive; the selection is imported into the project rtl/
+ * folder (`ecc rtl import`) when the workspace is created.
+ */
+function onPendingRtlChange(selection: { verilog: string[]; filelist: string }) {
+  config.value.rtl_list = [...selection.verilog]
+  filelistPath.value = selection.filelist
   syncWorkspaceConfig()
-}
-
-function handleFileDrop(event: DragEvent) {
-  isDraggingFiles.value = false
-  manualFilePickError.value = ''
-  const files = event.dataTransfer?.files
-  if (!files) return
-
-  const paths = Array.from(files)
-    .map((file) => (file as File & { path?: string }).path ?? file.name)
-    .filter((path): path is string => Boolean(path))
-    .filter((path) => isHdlFilePath(path))
-
-  if (paths.length === 0) {
-    manualFilePickError.value =
-      'Only RTL design files can be dropped here. Use Browse to select a folder.'
-    return
-  }
-
-  addManualFiles(paths)
-}
-
-function addManualFiles(paths: string[]) {
-  const existing = new Set([...manuallyAddedFiles.value, ...directorySelectedFiles.value])
-  for (const path of paths) {
-    if (!existing.has(path)) {
-      manuallyAddedFiles.value.push(path)
-      existing.add(path)
-    }
-  }
-  syncRtlList()
-}
-
-function removeManualFile(path: string) {
-  manuallyAddedFiles.value = manuallyAddedFiles.value.filter((file) => file !== path)
-  syncRtlList()
 }
 
 async function importDesignInput(type: DesignInputKey) {
@@ -3668,16 +3504,6 @@ async function importDesignInput(type: DesignInputKey) {
     return
   }
 
-  if (type === 'filelist') {
-    filelistPath.value = file
-    if (startsFromSynthesis.value) {
-      config.value.rtl_list = []
-      manuallyAddedFiles.value = []
-      directorySelectedFiles.value = []
-      rtlSourceDirectory.value = null
-      scannedRtlFiles.value = []
-    }
-  }
   if (type === 'sdc') sdcPath.value = file
   if (type === 'def') config.value.origin_def = file
   if (type === 'verilog') config.value.origin_verilog = file
@@ -3687,23 +3513,6 @@ async function importDesignInput(type: DesignInputKey) {
 function getDesignFileOptions(type: DesignInputKey): DesktopFileDialogOptions | null {
   const common = { multiple: false }
   switch (type) {
-    case 'filelist':
-      return {
-        ...common,
-        title: 'Select Filelist',
-        filters: [
-          {
-            name: 'Filelist',
-            extensions: ['f', 'fl', 'flist', 'filelist', 'lst', 'txt', 'gz'],
-          },
-          {
-            // ECC writes the workspace filelist without an extension
-            // (origin/filelist); keep it selectable in the dialog.
-            name: 'All Files',
-            extensions: ['*'],
-          },
-        ],
-      }
     case 'sdc':
       return {
         ...common,
@@ -3735,22 +3544,13 @@ function isAllowedDesignInputPath(type: DesignInputKey, path: string) {
         lowerPath.endsWith(`.${extension}`) || lowerPath.endsWith(`.${extension}.gz`),
     )
 
-  if (type === 'filelist') {
-    // Extension filters cannot match the extensionless ECC convention
-    // (origin/filelist), so accept it by basename as well.
-    return (
-      matches(['f', 'fl', 'flist', 'filelist', 'lst', 'txt']) ||
-      lowerPath.endsWith('/filelist')
-    )
-  }
   if (type === 'sdc') return matches(['sdc'])
   if (type === 'def') return matches(['def'])
   if (type === 'verilog') return matches(['v', 'sv', 'vg'])
-  return type === 'rtl' ? isHdlFilePath(path) : false
+  return false
 }
 
 function getDesignInputPath(type: DesignInputKey) {
-  if (type === 'filelist') return filelistPath.value
   if (type === 'sdc') return sdcPath.value
   if (type === 'def') return config.value.origin_def
   if (type === 'verilog') return config.value.origin_verilog
@@ -3758,13 +3558,58 @@ function getDesignInputPath(type: DesignInputKey) {
 }
 
 function getDesignInputStatus(type: DesignInputKey) {
-  if (type === 'rtl') return config.value.rtl_list.length > 0
   return getDesignInputPath(type).trim() !== ''
 }
 
+/**
+ * Effective synthesis design inputs: the pending Import RTL selection wins;
+ * otherwise the project's imported design RTL (reuse). Null when neither
+ * exists.
+ */
+function effectiveSynthesisDesignInputs(): {
+  rtlPaths: string[]
+  filelistPath: string
+} | null {
+  if (filelistPath.value.trim()) {
+    return { rtlPaths: [], filelistPath: filelistPath.value.trim() }
+  }
+  if (config.value.rtl_list.length > 0) {
+    return { rtlPaths: [...config.value.rtl_list], filelistPath: '' }
+  }
+  const imported = importedDesignSource.value
+  if (!imported) return null
+  if (imported.filelist) {
+    return { rtlPaths: [], filelistPath: imported.filelist }
+  }
+  if (imported.rtlList.length) {
+    return { rtlPaths: [...imported.rtlList], filelistPath: '' }
+  }
+  return null
+}
+
+const designSourceSummary = computed(() => effectiveSynthesisDesignInputs())
+
+/** Import RTL is a required project phase: a pending selection or an already
+ * imported project design source must exist. MPC-backed projects take their
+ * design from the managed template and skip the import. */
+const mpcDesignProject = computed(() => Boolean(config.value.mpc || projectMpc.value))
+
+function rtlImportReady() {
+  return mpcDesignProject.value || effectiveSynthesisDesignInputs() !== null
+}
+
+const rtlImportBlockedReason = computed(() => {
+  if (currentStep.value !== 2 || rtlImportReady()) return ''
+  if (isLoadingProjectManifest.value) return 'Reading the project manifest.'
+  if (projectManifestError.value) return projectManifestError.value
+  return 'Select RTL files or a filelist to import into the project rtl/ folder.'
+})
+
+const topModuleReturnTargetStep = computed(() => (startsFromSynthesis.value ? 2 : 5))
+
 function designFilesReady() {
   if (startsFromSynthesis.value) {
-    return exclusiveDesignFilesReady(config.value.rtl_list, filelistPath.value)
+    return mpcDesignProject.value || effectiveSynthesisDesignInputs() !== null
   }
   if (startsFromPreFloorplan.value) {
     return config.value.origin_verilog.trim() !== ''
@@ -4113,7 +3958,10 @@ function specReady() {
     }) &&
     String(params.clock || '').trim() !== '' &&
     Number(params.frequency_max) > 0 &&
-    Number(params.max_fanout) > 0
+    Number(params.max_fanout) > 0 &&
+    Number.isInteger(params.sta_max_parallel_corners ?? 1) &&
+    Number(params.sta_max_parallel_corners ?? 1) >= 1 &&
+    Number(params.sta_max_parallel_corners ?? 1) <= 4
 
   if (!hasCoreFields || projectManifestError.value || isLoadingProjectManifest.value) {
     return false
@@ -4215,10 +4063,10 @@ function nextStep() {
   if (currentStep.value < steps.length && canProceed.value) {
     currentStep.value += 1
     highestStep.value = Math.max(highestStep.value, currentStep.value)
-    if (currentStep.value === 5) {
+    if (currentStep.value === 6) {
       void ensurePdksLoaded()
     }
-    if (currentStep.value === 6) {
+    if (currentStep.value === 7) {
       void refreshTopModuleDiscovery()
     }
   }
@@ -4227,10 +4075,10 @@ function nextStep() {
 function jumpToStep(step: number) {
   currentStep.value = step
   highestStep.value = Math.max(highestStep.value, step)
-  if (step === 5) {
+  if (step === 6) {
     void ensurePdksLoaded()
   }
-  if (step === 6) {
+  if (step === 7) {
     void refreshTopModuleDiscovery()
   }
 }
@@ -4263,11 +4111,13 @@ async function refreshTopModuleDiscovery() {
   const pathsChanged = fingerprint !== lastTopModuleFingerprint.value
   const designName = String(config.value.parameters.design || '').trim()
   const designNameChanged = designName !== lastTopModuleDesignName.value
-  const request = startsFromSynthesis.value
-    ? exclusiveDesignFilesReady(config.value.rtl_list, filelistPath.value) &&
-      filelistPath.value.trim()
-      ? { filelistPath: filelistPath.value.trim(), designName }
-      : { rtlPaths: [...config.value.rtl_list], designName }
+  const effectiveInputs = startsFromSynthesis.value
+    ? effectiveSynthesisDesignInputs()
+    : null
+  const request = effectiveInputs
+    ? effectiveInputs.filelistPath
+      ? { filelistPath: effectiveInputs.filelistPath, designName }
+      : { rtlPaths: [...effectiveInputs.rtlPaths], designName }
     : { originVerilogPath: config.value.origin_verilog.trim(), designName }
   const sourceTop = String(
     props.initialConfig?.source_config?.parameters?.top_module ?? '',
@@ -4309,10 +4159,13 @@ async function refreshTopModuleDiscovery() {
 }
 
 function currentDesignInputFingerprint() {
+  const effectiveInputs = startsFromSynthesis.value
+    ? effectiveSynthesisDesignInputs()
+    : null
   return designInputFingerprint({
-    filelist: filelistPath.value,
+    filelist: effectiveInputs?.filelistPath ?? '',
     originVerilog: config.value.origin_verilog,
-    rtlList: config.value.rtl_list,
+    rtlList: effectiveInputs?.rtlPaths ?? [],
     startsFromSynthesis: startsFromSynthesis.value,
   })
 }
@@ -4347,8 +4200,8 @@ const topModuleReturnToDesignFiles = computed(() => {
 })
 
 watch(currentStep, (step) => {
-  if (step === 5) void loadProjectEccPdkConfig()
-  if (step === 6) void refreshTopModuleDiscovery()
+  if (step === 6) void loadProjectEccPdkConfig()
+  if (step === 7) void refreshTopModuleDiscovery()
 })
 
 watch(
@@ -4367,7 +4220,7 @@ watch(
       externalPdkScans.value = new Map()
       pdkSelections.value = { tech_lef: [], cell_lef: [], liberty: [] }
     }
-    if (currentStep.value === 5) void loadProjectEccPdkConfig()
+    if (currentStep.value === 6) void loadProjectEccPdkConfig()
   },
 )
 
@@ -4376,10 +4229,11 @@ watch(
     filelistPath.value,
     config.value.origin_verilog,
     config.value.rtl_list.join('|'),
+    importedDesignSource.value,
     config.value.parameters.design,
   ],
   () => {
-    if (currentStep.value === 6) void refreshTopModuleDiscovery()
+    if (currentStep.value === 7) void refreshTopModuleDiscovery()
   },
 )
 

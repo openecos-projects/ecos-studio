@@ -19,7 +19,6 @@ import { computed, onMounted, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import FrontendLeftSidebar from '../components/FrontendLeftSidebar.vue'
 import LeftSidebar from '../components/LeftSidebar.vue'
-import { clearBaselineStepConfigCache } from '../composables/useBaselineStepConfig'
 import { clearHomeSnapshotCache } from '../composables/useHomeSnapshots'
 import { clearStepDashboardDataCache } from '../composables/useStepDashboardData'
 import { useWorkspace } from '../composables/useWorkspace'
@@ -70,6 +69,7 @@ watch(
 onMounted(() => {
   agentShell.setMode('workspace')
   agentShell.closeHomeAgent()
+  agentShell.closeWorkspaceAgent()
   const path = currentProject.value?.path
   if (path && currentProject.value?.designTool !== 'frontend') {
     void backendWorkspaceSession.start(path)
@@ -79,7 +79,6 @@ onMounted(() => {
 onBeforeRouteLeave(() => {
   backendWorkspaceSession.dispose()
   clearStepDashboardDataCache()
-  clearBaselineStepConfigCache()
   clearHomeSnapshotCache()
   // Keep Agent tabs across workspace navigation.
   agentShell.resetShell({ keepHomeOpen: false })

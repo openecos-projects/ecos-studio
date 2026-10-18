@@ -349,7 +349,7 @@ function openAgentProgress(episode: DesktopAgentOptimizationEpisodeSummary): voi
   }
   messageStore.upsertOptimizationProjection(episode.agentSessionId, episode.optimization)
   agentShell.openHomeAgent()
-  agentShell.setWorkspaceAgentCollapsed(false)
+  agentShell.openWorkspaceAgent()
   open.value = false
 }
 

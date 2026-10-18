@@ -405,6 +405,7 @@ export interface ResourceManagerServiceOptions {
   pdksDir?: string
   mpcsDir?: string
   registryUrl?: string
+  resourceInUse?: (resourceId: string) => boolean | Promise<boolean>
   resourcesDir?: string
   sha256Verifier?: Sha256Verifier
   toolsDir?: string
@@ -443,6 +444,7 @@ export class ResourceManagerService {
   private readonly pdksDir: string
   private readonly pdkInventoryService: PdkInventoryService
   private readonly registryUrl: string
+  private readonly resourceInUse: (resourceId: string) => boolean | Promise<boolean>
   private readonly resourcesDir: string
   private readonly sha256Verifier: Sha256Verifier
   private readonly toolsDir: string
@@ -478,6 +480,7 @@ export class ResourceManagerService {
     })
     this.registryUrl =
       options.registryUrl ?? process.env.ECOS_REGISTRY_URL ?? DEFAULT_REGISTRY_URL
+    this.resourceInUse = options.resourceInUse ?? (() => false)
     this.commandRunner = options.commandRunner ?? runCommand
     this.fetchImpl = options.fetchImpl ?? fetch
     this.archiveExtractor = options.archiveExtractor ?? extractArchive
@@ -1076,6 +1079,9 @@ export class ResourceManagerService {
   }
 
   async uninstallResource(resourceId: string): Promise<ResourceOperationResult> {
+    if (await this.resourceInUse(resourceId)) {
+      throw new Error(`Resource '${resourceId}' is in use by an active ECC run`)
+    }
     if (!resourceId.startsWith('tool:')) {
       if (resourceId.startsWith('pdk:')) {
         await this.pdkInventoryService.removeInstallation(resourceId)

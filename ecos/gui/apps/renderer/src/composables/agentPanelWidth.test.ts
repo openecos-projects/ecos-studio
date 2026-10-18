@@ -6,9 +6,7 @@ import {
   AGENT_PANEL_MIN_WIDTH,
   clampAgentPanelWidth,
   persistAgentPanelWidth,
-  persistWorkspaceAgentCollapsed,
   readStoredAgentPanelWidth,
-  readStoredWorkspaceAgentCollapsed,
 } from './agentPanelWidth'
 
 describe('agentPanelWidth', () => {
@@ -26,13 +24,5 @@ describe('agentPanelWidth', () => {
     expect(readStoredAgentPanelWidth()).toBe(AGENT_PANEL_DEFAULT_WIDTH)
     persistAgentPanelWidth(512)
     expect(readStoredAgentPanelWidth()).toBe(512)
-  })
-
-  it('reads and persists the workspace collapsed state', () => {
-    expect(readStoredWorkspaceAgentCollapsed()).toBe(false)
-    persistWorkspaceAgentCollapsed(true)
-    expect(readStoredWorkspaceAgentCollapsed()).toBe(true)
-    persistWorkspaceAgentCollapsed(false)
-    expect(readStoredWorkspaceAgentCollapsed()).toBe(false)
   })
 })

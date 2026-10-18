@@ -24,17 +24,45 @@ function createService(
   callRuntime = vi.fn(),
   replacement?: ProjectManifestReplacementProvider,
 ) {
+  const runtime = {
+    discoverProject: (directory: string) =>
+      callRuntime('project.discover', { directory }),
+    loadProjectManifest: (root: string) =>
+      callRuntime('project.manifest.load', { projectRoot: root }),
+    mutateProjectManifest: (root: string, mutation: unknown) =>
+      callRuntime('project.manifest.mutate', { projectRoot: root, mutation }),
+  }
   return {
     callRuntime,
     service: new ProjectManifestService(
       { resolveProjectRoot: async (path) => path },
       replacement,
-      { callRuntime },
+      runtime,
     ),
   }
 }
 
 describe('ProjectManifestService', () => {
+  it('uses the read-only index path for browsing an existing backend Project', async () => {
+    const readProjectManifest = vi.fn(async () => emptyManifest as never)
+    const loadProjectManifest = vi.fn()
+    const service = new ProjectManifestService(
+      { resolveProjectRoot: async (path) => path },
+      undefined,
+      {
+        readProjectManifest,
+        loadProjectManifest,
+        discoverProject: vi.fn(),
+        mutateProjectManifest: vi.fn(),
+      },
+    )
+    await expect(service.load(projectRoot)).resolves.toMatchObject({
+      project_id: 'proj_gcd',
+    })
+    expect(readProjectManifest).toHaveBeenCalledWith(projectRoot)
+    expect(loadProjectManifest).not.toHaveBeenCalled()
+  })
+
   it('discovers a nested Workspace through the ECC Runtime', async () => {
     const { callRuntime, service } = createService(
       vi
@@ -71,6 +99,34 @@ describe('ProjectManifestService', () => {
       project_id: emptyManifest.project_id,
       root_path: projectRoot,
       workspaces: [],
+    })
+  })
+
+  it('resolves a new project through the creation path without requiring the directory', async () => {
+    const callRuntime = vi.fn().mockResolvedValue(emptyManifest)
+    const resolveProjectRoot = vi.fn(async (path: string) => path)
+    const resolveProjectCreationRoot = vi.fn(async (path: string) => `${path}/canonical`)
+    const service = new ProjectManifestService(
+      { resolveProjectRoot, resolveProjectCreationRoot },
+      undefined,
+      {
+        discoverProject: vi.fn(),
+        loadProjectManifest: vi.fn(),
+        mutateProjectManifest: (root, mutation) =>
+          callRuntime('project.manifest.mutate', { projectRoot: root, mutation }),
+      },
+    )
+
+    await service.mutate({
+      projectRoot: '/projects/new-gcd',
+      mutation: { type: 'create', name: 'new-gcd', designName: 'gcd' },
+    })
+
+    expect(resolveProjectCreationRoot).toHaveBeenCalledWith('/projects/new-gcd')
+    expect(resolveProjectRoot).not.toHaveBeenCalled()
+    expect(callRuntime).toHaveBeenCalledWith('project.manifest.mutate', {
+      projectRoot: '/projects/new-gcd/canonical',
+      mutation: { type: 'create', name: 'new-gcd', designName: 'gcd' },
     })
   })
 
@@ -164,7 +220,7 @@ describe('ProjectManifestService', () => {
     ).rejects.toThrow('registration changed')
   })
 
-  it('keeps directory replacement in Electron and Manifest mutation in ECC', async () => {
+  it('delegates backend directory deletion entirely to ECC CLI', async () => {
     const callRuntime = vi
       .fn()
       .mockResolvedValueOnce({
@@ -198,7 +254,7 @@ describe('ProjectManifestService', () => {
 
     expect(
       replacement.prepareManagedProjectWorkspaceDirectoryReplacement,
-    ).toHaveBeenCalledWith(projectRoot, 'ws-1', `${projectRoot}/ws-1`)
+    ).not.toHaveBeenCalled()
     expect(callRuntime).toHaveBeenLastCalledWith('project.manifest.mutate', {
       projectRoot,
       mutation: {
@@ -207,8 +263,6 @@ describe('ProjectManifestService', () => {
         deleteDirectory: true,
       },
     })
-    expect(replacement.finalizeProjectDirectoryReplacement).toHaveBeenCalledWith(
-      'replace-1',
-    )
+    expect(replacement.finalizeProjectDirectoryReplacement).not.toHaveBeenCalled()
   })
 })

@@ -34,7 +34,7 @@ import {
   resolveDataHome,
   resolveEccRuntimeBinDir,
   type EccRuntimeEnvOptions,
-} from './eccRpc/runtimeEnv'
+} from './eccCli/runtimeEnv'
 
 export type { CliSpawnLike, CliSelfCheckChild } from './cliSelfCheck'
 export type { CliBundleInstallRecord } from './cliInstallerArtifacts'
@@ -92,6 +92,7 @@ export interface CliInstallerServiceOptions {
   spawn?: CliSpawnLike
   expectedVersion?: string
   selfCheckTimeoutMs?: number
+  runtimeInUse?: () => boolean | Promise<boolean>
   now?: () => Date
 }
 
@@ -117,6 +118,7 @@ export class CliInstallerService {
   private readonly spawnImpl: CliSpawnLike
   private readonly expectedVersion: string
   private readonly selfCheckTimeoutMs: number
+  private readonly runtimeInUse: () => boolean | Promise<boolean>
   private readonly resolveNow: () => Date
 
   private ensurePromise: Promise<string> | null = null
@@ -151,6 +153,7 @@ export class CliInstallerService {
     this.spawnImpl = options.spawn ?? (spawn as unknown as CliSpawnLike)
     this.expectedVersion = options.expectedVersion ?? EXPECTED_ECC_BUNDLE_VERSION
     this.selfCheckTimeoutMs = options.selfCheckTimeoutMs ?? SELF_CHECK_TIMEOUT_MS
+    this.runtimeInUse = options.runtimeInUse ?? (() => false)
     this.resolveNow = options.now ?? (() => new Date())
     this.envWriter = new CliInstallerEnvWriter({
       resourceManager: options.resourceManager,
@@ -470,6 +473,11 @@ export class CliInstallerService {
         'An install is in progress; wait for it to finish before uninstalling',
       )
     }
+    if (!this.externalBinDir && (await this.runtimeInUse())) {
+      throw new Error(
+        'The ECC runtime is in use; wait for active runs before uninstalling it',
+      )
+    }
     this.uninstalling = true
     try {
       const shimPath = join(this.binDir, SHIM_NAME)
@@ -568,6 +576,11 @@ export class CliInstallerService {
   }
 
   private async runEnsureBundle(options: EnsureBundleOptions): Promise<string> {
+    if (!this.externalBinDir && (await this.runtimeInUse())) {
+      throw new Error(
+        'The ECC runtime is in use; wait for active runs before updating it',
+      )
+    }
     this.lastFailure = null
     const versionDir = await acquireAndActivateBundle({
       dataDir: this.dataDir,

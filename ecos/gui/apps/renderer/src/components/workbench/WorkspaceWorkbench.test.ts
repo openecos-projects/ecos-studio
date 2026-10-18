@@ -8,11 +8,13 @@ import WorkspaceWorkbench from './WorkspaceWorkbench.vue'
 import workbenchSource from './WorkspaceWorkbench.vue?raw'
 import logSource from './FlowLogPanel.vue?raw'
 import { useAgentShellStore } from '@/stores/agentShellStore'
+import { useWorkspaceInformationPanel } from '@/composables/useWorkspaceInformationPanel'
 
 describe('WorkspaceWorkbench Agent panel', () => {
   beforeEach(() => {
     localStorage.clear()
     setActivePinia(createPinia())
+    useWorkspaceInformationPanel().informationPanelVisible.value = true
   })
 
   it('preserves the log minimum height and keeps Agent sizing independent of message content', () => {
@@ -50,10 +52,6 @@ describe('WorkspaceWorkbench Agent panel', () => {
       expect(getComputedStyle(log).minHeight).toBe('34px')
       expect(getComputedStyle(log).flexBasis).toBe('34px')
       log.classList.remove('is-collapsed')
-      const panel = container.querySelector('.workspace-workbench-right')!
-      panel.classList.add('workspace-workbench-right--agent-collapsed')
-      expect(getComputedStyle(log).flexGrow).toBe('1')
-      panel.classList.remove('workspace-workbench-right--agent-collapsed')
       expect(getComputedStyle(log).minHeight).toBe('96px')
     } finally {
       style.remove()
@@ -61,8 +59,9 @@ describe('WorkspaceWorkbench Agent panel', () => {
     }
   })
 
-  it('collapses the Agent panel and gives the log the remaining height', async () => {
+  it('hides the Agent panel when workspace visibility is turned off', async () => {
     const store = useAgentShellStore()
+    store.openWorkspaceAgent()
     const wrapper = mount(WorkspaceWorkbench, {
       props: { flowTitle: 'Flow', nodes: [] },
       global: {
@@ -79,18 +78,66 @@ describe('WorkspaceWorkbench Agent panel', () => {
     })
 
     expect(wrapper.find('.workspace-agent').exists()).toBe(true)
-    store.setWorkspaceAgentCollapsed(true)
+    store.closeWorkspaceAgent()
     await nextTick()
 
-    expect(wrapper.find('.workspace-agent').exists()).toBe(true)
-    expect(wrapper.get('.workspace-workbench-inspector').attributes('style')).toContain(
-      'display: none',
-    )
-    const toggle = wrapper.get('button.workspace-workbench-agent-toggle')
-    expect(toggle.attributes('aria-label')).toBe('Expand Agent panel')
-    await toggle.trigger('click')
+    expect(wrapper.find('.workspace-agent').exists()).toBe(false)
+    expect(wrapper.find('.workspace-workbench-inspector').exists()).toBe(false)
+  })
+
+  it('removes the right panel in RTL mode when Agent is hidden', async () => {
+    const store = useAgentShellStore()
+    store.openWorkspaceAgent()
+    const wrapper = mount(WorkspaceWorkbench, {
+      props: { flowTitle: 'Flow', nodes: [], agentOnly: true },
+      slots: {
+        'right-log': '<div class="old-log">Old log</div>',
+        left: '<div>Dashboard</div>',
+      },
+      global: {
+        stubs: {
+          Splitter: { template: '<div><slot /></div>' },
+          SplitterPanel: { template: '<div><slot /></div>' },
+          FlowStatusStrip: { template: '<div class="flow-status" />' },
+          FlowRunControl: true,
+          ChatInspectorPanel: {
+            props: ['hideGuiArtifacts'],
+            template: '<div class="workspace-agent">{{ hideGuiArtifacts }}</div>',
+          },
+        },
+      },
+    })
+    expect(wrapper.find('.flow-status').exists()).toBe(false)
+    expect(wrapper.find('.old-log').exists()).toBe(false)
+    expect(wrapper.get('.workspace-agent').text()).toBe('true')
+    useWorkspaceInformationPanel().toggleInformationPanel()
     await nextTick()
-    expect(store.workspaceAgentCollapsed).toBe(false)
-    expect(wrapper.get('.workspace-workbench-inspector').isVisible()).toBe(true)
+    expect(wrapper.classes()).toContain('is-information-hidden')
+    useWorkspaceInformationPanel().toggleInformationPanel()
+    await nextTick()
+    expect(wrapper.classes()).not.toContain('is-information-hidden')
+    store.closeWorkspaceAgent()
+    await nextTick()
+    expect(wrapper.find('.workspace-agent').exists()).toBe(false)
+    expect(wrapper.classes()).toContain('is-agent-hidden')
+    wrapper.unmount()
+  })
+
+  it('leaves the shared Frontend workbench unchanged when the RTL information panel is hidden', () => {
+    useWorkspaceInformationPanel().informationPanelVisible.value = false
+    const wrapper = mount(WorkspaceWorkbench, {
+      props: { flowTitle: 'Frontend', nodes: [] },
+      global: {
+        stubs: {
+          Splitter: { template: '<div><slot /></div>' },
+          SplitterPanel: { template: '<div><slot /></div>' },
+          FlowStatusStrip: true,
+          FlowRunControl: true,
+          ChatInspectorPanel: true,
+        },
+      },
+    })
+    expect(wrapper.classes()).not.toContain('is-information-hidden')
+    wrapper.unmount()
   })
 })

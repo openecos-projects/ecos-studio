@@ -1,5 +1,5 @@
 import { readFile, readdir, realpath, stat } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, resolve, win32 } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, win32 } from 'node:path'
 import {
   type PdkDetectedFiles,
   type ProjectManifest,
@@ -209,6 +209,18 @@ function isPdkResourceFile(path: string): boolean {
 }
 
 async function isProjectDirectoryCandidate(path: string): Promise<boolean> {
+  try {
+    if ((await stat(`${path}/project.json`)).isFile()) return true
+  } catch {
+    // Continue checking the historical workspace shape below.
+  }
+
+  try {
+    if ((await stat(`${path}/runs`)).isDirectory()) return true
+  } catch {
+    // Continue checking the current workspace shape below.
+  }
+
   const homeDirectory = `${path}/home`
 
   try {
@@ -277,6 +289,40 @@ export class ProjectScopeService {
     return await canonicalizeExistingDirectory(path)
   }
 
+  async resolveProjectCreationRoot(path: string): Promise<string> {
+    const requested = resolve(path)
+    try {
+      return await canonicalizeExistingDirectory(requested)
+    } catch (error) {
+      if (!isNodeErrorWithCode(error, 'ENOENT')) throw error
+    }
+
+    const missingSegments: string[] = []
+    let candidate = requested
+    let existingRoot: string
+    while (true) {
+      try {
+        existingRoot = await canonicalizeExistingDirectory(candidate)
+        break
+      } catch (error) {
+        if (!isNodeErrorWithCode(error, 'ENOENT')) throw error
+        const parent = dirname(candidate)
+        if (parent === candidate) throw error
+        missingSegments.unshift(basename(candidate))
+        candidate = parent
+      }
+    }
+
+    const canonicalTarget = await canonicalizePotentialPathWithinRoot(
+      join(existingRoot, ...missingSegments),
+      existingRoot,
+    )
+    if (!isPathWithinRoot(canonicalTarget, existingRoot)) {
+      throw projectPathAccessDeniedError(canonicalTarget, 'root')
+    }
+    return canonicalTarget
+  }
+
   async canonicalizeProjectTarget(
     requestedProjectRoot: string,
     requestedTarget: string,
@@ -289,7 +335,10 @@ export class ProjectScopeService {
       return { projectRoot: canonical, targetDirectory: canonical }
     }
 
-    const canonicalRoot = await this.resolveProjectRoot(projectRoot)
+    // The creation journal canonicalizes its target before `ecc init` runs,
+    // so a brand-new project root may not exist yet; resolve it with
+    // creation-root semantics instead of requiring an existing directory.
+    const canonicalRoot = await this.resolveProjectCreationRoot(projectRoot)
     const canonicalTarget = await canonicalizePotentialPathWithinRoot(
       targetDirectory,
       canonicalRoot,
@@ -449,6 +498,39 @@ export class ProjectScopeService {
       workspaceRoots,
     })
     return canonicalPath
+  }
+
+  async authorizeProjectManagementReadRoot(path: string): Promise<string> {
+    const windowId = requireWindowScopeId()
+    const canonicalPath = await this.resolveProjectRoot(path)
+    if (
+      this.rootsByWindowId.get(windowId) === canonicalPath ||
+      this.readScopesByWindowId.get(windowId)?.projectRoot === canonicalPath ||
+      this.projectManagementReadScopesByWindowId.get(windowId)?.projectRoot ===
+        canonicalPath
+    ) {
+      return canonicalPath
+    }
+
+    // Project Management may inspect the project that owns the active workspace.
+    // The active root is a workspace after opening one, so exact-root checks above
+    // cannot authorize its containing project.
+    const activeRoot = this.rootsByWindowId.get(windowId)
+    if (activeRoot && this.loadProjectManifest) {
+      try {
+        const manifest = await this.loadProjectManifest(canonicalPath)
+        const workspaceRoots = await manifestWorkspaceRoots(manifest, canonicalPath)
+        if (
+          workspaceRoots.some((workspaceRoot) => pathsEqual(workspaceRoot, activeRoot))
+        ) {
+          return canonicalPath
+        }
+      } catch {
+        // Fall through to the existing project-management scope error.
+      }
+    }
+
+    throw projectPathAccessDeniedError(canonicalPath, 'project management scope')
   }
 
   async clearProjectRoot(): Promise<void> {

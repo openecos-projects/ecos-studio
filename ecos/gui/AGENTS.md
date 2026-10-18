@@ -65,33 +65,68 @@ pnpm --filter @ecos-studio/desktop-electron exec vitest run electron/path/to/fil
 - Build: `pnpm run build`
 - Environment diagnostics: `pnpm run doctor`
 - Electron smoke: `pnpm run desktop:build && pnpm run desktop:smoke`
-- Product e2e (real app journey against the built app; requires the local EDA
+- E2E Desktop Flow (real app journey against the built app; requires the local EDA
   toolchain and PDK, see below): `pnpm run desktop:build && pnpm run desktop:e2e`
 
-The product e2e suite under `apps/desktop-electron/e2e/` drives the real
+The E2E Desktop Flow suite under `apps/desktop-electron/e2e/` drives the real
 application through the preload bridge: it creates a project and workspace and
 runs the full rtl2gds flow, then gates the produced workspace with ECC's
 signoff-lit suite. It needs a working toolchain environment
 (`CHIPCOMPILER_OSS_CAD_DIR`, `CHIPCOMPILER_ECC_SIZER_ROOT`,
 `CHIPCOMPILER_KEPLER_FORMAL_ROOT`) and an unzipped ICS55 PDK. Useful overrides:
 `ECOS_E2E_OUT` (evidence directory), `ECOS_E2E_DESIGN_DIR` (an ecc-ci-designs
-style project used by the journey and the control cases; defaults to the gcd
-example, which currently fails at place on ecc-dreamplace 9a50193 — prefer a
-CI-tracked design), `ECOS_E2E_LIT_SUITE` (lit suite checkout; skips the gate
-when unset), `ECOS_E2E_PDK_ROOT`, `ECOS_E2E_ECC_BIN_DIR` (external ECC bundle
-instead of the repo dev runtime).
+style project used by the journey; defaults to the gcd example),
+`ECOS_E2E_LIT_SUITE` (lit suite checkout; skips the gate when unset),
+`ECOS_E2E_PDK_ROOT`, `ECOS_E2E_ECC_BIN_DIR` (external ECC bundle instead of
+the repo dev runtime).
 
-In CI the `e2e-product` job fans out over the rtl2gds-capable ecc-ci-designs
-(the list is derived upstream each run; gcd_icg and xtea are excluded, aes is
-excluded on pull requests). The job also runs on the nightly schedule, which
-is the main coverage for aes and for drift in the unpinned inputs (daily
-oss-cad-suite builds, the ecc-ci-designs default branch). The usb leg
-additionally runs the flow-cancel and missing-Sizer control cases; every
-other leg runs only the rtl2gds journey
-(`vitest run --config vitest.e2e.config.ts rtl2gds`). Each leg uploads its own
-`product-e2e-evidence-<design>` artifact. A fan-in `Product E2E` job
-aggregates the matrix into a single stable check name that branch rulesets
-require.
+In CI the `e2e-desktop-flow` job runs only the GCD example on PRs, main pushes,
+nightly schedules, and manual runs. Three independent runners select
+`rtl2gds`, `cli-flow`, and `flow-concurrency` from the E2E suite so the GUI,
+terminal, and concurrency journeys can run in parallel. They cover the GUI run button, built-in
+terminal, persisted flow/checklist projections, cancellation, and concurrent
+workspace isolation against the pinned ECC runtime. ECC owns the full
+design matrix, PPA, and physical-signoff regression tests. Studio does not
+repeat that matrix. The optional signoff-lit test is explicitly skipped when
+`ECOS_E2E_LIT_SUITE` is unset; local custom-design runs can still enable it.
+
+Desktop E2E uses ECC CI's `ubuntu-latest` runner and the OSS CAD Suite release
+and Kepler artifact recorded in `.github/ecc-ci-toolchain.json`. The ECC
+bundle, PDK, and Sizer all come from the same workflow run for the exact
+pinned ECC commit. Designs without an EMIR technology file use ECC's
+synthetic ICS55 fixture for flow testing; it is not foundry signoff data.
+The GUI journey also verifies reproducible CLI export against its completed
+GCD workspace. Each journey uploads `e2e-flow-workspace-gcd-<journey>`.
+The `Product E2E` summary requires all three journeys to succeed and keeps the stable check name
+used by branch rulesets.
+
+Linux CI sets `MALLOC_ARENA_MAX=2`, `MALLOC_TRIM_THRESHOLD_=131072`, and
+`MALLOC_MMAP_THRESHOLD_=131072` to reduce native heap retention between EDA
+phases. These allocator limits
+do not change design parameters or signoff assertions. When reproducing memory
+failures locally, apply the memory limit to the Electron application scope and
+verify that its ECC children remain within that scope.
+
+The GCD CI job sets `ECOS_E2E_CONCURRENCY_START_AFTER_STEP=sta` for the
+finish-both scenario: the second workspace starts after the first completes
+STA while its remaining power/EMIR/Harden steps are still running. This keeps
+the two routing memory peaks apart on the hosted runner. Both flows must
+actually overlap and finish successfully. The separate simultaneous-start
+and cancellation-isolation scenarios still start both flows immediately.
+Without this override, local finish-both runs also start immediately.
+
+The rtl2gds journey starts execution with the visible Flow run button and
+observes the resulting ECC operation. The terminal journey initializes the
+project with ECC CLI commands, applies design declarations and parameters before
+workspace creation, and starts the flow in the built-in terminal. Both verify
+running/completed cards and checklist badges against the persisted
+`home/flow.json`, including advisory `attention` states shown as warnings.
+Each app launch uses an isolated HOME and XDG directories so host shell startup
+files and user-installed ECC commands cannot replace the selected test runtime.
+The source directory name identifies each CI case and its workspace output;
+`design.name` and `design.top` remain the chip design declarations. With a lit
+suite configured, the matching case must exist and exactly one lit test must
+pass; missing or unsupported cases fail the gate.
 
 Before publishing GUI source or configuration changes, run `pnpm run check`.
 Also run the production build when changing build configuration, preload/main

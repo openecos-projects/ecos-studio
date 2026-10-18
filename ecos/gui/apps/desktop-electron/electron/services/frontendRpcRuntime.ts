@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { EccRuntimeEvent } from '@ecos-studio/shared'
-import type { EccRpcSidecarLaunch } from './eccRpc/sidecarProcess'
+import type { EccRpcSidecarLaunch } from './frontendRpc/sidecarProcess'
 import { resolveFrontendDevelopmentRoot } from './frontendDevelopmentRoot'
 
 let legacyFrontendProtocolSequence = 0

@@ -1,6 +1,10 @@
 <template>
-  <div class="flow-insights" :data-step-count="steps.length">
-    <header class="flow-insights-header">
+  <div
+    class="flow-insights"
+    :class="{ 'is-dialog-only': dialogOnly }"
+    :data-step-count="steps.length"
+  >
+    <header v-if="!dialogOnly" class="flow-insights-header">
       <div class="flow-insights-title">
         <i class="ri-grid-line" aria-hidden="true" />
         <h2>Data Snapshot</h2>
@@ -10,7 +14,12 @@
       </span>
     </header>
 
-    <div class="data-snapshot-grid" role="list" aria-label="Data snapshot modules">
+    <div
+      v-if="!dialogOnly"
+      class="data-snapshot-grid"
+      role="list"
+      aria-label="Data snapshot modules"
+    >
       <div
         v-for="(cell, index) in snapshotCells"
         :key="cell?.id ?? `snapshot-empty-${index}`"
@@ -41,6 +50,7 @@
       :style="{ width: 'min(1080px, calc(100vw - 40px))' }"
       :content-style="{ height: 'min(72vh, 680px)', overflow: 'auto' }"
       :draggable="false"
+      @update:visible="onDialogVisibilityChange"
     >
       <div class="data-snapshot-dialog-body">
         <StepResourcesPanel v-if="activeTab === 'resources'" :model="stepResources" />
@@ -59,7 +69,7 @@
           v-else-if="activeTab === 'timing'"
           :model="sta"
           :critical-paths="staCriticalPaths"
-          :convergence="staConvergence"
+          :timing-artifacts="timingArtifacts"
           :timing-issues-artifact="timingIssuesArtifact"
         />
       </div>
@@ -68,7 +78,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import type { WorkspaceArtifactDescriptor } from '@ecos-studio/shared'
 import StepResourcesPanel from './StepResourcesPanel.vue'
@@ -84,7 +94,6 @@ import type {
   DrcRelatedMetrics,
   FlowInsightStep,
   InstanceCompositionModel,
-  StaConvergenceModel,
   StaCriticalPathsModel,
   StaOverviewModel,
   StepResourcesModel,
@@ -104,14 +113,18 @@ const props = defineProps<{
   drcRelated?: DrcRelatedMetrics | null
   sta: StaOverviewModel | null
   staCriticalPaths?: StaCriticalPathsModel | null
-  staConvergence?: StaConvergenceModel | null
+  timingArtifacts?: WorkspaceArtifactDescriptor[]
   timingIssuesArtifact?: WorkspaceArtifactDescriptor | null
   loading?: boolean
   loadCongestion?: () => void | Promise<void>
+  dialogOnly?: boolean
+  selectedModule?: string | null
 }>()
 
-const DATA_SNAPSHOT_ROWS = 4
-const DATA_SNAPSHOT_COLUMNS = 5
+const emit = defineEmits<{ close: [] }>()
+
+const DATA_SNAPSHOT_ROWS = 3
+const DATA_SNAPSHOT_COLUMNS = 3
 const DATA_SNAPSHOT_CELL_COUNT = DATA_SNAPSHOT_ROWS * DATA_SNAPSHOT_COLUMNS
 
 const activeTab = ref<string | null>(null)
@@ -145,9 +158,29 @@ function openModule(moduleId: string): void {
   dialogVisible.value = true
   if (moduleId === 'congestion') void props.loadCongestion?.()
 }
+
+function onDialogVisibilityChange(visible: boolean): void {
+  if (!visible) emit('close')
+}
+
+watch(
+  () => props.selectedModule,
+  (moduleId) => {
+    if (moduleId && modules.value.some((module) => module.id === moduleId)) {
+      openModule(moduleId)
+    } else {
+      dialogVisible.value = false
+    }
+  },
+  { immediate: true },
+)
 </script>
 
 <style scoped>
+.flow-insights.is-dialog-only {
+  display: contents;
+}
+
 .flow-insights {
   display: flex;
   flex: 1;
@@ -194,8 +227,8 @@ function openModule(moduleId: string): void {
 .data-snapshot-grid {
   display: grid;
   flex: 1;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  grid-template-rows: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
   min-height: 0;
   padding: 2px 0 0;
 }
@@ -207,11 +240,11 @@ function openModule(moduleId: string): void {
   min-width: 0;
 }
 
-.data-snapshot-cell:nth-child(5n) {
+.data-snapshot-cell:nth-child(3n) {
   border-right: 0;
 }
 
-.data-snapshot-cell:nth-child(n + 16) {
+.data-snapshot-cell:nth-child(n + 7) {
   border-bottom: 0;
 }
 

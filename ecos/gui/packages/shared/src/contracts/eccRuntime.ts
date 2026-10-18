@@ -4,12 +4,32 @@ import type { PdkRequirement } from './pdkInventory.ts'
 export interface EccWorkspaceCreateRequest {
   commandId: string
   targetDirectory: string
+  /**
+   * Design inputs with role `rtl`/`filelist` on a non-derived create mean
+   * "import these sources into the project rtl/ directory" (`ecc rtl import`
+   * runs after `ecc init` / before `ecc project apply`, which no longer sets
+   * design.rtl). A project that already declares design RTL sends no
+   * rtl/filelist inputs; ECC materializes the workspace from ecc.toml.
+   */
   workspaceBindings: Record<string, unknown>
   workspaceSpec: Record<string, unknown>
   pdkInstallationId?: string
   pdkRequirement?: PdkRequirement
   projectId?: string
+  projectMode?: 'create' | 'select'
+  projectName?: string
   projectRoot?: string
+  projectMpc?: {
+    designIndex: number
+    displayName: string
+    resourceId: string
+    root: string
+    version: string
+  }
+  deriveFrom?: {
+    sourceStep?: string
+    workspaceId: string
+  }
   /**
    * ecc.toml persistence intent for this create/update. Consumed by the
    * Electron bridge (stripped before the request reaches ECC).
@@ -84,6 +104,7 @@ export interface EccWorkspaceParameterRecord {
   description: string
   param: string
   range?: unknown[]
+  source?: string
   type: string
   unit?: string
   value: unknown
@@ -215,6 +236,7 @@ export interface EccWorkspaceCreateResult extends EccWorkspaceOpenResult {
 
 export interface EccWorkspaceCloseResult {
   ok: boolean
+  retained?: boolean
 }
 
 export interface EccWorkspaceInfoResult {
@@ -226,6 +248,7 @@ export interface EccWorkspaceInfoResult {
 export interface EccWorkspaceRefreshConfigResult {
   directory: string
   refreshed: boolean
+  workspaceRevision?: number
 }
 
 export interface EccWorkspaceResetFlowResult {
@@ -338,6 +361,7 @@ export interface EccRuntimeOperation {
   currentStep: string
   currentTool: string
   error: { code: string; message: string } | null
+  flow?: { steps: EccRuntimeStepSnapshot[] }
   interruptibility?: EccRuntimeInterruptibility
   kind: EccRuntimeOperationKind
   operationId: string
@@ -499,6 +523,22 @@ export interface EccRuntimeStepSnapshot {
   runtime: string
   state: string
   tool: string
+  checklist?:
+    | Array<Record<string, unknown>>
+    | {
+        status: 'passed' | 'blocked' | 'attention' | 'unknown'
+        blocked: boolean
+        failed_items?: string[]
+        source?: string
+        updated_at?: string
+      }
+  checklist_status?: {
+    status: 'passed' | 'blocked' | 'attention' | 'unknown'
+    blocked: boolean
+    failed_items?: string[]
+    source?: string
+    updated_at?: string
+  }
 }
 
 export interface EccWorkspaceRuntimeSnapshot extends EccWorkspaceHandleRequest {
@@ -528,6 +568,20 @@ export interface EccEngineeringAnalysisArtifactRef {
   name: string
   reference: string
   stepId: string
+  sha256?: string
+  sizeBytes?: number
+}
+
+export interface EccEngineeringAnalysisStep {
+  flowState: string
+  order: number
+  stepId: string
+  toolId: string
+  [key: string]: unknown
+}
+
+export interface EccEngineeringAnalysis {
+  steps: EccEngineeringAnalysisStep[]
 }
 
 export interface EccEngineeringMetric extends Record<string, unknown> {
@@ -703,6 +757,7 @@ export interface EccSnapshotArtifactDescriptor {
  * through the artifact index (ADR-0005, ADR-0007, ADR-0010).
  */
 export interface EccEngineeringSnapshot {
+  analysis?: EccEngineeringAnalysis
   artifacts: EccSnapshotArtifactDescriptor[]
   cause: string
   checklist: EccSnapshotChecklistProjection
@@ -710,12 +765,16 @@ export interface EccEngineeringSnapshot {
   hotspotPreview: EccHotspotPreview
   metrics: EccEngineeringMetric[]
   parameters: Record<string, unknown>
+  qorAssessment?: Record<string, unknown>
   qorSnapshotExtension?: EccQorSnapshotExtension
-  schemaVersion: 6
+  schemaVersion: 4 | 6
   signoffAssessment: EccWorkspaceInspectSignoffResult
   timingPreview: EccTimingPreview
   workspaceId: string
   workspaceRevision: number
+  workspaceSpec?: Record<string, unknown>
+  workspaceBindings?: Record<string, unknown>
+  stepOutputs?: EccWorkspaceStepOutputsResult
   stalePredecessor?: {
     invalidatedStepIds: string[]
     workspaceRevision: number
@@ -814,6 +873,7 @@ export type EccRuntimeEvent =
       type: 'operation.completed'
       workspaceDirectory?: string
       workspaceHandle?: string
+      workspaceRevision?: number
     }
   | {
       data?: Record<string, unknown>
@@ -840,6 +900,7 @@ export type EccRuntimeEvent =
       type: 'operation.failed'
       workspaceDirectory?: string
       workspaceHandle?: string
+      workspaceRevision?: number
     }
   | {
       logFile?: string
@@ -850,6 +911,7 @@ export type EccRuntimeEvent =
       type: 'operation.cancelled'
       workspaceDirectory?: string
       workspaceHandle?: string
+      workspaceRevision?: number
     }
 
 export interface EccRuntimeApi {

@@ -8,7 +8,6 @@ import InputNumber from 'primevue/inputnumber'
 import Checkbox from 'primevue/checkbox'
 import Textarea from 'primevue/textarea'
 import StepConfigValueBlock from './StepConfigValueBlock.vue'
-import { useStepConfigDiff } from './stepConfigDiff'
 
 const model = defineModel<unknown>({ required: true })
 
@@ -20,13 +19,11 @@ const props = withDefaults(
     readonly?: boolean
     parameterDescriptions?: Record<string, string>
     parameterTypes?: Record<string, string>
-    /** Baseline-comparison leaf path ('' at the root; keys append '.k', array items '[i]'). */
+    /** Parameter path used to resolve descriptions and numeric types. */
     path?: string
   }>(),
   { depth: 0, maxDepth: 5, accent: 'indigo', readonly: false, path: '' },
 )
-
-const diff = useStepConfigDiff()
 
 function childPath(key: string): string {
   return props.path ? `${props.path}.${key}` : key
@@ -38,14 +35,6 @@ function itemPath(index: number): string {
 
 function cellPath(rowIndex: number, key: string): string {
   return `${itemPath(rowIndex)}.${key}`
-}
-
-function isChanged(path: string): boolean {
-  return diff?.isChanged(path) ?? false
-}
-
-function changedUnder(prefix: string): number {
-  return diff?.changedCountUnder(prefix) ?? 0
 }
 
 function descriptionFor(path: string): string | undefined {
@@ -179,7 +168,6 @@ function setPrim(i: number, v: unknown): void {
     <div
       v-if="model === null || model === undefined || typeof model !== 'object'"
       class="sc-field w-full min-w-0"
-      :class="{ 'sc-diff': isChanged(path) }"
     >
       <InputText
         v-if="typeof model === 'string'"
@@ -217,11 +205,7 @@ function setPrim(i: number, v: unknown): void {
     </div>
 
     <!-- Max depth exceeded: JSON -->
-    <div
-      v-else-if="depth >= maxDepth"
-      class="field"
-      :class="{ 'sc-diff': changedUnder(path) > 0 }"
-    >
+    <div v-else-if="depth >= maxDepth" class="field">
       <label>JSON</label>
       <Textarea
         v-model="jsonEdit"
@@ -245,12 +229,7 @@ function setPrim(i: number, v: unknown): void {
         </thead>
         <tbody>
           <tr v-for="(row, ri) in uniformTable.rows" :key="ri">
-            <td
-              v-for="k in uniformTable.keys"
-              :key="k"
-              class="align-top"
-              :class="{ 'sc-diff': isChanged(cellPath(ri, k)) }"
-            >
+            <td v-for="k in uniformTable.keys" :key="k" class="align-top">
               <StepConfigValueBlock
                 v-if="isObj(row[k]) || Array.isArray(row[k])"
                 :model-value="row[k]"
@@ -329,7 +308,6 @@ function setPrim(i: number, v: unknown): void {
         v-for="(_x, i) in model as unknown[]"
         :key="i"
         class="flex w-full min-w-0 items-center gap-2"
-        :class="{ 'sc-diff': isChanged(itemPath(i)) }"
       >
         <InputText
           v-if="typeof (model as unknown[])[i] === 'string'"
@@ -394,20 +372,9 @@ function setPrim(i: number, v: unknown): void {
 
     <!-- Object → sub-panels -->
     <div v-else class="space-y-2">
-      <div
-        v-for="k in objectKeys"
-        :key="k"
-        class="sc-pro-subpanel"
-        :class="{ 'sc-diff-panel': changedUnder(childPath(k)) > 0 }"
-      >
+      <div v-for="k in objectKeys" :key="k" class="sc-pro-subpanel">
         <div class="sc-pro-subpanel__title">
           {{ k }}
-          <span
-            v-if="changedUnder(childPath(k)) > 0"
-            class="sc-diff-badge"
-            title="Changed vs baseline"
-            >{{ changedUnder(childPath(k)) }}</span
-          >
         </div>
         <div v-if="descriptionFor(childPath(k))" class="sc-pro-subpanel__description">
           {{ descriptionFor(childPath(k)) }}

@@ -16,16 +16,19 @@ import { AppInfoService } from '../services/appInfoService'
 import { BackendWorkspaceService } from '../services/backendWorkspaceService'
 import { ProjectComparisonFileWatcher } from '../services/projectComparisonFileWatcher'
 import { BackendProjectComparisonService } from '../services/backendProjectComparisonService'
+import { ProjectWorkspaceFlowService } from '../services/projectWorkspaceFlowService'
 import { prepareDesktopLogs } from '../services/desktopLogPaths'
 import {
   createEccRuntimeEnv,
+  resolveDurableEccExecutable,
   resolveEccExecutable,
   resolveExternalEccBinDir,
-} from '../services/eccRpc/runtimeEnv'
-import type { EccRuntimeEnvOptions } from '../services/eccRpc/runtimeEnv'
-import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
-import { resolveEccSidecarLogDirectory } from '../services/eccRpc/sidecarLogDirectory'
-import { EccRpcSidecarProcess } from '../services/eccRpc/sidecarProcess'
+} from '../services/eccCli/runtimeEnv'
+import type { EccRuntimeEnvOptions } from '../services/eccCli/runtimeEnv'
+import { EccRpcRuntimeService } from '../services/frontendRpc/runtimeService'
+import { resolveEccSidecarLogDirectory } from '../services/frontendRpc/sidecarLogDirectory'
+import { EccRpcSidecarProcess } from '../services/frontendRpc/sidecarProcess'
+import { EccCliRuntimeService } from '../services/eccCli/runtimeService'
 import {
   createFrontendRpcLaunchResolver,
   frontendRuntimeEventFromNotification,
@@ -52,7 +55,6 @@ import {
 import { ProjectWorkspaceImportService } from '../services/projectWorkspaceImportService'
 import { ResourceManagerService } from '../services/resourceManagerService'
 import { ResourceUpdateScheduler } from '../services/resourceUpdateScheduler'
-import { assessRunStaleness } from '../services/resourceStalenessGuard'
 import type { PdkInventoryService } from '../services/pdkInventoryService'
 import { ProjectEccConfigService } from '../services/projectEccConfigService'
 import { SettingsStore } from '../services/settingsStore'
@@ -94,9 +96,10 @@ let services: {
   appInfoService: AppInfoService
   backendWorkspaceService: BackendWorkspaceService
   backendProjectComparisonService: BackendProjectComparisonService
+  projectWorkspaceFlowService: ProjectWorkspaceFlowService
   cliInstallerService: CliInstallerService
   codexDependencyService: CodexDependencyService
-  eccRuntimeService: EccRpcRuntimeService
+  eccRuntimeService: EccCliRuntimeService
   frontendRpcRuntimeService: FrontendRpcRuntimeService
   modelProfileService: ModelProfileService
   projectManagementReadService: ProjectManagementReadService
@@ -138,7 +141,7 @@ configureGpuMode({
 const { mainLogFile, sessionDirectory: logSessionDirectory } = prepareDesktopLogs()
 configureElectronLoggerFile(mainLogFile)
 electronLogger.status('[desktop] Logs: %s', mainLogFile)
-electronLogger.status('[runtime] Runtime: ECC RPC + frontend RPC')
+electronLogger.status('[runtime] Runtime: ECC CLI + frontend RPC (ECC-FE only)')
 registerSurferProtocolSchemes(protocol)
 
 if (process.env.ECOS_ELECTRON_SMOKE === '1') {
@@ -187,7 +190,13 @@ function getDesktopServices() {
     appVersionProvider: () => app.getVersion(),
     env: runtimeEnv,
   })
-  const resourceManagerService = new ResourceManagerService()
+  let eccRuntimeService: EccCliRuntimeService | undefined
+  const runtimeInUse = () =>
+    eccRuntimeService?.isRuntimeResourceInUse('tool:ecc') ?? false
+  const resourceManagerService = new ResourceManagerService({
+    resourceInUse: (resourceId) =>
+      eccRuntimeService?.isRuntimeResourceInUse(resourceId) ?? false,
+  })
   // Broadcast detected updates to every window: automatic checks run outside
   // any IPC request, so the renderer relies on this push channel.
   const resourceUpdateScheduler = new ResourceUpdateScheduler({
@@ -206,7 +215,6 @@ function getDesktopServices() {
     },
   })
   const pdkInventoryService = resourceManagerService.getPdkInventoryService()
-  const projectEccConfigService = new ProjectEccConfigService()
   const cliInstallerService = new CliInstallerService({
     resourceManager: resourceManagerService,
     env: process.env,
@@ -216,6 +224,7 @@ function getDesktopServices() {
     resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
     userDataPath: app.getPath('userData'),
     externalBinDir: resolveExternalEccOverride(),
+    runtimeInUse,
   })
   const runtimeEnvProvider = (designTool: DesignTool = 'backend') => {
     // Rebuild the base env on every resolution so a bundle acquired (or
@@ -228,42 +237,25 @@ function getDesktopServices() {
       designTool,
     })
   }
-  const eccRuntimeService = new EccRpcRuntimeService({
-    assessResourceStaleness: (workspaceDirectory) =>
-      assessRunStaleness({
-        resourceManagerService,
-        pdkInventoryService,
-        workspaceDirectory,
-      }),
-    createSidecar: (_directory, onEvent, onNotification) =>
-      new EccRpcSidecarProcess({
-        // Re-resolve the executable on every start so a bundle downloaded by
-        // the CLI installer (or refreshed by drift sync) is picked up without
-        // an app restart. While first-use acquisition is still running there
-        // is deliberately no PATH fallback: launching a wrong/unavailable
-        // binary would be harder to diagnose than a clear error.
-        resolveLaunch: async () => {
-          const executable = resolveEccExecutable(eccRuntimeOptions)
-          if (!executable) {
-            throw new Error(
-              'The ECC core component is not ready yet. Wait for the first-use download to finish (see Command line tools) and try again.',
-            )
-          }
-          return {
-            command: executable,
-            args: ['rpc', 'serve', '--stdio', '--persistent-db'],
-          }
-        },
-        env: runtimeEnv,
-        envProvider: runtimeEnvProvider,
-        logDirectoryProvider: () => resolveEccSidecarLogDirectory(logSessionDirectory),
-        onEvent,
-        onNotification,
-      }),
-    lazyWorkspaceOpen: false,
+  eccRuntimeService = new EccCliRuntimeService({
+    envProvider: runtimeEnvProvider,
+    resolveLaunch: async () => {
+      const executable = resolveDurableEccExecutable(eccRuntimeOptions)
+      if (!executable) {
+        throw new Error(
+          'The ECC core component is not ready yet. Wait for the first-use download to finish (see Command line tools) and try again.',
+        )
+      }
+      return { command: executable }
+    },
   })
+  const projectEccConfigService = new ProjectEccConfigService(
+    (projectRoot, sets, unsets) =>
+      eccRuntimeService.applyProjectSettings(projectRoot, sets, unsets),
+  )
   projectScopeService = new ProjectScopeService({
-    loadProjectManifest: (projectRoot) => projectManifestService.load(projectRoot),
+    loadProjectManifest: (projectRoot) =>
+      eccRuntimeService.readProjectManifest(projectRoot),
     readGrantProvider: projectReadGrantStore,
   })
   const workspaceResourceService = new WorkspaceResourceService({
@@ -344,10 +336,9 @@ function getDesktopServices() {
     (directory, step) =>
       eccRuntimeService.readWorkspaceStepConfigurationForDirectory(directory, step),
     (directory) =>
-      eccRuntimeService.callRuntime<ProjectWorkspaceConfiguration>(
-        'workspace.configuration.read',
-        { directory },
-      ),
+      eccRuntimeService.readWorkspaceConfiguration(
+        directory,
+      ) as Promise<ProjectWorkspaceConfiguration>,
     (path) => projectScopeService!.requestProjectPathAccess(path),
   )
   const backendProjectComparisonService = new BackendProjectComparisonService(
@@ -355,9 +346,17 @@ function getDesktopServices() {
     undefined,
     () => eccRuntimeService.operationProjection().operations,
   )
+  const projectWorkspaceFlowService = new ProjectWorkspaceFlowService(
+    (root) => projectScopeService!.authorizeProjectManagementReadRoot(root),
+    (root, id, runId) => eccRuntimeService.isProjectProcessAlive(root, id, runId),
+  )
   const backendWorkspaceService = new BackendWorkspaceService({
     projectManagementReadService,
-    snapshotWatcherFactory: (callbacks) => new ProjectComparisonFileWatcher(callbacks),
+    snapshotWatcherFactory: (callbacks) =>
+      new ProjectComparisonFileWatcher(callbacks, undefined, undefined, [
+        'engineering-snapshot.json',
+        'flow.json',
+      ]),
     workspaceRootProvider: projectScopeService,
   })
   const projectWorkspaceImportService = new ProjectWorkspaceImportService(
@@ -407,6 +406,7 @@ function getDesktopServices() {
     appInfoService,
     backendWorkspaceService,
     backendProjectComparisonService,
+    projectWorkspaceFlowService,
     cliInstallerService,
     frontendRpcRuntimeService,
     chipViewerService,
@@ -504,6 +504,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       appInfoService: desktopServices.appInfoService,
       backendWorkspaceService: desktopServices.backendWorkspaceService,
       backendProjectComparisonService: desktopServices.backendProjectComparisonService,
+      projectWorkspaceFlowService: desktopServices.projectWorkspaceFlowService,
       cliInstallerService: desktopServices.cliInstallerService,
       codexDependencyService: desktopServices.codexDependencyService,
       createWindow: async (options) => {
@@ -562,6 +563,7 @@ async function launchWindow(
     workspaceWindowRegistry.unregisterByWindow(mainWindow as WorkspaceWindowLike)
     services?.backendWorkspaceService.clearWindow(windowId)
     services?.backendProjectComparisonService.disposeWindow(windowId)
+    services?.projectWorkspaceFlowService.clearWindow(windowId)
     projectScopeService?.clearWindow(windowId)
     clearWindowMenuState(windowId)
   })

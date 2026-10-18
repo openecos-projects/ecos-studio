@@ -52,4 +52,21 @@ describe('ProjectExecutionStatus', () => {
     )
     expect(wrapper.text()).toContain('Post-route LEC running')
   })
+
+  it('updates the running step from Flow even when the operation projection is older', async () => {
+    const wrapper = mount(ProjectExecutionStatus, {
+      props: {
+        operations: [operation({ state: 'running', step: 'Synth' })],
+        flowHint: { state: 'running', label: 'macroPlacement running' },
+      },
+    })
+    expect(wrapper.text()).toBe('macroPlacement running')
+    await wrapper.setProps({
+      flowHint: { state: 'running', label: 'postFloorplan running' },
+    })
+    expect(wrapper.text()).toBe('postFloorplan running')
+    expect(wrapper.get('[role="status"]').attributes('title')).toBe(
+      'postFloorplan running',
+    )
+  })
 })

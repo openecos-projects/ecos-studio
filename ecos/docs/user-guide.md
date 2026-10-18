@@ -306,6 +306,18 @@ Names must not contain spaces or Chinese characters.
 
 **Step 3 — Flow Setup.** Define the step range of the harden flow:
 
+When the range includes STA, **STA maximum parallel corners** selects an integer
+from 1 to 4 (default 1, serial). Studio submits `sta.max_parallel_corners` through
+the ECC CLI workspace parameter workflow; ECC persists the override in
+`home/params.toml` and regenerates the STA configuration's `max_parallel_corners`.
+This is an upper bound, not a promise: Linux worker dispatch is also limited by
+CPU count and memory headroom. Other platforms run serially. The runtime reserves
+at least 1 GiB or 10% of the effective memory capacity, whichever is larger,
+honors Linux cgroup v2 memory limits, and stops adding workers when estimated
+memory requirements exceed the remaining headroom. Unknown memory availability
+reduces dispatch to one worker. This heuristic does not guarantee that an
+individual corner fits in memory; use 1 for very large designs or constrained hosts.
+
 - A summary strip shows the selected **Start Step**, **End Step**, and step
   count.
 - Click a step card to set the range. Steps are marked *Reused from source*
@@ -378,16 +390,22 @@ the wizard is prefilled:
 
 ### Updating a Workspace
 
-**File → Update Workspace** re-opens the wizard for the *current* workspace so
-you can change flow range, design files, PDK, or parameters. Before updating
-you choose how to treat the existing data:
+For a backend ECC workspace, **File → Update Workspace** applies the current
+Project design inputs, PDK, and flow selection through `ecc workspace refresh`.
+Workspace-local parameter overrides are preserved; edit them separately in the
+parameter UI. If ECC detects manually changed derived configuration files, the
+app asks before retrying with overwrite enabled. The operation is disabled
+while a flow is running.
+
+For a frontend workspace, **File → Update Workspace** re-opens the workspace
+wizard. Before replacing it you choose how to treat the existing data:
 
 - **Cancel** — abort.
 - **Do Not Backup** — replace directly.
 - **Backup Original** — keep a full backup in Project Management before the
   update replaces flow state, results, artifacts, logs, and user files.
 
-Update is disabled while a flow is running.
+Frontend update is also disabled while a flow is running.
 
 ---
 
@@ -414,14 +432,25 @@ Show fewer**):
 - **New** — create a workspace under this project (opens the wizard with the
   directory locked to the project).
 - **⋯** — **Import workspace** (register an on-disk workspace into the
-  project's `project.json`; already-registered workspaces are reported) or
+  project's `project.json`; already-registered workspaces are reported),
+  **Check project** (backend projects only; explicitly run the full consistency
+  check and show repair actions for any findings), or
   **Remove project** (removes the project from the list only — files stay on
   disk and can be re-imported).
 
 **Workspace rows** show the workspace ID, its step range
 (`startStep -> endStep`), provenance (`from <workspace> / <step>` when derived),
 and status: while executing, the current operation and a running/queued/
-cancelling badge; otherwise the flow status plus the last verification time.
+cancelling badge; otherwise the current flow status.
+Running backend rows name the actual executing flow step, for example
+**Synthesis running** or **macroPlacement running**, and update as the flow advances.
+
+Backend flow status is loaded only for displayed workspace rows. Collapsed
+projects and rows hidden by the preview limit do not load their flow files;
+expanding them loads their current state. Displayed rows update when their flow
+files change. Unreadable or missing state shows **Status unavailable**, while
+an unfinished execution whose process is gone shows **Interrupted**. Browsing
+the list does not run a full consistency scan or repair workspace state.
 
 - **Open** — open the workspace.
 - **⋯** — **Create from output** or **Delete workspace** (red).
@@ -496,10 +525,6 @@ Conditional panels above the analysis view:
 
 - **ProjectComparisonRefreshStatus** — when automatic refresh is unavailable, a
   warning with a manual **Refresh** button.
-- **Unfinished Workspace Creation** — lists interrupted workspace creations
-  (target directory, issue, stage, timestamp). **Continue Initialization**
-  resumes; **Abandon Registration** (red, confirmed) unregisters the attempt
-  while leaving files on disk.
 - **Project Background Operation** — when the selected workspace has a queued,
   running, or cancelling background operation (step run or full flow), with
   **Cancel**, **Retry Snapshot** (on snapshot failure), and **Open Workspace**
@@ -555,12 +580,58 @@ The Home page aggregates the whole flow:
   count. Click a thumbnail to open that layout in the Chip Viewer. Unavailable
   layouts show the reason (too large, invalid, changed, stale, missing).
 - **Key Metrics** — area, instances, timing, and other headline metrics.
-- **Flow Insights** — a tile grid (click a tile to open its full-size dialog):
-  step resources (runtime and peak memory, with a **Log scale** toggle), DB
+- **Insight navigation** — buttons beneath **Dashboard** in the left sidebar
+  open full-size dialogs: **Step Trends** (runtime and peak memory, with a
+  **Log scale** toggle), **DB Trends**
   trends (metric×step heat matrix, trend lines, instance composition with a
   Count/Area toggle), congestion (overflow trends and per-step heat maps), DRC
   (bars/pie toggle, per-type list, layer×type matrix with a *Non-zero only*
-  filter), and STA (timing analysis plus cross-run convergence).
+  filter), and **Timing** (current-workspace STA analysis). The Data Snapshot
+  card is no longer on the Dashboard; Chip Basic Info and Key Metrics share
+  its bottom row in a 4:6 width ratio.
+
+### Timing
+
+The Timing dialog shows current STA results, without a baseline or cross-run
+convergence chart. QoR baseline comparisons elsewhere in Studio are unchanged.
+
+- **Overview / Summary** — separate worst setup/hold WNS and TNS KPIs (also
+  present in the compact Synthesis/STA summaries), with each metric's own
+  worst corner; the minimum available frequency across
+  corners, and a per-corner WNS/TNS/NVP table. Times are in ns; frequency is in
+  MHz. NVP is the number of violating paths. Missing corner data stays visible
+  and cannot be interpreted as a passing result. A path-group selector and
+  negative-first sorting help focus the overview.
+  Red cells trace the Worst row back to its source corner values, including
+  ties; this provenance marker is not itself a violation indicator. NVP is a
+  total across corners, so its non-zero contributors are highlighted instead
+  of inventing a single worst corner.
+- **WNS / TNS by Corner** — switches the same chart between worst slack and
+  total negative slack. Both modes show setup and hold series in ns, with a
+  zero reference line; unavailable values are gaps, not zero-valued passes.
+  Expand the chart when needed. The corner table scrolls with pinned column
+  headers and a Worst row so path selection remains easy to reach.
+- **Timing paths · corner** — selects the corner to inspect, initially the
+  worst setup corner. Setup and hold paths are sorted by lowest slack first.
+  Each compact path row shows slack, endpoints, path group, and stage count;
+  expand it for a delay waterfall and a scrollable pin/cell/delay/arrival table.
+  All exported paths for the selected corner are available, including paths
+  with positive slack; Run Information states the tool's export limit and the
+  setup/hold path counts.
+- **View full timing issues with stages** — separately loads the analysis
+  issue list. An empty issue list does not imply an empty timing-path export.
+  Zero issues, missing paths, and artifact errors have distinct messages.
+- **Reload timing** re-reads the indexed corner artifacts. Committing a new
+  workspace revision automatically invalidates cached summaries, paths, and
+  issues; late responses from an older revision do not replace current data.
+
+Corner overview data comes from indexed
+`sta_ecc/feature/<corner>/qor_summary.json` artifacts, and path details come from
+the matching `timing_paths.json`. The separate issue list comes from
+`sta_ecc/analysis/sta_timing_issues.json`. Reads go through the desktop backend's
+committed artifact index, not renderer-side filesystem access. Missing, changed,
+or unindexed artifacts remain unavailable rather than being silently replaced
+with data from another revision.
 
 ---
 

@@ -153,6 +153,7 @@ describe('workspace desktop bridge', () => {
             },
             parameters: {
               'cts.max_fanout': 20,
+              'sta.max_parallel_corners': 1,
               'design.frequency_mhz': 100,
               'floorplan.core_margin': [0, 0],
               'floorplan.core_util': 0.5,
@@ -164,9 +165,6 @@ describe('workspace desktop bridge', () => {
         }),
       }),
     )
-    expect(create.mock.calls[0]?.[0]).not.toMatchObject({
-      payload: { projectRoot: expect.anything() },
-    })
   })
 
   it('maps wizard display keys onto spec keys through the parameter catalog index', async () => {
@@ -180,6 +178,7 @@ describe('workspace desktop bridge', () => {
           design: 'demo',
           top_module: 'top',
           frequency_max: 200,
+          sta_max_parallel_corners: 3,
           utilization: 0.7,
           max_fanout: 20,
           margin: 2,
@@ -201,6 +200,7 @@ describe('workspace desktop bridge', () => {
     )
 
     expect(options.workspaceSpec.parameters).toEqual({
+      'sta.max_parallel_corners': 3,
       'design.frequency_mhz': 200,
       'floorplan.core_util': 0.7,
       'floorplan.die_builder.mode': 'die_util',
@@ -319,7 +319,7 @@ describe('workspace desktop bridge', () => {
         throughStepId: 'Harden',
       },
     })
-    expect(options.workspaceSpec.parameters).toEqual({})
+    expect(options.workspaceSpec.parameters).toEqual({ 'sta.max_parallel_corners': 1 })
   })
 
   it('keeps a synthesis-only Flow range when endpoints are inferred', async () => {

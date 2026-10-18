@@ -1,8 +1,8 @@
-import {
-  isObsoleteFlowStepName,
-  type DesignRuntimeEvent,
-  type FlowStepState,
-  type FlowStepSummary,
+import type {
+  DesignRuntimeEvent,
+  EccRuntimeStepSnapshot,
+  FlowStepState,
+  FlowStepSummary,
 } from '@ecos-studio/shared'
 
 function normalizeState(value: unknown, fallback: FlowStepState): FlowStepState {
@@ -46,8 +46,53 @@ function stepKey(value: string): string {
   return value.trim().toLowerCase()
 }
 
+function checklistStatusValue(
+  value: unknown,
+): FlowStepSummary['checklistStatus'] | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const status = (value as Record<string, unknown>).status
+  return ['passed', 'blocked', 'attention', 'unknown'].includes(status as string)
+    ? (status as FlowStepSummary['checklistStatus'])
+    : undefined
+}
+
 export function isObsoleteBackendFlowStep(value: string): boolean {
-  return isObsoleteFlowStepName(value)
+  return value.toLowerCase().replace(/[\s_-]/g, '') === 'fixfanout'
+}
+
+export function projectRuntimeFlowSteps(
+  runtimeSteps: readonly EccRuntimeStepSnapshot[],
+): FlowStepSummary[] {
+  return runtimeSteps.flatMap((step, order) => {
+    if (isObsoleteBackendFlowStep(step.name)) return []
+    const runtimeSeconds = parseRuntimeSeconds(step.runtime)
+    return [
+      {
+        name: step.name,
+        order,
+        peakMemoryMb: step.peakMemory,
+        ...(runtimeSeconds === null ? {} : { runtimeSeconds }),
+        state: normalizeState(step.state, 'unknown'),
+        stepId: step.name,
+        ...(step.tool ? { toolId: step.tool } : {}),
+        ...(() => {
+          const checklistStatus =
+            checklistStatusValue(step.checklist_status) ??
+            checklistStatusValue(step.checklist)
+          return checklistStatus ? { checklistStatus } : {}
+        })(),
+      },
+    ]
+  })
+}
+
+function parseRuntimeSeconds(runtime: string): number | null {
+  if (!runtime) return null
+  const parts = runtime.split(':').map(Number)
+  if (parts.some((part) => !Number.isFinite(part))) return null
+  if (parts.length === 3) return parts[0]! * 3600 + parts[1]! * 60 + parts[2]!
+  if (parts.length === 2) return parts[0]! * 60 + parts[1]!
+  return parts.length === 1 ? parts[0]! : null
 }
 
 export function projectBackendFlowSteps(
@@ -143,6 +188,17 @@ export function projectBackendFlowSteps(
         ? 'failed'
         : 'succeeded'
     step.state = normalizeState(data.state, fallback)
+    const checklist = data.checklist_status ?? data.checklist
+    if (
+      checklist &&
+      typeof checklist === 'object' &&
+      typeof (checklist as Record<string, unknown>).status === 'string'
+    ) {
+      const status = (checklist as Record<string, unknown>).status
+      if (['passed', 'blocked', 'attention', 'unknown'].includes(status as string)) {
+        step.checklistStatus = status as FlowStepSummary['checklistStatus']
+      }
+    }
     if (typeof data.tool === 'string' && data.tool) step.toolId = data.tool
   }
 

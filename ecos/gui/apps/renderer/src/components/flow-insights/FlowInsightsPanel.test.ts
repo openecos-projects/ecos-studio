@@ -60,6 +60,8 @@ describe('FlowInsightsPanel', () => {
     })
 
     expect(wrapper.findAll('.data-snapshot-tile')).toHaveLength(5)
+    expect(wrapper.findAll('.data-snapshot-cell')).toHaveLength(9)
+    expect(wrapper.findAll('.data-snapshot-cell.is-empty')).toHaveLength(4)
     expect(wrapper.text()).toContain('Step Trends')
     expect(wrapper.text()).toContain('Congestion')
     const congestion = wrapper
@@ -68,5 +70,11 @@ describe('FlowInsightsPanel', () => {
     await congestion?.trigger('click')
 
     expect(loadCongestion).toHaveBeenCalledOnce()
+    await wrapper.setProps({ dialogOnly: true, selectedModule: 'timing' })
+    expect(wrapper.find('.data-snapshot-grid').exists()).toBe(false)
+    expect(wrapper.find('.flow-insights-header').exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'StaPanel' }).exists()).toBe(true)
+    await wrapper.setProps({ selectedModule: 'congestion' })
+    expect(loadCongestion).toHaveBeenCalledTimes(2)
   })
 })

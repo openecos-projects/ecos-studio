@@ -1,0 +1,714 @@
+import { spawn } from 'node:child_process'
+import { EventEmitter, once } from 'node:events'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { PassThrough, Writable } from 'node:stream'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+const electronLogger = vi.hoisted(() => ({
+  debug: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+  status: vi.fn(),
+  warn: vi.fn(),
+}))
+
+vi.mock('../logger', () => ({
+  electronLogger,
+}))
+
+import {
+  EccRpcShutdownDeferredError,
+  EccRpcSidecarProcess,
+  type SpawnedEccRpcSidecar,
+} from './sidecarProcess'
+import { encodeContentLengthFrame } from './transport'
+
+class FakeWritable extends Writable {
+  readonly chunks: Buffer[] = []
+
+  _write(
+    chunk: Buffer,
+    _encoding: BufferEncoding,
+    callback: (error?: Error | null) => void,
+  ): void {
+    this.chunks.push(Buffer.from(chunk))
+    callback()
+  }
+}
+
+class FakeChild extends EventEmitter implements SpawnedEccRpcSidecar {
+  readonly stderr = new PassThrough()
+  readonly stdin = new FakeWritable()
+  readonly stdout = new PassThrough()
+  readonly signals: Array<NodeJS.Signals | undefined> = []
+  killed = false
+
+  kill(signal?: NodeJS.Signals): boolean {
+    this.signals.push(signal)
+    this.killed = true
+    return true
+  }
+}
+
+const explicitFrontendLaunch = {
+  command: '/runtime/ecc-fe/bin/python3',
+  commandArgs: ['-m', 'fecompiler.cli.main', 'rpc', 'serve', '--stdio'],
+}
+
+describe('EccRpcSidecarProcess', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    electronLogger.error.mockReset()
+  })
+
+  it('handles broken stdin without throwing into the desktop process', async () => {
+    const child = new FakeChild()
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      spawn: () => child,
+    })
+    const client = await sidecar.start()
+    const error = Object.assign(new Error('write EPIPE'), { code: 'EPIPE' })
+    const pending = client.call('rpc.ping').catch((failure: unknown) => failure)
+
+    try {
+      expect(() => child.stdin.emit('error', error)).not.toThrow()
+      expect(await pending).toBe(error)
+      expect(readFileSync(sidecar.logFile!, 'utf8')).toContain('write EPIPE')
+    } finally {
+      client.rejectPending(error)
+      await pending
+    }
+  })
+
+  it('rejects EPIPE from a real child that closes its input while still alive', async () => {
+    const child = spawn(process.execPath, [
+      '-e',
+      "require('node:fs').closeSync(0); process.stdout.write('ready'); setInterval(() => {}, 1000)",
+    ])
+    const ready = once(child.stdout, 'data')
+    const closed = once(child, 'close')
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      spawn: () => child,
+    })
+    try {
+      const client = await sidecar.start()
+      await ready
+      await expect(client.call('rpc.ping')).rejects.toMatchObject({ code: 'EPIPE' })
+      expect(readFileSync(sidecar.logFile!, 'utf8')).toContain('EPIPE')
+    } finally {
+      child.kill()
+      await closed
+    }
+  })
+
+  it('rejects startup without resolveLaunch or an explicit command', async () => {
+    const child = new FakeChild()
+    const spawn = vi.fn(() => child)
+    const sidecar = new EccRpcSidecarProcess({
+      env: { PATH: '/bin' },
+      spawn,
+    })
+
+    await expect(sidecar.start()).rejects.toThrow(
+      'ECC-FE sidecar launch is not configured',
+    )
+    expect(spawn).not.toHaveBeenCalled()
+  })
+
+  it('uses a runtime-specific launch resolver', async () => {
+    const child = new FakeChild()
+    const spawn = vi.fn(() => child)
+    const resolveLaunch = vi.fn(() => ({
+      args: ['-m', 'fecompiler.cli.main', 'rpc', 'serve', '--stdio'],
+      command: 'python3',
+      env: { PATH: '/bin', PYTHONPATH: '/work/ecc-fe' },
+    }))
+    const sidecar = new EccRpcSidecarProcess({
+      env: { PATH: '/bin' },
+      resolveLaunch,
+      spawn,
+    })
+
+    await sidecar.start()
+
+    expect(resolveLaunch).toHaveBeenCalledWith({ PATH: '/bin' })
+    expect(spawn).toHaveBeenCalledWith(
+      'python3',
+      ['-m', 'fecompiler.cli.main', 'rpc', 'serve', '--stdio'],
+      {
+        env: { PATH: '/bin', PYTHONPATH: '/work/ecc-fe' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    )
+    expect(readFileSync(sidecar.logFile!, 'utf8')).toContain(
+      '[sidecar] spawning python3 -m fecompiler.cli.main rpc serve --stdio',
+    )
+  })
+
+  it('spawns the resolved absolute ECC-FE executable when provided', async () => {
+    const child = new FakeChild()
+    const spawn = vi.fn(() => child)
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      ...explicitFrontendLaunch,
+      env: { PATH: '/home/ecos/.local/bin:/bin' },
+      spawn,
+    })
+
+    await sidecar.start()
+
+    expect(spawn).toHaveBeenCalledWith(
+      explicitFrontendLaunch.command,
+      explicitFrontendLaunch.commandArgs,
+      {
+        env: { PATH: '/home/ecos/.local/bin:/bin' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    )
+  })
+
+  it('rechecks equivalent runtime environments before reusing the sidecar', async () => {
+    const child = new FakeChild()
+    const spawn = vi.fn(() => child)
+    const envProvider = vi
+      .fn<() => Promise<NodeJS.ProcessEnv>>()
+      .mockResolvedValueOnce({ PATH: '/bin', TOOL_ROOT: '/tools' })
+      .mockResolvedValueOnce({ TOOL_ROOT: '/tools', PATH: '/bin' })
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      envProvider,
+      spawn,
+    })
+
+    const firstClient = await sidecar.start()
+    const secondClient = await sidecar.start()
+
+    expect(secondClient).toBe(firstClient)
+    expect(envProvider).toHaveBeenCalledTimes(2)
+    expect(spawn).toHaveBeenCalledOnce()
+  })
+
+  it('restarts the sidecar before using a changed runtime environment', async () => {
+    const firstChild = new FakeChild()
+    const secondChild = new FakeChild()
+    const children = [firstChild, secondChild]
+    const spawn = vi.fn(() => children.shift()!)
+    let runtimeEnv: NodeJS.ProcessEnv = { PATH: '/tools/v1/bin' }
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      managementRpc: true,
+      envProvider: async () => runtimeEnv,
+      spawn,
+    })
+    const firstClient = await sidecar.start()
+    runtimeEnv = { PATH: '/tools/v2/bin' }
+
+    const restart = sidecar.start()
+    await vi.waitFor(() => {
+      expect(firstChild.stdin.chunks).toHaveLength(1)
+    })
+    firstChild.stdout.write(
+      encodeContentLengthFrame('{"jsonrpc":"2.0","id":1,"result":{"ok":true}}'),
+    )
+    firstChild.emit('close', 0, null)
+
+    const secondClient = await restart
+
+    expect(secondClient).not.toBe(firstClient)
+    expect(spawn).toHaveBeenCalledTimes(2)
+    expect(spawn).toHaveBeenLastCalledWith(
+      explicitFrontendLaunch.command,
+      explicitFrontendLaunch.commandArgs,
+      {
+        env: { PATH: '/tools/v2/bin' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    )
+  })
+
+  it('waits for an in-flight shutdown before spawning a fresh sidecar', async () => {
+    const firstChild = new FakeChild()
+    const secondChild = new FakeChild()
+    const children = [firstChild, secondChild]
+    const spawn = vi.fn(() => children.shift()!)
+    const sidecar = new EccRpcSidecarProcess({ ...explicitFrontendLaunch, spawn })
+    const firstClient = await sidecar.start()
+
+    const shutdown = sidecar.shutdown()
+    expect(firstChild.signals).toEqual(['SIGTERM'])
+
+    const restart = sidecar.start()
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(spawn).toHaveBeenCalledTimes(1)
+
+    firstChild.emit('close', null, 'SIGTERM')
+    await shutdown
+
+    const secondClient = await restart
+    expect(secondClient).not.toBe(firstClient)
+    expect(spawn).toHaveBeenCalledTimes(2)
+    expect(firstChild.stdin.chunks).toHaveLength(0)
+  })
+
+  it('reuses the live sidecar when a deferred shutdown is still settling', async () => {
+    const child = new FakeChild()
+    const spawn = vi.fn(() => child)
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      managementRpc: true,
+      spawn,
+    })
+    const firstClient = await sidecar.start()
+
+    const shutdown = sidecar.shutdown().catch((error: unknown) => error)
+    await vi.waitFor(() => {
+      expect(child.stdin.chunks).toHaveLength(1)
+    })
+
+    const restart = sidecar.start()
+    child.stdout.write(
+      encodeContentLengthFrame(
+        '{"jsonrpc":"2.0","id":1,"result":{"ok":false,"deferred":true,"shutdownBarrier":{"operationId":"operation-1"}}}',
+      ),
+    )
+
+    await expect(shutdown).resolves.toBeInstanceOf(EccRpcShutdownDeferredError)
+    await expect(restart).resolves.toBe(firstClient)
+    expect(spawn).toHaveBeenCalledOnce()
+    expect(child.signals).toEqual([])
+  })
+
+  it('does not terminate active frontend work when a rebuilt package requests a restart', async () => {
+    const child = new FakeChild()
+    const spawn = vi.fn(() => child)
+    let checksum = 'a'.repeat(64)
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      managementRpc: true,
+      envProvider: async () => ({ ECOS_FE_RUNTIME_SHA256: checksum }),
+      spawn,
+    })
+    const client = await sidecar.start()
+    checksum = 'b'.repeat(64)
+    const restart = sidecar.start().catch((error: unknown) => error)
+    await vi.waitFor(() => expect(child.stdin.chunks).toHaveLength(1))
+    child.stdout.write(
+      encodeContentLengthFrame(
+        '{"jsonrpc":"2.0","id":1,"result":{"ok":false,"deferred":true}}',
+      ),
+    )
+
+    await expect(restart).resolves.toBeInstanceOf(EccRpcShutdownDeferredError)
+    expect(spawn).toHaveBeenCalledOnce()
+    expect(child.signals).toEqual([])
+    const ping = client.call('rpc.ping')
+    child.stdout.write(
+      encodeContentLengthFrame('{"jsonrpc":"2.0","id":2,"result":{"ok":true}}'),
+    )
+    await expect(ping).resolves.toEqual({ ok: true })
+  })
+
+  it('reuses the last successful environment when the provider temporarily fails', async () => {
+    const firstChild = new FakeChild()
+    const secondChild = new FakeChild()
+    const children = [firstChild, secondChild]
+    const spawn = vi.fn(() => children.shift()!)
+    const envProvider = vi
+      .fn<() => Promise<NodeJS.ProcessEnv>>()
+      .mockResolvedValueOnce({ PATH: '/tools/bin' })
+      .mockRejectedValueOnce(new Error('manifest unavailable'))
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      env: { PATH: '/base/bin' },
+      envProvider,
+      spawn,
+    })
+    const firstClient = await sidecar.start()
+    let secondClient: unknown
+    let settled = false
+
+    const secondStart = sidecar.start().then((client) => {
+      secondClient = client
+      settled = true
+      return client
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+    const reusedHealthyClient = settled && secondClient === firstClient
+
+    if (!settled) {
+      firstChild.stdout.write(
+        encodeContentLengthFrame('{"jsonrpc":"2.0","id":1,"result":{"ok":true}}'),
+      )
+      firstChild.emit('close', 0, null)
+      await secondStart
+    }
+
+    expect(reusedHealthyClient).toBe(true)
+    expect(envProvider).toHaveBeenCalledTimes(2)
+    expect(spawn).toHaveBeenCalledOnce()
+  })
+
+  it('bounds restart when shutdown responds but the child never exits', async () => {
+    vi.useFakeTimers()
+    const child = new FakeChild()
+    const spawn = vi.fn(() => child)
+    let runtimeEnv: NodeJS.ProcessEnv = { PATH: '/tools/v1/bin' }
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      managementRpc: true,
+      envProvider: async () => runtimeEnv,
+      shutdownTimeoutMs: 25,
+      spawn,
+    })
+    await sidecar.start()
+    runtimeEnv = { PATH: '/tools/v2/bin' }
+
+    const restartError = sidecar.start().catch((error: unknown) => error)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(child.stdin.chunks).toHaveLength(1)
+    child.stdout.write(
+      encodeContentLengthFrame('{"jsonrpc":"2.0","id":1,"result":{"ok":true}}'),
+    )
+    await vi.advanceTimersByTimeAsync(25)
+    expect(child.signals).toEqual(['SIGTERM'])
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(child.signals).toEqual(['SIGTERM', 'SIGKILL'])
+    await vi.advanceTimersByTimeAsync(25)
+
+    await expect(restartError).resolves.toMatchObject({
+      message: 'ECC RPC sidecar did not exit after SIGKILL.',
+    })
+    expect(spawn).toHaveBeenCalledOnce()
+  })
+
+  it('uses one bounded signal escalation when restart shutdown times out', async () => {
+    vi.useFakeTimers()
+    const child = new FakeChild()
+    let runtimeEnv: NodeJS.ProcessEnv = { PATH: '/tools/v1/bin' }
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      managementRpc: true,
+      envProvider: async () => runtimeEnv,
+      shutdownTimeoutMs: 25,
+      spawn: () => child,
+    })
+    await sidecar.start()
+    runtimeEnv = { PATH: '/tools/v2/bin' }
+
+    const restartError = sidecar.start().catch((error: unknown) => error)
+    await vi.advanceTimersByTimeAsync(25)
+    expect(child.signals).toEqual(['SIGTERM'])
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(child.signals).toEqual(['SIGTERM', 'SIGKILL'])
+    await vi.advanceTimersByTimeAsync(25)
+
+    await expect(restartError).resolves.toMatchObject({
+      message: 'ECC RPC sidecar did not exit after SIGKILL.',
+    })
+    expect(child.listenerCount('close')).toBe(1)
+  })
+
+  it('connects stdout responses to the JSON-RPC client', async () => {
+    const child = new FakeChild()
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      spawn: () => child,
+    })
+    const client = await sidecar.start()
+
+    const promise = client.call<{ ok: boolean }>('rpc.ping')
+    child.stdout.write(
+      encodeContentLengthFrame('{"jsonrpc":"2.0","id":1,"result":{"ok":true}}'),
+    )
+
+    await expect(promise).resolves.toEqual({ ok: true })
+  })
+
+  it('recovers a response after malformed tool output leaks to stdout', async () => {
+    const child = new FakeChild()
+    const events: unknown[] = []
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      onEvent: (event) => events.push(event),
+      spawn: () => child,
+    })
+    const client = await sidecar.start()
+
+    const promise = client.call<{ ok: boolean }>('rpc.ping')
+    child.stdout.write(
+      Buffer.concat([
+        Buffer.from('tool output before protocol frame\r\n\r\n'),
+        encodeContentLengthFrame('{"jsonrpc":"2.0","id":1,"result":{"ok":true}}'),
+      ]),
+    )
+
+    await expect(promise).resolves.toEqual({ ok: true })
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        text: expect.stringContaining('discarded malformed stdout'),
+        type: 'runtime.stderr',
+      }),
+    )
+  })
+
+  it('does not signal a sidecar when ECC defers shutdown for an active operation', async () => {
+    const child = new FakeChild()
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      managementRpc: true,
+      spawn: () => child,
+    })
+    await sidecar.start()
+
+    const shutdown = sidecar.shutdown()
+    await vi.waitFor(() => {
+      expect(child.stdin.chunks).toHaveLength(1)
+    })
+    child.stdout.write(
+      encodeContentLengthFrame(
+        '{"jsonrpc":"2.0","id":1,"result":{"ok":false,"deferred":true,"shutdownBarrier":{"operationId":"operation-1"}}}',
+      ),
+    )
+
+    await expect(shutdown).rejects.toBeInstanceOf(EccRpcShutdownDeferredError)
+    expect(child.signals).toEqual([])
+  })
+
+  it('waits for the sidecar process to exit after rpc.shutdown is acknowledged', async () => {
+    const child = new FakeChild()
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      managementRpc: true,
+      spawn: () => child,
+    })
+    await sidecar.start()
+
+    let settled = false
+    const shutdown = sidecar.shutdown().then(() => {
+      settled = true
+    })
+    await vi.waitFor(() => {
+      expect(child.stdin.chunks).toHaveLength(1)
+    })
+    child.stdout.write(
+      encodeContentLengthFrame('{"jsonrpc":"2.0","id":1,"result":{"ok":true}}'),
+    )
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(settled).toBe(false)
+    child.emit('close', 0, null)
+    await expect(shutdown).resolves.toBeUndefined()
+  })
+
+  it('terminates the backend runtime without a management RPC', async () => {
+    const child = new FakeChild()
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      spawn: () => child,
+    })
+    await sidecar.start()
+
+    const shutdown = sidecar.shutdown()
+    await vi.waitFor(() => {
+      expect(child.signals).toEqual(['SIGTERM'])
+    })
+    expect(child.stdin.chunks).toEqual([])
+    child.emit('close', 0, null)
+
+    await expect(shutdown).resolves.toBeUndefined()
+  })
+
+  it('forwards sidecar JSON-RPC notifications to the runtime owner', async () => {
+    const child = new FakeChild()
+    const notifications: unknown[] = []
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      onNotification: (notification) => notifications.push(notification),
+      spawn: () => child,
+    })
+
+    await sidecar.start()
+    child.stdout.write(
+      encodeContentLengthFrame(
+        '{"jsonrpc":"2.0","method":"runtime.event","params":{"eventId":"workspace-1:1"}}',
+      ),
+    )
+
+    expect(notifications).toEqual([
+      {
+        jsonrpc: '2.0',
+        method: 'runtime.event',
+        params: { eventId: 'workspace-1:1' },
+      },
+    ])
+  })
+
+  it('writes stderr to a runtime log file and emits stderr events', async () => {
+    const child = new FakeChild()
+    const tempDir = mkdtempSync(join(tmpdir(), 'ecc-rpc-sidecar-'))
+    const events: unknown[] = []
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      onEvent: (event) => events.push(event),
+      spawn: () => child,
+      tempDir,
+    })
+
+    await sidecar.start()
+    child.stderr.write('hello stderr\n')
+
+    const logFile = sidecar.logFile
+    expect(logFile).toBeTruthy()
+    expect(readFileSync(logFile!, 'utf8')).toContain('hello stderr')
+    expect(events).toContainEqual({
+      logFile,
+      text: 'hello stderr\n',
+      type: 'runtime.stderr',
+    })
+  })
+
+  it('gives concurrent sidecars separate logs in one desktop session directory', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'ecc-rpc-sidecar-'))
+    const desktopLogDirectory = join(tempDir, 'desktop-logs')
+    const first = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      logDirectoryProvider: () => desktopLogDirectory,
+      spawn: () => new FakeChild(),
+      tempDir,
+    })
+    const second = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      logDirectoryProvider: () => desktopLogDirectory,
+      spawn: () => new FakeChild(),
+      tempDir,
+    })
+
+    await Promise.all([first.start(), second.start()])
+
+    expect(first.logFile).not.toBe(second.logFile)
+    expect(existsSync(first.logFile!)).toBe(true)
+    expect(existsSync(second.logFile!)).toBe(true)
+  })
+
+  it('moves a legacy workspace log before rerun output is appended', async () => {
+    const child = new FakeChild()
+    const tempDir = mkdtempSync(join(tmpdir(), 'ecc-rpc-sidecar-'))
+    const workspaceDirectory = join(tempDir, 'workspace')
+    const workspaceLogDirectory = join(workspaceDirectory, 'log')
+    const desktopLogDirectory = join(tempDir, 'desktop-logs')
+    const legacyLogFile = join(workspaceLogDirectory, 'ecc-rpc-runtime-legacy.log')
+    mkdirSync(workspaceLogDirectory, { recursive: true })
+    writeFileSync(legacyLogFile, 'before rerun\n')
+
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      logDirectoryProvider: () => desktopLogDirectory,
+      spawn: () => child,
+      tempDir,
+    })
+    await sidecar.start()
+    sidecar.logFile = legacyLogFile
+
+    sidecar.relocateLogFileFrom(workspaceDirectory)
+    child.stderr.write('during rerun\n')
+
+    expect(sidecar.logFile?.startsWith(`${desktopLogDirectory}/`)).toBe(true)
+    expect(readFileSync(sidecar.logFile!, 'utf8')).toBe('before rerun\nduring rerun\n')
+    expect(existsSync(legacyLogFile)).toBe(false)
+  })
+
+  it('rejects pending requests and emits an unexpected exit event', async () => {
+    const child = new FakeChild()
+    const events: unknown[] = []
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      onEvent: (event) => events.push(event),
+      spawn: () => child,
+    })
+    const client = await sidecar.start()
+    const promise = client.call('rpc.ping')
+
+    child.emit('close', 1, null)
+
+    await expect(promise).rejects.toThrow('ECC RPC sidecar exited')
+    await expect(promise).rejects.toThrow(`See ${sidecar.logFile}`)
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        code: 1,
+        logFile: sidecar.logFile,
+        reason: 'unexpected',
+        signal: null,
+        type: 'runtime.exited',
+      }),
+    )
+  })
+
+  it('includes the sidecar log and last output in an unexpected exit', async () => {
+    const child = new FakeChild()
+    const events: unknown[] = []
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      onEvent: (event) => events.push(event),
+      spawn: () => child,
+    })
+
+    await sidecar.start()
+    child.stderr.write('fatal: missing liberty file\n')
+    child.emit('close', 1, null)
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        message: expect.stringContaining('fatal: missing liberty file'),
+        logFile: sidecar.logFile,
+        type: 'runtime.exited',
+      }),
+    )
+    expect(electronLogger.error).toHaveBeenCalledWith(
+      '[runtime] %s',
+      expect.stringContaining('fatal: missing liberty file'),
+    )
+  })
+
+  it('fails shutdown after bounded signal escalation when rpc.shutdown times out', async () => {
+    vi.useFakeTimers()
+    const child = new FakeChild()
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      managementRpc: true,
+      shutdownTimeoutMs: 25,
+      spawn: () => child,
+    })
+
+    await sidecar.start()
+    const shutdown = sidecar.shutdown().catch((error: unknown) => error)
+
+    await vi.advanceTimersByTimeAsync(25)
+    expect(child.signals).toEqual(['SIGTERM'])
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(child.signals).toEqual(['SIGTERM', 'SIGKILL'])
+    await vi.advanceTimersByTimeAsync(25)
+    await expect(shutdown).resolves.toMatchObject({
+      message: 'ECC RPC sidecar did not exit after SIGKILL.',
+    })
+  })
+
+  it('force terminates the running sidecar with SIGKILL', async () => {
+    const child = new FakeChild()
+    const sidecar = new EccRpcSidecarProcess({
+      ...explicitFrontendLaunch,
+      spawn: () => child,
+    })
+    await sidecar.start()
+
+    await sidecar.forceShutdown()
+
+    expect(child.signals).toEqual(['SIGKILL'])
+  })
+})

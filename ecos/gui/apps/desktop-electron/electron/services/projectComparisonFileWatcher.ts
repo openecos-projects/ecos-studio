@@ -13,6 +13,7 @@ export interface ProjectComparisonFileWatcherCallbacks {
 
 type Watch = typeof watch
 type Canonicalize = (path: string) => Promise<string>
+type WorkspaceFilename = string | readonly string[]
 
 export class ProjectComparisonFileWatcher {
   private projectWatcher: FSWatcher | null = null
@@ -24,12 +25,13 @@ export class ProjectComparisonFileWatcher {
     private readonly callbacks: ProjectComparisonFileWatcherCallbacks,
     private readonly watchDirectory: Watch = watch,
     private readonly canonicalize: Canonicalize = realpath,
+    private readonly workspaceFilename: WorkspaceFilename = 'engineering-snapshot.json',
   ) {}
 
   async startProject(projectRoot: string): Promise<void> {
     const root = resolve(projectRoot)
     const target = join(root, 'project.json')
-    const watcher = this.create(root, target, () => this.callbacks.onManifestChanged())
+    const watcher = this.create(root, [target], () => this.callbacks.onManifestChanged())
     this.projectWatcher = watcher
     try {
       await ready(watcher)
@@ -44,8 +46,9 @@ export class ProjectComparisonFileWatcher {
     const project = resolve(projectRoot)
     const expected = new Map<
       string,
-      { directory: string; target: string; allowedParents: string[] }
+      { directory: string; targets: string[]; allowedParents: string[] }
     >()
+    const filenames = this.workspaceFilenames()
     for (const root of workspaceRoots) {
       const locator = resolve(root)
       let canonical: string
@@ -68,14 +71,14 @@ export class ProjectComparisonFileWatcher {
         }
         expected.set(locator, {
           directory: home,
-          target: join(home, 'engineering-snapshot.json'),
+          targets: filenames.map((filename) => join(home, filename)),
           allowedParents: [],
         })
       } catch (error) {
         if (!isNodeErrorWithCode(error, 'ENOENT')) throw error
         expected.set(locator, {
           directory: canonical,
-          target: join(unresolvedHome, 'engineering-snapshot.json'),
+          targets: filenames.map((filename) => join(unresolvedHome, filename)),
           allowedParents: [unresolvedHome],
         })
       }
@@ -92,7 +95,7 @@ export class ProjectComparisonFileWatcher {
         if (this.workspaceWatchers.has(workspaceRoot)) return []
         const watcher = this.create(
           targetInfo.directory,
-          targetInfo.target,
+          targetInfo.targets,
           () => this.callbacks.onSnapshotChanged(workspaceRoot),
           targetInfo.allowedParents,
         )
@@ -122,13 +125,15 @@ export class ProjectComparisonFileWatcher {
 
   private create(
     directory: string,
-    target: string,
+    targets: readonly string[],
     callback: () => void,
     allowedParents: readonly string[] = [],
   ): FSWatcher {
     const allowed = new Set(
-      [directory, target, ...allowedParents].map((path) => resolve(path)),
+      [directory, ...targets, ...allowedParents].map((path) => resolve(path)),
     )
+    const targetSet = new Set(targets.map((path) => resolve(path)))
+    const scheduleKey = targets.map((path) => resolve(path)).join('\0')
     const watcher = this.watchDirectory(directory, {
       depth: allowedParents.length ? 1 : 0,
       followSymlinks: false,
@@ -142,8 +147,8 @@ export class ProjectComparisonFileWatcher {
     })
     watcher.on('all', (event, changedPath) => {
       if (!['add', 'change', 'unlink'].includes(event)) return
-      if (resolve(changedPath) !== target) return
-      this.schedule(target, callback)
+      if (!targetSet.has(resolve(changedPath))) return
+      this.schedule(scheduleKey, callback)
     })
     watcher.on('error', (error) => {
       if (this.failed) return
@@ -151,6 +156,12 @@ export class ProjectComparisonFileWatcher {
       this.callbacks.onError(error)
     })
     return watcher
+  }
+
+  private workspaceFilenames(): readonly string[] {
+    return typeof this.workspaceFilename === 'string'
+      ? [this.workspaceFilename]
+      : this.workspaceFilename
   }
 
   private schedule(key: string, callback: () => void): void {
@@ -180,6 +191,7 @@ function ready(watcher: FSWatcher): Promise<void> {
     const cleanup = () => {
       watcher.off('ready', onReady)
       watcher.off('error', onError)
+      watcher.off('close', onClose)
     }
     const onReady = () => {
       cleanup()
@@ -189,7 +201,12 @@ function ready(watcher: FSWatcher): Promise<void> {
       cleanup()
       rejectReady(error)
     }
+    const onClose = () => {
+      cleanup()
+      rejectReady(new Error('File watcher closed before becoming ready.'))
+    }
     watcher.once('ready', onReady)
     watcher.once('error', onError)
+    watcher.once('close', onClose)
   })
 }

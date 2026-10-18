@@ -143,6 +143,11 @@ export type {
   QorStatus,
 } from './contracts/backendProjectComparison.ts'
 export type {
+  ProjectWorkspaceFlowState,
+  ProjectWorkspaceFlows,
+  ProjectWorkspaceFlowsRequest,
+} from './contracts/projectWorkspaceFlows.ts'
+export type {
   DesignRuntimeApi,
   DesignRuntimeCancelRequest,
   DesignRuntimeCancelResult,
@@ -605,6 +610,7 @@ export type {
   ProjectManifestMutationRequest,
   ProjectManifestMutationResult,
   ProjectManifestProfile,
+  ProjectRuntimeProcessEntry,
   ProjectManifestReplacementBackupInput,
   ProjectManifestWorkspace,
   ProjectManifestWorkspaceImportInput,

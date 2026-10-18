@@ -4,6 +4,10 @@ import type { WorkspaceCreationModelApi } from './workspaceCreationModel.ts'
 import type { BackendWorkspaceApi } from './backendWorkspace.ts'
 import type { BackendProjectComparisonApi } from './backendProjectComparison.ts'
 import type {
+  ProjectWorkspaceFlows,
+  ProjectWorkspaceFlowsRequest,
+} from './projectWorkspaceFlows.ts'
+import type {
   WorkspaceResourceIndex,
   WorkspaceStepInfoRequest,
   WorkspaceStepInfoResult,
@@ -341,6 +345,10 @@ export interface DesktopApi {
   backendWorkspace: BackendWorkspaceApi
   backendProjectComparison: BackendProjectComparisonApi
   projectManagement?: {
+    watchWorkspaceFlows(
+      request: ProjectWorkspaceFlowsRequest,
+    ): Promise<ProjectWorkspaceFlows>
+    onWorkspaceFlowsChanged(listener: () => void): DesktopEventUnsubscribe
     discoverProject(directory: string): Promise<ProjectManifest | null>
     readManifest(projectRoot: string): Promise<ProjectManifest | null>
     readFrontendWorkspaceTexts(

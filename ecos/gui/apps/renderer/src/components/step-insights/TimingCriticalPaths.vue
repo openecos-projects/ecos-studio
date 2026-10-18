@@ -12,30 +12,52 @@
       <span>{{ truncationNote }}</span>
     </p>
     <div v-for="group in pathGroups" :key="group.id" class="timing-path-group">
-      <h4>{{ group.title }}</h4>
+      <h4>{{ group.title }} · {{ group.paths.length }} paths</h4>
       <article v-for="path in group.paths" :key="path.id" class="timing-path-card">
-        <header>
-          <strong>{{ path.id.split(':').slice(1).join(':') || path.id }}</strong>
-          <span :class="slackClass(path.slackNs)"
-            >{{ formatSlack(path.slackNs) }} ns</span
-          >
-          <small>{{ path.stageCount }} stages · {{ path.corner }}</small>
-        </header>
-        <div class="timing-path-waterfall" aria-hidden="true">
-          <span
-            v-for="(stage, index) in path.stages"
-            :key="`${path.id}-${index}`"
-            :style="{ flexGrow: Math.max(stage.delayNs ?? 0, 0.01) }"
-            :title="stageTitle(stage, index)"
-          />
-        </div>
-        <ol class="timing-path-stages">
-          <li v-for="(stage, index) in path.stages" :key="`${path.id}-stage-${index}`">
-            <span>{{ stage.pin || `stage ${index + 1}` }}</span>
-            <small>{{ stage.cell }}</small>
-            <em>{{ formatDelay(stage.delayNs) }}</em>
-          </li>
-        </ol>
+        <details>
+          <summary>
+            <strong>{{ path.id.split(':').slice(1).join(':') || path.id }}</strong>
+            <span :class="slackClass(path.slackNs)"
+              >{{ formatSlack(path.slackNs) }} ns</span
+            >
+            <small>{{ path.stageCount }} stages · {{ path.corner }}</small>
+            <small v-if="path.pathGroup">Group: {{ path.pathGroup }}</small>
+            <span v-if="path.startPoint || path.endPoint" class="timing-path-endpoints"
+              >{{ path.startPoint || '—' }} → {{ path.endPoint || '—' }}</span
+            >
+          </summary>
+          <div class="timing-path-waterfall" aria-hidden="true">
+            <span
+              v-for="(stage, index) in path.stages"
+              :key="`${path.id}-${index}`"
+              :style="{ flexGrow: Math.max(stage.delayNs ?? 0, 0.01) }"
+              :title="stageTitle(stage, index)"
+            />
+          </div>
+          <div class="timing-path-stage-scroll">
+            <table class="timing-path-stages" :aria-label="`${path.id} stages`">
+              <thead>
+                <tr>
+                  <th scope="col">Pin</th>
+                  <th scope="col">Cell</th>
+                  <th scope="col">Delay (ns)</th>
+                  <th scope="col">Arrival (ns)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="(stage, index) in path.stages"
+                  :key="`${path.id}-stage-${index}`"
+                >
+                  <td>{{ stage.pin || `stage ${index + 1}` }}</td>
+                  <td>{{ stage.cell || '—' }}</td>
+                  <td>{{ formatDelay(stage.delayNs) }}</td>
+                  <td>{{ formatDelay(stage.arrivalNs) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
       </article>
     </div>
   </section>
@@ -161,43 +183,63 @@ function stageTitle(stage: StaPathStage, index: number): string {
   padding: 8px;
 }
 
-.timing-path-card header {
+.timing-path-card summary {
   align-items: baseline;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  cursor: pointer;
+  list-style: none;
 }
 
-.timing-path-card header strong {
+.timing-path-card summary::before {
+  content: '▸';
+  color: var(--text-secondary);
+}
+
+.timing-path-card details[open] summary::before {
+  content: '▾';
+}
+
+.timing-path-endpoints {
+  color: var(--text-secondary);
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.timing-path-card summary strong {
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
-.timing-path-card header span {
+.timing-path-card summary span {
   font-variant-numeric: tabular-nums;
 }
 
-.timing-path-card header span.is-good {
+.timing-path-card summary span.is-good {
   color: var(--success-color);
 }
 
-.timing-path-card header span.is-bad {
+.timing-path-card summary span.is-bad {
   color: var(--danger-color);
 }
 
-.timing-path-card header span.is-missing {
+.timing-path-card summary span.is-missing {
   color: var(--text-secondary);
 }
 
-.timing-path-card header small {
+.timing-path-card summary small {
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .timing-path-waterfall {
   display: flex;
   gap: 1px;
   height: 10px;
+  margin: 10px 0;
   overflow: hidden;
 }
 
@@ -210,28 +252,34 @@ function stageTitle(stage: StaPathStage, index: number): string {
   background: color-mix(in srgb, var(--accent-color, #3b82f6) 42%, transparent);
 }
 
+.timing-path-stage-scroll {
+  max-height: 320px;
+  overflow: auto;
+}
+
 .timing-path-stages {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  list-style: none;
-  margin: 0;
-  max-height: 120px;
-  overflow-y: auto;
-  padding: 0;
-}
-
-.timing-path-stages li {
+  border-collapse: collapse;
   color: var(--text-secondary);
-  display: grid;
-  font-size: 10px;
-  gap: 8px;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 64px;
+  font-size: 12px;
+  width: 100%;
 }
 
-.timing-path-stages em {
-  font-style: normal;
+.timing-path-stages th,
+.timing-path-stages td {
+  border-bottom: 1px solid var(--border-color);
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.timing-path-stages th {
+  background: var(--bg-secondary);
+  position: sticky;
+  top: 0;
+}
+
+.timing-path-stages td:nth-child(n + 3) {
   font-variant-numeric: tabular-nums;
   text-align: right;
+  white-space: nowrap;
 }
 </style>

@@ -29,20 +29,45 @@ afterEach(async () => {
 async function createServices() {
   const root = await mkdtemp(join(tmpdir(), 'ecos-frontend-project-'))
   directories.push(root)
-  const scope = { resolveProjectRoot: realpath }
+  const scope = {
+    resolveProjectRoot: realpath,
+    resolveProjectCreationRoot: async (path: string) => path,
+  }
   const frontend = new FrontendProjectManifestService(scope)
   const callRuntime = vi.fn().mockRejectedValue(new Error('backend RPC was not expected'))
-  const manifestService = new ProjectManifestService(
-    scope,
-    undefined,
-    { callRuntime },
-    frontend,
-  )
+  const runtime = {
+    discoverProject: (directory: string) =>
+      callRuntime('project.discover', { directory }),
+    loadProjectManifest: (projectRoot: string) =>
+      callRuntime('project.manifest.load', { projectRoot }),
+    mutateProjectManifest: (projectRoot: string, mutation: unknown) =>
+      callRuntime('project.manifest.mutate', { projectRoot, mutation }),
+  }
+  const manifestService = new ProjectManifestService(scope, undefined, runtime, frontend)
   const readService = new ProjectManagementReadService(manifestService)
   return { root, frontend, manifestService, readService, callRuntime }
 }
 
 describe('frontend project management on the main ECC runtime', () => {
+  it('creates a frontend project in a missing target directory', async () => {
+    const { root, manifestService, callRuntime } = await createServices()
+    const projectRoot = join(root, 'new', 'frontend')
+
+    const created = await manifestService.mutate({
+      projectRoot,
+      mutation: {
+        type: 'create',
+        name: 'cpu',
+        designName: 'core',
+        projectType: 'frontend',
+      },
+    })
+
+    expect(created.manifest.project_type).toBe('frontend')
+    expect(await realpath(projectRoot)).toBe(projectRoot)
+    expect(callRuntime).not.toHaveBeenCalled()
+  })
+
   it('does not send an unregistered frontend workspace discovery to backend ECC', async () => {
     const { root, manifestService, readService, callRuntime } = await createServices()
     const workspacePath = join(root, 'ws_0001')

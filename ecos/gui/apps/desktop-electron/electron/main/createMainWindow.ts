@@ -82,6 +82,7 @@ export async function createMainWindow(
       nodeIntegration: false,
     },
   })
+  mainWindow.maximize()
 
   if (FORWARD_RENDERER_CONSOLE) {
     mainWindow.webContents.on('console-message', (details) => {

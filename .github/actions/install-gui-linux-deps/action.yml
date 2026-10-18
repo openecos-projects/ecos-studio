@@ -13,11 +13,12 @@ runs:
     - name: Install packages
       shell: bash
       run: |
+        sudo apt-get update
+
         packages=(
           libasound2-dev
           libatk-bridge2.0-dev
           libdrm-dev
-          libfuse2
           libgbm-dev
           libgl1-mesa-dev
           libgtk-3-dev
@@ -35,10 +36,15 @@ runs:
           libxtst-dev
         )
 
+        if apt-cache show libfuse2t64 >/dev/null 2>&1; then
+          packages+=(libfuse2t64)
+        else
+          packages+=(libfuse2)
+        fi
+
         if [[ -n "${{ inputs.extra-packages }}" ]]; then
           read -r -a extra_packages <<< "${{ inputs.extra-packages }}"
           packages+=("${extra_packages[@]}")
         fi
 
-        sudo apt-get update
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --fix-missing "${packages[@]}"

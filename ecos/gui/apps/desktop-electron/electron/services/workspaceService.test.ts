@@ -31,6 +31,7 @@ function createProjectScopeProvider(
     clearProjectRoot: vi.fn(),
     getProjectRoot: vi.fn().mockResolvedValue(rootPath),
     isProjectDirectory: vi.fn().mockResolvedValue(true),
+    authorizeProjectManagementReadRoot: vi.fn().mockResolvedValue(canonicalPath),
     registerProjectManagementReadRoot: vi.fn(),
     registerProjectReadRoot: vi.fn(),
     registerProjectRoot: vi.fn(),

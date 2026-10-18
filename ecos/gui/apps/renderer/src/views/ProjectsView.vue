@@ -43,6 +43,27 @@
         </div>
       </header>
 
+      <div
+        v-if="selectedProjectRuntimeIssues.length"
+        class="project-maintenance-warning"
+        role="status"
+      >
+        <i class="ri-error-warning-line" aria-hidden="true"></i>
+        <span>Project runtime registry needs maintenance.</span>
+      </div>
+
+      <div
+        v-if="selectedProjectMigration"
+        class="project-maintenance-warning"
+        role="alert"
+      >
+        <i class="ri-lock-line" aria-hidden="true"></i>
+        <span>Legacy project is read-only: {{ selectedProjectMigration.reason }}</span>
+        <button type="button" class="inline-action" @click="refreshProjectManifests">
+          Retry migration
+        </button>
+      </div>
+
       <div class="manager-grid">
         <aside class="manager-sidebar" aria-label="Projects">
           <div class="project-list-panel" aria-label="Projects">
@@ -152,7 +173,7 @@
                     <button
                       type="button"
                       class="row-primary-action"
-                      :disabled="mutationsDisabled"
+                      :disabled="projectMutationsDisabled(project.model)"
                       :aria-label="`New workspace in ${project.model.name}`"
                       @click="createWorkspaceForProject(project.model)"
                     >
@@ -165,24 +186,36 @@
                       :aria-expanded="projectActionMenuId === project.model.id"
                       :aria-label="`More actions for ${project.model.name}`"
                       aria-haspopup="menu"
-                      @click="toggleProjectActionMenu(project.model.id)"
+                      @click="toggleProjectActionMenu(project.model.id, $event)"
                     >
                       <i class="ri-more-2-fill" aria-hidden="true"></i>
                     </button>
                     <div
                       v-if="projectActionMenuId === project.model.id"
                       class="row-action-menu"
+                      :class="{
+                        'row-action-menu--above': rowActionMenuPlacement === 'above',
+                      }"
                       role="group"
                       :aria-label="`More actions for ${project.model.name}`"
                     >
                       <button
                         type="button"
                         class="row-action-menu-item"
-                        :disabled="mutationsDisabled"
+                        :disabled="projectMutationsDisabled(project.model)"
                         @click="importWorkspaceIntoProject(project.model)"
                       >
                         <i class="ri-file-add-line" aria-hidden="true"></i>
                         <span>Import workspace</span>
+                      </button>
+                      <button
+                        v-if="project.model.projectType === 'backend'"
+                        type="button"
+                        class="row-action-menu-item"
+                        @click="checkProjectRegistration(project.source.path)"
+                      >
+                        <i class="ri-shield-check-line" aria-hidden="true"></i>
+                        <span>Check project</span>
                       </button>
                       <button
                         type="button"
@@ -218,7 +251,11 @@
                     v-for="workspace in visibleProjectWorkspaces(project.model)"
                     :key="workspace.id"
                     class="workspace-tree-item"
-                    :class="flowStatusHintClass(workspace.flowStatusHint.state)"
+                    :class="
+                      flowStatusHintClass(
+                        workspaceListFlowHint(project.source.path, workspace).state,
+                      )
+                    "
                     :style="workspaceDepthStyle(workspace)"
                   >
                     <div
@@ -258,10 +295,13 @@
                           :operations="
                             projectExecutionOperations(project.source.path, workspace.id)
                           "
+                          :flow-hint="
+                            workspaceListFlowHint(project.source.path, workspace)
+                          "
                         />
                         <ProjectResultStatus
                           v-else
-                          :hint="workspace.flowStatusHint"
+                          :hint="workspaceListFlowHint(project.source.path, workspace)"
                           :result-state="workspace.resultState"
                         />
                       </button>
@@ -291,7 +331,11 @@
                           :aria-label="`More actions for ${workspace.id}`"
                           aria-haspopup="menu"
                           @click="
-                            toggleWorkspaceActionMenu(project.model.id, workspace.id)
+                            toggleWorkspaceActionMenu(
+                              project.model.id,
+                              workspace.id,
+                              $event,
+                            )
                           "
                         >
                           <i class="ri-more-2-fill" aria-hidden="true"></i>
@@ -305,6 +349,9 @@
                             )
                           "
                           class="row-action-menu"
+                          :class="{
+                            'row-action-menu--above': rowActionMenuPlacement === 'above',
+                          }"
                           role="group"
                           :aria-label="`More actions for ${workspace.id}`"
                         >
@@ -322,7 +369,7 @@
                           <button
                             type="button"
                             class="row-action-menu-item danger"
-                            :disabled="mutationsDisabled"
+                            :disabled="projectMutationsDisabled(project.model)"
                             @click="
                               requestDeleteWorkspace(project.model.id, workspace.id)
                             "
@@ -440,7 +487,7 @@
                     <button
                       type="button"
                       class="empty-state-action primary"
-                      :disabled="mutationsDisabled"
+                      :disabled="projectMutationsDisabled(project.model)"
                       @click="createWorkspaceForProject(project.model)"
                     >
                       New workspace
@@ -448,7 +495,7 @@
                     <button
                       type="button"
                       class="empty-state-action"
-                      :disabled="mutationsDisabled"
+                      :disabled="projectMutationsDisabled(project.model)"
                       @click="importWorkspaceIntoProject(project.model)"
                     >
                       Import workspace
@@ -534,7 +581,6 @@
               :refreshing="projectComparisonSession.projection.status === 'refreshing'"
               @refresh="projectComparisonSession.refresh()"
             />
-            <ProjectCreationRecoveryPanel />
             <ProjectBackgroundOperationPanel
               v-if="selectedWorkspace"
               :operation-ids="selectedWorkspaceOperationIds"
@@ -546,6 +592,7 @@
             <ProjectAnalysisPanel
               :findings="projectComparisonSession.findings"
               :project="selectedProject"
+              :mutations-disabled="selectedProjectMutationsDisabled"
               :selected-analysis-tab="selectedAnalysisTab"
               :selected-step="selectedStep"
               :selected-workspace-id="selectedWorkspaceId"
@@ -692,6 +739,22 @@
             </label>
             <MpcTemplatePreview :design="selectedProjectMpcDesign" />
           </template>
+          <template v-else>
+            <div class="form-field project-rtl-import">
+              <span>Import RTL</span>
+              <RtlImportStep
+                :verilog="projectRtlSelection.verilog"
+                :filelist="projectRtlSelection.filelist"
+                show-manual-path
+                manual-input-name="project-rtl-source"
+                @update:selection="projectRtlSelection = $event"
+              />
+              <p class="modal-help">
+                Required: the selected RTL files or filelist are copied into the project's
+                rtl/ folder by <code>ecc rtl import</code> at creation.
+              </p>
+            </div>
+          </template>
         </template>
 
         <p class="modal-help">Project manifest: {{ projectManifestPreview }}</p>
@@ -835,7 +898,7 @@
           <button
             type="button"
             class="secondary-button danger"
-            :disabled="mutationsDisabled"
+            :disabled="selectedProjectMutationsDisabled"
             @click="confirmDeleteWorkspace"
           >
             <i class="ri-delete-bin-line"></i>
@@ -882,7 +945,7 @@
           <button
             type="button"
             class="secondary-button danger"
-            :disabled="mutationsDisabled"
+            :disabled="selectedProjectMutationsDisabled"
             @click="confirmDeleteProject"
           >
             <i class="ri-subtract-line"></i>
@@ -908,9 +971,10 @@ import ProjectComparisonRefreshStatus from './project-management/ProjectComparis
 import ProjectExecutionStatus from './project-management/ProjectExecutionStatus.vue'
 import ProjectResultStatus from './project-management/ProjectResultStatus.vue'
 import ProjectBackgroundOperationPanel from './project-management/ProjectBackgroundOperationPanel.vue'
-import ProjectCreationRecoveryPanel from './project-management/ProjectCreationRecoveryPanel.vue'
 import ProjectConsistencyRepairStrip from './project-management/ProjectConsistencyRepairStrip.vue'
 import MpcTemplatePreview from '@/components/MpcTemplatePreview.vue'
+import RtlImportStep from '@/components/RtlImportStep.vue'
+import { exclusiveDesignFilesReady } from '@/components/topModuleConfirmation'
 import { previewList } from './project-management/projectListPreview'
 import { resolveProjectManagementRouteFocus } from './project-management/projectRouteFocus'
 import { mapWithConcurrency } from './project-management/asyncConcurrency'
@@ -919,6 +983,8 @@ import {
   type FrontendProjectWorkspaceData,
 } from './project-management/frontendProjectWorkspaceData'
 import { getDesktopApi } from '@/platform/desktop'
+import { useVisibleWorkspaceFlows } from '@/composables/useVisibleWorkspaceFlows'
+import { workspaceFlowHint } from '@/utils/projectWorkspaceFlowPresentation'
 import { listResourcesApi, readMpcSpecApi } from '@/api/plugin'
 import { mutateProjectManifest } from '@/api/projectManifest'
 import { readWorkspaceStepOutputsApi } from '@/api/workspace'
@@ -933,6 +999,8 @@ import {
   buildProjectManagementProject,
   createWorkspaceBranchDraft,
   isCompletedStepStatus,
+  projectComparisonWorkspaceFlowStates,
+  projectWorkspaceFlowStatesWithRuntime,
   type ProjectManifestMpcCandidate,
   projectMpcOptionFromResource,
   resolveProjectSelectionUpdate,
@@ -1011,6 +1079,7 @@ const workspacePopoverStyle = ref<Record<string, string>>({})
 let workspaceStepOutputRequestQueue = Promise.resolve()
 const projectActionMenuId = ref<string | null>(null)
 const workspaceActionMenuTarget = ref<WorkspaceTarget | null>(null)
+const rowActionMenuPlacement = ref<'above' | 'below'>('below')
 const pendingDeleteWorkspaceTarget = ref<WorkspaceTarget | null>(null)
 const keepWorkspaceDataOnDelete = ref(true)
 const deleteWorkspaceError = ref('')
@@ -1029,6 +1098,14 @@ const projectRootDraft = ref({
   directory: '',
   projectType: 'backend' as ProjectManifestType,
   mpcId: '',
+})
+/** RTL sources imported into the new backend project's rtl/ folder
+ * (`ecc rtl import` runs right after `ecc init`). Exclusive: either a
+ * filelist or Verilog files. MPC-backed projects take their design from the
+ * MPC template and skip the import. */
+const projectRtlSelection = ref<{ verilog: string[]; filelist: string }>({
+  verilog: [],
+  filelist: '',
 })
 const projectMpcs = ref<ProjectManifestMpcCandidate[]>([])
 const isLoadingProjectMpcs = ref(false)
@@ -1129,7 +1206,15 @@ const projectCards = computed<ProjectCard[]>(() => {
       model: buildProjectManagementProject(
         project,
         projectManifests.value[project.path] ?? null,
-        workspaceFlowStates.value[project.path] ?? {},
+        projectWorkspaceFlowStatesWithRuntime(
+          projectComparisonWorkspaceFlowStates(
+            projectComparisonForProject(project.path),
+            workspaceFlowStates.value[project.path] ?? {},
+          ),
+          comparisonProjectRoot.value === project.path
+            ? projectComparisonSession.execution.operations
+            : [],
+        ),
         project.projectType === 'frontend'
           ? null
           : projectComparisonForProject(project.path),
@@ -1165,6 +1250,30 @@ const visibleProjectCards = computed(() =>
 const projectListCanToggle = computed(
   () => !searchShowsAll.value && projectCards.value.length > PROJECT_PREVIEW_LIMIT,
 )
+
+const visibleWorkspaceFlows = useVisibleWorkspaceFlows(() => ({
+  projects: visibleProjectCards.value.flatMap((project) => {
+    if (
+      project.model.projectType !== 'backend' ||
+      !projectWorkspaceListExpanded(project.model.id)
+    )
+      return []
+    const workspaceIds = visibleProjectWorkspaces(project.model).map(
+      (workspace) => workspace.id,
+    )
+    return workspaceIds.length ? [{ projectRoot: project.source.path, workspaceIds }] : []
+  }),
+}))
+
+function workspaceListFlowHint(
+  projectRoot: string,
+  workspace: ProjectWorkspace,
+): ProjectFlowStatusHint {
+  if (projectManifests.value[projectRoot]?.project_type === 'frontend')
+    return workspace.flowStatusHint
+  if (workspace.status === 'archived') return { state: 'skipped', label: 'Archived' }
+  return workspaceFlowHint(visibleWorkspaceFlows.value[projectRoot]?.[workspace.id])
+}
 
 function projectCardMatchesSearch(project: ProjectCard, query: string): boolean {
   const projectFields = [
@@ -1206,6 +1315,22 @@ const selectedProject = computed<ProjectManagementProject>(() => {
     selected?.model ?? projectCards.value[0]?.model ?? buildProjectManagementProject(null)
   )
 })
+const selectedProjectRuntimeIssues = computed(
+  () => projectManifests.value[selectedProject.value.path]?.runtime_process_issues ?? [],
+)
+const selectedProjectMigration = computed(
+  () => projectManifests.value[selectedProject.value.path]?.project_migration ?? null,
+)
+const selectedProjectMutationsDisabled = computed(
+  () => mutationsDisabled.value || Boolean(selectedProjectMigration.value),
+)
+
+function projectMutationsDisabled(project: ProjectManagementProject): boolean {
+  return (
+    mutationsDisabled.value ||
+    Boolean(projectManifests.value[project.path]?.project_migration)
+  )
+}
 
 const selectedWorkspace = computed<ProjectWorkspace | null>(() => {
   return (
@@ -1732,13 +1857,19 @@ function updateWorkspaceFlowPopoverPosition() {
   }
 }
 
-function toggleProjectActionMenu(projectId: string) {
-  projectActionMenuId.value = projectActionMenuId.value === projectId ? null : projectId
+function toggleProjectActionMenu(projectId: string, event: MouseEvent) {
+  const wasOpen = projectActionMenuId.value === projectId
+  projectActionMenuId.value = wasOpen ? null : projectId
   workspaceActionMenuTarget.value = null
   closeWorkspaceFlowPopover()
+  rowActionMenuPlacement.value = wasOpen ? 'below' : rowActionMenuPlacementFor(event)
 }
 
-function toggleWorkspaceActionMenu(projectId: string, workspaceId: string) {
+function toggleWorkspaceActionMenu(
+  projectId: string,
+  workspaceId: string,
+  event: MouseEvent,
+) {
   const wasOpen = workspaceTargetMatches(
     workspaceActionMenuTarget.value,
     projectId,
@@ -1748,11 +1879,32 @@ function toggleWorkspaceActionMenu(projectId: string, workspaceId: string) {
   workspaceActionMenuTarget.value = wasOpen ? null : { projectId, workspaceId }
   projectActionMenuId.value = null
   closeWorkspaceFlowPopover()
+  rowActionMenuPlacement.value = wasOpen ? 'below' : rowActionMenuPlacementFor(event)
 }
 
 function closeRowActionMenus() {
   projectActionMenuId.value = null
   workspaceActionMenuTarget.value = null
+  rowActionMenuPlacement.value = 'below'
+}
+
+function rowActionMenuPlacementFor(event: MouseEvent): 'above' | 'below' {
+  const trigger = event.currentTarget
+  if (!(trigger instanceof HTMLElement)) return 'below'
+  const scrollContainer = trigger.closest<HTMLElement>('.project-list')
+  const triggerRect = trigger.getBoundingClientRect()
+  const containerRect = scrollContainer?.getBoundingClientRect()
+  const topBoundary = Math.max(containerRect?.top ?? 0, 0)
+  const bottomBoundary = Math.min(
+    containerRect?.bottom ?? window.innerHeight,
+    window.innerHeight,
+  )
+  // shortcut: 112px covers the current menus; measure dynamically if more actions are added.
+  const estimatedHeight = 112
+
+  if (triggerRect.bottom + 6 + estimatedHeight <= bottomBoundary) return 'below'
+  if (triggerRect.top - 6 - estimatedHeight >= topBoundary) return 'above'
+  return 'below'
 }
 
 function modalElement(modal: ModalId): HTMLElement | null {
@@ -2014,8 +2166,27 @@ async function refreshProjectManifestsNow() {
   workspaceFlowStates.value = Object.fromEntries(
     entries.map(([path]) => [path, workspaceFlowStates.value[path] ?? {}]),
   )
-  void projectConsistency.refresh(projectSources.value)
   void loadSelectedProjectWorkspaceData()
+}
+
+async function checkProjectRegistration(projectRoot: string) {
+  closeRowActionMenus()
+  try {
+    await projectConsistency.check(projectRoot)
+    showToast({
+      severity: 'info',
+      summary: 'Project checked',
+      detail: 'The project consistency report has been refreshed.',
+      life: 3000,
+    })
+  } catch (error) {
+    showToast({
+      severity: 'warn',
+      summary: 'Project check failed',
+      detail: error instanceof Error ? error.message : String(error),
+      life: 5000,
+    })
+  }
 }
 
 async function handleProjectConsistencyRepaired(projectRoot: string) {
@@ -2311,6 +2482,7 @@ function openNewProjectDialog() {
     projectType: 'backend',
     mpcId: '',
   }
+  projectRtlSelection.value = { verilog: [], filelist: '' }
   projectMpcs.value = []
   projectMpcLoadError.value = ''
   resetProjectMpcSpec()
@@ -2434,16 +2606,49 @@ async function createProjectFolderDraft() {
     return
   }
 
+  const mpcProject =
+    projectRootDraft.value.projectType === 'backend' && Boolean(selectedProjectMpc.value)
+  if (projectRootDraft.value.projectType === 'backend' && !mpcProject) {
+    if (
+      !exclusiveDesignFilesReady(
+        projectRtlSelection.value.verilog,
+        projectRtlSelection.value.filelist,
+      )
+    ) {
+      projectRootError.value =
+        'Import RTL files or a filelist before creating the project.'
+      return
+    }
+  }
+
   const name = projectRootDraft.value.name.trim() || basenamePath(directory) || 'project'
   const designName = projectRootDraft.value.designName.trim() || name
-  const manifest = await mutateProjectManifest(directory, {
-    type: 'create',
-    name,
-    designName,
-    projectType: projectRootDraft.value.projectType,
-    mpc: selectedProjectMpc.value,
-  })
-  await applyProjectManifestForProject(manifest, manifest.root_path)
+  const rtlImport =
+    projectRootDraft.value.projectType === 'backend' && !mpcProject
+      ? projectRtlSelection.value.filelist
+        ? { filelist: projectRtlSelection.value.filelist }
+        : { verilog: [...projectRtlSelection.value.verilog] }
+      : undefined
+  let manifest: ProjectManifest
+  try {
+    manifest = await mutateProjectManifest(directory, {
+      type: 'create',
+      name,
+      designName,
+      projectType: projectRootDraft.value.projectType,
+      mpc: selectedProjectMpc.value,
+      ...(rtlImport ? { rtlImport } : {}),
+    })
+  } catch (error) {
+    console.warn('Failed to create project.', error)
+    projectRootError.value = writeFailureDetail('project.json', error)
+    return
+  }
+  try {
+    await applyProjectManifestForProject(manifest, manifest.root_path)
+  } catch (error) {
+    console.warn('Project created but the project cache refresh failed.', error)
+  }
   selectProject(manifest.root_path)
   closeNewProjectDialog()
 }
@@ -2583,12 +2788,10 @@ function projectFromManifest(manifest: ProjectManifest, fallbackRoot: string): P
 }
 
 function projectStatusFromManifest(manifest: ProjectManifest): ProjectStatus {
-  if (manifest.workspaces.some((workspace) => workspace.status === 'running'))
-    return 'running'
+  if (Object.keys(manifest.runtime_processes ?? {}).length > 0) return 'running'
+  if (manifest.project_type !== 'frontend') return 'not_started'
   if (manifest.workspaces.some((workspace) => workspace.status === 'failed'))
     return 'failed'
-  if (manifest.workspaces.some((workspace) => workspace.status === 'in_progress'))
-    return 'in_progress'
   if (
     manifest.workspaces.length > 0 &&
     manifest.workspaces.every((workspace) =>
@@ -2598,7 +2801,7 @@ function projectStatusFromManifest(manifest: ProjectManifest): ProjectStatus {
     return manifest.workspaces.some((workspace) => workspace.status === 'warning')
       ? 'warning'
       : 'success'
-  return manifest.workspaces.length > 0 ? 'in_progress' : 'not_started'
+  return 'not_started'
 }
 
 function normalizePath(path: string): string {

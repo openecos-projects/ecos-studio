@@ -55,6 +55,7 @@ export type FlowStepState =
   | 'succeeded'
   | 'warning'
   | 'failed'
+  | 'blocked'
   | 'cancelled'
   | 'skipped'
   | 'unknown'
@@ -67,6 +68,7 @@ export interface FlowStepSummary {
   toolId?: string
   runtimeSeconds?: number
   peakMemoryMb?: number
+  checklistStatus?: 'passed' | 'blocked' | 'attention' | 'unknown'
 }
 
 export interface WorkspaceFlowSummary {
@@ -280,6 +282,11 @@ export interface WorkspaceTimingSummaryDetail {
     tns: number | null
     violationCount: number | null
   }
+  pathGroups?: Array<{
+    name: string
+    setup: WorkspaceTimingSummaryDetail['setup']
+    hold: WorkspaceTimingSummaryDetail['hold']
+  }>
 }
 
 /**

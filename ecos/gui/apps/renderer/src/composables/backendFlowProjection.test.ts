@@ -1,6 +1,6 @@
 import type { DesignRuntimeEvent, FlowStepSummary } from '@ecos-studio/shared'
 import { describe, expect, it } from 'vitest'
-import { projectBackendFlowSteps } from './backendFlowProjection'
+import { projectBackendFlowSteps, projectRuntimeFlowSteps } from './backendFlowProjection'
 
 const committed: FlowStepSummary[] = [
   { name: 'Synth', order: 0, state: 'succeeded', stepId: 'Synth', toolId: 'yosys' },
@@ -109,4 +109,20 @@ describe('backend Flow projection', () => {
 
     expect(projected[1]).toMatchObject({ state: 'failed', stepId: 'Place' })
   })
+})
+
+it('projects persisted checklist status without changing legacy step state', () => {
+  const projected = projectRuntimeFlowSteps([
+    {
+      name: 'DRC',
+      tool: 'ecc',
+      state: 'Success',
+      runtime: '',
+      peakMemory: 0,
+      checklist: [{ id: 'drc.clean', blocked: true }],
+      checklist_status: { status: 'blocked', blocked: true, failed_items: ['drc.clean'] },
+    },
+  ])
+
+  expect(projected[0]).toMatchObject({ state: 'succeeded', checklistStatus: 'blocked' })
 })

@@ -13,6 +13,64 @@ class FakeWatcher extends EventEmitter {
 describe('ProjectComparisonFileWatcher', () => {
   afterEach(() => vi.useRealTimers())
 
+  it('observes flow and engineering snapshot replacements together', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ecos-flow-and-snapshot-watch-'))
+    const workspaceRoot = join(projectRoot, 'ws_1')
+    const home = join(workspaceRoot, 'home')
+    await mkdir(home, { recursive: true })
+    await writeFile(join(home, 'flow.json'), '{}')
+    await writeFile(join(home, 'engineering-snapshot.json'), '{}')
+    const changed = vi.fn()
+    const watcher = new ProjectComparisonFileWatcher(
+      { onError: vi.fn(), onManifestChanged: vi.fn(), onSnapshotChanged: changed },
+      undefined,
+      undefined,
+      ['engineering-snapshot.json', 'flow.json'],
+    )
+    try {
+      await watcher.reconcile(projectRoot, [workspaceRoot])
+      for (const filename of ['flow.json', 'engineering-snapshot.json']) {
+        const staged = join(home, `${filename}.tmp`)
+        await writeFile(staged, JSON.stringify({ filename }))
+        await rename(staged, join(home, filename))
+        await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(1))
+        expect(changed).toHaveBeenCalledWith(workspaceRoot)
+        changed.mockClear()
+      }
+    } finally {
+      await watcher.close()
+      await rm(projectRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('observes Flow file replacements independently of engineering snapshots', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ecos-flow-watch-'))
+    const workspaceRoot = join(projectRoot, 'ws_1')
+    const home = join(workspaceRoot, 'home')
+    await mkdir(home, { recursive: true })
+    await writeFile(join(home, 'flow.json'), '{}')
+    const changed = vi.fn()
+    const watcher = new ProjectComparisonFileWatcher(
+      { onError: vi.fn(), onManifestChanged: vi.fn(), onSnapshotChanged: changed },
+      undefined,
+      undefined,
+      'flow.json',
+    )
+    try {
+      await watcher.reconcile(projectRoot, [workspaceRoot])
+      for (const revision of [1, 2]) {
+        const staged = join(home, 'flow.tmp')
+        await writeFile(staged, JSON.stringify({ revision }))
+        await rename(staged, join(home, 'flow.json'))
+        await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(revision))
+      }
+      expect(changed).toHaveBeenLastCalledWith(workspaceRoot)
+    } finally {
+      await watcher.close()
+      await rm(projectRoot, { recursive: true, force: true })
+    }
+  })
+
   it('watches only manifest and snapshot directories at depth zero and survives replace events', async () => {
     vi.useFakeTimers()
     const created: Array<{
@@ -73,6 +131,19 @@ describe('ProjectComparisonFileWatcher', () => {
     await watcher.close()
     expect(created[0]!.watcher.close).toHaveBeenCalledOnce()
     expect(created[2]!.watcher.close).toHaveBeenCalledOnce()
+  })
+
+  it('rejects startup when a watcher closes before ready', async () => {
+    const watcher = new FakeWatcher()
+    const service = new ProjectComparisonFileWatcher(
+      { onError: vi.fn(), onManifestChanged: vi.fn(), onSnapshotChanged: vi.fn() },
+      vi.fn(() => watcher) as never,
+      async (path) => path,
+    )
+
+    const pending = service.startProject('/project')
+    watcher.emit('close')
+    await expect(pending).rejects.toThrow('closed before becoming ready')
   })
 
   it('continues observing project.json after consecutive atomic replacements', async () => {

@@ -167,6 +167,69 @@ describe('useDesignReportExport', () => {
     expect(composable.reportData.value?.design.designName).toBe('gcd_run')
   })
 
+  it('falls back to persisted workspace files when the backend runtime is inactive', async () => {
+    currentProject.value = {
+      path: '/projects/gcd/ws_001',
+      name: 'gcd_run',
+      designTool: 'backend',
+    }
+    mockReadOptionalProjectTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/home/flow.json')) {
+        return JSON.stringify({ steps: [{ name: 'Synthesis', state: 'Success' }] })
+      }
+      if (path.endsWith('/home/parameters.json')) {
+        return JSON.stringify({ Design: 'gcd', CLOCK_PERIOD: 10 })
+      }
+      return null
+    })
+
+    const composable = useDesignReportExport({
+      currentProject,
+      showToast,
+      workspaceSession: ref({ state: 'closed', workspaceId: '' }),
+    })
+
+    composable.openDesignReportExport('text')
+    await vi.waitFor(() => expect(composable.loading.value).toBe(false))
+
+    expect(composable.error.value).toBe('')
+    expect(composable.reportData.value?.design.designName).toBe('gcd_run')
+    expect(mockRuntimeSnapshot).not.toHaveBeenCalled()
+    expect(mockReadOptionalProjectTextFile).toHaveBeenCalledWith(
+      '/projects/gcd/ws_001/home/flow.json',
+    )
+  })
+
+  it('falls back to persisted workspace files when the backend runtime snapshot fails', async () => {
+    currentProject.value = {
+      path: '/projects/gcd/ws_001',
+      name: 'gcd_run',
+      designTool: 'backend',
+    }
+    mockRuntimeSnapshot.mockRejectedValue(new Error('runtime unavailable'))
+    mockReadOptionalProjectTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/home/flow.json')) {
+        return JSON.stringify({ steps: [{ name: 'Synthesis', state: 'Success' }] })
+      }
+      return null
+    })
+
+    const composable = useDesignReportExport({
+      currentProject,
+      showToast,
+      workspaceSession: ref({ state: 'active', workspaceId: 'workspace-1' }),
+    })
+
+    composable.openDesignReportExport('text')
+    await vi.waitFor(() => expect(composable.loading.value).toBe(false))
+
+    expect(composable.error.value).toBe('')
+    expect(composable.reportData.value?.design.designName).toBe('gcd_run')
+    expect(mockReadOptionalProjectTextFile).toHaveBeenCalledWith(
+      '/projects/gcd/ws_001/home/flow.json',
+    )
+  })
+
   it('loads workspace data and generates report content on openDesignReportExport', async () => {
     currentProject.value = {
       path: '/projects/gcd/ws_001',

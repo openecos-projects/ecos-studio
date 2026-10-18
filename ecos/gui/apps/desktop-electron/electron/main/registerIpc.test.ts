@@ -92,16 +92,14 @@ vi.mock('../services/menuService', () => ({
   setMenuActionEnabled,
 }))
 
-const { executeWorkspaceRerunMock, verifyWorkspaceRerunContractMock } = vi.hoisted(
-  () => ({
-    executeWorkspaceRerunMock: vi.fn(),
-    verifyWorkspaceRerunContractMock: vi.fn(),
-  }),
-)
+const { executeWorkspaceRerunMock, prepareWorkspaceRerunMock } = vi.hoisted(() => ({
+  executeWorkspaceRerunMock: vi.fn(),
+  prepareWorkspaceRerunMock: vi.fn(),
+}))
 
-vi.mock('../services/eccRpc/workspaceRerun', () => ({
+vi.mock('../services/workspaceRerun', () => ({
   executeWorkspaceRerun: executeWorkspaceRerunMock,
-  verifyWorkspaceRerunContract: verifyWorkspaceRerunContractMock,
+  prepareWorkspaceRerun: prepareWorkspaceRerunMock,
 }))
 
 import { registerIpc, type DesktopBridgeServices } from './registerIpc'
@@ -129,10 +127,14 @@ function registerHandlers(
       repair: vi.fn(),
     },
     projectManagementReadService: {
-      discoverProject: vi.fn(),
+      discoverProject: vi.fn().mockResolvedValue(null),
       readManifest: vi.fn(),
       listProjectEntries: vi.fn(),
       readWorkspaceStepConfiguration: vi.fn(),
+    },
+    projectWorkspaceFlowService: {
+      watch: vi.fn().mockResolvedValue({}),
+      onChanged: vi.fn(),
     },
     backendWorkspaceService: {
       clearWindow: vi.fn(),
@@ -174,6 +176,7 @@ function registerHandlers(
       readProjectTextFile: vi.fn(),
       readProjectTextFileTail: vi.fn(),
       registerProjectManagementReadRoot: vi.fn(),
+      authorizeProjectManagementReadRoot: vi.fn(),
       registerProjectReadRoot: vi.fn(),
       registerProjectRoot: vi.fn(),
       listProjectDirectory: vi.fn(),
@@ -254,6 +257,7 @@ function registerHandlers(
       cancelOperationLegacy: vi.fn(),
       closeWorkspace: vi.fn(),
       createWorkspace: vi.fn(),
+      discoverProject: vi.fn(),
       describeWorkspaceSpec: vi.fn(),
       deriveWorkspace: vi.fn(),
       engineeringSnapshot: vi.fn(),
@@ -278,6 +282,8 @@ function registerHandlers(
       operationStatus: vi.fn(),
       waitForOperation: vi.fn(),
       openWorkspace: vi.fn(),
+      readWorkspaceBindingRequirement: vi.fn().mockResolvedValue({}),
+      readWorkspaceConfiguration: vi.fn().mockResolvedValue({}),
       refreshConfig: vi.fn(),
       releaseWorkspace: vi.fn().mockResolvedValue({ ok: true }),
       retryFinalSnapshot: vi.fn(),
@@ -479,7 +485,7 @@ describe('registerIpc', () => {
     openExternal.mockReset()
     openPath.mockReset()
     executeWorkspaceRerunMock.mockReset()
-    verifyWorkspaceRerunContractMock.mockReset()
+    prepareWorkspaceRerunMock.mockReset()
     showOpenDialog.mockReset()
     showMessageBox.mockReset()
     showSaveDialog.mockReset()
@@ -886,6 +892,21 @@ describe('registerIpc', () => {
     expect(
       services.backendProjectComparisonService.getExecutionSnapshot,
     ).toHaveBeenCalledWith(7, 'context-1')
+  })
+
+  it('scopes visible Workspace Flow reads and notifications to their sending window', async () => {
+    const { handlers, services } = registerHandlers()
+    const request = { projects: [{ projectRoot: '/project', workspaceIds: ['ws_1'] }] }
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementWatchWorkspaceFlows)?.(
+        { sender: { id: 7 } },
+        request,
+      ),
+    ).resolves.toEqual({})
+    expect(services.projectWorkspaceFlowService.watch).toHaveBeenCalledWith(7, request)
+    expect(services.projectWorkspaceFlowService.onChanged).toHaveBeenCalledWith(
+      expect.any(Function),
+    )
   })
 
   it('queries Step Findings without accepting a Renderer path', async () => {
@@ -1758,7 +1779,7 @@ describe('registerIpc', () => {
       start: vi.fn(),
       startSession: vi.fn(async (request) => ({ sessionId: request.sessionId })),
     } as unknown as DesktopBridgeServices['agentRuntimeService']
-    const { handlers, services } = registerHandlers(agentRuntimeService)
+    const { handlers } = registerHandlers(agentRuntimeService)
     const window = {
       focus: vi.fn(),
       isDestroyed: vi.fn(() => false),
@@ -1789,16 +1810,7 @@ describe('registerIpc', () => {
       target_workspace: '/runs/gcd_rerun_place',
     }
     fromWebContents.mockReturnValue(window)
-    mockAgentWorkspaceContext(services)
-    verifyWorkspaceRerunContractMock.mockResolvedValue({
-      sourceWorkspace: contract.source_workspace,
-      targetWorkspace: contract.target_workspace,
-    })
-    services.eccRuntimeService.deriveWorkspace.mockResolvedValue({
-      directory: contract.target_workspace,
-      workspaceHandle: 'derived-handle',
-      workspaceRevision: 1,
-    })
+    prepareWorkspaceRerunMock.mockResolvedValue({ directory: contract.target_workspace })
     await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
       { sender: owner },
       session,
@@ -1815,21 +1827,10 @@ describe('registerIpc', () => {
     })
 
     workspaceWindowRegistry.register(contract.source_workspace, window)
-    await openBackendWorkspace(
-      handlers,
-      { sender: owner },
-      { directory: contract.source_workspace },
-    )
     await expect(
       prepare?.({ sender: owner }, { token: forwarded.workspaceRerunToken }),
     ).resolves.toMatchObject({ directory: contract.target_workspace })
-    expect(verifyWorkspaceRerunContractMock).toHaveBeenCalledWith(contract)
-    expect(services.eccRuntimeService.deriveWorkspace).toHaveBeenCalledWith({
-      workspaceHandle: 'workspace-1',
-      directory: contract.source_workspace,
-      targetDirectory: contract.target_workspace,
-      resetFromStep: contract.target_step,
-    })
+    expect(prepareWorkspaceRerunMock).toHaveBeenCalledWith(contract)
   })
 
   it('executes a prepared rerun through the target workspace handle owned by its window', async () => {
@@ -1876,15 +1877,7 @@ describe('registerIpc', () => {
     fromWebContents.mockReturnValue(window)
     workspaceWindowRegistry.register(contract.source_workspace, window)
     mockAgentWorkspaceContext(services)
-    verifyWorkspaceRerunContractMock.mockResolvedValue({
-      sourceWorkspace: contract.source_workspace,
-      targetWorkspace: contract.target_workspace,
-    })
-    services.eccRuntimeService.deriveWorkspace.mockResolvedValue({
-      directory: contract.target_workspace,
-      workspaceHandle: 'derived-handle',
-      workspaceRevision: 1,
-    })
+    prepareWorkspaceRerunMock.mockResolvedValue({ directory: contract.target_workspace })
     await openBackendWorkspace(
       handlers,
       { sender: owner },
@@ -1985,15 +1978,7 @@ describe('registerIpc', () => {
     fromWebContents.mockReturnValue(window)
     workspaceWindowRegistry.register(contract.source_workspace, window)
     mockAgentWorkspaceContext(services)
-    verifyWorkspaceRerunContractMock.mockResolvedValue({
-      sourceWorkspace: contract.source_workspace,
-      targetWorkspace: contract.target_workspace,
-    })
-    services.eccRuntimeService.deriveWorkspace.mockResolvedValue({
-      directory: contract.target_workspace,
-      workspaceHandle: 'derived-handle',
-      workspaceRevision: 1,
-    })
+    prepareWorkspaceRerunMock.mockResolvedValue({ directory: contract.target_workspace })
     await openBackendWorkspace(
       handlers,
       { sender: owner },
@@ -2357,7 +2342,7 @@ describe('registerIpc', () => {
     expect(services.eccRuntimeService.createWorkspace).not.toHaveBeenCalled()
   })
 
-  it('persists eccPdkConfig to ecc.toml and strips it from the runtime request', async () => {
+  it('passes eccPdkConfig to the runtime Project apply transaction', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
     services.pdkInventoryService.resolveBinding.mockResolvedValue(null)
@@ -2402,13 +2387,8 @@ describe('registerIpc', () => {
     ).resolves.toMatchObject({ workspaceHandle: 'workspace-handle' })
 
     const runtimeCall = services.eccRuntimeService.createWorkspace.mock.calls[0][0]
-    expect(runtimeCall).not.toHaveProperty('eccPdkConfig')
-    expect(services.projectEccConfigService.write).toHaveBeenCalledWith({
-      projectRoot: '/tmp/project',
-      pdkRoot: '/canonical/pdk',
-      pdkName: 'ics55',
-      ...eccPdkConfig,
-    })
+    expect(runtimeCall).toMatchObject({ eccPdkConfig })
+    expect(services.projectEccConfigService.write).not.toHaveBeenCalled()
   })
 
   it('skips ecc.toml persistence when the create carries no eccPdkConfig', async () => {
@@ -4357,6 +4337,18 @@ describe('registerIpc', () => {
     expect(
       services.backendProjectComparisonService.invalidateWorkspace,
     ).toHaveBeenCalledWith('/work/demo')
+  })
+
+  it('invalidates Project execution snapshots when the CLI operation projection changes', () => {
+    const { services } = registerHandlers()
+    const listener =
+      services.eccRuntimeService.onOperationProjectionInvalidated.mock.calls[1]?.[0]
+
+    listener?.(2)
+
+    expect(
+      services.backendProjectComparisonService.invalidateExecution,
+    ).toHaveBeenCalledOnce()
   })
 
   it('invalidates Project execution snapshots for step progress without repeating duplicates', () => {

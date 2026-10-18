@@ -986,14 +986,25 @@ function summarizeStaOverview(
   )
   const worstSetup = setupEntries.sort((left, right) => left.wns - right.wns)[0] ?? null
   const worstHold = holdEntries.sort((left, right) => left.wns - right.wns)[0] ?? null
-  const frequencyMhz =
-    corners.flatMap((row) =>
-      row.setup?.frequencyMhz != null ? [row.setup.frequencyMhz] : [],
-    )[0] ?? null
-  const setupViolationCount = corners.reduce((sum, row) => sum + (row.setup?.nvp ?? 0), 0)
-  const holdViolationCount = corners.reduce((sum, row) => sum + (row.hold?.nvp ?? 0), 0)
+  const frequencies = corners.flatMap((row) =>
+    row.setup?.frequencyMhz != null ? [row.setup.frequencyMhz] : [],
+  )
+  const frequencyMhz = frequencies.length ? Math.min(...frequencies) : null
+  const setupViolationCount = corners.every(
+    (row) => !row.missing && row.setup?.nvp != null,
+  )
+    ? corners.reduce((sum, row) => sum + (row.setup?.nvp ?? 0), 0)
+    : null
+  const holdViolationCount = corners.every((row) => !row.missing && row.hold?.nvp != null)
+    ? corners.reduce((sum, row) => sum + (row.hold?.nvp ?? 0), 0)
+    : null
+  const complete =
+    corners.length > 0 &&
+    corners.every(
+      (row) => !row.missing && row.setup?.wns != null && row.hold?.wns != null,
+    )
   const allCornersMet =
-    worstSetup !== null && worstHold !== null
+    complete && worstSetup !== null && worstHold !== null
       ? worstSetup.wns >= 0 && worstHold.wns >= 0
       : null
 
@@ -1164,6 +1175,9 @@ export interface StaCriticalPath {
   slackNs: number | null
   stageCount: number
   stages: StaPathStage[]
+  startPoint?: string
+  endPoint?: string
+  pathGroup?: string
 }
 
 export interface StaCriticalPathsModel {
@@ -1211,7 +1225,10 @@ export function parseStaTimingPaths(
         pin: typeof stage.pin === 'string' ? stage.pin : '',
         cell: typeof stage.cell === 'string' ? stage.cell : '',
         arrivalNs,
-        delayNs: finiteMetricNumber(stage.delay_ns ?? stage.delay) ?? inferredDelay,
+        delayNs:
+          finiteMetricNumber(
+            stage.incremental_delay_ns ?? stage.delay_ns ?? stage.delay,
+          ) ?? inferredDelay,
       })
     })
     const pathId = typeof path.path_id === 'string' ? path.path_id : `path-${index + 1}`
@@ -1223,6 +1240,9 @@ export function parseStaTimingPaths(
         slackNs: finiteMetricNumber(path.slack_ns ?? path.slack),
         stageCount: stages.length,
         stages,
+        startPoint: typeof path.start_point === 'string' ? path.start_point : '',
+        endPoint: typeof path.end_point === 'string' ? path.end_point : '',
+        pathGroup: typeof path.path_group === 'string' ? path.path_group : '',
       },
     ]
   })
@@ -1269,68 +1289,4 @@ export function selectStaCriticalPaths(
       .sort(bySlack)
       .slice(0, limit),
   }
-}
-
-export interface StaConvergencePoint {
-  workspaceName: string
-  setupWns: number | null
-  holdWns: number | null
-  frequencyMhz: number | null
-}
-
-export interface StaConvergenceModel {
-  points: StaConvergencePoint[]
-}
-
-export function buildStaConvergenceModel(
-  points: StaConvergencePoint[],
-): StaConvergenceModel | null {
-  const kept = points.filter(
-    (point) =>
-      point.setupWns !== null || point.holdWns !== null || point.frequencyMhz !== null,
-  )
-  return kept.length >= 2 ? { points: kept } : null
-}
-
-export function staConvergenceFromComparison(
-  comparison: {
-    workspaceName: string
-    baselineWorkspaceName: string | null
-    isBaselineWorkspace: boolean
-    metrics: Array<{
-      metricName: string
-      currentValue: number
-      baselineValue: number | null
-    }>
-  } | null,
-): StaConvergenceModel | null {
-  if (!comparison?.baselineWorkspaceName || comparison.isBaselineWorkspace) return null
-  const pick = (
-    metricName: string,
-  ): { current: number | null; baseline: number | null } => {
-    const metric = comparison.metrics.find((item) => item.metricName === metricName)
-    return {
-      current:
-        metric && Number.isFinite(metric.currentValue) ? metric.currentValue : null,
-      baseline:
-        metric && Number.isFinite(metric.baselineValue) ? metric.baselineValue : null,
-    }
-  }
-  const setup = pick('sta_setup_wns')
-  const hold = pick('sta_hold_wns')
-  const frequency = pick('sta_frequency_mhz')
-  return buildStaConvergenceModel([
-    {
-      workspaceName: comparison.baselineWorkspaceName,
-      setupWns: setup.baseline,
-      holdWns: hold.baseline,
-      frequencyMhz: frequency.baseline,
-    },
-    {
-      workspaceName: comparison.workspaceName,
-      setupWns: setup.current,
-      holdWns: hold.current,
-      frequencyMhz: frequency.current,
-    },
-  ])
 }

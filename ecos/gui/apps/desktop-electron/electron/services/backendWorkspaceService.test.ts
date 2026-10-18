@@ -7,6 +7,7 @@ import {
 } from '@ecos-studio/shared'
 import { describe, expect, it, vi } from 'vitest'
 import { BackendWorkspaceService } from './backendWorkspaceService'
+import { flowSection } from './backendWorkspaceOverviewProjection'
 import { electronLogger } from './logger'
 import type {
   ProjectComparisonFileWatcher,
@@ -209,6 +210,39 @@ function manifestForWorkspaces(workspaceIds: string[], baselineId: string) {
 }
 
 describe('BackendWorkspaceService', () => {
+  it('overlays the live flow state over the last engineering snapshot', () => {
+    const snapshot = engineeringSnapshot()
+    snapshot.flow = {
+      steps: [
+        {
+          name: 'Synthesis',
+          state: 'Success',
+          runtime: '0:0:1',
+          'peak memory (mb)': 1,
+          tool: 'yosys',
+          info: {},
+        },
+      ],
+    }
+    const persisted = persistedSnapshotResult(snapshot)
+    const flow = flowSection(persisted, {
+      steps: [
+        {
+          name: 'Synthesis',
+          state: 'Ongoing',
+          runtime: '',
+          peakMemory: 2,
+          tool: 'yosys',
+        },
+      ],
+    })
+
+    expect(flow).toMatchObject({
+      status: 'ready',
+      data: { steps: [{ name: 'Synthesis', state: 'running', peakMemoryMb: 2 }] },
+    })
+  })
+
   it('invalidates the previous Context when its window scope is cleared', async () => {
     const service = new BackendWorkspaceService({
       projectManagementReadService: persistedReadService(engineeringSnapshot()),
@@ -1713,6 +1747,70 @@ describe('BackendWorkspaceService', () => {
       },
     })
   })
+
+  it.each([true, false])(
+    'preserves timing summary path groups when present: %s',
+    async (withGroups) => {
+      const snapshot = engineeringSnapshot()
+      const summary = {
+        setup: { wns: 7.457, tns: 0, nvp: 0, frequency_mhz: 393 },
+        hold: { wns: 0.315, tns: 0, nvp: 0 },
+      }
+      snapshot.artifacts = [
+        {
+          artifactId: 'timing-summary-sta',
+          availability: 'available',
+          kind: 'timing_summary',
+          name: 'MAX_125/RCworst/qor_summary.json',
+          reference: 'sta_ecc/feature/MAX_125/RCworst/qor_summary.json',
+          stepId: 'sta',
+        },
+      ] as never
+      const readVerifiedArtifact = vi.fn().mockResolvedValue({
+        ok: true,
+        bytes: new TextEncoder().encode(
+          JSON.stringify({
+            summary,
+            ...(withGroups ? { path_groups: [{ name: 'clk', ...summary }] } : {}),
+          }),
+        ),
+      })
+      const service = new BackendWorkspaceService({
+        projectManagementReadService: {
+          ...persistedReadService(snapshot),
+          readVerifiedArtifact,
+        },
+        workspaceRootProvider: workspaceRootProvider(),
+      })
+      const overview = await runWithWindowScope(58, () => service.getOverview())
+      const result = await runWithWindowScope(58, () =>
+        service.getArtifact({
+          artifactId: 'timing-summary-sta',
+          workspaceContextId: overview.workspaceContextId,
+          workspaceRevision: snapshot.workspaceRevision,
+        }),
+      )
+      expect(result.artifact.status).toBe('ready')
+      if (result.artifact.status !== 'ready') return
+      expect(result.artifact.data.timingSummary).toMatchObject({
+        corner: 'MAX_125/RCworst',
+        meetsTiming: true,
+        setup: { wns: 7.457, tns: 0, violationCount: 0, frequencyMhz: 393 },
+        hold: { wns: 0.315, tns: 0, violationCount: 0 },
+      })
+      if (withGroups) {
+        expect(result.artifact.data.timingSummary?.pathGroups).toEqual([
+          {
+            name: 'clk',
+            setup: { wns: 7.457, tns: 0, violationCount: 0, frequencyMhz: 393 },
+            hold: { wns: 0.315, tns: 0, violationCount: 0 },
+          },
+        ])
+      } else {
+        expect(result.artifact.data.timingSummary).not.toHaveProperty('pathGroups')
+      }
+    },
+  )
 
   it('parses timing Artifacts only for the current Snapshot revision', async () => {
     const snapshot = engineeringSnapshot()

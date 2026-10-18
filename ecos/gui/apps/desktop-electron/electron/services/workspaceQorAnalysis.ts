@@ -161,7 +161,7 @@ function snapshotQorProjection(
   }
 }
 
-function flowState(value: unknown): ProjectStepStatus | undefined {
+export function workspaceFlowStepStatus(value: unknown): ProjectStepStatus | undefined {
   if (typeof value !== 'string') return undefined
   switch (value.trim().toLowerCase()) {
     case 'success':
@@ -197,7 +197,7 @@ export function workspaceFlowStates(flow: unknown): Record<string, ProjectStepSt
     steps.flatMap((rawStep) => {
       const stepRecord = record(rawStep)
       const step = coarseFlowStep(stepRecord?.name ?? stepRecord?.stepId)
-      const state = flowState(stepRecord?.state ?? stepRecord?.status)
+      const state = workspaceFlowStepStatus(stepRecord?.state ?? stepRecord?.status)
       return step && state ? [[step, state]] : []
     }),
   )

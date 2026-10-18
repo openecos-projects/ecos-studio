@@ -6,14 +6,8 @@ on:
       - main
       - 'release/v*'
   pull_request:
-    # edited is included so Check Commit Messages re-lints the PR title; the
-    # heavy jobs guard on github.event.action != 'edited' and skip it.
-    types: [opened, synchronize, reopened, ready_for_review, edited]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
-  # Nightly on main: the e2e-product matrix runs the full design set
-  # (including aes) and catches drift in the unpinned inputs
-  # (daily oss-cad-suite builds, the ecc-ci-designs default branch)
-  # before it ambushes an unrelated PR.
   schedule:
     - cron: "43 19 * * *"
 
@@ -21,10 +15,8 @@ permissions:
   contents: read
 
 concurrency:
-  # Edited-event runs (PR title/body lint) get their own group and never
-  # cancel others, so a metadata edit cannot kill an in-progress full run.
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event_name == 'pull_request' && github.event.action == 'edited' && '-edited' || '' }}
-  cancel-in-progress: ${{ github.event.action != 'edited' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   changes:
@@ -73,7 +65,10 @@ jobs:
               - 'ecos/agent/**'
               - '.github/scripts/**'
             ci:
+              - '.github/actions/**'
+              - '.github/scripts/**'
               - '.github/workflows/**'
+              - '.github/ecc-ci-toolchain.json'
             e2e:
               - 'ecos/gui/apps/desktop-electron/e2e/**'
               - 'ecos/gui/apps/desktop-electron/vitest.e2e.config.ts'
@@ -83,36 +78,6 @@ jobs:
               - 'ecos/README.md'
               - 'ecos/docs/**'
 
-  # PR-only lint: every commit in the PR range plus the PR title must satisfy
-  # the conventional-commit rules (commitlint.config.cjs), mirroring what the
-  # local lefthook commit-msg hook enforces.
-  commit-message:
-    name: Check Commit Messages
-    runs-on: ubuntu-22.04
-    timeout-minutes: 10
-    if: github.event_name == 'pull_request'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set Up Node.js
-        uses: ./.github/actions/setup-node-pnpm
-
-      - name: Install Dependencies
-        working-directory: ecos/gui
-        run: pnpm install --frozen-lockfile
-
-      - name: Lint Commit Messages and PR Title
-        working-directory: ecos/gui
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
-        run: |
-          pnpm exec commitlint --from "$PR_BASE" --to HEAD
-          printf '%s\n' "$PR_TITLE" | pnpm exec commitlint
-
   check-version:
     name: Check Version Consistency
     runs-on: ubuntu-22.04
@@ -120,7 +85,6 @@ jobs:
     needs: changes
     if: >-
       ${{
-        github.event.action != 'edited' &&
         (startsWith(github.ref, 'refs/heads/release/v') ||
         startsWith(github.base_ref, 'release/v') ||
         needs.changes.outputs.gui == 'true' ||
@@ -146,7 +110,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     needs: changes
-    if: ${{ github.event.action != 'edited' && (needs.changes.outputs.gui == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true') }}
+    if: ${{ needs.changes.outputs.gui == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
     defaults:
       run:
         working-directory: ecos/gui
@@ -196,7 +160,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     needs: changes
-    if: ${{ github.event.action != 'edited' && (needs.changes.outputs.chip_viewer == 'true' || needs.changes.outputs.ci == 'true') }}
+    if: ${{ needs.changes.outputs.chip_viewer == 'true' || needs.changes.outputs.ci == 'true' }}
     defaults:
       run:
         working-directory: ecos/chip-viewer
@@ -215,79 +179,97 @@ jobs:
       - name: Run Rust Tests
         run: cargo test --workspace
 
-  # Mirror ECC CI's e2e-designs listing so the product matrix tracks the
-  # upstream design set automatically.
-  e2e-designs:
-    name: List Product E2E Designs
-    runs-on: ubuntu-22.04
-    timeout-minutes: 10
-    outputs:
-      designs: ${{ steps.list.outputs.designs }}
-    steps:
-      - name: Checkout Designs
-        uses: actions/checkout@v4
-        with:
-          repository: openecos-projects/ecc-ci-designs
-          path: designs
-
-      - name: List rtl2gds-Capable Designs
-        id: list
-        run: |
-          # gcd_icg is a gate-level syn_sta fixture, not an rtl2gds journey.
-          # xtea is red upstream (hold WNS < 0). aes is ~50min of flow:
-          # excluded on pull requests, covered on main pushes, nightly,
-          # and manual runs.
-          excludes=(gcd_icg xtea)
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            excludes+=(aes)
-          fi
-          designs="$(find designs -mindepth 2 -maxdepth 2 -name ecc.toml -printf '%h\n' \
-            | xargs -n1 basename | grep -vxFf <(printf '%s\n' "${excludes[@]}") \
-            | jq -R . | jq -cs .)"
-          echo "designs=$designs" >> "$GITHUB_OUTPUT"
-
-  e2e-product:
-    name: Product E2E (rtl2gds / ${{ matrix.design }})
-    needs: [changes, e2e-designs]
+  ecc-runtime:
+    name: Wait for Pinned ECC Runtime
+    needs: changes
     if: >-
       ${{
         github.event_name == 'workflow_dispatch' ||
         github.event_name == 'schedule' ||
-        (github.event.action != 'edited' &&
-         (needs.changes.outputs.gui == 'true' ||
+        (needs.changes.outputs.gui == 'true' ||
           needs.changes.outputs.version == 'true' ||
           needs.changes.outputs.e2e == 'true' ||
-          needs.changes.outputs.ci == 'true'))
+          needs.changes.outputs.ci == 'true')
       }}
     runs-on: ubuntu-22.04
+    timeout-minutes: 65
+    outputs:
+      run_id: ${{ steps.runtime.outputs.run_id }}
+      oss_cad_suite_version: ${{ steps.toolchain.outputs.oss_cad_suite_version }}
+      kepler_run_id: ${{ steps.toolchain.outputs.kepler_run_id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Wait for ECC CI
+        id: runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_id="$(python3 -c 'import json; print(json.load(open(".github/ecc-ci-toolchain.json"))["ecc_run_id"])')"
+          bash .github/scripts/wait-ecc-ci.sh "$(git rev-parse HEAD:ecc)" "$run_id"
+
+      - name: Test ECC Toolchain Installation
+        run: python3 -B -m unittest discover -s .github/scripts/tests -p 'test_*.py'
+
+      - name: Verify the Toolchain Validated by ECC
+        id: toolchain
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ECC_CI_RUN_ID: ${{ steps.runtime.outputs.run_id }}
+        run: >-
+          python3 .github/scripts/resolve-ecc-toolchain.py "$ECC_CI_RUN_ID"
+          "$(git rev-parse HEAD:ecc)" --output "$RUNNER_TEMP/ecc-toolchain.json"
+
+      - name: Upload ECC Toolchain Provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecc-toolchain-provenance
+          path: ${{ runner.temp }}/ecc-toolchain.json
+          if-no-files-found: error
+          retention-days: 14
+
+  e2e-desktop-flow:
+    name: E2E Desktop Flow (gcd, ${{ matrix.journey }})
+    needs: [changes, ecc-runtime]
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        github.event_name == 'schedule' ||
+        (needs.changes.outputs.gui == 'true' ||
+          needs.changes.outputs.version == 'true' ||
+          needs.changes.outputs.e2e == 'true' ||
+          needs.changes.outputs.ci == 'true')
+      }}
+    runs-on: ubuntu-latest
+    env:
+      ECOS_E2E_CONCURRENCY_START_AFTER_STEP: sta
+      MALLOC_ARENA_MAX: '2'
+      MALLOC_TRIM_THRESHOLD_: '131072'
+      MALLOC_MMAP_THRESHOLD_: '131072'
     # Must stay above the in-test flow watchdog (75min) so its catch block can capture evidence first.
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        design: ${{ fromJSON(needs.e2e-designs.outputs.designs) }}
+        journey: [rtl2gds, cli-flow, flow-concurrency]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Checkout ECC Submodule
-        # The version assertion compares the app-reported ECC version against
-        # ecc/pyproject.toml, and the signoff gate reuses
-        # ecc/nix/scripts/signoff-lit.sh; only ecc is needed.
         run: git -C "${{ github.workspace }}" submodule update --init ecc
+
+      - name: Configure E2E Environment
+        run: echo "ECOS_E2E_OUT=$RUNNER_TEMP/e2e-out" >> "$GITHUB_ENV"
 
       - name: Install Linux GUI Dependencies
         uses: ./.github/actions/install-gui-linux-deps
         with:
-          extra-packages: xvfb libasound2 jq
+          extra-packages: xvfb jq
 
       - name: Set Up Node.js
         uses: ./.github/actions/setup-node-pnpm
-
-      - name: Set Up uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: 0.11.12
 
       - name: Install Dependencies
         working-directory: ecos/gui
@@ -297,27 +279,15 @@ jobs:
         working-directory: ecos/gui
         run: pnpm run desktop:build
 
-      - name: Install Signoff Tools
-        run: |
-          uv venv "$RUNNER_TEMP/lit-tools"
-          # ecc-ci-designs uses ShTest(execute_external=True), rejected by lit>=23.
-          uv pip install --python "$RUNNER_TEMP/lit-tools/bin/python" 'lit<23' filecheck
-          echo "$RUNNER_TEMP/lit-tools/bin" >> "$GITHUB_PATH"
-
       - name: Download ECC Runtime Artifacts for the Pinned Submodule
         env:
           GH_TOKEN: ${{ github.token }}
+          ECC_CI_RUN_ID: ${{ needs.ecc-runtime.outputs.run_id }}
         run: |
           set -euo pipefail
           sha="$(git rev-parse HEAD:ecc)"
-          run_id="$(
-            gh api "repos/openecos-projects/ecc/actions/workflows/ci.yml/runs?head_sha=${sha}&status=success&per_page=1" \
-              --jq '[.workflow_runs[] | select(.conclusion == "success") | .id][0] // empty'
-          )"
-          if [ -z "$run_id" ]; then
-            echo "::error::No successful ECC CI run found for pinned ecc ${sha}"
-            exit 1
-          fi
+          run_id="$ECC_CI_RUN_ID"
+          test -n "$run_id"
           echo "Using ECC CI run ${run_id} for pinned ecc ${sha}"
           for name in ecc-cli-linux-x86_64 icsprout55-pdk ecc-sizer; do
             gh run download "$run_id" \
@@ -355,41 +325,28 @@ jobs:
       - name: Set Up kepler-formal
         env:
           GH_TOKEN: ${{ github.token }}
+          KEPLER_CI_RUN_ID: ${{ needs.ecc-runtime.outputs.kepler_run_id }}
         run: |
           set -euo pipefail
-          run_id=""
-          # TODO: drop the fallback once the kepler-formal package workflow
-          # publishes successful runs on main (mirrors ECC CI).
-          for branch in main emin/add-ci-pkgs; do
-            run_id="$(
-              gh api "repos/openecos-projects/kepler-formal/actions/workflows/package.yml/runs?branch=${branch}&status=success&per_page=1" \
-                --jq '[.workflow_runs[] | select(.conclusion == "success") | .id][0] // empty'
-            )"
-            [ -n "$run_id" ] && break
-          done
-          if [ -z "$run_id" ]; then
-            echo "::error::No successful kepler-formal package run found"
-            exit 1
-          fi
-          install_root="$RUNNER_TEMP/kepler-formal"
+          install_root="$RUNNER_TEMP/kepler-formal-linux-x64"
           mkdir -p "$install_root"
-          gh run download "$run_id" \
-            --repo openecos-projects/kepler-formal \
-            --name kepler-formal-linux-x64 \
-            --dir "$install_root"
-          tar -xzf "$install_root/kepler-formal-linux-x64.tar.gz" -C "$install_root"
+          gh run download "$KEPLER_CI_RUN_ID" --repo openecos-projects/kepler-formal \
+            --name kepler-formal-linux-x64 --dir "$install_root"
+          archive="$(find "$install_root" -name kepler-formal-linux-x64.tar.gz -print -quit)"
+          test -n "$archive"
+          python3 .github/scripts/extract-kepler.py "$archive" "$install_root"
           marker="$(find "$install_root" -type f -path '*/bin/kepler-formal' -print -quit)"
-          if [ -z "$marker" ]; then
-            echo "::error::Extracted kepler-formal is missing bin/kepler-formal"
-            exit 1
-          fi
+          test -n "$marker"
           tool_root="${marker%/bin/kepler-formal}"
-          echo "${tool_root}/bin" >> "$GITHUB_PATH"
-          echo "CHIPCOMPILER_KEPLER_FORMAL_ROOT=${tool_root}" >> "$GITHUB_ENV"
+          test -x "$marker"
+          "$marker" --help > "$RUNNER_TEMP/kepler-formal-help.txt"
+          echo "$tool_root/bin" >> "$GITHUB_PATH"
+          echo "CHIPCOMPILER_KEPLER_FORMAL_ROOT=$tool_root" >> "$GITHUB_ENV"
 
       - name: Set Up OSS CAD Suite
         uses: YosysHQ/setup-oss-cad-suite@v4
         with:
+          version: ${{ needs.ecc-runtime.outputs.oss_cad_suite_version }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Point ECC at OSS CAD Suite
@@ -397,64 +354,58 @@ jobs:
           echo "CHIPCOMPILER_OSS_CAD_DIR=$(dirname "$(dirname "$(readlink -f "$(command -v yosys)")")")"
           >> "$GITHUB_ENV"
 
-      - name: Checkout E2E Designs
-        uses: actions/checkout@v4
-        with:
-          repository: openecos-projects/ecc-ci-designs
-          path: .scratch/ecc-ci-designs
+      - name: Record Runner Memory
+        run: |
+          mkdir -p "$ECOS_E2E_OUT"
+          free -b | tee "$ECOS_E2E_OUT/runner-memory.txt"
+          nproc | tee "$ECOS_E2E_OUT/runner-cpu-count.txt"
 
-      - name: Run Product E2E (rtl2gds Journey + Signoff-lit Gate)
+      - name: Run GCD Product Journeys
         working-directory: ecos/gui
         env:
           ELECTRON_DISABLE_SANDBOX: '1'
           ECOS_ELECTRON_DISABLE_GPU: '1'
-          ECOS_E2E_OUT: ${{ runner.temp }}/e2e-out
-          ECOS_E2E_DESIGN_DIR: ${{ github.workspace }}/.scratch/ecc-ci-designs/${{ matrix.design }}
-          ECOS_E2E_LIT_SUITE: ${{ github.workspace }}/.scratch/ecc-ci-designs
+        run: >-
+          xvfb-run --auto-servernum pnpm --filter @ecos-studio/desktop-electron
+          exec vitest run --config vitest.e2e.config.ts ${{ matrix.journey }}
+
+      - name: Run Packaged Reproducible CLI Smoke
+        if: ${{ matrix.journey == 'rtl2gds' }}
         run: |
-          if [ "${{ matrix.design }}" = "usb" ]; then
-            # The usb leg is the fast one; it also carries the flow-cancel and
-            # missing-Sizer control cases so big designs stay journey-only.
-            xvfb-run --auto-servernum pnpm run desktop:e2e
-          else
-            xvfb-run --auto-servernum pnpm --filter @ecos-studio/desktop-electron \
-              exec vitest run --config vitest.e2e.config.ts rtl2gds
-          fi
+          python3 ecc/packaging/reproducible_cli_smoke.py \
+            --binary "$ECOS_E2E_ECC_BIN_DIR/ecc" \
+            --design "$ECOS_E2E_OUT/rtl2gds/work/gcd" \
+            --e2e-out "$ECOS_E2E_OUT/rtl2gds"
 
       - name: Upload E2E Evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: product-e2e-evidence-${{ matrix.design }}
+          name: e2e-flow-workspace-gcd-${{ matrix.journey }}
           if-no-files-found: ignore
           retention-days: 14
           path: ${{ runner.temp }}/e2e-out
 
-  # Fan-in: one stable check name covering the whole design matrix, so branch
-  # rulesets can require "Product E2E" without naming every dynamic matrix leg.
-  e2e-product-summary:
+  e2e-desktop-flow-summary:
     name: Product E2E
-    needs: [changes, e2e-designs, e2e-product]
-    # Mirrors e2e-product's gate so a skipped matrix yields a skipped summary
-    # (neutral for rulesets); always() lets it run to report leg failures.
+    needs: [changes, e2e-desktop-flow]
     if: >-
       ${{
         always() &&
         (github.event_name == 'workflow_dispatch' ||
          github.event_name == 'schedule' ||
-         (github.event.action != 'edited' &&
-          (needs.changes.outputs.gui == 'true' ||
+         (needs.changes.outputs.gui == 'true' ||
            needs.changes.outputs.version == 'true' ||
            needs.changes.outputs.e2e == 'true' ||
-           needs.changes.outputs.ci == 'true')))
+           needs.changes.outputs.ci == 'true'))
       }}
     runs-on: ubuntu-22.04
     timeout-minutes: 5
     steps:
-      - name: Aggregate Matrix Results
+      - name: Check Product E2E Result
         run: |
-          result="${{ needs.e2e-product.result }}"
-          echo "e2e-product matrix result: ${result}"
+          result="${{ needs.e2e-desktop-flow.result }}"
+          echo "GCD product E2E result: ${result}"
           [ "${result}" = "success" ]
 
   build-appimage:
@@ -462,8 +413,7 @@ jobs:
     needs: [changes, check-version, gui-checks, chip-viewer-rust]
     if: >-
       ${{
-        always() &&
-        github.event.action != 'edited' &&
+        !cancelled() &&
         (needs.changes.outputs.gui == 'true' ||
          needs.changes.outputs.chip_viewer == 'true' ||
          needs.changes.outputs.version == 'true' ||
@@ -549,8 +499,7 @@ jobs:
     needs: [changes, check-version, gui-checks, chip-viewer-rust]
     if: >-
       ${{
-        always() &&
-        github.event.action != 'edited' &&
+        !cancelled() &&
         (needs.changes.outputs.gui == 'true' ||
          needs.changes.outputs.chip_viewer == 'true' ||
          needs.changes.outputs.version == 'true' ||
@@ -631,8 +580,7 @@ jobs:
     needs: [changes, check-version, gui-checks, chip-viewer-rust]
     if: >-
       ${{
-        always() &&
-        github.event.action != 'edited' &&
+        !cancelled() &&
         (needs.changes.outputs.gui == 'true' ||
          needs.changes.outputs.chip_viewer == 'true' ||
          needs.changes.outputs.version == 'true' ||

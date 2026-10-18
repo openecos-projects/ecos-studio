@@ -38,13 +38,28 @@ and [CONTRIBUTING.md](CONTRIBUTING.md) for setup and development workflows.
 
 ## Validation And CI
 
-- Treat `.github/workflows/ci.yml` as the source of truth for required CI jobs.
-  This includes the `e2e-product` job, which runs the product e2e suite
+- Treat `.github/workflows/ci.yml` as the source of truth for product CI jobs
+  and `.github/workflows/pr-metadata.yml` for commit and PR-title checks.
+  The `e2e-desktop-flow` job runs the product e2e suite
   (`ecos/gui/apps/desktop-electron/e2e/`, invoked via `pnpm run desktop:e2e`)
-  across a matrix of ecc-ci-designs rtl2gds designs against the pinned ECC
-  runtime artifacts (also on the nightly schedule, which covers the full
-  design set including aes); see `ecos/gui/AGENTS.md` for the local
-  environment requirements.
+  with the GCD example against the pinned ECC runtime artifacts on PRs,
+  main pushes, nightly schedules, and manual runs. ECC owns the full design
+  matrix and physical-signoff regression coverage; see `ecos/gui/AGENTS.md`
+  for the local environment requirements. GUI, terminal, and concurrency
+  journeys run on separate runners; `Product E2E` requires all three to pass
+  and matches the required main-branch check. PR title or description edits only run PR Metadata and
+  do not replace or cancel product CI results.
+- Resolve third-party E2E inputs from a successful packaged-design job in the
+  pinned ECC CI run. Keep PDK and Sizer artifacts in that same run, and reuse
+  its OSS CAD Suite release and Kepler artifact run. The original ECC
+  design-suite commit remains recorded as provenance.
+  Preserve the uploaded `ecc-toolchain-provenance` manifest when diagnosing
+  toolchain differences; do not substitute the latest available tools.
+  Update `.github/ecc-ci-toolchain.json` alongside an ECC pin change using
+  `python3 .github/scripts/resolve-ecc-toolchain.py <run-id> <ecc-sha>
+  --refresh-from-logs --output .github/ecc-ci-toolchain.json` with a maintainer
+  token that can read ECC logs. Product CI verifies this lock using public
+  metadata and does not require cross-repository log permissions.
 - Run the narrowest relevant check while iterating, then run the local equivalent
   of every non-packaging CI job enabled by the changed paths. Use the commands in
   the affected component's scoped instructions.

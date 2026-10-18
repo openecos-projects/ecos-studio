@@ -114,8 +114,9 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
   const stepConfigParameterDescriptions = ref<Record<string, string>>({})
   const stepConfigParameterTypes = ref<Record<string, string>>({})
 
-  /** Editable draft (matches disk when JSON is valid; baseline updates after save). */
+  /** Editable draft, synchronized with the selected ECC step projection. */
   const stepConfigDraft = ref<unknown | null>(null)
+  const stepConfigCommittedDraft = ref<Record<string, unknown> | null>(null)
   const stepConfigBaselineSig = ref('')
 
   /** Text draft when JSON is invalid */
@@ -303,6 +304,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     stepConfigParameterDescriptions.value = {}
     stepConfigParameterTypes.value = {}
     stepConfigDraft.value = null
+    stepConfigCommittedDraft.value = null
     stepConfigBaselineSig.value = ''
     stepConfigTextDraft.value = ''
     stepConfigTextBaseline.value = ''
@@ -324,6 +326,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     initialEditorDraftPending = false
     if (raw == null || raw === '') {
       stepConfigDraft.value = null
+      stepConfigCommittedDraft.value = null
       stepConfigBaselineSig.value = ''
       stepConfigTextDraft.value = ''
       stepConfigTextBaseline.value = ''
@@ -331,6 +334,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     }
     if (!rawLooksValidJson(raw)) {
       stepConfigDraft.value = null
+      stepConfigCommittedDraft.value = null
       stepConfigBaselineSig.value = ''
       stepConfigTextDraft.value = raw
       stepConfigTextBaseline.value = raw
@@ -339,6 +343,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     try {
       const parsed = JSON.parse(raw) as unknown
       stepConfigDraft.value = deepClone(parsed)
+      stepConfigCommittedDraft.value = isRecord(parsed) ? deepClone(parsed) : null
       stepConfigBaselineSig.value = stableJsonSig(parsed)
       initialEditorDraftPending = true
       if (stepConfigEditorMounted) {
@@ -348,6 +353,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
       stepConfigTextBaseline.value = ''
     } catch {
       stepConfigDraft.value = null
+      stepConfigCommittedDraft.value = null
       stepConfigBaselineSig.value = ''
     }
   }
@@ -398,7 +404,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
 
   const stepConfigDisplay = computed(() => prettyJsonOrRaw(stepConfigRaw.value))
 
-  /** Parsed step config file for structured UI; null if parse fails */
+  /** Parsed step configuration for dashboard consumers that inspect the current JSON. */
   const stepConfigParsed = computed((): unknown | null => {
     const raw = stepConfigRaw.value
     if (raw == null || raw === '') return null
@@ -429,6 +435,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     () => {
       if (stepConfigReadError.value) {
         stepConfigDraft.value = null
+        stepConfigCommittedDraft.value = null
         stepConfigBaselineSig.value = ''
         stepConfigTextDraft.value = ''
         stepConfigTextBaseline.value = ''
@@ -444,6 +451,9 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     stepConfigEditorMounted = true
     if (!initialEditorDraftPending || stepConfigDraft.value === null) return
     stepConfigBaselineSig.value = stableJsonSig(stepConfigDraft.value)
+    if (isRecord(stepConfigDraft.value)) {
+      stepConfigCommittedDraft.value = deepClone(stepConfigDraft.value)
+    }
     initialEditorDraftPending = false
   }
 
@@ -503,6 +513,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     const rawBeforeSave = stepConfigRaw.value
     const draftBeforeSave =
       stepConfigDraft.value === null ? null : deepClone(stepConfigDraft.value)
+    let mutationCommitted = false
     activeStepConfigSave.value = saveToken
     isSavingStepConfig.value = true
     try {
@@ -521,6 +532,16 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
         setStepConfigSaveError('Step configuration must be an object')
         return false
       }
+      const committed = stepConfigCommittedDraft.value ?? {}
+      const editableParameterIds = new Set(Object.keys(stepConfigParameterTypes.value))
+      const parameterPatch = Object.fromEntries(
+        Object.entries(draftBeforeSave).filter(
+          ([key, value]) =>
+            editableParameterIds.has(key) &&
+            stableJsonSig(value) !== stableJsonSig(committed[key]),
+        ),
+      )
+      if (Object.keys(parameterPatch).length === 0) return true
       const expectedWorkspaceRevision = workspaceLifecycle.session.value.workspaceRevision
       if (typeof expectedWorkspaceRevision !== 'number') {
         setStepConfigSaveError('Workspace Revision is unavailable')
@@ -530,7 +551,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
         updateWorkspaceStepConfigurationApi({
           commandId: crypto.randomUUID(),
           expectedWorkspaceRevision,
-          parameters: draftBeforeSave,
+          parameters: parameterPatch,
           stepId: runtimeStepId,
           workspaceHandle: workspaceLifecycle.session.value.workspaceId,
         }),
@@ -543,6 +564,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
       )
         return false
       const nextWorkspaceRevision = stepResult.workspaceRevision
+      mutationCommitted = true
       workspaceLifecycle.updateWorkspaceRevision(nextWorkspaceRevision, sessionId)
       workspaceRevision.value = nextWorkspaceRevision
       if (!canApply()) return false
@@ -551,12 +573,20 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
         sessionId,
         step,
       })
-      stepConfigRaw.value = JSON.stringify(draftBeforeSave, null, 2)
-      stepConfigBaselineSig.value = stableJsonSig(draftBeforeSave)
+      // Re-read the selected step from ECC so the editor reflects the persisted
+      // parameter projection rather than the submitted draft.
+      await refetch()
+      if (error.value) {
+        setStepConfigSaveError(`Saved successfully, but refresh failed: ${error.value}`)
+        return false
+      }
       return true
     } catch (e) {
       if (!canApply()) return false
-      setStepConfigSaveError(e instanceof Error ? e.message : String(e))
+      const detail = e instanceof Error ? e.message : String(e)
+      setStepConfigSaveError(
+        mutationCommitted ? `Saved successfully, but refresh failed: ${detail}` : detail,
+      )
       return false
     } finally {
       setSavingForToken(false)
@@ -586,8 +616,8 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     workspaceRevision,
     stepConfigRaw,
     stepConfigDisplay,
-    stepConfigReadError,
     stepConfigParsed,
+    stepConfigReadError,
     stepConfigJsonInvalid,
     stepConfigParameterCount,
     stepConfigParameterDescriptions,

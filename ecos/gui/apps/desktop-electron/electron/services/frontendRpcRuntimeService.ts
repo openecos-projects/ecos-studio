@@ -10,7 +10,7 @@ import type {
   EccWorkspaceInfoResult,
   EccWorkspaceOpenResult,
 } from '@ecos-studio/shared'
-import { EccRpcRuntimeService } from './eccRpc/runtimeService'
+import { EccRpcRuntimeService } from './frontendRpc/runtimeService'
 import { normalizeFrontendRuntimeEvent } from './frontendRpcRuntime'
 
 export type FrontendRpcHelloResult = DesignRuntimeHelloResult & { eccFeVersion: string }

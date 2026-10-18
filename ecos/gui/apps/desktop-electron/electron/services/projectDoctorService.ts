@@ -4,20 +4,21 @@ import type {
   ProjectDoctorFixRecord,
   ProjectDoctorRepairResult,
 } from '@ecos-studio/shared'
-import type {
-  ProjectManifestRuntime,
-  ProjectManifestScopeProvider,
-} from './projectManifestService'
+import type { ProjectManifestScopeProvider } from './projectManifestService'
 import type { FrontendProjectManifestService } from './frontendProjectManifestService'
 
+interface ProjectDoctorRuntime {
+  callRuntime<T = unknown>(method: string, params?: unknown): Promise<T>
+}
+
 const DOCTOR_CHECK_CLASSES = new Set([
-  'derived-field-mismatch',
+  'invalid-workspace',
   'missing-directory',
   'unregistered-directory',
 ])
 
 /**
- * Bridges `project.doctor.check` / `project.doctor.repair` ECC runtime RPCs.
+ * Bridges project registration checks and repairs through the ECC CLI.
  * The check is read-only; repair is the explicit user-triggered write. ECC
  * owns the manifest lock and the actual repair — this service only scopes
  * paths and normalizes the record shapes.
@@ -25,7 +26,7 @@ const DOCTOR_CHECK_CLASSES = new Set([
 export class ProjectDoctorService {
   constructor(
     private readonly projectScopeProvider: ProjectManifestScopeProvider,
-    private readonly runtime: ProjectManifestRuntime,
+    private readonly runtime: ProjectDoctorRuntime,
     private readonly frontend?: FrontendProjectManifestService,
   ) {}
 
@@ -89,14 +90,20 @@ function countValue(value: unknown): number {
 
 function normalizeFinding(value: unknown): ProjectDoctorFinding | null {
   if (!isRecord(value)) return null
-  const check = stringValue(value.check)
+  const detail = stringValue(value.detail)
+  const check =
+    value.check === 'derived-field-mismatch' &&
+    detail.startsWith('workspace facts unreadable:')
+      ? 'invalid-workspace'
+      : stringValue(value.check)
+  // Older runtimes compare execution caches that CLI runs no longer maintain.
   if (!DOCTOR_CHECK_CLASSES.has(check)) return null
   return {
     check: check as ProjectDoctorFinding['check'],
     status: 'fail',
     workspace_id: stringValue(value.workspace_id),
     workspace: stringValue(value.workspace),
-    detail: stringValue(value.detail),
+    detail,
   }
 }
 
@@ -139,7 +146,7 @@ function normalizeCheckResult(
     projectRoot:
       typeof result.projectRoot === 'string' ? result.projectRoot : projectRoot,
     checked: countValue(result.checked),
-    inconsistent: countValue(result.inconsistent),
+    inconsistent: findings.length,
     findings,
   }
 }

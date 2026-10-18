@@ -73,7 +73,9 @@ export interface EngineeringSnapshotSections {
 export type EngineeringSnapshotEnvelope = Pick<
   EccEngineeringSnapshot,
   | 'cause'
+  | 'analysis'
   | 'parameters'
+  | 'qorAssessment'
   | 'schemaVersion'
   | 'stalePredecessor'
   | 'workspaceId'
@@ -113,7 +115,7 @@ export function parseEngineeringSnapshotJson(
 }
 
 /**
- * Snapshot v6 reader: a tolerant reader for field-level evolution (unknown
+ * Snapshot v4/v6 reader: a tolerant reader for field-level evolution (unknown
  * fields are ignored per ADR-0005) that fails closed on the envelope,
  * container, version, identity, and artifact-reference invariants the ECC
  * producer guarantees. Section payloads degrade independently so a malformed
@@ -132,7 +134,10 @@ export function validateEngineeringSnapshot(
   ) {
     return { ok: false, issue: invalidIssue() }
   }
-  if (value.schemaVersion !== ENGINEERING_SNAPSHOT_SCHEMA_VERSION) {
+  if (
+    value.schemaVersion !== 4 &&
+    value.schemaVersion !== ENGINEERING_SNAPSHOT_SCHEMA_VERSION
+  ) {
     return {
       ok: false,
       issue: {
@@ -192,8 +197,12 @@ export function validateEngineeringSnapshot(
     ok: true,
     snapshot: {
       cause: value.cause,
+      ...(record(value.analysis)
+        ? { analysis: value.analysis as unknown as EccEngineeringSnapshot['analysis'] }
+        : {}),
       parameters: value.parameters,
-      schemaVersion: ENGINEERING_SNAPSHOT_SCHEMA_VERSION,
+      ...(record(value.qorAssessment) ? { qorAssessment: value.qorAssessment } : {}),
+      schemaVersion: value.schemaVersion,
       ...(value.stalePredecessor
         ? {
             stalePredecessor: value.stalePredecessor as NonNullable<

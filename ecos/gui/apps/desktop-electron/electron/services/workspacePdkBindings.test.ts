@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  ensureBackendProjectManifestForCreate,
-  persistEccPdkConfigFromCreate,
+  authorizeBackendProjectRootForCreate,
   prepareWorkspaceCreateBinding,
   prepareWorkspaceOpenBinding,
 } from './workspacePdkBindings'
@@ -31,7 +30,12 @@ function createDependencies(
   return {
     callRuntime,
     dependencies: {
-      eccRuntimeService: { callRuntime },
+      eccRuntimeService: {
+        discoverProject: (directory: string) =>
+          callRuntime('project.discover', { directory }),
+        readWorkspaceBindingRequirement: (directory: string) =>
+          callRuntime('workspace.binding_requirement', { directory }),
+      },
       pdkInventoryService: {
         bindInstallation: vi.fn(),
         resolveBinding: vi.fn(),
@@ -136,18 +140,18 @@ describe('prepareWorkspaceOpenBinding', () => {
   })
 })
 
-describe('ensureBackendProjectManifestForCreate', () => {
-  it('creates the manifest before ECC creates a managed workspace', async () => {
-    const writeProjectTextFile = vi.fn()
+describe('authorizeBackendProjectRootForCreate', () => {
+  it('registers an existing project root without writing any project file', async () => {
+    const registerProjectRoot = vi.fn().mockResolvedValue('/projects/test_agent')
     const dependencies = {
       workspaceService: {
-        pathExists: vi.fn().mockResolvedValue(false),
-        registerProjectRoot: vi.fn().mockResolvedValue('/projects/test_agent'),
-        writeProjectTextFile,
+        pathExists: vi.fn().mockResolvedValue(true),
+        registerProjectRoot,
+        writeProjectTextFile: vi.fn(),
       },
     }
 
-    await ensureBackendProjectManifestForCreate(dependencies, {
+    await authorizeBackendProjectRootForCreate(dependencies, {
       commandId: 'create-1',
       projectId: 'proj_test_agent',
       projectRoot: '/projects/test_agent',
@@ -156,10 +160,30 @@ describe('ensureBackendProjectManifestForCreate', () => {
       workspaceSpec: { design: { name: 'test_agent' } },
     })
 
-    expect(writeProjectTextFile).toHaveBeenCalledWith(
-      '/projects/test_agent/project.json',
-      expect.stringContaining('"project_id": "proj_test_agent"'),
-    )
+    expect(registerProjectRoot).toHaveBeenCalledWith('/projects/test_agent')
+    expect(dependencies.workspaceService.writeProjectTextFile).not.toHaveBeenCalled()
+  })
+
+  it('leaves a not-yet-created project root to ecc init', async () => {
+    const registerProjectRoot = vi.fn()
+    const dependencies = {
+      workspaceService: {
+        pathExists: vi.fn().mockResolvedValue(false),
+        registerProjectRoot,
+        writeProjectTextFile: vi.fn(),
+      },
+    }
+
+    await authorizeBackendProjectRootForCreate(dependencies, {
+      commandId: 'create-2',
+      projectRoot: '/projects/fresh',
+      targetDirectory: '/projects/fresh/ws_0001',
+      workspaceBindings: {},
+      workspaceSpec: {},
+    })
+
+    expect(registerProjectRoot).not.toHaveBeenCalled()
+    expect(dependencies.workspaceService.writeProjectTextFile).not.toHaveBeenCalled()
   })
 })
 
@@ -312,6 +336,13 @@ describe('prepareWorkspaceCreateBinding', () => {
     expect(result.workspaceBindings.mpc).toEqual({
       template: { name: 'frame', minimum_area: 100 },
     })
+    expect(result.projectMpc).toEqual({
+      designIndex: 0,
+      displayName: 'frame',
+      resourceId: 'mpc:frame',
+      root: '/mpcs/frame/2.0.0',
+      version: '2.0.0',
+    })
   })
 
   it('rejects creation when the portable MPC requirement is not installed', async () => {
@@ -386,71 +417,5 @@ describe('manual external PDK resources', () => {
       },
       root: '/pdks/ics55',
     })
-  })
-})
-
-describe('persistEccPdkConfigFromCreate', () => {
-  it('writes external paths and overrides with binding-derived PDK context', async () => {
-    const write = vi.fn()
-    const runtimeRequest = {
-      commandId: 'create-1',
-      projectRoot: '/projects/demo',
-      targetDirectory: '/projects/demo/runs/workspace',
-      workspaceBindings: { pdk: { root: '/pdks/ics55' } },
-      workspaceSpec: { pdk: { familyId: 'ics55' } },
-    }
-
-    await persistEccPdkConfigFromCreate(
-      { ...createDependencies().dependencies, projectEccConfigService: { write } },
-      runtimeRequest,
-      {
-        externalPaths: ['/macros/sram'],
-        overrides: { lefs: ['/pdks/ics55/IP/lef/std.lef', '/macros/sram/sram.lef'] },
-      },
-    )
-
-    expect(write).toHaveBeenCalledWith({
-      projectRoot: '/projects/demo',
-      pdkRoot: '/pdks/ics55',
-      pdkName: 'ics55',
-      externalPaths: ['/macros/sram'],
-      overrides: { lefs: ['/pdks/ics55/IP/lef/std.lef', '/macros/sram/sram.lef'] },
-    })
-  })
-
-  it('derives the project root from the target directory and skips empty payloads', async () => {
-    const write = vi.fn()
-    const dependencies = {
-      ...createDependencies().dependencies,
-      projectEccConfigService: { write },
-    }
-    const runtimeRequest = {
-      commandId: 'create-2',
-      projectRoot: '/projects/demo',
-      targetDirectory: '/projects/demo/runs/workspace',
-      workspaceBindings: {},
-      workspaceSpec: {},
-    }
-
-    await persistEccPdkConfigFromCreate(dependencies, runtimeRequest, undefined)
-    await persistEccPdkConfigFromCreate(dependencies, runtimeRequest, {
-      externalPaths: [],
-    })
-    expect(write).not.toHaveBeenCalled()
-
-    await persistEccPdkConfigFromCreate(dependencies, runtimeRequest, {
-      externalPaths: ['/macros/sram'],
-    })
-    expect(write).toHaveBeenCalledWith(
-      expect.objectContaining({ projectRoot: '/projects/demo' }),
-    )
-
-    await expect(
-      persistEccPdkConfigFromCreate(
-        dependencies,
-        { ...runtimeRequest, projectRoot: undefined },
-        { externalPaths: ['/macros/sram'] },
-      ),
-    ).rejects.toThrow('requires a project root')
   })
 })

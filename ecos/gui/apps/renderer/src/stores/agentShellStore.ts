@@ -1,12 +1,9 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import type { DesktopCodexDependencyStatus } from '@ecos-studio/shared'
 import {
   clampAgentPanelWidth,
   persistAgentPanelWidth,
-  persistWorkspaceAgentCollapsed,
   readStoredAgentPanelWidth,
-  readStoredWorkspaceAgentCollapsed,
 } from '@/composables/agentPanelWidth'
 import {
   resolveAgentTabContext,
@@ -48,8 +45,7 @@ export const useAgentShellStore = defineStore('agentShell', () => {
   const preserveSessionOnWorkspaceSwitch = ref(false)
   const pendingPostCreateFlow = ref<AgentPostCreateFlowHandoff | null>(null)
   const panelWidthPx = ref(readStoredAgentPanelWidth())
-  const workspaceAgentCollapsed = ref(readStoredWorkspaceAgentCollapsed())
-  const codexStatus = ref<DesktopCodexDependencyStatus | null>(null)
+  const workspaceAgentOpen = ref(false)
   const hiddenOptimizationSessionIds = new Set<string>()
 
   const activeTab = computed(
@@ -205,6 +201,7 @@ export const useAgentShellStore = defineStore('agentShell', () => {
     if (!options.keepHomeOpen) {
       homeAgentOpen.value = false
     }
+    workspaceAgentOpen.value = false
   }
 
   function clearTabs(): void {
@@ -218,17 +215,16 @@ export const useAgentShellStore = defineStore('agentShell', () => {
     persistAgentPanelWidth(next)
   }
 
-  function setWorkspaceAgentCollapsed(collapsed: boolean): void {
-    workspaceAgentCollapsed.value = collapsed
-    persistWorkspaceAgentCollapsed(collapsed)
+  function openWorkspaceAgent(): void {
+    workspaceAgentOpen.value = true
+  }
+
+  function closeWorkspaceAgent(): void {
+    workspaceAgentOpen.value = false
   }
 
   function toggleWorkspaceAgent(): void {
-    setWorkspaceAgentCollapsed(!workspaceAgentCollapsed.value)
-  }
-
-  function setCodexStatus(status: DesktopCodexDependencyStatus | null): void {
-    codexStatus.value = status
+    workspaceAgentOpen.value = !workspaceAgentOpen.value
   }
 
   return {
@@ -239,8 +235,7 @@ export const useAgentShellStore = defineStore('agentShell', () => {
     sessionId,
     mode,
     panelWidthPx,
-    workspaceAgentCollapsed,
-    codexStatus,
+    workspaceAgentOpen,
     preserveMessagesOnWorkspaceSwitch,
     preserveSessionOnWorkspaceSwitch,
     pendingPostCreateFlow,
@@ -251,9 +246,9 @@ export const useAgentShellStore = defineStore('agentShell', () => {
     setSessionId,
     setMode,
     setPanelWidthPx,
-    setWorkspaceAgentCollapsed,
+    openWorkspaceAgent,
+    closeWorkspaceAgent,
     toggleWorkspaceAgent,
-    setCodexStatus,
     activateTab,
     createTab,
     markTabStarted,

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { dirname, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import {
   type BackendWorkspaceOverviewResult,
@@ -52,6 +52,7 @@ import {
 import { flowInsightsSection } from './backendWorkspaceFlowInsights'
 import { isPathWithinRoot } from './pathScope'
 import { projectWorkspaceResults } from './backendWorkspaceResultProjection'
+import { readWorkspaceFlowFile } from './eccCli/persistedState'
 
 interface BackendWorkspaceServiceOptions {
   workspaceRootProvider: {
@@ -573,9 +574,10 @@ export class BackendWorkspaceService {
     const previousSnapshot = context.snapshot
     const previousWorkspaceRoot = context.workspaceRoot
     const workspaceRoot = await this.options.workspaceRootProvider.getProjectRoot()
-    const [manifest, snapshot] = await Promise.all([
+    const [manifest, snapshot, liveFlow] = await Promise.all([
       this.readManifest(workspaceRoot),
       this.readEngineeringSnapshot(workspaceRoot),
+      this.readWorkspaceFlow(workspaceRoot),
     ])
     if (!manifest && previousSnapshot?.ok && previousWorkspaceRoot) {
       throw new Error('PROJECT_MANIFEST_READ_FAILED')
@@ -617,7 +619,7 @@ export class BackendWorkspaceService {
     }
     const resultProjection = snapshot?.ok ? projectWorkspaceResults(snapshot) : null
     const displaySnapshot = resultProjection?.snapshot ?? snapshot
-    const flow = flowSection(snapshot)
+    const flow = flowSection(snapshot, liveFlow ?? undefined)
     const checklist = checklistSection(displaySnapshot, flow)
     const qor = await this.readQor(workspaceRoot, manifest, displaySnapshot)
     const flowInsights = flowInsightsSection(snapshot, flow, qor.qor)
@@ -702,6 +704,14 @@ export class BackendWorkspaceService {
         projectRoot: dirname(workspaceRoot),
         workspacePath: workspaceRoot,
       })
+    } catch {
+      return null
+    }
+  }
+
+  private async readWorkspaceFlow(workspaceRoot: string) {
+    try {
+      return await readWorkspaceFlowFile(join(workspaceRoot, 'home', 'flow.json'))
     } catch {
       return null
     }
@@ -810,7 +820,8 @@ export class BackendWorkspaceService {
     watchedRoots: string[],
   ): void {
     const createWatcher = this.options.snapshotWatcherFactory
-    const watchKey = watchedRoots
+    const snapshotRoots = watchedRoots
+    const watchKey = snapshotRoots
       .map((root) => resolve(root))
       .sort()
       .join('\0')
@@ -828,10 +839,10 @@ export class BackendWorkspaceService {
     })
     context.watcher = watcher
     context.watchKey = watchKey
-    context.watchedRoots = watchedRoots
+    context.watchedRoots = snapshotRoots
     void Promise.all([
       watcher.startProject(dirname(workspaceRoot)),
-      watcher.reconcile(dirname(workspaceRoot), watchedRoots),
+      watcher.reconcile(dirname(workspaceRoot), snapshotRoots),
     ]).catch((error) => {
       if (context.watcher === watcher) {
         context.watcher = undefined

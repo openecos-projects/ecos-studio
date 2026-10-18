@@ -688,6 +688,15 @@ describe('ResourceManagerService', () => {
     await rm(isolatedXdgRoot, { force: true, recursive: true })
   })
 
+  it('blocks resource removal while an active ECC run holds its runtime lease', async () => {
+    const service = new ResourceManagerService({
+      resourceInUse: (resourceId) => resourceId === 'tool:ecc',
+    })
+
+    await expect(service.uninstallResource('tool:ecc')).rejects.toThrow(
+      'in use by an active ECC run',
+    )
+  })
   afterEach(async () => {
     await Promise.all(
       tempDirectories
@@ -9691,7 +9700,12 @@ describe('ResourceManagerService', () => {
         health: 'ok',
       },
     })
-    const service = new ResourceManagerService(dirs)
+    const service = new ResourceManagerService({
+      ...dirs,
+      fetchImpl: vi.fn(async () => {
+        throw new Error('offline')
+      }),
+    })
 
     await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
       id: 'pdk:ics55',
@@ -9717,7 +9731,12 @@ describe('ResourceManagerService', () => {
         health: 'ok',
       },
     })
-    const service = new ResourceManagerService(dirs)
+    const service = new ResourceManagerService({
+      ...dirs,
+      fetchImpl: vi.fn(async () => {
+        throw new Error('offline')
+      }),
+    })
 
     await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
       id: 'pdk:ics55',
@@ -9747,7 +9766,12 @@ describe('ResourceManagerService', () => {
         health: 'ok',
       },
     })
-    const service = new ResourceManagerService(dirs)
+    const service = new ResourceManagerService({
+      ...dirs,
+      fetchImpl: vi.fn(async () => {
+        throw new Error('offline')
+      }),
+    })
 
     await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
       status: 'invalid',

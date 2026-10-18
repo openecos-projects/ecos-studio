@@ -227,32 +227,17 @@
                   <div class="qor-metric-comparison">
                     <div class="qor-step-trend-bar" aria-hidden="true">
                       <span
-                        v-if="metric.baselineValue !== null"
-                        class="qor-metric-baseline"
-                        :style="{
-                          width: `${qorMetricSegmentPercent(metric.baselineValue, metric)}%`,
-                        }"
-                      />
-                      <span
                         class="qor-metric-current"
                         :class="`is-${qorMetricComparisonState(metric)}`"
-                        :style="{
-                          width: `${qorMetricSegmentPercent(metric.currentValue, metric)}%`,
-                        }"
+                        style="width: 100%"
                       />
                     </div>
                     <div class="qor-metric-values">
-                      <span>{{ qorMetricBaselineValue(metric) }}</span>
                       <span>{{
                         formatDashboardValue(metric.currentValue, metric.unit)
                       }}</span>
                     </div>
                   </div>
-                  <strong
-                    class="qor-step-total"
-                    :class="`is-${metric.comparisonState}`"
-                    >{{ qorMetricDeltaValue(metric) }}</strong
-                  >
                 </div>
               </section>
             </div>
@@ -1057,28 +1042,15 @@
             <div class="qor-metric-comparison">
               <div class="qor-step-trend-bar" aria-hidden="true">
                 <span
-                  v-if="metric.baselineValue !== null"
-                  class="qor-metric-baseline"
-                  :style="{
-                    width: `${qorMetricSegmentPercent(metric.baselineValue, metric)}%`,
-                  }"
-                />
-                <span
                   class="qor-metric-current"
                   :class="`is-${qorMetricComparisonState(metric)}`"
-                  :style="{
-                    width: `${qorMetricSegmentPercent(metric.currentValue, metric)}%`,
-                  }"
+                  style="width: 100%"
                 />
               </div>
               <div class="qor-metric-values">
-                <span>{{ qorMetricBaselineValue(metric) }}</span>
                 <span>{{ formatDashboardValue(metric.currentValue, metric.unit) }}</span>
               </div>
             </div>
-            <strong class="qor-step-total" :class="`is-${metric.comparisonState}`">{{
-              qorMetricDeltaValue(metric)
-            }}</strong>
           </div>
         </section>
       </div>
@@ -1175,13 +1147,11 @@ import { useStepDashboardData } from '@/composables/useStepDashboardData'
 import { useStepConfigInfo } from '@/composables/useStepConfigInfo'
 import { useStepReportDialog } from '@/composables/useStepReportDialog'
 import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
-import { useBackendWorkspaceQor } from '@/composables/useBackendWorkspaceQor'
 import { useWorkspace } from '@/composables/useWorkspace'
 import CongestionPanel from './flow-insights/CongestionPanel.vue'
 import { getDesktopApi } from '@/platform/desktop'
 import { buildChipViewerOpenRequest, canOpenChipViewer } from './drawingAreaChipViewer'
 import StatusPieChart from './home/StatusPieChart.vue'
-import { homeQorFlowStepForLabel } from './home/qorComparisonData'
 import StepConfigPanel from './StepConfigPanel.vue'
 import TimingAnalysisDialog from './step-insights/TimingAnalysisDialog.vue'
 import TimingCornerTable from './step-insights/TimingCornerTable.vue'
@@ -1219,7 +1189,6 @@ const { openReport, reportDialog } = useStepReportDialog(
 )
 const { currentProject, showToast } = useWorkspace()
 const { flowStages } = useBackendFlowStages()
-const { state: qorComparisonState } = useBackendWorkspaceQor()
 const {
   loading: configLoading,
   stepConfigParsed,
@@ -1301,11 +1270,7 @@ const configDialogTitle = computed(() => {
   return tool ? `${stepName} · ${tool} Configuration` : `${stepName} Configuration`
 })
 const visibleQorMetrics = computed(() =>
-  prioritizeQorMetricComparisons(
-    data.value?.qor.metrics ?? [],
-    homeQorFlowStepForLabel(data.value?.step ?? ''),
-    qorComparisonState.value.comparison?.metrics ?? [],
-  ),
+  prioritizeQorMetricComparisons(data.value?.qor.metrics ?? [], null, []),
 )
 const selectedDataChart = computed(() => {
   const charts = data.value?.dataCharts ?? []
@@ -1516,42 +1481,15 @@ function qorCenterSecondary(qor: StepDashboardQor): string {
 }
 
 function qorMetricTone(metric: StepDashboardQorMetricComparison): string {
-  if (!metric.isComparisonAvailable) return 'unavailable'
-  if (metric.comparisonState === 'improvement') return 'good'
-  if (metric.comparisonState === 'regression') return 'bad'
-  return 'neutral'
+  return Number.isFinite(metric.currentValue) ? 'neutral' : 'unavailable'
 }
 
 function qorMetricComparisonState(metric: StepDashboardQorMetricComparison): string {
-  if (!metric.isComparisonAvailable) return 'unavailable'
-  if (metric.comparisonState === 'improvement') return 'improved'
-  if (metric.comparisonState === 'regression') return 'regressed'
-  return 'neutral'
-}
-
-function qorMetricSegmentPercent(
-  value: number | null,
-  metric: StepDashboardQorMetricComparison,
-): number {
-  if (value === null) return 0
-  const total = Math.abs(metric.baselineValue ?? 0) + Math.abs(metric.currentValue)
-  if (total > 0) return Number(((Math.abs(value) / total) * 100).toFixed(2))
-  return metric.baselineValue === null ? 100 : 50
-}
-
-function qorMetricBaselineValue(metric: StepDashboardQorMetricComparison): string {
-  return metric.baselineValue === null
-    ? '--'
-    : formatDashboardValue(metric.baselineValue, metric.unit)
-}
-
-function qorMetricDeltaValue(metric: StepDashboardQorMetricComparison): string {
-  if (!metric.isComparisonAvailable || metric.absoluteDelta === null) return '--'
-  return formatDashboardValue(Math.abs(metric.absoluteDelta), metric.unit)
+  return Number.isFinite(metric.currentValue) ? 'neutral' : 'unavailable'
 }
 
 function qorMetricAriaLabel(metric: StepDashboardQorMetricComparison): string {
-  return `${metric.label}: baseline ${qorMetricBaselineValue(metric)}; current ${formatDashboardValue(metric.currentValue, metric.unit)}; change ${qorMetricDeltaValue(metric)}; ${qorMetricComparisonState(metric)}`
+  return `${metric.label}: current ${formatDashboardValue(metric.currentValue, metric.unit)}`
 }
 
 function chartTabLabel(title: string): string {
@@ -2243,9 +2181,6 @@ function fileName(path: string): string {
 .qor-step-trend-bar > span {
   flex: 0 0 auto;
   min-width: 0;
-}
-.qor-metric-baseline {
-  background: var(--text-secondary);
 }
 .qor-metric-current.is-improved {
   background: var(--success-color);

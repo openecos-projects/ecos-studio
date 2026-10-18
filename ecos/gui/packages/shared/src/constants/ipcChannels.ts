@@ -28,6 +28,7 @@ export const desktopApiIpcChannels = {
   projectManifestMutate: 'project-manifest:mutate',
   projectManagementDiscoverProject: 'project-management:discover-project',
   projectManagementReadManifest: 'project-management:read-manifest',
+  projectManagementWatchWorkspaceFlows: 'project-management:watch-workspace-flows',
   projectManagementReadFrontendWorkspaceTexts:
     'project-management:read-frontend-workspace-texts',
   projectManagementListEntries: 'project-management:list-entries',
@@ -169,6 +170,7 @@ export const desktopApiIpcChannels = {
 } as const
 
 export const desktopApiEventChannels = {
+  projectWorkspaceFlowsChanged: 'project-management:workspace-flows-changed',
   backendWorkspaceInvalidated: 'backend-workspace:invalidated',
   backendProjectComparisonInvalidated: 'backend-project-comparison:invalidated',
   backendProjectExecutionInvalidated: 'backend-project-execution:invalidated',

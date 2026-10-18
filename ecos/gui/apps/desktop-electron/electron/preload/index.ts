@@ -219,6 +219,13 @@ const desktopApi: DesktopApi = {
       ),
   },
   projectManagement: {
+    watchWorkspaceFlows: (request) =>
+      invokeDesktop(desktopApiIpcChannels.projectManagementWatchWorkspaceFlows, request),
+    onWorkspaceFlowsChanged: (listener) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.projectWorkspaceFlowsChanged,
+        listener,
+      ),
     discoverProject: (directory) =>
       invokeDesktop(desktopApiIpcChannels.projectManagementDiscoverProject, directory),
     readManifest: (projectRoot) =>

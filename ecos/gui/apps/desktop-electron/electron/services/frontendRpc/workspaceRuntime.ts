@@ -1,0 +1,1399 @@
+import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
+import type {
+  EccFlowRunRequest,
+  EccFlowRunResult,
+  EccFlowRunStepRequest,
+  EccFlowRunStepResult,
+  EccLayoutEditApplyRequest,
+  EccLayoutEditApplyResult,
+  EccLayoutEditBeginRequest,
+  EccLayoutEditBeginResult,
+  EccLayoutEditDiscardRequest,
+  EccLayoutEditDiscardResult,
+  EccLayoutEditSaveRequest,
+  EccLayoutEditSaveResult,
+  EccPersistedEngineeringSnapshot,
+  EccRuntimeEvent,
+  EccRuntimeOperation,
+  EccRuntimeOperationRequest,
+  EccCandidateCapabilitiesRequest,
+  EccCandidateCapabilitiesResult,
+  EccCandidateResumeRequest,
+  EccCandidateRerunRequest,
+  EccRuntimeStartFlowRequest,
+  EccRuntimeStartStepRequest,
+  EccWorkspaceCloseResult,
+  EccWorkspaceConfigurationUpdateRequest,
+  EccWorkspaceCreateRequest,
+  EccWorkspaceCreateResult,
+  EccWorkspaceDeriveRequest,
+  EccWorkspaceDeriveResult,
+  EccWorkspaceExportSignoffRequest,
+  EccWorkspaceExportSignoffResult,
+  EccWorkspaceHandleRequest,
+  EccWorkspaceInfoRequest,
+  EccWorkspaceInfoResult,
+  EccWorkspaceOpenRequest,
+  EccWorkspaceOpenResult,
+  EccWorkspaceRefreshConfigRequest,
+  EccWorkspaceRefreshConfigResult,
+  EccWorkspaceResetFlowResult,
+  EccWorkspaceStepConfigurationUpdateRequest,
+  EccWorkspaceStepConfigurationReadRequest,
+  EccWorkspaceStepConfigurationReadResult,
+  EccWorkspaceStepOutputsResult,
+  EccWorkspaceRuntimeSnapshot,
+  EccWorkspaceSpecValidationRequest,
+  EccWorkspaceSpecValidationResult,
+  EccWorkspaceUpdateRequest,
+  EccWorkspaceUpdateResult,
+} from '@ecos-studio/shared'
+import { validateEngineeringSnapshot } from '@ecos-studio/shared'
+
+import { normalizeRuntimeError } from './errors'
+import { electronLogger } from '../logger'
+import type { JsonRpcNotificationPayload } from './jsonRpcClient'
+import {
+  RuntimeOperationTracker,
+  isRuntimeProtocolPayload,
+} from './runtimeOperationTracker'
+import type {
+  EccRpcRuntimeClient,
+  EccRpcRuntimeSidecar,
+  RuntimeShutdownBarrier,
+  RuntimeShutdownResult,
+} from './runtimeClient'
+import { RuntimeSidecarLifecycle } from './runtimeSidecarLifecycle'
+import {
+  WorkspaceRuntimeCommands,
+  type EccWorkspaceSessionResult,
+  type RuntimeOperation,
+  type RuntimeOperationMetadata,
+} from './workspaceRuntimeCommands'
+import { WorkspaceSessionRegistry } from './workspaceSessions'
+import { WorkspaceStepConfigurationCache } from './workspaceStepConfigurationCache'
+import { readPersistedEngineeringSnapshot } from '../eccCli/engineeringSnapshotReader'
+
+export type { EccRpcRuntimeClient, EccRpcRuntimeSidecar } from './runtimeClient'
+
+export interface EccWorkspaceRuntimeOptions {
+  /**
+   * Bound workspace directory for this runtime. `null` is used for the
+   * control runtime.
+   */
+  directory: string | null
+  createSidecar(
+    onEvent: (event: EccRuntimeEvent) => void,
+    onNotification: (notification: JsonRpcNotificationPayload) => void,
+  ): EccRpcRuntimeSidecar
+  onEvent?: (event: EccRuntimeEvent) => void
+  managementRpc?: boolean
+  lazyWorkspaceOpen?: boolean
+  sessions?: WorkspaceSessionRegistry
+}
+
+interface InFlightOperation {
+  operationId: string
+  workspaceHandle: string | undefined
+}
+
+interface RecoveredOperation {
+  logFile: string
+  operationId: string
+  step: string
+  tool: string
+}
+
+interface CrashRecoveryRequest {
+  operationId: string
+  workspaceHandle: string
+}
+
+export class EccWorkspaceRuntime {
+  private readonly sessions: WorkspaceSessionRegistry
+  private readonly sidecar: EccRpcRuntimeSidecar
+  private client: EccRpcRuntimeClient | null = null
+  private managementHelloResult: unknown = null
+  private readonly eventListeners = new Set<(event: EccRuntimeEvent) => void>()
+  /** Compatibility cancellation state for the legacy frontend RPC facade. */
+  private readonly cancelledOperationIds = new Set<string>()
+  private inFlightOperation: InFlightOperation | null = null
+  private inFlightCount = 0
+  private readonly operationTracker = new RuntimeOperationTracker()
+  private readonly crashRecoveryAttempts = new Set<string>()
+  private readonly failedCrashRecoveries = new Map<string, CrashRecoveryRequest>()
+  private readonly pendingCrashRecoveries = new Map<string, Promise<void>>()
+  private readonly pendingRecoveryEvents: EccRuntimeEvent[] = []
+  private readonly sidecarLifecycle: RuntimeSidecarLifecycle
+  private cachedSnapshot: Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'> | null =
+    null
+  private readonly stepConfigurationCache =
+    new WorkspaceStepConfigurationCache<EccWorkspaceStepConfigurationReadResult>()
+  private readonly commands: WorkspaceRuntimeCommands
+  private queue = Promise.resolve()
+  private ready = false
+  private boundDirectory: string | null
+
+  constructor(private readonly options: EccWorkspaceRuntimeOptions) {
+    this.boundDirectory = options.directory
+    this.sessions = options.sessions ?? new WorkspaceSessionRegistry()
+    this.sidecar = options.createSidecar(
+      (event) => this.handleSidecarEvent(event),
+      (notification) => this.handleNotification(notification),
+    )
+    this.sidecarLifecycle = new RuntimeSidecarLifecycle({
+      captureFinalSnapshot: async (workspaceId) => {
+        const client = this.client
+        if (!client) throw new Error('ECC Runtime client is unavailable.')
+        const snapshot = await client.call<
+          Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>
+        >('workspace.snapshot', { workspaceId })
+        this.cachedSnapshot = snapshot
+      },
+      closeSidecar: async () => {
+        await this.shutdown()
+      },
+      emitError: (text) => {
+        this.emit({
+          text,
+          type: 'runtime.stderr',
+          ...(this.boundDirectory ? { workspaceDirectory: this.boundDirectory } : {}),
+        })
+      },
+      emitIdle: () => {
+        this.emit({
+          type: 'runtime.idle',
+          ...(this.boundDirectory ? { workspaceDirectory: this.boundDirectory } : {}),
+        })
+      },
+      hasActiveOperations: () => this.operationTracker.hasActiveOperations(),
+    })
+    this.commands = new WorkspaceRuntimeCommands({
+      boundDirectory: () => this.boundDirectory,
+      enqueue: (method, workspaceHandle, operation, metadata) =>
+        this.enqueue(method, workspaceHandle, operation, metadata),
+      ensureStarted: () => this.ensureStarted(),
+      hasActiveOperations: () => this.operationTracker.hasActiveOperations(),
+      lazyWorkspaceOpen: Boolean(options.lazyWorkspaceOpen),
+      resolveEccWorkspaceId: (workspaceHandle) =>
+        this.resolveEccWorkspaceId(workspaceHandle),
+      sessions: this.sessions,
+      sidecar: this.sidecar,
+    })
+  }
+
+  get directory(): string | null {
+    return this.boundDirectory
+  }
+
+  /**
+   * Update the directory identity used for events / routing after ECC returns a
+   * canonical path (e.g. symlink request → resolved realpath).
+   */
+  rebindDirectory(directory: string): void {
+    this.boundDirectory = directory
+  }
+
+  hasSessions(): boolean {
+    return this.sessions.size > 0
+  }
+
+  isActive(): boolean {
+    return this.inFlightCount > 0 || this.operationTracker.hasActiveOperations()
+  }
+
+  activeOperations(): EccRuntimeOperation[] {
+    return this.operationTracker.activeOperations()
+  }
+
+  recentOperationOutcomes(): EccRuntimeOperation[] {
+    return this.operationTracker.recentOutcomes()
+  }
+
+  recoveryStates(): Array<{
+    operationId?: string
+    state: 'pending' | 'failed'
+    workspaceHandle: string
+  }> {
+    return [
+      ...[...this.pendingCrashRecoveries.keys()].map((workspaceHandle) => ({
+        state: 'pending' as const,
+        workspaceHandle,
+      })),
+      ...[...this.failedCrashRecoveries.values()].map((request) => ({
+        ...(request.operationId ? { operationId: request.operationId } : {}),
+        state: 'failed' as const,
+        workspaceHandle: request.workspaceHandle,
+      })),
+    ]
+  }
+
+  trackOperationSnapshot(operation: EccRuntimeOperation): void {
+    if (this.operationTracker.knowsOperation(operation.operationId)) return
+    this.commitReconciledOperation(operation)
+  }
+
+  async reconcileActiveOperations(workspaceHandle: string): Promise<void> {
+    const active = this.operationTracker.activeOperations()
+    if (!active.length) return
+    const client = await this.ensureStarted()
+    await this.resolveEccWorkspaceId(workspaceHandle)
+    const results = await Promise.allSettled(
+      active.map((operation) =>
+        client.call<EccRuntimeOperation>(
+          'operation.status',
+          {
+            operationId: operation.operationId,
+          },
+          { timeoutMs: 1_000 },
+        ),
+      ),
+    )
+    for (const [index, result] of results.entries()) {
+      if (
+        result.status === 'fulfilled' &&
+        result.value.operationId === active[index]?.operationId
+      ) {
+        this.commitReconciledOperation(result.value)
+      }
+    }
+  }
+
+  hasInFlightOperation(operationId?: string): boolean {
+    const operation = this.inFlightOperation
+    return Boolean(operation && (!operationId || operation.operationId === operationId))
+  }
+
+  async cancelOperationLegacy(
+    operationId?: string,
+  ): Promise<{ cancelled: boolean; operationId?: string }> {
+    const operation = this.inFlightOperation
+    if (!operation || (operationId && operation.operationId !== operationId)) {
+      return { cancelled: false, ...(operationId ? { operationId } : {}) }
+    }
+    this.cancelledOperationIds.add(operation.operationId)
+    // The legacy frontend sidecar has no operation-level cancel contract. Its
+    // established cancellation behavior is to stop the sidecar; the main
+    // runtime API uses `cancelOperation(request)` below for protocol-aware
+    // cancellation and therefore remains unchanged.
+    await this.shutdown()
+    return { cancelled: true, operationId: operation.operationId }
+  }
+
+  callRuntime<T>(
+    method: string,
+    params: Record<string, unknown> = {},
+    options: { timeoutMs?: number } = {},
+  ): Promise<T> {
+    return this.enqueue(method, undefined, async () => {
+      const client = await this.ensureStarted()
+      if (method === 'rpc.hello' && this.options.managementRpc) {
+        return this.managementHelloResult as T
+      }
+      return await client.call<T>(method, params, options)
+    })
+  }
+
+  async createWorkspacePayload(
+    payload: Record<string, unknown> & { directory: string },
+  ): Promise<EccWorkspaceCreateResult> {
+    return this.enqueue('workspace.create', undefined, async () => {
+      const client = await this.ensureStarted()
+      const response = await client.call<EccWorkspaceSessionResult>(
+        'workspace.create',
+        payload,
+        { timeoutMs: 0 },
+      )
+      const session = this.sessions.activate(
+        response.directory,
+        response.workspaceId,
+        response.workspaceRevision ?? 1,
+      )
+      return {
+        directory: session.directory,
+        workspaceHandle: session.workspaceHandle,
+        workspaceId: session.eccWorkspaceId ?? undefined,
+        workspaceRevision: session.workspaceRevision,
+      }
+    })
+  }
+
+  async deriveWorkspace(
+    request: EccWorkspaceDeriveRequest,
+  ): Promise<EccWorkspaceDeriveResult> {
+    return this.enqueue('workspace.derive', undefined, async () => {
+      const client = await this.ensureStarted()
+      const response = await client.call<EccWorkspaceSessionResult>(
+        'workspace.derive',
+        {
+          cause: request.cause ?? 'workspace.derived',
+          command_id: request.commandId ?? '',
+          directory: request.directory,
+          reset_from_step: request.resetFromStep,
+          target_directory: request.targetDirectory,
+        },
+        { timeoutMs: 0 },
+      )
+      const session = this.sessions.activate(
+        response.directory,
+        response.workspaceId,
+        response.workspaceRevision ?? 1,
+      )
+      return {
+        directory: session.directory,
+        workspaceHandle: session.workspaceHandle,
+        workspaceId: session.eccWorkspaceId ?? undefined,
+        workspaceRevision: session.workspaceRevision,
+      }
+    })
+  }
+
+  hasPendingRuntimeWork(): boolean {
+    return this.isActive() || this.sidecarLifecycle.hasFinalizationBlocker()
+  }
+
+  finalization() {
+    return this.sidecarLifecycle.finalization()
+  }
+
+  retryFinalSnapshot(): Promise<boolean> {
+    return this.sidecarLifecycle.retryFinalSnapshot()
+  }
+
+  shutdownBarrier(): {
+    cancelRequested: boolean
+    interruptibility: 'deferred'
+    operationId: string
+    safeToStop: boolean
+    state: string
+    step: string
+    workspaceId: string
+  } | null {
+    const operationId =
+      this.inFlightOperation?.operationId ??
+      this.operationTracker.firstActiveOperationId()
+    const finalization = this.sidecarLifecycle.finalization()
+    if (!operationId && !finalization) return null
+    return {
+      cancelRequested: false,
+      interruptibility: 'deferred',
+      operationId: operationId ?? 'final-snapshot',
+      safeToStop: false,
+      state: operationId
+        ? this.inFlightOperation
+          ? 'request_in_flight'
+          : 'running'
+        : (finalization?.state ?? 'finalizing'),
+      step: '',
+      workspaceId: this.boundDirectory ?? '',
+    }
+  }
+
+  onEvent(listener: (event: EccRuntimeEvent) => void): () => void {
+    this.eventListeners.add(listener)
+    return () => {
+      this.eventListeners.delete(listener)
+    }
+  }
+
+  createWorkspace(request: EccWorkspaceCreateRequest): Promise<EccWorkspaceCreateResult> {
+    return this.commands.createWorkspace(request)
+  }
+
+  describeWorkspaceSpec(): Promise<Record<string, unknown>> {
+    return this.commands.describeWorkspaceSpec()
+  }
+
+  validateWorkspaceSpec(
+    request: EccWorkspaceSpecValidationRequest,
+  ): Promise<EccWorkspaceSpecValidationResult> {
+    return this.commands.validateWorkspaceSpec(request)
+  }
+
+  async updateWorkspace(
+    request: EccWorkspaceUpdateRequest,
+  ): Promise<EccWorkspaceUpdateResult> {
+    const result = await this.commands.updateWorkspace(request)
+    this.stepConfigurationCache.clear()
+    return result
+  }
+
+  async updateWorkspaceConfiguration(
+    request: EccWorkspaceConfigurationUpdateRequest,
+  ): Promise<EccWorkspaceUpdateResult> {
+    const result = await this.commands.updateWorkspaceConfiguration(request)
+    this.cachedSnapshot = null
+    this.stepConfigurationCache.clear()
+    return result
+  }
+
+  async updateWorkspaceStepConfiguration(
+    request: EccWorkspaceStepConfigurationUpdateRequest,
+  ): Promise<EccWorkspaceUpdateResult> {
+    const result = await this.commands.updateWorkspaceStepConfiguration(request)
+    this.cachedSnapshot = null
+    this.stepConfigurationCache.clear()
+    return result
+  }
+
+  openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
+    return this.commands.openWorkspace(request)
+  }
+
+  workspaceSession(workspaceHandle: string): EccWorkspaceOpenResult {
+    const session = this.sessions.require(workspaceHandle)
+    return {
+      directory: session.directory,
+      reused: true,
+      workspaceHandle: session.workspaceHandle,
+      workspaceId: session.eccWorkspaceId ?? undefined,
+      workspaceRevision: session.workspaceRevision,
+    }
+  }
+
+  async closeWorkspace(
+    request: EccWorkspaceHandleRequest,
+  ): Promise<EccWorkspaceCloseResult> {
+    try {
+      return await this.commands.closeWorkspace(request)
+    } finally {
+      this.stepConfigurationCache.clear()
+    }
+  }
+
+  workspaceInfo(request: EccWorkspaceInfoRequest): Promise<EccWorkspaceInfoResult> {
+    return this.commands.workspaceInfo(request)
+  }
+
+  async readWorkspaceStepConfiguration(
+    request: EccWorkspaceStepConfigurationReadRequest,
+  ): Promise<EccWorkspaceStepConfigurationReadResult> {
+    const session = this.sessions.require(request.workspaceHandle)
+    const workspaceId = session.eccWorkspaceId
+    const cacheKey =
+      workspaceId && session.workspaceRevision > 0
+        ? `${workspaceId}:${session.workspaceRevision}:${request.step}`
+        : null
+    if (!cacheKey) {
+      return await this.commands.readWorkspaceStepConfiguration(request)
+    }
+    return await this.stepConfigurationCache.load(cacheKey, () =>
+      this.commands.readWorkspaceStepConfiguration(request),
+    )
+  }
+
+  async readWorkspaceStepConfigurationForDirectory(
+    directory: string,
+    step: string,
+  ): Promise<EccWorkspaceStepConfigurationReadResult> {
+    const client = await this.ensureStarted()
+    return await client.call<EccWorkspaceStepConfigurationReadResult>(
+      'workspace.step_configuration.read',
+      { directory, step },
+    )
+  }
+
+  async workspaceStepOutputs(
+    directory: string,
+    step?: string,
+  ): Promise<EccWorkspaceStepOutputsResult> {
+    const client = await this.ensureStarted()
+    return await client.call<EccWorkspaceStepOutputsResult>('workspace.step_outputs', {
+      directory,
+      ...(step ? { step } : {}),
+    })
+  }
+
+  async refreshConfig(
+    request: EccWorkspaceRefreshConfigRequest,
+  ): Promise<EccWorkspaceRefreshConfigResult> {
+    const result = await this.commands.refreshConfig(request)
+    this.cachedSnapshot = null
+    this.stepConfigurationCache.clear()
+    return result
+  }
+
+  async resetFlow(
+    request: EccWorkspaceHandleRequest,
+  ): Promise<EccWorkspaceResetFlowResult> {
+    const result = await this.commands.resetFlow(request)
+    this.cachedSnapshot = null
+    this.stepConfigurationCache.clear()
+    return result
+  }
+
+  exportSignoff(
+    request: EccWorkspaceExportSignoffRequest,
+  ): Promise<EccWorkspaceExportSignoffResult> {
+    return this.commands.exportSignoff(request)
+  }
+
+  layoutEditBegin(request: EccLayoutEditBeginRequest): Promise<EccLayoutEditBeginResult> {
+    return this.commands.layoutEditBegin(request)
+  }
+
+  layoutEditApply(request: EccLayoutEditApplyRequest): Promise<EccLayoutEditApplyResult> {
+    return this.commands.layoutEditApply(request)
+  }
+
+  async layoutEditSave(
+    request: EccLayoutEditSaveRequest,
+  ): Promise<EccLayoutEditSaveResult> {
+    const result = await this.commands.layoutEditSave(request)
+    this.stepConfigurationCache.clear()
+    return result
+  }
+
+  layoutEditDiscard(
+    request: EccLayoutEditDiscardRequest,
+  ): Promise<EccLayoutEditDiscardResult> {
+    return this.commands.layoutEditDiscard(request)
+  }
+
+  runFlow(request: EccFlowRunRequest): Promise<EccFlowRunResult> {
+    return this.commands.runFlow(request)
+  }
+
+  runStep(request: EccFlowRunStepRequest): Promise<EccFlowRunStepResult> {
+    return this.commands.runStep(request)
+  }
+
+  runStepPayload(
+    workspaceHandle: string,
+    payload: Record<string, unknown> & { step: string },
+  ): Promise<EccFlowRunStepResult> {
+    const rerun = Boolean(payload.rerun)
+    return this.enqueue(
+      'flow.run_step',
+      workspaceHandle,
+      async () => {
+        const client = await this.ensureStarted()
+        if (rerun) this.sidecar.relocateLogFileFrom?.(this.boundDirectory)
+        const workspaceId = await this.resolveEccWorkspaceId(workspaceHandle)
+        return await client.call<EccFlowRunStepResult>(
+          'flow.run_step',
+          { ...payload, rerun, workspaceId },
+          { timeoutMs: 0 },
+        )
+      },
+      { rerun, step: payload.step },
+    )
+  }
+
+  async startFlowOperation(
+    request: EccRuntimeStartFlowRequest,
+  ): Promise<EccRuntimeOperation> {
+    await this.settleCrashRecoveryBeforeStart(request.workspaceHandle)
+    this.clearCrashRecoverySuppression(request.workspaceHandle)
+    const client = await this.ensureStarted()
+    if (request.rerun) {
+      this.sidecar.relocateLogFileFrom?.(this.boundDirectory)
+    }
+    const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
+    return await client.call<EccRuntimeOperation>('operation.start_flow', {
+      expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+      idempotencyKey: request.idempotencyKey,
+      origin: 'gui',
+      rerun: Boolean(request.rerun),
+      workspaceId,
+    })
+  }
+
+  async candidateCapabilities(
+    request: EccCandidateCapabilitiesRequest,
+  ): Promise<EccCandidateCapabilitiesResult> {
+    const client = await this.ensureStarted()
+    this.requireCandidateCapability('candidate.capabilities')
+    const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
+    const result = await client.call<Record<string, unknown>>('candidate.capabilities', {
+      workspaceId,
+    })
+    return projectCandidateCapabilities(result)
+  }
+
+  async candidateRerun(request: EccCandidateRerunRequest): Promise<EccRuntimeOperation> {
+    this.clearCrashRecoverySuppression(request.workspaceHandle)
+    const client = await this.ensureStarted()
+    this.requireCandidateCapability('candidate.rerun')
+    this.sidecar.relocateLogFileFrom?.(this.boundDirectory)
+    const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
+    const operation = await client.call<EccRuntimeOperation>('candidate.rerun', {
+      candidateId: request.candidateId,
+      contextSha256: request.contextSha256,
+      endStep: request.endStep,
+      executionScope: request.executionScope,
+      expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+      ...(request.floorplanMode ? { floorplanMode: request.floorplanMode } : {}),
+      idempotencyKey: request.idempotencyKey,
+      parameterCardSha256: request.parameterCardSha256,
+      ...(request.parentCandidateRootRef
+        ? { parentCandidateRootRef: request.parentCandidateRootRef }
+        : {}),
+      patch: request.patch,
+      seed: request.seed,
+      targetStep: request.targetStep,
+      workspaceId,
+    })
+    return this.boundCandidateOperation(request.workspaceHandle, operation)
+  }
+
+  async candidateResume(
+    request: EccCandidateResumeRequest,
+  ): Promise<EccRuntimeOperation> {
+    this.clearCrashRecoverySuppression(request.workspaceHandle)
+    const client = await this.ensureStarted()
+    this.requireCandidateCapability('candidate.resume')
+    this.sidecar.relocateLogFileFrom?.(this.boundDirectory)
+    const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
+    const operation = await client.call<EccRuntimeOperation>('candidate.resume', {
+      candidateId: request.candidateId,
+      contextSha256: request.contextSha256,
+      expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+      idempotencyKey: request.idempotencyKey,
+      parameterCardSha256: request.parameterCardSha256,
+      seed: request.seed,
+      workspaceId,
+    })
+    return this.boundCandidateOperation(request.workspaceHandle, operation)
+  }
+
+  async startStepOperation(
+    request: EccRuntimeStartStepRequest,
+  ): Promise<EccRuntimeOperation> {
+    await this.settleCrashRecoveryBeforeStart(request.workspaceHandle)
+    this.clearCrashRecoverySuppression(request.workspaceHandle)
+    const client = await this.ensureStarted()
+    if (request.rerun) {
+      this.sidecar.relocateLogFileFrom?.(this.boundDirectory)
+    }
+    const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
+    return await client.call<EccRuntimeOperation>('operation.start_step', {
+      expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+      idempotencyKey: request.idempotencyKey,
+      origin: 'gui',
+      rerun: Boolean(request.rerun),
+      resetDependents: Boolean(request.resetDependents),
+      step: request.step,
+      workspaceId,
+    })
+  }
+
+  async operationStatus(
+    request: EccRuntimeOperationRequest,
+  ): Promise<EccRuntimeOperation> {
+    const client = await this.ensureStarted()
+    await this.resolveEccWorkspaceId(request.workspaceHandle)
+    const operation = await client.call<EccRuntimeOperation>('operation.status', {
+      operationId: request.operationId,
+    })
+    return this.boundCandidateOperation(request.workspaceHandle, operation)
+  }
+
+  async waitForOperation(
+    request: EccRuntimeOperationRequest,
+  ): Promise<EccRuntimeOperation> {
+    const operation = await this.operationTracker.waitFor(request.operationId)
+    return this.boundCandidateOperation(request.workspaceHandle, operation)
+  }
+
+  operationLogFile(request: EccRuntimeOperationRequest): string {
+    this.sessions.require(request.workspaceHandle)
+    if (!this.operationTracker.knowsOperation(request.operationId)) {
+      throw new Error('ECC Operation is not owned by this Workspace Session.')
+    }
+    if (!this.sidecar.logFile) throw new Error('ECC Runtime log is unavailable.')
+    return this.sidecar.logFile
+  }
+
+  async cancelOperation(
+    request: EccRuntimeOperationRequest,
+  ): Promise<{ accepted: boolean; operationId: string; state: string }> {
+    const client = await this.ensureStarted()
+    await this.resolveEccWorkspaceId(request.workspaceHandle)
+    return await client.call('operation.cancel', { operationId: request.operationId })
+  }
+
+  async workspaceSnapshot(
+    request: EccWorkspaceHandleRequest,
+  ): Promise<EccWorkspaceRuntimeSnapshot> {
+    await this.settleCrashRecovery(request.workspaceHandle)
+    // A route can mount after ECC publishes its terminal event but before the
+    // final snapshot has been captured. Do not expose the preceding Ongoing
+    // cache entry to that new renderer surface.
+    const finalSnapshotTask = this.sidecarLifecycle.waitForFinalSnapshot()
+    if (finalSnapshotTask) await finalSnapshotTask
+
+    const cachedSnapshot = this.cachedSnapshot
+    if (!this.isActive() && cachedSnapshot) {
+      this.flushPendingRecoveryEvents()
+      return { ...cachedSnapshot, workspaceHandle: request.workspaceHandle }
+    }
+    this.sessions.require(request.workspaceHandle)
+    const client = await this.ensureStarted()
+    const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
+    const snapshot = await client.call<
+      Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>
+    >('workspace.snapshot', { workspaceId })
+    this.cachedSnapshot = snapshot
+    this.flushPendingRecoveryEvents()
+    return { ...snapshot, workspaceHandle: request.workspaceHandle }
+  }
+
+  async engineeringSnapshot(
+    request: EccWorkspaceHandleRequest,
+  ): Promise<EccPersistedEngineeringSnapshot> {
+    const session = this.sessions.require(request.workspaceHandle)
+    if (!existsSync(session.directory)) {
+      return await this.readLegacyEngineeringSnapshot(request, session.eccWorkspaceId)
+    }
+    return await readPersistedEngineeringSnapshot(
+      session.directory,
+      session.eccWorkspaceId ?? undefined,
+    )
+  }
+
+  private async readLegacyEngineeringSnapshot(
+    request: EccWorkspaceHandleRequest,
+    workspaceId: string | null,
+  ): Promise<EccPersistedEngineeringSnapshot> {
+    const client = await this.ensureStarted()
+    const snapshot = await client.call<Record<string, unknown>>(
+      'workspace.engineering_snapshot',
+      workspaceId ? { workspaceId } : {},
+    )
+    const validated = validateEngineeringSnapshot(snapshot, workspaceId ?? undefined)
+    if (!validated.ok) throw new Error(validated.issue.code)
+    const { artifacts, flow, metrics, signoff } = validated.sections
+    if (artifacts.status !== 'ready') throw new Error(artifacts.issues[0]?.code)
+    if (flow.status !== 'ready') throw new Error(flow.issues[0]?.code)
+    if (metrics.status !== 'ready') throw new Error(metrics.issues[0]?.code)
+    if (signoff.status !== 'ready') throw new Error(signoff.issues[0]?.code)
+    return {
+      ...validated.snapshot,
+      artifacts: artifacts.data,
+      checklist: { items: [] },
+      flow: flow.data,
+      hotspotPreview: { hotspots: [], hotspotCount: 0, hotspotsTruncated: false },
+      metrics: metrics.data,
+      qorAssessment: {},
+      signoffAssessment: signoff.data,
+      timingPreview: { issues: [], issueCount: 0, issuesTruncated: false },
+    }
+  }
+
+  async recoverInterrupted(
+    workspaceHandle: string,
+    operationId = '',
+  ): Promise<{ recovered: RecoveredOperation[]; workspaceRevision?: number }> {
+    const client = await this.ensureStarted()
+    const workspaceId = await this.resolveEccWorkspaceId(workspaceHandle)
+    const result = await client.call<{
+      recovered: RecoveredOperation[]
+      workspaceRevision?: number
+    }>('workspace.recover_interrupted', {
+      workspaceId,
+      ...(operationId ? { operationId } : {}),
+    })
+    if (result.recovered.length > 0) this.cachedSnapshot = null
+    if (typeof result.workspaceRevision === 'number') {
+      this.sessions.updateRevision(workspaceHandle, result.workspaceRevision)
+      this.stepConfigurationCache.clear()
+      this.emit({
+        data: { workspaceRevision: result.workspaceRevision },
+        method: 'workspace.recover_interrupted',
+        phase: 'recovered',
+        type: 'operation.progress',
+        workspaceDirectory: this.runtimeDirectoryForHandle(workspaceHandle) ?? undefined,
+        workspaceHandle,
+      })
+    }
+    for (const recovered of result.recovered) {
+      const step = recovered.step || 'Flow step'
+      const event: EccRuntimeEvent = {
+        code: 'interrupted',
+        details: {
+          previousRun: !operationId,
+          tool: recovered.tool,
+        },
+        executionScope: 'single_step',
+        logFile: recovered.logFile || undefined,
+        message: operationId
+          ? `${step} was interrupted when the ECC sidecar stopped.`
+          : `Previous ${step} run was interrupted.`,
+        method: 'flow.run_step',
+        operationId: recovered.operationId,
+        step: recovered.step,
+        type: 'operation.failed',
+        workspaceDirectory: this.runtimeDirectoryForHandle(workspaceHandle) ?? undefined,
+        workspaceHandle,
+      }
+      if (operationId) this.emit(event)
+      else this.pendingRecoveryEvents.push(event)
+    }
+    return result
+  }
+
+  async shutdown(): Promise<RuntimeShutdownResult> {
+    if (!this.options.managementRpc && this.isActive()) {
+      return {
+        deferred: true,
+        ok: false,
+        shutdownBarrier: this.shutdownBarrier() ?? undefined,
+      }
+    }
+    try {
+      await this.sidecar.shutdown()
+    } catch (error) {
+      const shutdownBarrier = shutdownBarrierFrom(error)
+      if (shutdownBarrier) {
+        return { deferred: true, ok: false, shutdownBarrier }
+      }
+      throw error
+    }
+    this.client = null
+    this.managementHelloResult = null
+    this.ready = false
+    this.sessions.clearEccWorkspaceIds()
+    this.stepConfigurationCache.clear()
+    this.operationTracker.rejectAll(
+      new Error('ECC sidecar shut down before the operation completed.'),
+    )
+    return { ok: true }
+  }
+
+  async forceShutdown(): Promise<void> {
+    if (this.sidecar.forceShutdown) await this.sidecar.forceShutdown()
+    else await this.sidecar.shutdown()
+    this.client = null
+    this.managementHelloResult = null
+    this.ready = false
+    this.sessions.clearEccWorkspaceIds()
+    this.stepConfigurationCache.clear()
+    this.operationTracker.rejectAll(
+      Object.assign(new Error('ECC sidecar was terminated during Force quit.'), {
+        code: 'ECC_SIDECAR_FORCE_QUIT',
+      }),
+    )
+  }
+
+  async releaseIdleSidecar(): Promise<void> {
+    if (this.hasPendingRuntimeWork()) return
+    await this.shutdown()
+  }
+
+  async cancelAtSafeShutdownBoundary(
+    shutdownBarrier: RuntimeShutdownBarrier,
+  ): Promise<void> {
+    if (!shutdownBarrier.safeToStop || !shutdownBarrier.operationId) return
+    const client = this.client
+    if (!client) return
+    await client.call('operation.cancel', { operationId: shutdownBarrier.operationId })
+  }
+
+  private async ensureStarted(): Promise<EccRpcRuntimeClient> {
+    const client = await this.sidecar.start()
+    if (client !== this.client) {
+      this.client = client
+      this.managementHelloResult = null
+      this.ready = false
+      this.sessions.clearEccWorkspaceIds()
+      this.stepConfigurationCache.clear()
+      this.operationTracker.resetForClientReplacement(
+        new Error('ECC sidecar client was replaced.'),
+      )
+    }
+    if (this.ready) return client
+
+    const helloResult = await client.call<Record<string, unknown>>('rpc.hello', {
+      version: 1,
+    })
+    this.managementHelloResult = helloResult
+    this.ready = true
+    this.emit({
+      type: 'runtime.ready',
+      ...(this.boundDirectory ? { workspaceDirectory: this.boundDirectory } : {}),
+    })
+    return client
+  }
+
+  private requireCandidateCapability(method: string): void {
+    const capabilities = helloCapabilities(this.managementHelloResult)
+    if (!capabilities.includes(method)) {
+      throw new Error(`ECC Runtime is missing required capability: ${method}`)
+    }
+  }
+
+  private async resolveEccWorkspaceId(workspaceHandle: string): Promise<string> {
+    const session = this.sessions.require(workspaceHandle)
+    if (session.eccWorkspaceId) {
+      return session.eccWorkspaceId
+    }
+
+    const client = this.client ?? (await this.ensureStarted())
+    const response = await client.call<EccWorkspaceSessionResult>('workspace.open', {
+      directory: session.directory,
+      ...(session.workspaceBindings
+        ? { workspaceBindings: session.workspaceBindings }
+        : {}),
+    })
+    this.sessions.rebind(
+      workspaceHandle,
+      response.workspaceId,
+      response.workspaceRevision ?? 1,
+    )
+    return response.workspaceId
+  }
+
+  private enqueue<T>(
+    method: string,
+    workspaceHandle: string | undefined,
+    operation: RuntimeOperation<T>,
+    metadata: RuntimeOperationMetadata = {},
+  ): Promise<T> {
+    if (workspaceHandle && (method === 'flow.run' || method === 'flow.run_step')) {
+      this.clearCrashRecoverySuppression(workspaceHandle)
+    }
+    const run = async (): Promise<T> => {
+      const operationId = `operation-${randomUUID()}`
+      const runtimeDirectory =
+        this.runtimeDirectoryForHandle(workspaceHandle) ?? this.boundDirectory
+      this.inFlightCount += 1
+      this.inFlightOperation = {
+        operationId,
+        workspaceHandle,
+      }
+      const emitOperationLifecycle = isFlowOperationMethod(method)
+      try {
+        if (emitOperationLifecycle) {
+          this.emit({
+            logFile: this.sidecar.logFile ?? undefined,
+            method,
+            operationId,
+            ...metadata,
+            type: 'operation.started',
+            workspaceDirectory: runtimeDirectory ?? undefined,
+            workspaceHandle,
+          })
+        }
+        const result = await operation()
+        if (emitOperationLifecycle) {
+          this.emit({
+            logFile: this.sidecar.logFile ?? undefined,
+            method,
+            operationId,
+            ...metadata,
+            type: 'operation.completed',
+            workspaceDirectory: runtimeDirectory ?? undefined,
+            workspaceHandle,
+          })
+        }
+        return result
+      } catch (error) {
+        const normalized = normalizeRuntimeError(error, {
+          logFile: this.sidecar.logFile,
+          method,
+          operationId,
+          workspaceHandle,
+        })
+        if (emitOperationLifecycle) {
+          if (this.cancelledOperationIds.has(operationId)) {
+            this.emit({
+              logFile: normalized.logFile,
+              method,
+              operationId,
+              ...metadata,
+              type: 'operation.cancelled',
+              workspaceDirectory: runtimeDirectory ?? undefined,
+              workspaceHandle,
+            })
+          } else {
+            this.emit({
+              code: normalized.code,
+              details: normalized.details,
+              logFile: normalized.logFile,
+              message: normalized.message,
+              method,
+              operationId,
+              ...metadata,
+              type: 'operation.failed',
+              workspaceDirectory: runtimeDirectory ?? undefined,
+              workspaceHandle,
+            })
+          }
+        }
+        throw normalized
+      } finally {
+        this.cancelledOperationIds.delete(operationId)
+        if (this.inFlightOperation?.operationId === operationId) {
+          this.inFlightOperation = null
+        }
+        this.inFlightCount = Math.max(0, this.inFlightCount - 1)
+      }
+    }
+
+    const next = this.queue.then(run, run)
+    this.queue = next.then(
+      () => undefined,
+      () => undefined,
+    )
+    return next
+  }
+
+  private handleSidecarEvent(event: EccRuntimeEvent): void {
+    if (event.type === 'operation.progress') {
+      const inFlight = this.inFlightOperation
+      const sessionHandle = this.sessions.active?.workspaceHandle
+      const workspaceHandle = inFlight?.workspaceHandle ?? sessionHandle
+      this.emit({
+        ...event,
+        ...(inFlight?.operationId ? { operationId: inFlight.operationId } : {}),
+        workspaceDirectory:
+          event.workspaceDirectory ??
+          this.runtimeDirectoryForHandle(workspaceHandle) ??
+          this.boundDirectory ??
+          undefined,
+        ...(workspaceHandle ? { workspaceHandle } : {}),
+      })
+      return
+    }
+    if (event.type === 'runtime.exited') {
+      const inFlight = this.inFlightOperation
+      const workspaceHandle =
+        inFlight?.workspaceHandle ?? this.sessions.active?.workspaceHandle
+      const interrupted = this.operationTracker.interruptActiveOperations()
+      const interruptedOperationId = interrupted[0]?.operationId ?? null
+      this.client = null
+      this.managementHelloResult = null
+      this.ready = false
+      this.sessions.clearEccWorkspaceIds()
+      this.cachedSnapshot = null
+      this.stepConfigurationCache.clear()
+      this.operationTracker.rejectAll(
+        new Error('ECC sidecar exited before the operation completed.'),
+      )
+      this.emit(
+        workspaceHandle
+          ? {
+              ...event,
+              interruptedOperationId: interruptedOperationId ?? inFlight?.operationId,
+              workspaceDirectory:
+                this.runtimeDirectoryForHandle(workspaceHandle) ??
+                this.boundDirectory ??
+                undefined,
+              workspaceHandle,
+            }
+          : {
+              ...event,
+              ...(this.boundDirectory ? { workspaceDirectory: this.boundDirectory } : {}),
+            },
+      )
+      if (
+        event.reason === 'unexpected' &&
+        workspaceHandle &&
+        (!inFlight || interruptedOperationId) &&
+        !this.crashRecoveryAttempts.has(
+          this.crashRecoveryKey(workspaceHandle, interruptedOperationId ?? ''),
+        )
+      ) {
+        const operationId = interruptedOperationId ?? ''
+        const recoveryKey = this.crashRecoveryKey(workspaceHandle, operationId)
+        void this.startCrashRecovery(recoveryKey, workspaceHandle, operationId)
+      }
+      return
+    }
+    if (event.type === 'runtime.stderr') {
+      this.emit({
+        ...event,
+        ...(this.boundDirectory ? { workspaceDirectory: this.boundDirectory } : {}),
+      })
+      return
+    }
+    this.emit(event)
+  }
+
+  private handleNotification(notification: JsonRpcNotificationPayload): void {
+    if (
+      notification.method !== 'runtime.event' ||
+      !isRuntimeProtocolPayload(notification.params)
+    ) {
+      return
+    }
+    const protocolEvent = notification.params
+    const terminalAlreadyRecorded = this.operationTracker.hasTerminalOperation(
+      protocolEvent.operationId,
+    )
+    const session = this.sessions.findByEccWorkspaceId(protocolEvent.workspaceId)
+    const committedRevision = protocolEvent.payload.workspaceRevision
+    if (session && typeof committedRevision === 'number') {
+      if (committedRevision !== session.workspaceRevision) {
+        this.stepConfigurationCache.clear()
+      }
+      this.sessions.updateRevision(session.workspaceHandle, committedRevision)
+    }
+    const isTerminal = this.operationTracker.track(protocolEvent)
+    const operationState = protocolEvent.payload.state
+    if (
+      protocolEvent.type === 'operation.changed' &&
+      (operationState === 'failed' || operationState === 'interrupted') &&
+      isTerminal &&
+      !terminalAlreadyRecorded
+    ) {
+      const error = protocolEvent.payload.error
+      if (error && typeof error === 'object' && !Array.isArray(error)) {
+        const failure = error as Record<string, unknown>
+        const step = failure.step ?? protocolEvent.payload.step
+        const tool = failure.tool ?? protocolEvent.payload.tool
+        if (step || tool) {
+          electronLogger.error(
+            '[runtime] %s(%s) failed: %s; log=%s',
+            String(step ?? ''),
+            String(tool ?? ''),
+            String(failure.message ?? 'ECC tool failed.'),
+            String(failure.logFile ?? protocolEvent.payload.logFile ?? ''),
+          )
+        }
+      }
+    }
+    if (
+      protocolEvent.type === 'operation.changed' &&
+      ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(
+        String(operationState),
+      ) &&
+      isTerminal &&
+      !terminalAlreadyRecorded
+    ) {
+      // The prior cache may describe the final step as Ongoing. A fresh page
+      // must wait for the terminal ECC snapshot.
+      this.cachedSnapshot = null
+      this.sidecarLifecycle.finalizeOperation(protocolEvent.workspaceId)
+    }
+    this.emit({
+      event: protocolEvent,
+      type: 'runtime.protocol',
+      ...(session
+        ? {
+            workspaceDirectory: session.directory,
+            workspaceHandle: session.workspaceHandle,
+          }
+        : {}),
+      ...(this.boundDirectory && !session
+        ? { workspaceDirectory: this.boundDirectory }
+        : {}),
+    })
+  }
+
+  private runtimeDirectoryForHandle(workspaceHandle: string | undefined): string | null {
+    if (!workspaceHandle) {
+      return this.boundDirectory
+    }
+    try {
+      return this.sessions.require(workspaceHandle).directory
+    } catch {
+      return this.boundDirectory
+    }
+  }
+
+  private boundCandidateOperation(
+    workspaceHandle: string,
+    operation: EccRuntimeOperation,
+  ): EccRuntimeOperation {
+    if (!operation.workspaceId.includes('::candidate::') || operation.result == null) {
+      return operation
+    }
+    const directory = this.sessions.require(workspaceHandle).directory
+    return {
+      ...operation,
+      result: boundCandidateEvidence(directory, operation.result),
+    }
+  }
+
+  private commitReconciledOperation(operation: EccRuntimeOperation): void {
+    if (!this.operationTracker.reconcile(operation)) return
+    this.cachedSnapshot = null
+    this.sidecarLifecycle.finalizeOperation(operation.workspaceId)
+  }
+
+  private flushPendingRecoveryEvents(): void {
+    for (const event of this.pendingRecoveryEvents.splice(0)) this.emit(event)
+  }
+
+  private crashRecoveryKey(workspaceHandle: string, operationId: string): string {
+    return `${workspaceHandle}:${operationId}`
+  }
+
+  private async settleCrashRecovery(workspaceHandle: string): Promise<void> {
+    const pending = this.pendingCrashRecoveries.get(workspaceHandle)
+    if (pending) await pending
+    const retry = this.retryFailedCrashRecovery(workspaceHandle)
+    if (retry) await retry
+  }
+
+  private async settleCrashRecoveryBeforeStart(workspaceHandle: string): Promise<void> {
+    await this.settleCrashRecovery(workspaceHandle)
+    const failed = [...this.failedCrashRecoveries.values()].some(
+      (request) => request.workspaceHandle === workspaceHandle,
+    )
+    if (failed) {
+      throw new Error(
+        'ECC Runtime recovery for an interrupted Operation failed; reopen the Workspace to retry before starting a new run.',
+      )
+    }
+  }
+
+  private emitRecoverySettled(workspaceHandle: string): void {
+    const directory = this.runtimeDirectoryForHandle(workspaceHandle)
+    this.emit({
+      type: 'runtime.idle',
+      ...(directory ? { workspaceDirectory: directory } : {}),
+    })
+  }
+
+  private startCrashRecovery(
+    recoveryKey: string,
+    workspaceHandle: string,
+    operationId: string,
+  ): Promise<void> | null {
+    if (this.crashRecoveryAttempts.has(recoveryKey)) return null
+    this.crashRecoveryAttempts.add(recoveryKey)
+    let recovery!: Promise<void>
+    recovery = this.recoverInterrupted(workspaceHandle, operationId).then(
+      () => {
+        this.failedCrashRecoveries.delete(recoveryKey)
+        this.crashRecoveryAttempts.add(this.crashRecoveryKey(workspaceHandle, ''))
+        if (this.pendingCrashRecoveries.get(workspaceHandle) === recovery) {
+          this.pendingCrashRecoveries.delete(workspaceHandle)
+        }
+        this.emitRecoverySettled(workspaceHandle)
+      },
+      (error: unknown) => {
+        this.crashRecoveryAttempts.delete(recoveryKey)
+        this.failedCrashRecoveries.set(recoveryKey, { operationId, workspaceHandle })
+        if (this.pendingCrashRecoveries.get(workspaceHandle) === recovery) {
+          this.pendingCrashRecoveries.delete(workspaceHandle)
+        }
+        this.emitRecoverySettled(workspaceHandle)
+        electronLogger.error(
+          '[runtime] failed to recover interrupted operation %s: %s',
+          operationId || workspaceHandle,
+          error,
+        )
+      },
+    )
+    this.pendingCrashRecoveries.set(workspaceHandle, recovery)
+    return recovery
+  }
+
+  private retryFailedCrashRecovery(workspaceHandle: string): Promise<void> | null {
+    const failed = [...this.failedCrashRecoveries.entries()].find(
+      ([, request]) => request.workspaceHandle === workspaceHandle,
+    )
+    if (!failed) return null
+    const [recoveryKey, request] = failed
+    return this.startCrashRecovery(
+      recoveryKey,
+      request.workspaceHandle,
+      request.operationId,
+    )
+  }
+
+  private clearCrashRecoverySuppression(workspaceHandle: string): void {
+    this.crashRecoveryAttempts.delete(this.crashRecoveryKey(workspaceHandle, ''))
+  }
+
+  private emit(event: EccRuntimeEvent): void {
+    this.options.onEvent?.(event)
+    for (const listener of this.eventListeners) {
+      listener(event)
+    }
+  }
+}
+
+function isFlowOperationMethod(method: string): boolean {
+  return method === 'flow.run' || method === 'flow.run_step'
+}
+
+function helloCapabilities(helloResult: unknown): string[] {
+  if (typeof helloResult !== 'object' || helloResult === null) return []
+  const capabilities = (helloResult as { capabilities?: unknown }).capabilities
+  return Array.isArray(capabilities)
+    ? capabilities.filter((value): value is string => typeof value === 'string')
+    : []
+}
+
+const MAX_CANDIDATE_EVIDENCE_BYTES = 256 * 1024
+const CANDIDATE_EVIDENCE_REF_KEYS = new Set([
+  'candidateManifestRef',
+  'candidateRootRef',
+  'parameterApplicationReceiptRef',
+])
+
+function boundCandidateEvidence(
+  workspaceDirectory: string,
+  result: Record<string, unknown>,
+): Record<string, unknown> {
+  const encoded = Buffer.byteLength(JSON.stringify(result), 'utf8')
+  if (encoded > MAX_CANDIDATE_EVIDENCE_BYTES) {
+    throw new Error('Candidate evidence exceeds the bounded Product Command size')
+  }
+  for (const key of CANDIDATE_EVIDENCE_REF_KEYS) {
+    const value = result[key]
+    if (typeof value === 'string')
+      requireContainedWorkspacePath(workspaceDirectory, value)
+  }
+  return result
+}
+
+function requireContainedWorkspacePath(workspaceDirectory: string, value: string): void {
+  if (!value.trim() || value.includes('\0')) {
+    throw new Error('Candidate evidence path is invalid')
+  }
+  const root = resolve(workspaceDirectory)
+  const target = isAbsolute(value) ? resolve(value) : resolve(root, value)
+  const relativePath = relative(root, target)
+  if (relativePath.startsWith('..') || relativePath.split(sep).includes('..')) {
+    throw new Error('Candidate evidence path is outside the authorized Workspace')
+  }
+}
+
+function projectCandidateCapabilities(
+  result: Record<string, unknown>,
+): EccCandidateCapabilitiesResult {
+  const schema = result.schema
+  const schemaVersion = result.schema_version ?? result.schemaVersion
+  const targets = result.targets
+  if (typeof schema !== 'string' || !schema.trim()) {
+    throw new Error('Candidate capabilities schema is invalid')
+  }
+  if (!Number.isInteger(schemaVersion)) {
+    throw new Error('Candidate capabilities schema version is invalid')
+  }
+  if (!Array.isArray(targets)) {
+    throw new Error('Candidate capabilities targets are invalid')
+  }
+  const registrySha256 = result.registry_sha256 ?? result.registrySha256
+  return {
+    schema,
+    schemaVersion: Number(schemaVersion),
+    targets: targets.filter(
+      (item): item is Record<string, unknown> =>
+        typeof item === 'object' && item !== null && !Array.isArray(item),
+    ),
+    ...(typeof registrySha256 === 'string' ? { registrySha256 } : {}),
+  }
+}
+
+function shutdownBarrierFrom(error: unknown): RuntimeShutdownBarrier | null {
+  if (!(error instanceof Error) || !('shutdownBarrier' in error)) return null
+  const barrier = (error as Error & { shutdownBarrier?: unknown }).shutdownBarrier
+  if (typeof barrier !== 'object' || barrier === null || Array.isArray(barrier))
+    return null
+  const value = barrier as Record<string, unknown>
+  return typeof value.operationId === 'string' &&
+    typeof value.state === 'string' &&
+    typeof value.step === 'string' &&
+    typeof value.workspaceId === 'string'
+    ? (value as unknown as RuntimeShutdownBarrier)
+    : null
+}

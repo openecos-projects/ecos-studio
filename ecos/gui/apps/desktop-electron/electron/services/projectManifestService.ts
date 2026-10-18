@@ -14,6 +14,7 @@ import type { FrontendProjectManifestService } from './frontendProjectManifestSe
 
 export interface ProjectManifestScopeProvider {
   resolveProjectRoot(path: string): Promise<string>
+  resolveProjectCreationRoot?(path: string): Promise<string>
 }
 
 export interface ProjectManifestReplacementProvider {
@@ -37,11 +38,16 @@ export interface ProjectManifestReplacementProvider {
 }
 
 export interface ProjectManifestRuntime {
-  callRuntime<T>(
-    method: string,
-    params?: Record<string, unknown>,
-    options?: { timeoutMs?: number },
-  ): Promise<T>
+  discoverProject(directory: string): Promise<{
+    projectId: string
+    projectRoot: string
+  } | null>
+  loadProjectManifest(projectRoot: string): Promise<ProjectManifest>
+  readProjectManifest?(projectRoot: string): Promise<ProjectManifest>
+  mutateProjectManifest(
+    projectRoot: string,
+    mutation: ProjectManifestMutation | Record<string, unknown>,
+  ): Promise<EccProjectManifest>
 }
 
 export interface WorkspaceRegistrationEvidence {
@@ -68,9 +74,11 @@ export class ProjectManifestService {
       throw new Error('Project manifest mutation requires a project root')
     }
     validateProjectManifestMutation(request.mutation)
-    const projectRoot = await this.projectScopeProvider.resolveProjectRoot(
-      request.projectRoot,
-    )
+    const projectRoot =
+      request.mutation.type === 'create' &&
+      this.projectScopeProvider.resolveProjectCreationRoot
+        ? await this.projectScopeProvider.resolveProjectCreationRoot(request.projectRoot)
+        : await this.projectScopeProvider.resolveProjectRoot(request.projectRoot)
     return await this.enqueue(projectRoot, async () => {
       if (
         (request.mutation.type === 'create' &&
@@ -90,7 +98,9 @@ export class ProjectManifestService {
     const frontendManifest = await this.frontend?.load(projectRoot)
     if (frontendManifest) return frontendManifest
     return projectManifestForPresentation(
-      await this.loadManifest(projectRoot),
+      this.runtime.readProjectManifest
+        ? await this.runtime.readProjectManifest(projectRoot)
+        : await this.loadManifest(projectRoot),
       projectRoot,
     )
   }
@@ -111,10 +121,7 @@ export class ProjectManifestService {
   async discover(directory: string): Promise<ProjectManifest | null> {
     const frontendDiscovery = await this.frontend?.discover(directory)
     if (frontendDiscovery) return frontendDiscovery.manifest
-    const discovered = await this.runtime.callRuntime<{
-      projectId: string
-      projectRoot: string
-    } | null>('project.discover', { directory })
+    const discovered = await this.runtime.discoverProject(directory)
     if (!discovered) return null
     const projectRoot = await this.projectScopeProvider.resolveProjectRoot(
       discovered.projectRoot,
@@ -131,11 +138,21 @@ export class ProjectManifestService {
     workspacePath: string,
     expectedProjectId?: string,
   ): Promise<WorkspaceRegistrationEvidence | null> {
-    const projectRoot =
-      await this.projectScopeProvider.resolveProjectRoot(requestedProjectRoot)
+    let projectRoot: string
+    try {
+      projectRoot =
+        await this.projectScopeProvider.resolveProjectRoot(requestedProjectRoot)
+    } catch {
+      // A workspace-creation journal captures registration state before
+      // `ecc init` runs, when the project root and manifest do not exist
+      // yet; an unresolvable root simply means there is no evidence.
+      return null
+    }
     return await this.enqueue(projectRoot, async () => {
       const manifest =
-        (await this.frontend?.load(projectRoot)) ?? (await this.loadManifest(projectRoot))
+        (await this.frontend?.load(projectRoot).catch(() => null)) ??
+        (await this.loadManifest(projectRoot).catch(() => null))
+      if (!manifest) return null
       requireProjectIdentity(manifest, expectedProjectId)
       return workspaceRegistrationEvidence(manifest, workspacePath, projectRoot)
     })
@@ -202,7 +219,6 @@ export class ProjectManifestService {
     requestedMutation: ProjectManifestMutation,
   ): Promise<ProjectManifestMutationResult> {
     let mutation: ProjectManifestMutation | Record<string, unknown> = requestedMutation
-    let directoryReplacement: WorkspaceDirectoryReplacement | null = null
     if (requestedMutation.type === 'record-replacement-backup') {
       // Compat path: backend updates no longer send this mutation (ECC's
       // in-place update registers the retained backup itself); the rewrite
@@ -225,59 +241,17 @@ export class ProjectManifestService {
         'retain',
       )
     }
-    if (
-      requestedMutation.type === 'delete-workspace' &&
-      requestedMutation.deleteDirectory
-    ) {
-      const manifest = await this.loadManifest(projectRoot)
-      const workspace = manifest.workspaces.find(
-        (candidate) => candidate.workspace_id === requestedMutation.workspaceId,
-      )
-      if (workspace) {
-        if (!this.replacementProvider) {
-          throw new Error('Workspace replacement support is unavailable.')
-        }
-        directoryReplacement =
-          await this.replacementProvider.prepareManagedProjectWorkspaceDirectoryReplacement(
-            projectRoot,
-            requestedMutation.workspaceId,
-            absoluteWorkspacePath(projectRoot, workspace.workspace_path),
-          )
-        if (directoryReplacement) {
-          await this.setReplacementRecoveryMode(
-            directoryReplacement.id,
-            projectRoot,
-            'delete',
-          )
-        }
-      }
-    }
-
-    let manifest: EccProjectManifest
-    try {
-      manifest = await this.mutateManifest(projectRoot, mutation)
-    } catch (error) {
-      if (directoryReplacement) {
-        await this.replacementProvider!.restoreProjectDirectoryReplacement(
-          directoryReplacement.id,
-        ).catch(() => undefined)
-      }
-      throw error
-    }
+    const manifest = await this.mutateManifest(projectRoot, mutation)
 
     let cleanupPending = false
     const replacementId =
       requestedMutation.type === 'record-replacement-backup'
         ? requestedMutation.input.replacementId
-        : directoryReplacement?.id
+        : undefined
     if (replacementId) {
       try {
         if (requestedMutation.type === 'record-replacement-backup') {
           await this.replacementProvider!.retainProjectDirectoryReplacement(replacementId)
-        } else {
-          await this.replacementProvider!.finalizeProjectDirectoryReplacement(
-            replacementId,
-          )
         }
       } catch {
         cleanupPending = true
@@ -290,17 +264,14 @@ export class ProjectManifestService {
   }
 
   private loadManifest(projectRoot: string): Promise<EccProjectManifest> {
-    return this.runtime.callRuntime('project.manifest.load', { projectRoot })
+    return this.runtime.loadProjectManifest(projectRoot) as Promise<EccProjectManifest>
   }
 
   private mutateManifest(
     projectRoot: string,
     mutation: ProjectManifestMutation | Record<string, unknown>,
   ): Promise<EccProjectManifest> {
-    return this.runtime.callRuntime('project.manifest.mutate', {
-      projectRoot,
-      mutation,
-    })
+    return this.runtime.mutateProjectManifest(projectRoot, mutation)
   }
 
   private async setReplacementRecoveryMode(

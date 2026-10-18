@@ -4,7 +4,6 @@ import {
   addCapturedFlowStep,
   capturedFlowStepSetHas,
   deleteCapturedFlowStep,
-  flowStepArtifactFingerprint,
   flowStepRunArtifacts,
   isSuccessfulFlowState,
   isSuccessfulFlowStep,
@@ -94,27 +93,13 @@ describe('flow run artifacts', () => {
     expect(artifacts.layout?.exists).toBe(false)
   })
 
-  it('recognizes supported success states and detects changed run output', () => {
+  it('recognizes supported success states', () => {
     const initial = stepResource({ state: 'Completed' })
-    const changed = stepResource({
-      resources: {
-        ...initial.resources,
-        output: {
-          image: {
-            ...initial.resources.output.image!,
-            mtimeMs: 42,
-          },
-        },
-      },
-    })
 
     expect(isSuccessfulFlowStep(initial)).toBe(true)
     expect(isSuccessfulFlowState('succeeded')).toBe(true)
     expect(isSuccessfulFlowState('Warning')).toBe(true)
     expect(isSuccessfulFlowState('failed')).toBe(false)
-    expect(flowStepArtifactFingerprint(changed)).not.toBe(
-      flowStepArtifactFingerprint(initial),
-    )
   })
 
   it('treats GUI path, ECC step, and resource-index names as one step', () => {
