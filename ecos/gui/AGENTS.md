@@ -80,8 +80,10 @@ style project used by the journey; defaults to the gcd example),
 `ECOS_E2E_PDK_ROOT`, `ECOS_E2E_ECC_BIN_DIR` (external ECC bundle instead of
 the repo dev runtime).
 
-In CI the `e2e-desktop-flow` job runs the GCD example on PRs, main pushes,
-nightly schedules, and manual runs. It covers the GUI run button, built-in
+In CI the `e2e-desktop-flow` job runs only the GCD example on PRs, main pushes,
+nightly schedules, and manual runs. Three independent runners select
+`rtl2gds`, `cli-flow`, and `flow-concurrency` from the E2E suite so the GUI,
+terminal, and concurrency journeys can run in parallel. They cover the GUI run button, built-in
 terminal, persisted flow/checklist projections, cancellation, and concurrent
 workspace isolation against the pinned ECC runtime. ECC owns the full
 design matrix, PPA, and physical-signoff regression tests. Studio does not
@@ -93,9 +95,9 @@ and Kepler artifact recorded in `.github/ecc-ci-toolchain.json`. The ECC
 bundle, PDK, and Sizer all come from the same workflow run for the exact
 pinned ECC commit. Designs without an EMIR technology file use ECC's
 synthetic ICS55 fixture for flow testing; it is not foundry signoff data.
-The job also verifies reproducible CLI export against the completed GCD GUI
-workspace and uploads `e2e-flow-workspace-gcd`. The `Product E2E` summary
-requires this product journey to succeed and keeps the stable check name
+The GUI journey also verifies reproducible CLI export against its completed
+GCD workspace. Each journey uploads `e2e-flow-workspace-gcd-<journey>`.
+The `Product E2E` summary requires all three journeys to succeed and keeps the stable check name
 used by branch rulesets.
 
 Linux CI sets `MALLOC_ARENA_MAX=2`, `MALLOC_TRIM_THRESHOLD_=131072`, and

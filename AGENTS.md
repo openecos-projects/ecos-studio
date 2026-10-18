@@ -45,8 +45,9 @@ and [CONTRIBUTING.md](CONTRIBUTING.md) for setup and development workflows.
   with the GCD example against the pinned ECC runtime artifacts on PRs,
   main pushes, nightly schedules, and manual runs. ECC owns the full design
   matrix and physical-signoff regression coverage; see `ecos/gui/AGENTS.md`
-  for the local environment requirements. Its `Product E2E` summary matches the required
-  main-branch check. PR title or description edits only run PR Metadata and
+  for the local environment requirements. GUI, terminal, and concurrency
+  journeys run on separate runners; `Product E2E` requires all three to pass
+  and matches the required main-branch check. PR title or description edits only run PR Metadata and
   do not replace or cancel product CI results.
 - Resolve third-party E2E inputs from a successful packaged-design job in the
   pinned ECC CI run. Keep PDK and Sizer artifacts in that same run, and reuse

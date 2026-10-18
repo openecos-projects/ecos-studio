@@ -230,7 +230,7 @@ jobs:
           retention-days: 14
 
   e2e-desktop-flow:
-    name: E2E Desktop Flow (gcd)
+    name: E2E Desktop Flow (gcd, ${{ matrix.journey }})
     needs: [changes, ecc-runtime]
     if: >-
       ${{
@@ -249,6 +249,10 @@ jobs:
       MALLOC_MMAP_THRESHOLD_: '131072'
     # Must stay above the in-test flow watchdog (75min) so its catch block can capture evidence first.
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        journey: [rtl2gds, cli-flow, flow-concurrency]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -361,9 +365,12 @@ jobs:
         env:
           ELECTRON_DISABLE_SANDBOX: '1'
           ECOS_ELECTRON_DISABLE_GPU: '1'
-        run: xvfb-run --auto-servernum pnpm run desktop:e2e
+        run: >-
+          xvfb-run --auto-servernum pnpm --filter @ecos-studio/desktop-electron
+          exec vitest run --config vitest.e2e.config.ts ${{ matrix.journey }}
 
       - name: Run Packaged Reproducible CLI Smoke
+        if: ${{ matrix.journey == 'rtl2gds' }}
         run: |
           python3 ecc/packaging/reproducible_cli_smoke.py \
             --binary "$ECOS_E2E_ECC_BIN_DIR/ecc" \
@@ -374,7 +381,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-flow-workspace-gcd
+          name: e2e-flow-workspace-gcd-${{ matrix.journey }}
           if-no-files-found: ignore
           retention-days: 14
           path: ${{ runner.temp }}/e2e-out
