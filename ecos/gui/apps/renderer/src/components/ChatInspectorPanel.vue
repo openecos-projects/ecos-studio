@@ -13,15 +13,6 @@
       >
         <template #tab-actions>
           <button
-            type="button"
-            class="chat-inspector-collapse-toggle"
-            title="Collapse Agent panel"
-            aria-label="Collapse Agent panel"
-            @click="collapsePanel"
-          >
-            <i class="ri-arrow-down-s-line" aria-hidden="true" />
-          </button>
-          <button
             v-if="!hideGuiArtifacts"
             type="button"
             class="chat-inspector-clear-artifacts"
@@ -67,24 +58,17 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useMessageStore } from '@/stores/messageStore'
-import { useAgentShellStore } from '@/stores/agentShellStore'
 import AIChatPanel from './AIChatPanel.vue'
 
 defineProps<{ hideGuiArtifacts?: boolean }>()
 
 const isFullscreen = ref(false)
 const messageStore = useMessageStore()
-const agentShell = useAgentShellStore()
 
 const canClearGuiArtifacts = computed(() => messageStore.hasSessionGuiArtifacts())
 
 function clearGuiArtifacts(): void {
   messageStore.clearSessionGuiArtifacts()
-}
-
-function collapsePanel(): void {
-  isFullscreen.value = false
-  agentShell.setWorkspaceAgentCollapsed(true)
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -110,7 +94,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   box-shadow: 0 28px 80px rgba(15, 23, 42, 0.34);
 }
 
-.chat-inspector-collapse-toggle,
 .chat-inspector-fullscreen-toggle {
   display: inline-flex;
   height: 1.5rem;
@@ -124,13 +107,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   cursor: pointer;
 }
 
-.chat-inspector-collapse-toggle:hover,
 .chat-inspector-fullscreen-toggle:hover {
   background: color-mix(in srgb, var(--bg-primary) 80%, transparent);
   color: var(--text-primary);
 }
 
-.chat-inspector-collapse-toggle:focus-visible,
 .chat-inspector-fullscreen-toggle:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent-color) 65%, transparent);
   outline-offset: 2px;

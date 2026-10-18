@@ -11,6 +11,7 @@ const source = readFileSync(
 describe('WorkspaceViewWrapper Agent capture', () => {
   it('keeps GUI flow capture on the workspace shell instead of step pages', () => {
     expect(source).toContain('useWorkspaceAgentFlowCapture()')
+    expect(source).toContain('agentShell.closeWorkspaceAgent()')
   })
 })
 

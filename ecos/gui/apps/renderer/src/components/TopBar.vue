@@ -70,7 +70,6 @@
         aria-hidden="true"
       ></span>
       <button
-        v-if="!isWorkspaceRoute"
         type="button"
         class="window-btn"
         :class="{ active: chatButtonActive }"
@@ -290,10 +289,12 @@ const themeStore = useThemeStore()
 const { informationPanelVisible, toggleInformationPanel } = useWorkspaceInformationPanel()
 const agentShell = useAgentShellStore()
 const userGuide = useUserGuideStore()
-const { homeAgentOpen } = storeToRefs(agentShell)
+const { homeAgentOpen, workspaceAgentOpen } = storeToRefs(agentShell)
 const { open: userGuideOpen } = storeToRefs(userGuide)
 const isDark = computed(() => themeStore.themeName === 'dark')
-const chatButtonActive = computed(() => homeAgentOpen.value)
+const chatButtonActive = computed(() =>
+  isWorkspaceRoute.value ? workspaceAgentOpen.value : homeAgentOpen.value,
+)
 const desktopApi = getDesktopApi()
 const canOpenStepConfig = computed(
   () => isWorkspaceRoute.value && Boolean(props.hasWorkspace),
@@ -305,7 +306,11 @@ const toggleTheme = () => {
 function handleAgentChatClick(): void {
   activeMenu.value = null
   quickMenuOpen.value = false
-  agentShell.toggleHomeAgent()
+  if (isWorkspaceRoute.value) {
+    agentShell.toggleWorkspaceAgent()
+  } else {
+    agentShell.toggleHomeAgent()
+  }
 }
 
 function handleUserGuideClick(): void {

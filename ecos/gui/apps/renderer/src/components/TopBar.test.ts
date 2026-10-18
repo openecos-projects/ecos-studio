@@ -23,9 +23,16 @@ vi.mock('vue-router', () => ({
 vi.mock('@/stores/themeStore', () => ({
   useThemeStore: () => ({ themeName: 'light', toggleTheme: vi.fn() }),
 }))
-vi.mock('@/stores/agentShellStore', () => ({
-  useAgentShellStore: () => ({ homeAgentOpen: false, toggleHomeAgent: vi.fn() }),
-}))
+vi.mock('@/stores/agentShellStore', async () => {
+  const { ref } = await import('vue')
+  const agentStore = {
+    homeAgentOpen: ref(false),
+    workspaceAgentOpen: ref(false),
+    toggleHomeAgent: vi.fn(),
+    toggleWorkspaceAgent: vi.fn(),
+  }
+  return { useAgentShellStore: () => agentStore }
+})
 vi.mock('@/stores/userGuideStore', async () => {
   const { ref } = await import('vue')
   return {
@@ -49,6 +56,21 @@ import TopBar from './TopBar.vue'
 import { useWorkspaceInformationPanel } from '@/composables/useWorkspaceInformationPanel'
 
 describe('TopBar title', () => {
+  it('toggles the workspace Agent panel from the workspace route', async () => {
+    testState.route.path = '/workspace/home'
+    const agentStore = await import('@/stores/agentShellStore')
+    const store = agentStore.useAgentShellStore()
+    const wrapper = mount(TopBar, { props: { hasWorkspace: true } })
+
+    const button = wrapper.get('button[aria-label="ECOS Agent"]')
+    expect(button.attributes('aria-pressed')).toBe('false')
+    await button.trigger('click')
+    expect(store.toggleWorkspaceAgent).toHaveBeenCalledTimes(1)
+    expect(store.toggleHomeAgent).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
   it('toggles the RTL information area immediately before the theme button', async () => {
     testState.route.path = '/workspace/home'
     useWorkspaceInformationPanel().informationPanelVisible.value = true

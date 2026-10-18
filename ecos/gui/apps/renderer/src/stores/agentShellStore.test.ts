@@ -49,8 +49,10 @@ describe('agentShellStore', () => {
     const store = useAgentShellStore()
     store.createTab({ mode: 'home', projectName: 'gcd' })
     store.openHomeAgent()
+    store.openWorkspaceAgent()
     store.resetShell()
     expect(store.homeAgentOpen).toBe(false)
+    expect(store.workspaceAgentOpen).toBe(false)
     expect(store.tabs).toHaveLength(1)
     expect(store.sessionId).toBeTruthy()
   })
@@ -110,22 +112,12 @@ describe('agentShellStore', () => {
     expect(localStorage.getItem('ecos.agent.panelWidthPx')).toBe('560')
   })
 
-  it('persists workspace Agent collapse state and tracks Codex status', () => {
+  it('toggles workspace Agent visibility', () => {
     const store = useAgentShellStore()
-    expect(store.workspaceAgentCollapsed).toBe(false)
-    store.setWorkspaceAgentCollapsed(true)
-    expect(store.workspaceAgentCollapsed).toBe(true)
-    expect(localStorage.getItem('ecos.agent.workspaceCollapsed')).toBe('true')
-
-    const status = {
-      authState: 'authenticated' as const,
-      binPath: '/tmp/codex',
-      message: 'Codex CLI 已就绪。',
-      platformSupportsInstall: true,
-      state: 'ready' as const,
-      version: 'codex-cli 1.0.0',
-    }
-    store.setCodexStatus(status)
-    expect(store.codexStatus).toEqual(status)
+    expect(store.workspaceAgentOpen).toBe(false)
+    store.toggleWorkspaceAgent()
+    expect(store.workspaceAgentOpen).toBe(true)
+    store.closeWorkspaceAgent()
+    expect(store.workspaceAgentOpen).toBe(false)
   })
 })

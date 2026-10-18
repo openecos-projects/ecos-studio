@@ -69,6 +69,7 @@ watch(
 onMounted(() => {
   agentShell.setMode('workspace')
   agentShell.closeHomeAgent()
+  agentShell.closeWorkspaceAgent()
   const path = currentProject.value?.path
   if (path && currentProject.value?.designTool !== 'frontend') {
     void backendWorkspaceSession.start(path)
