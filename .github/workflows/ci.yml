@@ -248,9 +248,36 @@ jobs:
           designs="$(jq -c '. + ["gcd"]' <<<"$designs")"
           echo "designs=$designs" >> "$GITHUB_OUTPUT"
 
+  ecc-runtime:
+    name: Wait for Pinned ECC Runtime
+    needs: changes
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        github.event_name == 'schedule' ||
+        (github.event.action != 'edited' &&
+         (needs.changes.outputs.gui == 'true' ||
+          needs.changes.outputs.version == 'true' ||
+          needs.changes.outputs.e2e == 'true' ||
+          needs.changes.outputs.ci == 'true'))
+      }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 65
+    outputs:
+      run_id: ${{ steps.runtime.outputs.run_id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Wait for ECC CI
+        id: runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/wait-ecc-ci.sh "$(git rev-parse HEAD:ecc)"
+
   e2e-desktop-flow:
     name: E2E Desktop Flow (${{ matrix.design }})
-    needs: [changes, e2e-designs]
+    needs: [changes, e2e-designs, ecc-runtime]
     if: >-
       ${{
         github.event_name == 'workflow_dispatch' ||
@@ -309,17 +336,12 @@ jobs:
       - name: Download ECC Runtime Artifacts for the Pinned Submodule
         env:
           GH_TOKEN: ${{ github.token }}
+          ECC_CI_RUN_ID: ${{ needs.ecc-runtime.outputs.run_id }}
         run: |
           set -euo pipefail
           sha="$(git rev-parse HEAD:ecc)"
-          run_id="$(
-            gh api "repos/openecos-projects/ecc/actions/workflows/ci.yml/runs?head_sha=${sha}&status=success&per_page=1" \
-              --jq '[.workflow_runs[] | select(.conclusion == "success") | .id][0] // empty'
-          )"
-          if [ -z "$run_id" ]; then
-            echo "::error::No successful ECC CI run found for pinned ecc ${sha}"
-            exit 1
-          fi
+          run_id="$ECC_CI_RUN_ID"
+          test -n "$run_id"
           echo "Using ECC CI run ${run_id} for pinned ecc ${sha}"
           for name in ecc-cli-linux-x86_64 icsprout55-pdk ecc-sizer; do
             gh run download "$run_id" \
