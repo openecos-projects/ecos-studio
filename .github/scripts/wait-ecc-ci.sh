@@ -2,6 +2,7 @@
 set -euo pipefail
 
 sha="${1:?usage: wait-ecc-ci.sh ECC_COMMIT_SHA}"
+requested_run="${2:-}"
 deadline=$((SECONDS + 3600))
 
 while true; do
@@ -33,7 +34,7 @@ while true; do
     if jq -e --argjson run_id "$run_id" 'any(.workflow_runs[]; .id == $run_id and .status != "completed")' <<<"$runs" >/dev/null; then
       pending=true
     fi
-  done < <(jq -r --arg sha "$sha" '.workflow_runs[] | select(.head_sha == $sha) | .id' <<<"$runs")
+  done < <(jq -r --arg sha "$sha" --arg run "$requested_run" '.workflow_runs[] | select(.head_sha == $sha and ($run == "" or (.id | tostring) == $run)) | .id' <<<"$runs")
   if [[ "$pending" != true ]]; then
     printf '::error::No ready or active ECC runtime publishers for pinned ecc %s\n' "$sha" >&2
     jq -r '.workflow_runs[] | "\(.html_url): \(.conclusion)"' <<<"$runs" >&2

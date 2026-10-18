@@ -1,0 +1,37 @@
+{
+  "oss_cad_suite_version": "2026-10-14",
+  "kepler_run_id": "36442480272",
+  "designs_sha": "57c9b2f4bf591798ff5d2ba27765eaf432607433",
+  "ecc_sha": "79aa7c1fbd742b56350be4e197fc84f7c2016ad5",
+  "ecc_run_id": "39108862557",
+  "ecc_job_id": 117621584062,
+  "artifacts": {
+    "ecc-cli-linux-x86_64": {
+      "id": 12129951111,
+      "name": "ecc-cli-linux-x86_64",
+      "digest": "sha256:1c319e2c7ea8c70102e7175b834513a551a2eca16e0fabf93be6215935c63658",
+      "size_in_bytes": 573116175
+    },
+    "icsprout55-pdk": {
+      "id": 12128979904,
+      "name": "icsprout55-pdk",
+      "digest": "sha256:8238d669747972cf8862823a56e55a6c45f279ed6c29457ba2702b3ea5ab47ab",
+      "size_in_bytes": 394740996
+    },
+    "ecc-sizer": {
+      "id": 12129119094,
+      "name": "ecc-sizer",
+      "digest": "sha256:5855ecc6615d0f7a36bcaa0b2fe333261928a0806f8751d7891fbe3df29d462b",
+      "size_in_bytes": 85265281
+    }
+  },
+  "kepler_sha": "92759a6cbf58aafb4905de099c862698b2d686fc",
+  "kepler_artifacts": {
+    "kepler-formal-linux-x64": {
+      "id": 10978757630,
+      "name": "kepler-formal-linux-x64",
+      "digest": "sha256:16b5e223dc3bffbabca8edd51363588b206f446fbea617be4d401d9137444218",
+      "size_in_bytes": 33734495
+    }
+  }
+}

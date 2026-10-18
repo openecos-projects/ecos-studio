@@ -53,6 +53,11 @@ and [CONTRIBUTING.md](CONTRIBUTING.md) for setup and development workflows.
   its OSS CAD Suite release, Kepler artifact run, and design-suite commit.
   Preserve the uploaded `ecc-toolchain-provenance` manifest when diagnosing
   toolchain differences; do not substitute the latest available tools.
+  Update `.github/ecc-ci-toolchain.json` alongside an ECC pin change using
+  `python3 .github/scripts/resolve-ecc-toolchain.py <run-id> <ecc-sha>
+  --refresh-from-logs --output .github/ecc-ci-toolchain.json` with a maintainer
+  token that can read ECC logs. Product CI verifies this lock using public
+  metadata and does not require cross-repository log permissions.
 - Run the narrowest relevant check while iterating, then run the local equivalent
   of every non-packaging CI job enabled by the changed paths. Use the commands in
   the affected component's scoped instructions.

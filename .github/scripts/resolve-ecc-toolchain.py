@@ -110,14 +110,53 @@ def resolve(run_id, sha, timeout):
     return manifest
 
 
+def verify_lock(manifest, run_id, sha):
+    if manifest["ecc_sha"] != sha or manifest["ecc_run_id"] != str(run_id):
+        raise ValueError("Update the ECC toolchain lock for the pinned ECC commit and runtime run")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", manifest["oss_cad_suite_version"]):
+        raise ValueError("Invalid locked OSS CAD Suite release")
+    if not re.fullmatch(r"[0-9a-f]{40}", manifest["designs_sha"]):
+        raise ValueError("Invalid locked design-suite commit")
+    run = api(f"repos/{ECC_REPO}/actions/runs/{run_id}")
+    if run["head_sha"] != sha:
+        raise ValueError("ECC runtime run does not match the pinned ECC commit")
+    jobs = api(f"repos/{ECC_REPO}/actions/runs/{run_id}/jobs?per_page=100")["jobs"]
+    if not any(job["id"] == manifest["ecc_job_id"] and job["conclusion"] == "success"
+               and job["name"].startswith("E2E Packaged Flow (") for job in jobs):
+        raise ValueError("Locked ECC design validation job is no longer successful")
+    actual = artifact_records(
+        api(f"repos/{ECC_REPO}/actions/runs/{run_id}/artifacts?per_page=100"),
+        ("ecc-cli-linux-x86_64", "icsprout55-pdk", "ecc-sizer"),
+    )
+    if actual != manifest["artifacts"]:
+        raise ValueError("ECC runtime artifact metadata differs from the validated lock")
+    kepler_run = manifest["kepler_run_id"]
+    kepler = api(f"repos/{KEPLER_REPO}/actions/runs/{kepler_run}")
+    if kepler["conclusion"] != "success" or kepler["head_sha"] != manifest["kepler_sha"]:
+        raise ValueError("Kepler run differs from the validated lock")
+    actual_kepler = artifact_records(
+        api(f"repos/{KEPLER_REPO}/actions/runs/{kepler_run}/artifacts?per_page=100"),
+        ("kepler-formal-linux-x64",),
+    )
+    if actual_kepler != manifest["kepler_artifacts"]:
+        raise ValueError("Kepler artifact metadata differs from the validated lock")
+    return manifest
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_id", type=int)
     parser.add_argument("ecc_sha")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--timeout", type=int, default=1800)
+    parser.add_argument("--lock", type=Path, default=Path(".github/ecc-ci-toolchain.json"))
+    parser.add_argument("--refresh-from-logs", action="store_true",
+                        help="Regenerate provenance using a maintainer token with ECC log access")
     args = parser.parse_args()
-    manifest = resolve(args.run_id, args.ecc_sha, args.timeout)
+    if args.refresh_from_logs:
+        manifest = resolve(args.run_id, args.ecc_sha, args.timeout)
+    else:
+        manifest = verify_lock(json.loads(args.lock.read_text()), args.run_id, args.ecc_sha)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(manifest, indent=2) + "\n")
     if os.environ.get("GITHUB_OUTPUT"):

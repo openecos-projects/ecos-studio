@@ -239,12 +239,14 @@ jobs:
         id: runtime
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash .github/scripts/wait-ecc-ci.sh "$(git rev-parse HEAD:ecc)"
+        run: |
+          run_id="$(python3 -c 'import json; print(json.load(open(".github/ecc-ci-toolchain.json"))["ecc_run_id"])')"
+          bash .github/scripts/wait-ecc-ci.sh "$(git rev-parse HEAD:ecc)" "$run_id"
 
       - name: Test ECC Toolchain Resolution
         run: python3 -B -m unittest discover -s .github/scripts/tests -p 'test_ecc_toolchain.py'
 
-      - name: Resolve the Toolchain Validated by ECC
+      - name: Verify the Toolchain Validated by ECC
         id: toolchain
         env:
           GH_TOKEN: ${{ github.token }}

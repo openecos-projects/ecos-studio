@@ -125,6 +125,51 @@ class ToolchainTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Kepler run"):
             toolchain.resolve(1, SHA, 0)
 
+    def locked_manifest(self):
+        return {
+            "ecc_sha": SHA, "ecc_run_id": "1", "ecc_job_id": 9,
+            "oss_cad_suite_version": "2026-10-14", "designs_sha": DESIGNS_SHA,
+            "kepler_run_id": "123", "kepler_sha": "c" * 40,
+            "artifacts": toolchain.artifact_records(
+                artifacts("ecc-cli-linux-x86_64", "icsprout55-pdk", "ecc-sizer"),
+                ("ecc-cli-linux-x86_64", "icsprout55-pdk", "ecc-sizer")),
+            "kepler_artifacts": toolchain.artifact_records(
+                artifacts("kepler-formal-linux-x64"), ("kepler-formal-linux-x64",)),
+        }
+
+    @patch.object(toolchain, "api")
+    def test_ci_verifies_lock_without_downloading_logs(self, api):
+        manifest = self.locked_manifest()
+        api.side_effect = [
+            {"head_sha": SHA},
+            {"jobs": [{"id": 9, "name": "E2E Packaged Flow (gcd)", "conclusion": "success"}]},
+            artifacts("ecc-cli-linux-x86_64", "icsprout55-pdk", "ecc-sizer"),
+            {"head_sha": "c" * 40, "conclusion": "success"},
+            artifacts("kepler-formal-linux-x64"),
+        ]
+        self.assertEqual(toolchain.verify_lock(manifest, 1, SHA), manifest)
+        self.assertTrue(all(not call.args[0].endswith("/logs") for call in api.call_args_list))
+
+    @patch.object(toolchain, "api")
+    def test_outdated_lock_is_rejected_before_network_access(self, api):
+        for run_id, sha in ((2, SHA), (1, "d" * 40)):
+            with self.subTest(run_id=run_id, sha=sha), self.assertRaisesRegex(ValueError, "Update"):
+                toolchain.verify_lock(self.locked_manifest(), run_id, sha)
+        api.assert_not_called()
+
+    @patch.object(toolchain, "api")
+    def test_replaced_artifacts_are_rejected(self, api):
+        for key, value in (("id", 999), ("digest", "sha256:replaced")):
+            manifest = self.locked_manifest()
+            manifest["artifacts"]["icsprout55-pdk"][key] = value
+            api.side_effect = [
+                {"head_sha": SHA},
+                {"jobs": [{"id": 9, "name": "E2E Packaged Flow (gcd)", "conclusion": "success"}]},
+                artifacts("ecc-cli-linux-x86_64", "icsprout55-pdk", "ecc-sizer"),
+            ]
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "artifact metadata"):
+                toolchain.verify_lock(manifest, 1, SHA)
+
 
 if __name__ == "__main__":
     unittest.main()
