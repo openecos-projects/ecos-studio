@@ -1,26 +1,80 @@
 # ECOS Studio
 
-ECOS Studio is a desktop application that provides an integrated development environment for chip design, guiding you through the complete RTL-to-GDS flow.
+ECOS Studio is a desktop environment for chip design. It combines project and
+workspace management, an RTL-to-GDS flow dashboard, a native Chip Viewer, and a
+built-in Agent. You can run backend flows from the GUI or the built-in terminal;
+both use ECC and update the same workspace state. An experimental frontend
+environment supports RTL review, elaboration, lint, and CPU verification.
 
 <div align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/asset/overview-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/asset/overview-light.png">
-  <img alt="ECOS Studio Overview" src="docs/asset/overview-light.png" width="800">
+  <img alt="GCD workspace with the Flow diagram, signoff checklist, and chip metrics" src="docs/asset/overview-light.png" width="1200">
 </picture>
 </div>
+
+The GCD workspace above shows completed implementation results and advisory
+warnings. Execution status and signoff readiness are explained in the
+[User Guide](docs/user-guide.md#monitoring-progress).
 
 ## Download
 
 - [ECOS-Studio AppImage (amd64)](https://github.com/openecos-projects/ecos-studio/releases/latest/)
 
-[AppImage](https://en.wikipedia.org/wiki/AppImage) is a portable Linux application format — download a single file, make it executable, and run it without installation. ECOS Studio is a GUI application and requires a desktop environment (X11 or Wayland) to run — it cannot be launched from a headless environment. For Linux Desktop x86_64 users, you can download the latest ECOS Studio AppImage from the releases page.
-```shell
-# Download and run ECOS Studio on Linux x86_64
-wget https://github.com/openecos-projects/ecos-studio/releases/latest/download/<latest-release-file>.AppImage
-chmod +x <latest-release-file>.AppImage
-./<latest-release-file>.AppImage
+Download the AppImage from the release page, make it executable, and run it from
+a Linux x86_64 desktop with X11 or Wayland and glibc 2.34 or newer. In the
+directory containing the downloaded AppImage:
+
+```bash
+chmod +x ./ECOS-Studio*.AppImage
+./ECOS-Studio*.AppImage
 ```
+
+Use the exact filename if the directory contains more than one AppImage. See
+the [FAQ](docs/FAQ.md) for FUSE and virtual-machine startup issues.
+
+## Using ECOS Studio
+
+1. Open **Resource Manager** to install or import the required tools and an
+   eligible PDK. The **Command line tools** card shows ECC runtime readiness.
+2. Open **Project Management** and create a backend project. Import RTL files
+   or a filelist into the project's `rtl/` directory, or select a managed MPC
+   template.
+3. Create a workspace under that project. The wizard selects the flow range,
+   design inputs, PDK, top module, clock, and implementation parameters.
+4. Open the workspace dashboard and use the **Flow** diagram's Run button.
+   Each step card shows execution status, runtime, peak memory, checklist
+   results, reports, logs, and an available layout thumbnail.
+5. Inspect the final checklist and use **Review & export** on the Signoff card
+   to review delivery artifacts.
+
+Execution status and signoff readiness are separate. Antenna Check and EMIR are
+advisory checks: their warnings do not prevent Harden from completing. EMIR
+requires a real process technology file; see
+[Advisory checks](docs/user-guide.md#advisory-checks).
+
+The top bar's **ECOS Agent** button shows or hides the Agent. It starts hidden
+when you enter a workspace. The **User Guide** button opens the guide inside
+the application.
+
+### Running ECC from the terminal
+
+Open **Terminal** from the status bar to use `ecc` with the application's tool
+environment. For an existing project and workspace:
+
+```bash
+ecc status --project /path/to/project --workspace ws_0001
+ecc run --project /path/to/project --workspace ws_0001
+```
+
+The workspace dashboard, Run button, and Project Management status follow CLI
+execution. Separate workspaces can run concurrently; available CPU and memory
+limit how many flows you should run at once. The host-shell command installed
+by **Command line tools** is `ecos-ecc`.
+
+See [Using ECC in the terminal](docs/user-guide.md#using-ecc-in-the-terminal)
+for a complete project creation example and rerun commands.
 
 ## Quick Start (For Developers)
 
@@ -34,7 +88,7 @@ are not supported by `make build` yet.
 ### Development
 
 ```bash
-# From repo root, initialize the repo and required resources first.
+# From the repository root, initialize submodules and development tools.
 make setup
 
 # Prepare ECC. If Nix is available, enter the dev shell before syncing.
@@ -44,7 +98,7 @@ uv sync --no-build-isolation-package ecc-dreamplace --no-build-isolation-package
 
 # Install GUI dependencies and run GUI in dev mode.
 cd ../ecos/gui
-pnpm install
+pnpm install --frozen-lockfile
 pnpm run dev
 ```
 
@@ -66,21 +120,22 @@ cd ecos/gui && ECOS_ELECTRON_LOG_LEVEL=debug pnpm run dev
 
 Available levels: `debug`, `info`, `warning` (default), `error`, `critical`.
 
-Normal desktop workspace and flow actions run through the ECC CLI managed by the
-Electron desktop bridge.
+Backend project, workspace, parameter, and flow operations use the ECC CLI
+through the Electron desktop bridge. Studio observes workspace files and
+operation events to keep GUI and CLI runs synchronized. ECC-FE provides the
+separate frontend runtime, installed through Resource Manager.
 
-The renderer calls the Electron desktop bridge for workspace and flow commands.
-Read-only workspace queries such as `get_info` and runtime snapshots return their
-data through the CLI response. Runtime events are reserved for flow lifecycle
-changes from `run_step` and `rtl2gds`; stdout and stderr log streams are shown as
-logs and do not trigger workspace data reloads.
+To use a separately installed ECC, set `ECOS_ECC_BIN_DIR` to the absolute
+directory containing its `ecc` executable. For frontend source development,
+set `ECOS_FE_DEV_ROOT` explicitly. See the [GUI development guide](gui/README.md)
+for runtime overrides, checks, and E2E setup.
 
 ### Release Build
 
 `make build` runs the full pipeline:
 
 ```
-ECC CLI packaging environment → ECC CLI runtime resources → Electron build → AppImage
+Native Chip Viewer and Agent build → Electron build → AppImage and deb packages
 ```
 
 ```bash
@@ -88,8 +143,12 @@ ECC CLI packaging environment → ECC CLI runtime resources → Electron build �
 make build
 ```
 
-The build output is copied to the repository root `build/` directory. By
-default, the Linux release artifacts include an AppImage and deb package.
+The build output is available through the repository root `build/` link. By
+default, the Linux release artifacts include an AppImage and deb package. The
+application downloads its pinned ECC runtime on first use; the desktop package
+does not embed that bundle. Install an eligible PDK and the tools required by your selected flow through
+Resource Manager; the default full flow needs Yosys/OSS CAD Suite and its
+configured LEC engine, normally Kepler Formal.
 
 ## Documentation
 

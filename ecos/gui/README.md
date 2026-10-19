@@ -31,7 +31,7 @@ Then install GUI dependencies:
 
 ```bash
 cd ../ecos/gui
-pnpm install
+pnpm install --frozen-lockfile
 ```
 
 ### Development
@@ -121,7 +121,7 @@ pnpm run doctor
 GUI dependencies, optional ECC/Nix availability, and the native resources used
 by the desktop app. It does not start Electron.
 
-The Electron smoke test is manual and should be run after a desktop build:
+Run the Electron smoke test locally after a desktop build:
 
 ```bash
 pnpm run desktop:build
@@ -129,8 +129,37 @@ pnpm run desktop:smoke
 ```
 
 The smoke test starts Electron and verifies that the preload bridge is exposed
-and a key IPC call can reach the main process. It is not part of `check`,
-`test`, `make build`, or CI.
+and a key IPC call can reach the main process. It is separate from `check`
+and `test`; the GUI Checks CI job runs it after building the desktop bundles.
+
+### Product E2E
+
+The real application suite creates backend projects and workspaces, drives the
+GUI and built-in terminal, and checks concurrent workspace isolation. Build
+before running it:
+
+```bash
+pnpm run desktop:build
+pnpm run desktop:e2e
+```
+
+Use a Linux desktop or Xvfb with a working ECC runtime, the unzipped ICS55 PDK,
+OSS CAD Suite, Sizer, and Kepler Formal. The required tool environment includes
+`CHIPCOMPILER_OSS_CAD_DIR`, `CHIPCOMPILER_ECC_SIZER_ROOT`, and
+`CHIPCOMPILER_KEPLER_FORMAL_ROOT`. Useful overrides:
+
+- `ECOS_E2E_PDK_ROOT`: local PDK root.
+- `ECOS_E2E_ECC_BIN_DIR`: directory containing an external ECC executable.
+- `ECOS_E2E_DESIGN_DIR`: design directory; the suite defaults to GCD.
+- `ECOS_E2E_OUT`: directory for workspace and screenshot evidence.
+- `ECOS_E2E_LIT_SUITE`: optional ECC signoff-lit checkout. Its gate is skipped
+  when this variable is unset.
+
+CI runs three independent GCD journeys: `rtl2gds`, `cli-flow`, and
+`flow-concurrency`. **Product E2E** requires all three to pass. ECC owns the
+broader design matrix; Studio verifies its product integration against the
+pinned ECC artifacts and toolchain lock. See [GUI validation instructions](AGENTS.md#validation-by-scope)
+for the current prerequisites and CI-specific settings.
 
 Git hooks are managed with Lefthook from the repository root. The pre-commit
 hook runs lightweight GUI lint checks and staged-file format checks for
@@ -166,7 +195,7 @@ which files changed.
 - [ECOS package README](../README.md) — overall quick start and release notes for ECOS Studio
 - [ECOS Studio user guide](../docs/user-guide.md) — product usage
 - [Repository root README](../../README.md) — monorepo overview
-- [ECC development](../../ecc/docs/development.md), [ECC architecture](../../ecc/docs/architecture.md) — ECC toolchain docs
+- [ECC development](../../ecc/docs/development.md), [ECC CLI design](../../ecc/docs/specification/cli-design.md) — ECC toolchain docs
 
 ---
 

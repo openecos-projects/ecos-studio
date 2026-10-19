@@ -102,7 +102,7 @@ Topbar Chat 按当前页面提供不同入口：
 4. 检查 Agent 展示的设置合同（Project Root / Workspace / Design Name 分栏）。
    需要修改时，可以用自然语言说明需要调整的字段（可一次改多个明确字段）。
 5. 点击“确认并开始运行”。ECOS Studio 创建 workspace，写入 `project.json`，进入
-   工程并展开侧栏 Agent，再通过固定 ECC RPC 启动完整流程；点击“取消”不会创建
+   工程并展开侧栏 Agent，再通过 ECC CLI 启动完整流程；点击“取消”不会创建
    workspace 或执行 ECC。
 6. Workspace shell 等待该次 runtime operation 结束后再回报成功或失败；到达 Harden
    时继续检查 signoff checklist，并在没有 blocked 项时询问是否导出 signoff 包。
@@ -112,21 +112,21 @@ Topbar Chat 按当前页面提供不同入口：
 Quick Start 是 GUI 执行的固定 `ecos.quick_start.workflow.v1` 工作流，不由 Codex
 规划。它先检查 GCD 示例、ICS55 PDK 和 MPC 是否 Ready，再依次打开 Project
 Management、创建 Project 和 Workspace、切换到新 Workspace，并启动从 Synthesis
-到 Harden 的完整 flow。各步状态和资源快照写入 `quick_start_run.json`；聊天中显示
-“Quick Start 已完成”只代表设置完成且 flow 已启动，最终完成或失败由后台 runtime
-结果更新到该记录。设置和启动过程中可单独 Stop Quick Start；flow 已启动后不再由
-这个按钮停止。
+到 Harden 的完整 flow。各步状态和资源快照写入 `quick_start_run.json`；界面等待
+对应 ECC operation 的终态后才显示完整流程成功、失败或取消。`Stop Quick Start`
+会停止设置；flow 启动后会请求取消该次 operation，并等待其终态。也可以在
+Background Tasks 中使用 Cancel Flow。该入口来自首页 Agent 的 Get started 对话选项。
 
 ### 3. Workspace：重跑或继续 flow
 
 “从指定阶段重跑”基于 source workspace 的流程记录和产物，只允许选择有完成证据
-的阶段。确认冻结合同后，GUI 创建隔离 target workspace，通过固定 ECC RPC 执行：
+的阶段。确认冻结合同后，GUI 创建隔离 target workspace，通过 ECC CLI 执行：
 
 - 只重跑所选阶段后停止；或
 - 从所选阶段继续到标准终点（当前为 Harden），而不是 source workspace 原先的终点。
 
 新建默认流程及隔离重跑补齐后的布线后顺序为 `route → filler → lvs → drc →
-postRouteLec → RCX → sta → powerAnalysis → Harden`。源 workspace 不会被重排；
+antennaCheck → postRouteLec → RCX → sta → powerAnalysis → emir → Harden`。源 workspace 不会被重排；
 继续已有 flow 时仍按其持久化步骤顺序执行。
 
 “继续未完成 flow”经确认后在当前 workspace 原地执行

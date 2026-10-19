@@ -4,7 +4,11 @@
 
 **Q: What is ECOS Studio?**
 
-ECOS Studio is an integrated RTL-to-GDS chip design solution that bundles open-source EDA tools (Yosys, ECC-Tools, ECC-Dreamplace, KLayout), IP libraries, and PDKs into a unified desktop application.
+ECOS Studio is a desktop environment for project and workspace management,
+RTL-to-GDS execution through ECC, native layout viewing, and Agent-assisted
+workflows. The desktop package includes the Agent and Chip Viewer; it downloads
+its pinned ECC runtime on first use. Resource Manager installs or imports the
+additional EDA tools, PDKs, and templates required by the selected flow.
 
 > [!NOTE]
 > IP integration and additional tool support are still in progress. Stay tuned for updates.
@@ -17,7 +21,13 @@ Currently only Linux x86_64 with glibc >= 2.34. **Ubuntu 22.04 or later is recom
 
 **Q: Which PDKs are supported?**
 
-Currently only [ICsprout 55nm Open PDK](https://github.com/openecos-projects/icsprout55-pdk). Custom PDK import is not yet available.
+The validated backend integration currently targets
+[ICsprout 55nm Open PDK](https://github.com/openecos-projects/icsprout55-pdk).
+Use Resource Manager to install it or **Import Local** to register an existing
+local installation; imported PDK files stay in place. A PDK must pass the
+workspace wizard’s eligibility checks. **Manual Config** selects technology
+LEF, cell LEF, and Liberty resources; it does not make an arbitrary PDK family
+supported automatically.
 
 **Q: What RTL formats are supported?**
 
@@ -50,13 +60,11 @@ See the [User Guide](user-guide.md) for detailed instructions on creating worksp
 
 **Q: AppImage fails to launch with `dlopen(): error loading libfuse.so.2`**
 
-The AppImage runtime requires FUSE 2, but some distributions (e.g. Ubuntu 24.04) only ship FUSE 3. Either install FUSE 2:
+The AppImage runtime requires FUSE 2. On Ubuntu 24.04, install it with
+`sudo apt install libfuse2t64`; Ubuntu 22.04 uses `sudo apt install libfuse2`.
+Other distributions may use a different package name.
 
-```bash
-sudo apt install libfuse2  # Debian/Ubuntu
-```
-
-or run the AppImage without FUSE by extracting and running it directly:
+You can also run the AppImage without FUSE by extracting and running it directly:
 
 ```bash
 ./ECOS-Studio_*.AppImage --appimage-extract-and-run
@@ -78,7 +86,12 @@ See [#49](https://github.com/openecos-projects/ecos-studio/issues/49) for detail
 
 **Q: PDK validation fails with "PDK root directory not found" or missing files**
 
-The PDK directory is incomplete or empty. This typically happens when icsprout55-pdk are not fully initialized. Re-run `git checkout main && make unzip` in icsprout55-pdk directory or see [#46](https://github.com/openecos-projects/ecos-studio/issues/46) for detailed diagnosis and resolution.
+The PDK directory is incomplete, empty, or no longer at its registered path.
+For an ICsprout55 source checkout, follow its README to populate the required
+files (`make unzip` from the PDK directory). Then use **Validate** in Resource
+Manager or **Re-check PDK** in the workspace wizard. See
+[#46](https://github.com/openecos-projects/ecos-studio/issues/46) for an earlier
+missing-file diagnosis.
 
 **Q: The CTS stage hangs — log file keeps growing or the flow is stuck with no progress**
 
@@ -86,11 +99,16 @@ The CTS engine can enter an infinite loop under certain design configurations. T
 
 **Q: Yosys synthesis step times out**
 
-Large or complex designs may exceed the 10-minute synthesis timeout. Use a smaller design or wait for future releases with configurable timeout support. See [#48](https://github.com/openecos-projects/ecos-studio/issues/48) for details.
+The current synthesis runner has no fixed ten-minute execution timeout. Open
+**Log** on the Synthesis card and check the last tool message, available memory,
+and the selected Yosys/Slang installation. If a run fails or stops making
+progress, include the log and **Help → About → Copy version info** in an issue.
+[#48](https://github.com/openecos-projects/ecos-studio/issues/48) describes an
+older timeout issue.
 
 **Q: DreamPlace placement fails with "overflow is significant" or HPWL is infinity/nan**
 
-The core utilization or target density is too high for the placer to converge. Try reducing Core Utilization and Target Density, increasing Cell Padding, or enabling the Routability Opt Flag in the Configuration page. See [#50](https://github.com/openecos-projects/ecos-studio/issues/50) for details.
+The core utilization or target density is too high for the placer to converge. Try reducing Core Utilization and Target Density, increasing Cell Padding, or enabling routability optimization in **Edit → Config → Place**. See [#50](https://github.com/openecos-projects/ecos-studio/issues/50) for details.
 
 **Q: How do I enable Electron host diagnostic logs?**
 
@@ -110,9 +128,24 @@ Available levels: `debug`, `info`, `warning` (default), `error`, `critical`.
 
 **Q: How does the desktop app run workspace and flow actions?**
 
-Workspace queries and flow queries are regular CLI request/response calls over
-the Electron desktop bridge. `get_info`, runtime snapshots, workspace loading,
-and workspace creation return data to their caller and do not enter the runtime
-refresh stream. Runtime events are used only for running flow lifecycle changes
-from `run_step` and `rtl2gds`; stdout and stderr log output is not treated as a
-workspace data-refresh signal.
+Project and workspace commands use the ECC CLI through the Electron desktop
+bridge. Backend flow runs have their own ECC operation identity and persisted
+workspace state. Studio observes operation updates and workspace files so runs
+started in the built-in terminal also update the dashboard and Project
+Management. Logs are displayed separately from the verified workspace state.
+
+**Q: Does Update Workspace keep completed results?**
+
+Backend **File → Update Workspace** recreates the workspace from project
+settings. It retains workspace parameter overrides, but replaces previous flow
+state, outputs, logs, and workspace-local user files. Back up the directory
+first, or use `ecc workspace refresh NAME --project DIR --keep-backup` to retain
+the replaced generation. For parameter-only changes, use **Edit → Config**.
+See [Updating a Workspace](user-guide.md#updating-a-workspace).
+
+**Q: Does deleting a workspace delete its files?**
+
+The confirmation dialog defaults to **Keep workspace data**. Accepting that
+default removes the registration and keeps the directory. Clear the checkbox
+to also delete an internal workspace directory. External workspace files are
+always retained.

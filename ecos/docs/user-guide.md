@@ -1,11 +1,10 @@
 # ECOS Studio User Guide
 
-This guide walks you through using ECOS Studio to design and implement your chip
-from RTL to GDS. It covers every screen and operation in the desktop
-application: managing resources and PDKs, creating and organizing workspaces,
-running the RTL-to-GDS flow, inspecting layouts in the Chip Viewer, using the
-built-in Agent, and working with the experimental frontend (RTL verification)
-environment.
+This guide explains how to use ECOS Studio to implement a chip from RTL to GDS.
+It covers managing resources and PDKs, creating projects and workspaces,
+running and inspecting the RTL-to-GDS flow from the GUI or terminal, using the
+Chip Viewer and built-in Agent, and working with the experimental frontend
+(RTL verification) environment.
 
 ## Table of Contents
 
@@ -34,17 +33,18 @@ environment.
   - [Navigation Sidebar](#navigation-sidebar)
   - [Workbench Layout](#workbench-layout)
   - [Home Dashboard](#home-dashboard)
+  - [Timing](#timing)
 - [Running the RTL-to-GDS Flow](#running-the-rtl-to-gds-flow)
   - [Starting and Re-running](#starting-and-re-running)
   - [Monitoring Progress](#monitoring-progress)
   - [Cancelling a Flow](#cancelling-a-flow)
   - [Viewing Logs](#viewing-logs)
-- [Step Pages](#step-pages)
-  - [Overview and Checklist](#overview-and-checklist)
-  - [Quality of Results](#quality-of-results)
+  - [Advisory Checks](#advisory-checks)
+  - [Using ECC in the Terminal](#using-ecc-in-the-terminal)
+- [Inspecting Flow Steps](#inspecting-flow-steps)
+  - [Checklist Details](#checklist-details)
+  - [Reports](#reports)
   - [Layout](#layout)
-  - [Data Insights](#data-insights)
-  - [Data Reports](#data-reports)
 - [Configuring the Flow](#configuring-the-flow)
 - [Chip Viewer](#chip-viewer)
   - [Opening the Chip Viewer](#opening-the-chip-viewer)
@@ -55,13 +55,16 @@ environment.
   - [Keyboard Shortcuts](#keyboard-shortcuts)
 - [ECOS Agent](#ecos-agent)
   - [Chat Panel](#chat-panel)
+  - [Guided Setup and Quick Start](#guided-setup-and-quick-start)
   - [Proposals and Confirmation](#proposals-and-confirmation)
+  - [Optimizing a Completed Design](#optimizing-a-completed-design)
   - [Agent Sessions](#agent-sessions)
   - [Agent Setup](#agent-setup)
 - [Frontend Design (Experimental)](#frontend-design-experimental)
   - [Frontend Landing Page](#frontend-landing-page)
   - [Frontend Workspace Wizard](#frontend-workspace-wizard)
   - [Frontend Workspace Layout](#frontend-workspace-layout)
+  - [Step QoR](#step-qor)
   - [Prepare](#prepare)
   - [RTL Review](#rtl-review)
   - [Elaboration (Elab)](#elaboration-elab)
@@ -70,10 +73,10 @@ environment.
   - [Cases and Waveforms](#cases-and-waveforms)
   - [Source Editor](#source-editor)
   - [Waveform Viewer](#waveform-viewer)
-- [Tech Library](#tech-library)
 - [Global UI](#global-ui)
   - [Notifications](#notifications)
   - [Background Tasks](#background-tasks)
+  - [Closing Studio](#closing-studio)
   - [Terminal Panel](#terminal-panel)
   - [Theme, Zoom, and About](#theme-zoom-and-about)
   - [Exporting Results](#exporting-results)
@@ -88,27 +91,32 @@ environment.
 
 **Linux (AppImage):**
 
-> [AppImage](https://en.wikipedia.org/wiki/AppImage) is a portable Linux
-> application format — download a single file, make it executable, and run it
-> without installation. ECOS Studio is a GUI application and requires a desktop
-> environment (X11 or Wayland) to run — it cannot be launched from a headless
-> environment.
+Download the [AppImage](https://en.wikipedia.org/wiki/AppImage) from the
+[release page](https://github.com/openecos-projects/ecos-studio/releases/latest).
+Use a Linux x86_64 desktop with glibc 2.34 or newer and X11 or Wayland. In the
+directory containing the downloaded file:
 
 ```bash
-chmod +x ./ECOS-Studio_*.AppImage
-./ECOS-Studio_*.AppImage
+chmod +x ./ECOS-Studio*.AppImage
+./ECOS-Studio*.AppImage
 ```
 
-**From Nix:**
+Use the exact filename if several AppImages are present.
 
-```bash
-nix shell .#ecos-studio
-ecos-studio
-```
+For source development, including the optional Nix development shell, follow
+the [development instructions](https://github.com/openecos-projects/ecos-studio/blob/main/ecos/README.md#development).
+Use the AppImage instructions above for the supported release installation.
 
 ### Home Screen
 
-When you first launch ECOS Studio you'll see the home screen. It contains:
+When you launch ECOS Studio, the home screen provides the main entry points.
+The screenshots in this guide were captured from the current desktop app using
+the GCD design. Paths, installed resources, and measured results will differ
+on your machine.
+
+![Home screen with design tools, resources, and Project Management](asset/home-light.png)
+
+It contains:
 
 **Design Tools** — two entry cards:
 
@@ -144,9 +152,12 @@ The application window is organized as follows:
 - **Page Content** — the current screen (welcome pages, workspace pages, …).
 - **Status Bar** — version text on the left; a **Terminal** toggle button on
   the right that shows or hides the built-in terminal panel.
-- **Agent Drawer** — on non-workspace screens, the ✨ **ECOS Agent** button in
-  the top bar opens a chat drawer on the right edge. Drag its left edge to
-  resize (280–720 px).
+- **ECOS Agent** — the top bar button shows or hides the Agent. On home
+  screens it opens a drawer, initially 280 px wide; drag its left edge to
+  resize (280–720 px). On the backend workspace dashboard it opens the right
+  panel. The Agent starts hidden when you enter a workspace.
+- **User Guide** — the book button in the top bar opens this guide inside the
+  application.
 - **Terminal Panel** — a bottom panel with one or more shell sessions (see
   [Terminal Panel](#terminal-panel)).
 
@@ -160,15 +171,18 @@ it; while a menu is open, hovering another menu name switches to it. Press
   - **New Window** (`Ctrl+Shift+N`) — open a new application window.
   - **New Workspace** (`Ctrl+N`) — open the workspace creation wizard.
   - **Open Workspace** (`Ctrl+O`) — pick a directory and open that workspace.
-  - **Update Workspace** — re-run the wizard on the current workspace to change
-    its configuration. Disabled while a flow is running.
-  - **Export Signoff Package** *(workspace screens only)* — review and export
+  - **Update Workspace** — recreate a backend workspace from current project
+    settings, or reopen the wizard for a frontend workspace. Read
+    [Updating a Workspace](#updating-a-workspace) before using this action: a
+    backend update replaces existing execution data. Disabled while a flow is
+    running.
+  - **Export Signoff Package** _(workspace screens only)_ — review and export
     the sign-off package. Disabled while a flow is running.
   - **Export Design Summary** — export a design summary report.
-- **Edit → Config** *(workspace screens only)* — open the
+- **Edit → Config** _(workspace screens only)_ — open the
   [Step Configuration](#configuring-the-flow) dialog.
 - **View**
-  - **Zoom In** (`Ctrl+`+) / **Zoom Out** (`Ctrl+`-) / **Reset Zoom**
+  - **Zoom In** (`Ctrl++`) / **Zoom Out** (`Ctrl+-`) / **Reset Zoom**
     (`Ctrl+0`) — scale the whole UI between 80% and 140%. The setting persists
     across launches.
 - **Help**
@@ -176,16 +190,16 @@ it; while a menu is open, hovering another menu name switches to it. Press
   - **About** — show version information for all components, with a **Copy
     version info** button for pasting into bug reports.
 
-Global shortcuts (Windows/Linux use `Ctrl`, macOS uses `Cmd`):
+Global shortcuts on Linux:
 
-| Shortcut | Action |
-|---|---|
-| `Ctrl+N` | New Workspace (open wizard) |
-| `Ctrl+Shift+N` | New Window |
-| `Ctrl+O` | Open Workspace |
-| `Ctrl+`+` / `-` / `0` | UI zoom in / out / reset |
-| `Esc` | Close menus, dialogs, popovers, notifications |
-| `Enter` | Confirm the default action in dialogs |
+| Shortcut                       | Action                                        |
+| ------------------------------ | --------------------------------------------- |
+| `Ctrl+N`                       | New Workspace (open wizard)                   |
+| `Ctrl+Shift+N`                 | New Window                                    |
+| `Ctrl+O`                       | Open Workspace                                |
+| `Ctrl++` / `Ctrl+-` / `Ctrl+0` | UI zoom in / out / reset                      |
+| `Esc`                          | Close menus, dialogs, popovers, notifications |
+| `Enter`                        | Confirm the default action in dialogs         |
 
 ---
 
@@ -197,8 +211,13 @@ The **Command line tools** card (on the home screen and in Resource Manager)
 manages the `ecos-ecc` host command that exposes the packaged RTL-to-GDS
 runtime on your shell.
 
-- The status pill shows one of: *Unsupported*, *Development*, *Not installed*,
-  *Installing*, *Ready*, *Self-check failed*, *Failed*.
+The built-in terminal provides the command as `ecc`. Studio downloads its
+pinned ECC bundle on first use; wait for runtime readiness before creating a
+workspace or starting a flow. Installing the host shim lets you run the same
+CLI as `ecos-ecc` from a separate system terminal.
+
+- The status pill shows one of: _Unsupported_, _Development_, _Not installed_,
+  _Installing_, _Ready_, _Self-check failed_, _Failed_.
 - When installed, the card shows the version plus bundle and shim paths.
 - **Install / Reinstall** downloads and verifies the bundle (a progress bar
   with percentage is shown); **Uninstall** removes it. Linux only.
@@ -212,18 +231,18 @@ and MPC projects.
 **Layout:**
 
 - **Close button** (top-left `×`) — return to the home screen.
-- **Left navigation** — categories: *All Resources*, *Frontend Flow*, *EDA
-  Tools*, *PDKs*, *MPC*, *Installed*, each with a count badge. Selecting
-  *Frontend Flow* also shows a readiness bar (per stage: Review / Elab / Lint /
+- **Left navigation** — categories: _All Resources_, _Frontend Flow_, _EDA
+  Tools_, _PDKs_, _MPC_, _Installed_, each with a count badge. Selecting
+  _Frontend Flow_ also shows a readiness bar (per stage: Review / Elab / Lint /
   Sim / Wave).
 - **Need help?** card — links to the user guide.
 - **Toolbar** — search box (matches name, description, version, dependencies),
-  status tabs *All / Available / Installed / Updates*, and a **Refresh**
+  status tabs _All / Available / Installed / Updates_, and a **Refresh**
   button.
 
-**Resource rows** show an icon, name, description, flow tags, dependency tags
-("Installs n required: …"), version, size, and a status pill. Possible row
-actions, depending on state:
+**Resource cards** show an icon, name, description, flow tags, dependency tags
+("Installs n required: …"), version, size, and a status pill. Available card
+actions depend on the resource and its state:
 
 - **Import Local** — point at a local directory to register a locally built
   tool, or **link a PDK** (files stay in place; the PDK is registered by
@@ -233,14 +252,22 @@ actions, depending on state:
 - **Cancel** — abort an in-progress installation.
 - **Retry** — retry after an error (download failed, verification failed,
   post-install failed, …).
-- **Validate** *(PDKs)* — re-verify PDK integrity.
+- **Validate** _(PDKs)_ — re-verify PDK integrity.
 - **Uninstall / Remove** — uninstalling asks for confirmation because it cannot
-  be undone; *Remove reference* only unlinks a PDK without touching its files.
+  be undone; _Remove reference_ only unlinks a PDK without touching its files.
 
-**Batch install:** select multiple resources with the **Selected panel** on the
-right. It lists the pending selections (with missing dependencies marked "+n
-required"), an estimated total size, and a **Download** button that installs
-everything (two at a time).
+Use **Install** on a resource card to install it and its required dependencies.
+The dependency tags show which additional resources that action will install.
+
+ECC readiness alone does not mean every external EDA tool is available. For
+the default full backend flow, install or import Yosys/OSS CAD Suite and the
+configured LEC engine (normally Kepler Formal), together with an eligible PDK.
+A shorter flow range may require fewer tools. KLayout GUI is needed only when
+using `ecc gdsview`.
+
+![Resource Manager lists tools and their installation state](asset/resource-manager.png)
+
+![The PDK category shows a registered local ICS55 installation](asset/resource-pdks.png)
 
 ### MPC Resources
 
@@ -248,7 +275,7 @@ Open it from the home screen's **MPC Resources** quick link (route `/mpc`).
 
 - **Manage** jumps to Resource Manager; **Refresh** reloads the list.
 - **Left** — installed MPC resources (name + version); click to select.
-- **Right** — details for the selected package: version, an *Update available*
+- **Right** — details for the selected package: version, an _Update available_
   badge when applicable, a **Design** dropdown when the spec contains multiple
   designs, and a template preview showing design information (name, directory,
   DBU, IO pin count), die/core geometry, other resources, I/O metadata, and an
@@ -271,18 +298,20 @@ Click the **Backend Design** card on the home screen. The landing page offers:
   badge, a status badge (Success / Completed with warnings / Failed / Running /
   In Progress / Not Started), completed step count ("x/y steps"), path, and a
   relative timestamp (Today / Yesterday / N days ago). Workspaces whose state
-  cannot be verified show a stale (*Stale · last verified*) badge in amber.
+  cannot be verified show a stale (_Stale · last verified_) badge in amber.
   Hover a card to reveal **×** (remove from the list — files are not deleted)
   and click the card to reopen it. Unrecognized workspaces are greyed out and
   cannot be opened. When there are more than three entries, **View All (N) /
   Collapse** toggles between the short and full list. This list is how you
-  *resume where you left off*.
+  _resume where you left off_.
 
 ### Creating a New Workspace
 
 Click **New Workspace** to open the wizard. The dialog can be maximized, and
 its left step strip lets you jump back to any step you have already reached.
-The six steps:
+The wizard has seven steps. The example below starts from a project created
+in Project Management, so its project directory and imported RTL are already
+available:
 
 **Step 1 — Project Setup.** Choose how to anchor the workspace:
 
@@ -296,48 +325,54 @@ The six steps:
 
 Names must not contain spaces or Chinese characters.
 
-**Step 2 — Basic Info.**
+![Project Setup selects the project that owns the workspace](asset/wizard-01-project.png)
+
+**Step 2 — Import RTL.** Select RTL files or a filelist. ECC copies the selected
+sources into the project's `rtl/` directory and records the design inputs at
+creation. You can reuse an existing project's imported sources; selecting new
+sources replaces that selection. A managed MPC can supply the project design
+source. Complete this phase before choosing the remaining workspace settings.
+
+![Import RTL reuses project sources or selects replacement sources](asset/wizard-02-rtl.png)
+
+**Step 3 — Basic Info.**
 
 - **Workspace Name** (required; must not contain spaces or Chinese characters;
-  defaults to the design name until you edit it).
+  is proposed automatically, such as `ws_0001`).
 - **Description** — optional free text, stored in `params.toml`.
 - **Workspace Location** — read-only preview of where the workspace will be
   created (`<project root>/<workspace name>`).
 
-**Step 3 — Flow Setup.** Define the step range of the harden flow:
+![Basic Info names the workspace and previews its directory](asset/wizard-03-basics.png)
+
+**Step 4 — Flow Setup.** Define the execution range of the RTL-to-GDS flow:
 
 When the range includes STA, **STA maximum parallel corners** selects an integer
-from 1 to 4 (default 1, serial). Studio submits `sta.max_parallel_corners` through
-the ECC CLI workspace parameter workflow; ECC persists the override in
-`home/params.toml` and regenerates the STA configuration's `max_parallel_corners`.
-This is an upper bound, not a promise: Linux worker dispatch is also limited by
-CPU count and memory headroom. Other platforms run serially. The runtime reserves
-at least 1 GiB or 10% of the effective memory capacity, whichever is larger,
-honors Linux cgroup v2 memory limits, and stops adding workers when estimated
-memory requirements exceed the remaining headroom. Unknown memory availability
-reduces dispatch to one worker. This heuristic does not guarantee that an
-individual corner fits in memory; use 1 for very large designs or constrained hosts.
+from 1 to 4 (default 1, serial). ECC stores `sta.max_parallel_corners` in
+`home/params.toml`. The runtime may use fewer workers when CPU or memory is
+limited. Keep the setting at 1 for large designs or constrained hosts.
 
 - A summary strip shows the selected **Start Step**, **End Step**, and step
   count.
-- Click a step card to set the range. Steps are marked *Reused from source*
-  (locked, when deriving from another workspace), *Skipped by default*, and
-  *Skippable*.
+- Click a step card to set the range. Steps are marked _Reused from source_
+  (locked, when deriving from another workspace), _Skipped by default_, and
+  _Skippable_.
 
-**Step 4 — Design Files.** The inputs depend on the start step (the left rail
+![Flow Setup chooses the execution range and skipped steps](asset/wizard-04-flow.png)
+
+**Step 5 — Design Files.** The inputs depend on the start step (the left rail
 lists what is required and what is complete):
 
-- Start at **Synthesis** — **RTL** (required): drag & drop `.v` / `.sv` /
-  `.vhd` / `.vhdl` files (`.gz` allowed) or a design folder, or use the
-  **Browse** menu (**Select RTL files…** / **Select design folder…** — folder
-  scans let you check a subset of discovered files). Alternatively provide a
-  **Filelist** (mutually exclusive with the RTL list). **SDC** is optional.
+- Start at **Synthesis** — review the sources from **Import RTL** and add an
+  optional **SDC**. Use **Change in Import RTL** to change the source selection.
 - Start at **preFloorplan** — **Verilog** netlist (required) + optional SDC.
 - Start later — **DEF** (required) + **Verilog** (required) + optional SDC.
   Each single-file input has an **Import …** button that opens a filtered file
   dialog.
 
-**Step 5 — PDK Config.**
+![Design Files reviews imported RTL and adds an optional SDC](asset/wizard-05-files.png)
+
+**Step 6 — PDK Config.**
 
 - Pick a **Process Design Kit** from the imported PDK cards (name, node,
   source, version, and a readiness badge: ready / unverified / missing /
@@ -354,18 +389,20 @@ lists what is required and what is complete):
   indicators show whether PDK selection, PDK eligibility, and the chosen config
   mode are satisfied.
 
-**Step 6 — Spec Setting.** Stored in the workspace `params.toml`:
+![PDK Config selects a validated PDK and its resources](asset/wizard-06-pdk.png)
+
+**Step 7 — Spec Setting.** Stored in the workspace `home/params.toml`:
 
 - **Design Name** (required; read-only if the project already declares one),
-  **Top Module** (auto-discovers candidate modules from your RTL/netlist and
+  **Top Module** (discovers candidate modules from your imported RTL/netlist and
   suggests them; a **Return to Design Files** shortcut appears when discovery
   finds nothing), **Clock Signal Name** (required), **Frequency max [MHz]**.
-- **Max Fanout**, **Target Density**, **Target Overflow**, and any additional
-  parameters declared by the ECC parameter catalog (rendered as dropdowns,
-  checkboxes, or number fields; inapplicable parameters are disabled with an
-  explanation).
+- **Max Fanout** and the applicable design constraints. After creation, use
+  **Edit → Config** to change step-specific parameters such as placement density.
 - **Die Area** — either explicit **Width × Height**, or **Core Utilization**.
   With an MPC template, die-area limits are validated live.
+
+![Spec Setting configures the top module, clock, frequency, and die sizing](asset/wizard-07-spec.png)
 
 Click **Create Workspace**. ECOS Studio creates the directory structure,
 generates configuration files, initializes the workspace database, and
@@ -381,8 +418,8 @@ the wizard is prefilled:
 - A **Created from** card on the left shows the source project, workspace, and
   step.
 - **Flow Setup** starts at the next runnable step; earlier steps are shown as
-  reused and cannot be selected, and the start step is pinned to the source
-  output step.
+  reused and cannot be selected, and the start step is pinned to that next
+  runnable step.
 - **Design Files** reuses the source: DEF comes from the selected step output;
   Verilog and SDC default to the source workspace configuration.
 - **PDK Config** and **Spec Setting** default to the source workspace's
@@ -393,9 +430,22 @@ the wizard is prefilled:
 For a backend ECC workspace, **File → Update Workspace** applies the current
 Project design inputs, PDK, and flow selection through `ecc workspace refresh`.
 Workspace-local parameter overrides are preserved; edit them separately in the
-parameter UI. If ECC detects manually changed derived configuration files, the
-app asks before retrying with overwrite enabled. The operation is disabled
-while a flow is running.
+parameter UI. **Back up the workspace before updating:** refresh replaces the
+workspace directory with a fresh generation, removing its previous flow state,
+outputs, logs, and user-added files. The new generation must be run again. The
+backend GUI action does not offer a backup choice.
+
+To retain the old generation, use the terminal instead:
+
+```bash
+ecc workspace refresh ws_0001 --project /path/to/project --keep-backup
+```
+
+ECC retains the replaced tree in a sibling `.ws_0001.replace-backup-N` directory
+and registers it as an archived workspace in `project.json`. If derived
+`config/*.json` files were edited by hand, refresh refuses the overwrite until
+you explicitly approve it; the GUI asks before retrying. The operation is
+disabled while a flow is running.
 
 For a frontend workspace, **File → Update Workspace** re-opens the workspace
 wizard. Before replacing it you choose how to treat the existing data:
@@ -411,9 +461,12 @@ Frontend update is also disabled while a flow is running.
 
 ## Project Management
 
-Click **Project Management** (home screen, or **Back to Project Management**
-from the workspace shortcuts menu `⋯`). The manager is a maximizable overlay
-with a project/workspace tree on the left and an analysis panel on the right.
+Click **Project Management** on the home screen, or **Back to Project
+Management** in the workspace shortcuts menu `⋯`. The manager has a
+project/workspace tree on the left and an analysis panel on the right. Returning
+to it from a workspace keeps that workspace's execution running.
+
+![Project Management lists projects and workspaces alongside QoR analysis](asset/project-management.png)
 
 ### Projects and Workspace List
 
@@ -465,15 +518,24 @@ the list does not run a full consistency scan or repair workspace state.
 The **New project** dialog asks for:
 
 - **Project Name** and **Design Name**.
+- **Project Type** — Backend or Frontend. The workspace wizard follows the
+  selected project type.
 - **Project Storage Location** — read-only field; click it or **Browse** to
   choose a directory.
-- **Managed MPC** — optionally bind an installed MPC template (*No MPC* or a
+- **Managed MPC** — optionally bind an installed MPC template (_No MPC_ or a
   template from the dropdown). Templates with multiple designs show an **MPC
-  Design** selector and a preview card.
+  Design** selector and a preview card. This field applies to backend projects.
+- **Import RTL** — required for a backend project without a managed MPC.
+  Select RTL files or a filelist; `ecc rtl import` copies them into the
+  project's `rtl/` directory.
 
 The dialog previews the manifest path (`<location>/project.json`) and validates
 the inputs inline (missing directory, unloaded MPC spec, …). **Create** writes
-`project.json` and registers the project.
+the backend project's `ecc.toml` and `project.json`, imports its RTL, and
+registers the project. Creating a project does not run its flow; use the
+project row's **New** action to create a workspace next.
+
+![New Project selects Backend or Frontend and imports backend RTL](asset/new-project.png)
 
 ### Importing Projects and Workspaces
 
@@ -484,7 +546,12 @@ the inputs inline (missing directory, unloaded MPC spec, …). **Create** writes
 ### Removing and Deleting
 
 - **Remove project** — unregister from the list; nothing is deleted from disk.
-- **Delete workspace** — permanently deletes the workspace (asked to confirm).
+- **Delete workspace** — opens a confirmation dialog with **Keep workspace
+  data** checked by default. Confirming this default removes its registration
+  from `project.json` and leaves the directory on disk. Clear the checkbox to
+  also permanently delete a workspace directory inside the project.
+- External workspace directories always retain their data; the dialog removes
+  their registration only.
 
 ### Project Analysis
 
@@ -534,66 +601,64 @@ Conditional panels above the analysis view:
 
 ## Workspace Overview
 
-Open a workspace to land on its **Home** page. The workspace UI is a workbench:
-a narrow navigation rail on the far left, a dashboard area, and a right-hand
-column with flow status and logs.
+Open a backend workspace to land on its dashboard. The Flow diagram is the
+main place to run steps and inspect their results.
 
 ### Navigation Sidebar
 
-The 64 px rail lists **Dashboard** plus every flow step (Synthesis, Floorplan,
-Pre Floorplan, Macro Placement, Post Floorplan, Place, CTS, Timing Opt, Route,
-DRC, LVS, Filler, Post-Route LEC, LEC, STA, GDS, Signoff, Harden). Each entry
-shows a status badge: green check (success), skipped, spinning (running),
-clock (pending), red (failed), amber (incomplete). The current page is
-highlighted; clicking an entry navigates to that step's page.
+The left rail contains **Dashboard**, **Step Trends**, **DB Trends**,
+**Congestion**, **DRC**, and **Timing**. The analysis entries open dialogs over
+the dashboard. Select individual flow steps through the diagram's cards.
 
 ### Workbench Layout
 
-The main area is a draggable splitter:
+The dashboard fills the workspace while Agent is hidden. Use **ECOS Agent** in
+the top bar to show its panel on the right; the initial split gives it 25% of
+the workbench width. Drag the divider to adjust it. Hiding Agent removes that
+panel and divider so the dashboard fills the available width again.
 
-- **Left (≈60%)** — the dashboard of the current page.
-- **Right (≈40%)** — the **Flow Status Strip** (see below), the **Run**
-  button, the **Flow Log** panel, and the **Agent** inspector panel.
+The separate **Show/Hide information panel** top-bar control also affects the
+right panel. If Agent is enabled but its panel is not visible, check that
+**Show information panel** is selected.
 
 ### Home Dashboard
 
-The Home page aggregates the whole flow:
+- **Flow diagram** — each card shows the step's execution state, elapsed
+  runtime, peak memory, checklist state, and layout thumbnail when available.
+  The status icon opens a step-run dialog; **Details**, **Reports**, and
+  **Log** open that step's results. The diagram groups post-route checks into
+  branches. Use the zoom slider, wheel, or drag to navigate, and the expand
+  button to view the diagram full screen. Branches describe the displayed
+  dependencies; they do not promise that the checks execute in parallel.
+- **Quality of Results** — the current QoR v3 score out of 100, or **NR** when
+  the design is not rated. **QoR details** opens the full assessment and any
+  available baseline comparison.
+- **Signoff Checklist** — pass rate and passing, blocked, warning, and
+  unavailable counts. **Sign-off details** lists the findings and evidence.
+- **Signoff card** — after Harden, **Review & export** becomes available when
+  mandatory verification steps and their checklists pass. Review the package
+  before exporting; a completed runtime step alone does not certify signoff.
+- **Chip Basic Info** — project, SoC template, workspace, PDK, design, top
+  module, die area, frequency, clock, and applicable constraints.
+- **Key Metrics** — area, instances, timing, and other available results.
+- **Stale-result notice** — identifies results from an earlier configuration.
+  They remain available for inspection but do not count as current signoff
+  evidence.
 
-- **Stale/drift warning bar** *(conditional)* — appears when flow results are
-  stale or layout artifacts changed outside the tool; such artifacts are
-  viewable but not valid sign-off evidence.
-- **Chip Basic Info** — project, SoC template, baseline workspace, workspace,
-  PDK, design, top module, target die area, target frequency, clock. Long
-  values are truncated with a hover tooltip.
-- **Constraints** — minimum/maximum area, maximum cell count (over-limit values
-  highlighted), max fanout. **Port Definition →** opens the port table
-  (port/direction/type/width/description).
-- **Checklist** — a status pie chart (pass rate in the center) with
-  passing/blocked/warning/unavailable counts and a headline (ready, blocked,
-  needs attention, …). **Sign-off details →** lists every checklist entry with
-  its step, summary, and source path.
-- **Quality of Results** — baseline QoR score vs. current QoR score out of 100
-  (PASS/FAIL against the threshold), an improved/regressed summary with a pie
-  chart, per-step rows (click a row to open that step's QoR analysis), and
-  **QoR details →** for the full comparison.
-- **LayoutView** — a thumbnail per step layout; the header shows the layout
-  count. Click a thumbnail to open that layout in the Chip Viewer. Unavailable
-  layouts show the reason (too large, invalid, changed, stale, missing).
-- **Key Metrics** — area, instances, timing, and other headline metrics.
-- **Insight navigation** — buttons beneath **Dashboard** in the left sidebar
-  open full-size dialogs: **Step Trends** (runtime and peak memory, with a
-  **Log scale** toggle), **DB Trends**
-  trends (metric×step heat matrix, trend lines, instance composition with a
-  Count/Area toggle), congestion (overflow trends and per-step heat maps), DRC
-  (bars/pie toggle, per-type list, layer×type matrix with a *Non-zero only*
-  filter), and **Timing** (current-workspace STA analysis). The Data Snapshot
-  card is no longer on the Dashboard; Chip Basic Info and Key Metrics share
-  its bottom row in a 4:6 width ratio.
+Use the sidebar analysis dialogs for runtime and peak-memory trends, database
+metrics across steps, congestion maps, DRC statistics, and timing details.
+Missing results show their availability instead of a fabricated zero.
+
+![Workspace dashboard with the Flow diagram, checklist, and chip metrics](asset/overview-light.png)
+
+In this example, Harden succeeded while EMIR remains incomplete because no
+process technology file was configured. The warning remains visible in the
+checklist; see [Advisory Checks](#advisory-checks).
 
 ### Timing
 
-The Timing dialog shows current STA results, without a baseline or cross-run
-convergence chart. QoR baseline comparisons elsewhere in Studio are unchanged.
+Open **Timing** from the left rail to inspect the current workspace’s STA
+results by corner and path group.
 
 - **Overview / Summary** — separate worst setup/hold WNS and TNS KPIs (also
   present in the compact Synthesis/STA summaries), with each metric's own
@@ -621,147 +686,219 @@ convergence chart. QoR baseline comparisons elsewhere in Studio are unchanged.
 - **View full timing issues with stages** — separately loads the analysis
   issue list. An empty issue list does not imply an empty timing-path export.
   Zero issues, missing paths, and artifact errors have distinct messages.
-- **Reload timing** re-reads the indexed corner artifacts. Committing a new
-  workspace revision automatically invalidates cached summaries, paths, and
-  issues; late responses from an older revision do not replace current data.
+- **Reload timing** refreshes corner summaries, paths, and issues. Rerunning
+  or updating the workspace refreshes these results automatically. Missing
+  or changed artifacts remain unavailable until current results can be read.
 
-Corner overview data comes from indexed
-`sta_ecc/feature/<corner>/qor_summary.json` artifacts, and path details come from
-the matching `timing_paths.json`. The separate issue list comes from
-`sta_ecc/analysis/sta_timing_issues.json`. Reads go through the desktop backend's
-committed artifact index, not renderer-side filesystem access. Missing, changed,
-or unindexed artifacts remain unavailable rather than being silently replaced
-with data from another revision.
+![Timing analysis with setup and hold results across corners](asset/timing-analysis.png)
 
 ---
 
 ## Running the RTL-to-GDS Flow
 
-New default workspaces use the post-route sequence `route → filler → lvs → drc
-→ postRouteLec → RCX → sta → powerAnalysis → Harden`. Isolated full-flow reruns
-extend their target workspace in this order without changing the source.
-Continuing an existing workspace retains its persisted flow order.
+The workspace's stored flow determines its step list and order. New default
+flows include the post-route sequence `route → filler → lvs → drc →
+antennaCheck → postRouteLec → RCX → sta → powerAnalysis → emir → Harden`.
+Existing workspaces retain their stored sequence.
 
 ### Starting and Re-running
 
-The **▶ Run** button lives in the right-hand column:
+- Use **▶ Run** in the Flow diagram header to run the full flow.
+- Click a step card's execution-state icon to open its run dialog and run
+  that step.
+- Finished flows and steps ask for confirmation before rerunning. A rerun can
+  invalidate dependent downstream results; read the confirmation first.
+- The Run control shows a spinner while that workspace is busy. Runs started
+  through the built-in terminal update the same control.
+- Close an open Chip Viewer for the affected step before rerunning it. Run
+  stays disabled while the Viewer is saving edits.
 
-- On the **Home** page it runs the full flow.
-- On a **step** page it runs just that step (dependencies included).
-
-While running, the button shows a spinner and is disabled. If the flow (or the
-current step) already has results, clicking Run asks for confirmation —
-*Running it again will replace its current execution results* — because re-run
-resets the dependent downstream steps. If the Chip Viewer is saving layout
-edits, Run is disabled; re-running a step whose Chip Viewer window is still
-open is blocked with a toast asking you to close it first.
+Separate workspaces can run concurrently, including workspaces within one
+project. Use **Background Tasks** to track them. Each flow uses its own
+workspace state; avoid starting a second run against the same workspace and
+allow enough RAM and CPU for overlapping native tools.
 
 ### Monitoring Progress
 
-- The **Flow Status Strip** (top of the right column) renders every step as a
-  node (icon + name) with status colors: green succeeded, blue pulsing running,
-  amber warning, red failed, grey queued/skipped. Click a node to select it and
-  show its logs; the running node is selected automatically.
-- Step nodes on sidebar and status strip update live; dashboards refresh as
-  each step completes.
+Execution state and checklist state answer different questions:
+
+| Display                     | Meaning                                                                    |
+| --------------------------- | -------------------------------------------------------------------------- |
+| Execution icon / card color | Whether the step is pending, running, succeeded, failed, or skipped        |
+| Checklist label             | Whether its evidence is passed, blocked, warning, or unavailable           |
+| Signoff summary             | Whether the required verification and delivery checks are ready for review |
+
+For example, EMIR can have a red execution icon and a yellow checklist warning
+because it failed as a nonblocking advisory check. Antenna Check can execute
+successfully and still require coverage review.
+
+The dashboard, **Background Tasks**, and visible workspace rows in **Project
+Management** follow the current execution. You can return to Project Management
+without stopping the flow. CLI runs against that workspace also update these
+surfaces; you do not need to reopen the workspace to see progress.
 
 ### Cancelling a Flow
 
 There is no pause. To stop a running flow, open **Background Tasks** in the top
-bar, find the flow task, and click **Cancel Flow**. A confirmation explains
-that the runtime stops at the next supported cancellation boundary.
+bar, find the workspace task, and click **Cancel Flow**. The runtime stops at
+its supported cancellation boundary. Cancelling one workspace does not cancel
+other workspaces' flows. Backend ECC flows run independently of the Studio
+window; closing Studio does not cancel them. Cancel explicitly and wait for the
+terminal state when you want execution to stop.
 
 ### Viewing Logs
 
-The **Flow Log** panel (below the status strip) shows logs segmented by step
-and tool:
+Click **Log** on a flow step card to open its log dialog. The viewer groups
+output by step and tool and supports copying, expanding, and following the
+latest output. It follows the tail only while you are near the bottom, so you
+can scroll up to read earlier messages. Errors and warnings have distinct
+colors; the editor's context menu provides Copy and search actions.
 
-- **Copy log** — copy everything to the clipboard (icon turns ✓ briefly).
-- **Open log** — full-screen/maximizable dialog with the same content.
-- **Collapse/expand** — shrink the panel to just its title bar.
-- **Auto-follow** — the view follows the running step. Clicking a step node in
-  the status strip pins the panel to that step; re-running that step unpins it.
-- **Tail-following scroll** — auto-scroll only happens while you are near the
-  bottom, so scrolling up to read is never interrupted.
-- **Coloring** — lines are colored by level (errors red, warnings amber,
-  success green, phase headers, plain).
-- **Right-click** — a context menu offers Copy (the built-in editor find
-  shortcuts also work).
+![Step Log shows the real EMIR configuration error](asset/step-log.png)
+
+### Advisory Checks
+
+**Antenna Check** and **EMIR** are advisory. Their failures retain the real
+execution status and appear as checklist warnings, while later steps such as
+Harden may still complete. Review their logs and coverage before treating the
+results as verified.
+
+- **Antenna Check** reports antenna violations without repairing them. Some
+  PDK inputs lack antenna rules or gate-area annotations. A successful
+  invocation can therefore leave the design without antenna-check coverage.
+- **EMIR** needs a real process technology file. The default
+  `emir.technology_file_path` is empty; without it, EMIR reports `Incomplete`.
+  Set it on an existing workspace through **Edit → Config → EMIR**, or use:
+
+  ```bash
+  ecc param set emir.technology_file_path /absolute/path/process.tech \
+    --project /path/to/project --workspace ws_0001
+  ecc run --project /path/to/project --workspace ws_0001 --only emir --force
+  ```
+
+Changing a workspace parameter invalidates the owning step and its suffix.
+Running only EMIR leaves later steps to be rerun separately; continue the flow
+with `ecc run --project /path/to/project --workspace ws_0001` when needed.
+
+ECC's `test/fixtures/emir/ics55_synthetic.tech` is synthetic data for CI and E2E
+execution tests. Normal projects do not select it automatically, and its
+numerical results are not foundry signoff evidence.
+
+### Using ECC in the Terminal
+
+Open **Terminal** from the status bar. The built-in shell provides `ecc` with
+Studio's tool environment. In a separate host shell, the installed shim is
+named `ecos-ecc`; substitute it for `ecc` in these examples.
+
+This example creates a backend GCD project and workspace. Replace the RTL,
+PDK, and process technology paths with your own inputs. If you do not have an
+EMIR technology file, omit that parameter command and expect the advisory
+warning described above.
+
+```bash
+ecc init /path/to/gcd-project --project-name gcd --design-name gcd
+cd /path/to/gcd-project
+ecc rtl import --verilog /path/to/gcd.v
+ecc pdk set-root /path/to/icsprout55-pdk
+ecc project set design.top gcd
+ecc project set design.clock_port clk
+ecc param set design.frequency_mhz 100
+ecc param set floorplan.core_util 0.6
+ecc param set place.target_density 0.2
+# Configure this before creating the workspace if you will run EMIR.
+ecc param set emir.technology_file_path /path/to/process.tech
+ecc workspace create ws_0001
+```
+
+In Studio, import the project through **Project Management**, then open
+`ws_0001`. Keep the dashboard visible and start its flow from the terminal:
+
+```bash
+ecc run --project /path/to/gcd-project --workspace ws_0001
+```
+
+The diagram and Run control reflect the CLI run. The project manager's visible
+workspace row follows the current step and final outcome. Workspace creation
+and flow execution are separate operations; `ecc workspace create` does not
+start the flow.
+
+For an existing workspace, use explicit selectors to avoid running against a
+different project or workspace:
+
+```bash
+# Inspect current state.
+ecc status --project /path/to/gcd-project --workspace ws_0001
+# Continue from the first unfinished step.
+ecc run --project /path/to/gcd-project --workspace ws_0001 --resume
+# Rerun exactly one step, even if it previously succeeded.
+ecc run --project /path/to/gcd-project --workspace ws_0001 --only route --force
+```
+
+A project-level `ecc param set` supplies defaults for future workspaces. Add
+`--workspace ws_0001` to edit an existing workspace. ECC stores its parameters
+in `home/params.toml` and derives `config/*.json` from them. Direct edits to
+generated configuration can be replaced by refresh or rerun.
+
+`--no-wait` makes commands fail promptly when a required mutation lock is busy;
+it does not detach the flow or launch a background job. For concurrency, open
+another terminal session and run a different workspace.
 
 ---
 
-## Step Pages
+## Inspecting Flow Steps
 
-Each flow step page shows a **Step Dashboard** with cards tailored to the step:
+Use the actions on a step's Flow diagram card to inspect it without leaving
+the workspace dashboard.
 
-### Overview and Checklist
+### Checklist Details
 
-- **Overview** — basic info (design, paths, run state) and a configuration
-  summary. **Details** opens the Step Configuration dialog for this step.
-- **Checklist** — the same status pie as Home plus **Checklist details →**.
-- When the configuration changed since the last run, an amber banner marks the
-  page read-only until you re-run ("configuration changed since the last run").
+**Details** opens the step's checklist findings, including state, summary, and
+source. Expand the available evidence to inspect its content. Use the overall
+**Sign-off details** link to review findings across the whole workspace.
 
-### Quality of Results
+![Checklist Details expands the evidence behind a step result](asset/step-checklist.png)
 
-QoR status badge, pie chart, per-metric comparison bars (baseline vs. current
-with deltas), and **QoR details →**. Clicking a metric row on Home also lands
-here via `?panel=analysis`.
+### Reports
+
+**Reports** opens a file list and text preview. Select a report, use **Refresh
+reports** to reload the list, or maximize the dialog. Large reports show a
+truncation notice when the preview reaches its limit.
+
+![Reports displays a selected STA report beside the report list](asset/step-reports.png)
 
 ### Layout
 
-- A layout preview thumbnail; click to enlarge.
-- **Open Chip Viewer** — opens the native viewer in view mode.
-- **Place Macros** — *(macro placement steps only)* opens the viewer in edit
-  mode to place macros (see [Macro Placement Editing](#macro-placement-editing)).
-
-### Data Insights
-
-Step-dependent analysis, for example:
-
-- **Synthesis** — metric grid plus Timing Analysis (WNS/TNS/NVP KPIs, per-corner
-  tables with a path-group filter and *Negative first* sorting, critical-path
-  waterfall, and **Timing details →**).
-- **Floorplan / Place / …** — distribution charts with switchable metric tabs,
-  highlight values, and an **Open map snapshot** button for heat-map images.
-- **DRC** — violation statistics, snapshot tiles, and a congestion dialog.
-- **LVS** — entity comparison (netlist vs. DEF, diff column), connectivity,
-  unmatched devices, STA corners, **Corner details →**.
-- **RCX** — electrical summary (cap/res per corner) and sign-off metric tables.
-- **STA** — corner summary with **Corner details →** and timing analysis.
-- **LEC** — equivalence result with failure/staleness notices.
-- **Harden** — output artifact tables (LEF/lib/GDS).
-
-### Data Reports
-
-Lists the report files the step produced. Each row's **↗** button opens the
-report in a viewer dialog (text reports, tables, HTML).
+Click an available thumbnail to open the saved step geometry in Chip Viewer.
+A step may legitimately have no layout, for example a report-only check.
+Missing or stale geometry has an explanatory tooltip and cannot be opened as
+current layout data. Use **Edit → Config** for step parameter changes and the
+sidebar analysis dialogs for cross-step results.
 
 ---
 
 ## Configuring the Flow
 
-Two entry points:
+Open **Edit → Config** from the workspace menu. Select a step in the left
+**Flow steps** list to edit its parameters. The list comes from the current
+flow and ECC's parameter catalog; Floorplan groups its shared settings.
 
-- **Edit → Config** (menu) — the Step Configuration dialog.
-- **Details** on a step's Overview card — the same dialog focused on that step.
+- Parameter types determine the editor: text, number, checkbox, array, or
+  object fields.
+- **Reload** reads the persisted values, **Reset** discards the draft, and
+  **Save** applies changes to the current workspace. An `*` marks unsaved
+  changes; switching steps asks before discarding them.
+- Saving requires the current workspace revision and is blocked while that
+  workspace's flow is running. A conflicting edit is reported rather than
+  silently overwritten.
+- ECC persists workspace parameter overrides and regenerates the affected
+  configuration. Changing parameters can invalidate previous results; rerun
+  the affected steps before reviewing signoff.
 
-The dialog has a **Flow steps** list on the left (every step that has tunable
-parameters, with its parameter count) and a parameter editor on the right:
+![Step Configuration edits the selected workspace’s parameters](asset/flow-configuration.png)
 
-- Parameters render as text fields, number fields, checkboxes, arrays (add /
-  remove rows), object tables, or nested sub-cards, mirroring the underlying
-  JSON (maximum nesting depth 6).
-- **Baseline** toggle — adds a read-only baseline column from the baseline
-  workspace, with a "N differ" badge and per-parameter highlighting.
-- **Reload** — re-fetch current file and baseline. **Reset** — roll the draft
-  back to what is on disk. **Save** — persist (blocked while the flow is
-  running). An `*` marks unsaved changes; switching steps with unsaved changes
-  asks for confirmation.
-- Saving uses optimistic concurrency (an expected workspace revision), so a
-  conflicting edit from elsewhere is detected instead of silently overwritten.
-- If a config file is not valid JSON, the editor falls back to a raw text area
-  until the content parses again.
+Use `ecc param set KEY VALUE --project DIR --workspace NAME` for the same
+workspace parameter workflow in the terminal. Omit `--workspace` only when
+setting defaults for newly created workspaces.
 
 ---
 
@@ -772,22 +909,37 @@ layouts — large layout data stays out of the Electron renderer.
 
 ### Opening the Chip Viewer
 
-- **Open Chip Viewer** on a step's Layout card (view mode).
-- **Place Macros** on macro-placement steps (edit mode).
-- Clicking a layout thumbnail on the Home dashboard (view mode).
+Click a step card's layout thumbnail in the Flow diagram. The viewer opens the
+saved geometry snapshot for that step.
 
-The viewer opens the saved geometry snapshot for that step.
+You can also use the built-in terminal:
+
+```bash
+ecc chipview --project /path/to/project --workspace ws_0001 --step route
+ecc gdsview --project /path/to/project --workspace ws_0001 --step Harden
+```
+
+`chipview` opens saved geometry in the native Chip Viewer. `gdsview` opens an
+available GDS in KLayout and requires the KLayout GUI. A step needs the
+corresponding output files before either command can open it.
+
+![Fullscreen Chip Viewer showing GCD routing and physical-layer controls](asset/chip-viewer.png)
+
+The screenshot uses the software renderer in a virtual machine. Hardware GPU
+availability determines whether 3D mode is offered.
 
 ### Canvas Navigation
 
 - **Mouse wheel / trackpad pinch** — zoom at the cursor.
 - **`+` / `-`** — zoom around the viewport center.
-- **Left-drag** — pan. **Arrow keys** — pan by 10%.
+- **Left-drag in 2D** — pan. In 3D, left-drag orbits and middle/right-drag
+  pans. **Arrow keys** — pan by 10%.
 - **`F` / `Home`** — fit the whole layout.
 - **`Q`** — toggle 2D / 3D. In 3D: `1`/`T` top, `2`/`I` isometric, `3` front,
   `G` grid, wheel dollies the camera. 3D presets (Iso / Top / Front), shading,
   lighting, and theme (Engineering / EDA Classic / Diorama / Cyber, …) are in
-  the sidebar. Without a GPU, 3D falls back to CPU rendering.
+  the sidebar. If no supported hardware GPU is available, the Viewer uses
+  software rendering for 2D and disables 3D.
 - **Click** — select a shape; its properties appear in the sidebar.
 - **`Z`** — zoom to the selection, map bbox, DRC violation, or highlight set.
 - **`Esc`** — clear progressively (help → ruler → selection/highlight).
@@ -813,20 +965,17 @@ When data exists, tabs appear at the top:
 - **DRC** — violation list; jump between violations.
 - **ANTENNA** — antenna violations.
 - **MAP** — heat-map data with transparency slider, `H` to hide, `N` /
-  `Shift+N` to jump to the next / previous hotspot, `Space` to cycle.
+  `Shift+N` to jump to the next / previous hotspot, `Space` to switch between
+  the current and previously selected map.
 
 ### Macro Placement Editing
 
-In edit mode (opened via **Place Macros**):
-
-- The toolbar shows *N unplaced · M selected*.
-- Align (top / left / right / bottom, needs ≥ 2 placed selected), **Center on
-  DIE**, horizontal / vertical distribute (≥ 3), rotate 90°, and mirror
-  horizontally / vertically (respecting master symmetry).
-- Every macro must be placed before saving to postFloorplan; the queue state is
-  shown below the toolbar.
-- **Save** writes the placement; **Discard** reverts. Closing the window with
-  unsaved changes asks *Keep editing / Discard / Save*.
+Open **Edit → Config → Floorplan** to inspect `config/macro_location.tcl`.
+**Update** imports a prepared Tcl placement file. ECC's `macro` commands also
+manage manual placements; use `ecc macro --help` for the available operations.
+After changing placements, rerun the affected floorplan stages and their
+dependents to regenerate results. Opening a thumbnail or running `ecc chipview`
+opens a viewing session.
 
 ### Keyboard Shortcuts
 
@@ -841,56 +990,97 @@ ECOS Studio keeps validation, confirmation, and execution in your hands.
 
 ### Chat Panel
 
-The Agent panel sits in the right column of workspace pages (collapse it to a
-bottom bar showing the Agent status) and as a drawer on home screens.
+Use **ECOS Agent** in the top bar to show or hide the panel. On the backend
+workspace dashboard it starts closed; opening it reveals the right panel.
+Hiding it restores the dashboard width. Home screens use a drawer with a
+default width of 280 px, which you can resize by dragging its left edge.
 
 - Type a message and press **Enter** to send (**Shift+Enter** for a new line).
 - **Stop** (■) interrupts a running agent.
 - While the agent is working you can queue another message; a queue bar with
   **× Cancel queued message** appears.
-- The empty state offers suggestion buttons (e.g. *Update workspace
-  parameters*, *Rerun a completed stage*, *Continue unfinished flow*), each of
-  which sends that prompt.
-- Replies render Markdown. Specialized message cards:
-  - **Choices** — button/list options; clicking one answers the agent's
-    question.
-  - **Maps** — heat-map cards with statistics and a **↙** full-screen view.
-  - **Reports / info** — JSON tables, CSV tables, or embedded HTML/text with a
-    **↙** full-screen view.
-  - **Tool progress** — a flow timeline per step; click a step header to expand
-    its detail lines.
+- Workspace suggestions include **Rerun a completed stage**, **Continue
+  unfinished flow**, and, when a project is bound, **Create another workspace
+  in this project**. You can also describe parameter changes in chat.
+- Replies render Markdown. **Choices** collect answers, **Tool progress**
+  shows execution details, and optimization cards show the active episode.
+  Inspect layout and report artifacts through the dashboard's step cards.
+
+The Agent below is connected to the open workspace. Its operation choices
+include rerunning a stage, continuing a flow, creating a workspace, and
+starting optimization.
+
+![Workspace Agent ready with operation choices beside the Flow dashboard](asset/workspace-agent.png)
+
+### Guided Setup and Quick Start
+
+On Home, **Run your own RTL-to-GDS flow** guides you through project selection,
+workspace naming, RTL, PDK, and design settings. Review the proposed setup,
+then confirm creation and execution. Cancelling the proposal creates no
+workspace and starts no flow.
+
+The Home Agent's **Get started** conversation also offers **Quick Start** for
+the built-in GCD example. It requires ready GCD, ICS55 PDK, and MPC resources;
+missing resources are reported before creation. The walkthrough opens Project
+Management, creates a project and workspace, and starts the full flow. Its
+final success or failure message follows the actual flow result. **Stop Quick
+Start** stops setup or requests cancellation of the flow after it has started;
+you can also use **Background Tasks → Cancel Flow**.
 
 ### Proposals and Confirmation
 
 When the agent wants to act on the workspace (set up or create a workspace,
 rerun a step, continue an unfinished flow, update parameters), a contract panel
 shows the full key/value details and asks you to **Confirm** or **Cancel**.
-Confirmed actions execute immediately (parameter updates, flow runs); committed
-panels collapse into receipts that you can expand (**Details / Hide details**).
+Confirmed actions execute immediately; committed panels collapse into receipts
+that you can expand (**Details / Hide details**).
+
+- **Parameter changes** save the agreed values without automatically running
+  the flow.
+- **Rerun a completed stage** creates and opens an isolated target workspace,
+  preserving the source workspace and its earlier results. Choose either the
+  selected stage alone or continuation from that stage through Harden.
+- **Continue unfinished flow** resumes in the current workspace.
+
+### Optimizing a Completed Design
+
+On Home, choose **Optimize a completed design**, select a baseline workspace
+completed through Harden, and describe the goal. You can also request
+optimization from a workspace chat. Review the proposed primary metric,
+metrics to preserve, and signoff gates before confirming the optimization.
+
+Candidates execute in isolated workspaces. A baseline without noise
+calibration first runs three replays. Optimization has automatic execution,
+planning, and time budgets; this is not a single flow run. The optimization
+card shows progress and offers **Pause**, **Resume**, **Retry**, or **Stop**
+when applicable.
+
+Closing an active optimization's chat tab offers **Stop and Close** or **Keep
+Running**. **Keep Running** leaves it active in the background; click its
+**Background Tasks** entry to reopen the owning conversation and its controls.
 
 ### Agent Sessions
 
 The tab strip above the chat supports multiple concurrent conversations:
 switch tabs, close a tab (`×`), or start a **+ New Agent chat**. The panel menu
-also offers **Clear reports and layouts** (reset this session's GUI artifacts)
-and **Full screen**.
+offers **Full screen** for the workspace chat.
 
 ### Agent Setup
 
-If the agent runtime (Codex) is not ready, a setup card occupies the panel:
-status (not installed / installing / login required / ready / error), version
-and paths, an install progress bar, and buttons: **Install**, **Open login**,
-**I have completed login / re-detect**, **Choose local codex**, and
-**Continue with Agent**.
+If Codex or the selected model source is not ready, the panel shows a setup
+card with its status, version, and executable path. Select a model source,
+enter its API key, and use **Save and use**. **Manage** opens the model-source
+settings. The card also offers installation, re-detection, and local Codex
+selection when applicable. Once ready, continue the conversation.
 
 ---
 
 ## Frontend Design (Experimental)
 
-The frontend environment verifies RTL designs: source review, elaboration,
-lint, and simulation with waveforms and difftest. It is **experimental** — a
-yellow banner on every frontend screen warns that behavior may change between
-releases.
+The frontend environment has two design profiles: **General RTL** for source
+review, elaboration, and lint, and **CPU Core** for verification with a SoC
+harness, simulation, waveforms, and difftest. It remains experimental; the
+frontend screens display a warning that behavior may change between releases.
 
 ### Frontend Landing Page
 
@@ -898,16 +1088,27 @@ Reaches via the **Frontend Design** card. Mirrors the backend landing page:
 
 - **Back to ECOS**, **Open Workspace**, **New Workspace** (opens the frontend
   wizard), and a **Recent Workspaces** list filtered to frontend projects —
-  same badges, *View All / Collapse*, remove-from-list, and
+  same badges, _View All / Collapse_, remove-from-list, and
   unrecognized-state behavior as the backend page.
 
 ### Frontend Workspace Wizard
 
 Three steps (the left step strip allows going back):
 
-1. **Project Basics** — project name (letters/digits/underscore only), an
-   optional description, and the save location (click or **Browse**).
-2. **Verification Setup** —
+1. **Project Setup** — select an existing frontend project or create one
+   under a chosen parent directory. Set the project, workspace, and design
+   names, and an optional description. The preview shows the project manifest
+   and workspace location. Select **General RTL** or **CPU Core** under
+   **Design Type**. An existing project may lock this choice.
+2. **RTL Setup** for General RTL, or **Verification Setup** for CPU Core.
+
+   **General RTL:** choose Verilog/SystemVerilog sources or a filelist, set the
+   top module, and optionally provide a clock port and target frequency. It
+   needs no CPU adapter, SoC harness, toolchain, or test suite. This profile runs
+   **Prepare → RTL Review → Elaboration → Lint**; simulation is not included.
+
+   **CPU Core:**
+
    - **CPU** — pick a CPU core (card selector); choosing a custom filelist
      reveals a **CPU Top Module** field.
    - **CPU Design Files** — either **Use filelist** (single file) or **Select
@@ -918,14 +1119,17 @@ Three steps (the left step strip allows going back):
    - **CPU Top IO Contract** — the required top module name, IO counts, reset
      PC, program link base, boot payload base, and a full interface example.
    - A **Validation** panel lists errors and warnings live.
+
 3. **Review & Create** — two review blocks (with **Edit** jump-back links) and
    **Create Workspace**.
+
+![General RTL setup selects sources, the top module, and optional clock](asset/frontend-rtl-setup.png)
 
 ### Frontend Workspace Layout
 
 - **Left icon rail** — Home, Prepare, Src, Review, Elab, Lint, Sim, Wave (Src
   and Wave are fullscreen views; the others are flow steps). Status badges as in
-  the backend rail.
+  the flow overview. General RTL omits the CPU simulation and waveform steps.
 - **Flow panel** (240 px) — Done / Run / Fail / Wait counters, a total progress
   bar, the step list with per-step peak memory and runtime, and (on Home) the
   run-mode dropdown (**Run Frontend Flow** / **ReRun Frontend Flow**) plus the
@@ -938,6 +1142,14 @@ Three steps (the left step strip allows going back):
 - **Home view** — summary tiles (workspace name, step count, completed x/y,
   next step), the read-only **Frontend Configuration** card, a **Workspace
   Home** status card, and a **Workspace Guide**.
+
+### Step QoR
+
+Use the step header's **QoR** action or the **QoR** tab to inspect its quality
+assessment. It includes an available score breakdown, the input snapshot,
+quality gates, measured results, and any reported hotspots. **Pass**,
+**Blocked**, **Incomplete**, and **Unavailable** describe the available
+evidence; missing, stale, or running results do not imply a passing check.
 
 ### Prepare
 
@@ -956,8 +1168,8 @@ A left rail switches review modes:
 - **Modules** — Yosys module risk-ranking cards (risk level plus
   cells/mux/arith/mem/fanout/fanin/depth/score).
 
-The Summary tab shows the review delta (new / existing / resolved / waived),
-precheck metrics, top problems, and the next-step shortcut.
+The **Review** tab contains the review views; use the **QoR** tab for the
+step's quality gates and measured results.
 
 ### Elaboration (Elab)
 
@@ -965,18 +1177,19 @@ precheck metrics, top problems, and the next-step shortcut.
   unresolved modules, and heuristic candidates.
 - **Module Inventory** — module cards (path:line, instance count, ports,
   params, refs, TOP marker); click to open a module.
-- Summary tab: readiness, hierarchy inventory, compiler result, largest
-  modules.
+- Use the **QoR** tab for the elaboration quality assessment and metrics.
 
 ### Lint
 
-- Scope switch: **CPU n** (actionable) / **All n** (every Verilator
-  diagnostic).
+- Scope switch: **CPU n** or **Design n**, depending on the profile
+  (actionable design diagnostics), and **All n** (every Verilator diagnostic).
 - Diagnostics list (click to jump to source), **Rule Breakdown** (rules with
   E/W counts and examples), and **File Hotspots** (files with the most
   diagnostics).
 
 ### Simulation (Sim)
+
+Simulation, cases, and waveforms in this section apply to the CPU Core profile.
 
 - **Suite** dropdown; choosing `cpu_tests` reveals a **Mode** dropdown
   (Selected / All) and a **Cases** multi-select (run Prepare first to load CPU
@@ -1020,22 +1233,6 @@ The **Wave** view lists waveform files per case on the left and embeds the
 
 ---
 
-## Tech Library
-
-Route: sidebar **Tech** (inside a workspace). It inspects the technology data
-of the current workspace's view package — it is not the PDK installer (that is
-the Resource Manager).
-
-- Header shows the package root and a **Reload** button.
-- Left navigation — Overview / Layers / Sites / Via Masters / Cell Masters with
-  count badges, plus a summary bar (PDK, design, counts).
-- Each section is a searchable table (e.g. layers: ID/name/type/direction) with
-  an inspector on the right; vias and cells additionally render a geometric
-  **Preview** canvas.
-- Without a workspace or view package, the page shows guidance on what to open.
-
----
-
 ## Global UI
 
 ### Notifications
@@ -1054,12 +1251,27 @@ failure). The panel lists:
 - Running flows — workspace name, current step, status (Queued / Running /
   Cancelling), elapsed time; click a row to **Inspect**, and **Cancel Flow**
   where permitted.
-- In-progress workspace creations, including a *Creation needs recovery* hint.
+- Agent optimization episodes — progress and state; click one to reopen its
+  conversation and use the episode controls.
+- In-progress workspace creations, including a _Creation needs recovery_ hint.
 - Final snapshot saves, with a **Retry** button on failure.
+
+### Closing Studio
+
+Closing Studio leaves detached backend ECC flows running. Reopen their
+workspace to observe the current state, or use `ecc status` in a terminal.
+Use **Cancel Flow** to stop a backend run explicitly.
+
+Workspace creation, Agent optimization, and pending saves have their own close
+handling. When **Work is still in progress** appears, choose **Wait and Close
+Safely** or **Cancel**. The close-status indicator lets you view background
+tasks, **Keep App Open**, or review **Force Quit…**. Force quitting can leave
+unfinished creation or local state requiring recovery. Frontend runs and Agent
+optimization do not inherit the detached backend flow lifecycle.
 
 ### Terminal Panel
 
-Toggle from the status bar (bottom-left). Features:
+Toggle **Terminal** from the status bar at the bottom-right. Features:
 
 - Drag the top edge to resize; **New Terminal** (`+`) for more sessions;
   **Terminal Profiles** (default shell); **More Actions** (maximize/restore,
@@ -1067,6 +1279,10 @@ Toggle from the status bar (bottom-left). Features:
 - A right-hand session list switches between terminals and can be resized by
   dragging its separator.
 - Follows the application theme.
+
+Use `ecc` to create projects and run backend flows with Studio's runtime. See
+[Using ECC in the Terminal](#using-ecc-in-the-terminal) for setup, execution,
+and workspace-selection examples.
 
 ### Theme, Zoom, and About
 
@@ -1077,9 +1293,30 @@ Toggle from the status bar (bottom-left). Features:
 
 ### Exporting Results
 
-- **File → Export Signoff Package** — a review dialog lets you inspect the
-  sign-off package before exporting (disabled while a flow runs).
-- **File → Export Design Summary** — export a design summary.
+**Signoff delivery:** **File → Export Signoff Package** opens the review
+dialog. Check its resource summary and risks. **Ready to Export** or **Export
+With Attention** permits export; **Export Blocked** requires resolving the
+listed blockers. This action is disabled while a flow runs.
+
+**Design summary:** **File → Export Design Summary** previews LaTeX, Markdown,
+Typst, CSV, or text. Copy the current format, save it, or use **Export All
+Formats (5 Files)**. Options include multi-corner timing and stage execution
+breakdown, plus standalone-document options for LaTeX and Typst.
+
+**CLI evidence archive:** use ECC's reproducible export to archive available
+project/workspace evidence with a checksummed manifest and runtime information:
+
+```bash
+ecc reproducible export --project /path/to/project --workspace ws_0001 \
+  --output /path/to/evidence.tar.gz
+ecc reproducible verify --package /path/to/evidence.tar.gz
+ecc reproducible inspect --package /path/to/evidence.tar.gz --files
+ecc reproducible report --package /path/to/evidence.tar.gz
+```
+
+This evidence archive serves diagnosis and handoff. It is separate from the
+signoff delivery package and does not bundle a portable toolchain or guarantee
+that every external input can be replayed on another machine.
 
 ---
 
@@ -1087,10 +1324,41 @@ Toggle from the status bar (bottom-left). Features:
 
 **A flow step failed**
 
-1. Open the step page and check the Flow Log panel (errors are red).
-2. Click the step node in the Flow Status Strip to pin its log.
-3. Verify inputs (design files, PDK, constraints) on the step's Overview card.
+1. Click **Log** on the failed step's Flow diagram card.
+2. Open **Details** for its checklist and inspect the relevant evidence.
+3. Verify the project's design inputs, PDK, and workspace parameters.
 4. Fix configuration via **Edit → Config**, then re-run the step.
+
+**Harden succeeded, but EMIR is red or Signoff shows warnings**
+
+- EMIR is advisory and can fail without stopping Harden. If its log says
+  `technology_file_path is a placeholder`, configure a real technology file
+  and rerun it as described under [Advisory Checks](#advisory-checks).
+- Antenna Check also stays advisory after execution. Inspect its log and
+  report for missing antenna rules or incomplete coverage.
+
+**A CLI run does not appear in the workspace**
+
+- Check `ecc status --project DIR --workspace NAME` and confirm both selectors
+  refer to the workspace open in Studio.
+- Use a new built-in terminal session after installing or changing runtime
+  resources. A host shell may resolve a different ECC installation.
+- **Status unavailable** means Studio could not read verified flow state;
+  inspect the reported path or error before treating it as a completed run.
+
+**Snapshot Rebuild Required**
+
+Use **Rebuild Snapshot** in the recovery dialog to replace the unreadable or
+unsupported `home/engineering-snapshot.json`. Studio regenerates it from the
+workspace's flow state when reopening; this does not rerun the flow or replace
+the whole workspace directory. **Cancel** leaves the file untouched.
+
+**Workspace Identity Mismatch**
+
+The saved snapshot belongs to a different workspace identity, often after a
+manual directory copy. Studio refuses to open it automatically. Create a new
+workspace or use **Create from output** in Project Management for a supported
+branch instead of deleting identity data to force it open.
 
 **The Run button is disabled**
 
@@ -1105,7 +1373,7 @@ Toggle from the status bar (bottom-left). Features:
 
 **Layout thumbnail cannot be opened**
 
-- The tooltip on Home's LayoutView names the reason: too large, invalid,
+- The tooltip on the step card's thumbnail names the reason: too large, invalid,
   changed externally, stale, or missing.
 
 **Performance**
@@ -1125,8 +1393,9 @@ Toggle from the status bar (bottom-left). Features:
 
 ## Next Steps
 
-- **Try the bundled example** — create a workspace from the GCD example RTL
-  and run the full RTL-to-GDS flow.
+- **Try a small design** — import your GCD RTL, create a workspace, and run
+  the full RTL-to-GDS flow. See the terminal example above for the required
+  project, PDK, and workspace settings.
 - **Explore the frontend environment** — run Prepare → Review → Elab → Lint →
   Sim on a CPU design and inspect waves.
 - **Automate** — install the `ecos-ecc` CLI from Resource Manager and script
