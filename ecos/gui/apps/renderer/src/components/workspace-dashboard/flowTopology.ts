@@ -66,7 +66,8 @@ export function buildFlowTopology(steps: readonly TopologyStep[]): FlowTopology 
 
   const groups = [
     ['lvs'],
-    ['drc', 'antennaCheck'],
+    ['drc'],
+    ['antennaCheck'],
     ['postRouteLec'],
     ['RCX', 'sta'],
     ['powerAnalysis', 'emir'],

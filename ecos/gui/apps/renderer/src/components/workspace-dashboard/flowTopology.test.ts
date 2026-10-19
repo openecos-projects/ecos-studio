@@ -39,17 +39,20 @@ describe('workspace flow topology', () => {
     const empty = buildFlowTopology([])
     expect(withSignoffMilestone(empty, [])).toBe(empty)
   })
-  it('forks five verification branches and joins every tail before Harden', () => {
+  it('forks six verification branches and joins every tail before Harden', () => {
     const topology = buildFlowTopology(steps)
-    expect(topology.rows).toBe(5)
+    expect(topology.rows).toBe(6)
     expect(topology.nodes.map((node) => node.id).sort()).toEqual([...ids].sort())
     expect(
       topology.edges.filter((edge) => edge.from === 'filler').map((edge) => edge.to),
-    ).toEqual(['lvs', 'drc', 'postRouteLec', 'RCX', 'powerAnalysis'])
+    ).toEqual(['lvs', 'drc', 'antennaCheck', 'postRouteLec', 'RCX', 'powerAnalysis'])
     expect(
       topology.edges.filter((edge) => edge.to === 'Harden').map((edge) => edge.from),
-    ).toEqual(['lvs', 'antennaCheck', 'postRouteLec', 'sta', 'emir'])
-    expect(topology.edges).toContainEqual({ from: 'drc', to: 'antennaCheck' })
+    ).toEqual(['lvs', 'drc', 'antennaCheck', 'postRouteLec', 'sta', 'emir'])
+    const drc = topology.nodes.find((node) => node.id === 'drc')!
+    const antenna = topology.nodes.find((node) => node.id === 'antennaCheck')!
+    expect(antenna).toMatchObject({ column: drc.column, row: drc.row + 1 })
+    expect(topology.edges).not.toContainEqual({ from: 'drc', to: 'antennaCheck' })
     expect(topology.edges).toContainEqual({ from: 'powerAnalysis', to: 'emir' })
     expect(topology.edges).toContainEqual({ from: 'RCX', to: 'sta' })
     expect(topology.edges).toContainEqual({ from: 'Harden', to: 'Signoff' })

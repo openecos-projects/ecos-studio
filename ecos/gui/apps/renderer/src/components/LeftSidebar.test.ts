@@ -23,16 +23,17 @@ describe('RTL workspace navigation', () => {
     const links = wrapper.findAllComponents({ name: 'RouterLink' })
     expect(wrapper.text()).not.toContain('Project')
     expect(wrapper.text()).toContain('Dashboard')
-    expect(wrapper.findAll('a')).toHaveLength(6)
+    expect(wrapper.findAll('a')).toHaveLength(7)
     expect(links.map((link) => link.props('to'))).toEqual([
       { path: '/workspace/home', query: state.route.query },
-      ...['resources', 'db-trends', 'congestion', 'drc', 'timing'].map((insight) => ({
+      ...['power', 'resources', 'db-trends', 'congestion', 'drc', 'timing'].map((insight) => ({
         path: '/workspace/home',
         query: { ...state.route.query, insight },
       })),
     ])
     expect(links.map((link) => link.text())).toEqual([
       'Dashboard',
+      'Power',
       'Step Trends',
       'DB Trends',
       'Congestion',
