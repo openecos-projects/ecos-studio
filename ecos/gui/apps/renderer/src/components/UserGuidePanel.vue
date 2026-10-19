@@ -85,6 +85,22 @@ const md = new MarkdownIt({
   typographer: true,
 })
 
+const guideImages = import.meta.glob<string>('../../../../../docs/asset/*.png', {
+  eager: true,
+  query: '?url',
+  import: 'default',
+})
+const defaultImage = md.renderer.rules.image!
+md.renderer.rules.image = (tokens, idx, options, env, self) => {
+  const source = tokens[idx]?.attrGet('src') ?? ''
+  const bundled = guideImages[`../../../../../docs/${source}`]
+  if (bundled) {
+    const url = new URL(bundled, window.location.href)
+    tokens[idx]?.attrSet('src', url.protocol === 'file:' ? url.pathname : bundled)
+  }
+  return defaultImage(tokens, idx, options, env, self)
+}
+
 const defaultLinkOpen =
   md.renderer.rules.link_open ??
   ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options))

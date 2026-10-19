@@ -6,6 +6,7 @@ import { createPinia, setActivePinia } from 'pinia'
 
 import UserGuidePanel from './UserGuidePanel.vue'
 import { useUserGuideStore } from '@/stores/userGuideStore'
+import homeScreenshot from '../../../../../docs/asset/home-light.png'
 
 describe('UserGuidePanel', () => {
   beforeEach(() => {
@@ -42,6 +43,20 @@ describe('UserGuidePanel', () => {
     const tocLink = wrapper.find('a[href="#getting-started"]')
     expect(tocLink.exists()).toBe(true)
     expect(tocLink.attributes('target')).toBeUndefined()
+  })
+
+  it('renders guide screenshots using bundled asset URLs', async () => {
+    const { wrapper } = await mountOpenPanel()
+
+    const screenshot = wrapper.find(
+      'img[alt="Home screen with design tools, resources, and Project Management"]',
+    )
+    expect(screenshot.attributes('src')).toBe(homeScreenshot)
+    const images = wrapper.findAll('img')
+    expect(images.length).toBeGreaterThan(1)
+    for (const image of images) {
+      expect(image.attributes('src')).not.toMatch(/^asset\//)
+    }
   })
 
   it('grows the window by the panel width on open and shrinks back on close', async () => {
