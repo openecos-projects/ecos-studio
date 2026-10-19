@@ -340,6 +340,7 @@ export {
   type QorScalarStatus,
 } from './utils/qorScoreBands.ts'
 export type {
+  DesktopDownloadSource,
   ResourceAction,
   ResourceImportLocalRequest,
   ResourceImportPdkRequest,
@@ -358,6 +359,12 @@ export type {
   ResourceUpdateKind,
   ResourceUpdatesDetectedEvent,
   ResourceUpdatesDetectedItem,
+} from './contracts/resources.ts'
+export {
+  DEFAULT_DESKTOP_DOWNLOAD_SOURCE,
+  DESKTOP_DOWNLOAD_SOURCE_OPTIONS,
+  DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY,
+  normalizeDesktopDownloadSource,
 } from './contracts/resources.ts'
 export {
   isResourceStalenessError,
