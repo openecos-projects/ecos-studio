@@ -10,12 +10,8 @@ import { useUserGuideStore } from '@/stores/userGuideStore'
 /**
  * Drag the right edge of a left-docked User Guide panel to resize width.
  * `containerRef` is the horizontal parent used to compute available room.
- * `onResizeEnd` fires once per drag with the final width.
  */
-export function useUserGuidePanelResize(
-  containerRef: Ref<HTMLElement | null>,
-  options: { onResizeEnd?: (widthPx: number) => void } = {},
-) {
+export function useUserGuidePanelResize(containerRef: Ref<HTMLElement | null>) {
   const userGuide = useUserGuideStore()
   const { panelWidthPx } = storeToRefs(userGuide)
 
@@ -54,7 +50,6 @@ export function useUserGuidePanelResize(
         /* already released */
       }
     }
-    const wasDragging = pointerTarget !== null
     pointerTarget = null
     pointerId = null
     document.body.classList.remove('user-guide-panel-resizing')
@@ -62,7 +57,6 @@ export function useUserGuidePanelResize(
     window.removeEventListener('pointerup', stopResize)
     window.removeEventListener('pointercancel', stopResize)
     window.removeEventListener('blur', stopResize)
-    if (wasDragging) options.onResizeEnd?.(panelWidthPx.value)
   }
 
   function onResizePointerDown(event: PointerEvent): void {

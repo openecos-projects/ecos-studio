@@ -157,7 +157,10 @@ The application window is organized as follows:
   resize (280–720 px). On the backend workspace dashboard it opens the right
   panel. The Agent starts hidden when you enter a workspace.
 - **User Guide** — the book button in the top bar opens this guide inside the
-  application.
+  application. Drag its right edge to resize it; the main work area uses the
+  remaining space. Opening, resizing, and closing the guide keep the application
+  window size unchanged. Studio remembers your preferred panel width and caps
+  it to leave room for the main work area in smaller windows.
 - **Terminal Panel** — a bottom panel with one or more shell sessions (see
   [Terminal Panel](#terminal-panel)).
 

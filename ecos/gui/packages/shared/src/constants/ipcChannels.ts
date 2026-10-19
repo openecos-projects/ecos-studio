@@ -10,7 +10,6 @@ export const desktopApiIpcChannels = {
   windowIsMaximized: 'window:is-maximized',
   windowSetZoomFactor: 'window:set-zoom-factor',
   windowCreate: 'window:create',
-  windowSetLeftPanelExtension: 'window:set-left-panel-extension',
   shutdownGetStatus: 'shutdown:get-status',
   shutdownCancel: 'shutdown:cancel',
   shutdownReviewOptions: 'shutdown:review-options',

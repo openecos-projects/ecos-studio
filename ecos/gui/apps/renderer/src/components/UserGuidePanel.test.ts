@@ -59,40 +59,42 @@ describe('UserGuidePanel', () => {
     }
   })
 
-  it('grows the window by the panel width on open and shrinks back on close', async () => {
-    const setLeftPanelExtension = vi.fn().mockResolvedValue(440)
-    vi.stubGlobal('ecosDesktop', { window: { setLeftPanelExtension } })
+  it('remembers the resized panel width without accessing native window controls', async () => {
+    const windowControls = vi.fn(() => ({}))
+    vi.stubGlobal('ecosDesktop', {
+      get window() {
+        return windowControls()
+      },
+    })
+    vi.spyOn(document.documentElement, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      width: 1200,
+    } as DOMRect)
 
     const { wrapper, store } = await mountOpenPanel()
-    await flushPromises()
-    expect(setLeftPanelExtension).toHaveBeenCalledWith(440)
+    for (const width of [600, 320]) {
+      await wrapper.get('.user-guide-panel-resize-handle').trigger('pointerdown', {
+        button: 0,
+        pointerId: 1,
+        clientX: store.panelWidthPx,
+      })
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: width }))
+      window.dispatchEvent(new PointerEvent('pointerup'))
+      await flushPromises()
+      expect(store.panelWidthPx).toBe(width)
+      expect(wrapper.get('.user-guide-panel').attributes('style')).toContain(
+        `width: ${width}px`,
+      )
+    }
 
     store.closePanel()
     await flushPromises()
-    expect(setLeftPanelExtension).toHaveBeenLastCalledWith(0)
-    expect(wrapper.find('.user-guide-panel').exists()).toBe(false)
-  })
-
-  it('keeps rendering inline when the window cannot grow', async () => {
-    const setLeftPanelExtension = vi.fn().mockResolvedValue(0)
-    vi.stubGlobal('ecosDesktop', { window: { setLeftPanelExtension } })
-
-    const { wrapper } = await mountOpenPanel()
-    expect(wrapper.find('.user-guide-panel h1').exists()).toBe(true)
-    expect(setLeftPanelExtension).toHaveBeenCalledWith(440)
-  })
-
-  it('aligns the panel width when window growth is capped', async () => {
-    const setLeftPanelExtension = vi.fn().mockResolvedValue(300)
-    vi.stubGlobal('ecosDesktop', { window: { setLeftPanelExtension } })
-
-    const { wrapper, store } = await mountOpenPanel()
+    store.openPanel()
     await flushPromises()
-
-    expect(store.panelWidthPx).toBe(300)
-    expect(wrapper.find('.user-guide-panel').attributes('style')).toContain(
-      'width: 300px',
-    )
+    expect(store.panelWidthPx).toBe(320)
+    expect(localStorage.getItem('ecos.userGuide.panelWidthPx')).toBe('320')
+    wrapper.unmount()
+    expect(windowControls).not.toHaveBeenCalled()
   })
 
   it('scrolls to the heading when a table-of-contents link is clicked', async () => {
@@ -111,10 +113,8 @@ describe('UserGuidePanel', () => {
 
   it('opens external links through the desktop bridge when available', async () => {
     const openExternal = vi.fn().mockResolvedValue(undefined)
-    const setLeftPanelExtension = vi.fn().mockResolvedValue(0)
     vi.stubGlobal('ecosDesktop', {
       system: { openExternal },
-      window: { setLeftPanelExtension },
     })
 
     const { wrapper } = await mountOpenPanel()

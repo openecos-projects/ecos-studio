@@ -104,9 +104,6 @@ async function loadDesktopBridge() {
       onChanged(listener: () => void): () => void
       onUpdatesDetected(listener: (event: unknown) => void): () => void
     }
-    window: {
-      setLeftPanelExtension(widthPx: number): Promise<number>
-    }
     projectManagement: {
       watchWorkspaceFlows(request: unknown): Promise<unknown>
       onWorkspaceFlowsChanged(listener: () => void): () => void
@@ -195,17 +192,6 @@ describe('preload desktop bridge contract', () => {
     expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
       desktopApiEventChannels.projectWorkspaceFlowsChanged,
       expect.any(Function),
-    )
-  })
-
-  it('routes the left panel extension through its typed IPC channel', async () => {
-    const bridge = await loadDesktopBridge()
-    ipcRenderer.invoke.mockResolvedValueOnce(440)
-
-    await expect(bridge.window.setLeftPanelExtension(440)).resolves.toBe(440)
-    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
-      desktopApiIpcChannels.windowSetLeftPanelExtension,
-      440,
     )
   })
 

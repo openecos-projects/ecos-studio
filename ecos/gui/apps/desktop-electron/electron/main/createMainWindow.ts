@@ -71,6 +71,9 @@ export async function createMainWindow(
     minHeight: 720,
     autoHideMenuBar: true,
     frame: false,
+    // GTK's Wayland shadows move native resize handles outside our visible border.
+    // Set this at construction; changing it later does not remove that decoration.
+    hasShadow: process.platform !== 'linux',
     // Opaque window by default: transparent frameless windows drop 1px borders
     // under remote/software compositors (e.g. WSL + VNC). The shell no longer
     // relies on native transparent corners for rounded chrome.
@@ -82,8 +85,6 @@ export async function createMainWindow(
       nodeIntegration: false,
     },
   })
-  mainWindow.maximize()
-
   if (FORWARD_RENDERER_CONSOLE) {
     mainWindow.webContents.on('console-message', (details) => {
       const levelName = details.level === 'warning' ? 'warn' : details.level
@@ -101,13 +102,12 @@ export async function createMainWindow(
     const url = new URL(rendererUrl)
     url.hash = hashRoute.slice(1)
     await mainWindow.loadURL(url.toString())
-    if (shouldOpenDevTools()) {
-      mainWindow.webContents.openDevTools({ mode: 'detach' })
-    }
-    return mainWindow
+  } else {
+    await mainWindow.loadFile(rendererIndexPath, { hash: hashRoute.slice(1) })
   }
 
-  await mainWindow.loadFile(rendererIndexPath, { hash: hashRoute.slice(1) })
+  // Maximizing before the initial load can leave Wayland windows unable to restore.
+  mainWindow.maximize()
   if (shouldOpenDevTools()) {
     mainWindow.webContents.openDevTools({ mode: 'detach' })
   }

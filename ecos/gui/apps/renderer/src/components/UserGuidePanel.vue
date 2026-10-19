@@ -52,32 +52,11 @@ const userGuide = useUserGuideStore()
 const { open } = storeToRefs(userGuide)
 const { closePanel } = userGuide
 
-/** True while the main process extended the window width for this panel. */
-const windowExtended = ref(false)
-
-async function syncWindowExtension(widthPx: number): Promise<void> {
-  try {
-    const applied = await getDesktopApi().window.setLeftPanelExtension(widthPx)
-    windowExtended.value = applied > 0
-    // Align with the applied width when growth was capped at the screen edge.
-    if (widthPx > 0 && applied > 0 && applied !== widthPx) {
-      userGuide.setPanelWidthPx(applied)
-    }
-  } catch {
-    // Bridge unavailable (plain browser / tests): panel simply squeezes content.
-    windowExtended.value = false
-  }
-}
-
 /** Use viewport as the width budget for the left panel. */
 const viewportRef = ref<HTMLElement | null>(
   typeof document !== 'undefined' ? document.documentElement : null,
 )
-const { panelWidthStyle, onResizePointerDown } = useUserGuidePanelResize(viewportRef, {
-  onResizeEnd: (widthPx) => {
-    if (open.value && windowExtended.value) void syncWindowExtension(widthPx)
-  },
-})
+const { panelWidthStyle, onResizePointerDown } = useUserGuidePanelResize(viewportRef)
 
 const md = new MarkdownIt({
   html: false,
@@ -181,15 +160,9 @@ function handleContentClick(event: MouseEvent): void {
 
 watch(open, async (isOpen) => {
   if (isOpen) {
-    // Opening recreates the panel DOM (v-if), so restore the heading ids and
-    // grow the window to keep the app content width unchanged.
+    // Opening recreates the panel DOM (v-if), so restore the heading ids.
     await nextTick()
     assignHeadingIds()
-    void syncWindowExtension(userGuide.panelWidthPx)
-    return
-  }
-  if (windowExtended.value) {
-    void syncWindowExtension(0)
   }
 })
 </script>
@@ -200,7 +173,7 @@ watch(open, async (isOpen) => {
   display: flex;
   flex-shrink: 0;
   min-width: 280px;
-  max-width: min(760px, 100vw);
+  max-width: min(760px, calc(100% - 320px));
   flex-direction: column;
   border-right: 1px solid var(--border-color);
   background: var(--bg-primary);

@@ -149,7 +149,6 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       close: vi.fn(),
       setTitle: vi.fn(),
       setZoomFactor: vi.fn(),
-      setLeftPanelExtension: vi.fn(),
       isMaximized: vi.fn(),
       create: vi.fn(),
       onResized: vi.fn(),
