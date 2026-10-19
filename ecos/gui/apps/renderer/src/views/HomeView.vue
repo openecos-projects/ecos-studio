@@ -187,6 +187,9 @@
         :drc="flowInsightDrc"
         :drc-related="flowInsightDrcRelated"
         :sta="flowInsightSta"
+        :power-summary="powerSummary"
+        :power-summary-loading="powerSummaryLoading"
+        :power-summary-error="powerSummaryError"
         :sta-critical-paths="flowInsightStaPaths"
         :timing-artifacts="flowInsightTimingArtifacts"
         :timing-issues-artifact="flowInsightTimingIssuesArtifact"
@@ -275,6 +278,7 @@ import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
 import { useBackendFlowLogs } from '@/composables/useBackendFlowLogs'
 import { type HomeLayoutThumbnail } from '@/composables/useHomeSnapshots'
 import { useFlowInsights } from '@/composables/useFlowInsights'
+import { usePowerSummary } from '@/composables/usePowerSummary'
 import { useBackendWorkspaceQor } from '@/composables/useBackendWorkspaceQor'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
@@ -356,6 +360,11 @@ const {
   loading: flowInsightsLoading,
   loadCongestion: loadFlowInsightCongestion,
 } = useFlowInsights()
+const {
+  summary: powerSummary,
+  loading: powerSummaryLoading,
+  error: powerSummaryError,
+} = usePowerSummary()
 const flowInsightSteps = computed(() => flowInsightResources.value?.steps ?? [])
 const { keyMetrics, mpcDisplayName } = useDashboardOverview()
 const { state: qorComparisonState } = useBackendWorkspaceQor()

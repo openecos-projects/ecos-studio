@@ -2,6 +2,7 @@ import type { Component } from 'vue'
 import CongestionPanel from './CongestionPanel.vue'
 import DbTrendsPanel from './DbTrendsPanel.vue'
 import DrcPanel from './DrcPanel.vue'
+import PowerSummaryPanel from './PowerSummaryPanel.vue'
 import StaPanel from './StaPanel.vue'
 import StepResourcesPanel from './StepResourcesPanel.vue'
 import type {
@@ -11,6 +12,7 @@ import type {
   StaOverviewModel,
   StepResourcesModel,
 } from './flowInsightsData'
+import type { PowerSummaryModel } from './powerSummary'
 
 export interface FlowInsightsAvailabilityContext {
   stepResources: StepResourcesModel | null
@@ -18,6 +20,7 @@ export interface FlowInsightsAvailabilityContext {
   congestionTiles: CongestionMapTileModel[]
   drc: DrcLayerTypeMatrix | null
   sta: StaOverviewModel | null
+  powerSummary: PowerSummaryModel | null
 }
 
 export interface FlowInsightsModuleAvailability {
@@ -36,6 +39,16 @@ export interface FlowInsightsModuleDescriptor {
 }
 
 export const FLOW_INSIGHT_MODULES: FlowInsightsModuleDescriptor[] = [
+  {
+    id: 'power',
+    title: 'Power',
+    icon: 'ri-flashlight-line',
+    component: PowerSummaryPanel,
+    availability: () => ({
+      available: true,
+      hint: 'Power summary from powerAnalysis',
+    }),
+  },
   {
     id: 'resources',
     title: 'Step Trends',

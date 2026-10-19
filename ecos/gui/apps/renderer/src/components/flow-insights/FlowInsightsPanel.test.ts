@@ -45,6 +45,7 @@ describe('FlowInsightsPanel', () => {
         congestionTileUrls: new Map(),
         drc: null,
         sta: null,
+        powerSummary: null,
         loadCongestion,
       },
       global: {
@@ -59,9 +60,9 @@ describe('FlowInsightsPanel', () => {
       },
     })
 
-    expect(wrapper.findAll('.data-snapshot-tile')).toHaveLength(5)
+    expect(wrapper.findAll('.data-snapshot-tile')).toHaveLength(6)
     expect(wrapper.findAll('.data-snapshot-cell')).toHaveLength(9)
-    expect(wrapper.findAll('.data-snapshot-cell.is-empty')).toHaveLength(4)
+    expect(wrapper.findAll('.data-snapshot-cell.is-empty')).toHaveLength(3)
     expect(wrapper.text()).toContain('Step Trends')
     expect(wrapper.text()).toContain('Congestion')
     const congestion = wrapper

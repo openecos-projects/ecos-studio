@@ -783,7 +783,7 @@ describe('ProjectsView background lifecycle integration', () => {
     expect(wrapper.find('input[name="project-name"]').exists()).toBe(true)
     expect(wrapper.find('input[name="design-name"]').exists()).toBe(true)
     expect(wrapper.find('input[name="project-storage-location"]').exists()).toBe(true)
-    expect(wrapper.find('select[name="managed-mpc"]').exists()).toBe(true)
+    expect(wrapper.find('[data-managed-mpc-selector]').exists()).toBe(true)
     expect(wrapper.find('.project-rtl-import').exists()).toBe(true)
   })
 
@@ -980,6 +980,21 @@ describe('ProjectsView background lifecycle integration', () => {
       const routeRow = popoverRow(wrapper, 'route')
       expect((routeRow.element as HTMLButtonElement).disabled).toBe(false)
       expect(routeRow.find('.popover-step-add').exists()).toBe(true)
+    })
+
+    it('accepts snapshot-relative output directories when creating a branch', async () => {
+      testState.stepOutputs.mockResolvedValue({
+        design: 'gcd',
+        directory: '.',
+        sdc: null,
+        steps: [stepEntry('Synthesis', 'Success', { verilog: true })],
+      })
+
+      const wrapper = await openBranchPopover()
+      await popoverRow(wrapper, 'Synthesis').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.find('.branch-draft-dialog').exists()).toBe(true)
     })
 
     it('skips disabled start steps when picking the branch target start step', async () => {

@@ -1199,36 +1199,49 @@ async function showQuickStartProjectDialog(
     }
   }
 
-  let select: HTMLSelectElement | null = null
+  let selector: HTMLButtonElement | null = null
   for (let attempt = 0; attempt < 100; attempt += 1) {
     signal?.throwIfAborted()
-    select = document.querySelector<HTMLSelectElement>(
-      '.new-project-dialog select[name="managed-mpc"]',
+    selector = document.querySelector<HTMLButtonElement>(
+      '.new-project-dialog [data-managed-mpc-selector]',
     )
-    if (
-      select &&
-      !select.disabled &&
-      [...select.options].some((option) => option.value === input.mpcId)
-    ) {
+    if (selector && !selector.disabled) {
       break
     }
     await delay(100, signal)
   }
-  if (!select || select.disabled) {
-    throw new Error('Quick Start could not select the managed MPC.')
+  if (!selector || selector.disabled) {
+    throw new Error('Quick Start could not open managed MPC selection.')
   }
-  await moveQuickStartCursor(select, signal)
+  await moveQuickStartCursor(selector, signal)
   signal?.throwIfAborted()
-  select.value = input.mpcId
-  select.dispatchEvent(new Event('change', { bubbles: true }))
+  await clickQuickStartTarget(selector, signal)
+  let candidate: HTMLButtonElement | null = null
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    signal?.throwIfAborted()
+    candidate = document.querySelector<HTMLButtonElement>(
+      `.mpc-selection-dialog [data-resource-id="${CSS.escape(input.mpcId)}"]`,
+    )
+    if (candidate) break
+    await delay(100, signal)
+  }
+  if (!candidate) throw new Error('Quick Start could not find the managed MPC.')
+  await clickQuickStartTarget(candidate, signal)
   await delay(450, signal)
   for (let attempt = 0; attempt < 100; attempt += 1) {
     signal?.throwIfAborted()
     const loadingMpcSpec = [
-      ...document.querySelectorAll('.new-project-dialog .modal-help'),
+      ...document.querySelectorAll('.mpc-selection-dialog .modal-help'),
     ].some((message) => message.textContent?.includes('Loading MPC design specification'))
     if (!loadingMpcSpec) break
     await delay(100, signal)
+  }
+
+  const selectButton = document.querySelector<HTMLButtonElement>(
+    '.mpc-selection-dialog .primary-button',
+  )
+  if (selectButton && !selectButton.disabled) {
+    await clickQuickStartTarget(selectButton, signal)
   }
 
   const createButton = document.querySelector<HTMLButtonElement>(

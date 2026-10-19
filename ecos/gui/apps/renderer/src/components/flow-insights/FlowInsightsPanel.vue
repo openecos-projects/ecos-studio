@@ -53,7 +53,13 @@
       @update:visible="onDialogVisibilityChange"
     >
       <div class="data-snapshot-dialog-body">
-        <StepResourcesPanel v-if="activeTab === 'resources'" :model="stepResources" />
+        <PowerSummaryPanel
+          v-if="activeTab === 'power'"
+          :summary="powerSummary"
+          :loading="powerSummaryLoading"
+          :error="powerSummaryError"
+        />
+        <StepResourcesPanel v-else-if="activeTab === 'resources'" :model="stepResources" />
         <DbTrendsPanel
           v-else-if="activeTab === 'db-trends'"
           :model="dbTrends"
@@ -85,8 +91,10 @@ import StepResourcesPanel from './StepResourcesPanel.vue'
 import DbTrendsPanel from './DbTrendsPanel.vue'
 import CongestionPanel from './CongestionPanel.vue'
 import DrcPanel from './DrcPanel.vue'
+import PowerSummaryPanel from './PowerSummaryPanel.vue'
 import StaPanel from './StaPanel.vue'
 import { resolveFlowInsightModules } from './flowInsightsModule'
+import type { PowerSummaryModel } from './powerSummary'
 import type {
   CongestionMapTileModel,
   DbTrendModel,
@@ -112,6 +120,9 @@ const props = defineProps<{
   drc: DrcLayerTypeMatrix | null
   drcRelated?: DrcRelatedMetrics | null
   sta: StaOverviewModel | null
+  powerSummary: PowerSummaryModel | null
+  powerSummaryLoading?: boolean
+  powerSummaryError?: string | null
   staCriticalPaths?: StaCriticalPathsModel | null
   timingArtifacts?: WorkspaceArtifactDescriptor[]
   timingIssuesArtifact?: WorkspaceArtifactDescriptor | null
@@ -138,6 +149,7 @@ const modules = computed(() =>
     congestionTiles: props.congestionTiles,
     drc: props.drc,
     sta: props.sta,
+    powerSummary: props.powerSummary,
   }),
 )
 
