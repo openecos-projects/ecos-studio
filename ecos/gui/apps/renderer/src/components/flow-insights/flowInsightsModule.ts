@@ -1,12 +1,10 @@
 import type { Component } from 'vue'
-import CongestionPanel from './CongestionPanel.vue'
 import DbTrendsPanel from './DbTrendsPanel.vue'
 import DrcPanel from './DrcPanel.vue'
 import PowerSummaryPanel from './PowerSummaryPanel.vue'
 import StaPanel from './StaPanel.vue'
 import StepResourcesPanel from './StepResourcesPanel.vue'
 import type {
-  CongestionMapTileModel,
   DbTrendModel,
   DrcLayerTypeMatrix,
   StaOverviewModel,
@@ -17,7 +15,6 @@ import type { PowerSummaryModel } from './powerSummary'
 export interface FlowInsightsAvailabilityContext {
   stepResources: StepResourcesModel | null
   dbTrends: DbTrendModel | null
-  congestionTiles: CongestionMapTileModel[]
   drc: DrcLayerTypeMatrix | null
   sta: StaOverviewModel | null
   powerSummary: PowerSummaryModel | null
@@ -69,18 +66,6 @@ export const FLOW_INSIGHT_MODULES: FlowInsightsModuleDescriptor[] = [
       hint: context.dbTrends?.rows.length
         ? 'Metric × step matrix with deltas'
         : 'Waiting for step db statistics',
-    }),
-  },
-  {
-    id: 'congestion',
-    title: 'Congestion',
-    icon: 'ri-fire-line',
-    component: CongestionPanel,
-    availability: (context) => ({
-      available: context.congestionTiles.length > 0,
-      hint: context.congestionTiles.length
-        ? 'EGR / RUDY / density maps'
-        : 'Waiting for place / CTS maps',
     }),
   },
   {

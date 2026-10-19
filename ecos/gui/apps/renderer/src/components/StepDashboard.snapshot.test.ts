@@ -136,7 +136,6 @@ describe('StepDashboard committed Snapshot rendering', () => {
           TimingKpis: true,
           StepDataSummaryDialog: true,
           StepSnapshotPanel: true,
-          CongestionPanel: true,
         },
       },
     })
@@ -193,7 +192,6 @@ describe('StepDashboard committed Snapshot rendering', () => {
           TimingKpis: true,
           StepDataSummaryDialog: true,
           StepSnapshotPanel: true,
-          CongestionPanel: true,
         },
       },
     })
@@ -251,7 +249,6 @@ describe('StepDashboard committed Snapshot rendering', () => {
           TimingKpis: true,
           StepDataSummaryDialog: true,
           StepSnapshotPanel: true,
-          CongestionPanel: true,
         },
       },
     })

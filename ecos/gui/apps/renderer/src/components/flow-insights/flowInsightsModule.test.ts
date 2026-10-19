@@ -7,7 +7,6 @@ describe('flow insights module registry', () => {
       'power',
       'resources',
       'db-trends',
-      'congestion',
       'drc',
       'timing',
     ])
@@ -15,14 +14,12 @@ describe('flow insights module registry', () => {
       'Power',
       'Step Trends',
       'DB Trends',
-      'Congestion',
       'DRC',
       'Timing',
     ])
     const resolved = resolveFlowInsightModules({
       stepResources: null,
       dbTrends: null,
-      congestionTiles: [],
       drc: null,
       sta: null,
       powerSummary: null,

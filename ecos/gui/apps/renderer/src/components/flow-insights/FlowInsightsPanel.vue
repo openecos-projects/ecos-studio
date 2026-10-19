@@ -65,11 +65,6 @@
           :model="dbTrends"
           :composition="instanceComposition"
         />
-        <CongestionPanel
-          v-else-if="activeTab === 'congestion'"
-          :tiles="congestionTiles"
-          :tile-urls="congestionTileUrls"
-        />
         <DrcPanel v-else-if="activeTab === 'drc'" :model="drc" :related="drcRelated" />
         <StaPanel
           v-else-if="activeTab === 'timing'"
@@ -89,14 +84,12 @@ import Dialog from 'primevue/dialog'
 import type { WorkspaceArtifactDescriptor } from '@ecos-studio/shared'
 import StepResourcesPanel from './StepResourcesPanel.vue'
 import DbTrendsPanel from './DbTrendsPanel.vue'
-import CongestionPanel from './CongestionPanel.vue'
 import DrcPanel from './DrcPanel.vue'
 import PowerSummaryPanel from './PowerSummaryPanel.vue'
 import StaPanel from './StaPanel.vue'
 import { resolveFlowInsightModules } from './flowInsightsModule'
 import type { PowerSummaryModel } from './powerSummary'
 import type {
-  CongestionMapTileModel,
   DbTrendModel,
   DrcLayerTypeMatrix,
   DrcRelatedMetrics,
@@ -115,8 +108,6 @@ const props = defineProps<{
     num: InstanceCompositionModel
     area: InstanceCompositionModel
   } | null
-  congestionTiles: CongestionMapTileModel[]
-  congestionTileUrls: Map<string, string>
   drc: DrcLayerTypeMatrix | null
   drcRelated?: DrcRelatedMetrics | null
   sta: StaOverviewModel | null
@@ -127,7 +118,6 @@ const props = defineProps<{
   timingArtifacts?: WorkspaceArtifactDescriptor[]
   timingIssuesArtifact?: WorkspaceArtifactDescriptor | null
   loading?: boolean
-  loadCongestion?: () => void | Promise<void>
   dialogOnly?: boolean
   selectedModule?: string | null
 }>()
@@ -146,7 +136,6 @@ const modules = computed(() =>
   resolveFlowInsightModules({
     stepResources: props.stepResources,
     dbTrends: props.dbTrends,
-    congestionTiles: props.congestionTiles,
     drc: props.drc,
     sta: props.sta,
     powerSummary: props.powerSummary,
@@ -168,7 +157,6 @@ function openModule(moduleId: string): void {
   activeTab.value = moduleId
   dialogMaximized.value = false
   dialogVisible.value = true
-  if (moduleId === 'congestion') void props.loadCongestion?.()
 }
 
 function onDialogVisibilityChange(visible: boolean): void {

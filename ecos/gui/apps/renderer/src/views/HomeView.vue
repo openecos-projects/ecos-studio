@@ -182,8 +182,6 @@
         :step-resources="flowInsightResources"
         :db-trends="flowInsightDbTrends"
         :instance-composition="flowInsightComposition"
-        :congestion-tiles="flowInsightCongestionTiles"
-        :congestion-tile-urls="flowInsightCongestionUrls"
         :drc="flowInsightDrc"
         :drc-related="flowInsightDrcRelated"
         :sta="flowInsightSta"
@@ -194,7 +192,6 @@
         :timing-artifacts="flowInsightTimingArtifacts"
         :timing-issues-artifact="flowInsightTimingIssuesArtifact"
         :loading="flowInsightsLoading"
-        :load-congestion="loadFlowInsightCongestion"
       />
     </template>
   </WorkspaceWorkbench>
@@ -349,8 +346,6 @@ const {
   stepResources: flowInsightResources,
   dbTrends: flowInsightDbTrends,
   instanceComposition: flowInsightComposition,
-  congestionTiles: flowInsightCongestionTiles,
-  congestionTileUrls: flowInsightCongestionUrls,
   drc: flowInsightDrc,
   drcRelated: flowInsightDrcRelated,
   sta: flowInsightSta,
@@ -358,7 +353,6 @@ const {
   staCriticalPaths: flowInsightStaPaths,
   timingIssuesArtifact: flowInsightTimingIssuesArtifact,
   loading: flowInsightsLoading,
-  loadCongestion: loadFlowInsightCongestion,
 } = useFlowInsights()
 const {
   summary: powerSummary,
