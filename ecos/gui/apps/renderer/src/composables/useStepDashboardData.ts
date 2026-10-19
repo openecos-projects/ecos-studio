@@ -22,9 +22,6 @@ const stepDashboardCache = new Map<string, StepDashboardData>()
 
 function revokeDashboardData(data: StepDashboardData): void {
   if (data.layoutUrl?.startsWith('blob:')) URL.revokeObjectURL(data.layoutUrl)
-  for (const url of data.congestionTileUrls.values()) {
-    if (url.startsWith('blob:')) URL.revokeObjectURL(url)
-  }
 }
 
 function cacheKey(
@@ -317,15 +314,6 @@ export function useStepDashboardData() {
           next.layoutAvailability = 'stale'
         }
       }
-      const congestionUrls = await Promise.all(
-        next.congestionTiles.map(
-          async (tile) => [tile.pngPath, await readImage(tile.pngPath)] as const,
-        ),
-      )
-      for (const [artifactId, url] of congestionUrls) {
-        if (url) next.congestionTileUrls.set(artifactId, url)
-      }
-      next.mapUrl = next.congestionTileUrls.values().next().value ?? null
       const timingSummaries = []
       const timingPaths = []
       for (const descriptor of artifacts

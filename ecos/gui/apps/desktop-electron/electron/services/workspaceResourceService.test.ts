@@ -754,18 +754,18 @@ describe('WorkspaceResourceService', () => {
     })
   })
 
-  it('returns density map PNGs in the renderer map gallery shape', async () => {
+  it('returns density map CSVs in the renderer map gallery shape', async () => {
     const root = await tempWorkspace()
     await writeWorkspace(root, [{ name: 'place', tool: 'ecc' }])
     await mkdir(join(root, 'place_ecc', 'feature', 'density_map'), { recursive: true })
     await writeFile(
-      join(root, 'place_ecc', 'feature', 'density_map', 'cell_density.png'),
-      'png',
+      join(root, 'place_ecc', 'feature', 'density_map', 'cell_density.csv'),
+      '0,1',
       'utf8',
     )
     await writeFile(
-      join(root, 'place_ecc', 'feature', 'density_map', 'rudy-horizontal.png'),
-      'png',
+      join(root, 'place_ecc', 'feature', 'density_map', 'rudy-horizontal.csv'),
+      '0,1',
       'utf8',
     )
     await writeFile(
@@ -783,11 +783,11 @@ describe('WorkspaceResourceService', () => {
       response: 'available',
       info: {
         cell_density: {
-          path: join(root, 'place_ecc', 'feature', 'density_map', 'cell_density.png'),
+          path: join(root, 'place_ecc', 'feature', 'density_map', 'cell_density.csv'),
           info: [],
         },
         'rudy-horizontal': {
-          path: join(root, 'place_ecc', 'feature', 'density_map', 'rudy-horizontal.png'),
+          path: join(root, 'place_ecc', 'feature', 'density_map', 'rudy-horizontal.csv'),
           info: [],
         },
       },

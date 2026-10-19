@@ -316,16 +316,6 @@
               <i class="ri-bar-chart-box-line" aria-hidden="true" />
               <h2>Data Insights</h2>
             </div>
-            <button
-              v-if="data.mapUrl"
-              type="button"
-              class="dashboard-icon-button"
-              title="Open map snapshot"
-              aria-label="Open map snapshot"
-              @click="openImagePreview('Analysis map', data.mapUrl)"
-            >
-              <i class="ri-map-2-line" aria-hidden="true" />
-            </button>
           </header>
           <div v-if="isSynthesisStep" class="data-body synthesis-data-body">
             <section class="synthesis-insight-column">

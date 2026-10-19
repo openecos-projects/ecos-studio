@@ -771,7 +771,6 @@ export async function readWorkspaceArtifact(
     artifact.availability !== 'available' ||
     ![
       'layout_image',
-      'congestion_image',
       'sta_timing_issues',
       'timing_paths',
       'timing_summary',
@@ -837,7 +836,7 @@ export async function readWorkspaceArtifact(
           ? 'text/plain'
           : 'application/json',
       name: artifact.name,
-      ...(['layout_image', 'congestion_image'].includes(artifact.kind)
+      ...(artifact.kind === 'layout_image'
         ? { bytes: read.bytes }
         : {}),
       ...(text === undefined ? {} : { text }),

@@ -600,14 +600,19 @@ export class WorkspaceResourceService {
       const canonicalDirectory =
         await this.projectScopeProvider.requestProjectPathAccess(directory)
       const entries = await readdir(canonicalDirectory, { withFileTypes: true })
-      const pngEntries = entries
-        .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.png'))
+      const csvEntries = entries
+        .filter(
+          (entry) =>
+            entry.isFile() &&
+            entry.name.toLowerCase().endsWith('.csv') &&
+            entry.name.toLowerCase() !== 'layout.csv',
+        )
         .sort((a, b) => a.name.localeCompare(b.name))
 
       return stepInfo(
         Object.fromEntries(
-          pngEntries.map((entry) => [
-            stripPngExtension(entry.name),
+          csvEntries.map((entry) => [
+            stripCsvExtension(entry.name),
             {
               path: join(canonicalDirectory, entry.name),
               info: [],
@@ -1063,8 +1068,8 @@ function stepInfo(info: Record<string, unknown>): StepInfoBuildResult {
   return { info, errors: [] }
 }
 
-function stripPngExtension(filename: string): string {
-  return filename.replace(/\.png$/i, '')
+function stripCsvExtension(filename: string): string {
+  return filename.replace(/\.csv$/i, '')
 }
 
 function configFiles(step: WorkspaceStepResource): WorkspaceResourceFile[] {
