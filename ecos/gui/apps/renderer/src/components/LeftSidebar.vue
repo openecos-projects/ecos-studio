@@ -38,9 +38,14 @@ import { FLOW_INSIGHT_MODULES } from './flow-insights/flowInsightsModule'
 
 const route = useRoute()
 const currentStage = computed(() => route.query.insight ?? 'home')
+const sidebarInsightModules = [
+  ...FLOW_INSIGHT_MODULES.filter((module) => !['power', 'timing'].includes(module.id)),
+  ...FLOW_INSIGHT_MODULES.filter((module) => module.id === 'timing'),
+  ...FLOW_INSIGHT_MODULES.filter((module) => module.id === 'power'),
+]
 const workspaceStages = [
   { label: 'Dashboard', id: 'home', icon: 'ri-dashboard-line' },
-  ...FLOW_INSIGHT_MODULES.map((module) => ({
+  ...sidebarInsightModules.map((module) => ({
     label: module.title,
     id: module.id,
     icon: module.icon,

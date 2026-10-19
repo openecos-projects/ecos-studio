@@ -26,19 +26,19 @@ describe('RTL workspace navigation', () => {
     expect(wrapper.findAll('a')).toHaveLength(7)
     expect(links.map((link) => link.props('to'))).toEqual([
       { path: '/workspace/home', query: state.route.query },
-      ...['power', 'resources', 'db-trends', 'congestion', 'drc', 'timing'].map((insight) => ({
+      ...['resources', 'db-trends', 'congestion', 'drc', 'timing', 'power'].map((insight) => ({
         path: '/workspace/home',
         query: { ...state.route.query, insight },
       })),
     ])
     expect(links.map((link) => link.text())).toEqual([
       'Dashboard',
-      'Power',
       'Step Trends',
       'DB Trends',
       'Congestion',
       'DRC',
       'Timing',
+      'Power',
     ])
   })
 })
