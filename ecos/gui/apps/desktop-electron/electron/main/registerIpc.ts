@@ -2,7 +2,6 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
-  screen,
   shell,
   type IpcMain,
   type IpcMainInvokeEvent,
@@ -127,7 +126,6 @@ import {
   closeWindow,
   isWindowMaximized,
   minimizeWindow,
-  setWindowLeftPanelExtension,
   setWindowTitle,
   toggleMaximizeWindow,
 } from '../services/windowService'
@@ -1832,19 +1830,6 @@ export function registerIpc(
         ? options.initialRoute
         : '/'
     await services.createWindow({ initialRoute })
-  })
-
-  handle(desktopApiIpcChannels.windowSetLeftPanelExtension, (event, widthPx) => {
-    const target = Number(widthPx)
-    if (!Number.isFinite(target) || target < 0 || target > 1200) {
-      throw new Error('Left panel extension must be a number between 0 and 1200')
-    }
-    const targetWindow = getEventWindow(event)
-    const bounds = targetWindow.getBounds()
-    const workArea = screen.getDisplayMatching(bounds).workArea
-    return setWindowLeftPanelExtension(targetWindow, target, {
-      maxWindowWidthPx: workArea.x + workArea.width - bounds.x,
-    })
   })
 
   handle(desktopApiIpcChannels.workspaceOpenOrFocus, async (event, path) => {
