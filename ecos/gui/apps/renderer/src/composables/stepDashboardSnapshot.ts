@@ -6,7 +6,7 @@ import {
   type WorkspaceTimingPathsDetail,
   type WorkspaceTimingSummaryDetail,
 } from '@ecos-studio/shared'
-import { canonicalStepKey, type StaOverviewModel } from '@/components/flow-insights/flowInsightsData'
+import { type StaOverviewModel } from '@/components/flow-insights/flowInsightsData'
 import {
   checklistSummary,
   lecInsights,
@@ -247,16 +247,6 @@ export function snapshotStepDashboardData(
     }
   }
   const keyMetrics = detail.analysis.metrics.map(dashboardMetric)
-  const insightStep = {
-    directory: '',
-    key: canonicalStepKey(detail.step.name),
-    name: detail.step.name,
-    peakMemoryMb: detail.step.peakMemoryMb ?? null,
-    runtimeSeconds: detail.step.runtimeSeconds ?? null,
-    state: detail.step.state,
-    successful: detail.step.state === 'succeeded' || detail.step.state === 'skipped',
-    tool: detail.step.toolId ?? '',
-  }
   const normalizedStep = detail.step.name.trim().toLowerCase()
   const distributions = metricDistributions(detail)
   const sta = staDashboardInsights(detail.analysis.sta ?? null)

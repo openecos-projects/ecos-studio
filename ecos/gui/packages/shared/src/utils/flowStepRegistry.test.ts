@@ -111,6 +111,10 @@ describe('flow step registry', () => {
       'macroPlacement',
       'postFloorplan',
     ])
+    expect(flowStepDefinition('Place')).toMatchObject({
+      eccNames: ['preplace', 'place', 'diff_sizing'],
+      layoutEccNames: ['place'],
+    })
   })
 })
 
@@ -129,6 +133,8 @@ describe('parseProjectManifestFlowStep', () => {
     expect(parseProjectManifestFlowStep('antennaCheck')).toBe('Antenna Check')
     expect(parseProjectManifestFlowStep('emir')).toBe('EMIR')
     expect(parseProjectManifestFlowStep('postRouteLec')).toBe('Post-route LEC')
+    expect(parseProjectManifestFlowStep('preplace')).toBe('Place')
+    expect(parseProjectManifestFlowStep('diff_sizing')).toBe('Place')
   })
 
   it('resolves display labels and legacy aliases', () => {
@@ -183,6 +189,9 @@ describe('obsolete and layout classification', () => {
     expect(isLayoutFlowStep('legalization')).toBe(true)
     expect(isLayoutFlowStep('Floorplan')).toBe(true)
     expect(isLayoutFlowStep('sta')).toBe(true)
+    expect(isLayoutFlowStep('place')).toBe(true)
+    expect(isLayoutFlowStep('preplace')).toBe(false)
+    expect(isLayoutFlowStep('diff_sizing')).toBe(false)
     expect(isLayoutFlowStep('Synthesis')).toBe(false)
     expect(isLayoutFlowStep('powerAnalysis')).toBe(false)
     expect(isLayoutFlowStep('unknown')).toBe(false)

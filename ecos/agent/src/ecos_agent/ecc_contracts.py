@@ -11,6 +11,7 @@ class ECCStepName(StrEnum):
     The order matches the flow ECC actually writes to ``home/flow.json``:
     the floorplan phase runs as the three sub-steps ``preFloorplan,
     macroPlacement, postFloorplan`` sharing the ``Floorplan`` configuration,
+    followed by ``preplace, place, diff_sizing`` in the placement phase,
     and after ``route`` the tail runs ``filler, lvs, drc, antennaCheck,
     postRouteLec, RCX, sta, powerAnalysis, emir``. Isolated floorplan-geometry candidates still target
     the RPC-level ``Floorplan`` step name.
@@ -25,7 +26,9 @@ class ECCStepName(StrEnum):
     PRE_FLOORPLAN = "preFloorplan"
     MACRO_PLACEMENT = "macroPlacement"
     POST_FLOORPLAN = "postFloorplan"
+    PREPLACE = "preplace"
     PLACEMENT = "place"
+    DIFF_SIZING = "diff_sizing"
     CTS = "CTS"
     LEGALIZATION = "legalization"
     TIMING_OPT = "Timing optimization"

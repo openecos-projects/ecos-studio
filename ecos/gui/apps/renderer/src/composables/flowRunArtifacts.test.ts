@@ -93,6 +93,14 @@ describe('flow run artifacts', () => {
     expect(artifacts.layout?.exists).toBe(false)
   })
 
+  it('does not capture a layout image for internal placement helpers', () => {
+    const artifacts = flowStepRunArtifacts(
+      stepResource({ name: 'preplace', resources: stepResource().resources }),
+    )
+
+    expect(artifacts.layout).toBeNull()
+  })
+
   it('recognizes supported success states', () => {
     const initial = stepResource({ state: 'Completed' })
 

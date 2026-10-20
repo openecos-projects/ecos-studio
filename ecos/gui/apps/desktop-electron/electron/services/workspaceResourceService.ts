@@ -227,6 +227,15 @@ export class WorkspaceResourceService {
       addEccLikeResources(resources, directory, design, topModule, step.name)
     } else if (toolKey === 'dreamplace') {
       addEccLikeResources(resources, directory, design, topModule, step.name)
+    } else if (toolKey === 'sizer') {
+      addEccLikeResources(
+        resources,
+        directory,
+        design,
+        topModule,
+        step.name,
+        workspaceStepFileName(step.name, tool),
+      )
     } else if (isFrontendTool(toolKey)) {
       addFrontendResources(resources, directory, design, step.name)
     } else {
@@ -334,6 +343,22 @@ export class WorkspaceResourceService {
         Object.assign(file, described)
       }),
     )
+    await this.resolveLegacyVerilog(resources, errors)
+  }
+
+  private async resolveLegacyVerilog(
+    resources: StepFileBuckets,
+    errors: string[],
+  ): Promise<void> {
+    const verilog = resources.output.verilog
+    if (!verilog || verilog.exists || !verilog.path.endsWith('.v.gz')) return
+
+    const legacy = await this.describeFile(
+      verilog.path.slice(0, -'.gz'.length),
+      verilog.kind,
+      errors,
+    )
+    if (legacy.exists) resources.output.verilog = legacy
   }
 
   /**
@@ -641,6 +666,12 @@ export class WorkspaceResourceService {
   ): WorkspaceResourceFile[] {
     switch (id) {
       case 'layout':
+        if (step.resources.output.geometryManifest?.exists) {
+          return existingResourceRefs([
+            step.resources.output.def,
+            step.resources.output.geometryManifest,
+          ])
+        }
         return existingResourceRefs([
           step.resources.output.def,
           step.resources.output.gds,
@@ -701,6 +732,13 @@ function workspaceStepDirectoryName(stepName: string, tool: string): string {
   return `${stepName}_${tool}`
 }
 
+function workspaceStepFileName(stepName: string, tool: string): string {
+  if (tool.toLowerCase() === 'sizer') {
+    return stepName.trim().split(/\s+/).join('_').toLowerCase()
+  }
+  return stepName
+}
+
 function createEmptyBuckets(): StepFileBuckets {
   return {
     output: {},
@@ -722,14 +760,15 @@ function addEccLikeResources(
   design: string,
   topModule: string,
   stepName: string,
+  outputStepName = stepName,
 ): void {
   resources.output.dir = createFile(join(directory, 'output'), 'output')
   resources.output.def = createFile(
-    join(directory, 'output', `${design}_${stepName}.def.gz`),
+    join(directory, 'output', `${design}_${outputStepName}.def.gz`),
     'output',
   )
   resources.output.verilog = createFile(
-    join(directory, 'output', `${design}_${stepName}.v`),
+    join(directory, 'output', `${design}_${outputStepName}.v.gz`),
     'output',
   )
   resources.output.gds = createFile(
@@ -833,7 +872,7 @@ function addYosysResources(
     'output',
   )
   resources.output.verilog = createFile(
-    join(directory, 'output', `${design}_${stepName}.v`),
+    join(directory, 'output', `${design}_${stepName}.v.gz`),
     'output',
   )
   resources.output.fixed_verilog = createFile(

@@ -60,6 +60,8 @@ export interface FlowStepDefinition {
   skippable?: boolean
   /** Home/step dashboards may present layout imagery for this step. */
   layout?: boolean
+  /** Persisted ECC names in this family that actually publish layout imagery. */
+  layoutEccNames?: readonly string[]
   /** Signoff gate step (QoR project gate). */
   gate?: boolean
   /** Structural-change step for db trend jump attribution (filler inserts). */
@@ -103,13 +105,14 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
   },
   {
     id: 'Place',
-    eccNames: ['place'],
+    eccNames: ['preplace', 'place', 'diff_sizing'],
     label: 'Place',
     aliases: ['placement'],
     metricScopes: ['placement'],
     metricIdPrefixes: ['place'],
     tool: 'dreamplace',
     layout: true,
+    layoutEccNames: ['place'],
   },
   {
     id: 'CTS',
@@ -329,5 +332,17 @@ export function isObsoleteFlowStepName(value: string): boolean {
 /** True when home/step dashboards may present layout imagery for the step. */
 export function isLayoutFlowStep(value: string): boolean {
   const step = parseProjectManifestFlowStep(value)
-  return step !== null && flowStepDefinition(step).layout === true
+  if (step === null) return false
+  const definition = flowStepDefinition(step)
+  if (!definition.layout) return false
+  if (!definition.layoutEccNames) return true
+  if (
+    definition.layoutEccNames.some(
+      (name) => name.toLowerCase() === value.trim().toLowerCase(),
+    )
+  )
+    return true
+  return !definition.eccNames.some(
+    (name) => name.toLowerCase() === value.trim().toLowerCase(),
+  )
 }
