@@ -11,18 +11,13 @@ describe('centered flow viewport', () => {
       clientHeight: { configurable: true, value: 300 },
     })
     const workspace = ref('first')
+    const zoom = ref(0.75)
     const scope = effectScope()
     const result = scope.run(() =>
-      useCenteredFlowViewport(
-        ref(element),
-        ref(width),
-        ref(height),
-        ref(0.75),
-        workspace,
-      ),
+      useCenteredFlowViewport(ref(element), ref(width), ref(height), zoom, workspace),
     )!
     await nextTick()
-    return { element, workspace, scope, result }
+    return { element, workspace, zoom, scope, result }
   }
 
   it('initializes a large graph at its center', async () => {
@@ -55,6 +50,19 @@ describe('centered flow viewport', () => {
     await nextTick()
     expect(element.scrollLeft).toBe(200)
     expect(element.scrollTop).toBe(187.5)
+    scope.stop()
+  })
+
+  it('does not recenter when zoom changes the scrollbar geometry', async () => {
+    const { element, zoom, scope } = await setup(1200, 900)
+    element.scrollLeft = 100
+    element.scrollTop = 80
+    zoom.value = 0.5
+    Object.defineProperty(element, 'clientWidth', { configurable: true, value: 500 })
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+    expect(element.scrollLeft).toBe(100)
+    expect(element.scrollTop).toBe(80)
     scope.stop()
   })
 })

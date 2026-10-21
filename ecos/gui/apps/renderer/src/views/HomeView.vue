@@ -62,7 +62,7 @@
                 <div class="status-summary-content" :class="`is-${checklistStatusTone}`">
                   <div>
                     <strong class="status-summary-title">{{ checklistTitle }}</strong>
-                    <p>{{ checklistSummaryLabel }}</p>
+                    <p :title="checklistSummaryLabel">{{ checklistSummaryLabel }}</p>
                   </div>
                   <dl class="status-count-list">
                     <div v-if="checklistSummary.total" class="is-pass">
@@ -98,81 +98,6 @@
             </section>
           </template>
         </WorkspaceFlowDashboard>
-
-        <div class="home-dashboard-row home-dashboard-bottom">
-          <section class="dashboard-section chip-card">
-            <header class="dashboard-section-header">
-              <div>
-                <i class="ri-cpu-line" aria-hidden="true" />
-                <h2>Chip Basic Info</h2>
-              </div>
-            </header>
-            <dl class="dashboard-parameter-grid chip-info-grid">
-              <div>
-                <dt>Project</dt>
-                <dd :title="valueOrNA(workspaceIdentity?.projectName)">
-                  {{ valueOrNA(workspaceIdentity?.projectName) }}
-                </dd>
-              </div>
-              <div>
-                <dt>SoC Template</dt>
-                <dd :title="valueOrNA(mpcDisplayName)">
-                  {{ valueOrNA(mpcDisplayName) }}
-                </dd>
-              </div>
-              <div>
-                <dt>Workspace</dt>
-                <dd :title="valueOrNA(currentWorkspaceName)">
-                  {{ valueOrNA(currentWorkspaceName) }}
-                </dd>
-              </div>
-              <div>
-                <dt>PDK</dt>
-                <dd :title="valueOrNA(config.pdk)">{{ valueOrNA(config.pdk) }}</dd>
-              </div>
-              <div>
-                <dt>Design</dt>
-                <dd :title="valueOrNA(config.design)">{{ valueOrNA(config.design) }}</dd>
-              </div>
-              <div>
-                <dt>Top Module</dt>
-                <dd :title="valueOrNA(config.topModule)">
-                  {{ valueOrNA(config.topModule) }}
-                </dd>
-              </div>
-              <div>
-                <dt>Target Die Area</dt>
-                <dd :title="positiveNumberOrNA(config.die.area)">
-                  {{ positiveNumberOrNA(config.die.area) }}
-                </dd>
-              </div>
-              <div>
-                <dt>Target Frequency</dt>
-                <dd :title="frequencyOrNA(config.frequencyMax)">
-                  {{ frequencyOrNA(config.frequencyMax) }}
-                </dd>
-              </div>
-              <div>
-                <dt>Clock</dt>
-                <dd :title="valueOrNA(config.clock)">{{ valueOrNA(config.clock) }}</dd>
-              </div>
-            </dl>
-          </section>
-          <section class="dashboard-section key-metrics-card">
-            <header class="dashboard-section-header">
-              <div>
-                <i class="ri-speed-up-line" aria-hidden="true" />
-                <h2>Key Metrics</h2>
-              </div>
-            </header>
-            <dl class="dashboard-parameter-grid key-metrics-grid">
-              <div v-for="metric in keyMetrics" :key="metric.id">
-                <dt>{{ metric.label }}</dt>
-                <dd>{{ formatDashboardMetric(metric) }}</dd>
-              </div>
-            </dl>
-          </section>
-        </div>
       </main>
       <FlowInsightsPanel
         dialog-only
@@ -257,7 +182,6 @@ import StatusPieChart from '@/components/home/StatusPieChart.vue'
 import {
   checklistPieSlices,
   checklistStatusSummary,
-  formatDashboardMetric,
   workspaceResultFreshnessNotice,
 } from '@/components/home/dashboardData'
 import {
@@ -270,7 +194,6 @@ import {
   qorScoreTone as getQorScoreTone,
 } from '@/components/home/qorComparisonData'
 import HomeQorComparisonDialog from '@/components/home/HomeQorComparisonDialog.vue'
-import { useDashboardOverview } from '@/composables/useDashboardOverview'
 import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
 import { useBackendFlowLogs } from '@/composables/useBackendFlowLogs'
 import { type HomeLayoutThumbnail } from '@/composables/useHomeSnapshots'
@@ -299,34 +222,12 @@ function closeInsight(): void {
 const { currentProject } = useWorkspace()
 const backendWorkspaceSession = useBackendWorkspaceSession()
 const workspaceOverview = computed(() => backendWorkspaceSession.projection.data)
-const workspaceIdentity = computed(() => workspaceOverview.value?.identity)
 const resultFreshness = computed(() => workspaceOverview.value?.resultFreshness)
 const staleRevision = computed(() => {
   const freshness = resultFreshness.value
   return freshness?.status === 'stale' || freshness?.status === 'mixed'
     ? (freshness.staleRevision ?? null)
     : null
-})
-const workspaceConfiguration = computed(() => {
-  const section = workspaceOverview.value?.configuration
-  return section?.status === 'ready' || section?.status === 'partial'
-    ? section.data
-    : null
-})
-const config = computed(() => ({
-  clock: workspaceConfiguration.value?.clock ?? '',
-  design: workspaceConfiguration.value?.design ?? '',
-  die: { area: workspaceConfiguration.value?.dieArea ?? 0 },
-  frequencyMax: workspaceConfiguration.value?.frequencyMaxMhz ?? 0,
-  pdk: workspaceConfiguration.value?.pdk ?? '',
-  topModule: workspaceConfiguration.value?.topModule ?? '',
-}))
-const currentWorkspaceName = computed(() => {
-  if (workspaceIdentity.value?.workspaceName) {
-    return workspaceIdentity.value.workspaceName
-  }
-  const pathName = currentProject.value?.path?.split(/[/\\]/).filter(Boolean).pop()
-  return pathName || currentProject.value?.name || null
 })
 const { isLoading: flowLoading } = useBackendFlowStages()
 const { currentWorkspaceFlowExecutionActive } = useBackendFlowLogs()
@@ -360,7 +261,6 @@ const {
   error: powerSummaryError,
 } = usePowerSummary()
 const flowInsightSteps = computed(() => flowInsightResources.value?.steps ?? [])
-const { keyMetrics, mpcDisplayName } = useDashboardOverview()
 const { state: qorComparisonState } = useBackendWorkspaceQor()
 const showQor = ref(false)
 
@@ -425,19 +325,6 @@ const checklistSummaryLabel = computed(() => {
   return 'All checklist items passed'
 })
 
-function valueOrNA(value: string | number | null | undefined): string {
-  if (typeof value === 'string') return value.trim() || 'N/A'
-  return value === null || value === undefined ? 'N/A' : String(value)
-}
-
-function positiveNumberOrNA(value: number): string {
-  return Number.isFinite(value) && value > 0 ? String(value) : 'N/A'
-}
-
-function frequencyOrNA(value: number): string {
-  return Number.isFinite(value) && value > 0 ? `${value} MHz` : 'N/A'
-}
-
 function statusTone(summary: {
   total: number
   blocked: number
@@ -500,7 +387,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   box-sizing: border-box;
   display: grid;
   gap: 8px;
-  grid-template-rows: minmax(0, 4fr) minmax(0, 2fr);
+  grid-template-rows: minmax(min-content, 1fr);
   height: 100%;
   min-height: 0;
   min-width: 0;
@@ -509,7 +396,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 }
 
 .home-dashboard.has-stale {
-  grid-template-rows: auto minmax(0, 4fr) minmax(0, 2fr);
+  grid-template-rows: auto minmax(min-content, 1fr);
 }
 
 .home-dashboard-stale {
@@ -523,21 +410,6 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   gap: 8px;
   min-width: 0;
   padding: 7px 10px;
-}
-
-.home-dashboard-row {
-  display: grid;
-  gap: 8px;
-  min-height: 0;
-  min-width: 0;
-}
-
-.chip-info-grid {
-  overflow: auto;
-}
-
-.home-dashboard-bottom {
-  grid-template-columns: minmax(0, 4fr) minmax(0, 6fr);
 }
 
 .dashboard-section {
@@ -569,13 +441,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   --dashboard-surface: var(--bg-primary);
   --dashboard-soft-surface: var(--bg-secondary);
   --dashboard-border: var(--border-color);
-  flex: 0 0 164px;
-  height: 168px;
   box-shadow: none;
-}
-
-.signoff-overview-card {
-  flex-basis: 264px;
 }
 
 .flow-status-card .dashboard-section-header {
@@ -695,87 +561,27 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   padding: 8px 9px;
 }
 
-.chip-info-grid,
-.key-metrics-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.chip-info-grid {
-  align-content: start;
-  flex: 1 1 auto;
-  grid-auto-rows: minmax(min-content, auto);
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-
-.chip-info-grid > div {
-  justify-content: flex-start;
-}
-
-.key-metrics-grid {
-  align-content: start;
-  grid-auto-rows: minmax(min-content, 1fr);
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-
 .constraint-list {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.chip-info-grid dt,
-.key-metrics-grid dt,
 .constraint-list dt {
   color: var(--text-secondary);
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.2;
   margin: 0;
 }
 
-.chip-info-grid dd,
-.key-metrics-grid dd,
 .constraint-list dd {
   color: var(--text-primary);
-  flex: 0 0 auto;
-  font-family: inherit;
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
   line-height: 1.25;
   margin: 0;
   min-width: 0;
-}
-
-.chip-info-grid dd {
   overflow-wrap: anywhere;
-  white-space: normal;
-  word-break: break-word;
-}
-
-.key-metrics-grid dd,
-.constraint-list dd {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.key-metrics-grid dd {
-  font-size: 12px;
-  line-height: 1.15;
-}
-
-.key-metrics-grid > div {
-  gap: 3px;
-  min-height: min-content;
-  padding: 5px 7px;
-}
-
-.key-metrics-grid dt {
-  font-size: 12px;
-  margin-bottom: 2px;
 }
 
 .port-definition-link {
@@ -943,7 +749,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 
 .status-card-content {
   grid-template-columns: minmax(64px, 0.45fr) minmax(0, 1fr);
-  overflow: auto;
+  overflow: visible;
 }
 
 .status-card-content > .status-pie {
@@ -1149,7 +955,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 .qor-overview {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
-  overflow: auto;
+  overflow: visible;
 }
 
 .status-card .dashboard-section-header h2 {
@@ -1247,27 +1053,5 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   overflow: auto;
   padding: 8px;
   white-space: pre-wrap;
-}
-
-@media (max-width: 1180px) {
-  .home-dashboard,
-  .home-dashboard.has-stale {
-    grid-template-rows: minmax(440px, auto) auto;
-    align-content: start;
-  }
-  .home-dashboard.has-stale {
-    grid-template-rows: auto minmax(440px, auto) auto;
-  }
-  .home-dashboard-bottom {
-    grid-template-columns: 1fr;
-    grid-template-rows: repeat(3, minmax(180px, auto));
-    min-height: 556px;
-  }
-  .home-dashboard-bottom > .dashboard-section {
-    min-height: 180px;
-  }
-  .home-dashboard > :deep(.workspace-flow-dashboard) {
-    min-height: 440px;
-  }
 }
 </style>

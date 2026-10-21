@@ -11,6 +11,7 @@ export function useCenteredFlowViewport(
   let updateVersion = 0
   let observedElement: HTMLElement | null = null
   let lastCenteredSize = { width: 0, height: 0 }
+  let lastMeasuredZoom = zoom.value
   const surfaceSize = computed(() => ({
     width: Math.max(size.value.width, graphWidth.value * zoom.value),
     height: Math.max(size.value.height, graphHeight.value * zoom.value),
@@ -37,6 +38,8 @@ export function useCenteredFlowViewport(
   function measure(element: HTMLElement): void {
     const width = element.clientWidth
     const height = element.clientHeight
+    const zoomChanged = zoom.value !== lastMeasuredZoom
+    lastMeasuredZoom = zoom.value
     if (!width || !height || (width === size.value.width && height === size.value.height))
       return
     const center =
@@ -52,6 +55,10 @@ export function useCenteredFlowViewport(
         : { x: graphWidth.value / 2, y: graphHeight.value / 2 }
     const sizeChanged = width !== size.value.width || height !== size.value.height
     size.value = { width, height }
+    // Zoom owns the scroll anchor while a scale transition is settling. The
+    // resize observer still records the new viewport size, but must not issue
+    // a second center operation based on stale scrollbar geometry.
+    if (zoomChanged) return
     if (
       sizeChanged &&
       (width !== lastCenteredSize.width || height !== lastCenteredSize.height)
@@ -67,6 +74,7 @@ export function useCenteredFlowViewport(
       if (element === observedElement) return
       ++updateVersion
       lastCenteredSize = { width: 0, height: 0 }
+      lastMeasuredZoom = zoom.value
       if (size.value.width || size.value.height) size.value = { width: 0, height: 0 }
       observedElement = element
       if (!element) return

@@ -39,13 +39,6 @@
         </button>
       </header>
       <div class="flow-viewport">
-        <div
-          v-if="$slots.overview"
-          class="flow-overview"
-          aria-label="Flow status overview"
-        >
-          <slot name="overview" />
-        </div>
         <p v-if="error" class="flow-empty" role="alert">{{ error }}</p>
         <p v-else-if="!steps.length" class="flow-empty" role="status">
           {{ isLoading ? 'Loading flow…' : 'No flow steps are available.' }}
@@ -81,6 +74,8 @@
                 left: `${canvasOffset.x}px`,
                 top: `${canvasOffset.y}px`,
                 transform: `scale(${zoom})`,
+                '--flow-step-width': `${FLOW_CARD.width}px`,
+                '--flow-step-height': `${FLOW_CARD.height}px`,
               }"
             >
               <svg
@@ -133,6 +128,16 @@
               />
             </div>
           </div>
+        </div>
+        <div
+          v-if="$slots.overview"
+          class="flow-overview"
+          aria-label="Flow status overview"
+        >
+          <slot name="overview" />
+        </div>
+        <div v-if="$slots.metrics" class="flow-metrics" aria-label="Flow key metrics">
+          <slot name="metrics" />
         </div>
       </div>
       <StepChecklistDialog
@@ -208,6 +213,7 @@ import StepLogDialog from './StepLogDialog.vue'
 import FlowSignoffCard from './FlowSignoffCard.vue'
 import { useFlowDiagramPan } from './useFlowDiagramPan'
 import { useCenteredFlowViewport } from './useCenteredFlowViewport'
+import { FLOW_CARD, flowGraphLayout } from './flowGraphLayout'
 
 const emit = defineEmits<{ layout: [thumbnail: HomeLayoutThumbnail] }>()
 const { projectedSteps, isLoading, error } = useBackendFlowStages()
@@ -240,21 +246,14 @@ const steps = computed(() =>
 const topology = computed(() =>
   withSignoffMilestone(buildFlowTopology(steps.value), steps.value),
 )
-const positions = computed(
-  () =>
-    new Map(
-      topology.value.nodes.map((node) => [
-        node.id,
-        { x: 12 + node.column * 194, y: 12 + node.row * 202 },
-      ]),
-    ),
-)
+const layout = computed(() => flowGraphLayout(topology.value))
+const positions = computed(() => layout.value.positions)
 const signoffPosition = computed(() => positions.value.get(SIGNOFF_MILESTONE_ID))
 const positionedSteps = computed(() =>
   steps.value.map((step) => ({ step, ...positions.value.get(step.id)! })),
 )
-const graphWidth = computed(() => Math.max(1, topology.value.columns) * 194 - 20)
-const graphHeight = computed(() => topology.value.rows * 202)
+const graphWidth = computed(() => layout.value.width)
+const graphHeight = computed(() => layout.value.height)
 const { surfaceSize, canvasOffset } = useCenteredFlowViewport(
   flowScroll,
   graphWidth,
@@ -282,9 +281,9 @@ function isFinalizationStep(step: DashboardFlowStep): boolean {
 function edgePath(edge: FlowEdge): string {
   const from = positions.value.get(edge.from)!
   const to = positions.value.get(edge.to)!
-  const startX = from.x + 150
-  const startY = from.y + 88
-  const endY = to.y + 88
+  const startX = from.x + FLOW_CARD.width
+  const startY = from.y + FLOW_CARD.height / 2
+  const endY = to.y + FLOW_CARD.height / 2
   const midpoint = startX + (to.x - startX) / 2
   return `M ${startX} ${startY} H ${midpoint} V ${endY} H ${to.x - 3}`
 }
@@ -347,6 +346,7 @@ watch(selectedStep, (step) => {
 
 <style scoped>
 .workspace-flow-dashboard {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -412,7 +412,7 @@ output {
 .flow-viewport {
   position: relative;
   flex: 1;
-  min-height: 0;
+  min-height: 240px;
   min-width: 0;
   overflow: hidden;
 }
@@ -423,17 +423,33 @@ output {
   scrollbar-gutter: stable both-edges;
   cursor: grab;
 }
-.flow-overview {
+.flow-overview,
+.flow-metrics {
   position: absolute;
-  top: 8px;
   left: 8px;
-  z-index: 1;
+  z-index: 2;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  align-items: stretch;
   gap: 8px;
+  flex: 0 0 auto;
+  width: fit-content;
   max-width: calc(100% - 16px);
+  box-sizing: border-box;
   pointer-events: none;
 }
-.flow-overview :deep(> *) {
+.flow-overview {
+  top: 8px;
+}
+.flow-metrics {
+  bottom: 8px;
+}
+.flow-overview :deep(> *),
+.flow-metrics :deep(> *) {
+  align-self: stretch;
+  width: fit-content;
+  max-width: 100%;
   pointer-events: auto;
 }
 .flow-scroll.is-panning,

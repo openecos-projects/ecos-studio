@@ -47,8 +47,9 @@ const {
   flex-direction: column;
   align-items: center;
   justify-content: space-between;
-  width: 150px;
-  height: 176px;
+  box-sizing: border-box;
+  width: var(--flow-step-width, 156px);
+  height: var(--flow-step-height, 164px);
   padding: 8px;
   border: 1px solid var(--border-color);
   border-radius: 6px;

@@ -56,6 +56,11 @@ describe('workspace flow topology', () => {
     expect(topology.edges).toContainEqual({ from: 'powerAnalysis', to: 'emir' })
     expect(topology.edges).toContainEqual({ from: 'RCX', to: 'sta' })
     expect(topology.edges).toContainEqual({ from: 'Harden', to: 'Signoff' })
+    const firstBranch = topology.nodes.find((node) => node.id === 'lvs')!
+    const lastBranch = topology.nodes.find((node) => node.id === 'powerAnalysis')!
+    const filler = topology.nodes.find((node) => node.id === 'filler')!
+    expect(filler.row).toBe((firstBranch.row + lastBranch.row) / 2)
+    expect(topology.nodes.find((node) => node.id === 'Harden')!.row).toBe(filler.row)
     const extraction = topology.nodes.find((node) => node.id === 'RCX')!
     const timing = topology.nodes.find((node) => node.id === 'sta')!
     expect(extraction.row).toBe(timing.row)

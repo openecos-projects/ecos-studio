@@ -89,7 +89,7 @@ export function buildFlowTopology(steps: readonly TopologyStep[]): FlowTopology 
     )
     if (branch.length) branches.push(branch)
   }
-  const centerRow = Math.floor(branches.length / 2)
+  const centerRow = (branches.length - 1) / 2
   const branchColumn = fillerIndex + 1
   const joinColumn = branchColumn + Math.max(...branches.map((branch) => branch.length))
   addChain(steps.slice(0, fillerIndex + 1), 0, centerRow)

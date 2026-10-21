@@ -46,7 +46,10 @@ describe('workspace flow diagram', () => {
   function render(stubTeleport = true, withOverview = false) {
     return mount(WorkspaceFlowDashboard, {
       slots: withOverview
-        ? { overview: '<article class="test-overview">Status overview</article>' }
+        ? {
+            overview: '<article class="test-overview">Status overview</article>',
+            metrics: '<article class="test-metrics">Key metrics</article>',
+          }
         : {},
       global: {
         stubs: {
@@ -118,10 +121,15 @@ describe('workspace flow diagram', () => {
       wrapper.get('.flow-viewport').element,
     )
     expect(wrapper.find('.flow-scroll .test-overview').exists()).toBe(false)
+    expect(wrapper.get('.flow-metrics').element.parentElement).toBe(
+      wrapper.get('.flow-viewport').element,
+    )
+    const metrics = wrapper.get('.test-metrics').element
     await wrapper.get('input[aria-label="Flow diagram zoom"]').setValue('1')
     expect(wrapper.get('.test-overview').element).toBe(overview)
     await wrapper.get('button[aria-label="Expand flow diagram"]').trigger('click')
     expect(document.body.querySelector('.flow-overview .test-overview')).toBe(overview)
+    expect(document.body.querySelector('.flow-metrics .test-metrics')).toBe(metrics)
     document.body
       .querySelector<HTMLButtonElement>('button[aria-label="Restore flow diagram"]')!
       .click()

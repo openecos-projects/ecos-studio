@@ -596,6 +596,99 @@ describe('ECC CLI Workspace configuration boundary', () => {
   })
 })
 
+describe('ECC CLI workspace refresh legacy RTL recovery', () => {
+  async function serviceWithLegacyWorkspace() {
+    const root = await mkdtemp(join(tmpdir(), 'ecc-refresh-recovery-'))
+    temporaryDirectories.push(root)
+    const workspace = join(root, 'ws_1')
+    await mkdir(join(workspace, 'origin'), { recursive: true })
+    await writeFile(join(workspace, 'origin', 'gcd.v'), 'module gcd(); endmodule')
+    await writeFile(join(workspace, 'origin', 'gcd.sdc'), 'create_clock')
+    const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
+    ;(service as any).sessions.set('handle-1', {
+      directory: workspace,
+      handle: 'handle-1',
+      projectRoot: root,
+      workspaceId: 'ws_1',
+      workspaceRevision: 36,
+    })
+    vi.spyOn(
+      await import('./engineeringSnapshotReader'),
+      'readPersistedEngineeringSnapshot',
+    ).mockResolvedValue({ workspaceRevision: 37 } as never)
+    return { root, workspace, service }
+  }
+
+  const MISSING_RTL_ERROR = () =>
+    new EccCliCommandError(
+      1,
+      'kind=error error=step_input_missing step_input_missing: Synthesis requires design.rtl',
+      '',
+    )
+
+  it('imports workspace origin RTL into the project and retries the refresh', async () => {
+    const { root, workspace, service } = await serviceWithLegacyWorkspace()
+    let refreshAttempts = 0
+    const run = vi
+      .spyOn(EccCliProcess.prototype, 'run')
+      .mockImplementation(async (args) => {
+        if (args[0] === 'workspace' && args[1] === 'refresh') {
+          refreshAttempts += 1
+          if (refreshAttempts === 1) throw MISSING_RTL_ERROR()
+        }
+        return { exitCode: 0, stderr: '', stdout: '' }
+      })
+
+    await expect(
+      service.refreshConfig({ workspaceHandle: 'handle-1' }),
+    ).resolves.toMatchObject({
+      directory: workspace,
+      refreshed: true,
+      workspaceRevision: 37,
+    })
+    expect(refreshAttempts).toBe(2)
+    expect(run).toHaveBeenCalledWith(
+      [
+        'rtl',
+        'import',
+        '--project',
+        root,
+        '--verilog',
+        join(workspace, 'origin', 'gcd.v'),
+        '--plain',
+      ],
+      { cwd: root },
+    )
+  })
+
+  it('surfaces unrelated refresh failures without importing RTL', async () => {
+    const { service } = await serviceWithLegacyWorkspace()
+    const run = vi.spyOn(EccCliProcess.prototype, 'run').mockImplementation(async () => {
+      throw new EccCliCommandError(1, 'kind=error error=derived_configs_modified', '')
+    })
+
+    await expect(service.refreshConfig({ workspaceHandle: 'handle-1' })).rejects.toThrow(
+      'derived_configs_modified',
+    )
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(run.mock.calls.some((call) => call[0][0] === 'rtl')).toBe(false)
+  })
+
+  it('keeps the original failure when the workspace has no origin RTL', async () => {
+    const { workspace, service } = await serviceWithLegacyWorkspace()
+    const { rm } = await import('node:fs/promises')
+    await rm(join(workspace, 'origin', 'gcd.v'), { force: true })
+    const run = vi.spyOn(EccCliProcess.prototype, 'run').mockImplementation(async () => {
+      throw MISSING_RTL_ERROR()
+    })
+
+    await expect(service.refreshConfig({ workspaceHandle: 'handle-1' })).rejects.toThrow(
+      'requires design.rtl',
+    )
+    expect(run).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('ECC CLI Workspace parameter projection', () => {
   it('reads legacy flat Snapshot values through the catalog mapping', () => {
     expect(

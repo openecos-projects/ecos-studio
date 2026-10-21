@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { lstat, open, realpath, stat } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
+import { lstat, open, readdir, realpath, stat } from 'node:fs/promises'
+import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path'
 import type {
   EccBackgroundOperationLogResult,
   EccBackgroundOperationProjection,
@@ -703,16 +703,25 @@ export class EccCliRuntimeService {
     request: EccWorkspaceRefreshConfigRequest,
   ): Promise<EccWorkspaceRefreshConfigResult> {
     const session = this.requireSession(request.workspaceHandle)
-    await this.runWorkspaceMutation(
-      session,
-      workspaceRefreshArgs({
-        commandId: randomUUID(),
-        expectedWorkspaceRevision: request.expectedWorkspaceRevision,
-        force: request.force,
-        projectRoot: session.projectRoot,
-        workspaceId: session.workspaceId,
-      }),
-    )
+    const refresh = () =>
+      this.runWorkspaceMutation(
+        session,
+        workspaceRefreshArgs({
+          commandId: randomUUID(),
+          expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+          force: request.force,
+          projectRoot: session.projectRoot,
+          workspaceId: session.workspaceId,
+        }),
+      )
+    try {
+      await refresh()
+    } catch (error) {
+      const rtlImport = await legacyOriginRtlImportArgs(error, session)
+      if (!rtlImport) throw error
+      await this.runWorkspaceMutation(session, rtlImport)
+      await refresh()
+    }
     return {
       directory: session.directory,
       refreshed: true,
@@ -2003,6 +2012,41 @@ export function workspaceRefreshArgs(options: {
     '--no-wait',
     ...(options.force ? ['--force'] : []),
   ]
+}
+
+const ORIGIN_RTL_SUFFIXES = new Set(['.v', '.sv', '.svh', '.vh'])
+
+/**
+ * Legacy projects predate project-level `design.rtl`: their RTL sources only
+ * exist inside the workspace `origin/` directory, so `ecc workspace refresh`
+ * fails its step-input preflight with `step_input_missing`. Recover by
+ * importing those origin sources into the project through `ecc rtl import`
+ * (ECC remains the only writer of project configuration), then the caller
+ * retries the refresh.
+ */
+async function legacyOriginRtlImportArgs(
+  error: unknown,
+  session: WorkspaceSession,
+): Promise<string[] | null> {
+  if (
+    !(error instanceof EccCliCommandError) ||
+    error.code !== 'step_input_missing' ||
+    !error.message.includes('requires design.rtl')
+  ) {
+    return null
+  }
+  const originDirectory = join(session.directory, 'origin')
+  let entries: string[]
+  try {
+    entries = await readdir(originDirectory)
+  } catch {
+    return null
+  }
+  const verilog = entries
+    .filter((name) => ORIGIN_RTL_SUFFIXES.has(extname(name).toLowerCase()))
+    .map((name) => join(originDirectory, name))
+    .sort()
+  return rtlImportArgs(session.projectRoot, { verilog })
 }
 
 function parameterArgs(value: unknown): string[] {
