@@ -783,11 +783,7 @@
       </section>
     </div>
 
-    <div
-      v-if="showProjectMpcSelection"
-      class="project-modal-scrim"
-      role="presentation"
-    >
+    <div v-if="showProjectMpcSelection" class="project-modal-scrim" role="presentation">
       <section
         ref="projectMpcSelectionDialog"
         class="project-modal-dialog mpc-selection-dialog"
@@ -870,16 +866,18 @@
           {{ projectMpcSelectionError }}
         </p>
         <footer class="modal-actions">
-          <button type="button" class="secondary-button" @click="cancelProjectMpcSelection">
+          <button
+            type="button"
+            class="secondary-button"
+            @click="cancelProjectMpcSelection"
+          >
             Cancel
           </button>
           <button
             type="button"
             class="primary-button"
             :disabled="
-              isLoadingProjectMpcs ||
-              isLoadingProjectMpcSpec ||
-              !selectedProjectMpc
+              isLoadingProjectMpcs || isLoadingProjectMpcSpec || !selectedProjectMpc
             "
             @click="confirmProjectMpcSelection"
           >
@@ -1241,9 +1239,10 @@ const projectMpcSpecError = ref('')
 const showProjectMpcSelection = ref(false)
 const projectMpcSelectionError = ref('')
 const projectMpcSelectionDialog = ref<HTMLElement | null>(null)
-const projectMpcSelectionBeforeOpen = ref<{ resourceId: string; designIndex: number | null } | null>(
-  null,
-)
+const projectMpcSelectionBeforeOpen = ref<{
+  resourceId: string
+  designIndex: number | null
+} | null>(null)
 const newProjectDialog = ref<HTMLElement | null>(null)
 const workspaceDraftDialog = ref<HTMLElement | null>(null)
 const deleteWorkspaceDialog = ref<HTMLElement | null>(null)

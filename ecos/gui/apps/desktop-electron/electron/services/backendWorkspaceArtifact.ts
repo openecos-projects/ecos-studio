@@ -836,9 +836,7 @@ export async function readWorkspaceArtifact(
           ? 'text/plain'
           : 'application/json',
       name: artifact.name,
-      ...(artifact.kind === 'layout_image'
-        ? { bytes: read.bytes }
-        : {}),
+      ...(artifact.kind === 'layout_image' ? { bytes: read.bytes } : {}),
       ...(text === undefined ? {} : { text }),
       ...(parsedQorHotspots ? { hotspots: parsedQorHotspots } : {}),
       ...(parsedQorSummary ? { summary: parsedQorSummary } : {}),

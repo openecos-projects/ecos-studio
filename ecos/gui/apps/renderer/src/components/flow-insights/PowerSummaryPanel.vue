@@ -41,7 +41,9 @@ const metrics = [
 
 function formatValue(key: (typeof metrics)[number]['key']): string {
   const value = props.summary?.[key]
-  return value === undefined ? 'N/A' : value.toLocaleString(undefined, { maximumFractionDigits: 3 })
+  return value === undefined
+    ? 'N/A'
+    : value.toLocaleString(undefined, { maximumFractionDigits: 3 })
 }
 </script>
 

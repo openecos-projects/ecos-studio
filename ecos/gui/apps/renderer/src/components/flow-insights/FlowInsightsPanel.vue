@@ -59,7 +59,10 @@
           :loading="powerSummaryLoading"
           :error="powerSummaryError"
         />
-        <StepResourcesPanel v-else-if="activeTab === 'resources'" :model="stepResources" />
+        <StepResourcesPanel
+          v-else-if="activeTab === 'resources'"
+          :model="stepResources"
+        />
         <DbTrendsPanel
           v-else-if="activeTab === 'db-trends'"
           :model="dbTrends"

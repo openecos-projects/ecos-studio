@@ -56,11 +56,9 @@ export function usePowerSummary() {
     }
   }
 
-  watch(
-    [() => currentProject.value?.path ?? '', revision],
-    () => void load(),
-    { immediate: true },
-  )
+  watch([() => currentProject.value?.path ?? '', revision], () => void load(), {
+    immediate: true,
+  })
   onScopeDispose(() => {
     requestVersion += 1
   })

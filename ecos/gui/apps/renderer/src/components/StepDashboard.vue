@@ -829,7 +829,6 @@
                 <span>No floorplan metrics</span>
               </div>
             </section>
-
           </div>
           <div v-else class="data-body">
             <figure v-if="selectedDataChart" class="distribution-chart">
