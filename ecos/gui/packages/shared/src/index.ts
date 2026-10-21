@@ -397,6 +397,14 @@ export type {
   CliInstallerProgressEvent,
   CliManagedInstallSource,
 } from './contracts/cliInstaller.ts'
+export type {
+  EnvironmentDoctorComponent,
+  EnvironmentDoctorComponentStatus,
+  EnvironmentDoctorResult,
+  EnvironmentDoctorStatus,
+  EnvironmentDoctorSummary,
+} from './contracts/environmentDoctor.ts'
+export { normalizeEccVersion } from './utils/eccVersion.ts'
 export {
   ECC_BUNDLE_RESOURCE_ID,
   EXPECTED_ECC_BUNDLE_VERSION,

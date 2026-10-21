@@ -84,6 +84,8 @@ function subscribeToDesktopEvent(
 const desktopApi: DesktopApi = {
   app: {
     getVersions: () => invokeDesktop(desktopApiIpcChannels.appGetVersions),
+    getEnvironmentDoctor: () =>
+      invokeDesktop(desktopApiIpcChannels.appGetEnvironmentDoctor),
     getQuickStartResources: () =>
       invokeDesktop(desktopApiIpcChannels.appGetQuickStartResources),
     getQuickStartRoot: () => invokeDesktop(desktopApiIpcChannels.appGetQuickStartRoot),

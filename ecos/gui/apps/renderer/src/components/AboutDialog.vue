@@ -4,7 +4,7 @@
     v-model:visible="visible"
     modal
     header="About ECOS Studio"
-    :style="{ width: '420px' }"
+    :style="{ width: '480px' }"
     :contentStyle="{ padding: '24px' }"
     :closable="true"
     :draggable="false"
@@ -29,34 +29,91 @@
         </tbody>
       </table>
 
-      <button class="copy-btn" @click="copyVersions">
-        <i class="ri-file-copy-line" />
-        {{ copied ? 'Copied' : 'Copy version info' }}
-      </button>
+      <p v-if="runtimeNotice" class="runtime-notice">{{ runtimeNotice }}</p>
+      <p v-else-if="loadingMetadata" class="runtime-notice">
+        Checking runtime metadata...
+      </p>
+
+      <div class="about-actions">
+        <button class="copy-btn" @click="copyVersions">
+          <i class="ri-file-copy-line" />
+          {{ copied ? 'Copied' : 'Copy version info' }}
+        </button>
+        <button class="details-link" @click="showDoctor = true">
+          Environment details
+          <i class="ri-arrow-right-line" />
+        </button>
+      </div>
     </div>
+
+    <EnvironmentDoctorDialog v-model="showDoctor" />
   </Dialog>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
+import type { CliInstallState } from '@ecos-studio/shared'
+import { fetchCliInstallerStatus } from '@/api/cliInstaller'
 import { useVersion } from '@/composables/useVersion'
 import { aboutVersionRows, buildAboutVersionText } from './aboutDialogVersions'
+import EnvironmentDoctorDialog from './EnvironmentDoctorDialog.vue'
 
 const visible = defineModel<boolean>({ required: true })
-const { versions } = useVersion()
+const { versions, refreshVersions } = useVersion()
+const installerStatus = ref<CliInstallState | null>(null)
+const installerError = ref<string | null>(null)
+const loadingMetadata = ref(false)
+const showDoctor = ref(false)
+let metadataRequestId = 0
 
-const versionRows = computed(() => aboutVersionRows(versions.value))
+const versionRows = computed(() =>
+  aboutVersionRows({ versions: versions.value, installer: installerStatus.value }),
+)
+const runtimeNotice = computed(
+  () =>
+    installerStatus.value?.warning ??
+    installerStatus.value?.error ??
+    installerError.value,
+)
 
 const copied = ref(false)
 async function copyVersions(): Promise<void> {
-  const text = buildAboutVersionText(versions.value)
+  const text = buildAboutVersionText({
+    versions: versions.value,
+    installer: installerStatus.value,
+  })
   await navigator.clipboard.writeText(text)
   copied.value = true
   setTimeout(() => {
     copied.value = false
   }, 2000)
 }
+
+async function refreshMetadata(): Promise<void> {
+  const requestId = ++metadataRequestId
+  loadingMetadata.value = true
+  installerError.value = null
+  installerStatus.value = null
+  try {
+    const [status] = await Promise.all([fetchCliInstallerStatus(), refreshVersions()])
+    if (requestId === metadataRequestId) installerStatus.value = status
+  } catch (error) {
+    if (requestId === metadataRequestId) {
+      installerError.value = error instanceof Error ? error.message : String(error)
+    }
+  } finally {
+    if (requestId === metadataRequestId) loadingMetadata.value = false
+  }
+}
+
+watch(
+  visible,
+  (open) => {
+    if (open) void refreshMetadata()
+  },
+  { immediate: true },
+)
 </script>
 
 <style>
@@ -137,7 +194,7 @@ async function copyVersions(): Promise<void> {
 
 .label-cell {
   color: var(--text-secondary);
-  width: 130px;
+  width: 150px;
 }
 
 .version-cell {
@@ -145,7 +202,27 @@ async function copyVersions(): Promise<void> {
   font-family: monospace;
 }
 
-.copy-btn {
+.runtime-notice {
+  margin: 0;
+  padding: 8px 10px;
+  color: #e8bd68;
+  background: rgba(232, 189, 104, 0.08);
+  border: 1px solid rgba(232, 189, 104, 0.2);
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.about-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.copy-btn,
+.details-link {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -164,6 +241,17 @@ async function copyVersions(): Promise<void> {
 
 .copy-btn:hover {
   background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.details-link {
+  padding: 6px 0;
+  color: var(--accent-color, #73a9ff);
+  background: transparent;
+  border: 0;
+}
+
+.details-link:hover {
   color: var(--text-primary);
 }
 </style>

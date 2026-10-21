@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import {
   ECC_BUNDLE_RESOURCE_ID,
   EXPECTED_ECC_BUNDLE_VERSION,
+  normalizeEccVersion,
   type CliInstallState,
   type CliInstallerProgressEvent,
   type ResourceJob,
@@ -297,7 +298,9 @@ export class CliInstallerService {
       selfCheck,
       status: selfCheck.ok ? 'ready' : 'self-check-failed',
       warning:
-        installedVersion && installedVersion !== this.expectedVersion
+        installedVersion &&
+        normalizeEccVersion(installedVersion) !==
+          normalizeEccVersion(this.expectedVersion)
           ? `The external ECC runtime reports version ${installedVersion}, but this release is tested against ${this.expectedVersion}.`
           : null,
       error: selfCheck.ok

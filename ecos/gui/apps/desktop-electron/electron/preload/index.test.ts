@@ -32,6 +32,7 @@ async function loadDesktopBridge() {
   return contextBridgeExposeInMainWorld.mock.calls.at(-1)?.[1] as {
     app: {
       getVersions(): Promise<unknown>
+      getEnvironmentDoctor(): Promise<unknown>
       getQuickStartResources(): Promise<unknown>
     }
     shutdown: {
@@ -328,6 +329,28 @@ describe('preload desktop bridge contract', () => {
       8,
       desktopApiIpcChannels.workspaceRetainProjectDirectoryReplacement,
       replacement.id,
+    )
+  })
+
+  it('routes ECC environment diagnostics through the shared channel', async () => {
+    const bridge = await loadDesktopBridge()
+    const result = {
+      summary: {
+        status: 'ok',
+        checked: 1,
+        failed: 0,
+        attention: 0,
+        detail: 'ecc 0.1.0a12',
+        installedAt: null,
+      },
+      components: [],
+      projectPath: null,
+    }
+    ipcRenderer.invoke.mockResolvedValueOnce(result)
+
+    await expect(bridge.app.getEnvironmentDoctor()).resolves.toEqual(result)
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.appGetEnvironmentDoctor,
     )
   })
 

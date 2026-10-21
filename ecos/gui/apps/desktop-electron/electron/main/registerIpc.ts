@@ -283,6 +283,11 @@ export interface DesktopBridgeServices {
   appInfoService: {
     getVersions(): Promise<VersionInfo>
   }
+  environmentDoctorService?: {
+    run(
+      projectPath?: string | null,
+    ): Promise<import('@ecos-studio/shared').EnvironmentDoctorResult>
+  }
   createWindow?(options?: { initialRoute?: string }): Promise<void>
   settingsStore: {
     delete(key: string): Promise<void>
@@ -1761,6 +1766,15 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.appGetVersions, async () => {
     return await services.appInfoService.getVersions()
+  })
+
+  handle(desktopApiIpcChannels.appGetEnvironmentDoctor, async (event) => {
+    if (!services.environmentDoctorService) {
+      throw new Error('ECC environment diagnostics are unavailable.')
+    }
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const projectPath = window ? workspaceWindowRegistry.getPathForWindow(window) : null
+    return await services.environmentDoctorService.run(projectPath)
   })
 
   handle(desktopApiIpcChannels.appGetQuickStartRoot, async () => {

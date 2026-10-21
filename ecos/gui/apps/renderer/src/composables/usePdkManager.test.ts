@@ -106,6 +106,18 @@ const desktopBridge = {
       ecc: 'unknown',
       dreamplace: 'unknown',
     }),
+    getEnvironmentDoctor: async () => ({
+      summary: {
+        status: 'unknown' as const,
+        checked: 0,
+        failed: 0,
+        attention: 0,
+        detail: null,
+        installedAt: null,
+      },
+      components: [],
+      projectPath: null,
+    }),
   },
   productCommands: {
     execute: async () => ({ accepted: false, operationId: '', state: '' }),

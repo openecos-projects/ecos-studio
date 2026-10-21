@@ -21,7 +21,7 @@ export type CliSpawnLike = (
  */
 export function parseVersionFromSelfCheckDetail(detail: string | null): string | null {
   if (!detail) return null
-  const match = detail.match(/\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?/)
+  const match = detail.match(/\d+\.\d+\.\d+(?:(?:-|\+|\.)[0-9A-Za-z.-]+|(?:a|b|rc)\d+)?/)
   return match ? match[0] : null
 }
 

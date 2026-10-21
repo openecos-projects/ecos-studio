@@ -142,6 +142,7 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
   return {
     app: {
       getVersions: vi.fn(),
+      getEnvironmentDoctor: vi.fn(),
     },
     window: {
       minimize: vi.fn(),
