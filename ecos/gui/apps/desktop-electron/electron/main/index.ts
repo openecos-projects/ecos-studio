@@ -538,6 +538,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       agentQuickRunRoot: join(app.getPath('userData'), 'quick-runs'),
       agentRuntimeService: agentRuntimeService ?? undefined,
       appInfoService: desktopServices.appInfoService,
+      environmentDoctorService: desktopServices.environmentDoctorService,
       backendWorkspaceService: desktopServices.backendWorkspaceService,
       backendProjectComparisonService: desktopServices.backendProjectComparisonService,
       projectWorkspaceFlowService: desktopServices.projectWorkspaceFlowService,

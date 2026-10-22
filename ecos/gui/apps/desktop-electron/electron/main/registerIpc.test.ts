@@ -2123,7 +2123,7 @@ describe('registerIpc', () => {
     expect(services.appInfoService.getVersions).toHaveBeenCalledTimes(1)
   })
 
-  it('runs ECC environment diagnostics for the current workspace', async () => {
+  it('runs ECC environment diagnostics for the current workspace project root', async () => {
     const { handlers, services } = registerHandlers()
     const window = {
       isDestroyed: () => false,
@@ -2148,11 +2148,16 @@ describe('registerIpc', () => {
       projectPath: '/work/demo',
     }
     services.environmentDoctorService?.run.mockResolvedValue(result)
+    services.eccRuntimeService.discoverProject.mockResolvedValue({
+      projectId: 'demo',
+      projectRoot: '/work',
+    })
 
     const handler = handlers.get(desktopApiIpcChannels.appGetEnvironmentDoctor)
 
     await expect(handler?.({ sender: { id: 'web-contents' } })).resolves.toEqual(result)
-    expect(services.environmentDoctorService?.run).toHaveBeenCalledWith('/work/demo')
+    expect(services.eccRuntimeService.discoverProject).toHaveBeenCalledWith('/work/demo')
+    expect(services.environmentDoctorService?.run).toHaveBeenCalledWith('/work')
   })
 
   it('lists typed PDK Installation snapshots', async () => {

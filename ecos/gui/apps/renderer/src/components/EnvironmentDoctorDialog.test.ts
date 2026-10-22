@@ -67,7 +67,7 @@ describe('EnvironmentDoctorDialog', () => {
     expect(wrapper.text()).toContain('Needs attention')
     expect(wrapper.text()).toContain('2 checked')
     expect(wrapper.text()).toContain('ecc 0.1.0a12')
-    expect(wrapper.text()).toContain('/work/demo')
+    expect(wrapper.text()).toContain('Project: /work/demo')
     expect(wrapper.text()).toContain('yosys')
     expect(wrapper.text()).toContain('/tools/yosys')
     expect(wrapper.text()).toContain('Install klayout.')

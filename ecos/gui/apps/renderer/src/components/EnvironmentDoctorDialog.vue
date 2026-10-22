@@ -41,7 +41,7 @@
           <p class="doctor-context">
             {{
               result.projectPath
-                ? `Workspace: ${result.projectPath}`
+                ? `Project: ${result.projectPath}`
                 : 'No active workspace. PDK validation is skipped.'
             }}
           </p>
