@@ -92,7 +92,6 @@ describe('development wrappers', () => {
       fileExists: (path) =>
         [chipDefPath, chipManifestPath, ...chipGeometryFiles].includes(path) ||
         existsSync(path),
-      getFileModifiedTime: async (path) => (path === chipManifestPath ? 100 : null),
       isPackaged: false,
       openLogFile: vi.fn(() => 11),
       platform: 'linux',
