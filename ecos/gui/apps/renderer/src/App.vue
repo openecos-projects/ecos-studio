@@ -259,7 +259,6 @@ import { useSignoffPackageExport } from '@/composables/useSignoffPackageExport'
 import { useDesignReportExport } from '@/composables/useDesignReportExport'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useFlowRunner } from '@/composables/useFlowRunner'
-import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
 import {
@@ -275,8 +274,6 @@ import {
   hasDesktopApi,
   waitForDesktopApi,
 } from '@/platform/desktop'
-import { refreshConfigApi } from '@/api/flow'
-import { CMDEnum } from '@/api/type'
 
 import TopBar from '@/components/TopBar.vue'
 import HomeAgentDrawer from '@/components/HomeAgentDrawer.vue'
@@ -369,10 +366,8 @@ const {
   runtimeBackendConnecting,
   runtimeBackendTitle,
   runtimeBackendSubtitle,
-  invalidateWorkspaceResources,
 } = useWorkspace()
 const { runAllFlow } = useFlowRunner()
-const workspaceLifecycle = useWorkspaceLifecycle()
 const { loadPdks, pdkNameDialogVisible, pdkNameDraft, confirmPdkName, cancelPdkName } =
   usePdkManager()
 const { loadVersions } = useVersion()
@@ -1512,11 +1507,6 @@ async function openWorkspaceReconfigureWizard() {
     return
   }
 
-  if ((currentProject.value?.designTool ?? 'backend') === 'backend') {
-    await refreshBackendWorkspace(workspacePath)
-    return
-  }
-
   try {
     const normalizedWorkspacePath = normalizeLocalPath(workspacePath)
     const api = desktopApi.value ?? (await waitForDesktopApi())
@@ -1543,76 +1533,6 @@ async function openWorkspaceReconfigureWizard() {
       detail: error instanceof Error ? error.message : String(error),
       life: 15000,
     })
-  }
-}
-
-async function refreshBackendWorkspace(workspacePath: string): Promise<void> {
-  const workspaceHandle = workspaceSession.value.workspaceId
-  const expectedWorkspaceRevision = workspaceSession.value.workspaceRevision
-  if (!workspaceHandle || !Number.isInteger(expectedWorkspaceRevision)) {
-    showToast({
-      severity: 'error',
-      summary: 'Failed to Update Workspace',
-      detail: 'The current Workspace revision is unavailable.',
-      life: 5000,
-    })
-    return
-  }
-
-  const refresh = (force = false) =>
-    refreshConfigApi({
-      cmd: CMDEnum.refresh_config,
-      data: {
-        directory: workspacePath,
-        force,
-        workspaceHandle,
-        workspaceRevision: expectedWorkspaceRevision,
-      },
-    })
-
-  runtimeBackendTitle.value = 'Updating your workspace'
-  runtimeBackendSubtitle.value = 'Applying the current Project configuration'
-  runtimeBackendConnecting.value = true
-  try {
-    let result
-    try {
-      result = await refresh()
-    } catch (error) {
-      const code =
-        typeof error === 'object' && error !== null && 'code' in error
-          ? String(error.code)
-          : ''
-      if (
-        code !== 'derived_configs_modified' ||
-        !confirm(
-          'ECC detected manually modified derived configuration files. Updating will overwrite those edits. Continue?',
-        )
-      ) {
-        throw error
-      }
-      result = await refresh(true)
-    }
-    const revision = result.data.workspaceRevision
-    if (!Number.isInteger(revision)) {
-      throw new Error('Workspace update did not return a revision.')
-    }
-    workspaceLifecycle.updateWorkspaceRevision(revision!)
-    invalidateWorkspaceResources('all')
-    showToast({
-      severity: 'success',
-      summary: 'Workspace Updated',
-      detail: 'The current Project configuration was applied.',
-      life: 4000,
-    })
-  } catch (error) {
-    showToast({
-      severity: 'error',
-      summary: 'Failed to Update Workspace',
-      detail: error instanceof Error ? error.message : String(error),
-      life: 5000,
-    })
-  } finally {
-    runtimeBackendConnecting.value = false
   }
 }
 

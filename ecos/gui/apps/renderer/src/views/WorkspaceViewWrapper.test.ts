@@ -24,3 +24,10 @@ describe('WorkspaceViewWrapper project management layout', () => {
     expect(source).toContain('v-else-if="showLeftSidebar"')
   })
 })
+
+describe('WorkspaceViewWrapper runtime projection lifecycle', () => {
+  it('reconciles background operations after a workspace session is replaced', () => {
+    expect(source).toContain('const backgroundOperations = useBackgroundOperationStore()')
+    expect(source).toContain('void backgroundOperations.refresh()')
+  })
+})

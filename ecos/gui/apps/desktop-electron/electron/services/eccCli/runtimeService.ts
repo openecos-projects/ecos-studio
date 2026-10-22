@@ -512,16 +512,53 @@ export class EccCliRuntimeService {
     request: EccWorkspaceUpdateRequest,
   ): Promise<EccWorkspaceUpdateResult> {
     const session = this.requireSession(request.workspaceHandle)
+    const currentConfiguration = await this.readWorkspaceConfiguration(session.directory)
+    const rtlImport = workspaceRtlImport(
+      request,
+      session.projectRoot,
+      currentConfiguration,
+    )
+    if (rtlImport) await this.runWorkspaceMutation(session, rtlImport)
+
+    const projectSettings = projectSettingsArgs(request)
+    if (projectSettings.length) {
+      this.assertProjectWritable(session.projectRoot)
+      await this.cli.run(
+        [
+          'project',
+          'apply',
+          '--project',
+          session.projectRoot,
+          ...projectSettings,
+          '--no-wait',
+        ],
+        { cwd: session.projectRoot },
+      )
+    }
+
     await this.runWorkspaceMutation(
       session,
       workspaceRefreshArgs({
         commandId: request.commandId,
         expectedWorkspaceRevision: request.expectedWorkspaceRevision,
         force: true,
+        keepBackup: request.retainBackup === true,
         projectRoot: session.projectRoot,
         workspaceId: session.workspaceId,
       }),
     )
+
+    const parameters = isRecord(request.workspaceSpec.parameters)
+      ? request.workspaceSpec.parameters
+      : {}
+    if (Object.keys(parameters).length) {
+      await this.applyWorkspaceParameters(
+        session,
+        parameters,
+        session.workspaceRevision,
+        `${request.commandId}:parameters`,
+      )
+    }
     return updateResult(session)
   }
 
@@ -1759,7 +1796,7 @@ function workspaceFlowArgs(spec: Record<string, unknown>): string[] {
  * Absolute source paths of the request's design inputs, keyed by input role.
  */
 export function inputRolePaths(
-  request: EccWorkspaceCreateRequest,
+  request: Pick<EccWorkspaceCreateRequest, 'workspaceSpec' | 'workspaceBindings'>,
 ): Map<string, string[]> {
   const spec = request.workspaceSpec
   const bindings = request.workspaceBindings
@@ -1822,7 +1859,38 @@ function workspaceCreateRtlImport(
   })
 }
 
-export function projectSettingsArgs(request: EccWorkspaceCreateRequest): string[] {
+function workspaceRtlImport(
+  request: Pick<EccWorkspaceCreateRequest, 'workspaceSpec' | 'workspaceBindings'>,
+  projectRoot: string,
+  current: Pick<EccWorkspaceCreateRequest, 'workspaceSpec' | 'workspaceBindings'>,
+): string[] | null {
+  const requested = inputRolePaths(request)
+  if (sameInputRolePaths(requested, inputRolePaths(current))) return null
+  return rtlImportArgs(projectRoot, {
+    filelist: requested.get('filelist')?.[0],
+    verilog: requested.get('rtl') ?? [],
+  })
+}
+
+function sameInputRolePaths(
+  left: Map<string, string[]>,
+  right: Map<string, string[]>,
+): boolean {
+  if (left.size !== right.size) return false
+  for (const [role, paths] of left) {
+    const other = right.get(role)
+    if (!other || other.length !== paths.length) return false
+    if (paths.some((path, index) => path !== other[index])) return false
+  }
+  return true
+}
+
+export function projectSettingsArgs(
+  request: Pick<
+    EccWorkspaceCreateRequest,
+    'workspaceSpec' | 'workspaceBindings' | 'eccPdkConfig'
+  >,
+): string[] {
   const spec = request.workspaceSpec
   const bindings = request.workspaceBindings
   const design = requireRecord(spec.design)
@@ -1995,6 +2063,7 @@ export function workspaceRefreshArgs(options: {
   commandId: string
   expectedWorkspaceRevision?: number
   force?: boolean
+  keepBackup?: boolean
   projectRoot: string
   workspaceId: string
 }): string[] {
@@ -2011,6 +2080,7 @@ export function workspaceRefreshArgs(options: {
     options.commandId,
     '--no-wait',
     ...(options.force ? ['--force'] : []),
+    ...(options.keepBackup ? ['--keep-backup'] : []),
   ]
 }
 

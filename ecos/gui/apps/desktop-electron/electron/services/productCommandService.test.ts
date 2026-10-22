@@ -181,6 +181,7 @@ describe('executeProductCommand Workspace creation', () => {
     const payload = {
       commandId: 'update-1',
       draft: {
+        eccPdkConfig: { externalPaths: ['/macros/sram'] },
         targetDirectory: '/projects/demo/ws_1',
         workspaceBindings: { pdk: { root: '/pdks/ics55' } },
         workspaceSpec: { design: { name: 'gcd' } },
@@ -204,6 +205,7 @@ describe('executeProductCommand Workspace creation', () => {
     })
     expect(updateWorkspace).toHaveBeenCalledWith({
       commandId: 'update-1',
+      eccPdkConfig: { externalPaths: ['/macros/sram'] },
       expectedWorkspaceRevision: 1,
       retainBackup: true,
       workspaceBindings: { pdk: { root: '/pdks/ics55' } },

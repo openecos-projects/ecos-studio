@@ -61,6 +61,11 @@ export interface EccWorkspaceUpdateRequest
   extends EccWorkspaceMutationRequest, EccWorkspaceSpecValidationRequest {
   commandId: string
   /**
+   * ecc.toml persistence intent for this update. Consumed by the Electron
+   * bridge (stripped before the request reaches ECC).
+   */
+  eccPdkConfig?: EccWorkspacePdkConfigPersist
+  /**
    * Keep the replaced Workspace generation as a sibling backup directory.
    * Omitted when false so older ECC runtimes (which reject unknown fields)
    * still accept the update; ECC treats a missing flag as false.
