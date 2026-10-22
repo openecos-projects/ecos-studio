@@ -141,7 +141,7 @@ describe('workspace dashboard layout', () => {
     }
   })
 
-  it('keeps the same cards outside the canvas during zoom, pan, and expansion', async () => {
+  it('keeps the same cards outside the canvas during zoom, pan, and fit', async () => {
     const page = launched!.page
     await resize(1440, 1000)
     const qorCard = await page.locator('.qor-card').elementHandle()
@@ -151,20 +151,29 @@ describe('workspace dashboard layout', () => {
       element.scrollTop += 100
     })
     await assertClearLayout()
-    await page.getByRole('button', { name: 'Expand flow diagram', exact: true }).click()
-    try {
-      await assertClearLayout()
-      expect(
-        await qorCard!.evaluate(
-          (element) => element === document.querySelector('.qor-card'),
-        ),
-      ).toBe(true)
-      await shot('dashboard-expanded')
-    } finally {
-      await page
-        .getByRole('button', { name: 'Restore flow diagram', exact: true })
-        .click()
-    }
+    await page.getByRole('button', { name: 'Fit flow diagram', exact: true }).click()
+    await expect
+      .poll(async () => {
+        const { canvas, viewport } = await readLayout(page)
+        return {
+          fits:
+            canvas.width <= viewport.width + 1 && canvas.height <= viewport.height + 1,
+          centered:
+            Math.abs(
+              canvas.left + canvas.width / 2 - viewport.left - viewport.width / 2,
+            ) < 12 &&
+            Math.abs(
+              canvas.top + canvas.height / 2 - viewport.top - viewport.height / 2,
+            ) < 12,
+        }
+      })
+      .toEqual({ fits: true, centered: true })
+    expect(
+      await qorCard!.evaluate(
+        (element) => element === document.querySelector('.qor-card'),
+      ),
+    ).toBe(true)
+    await shot('dashboard-fit')
     await assertClearLayout()
   })
 

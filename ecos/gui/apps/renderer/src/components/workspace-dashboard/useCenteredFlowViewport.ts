@@ -1,10 +1,14 @@
 import { computed, nextTick, ref, watch, type Ref } from 'vue'
 
+const MIN_FLOW_ZOOM = 0.25
+const MAX_FLOW_ZOOM = 1.5
+const FIT_PADDING = 24
+
 export function useCenteredFlowViewport(
   viewport: Ref<HTMLElement | null>,
   graphWidth: Readonly<Ref<number>>,
   graphHeight: Readonly<Ref<number>>,
-  zoom: Readonly<Ref<number>>,
+  zoom: Ref<number>,
   workspaceKey: Readonly<Ref<unknown>>,
 ) {
   const size = ref({ width: 0, height: 0 })
@@ -33,6 +37,37 @@ export function useCenteredFlowViewport(
       0,
       center.y * zoom.value + canvasOffset.value.y - size.value.height / 2,
     )
+  }
+
+  async function fitToViewport(): Promise<void> {
+    const element = viewport.value
+    if (!element) return
+    measure(element)
+    const availableWidth = element.clientWidth - FIT_PADDING * 2
+    const availableHeight = element.clientHeight - FIT_PADDING * 2
+    if (
+      availableWidth <= 0 ||
+      availableHeight <= 0 ||
+      graphWidth.value <= 0 ||
+      graphHeight.value <= 0
+    )
+      return
+
+    const rawZoom = Math.min(
+      availableWidth / graphWidth.value,
+      availableHeight / graphHeight.value,
+    )
+    const nextZoom = Math.max(
+      MIN_FLOW_ZOOM,
+      Math.min(MAX_FLOW_ZOOM, Math.floor(rawZoom * 20) / 20),
+    )
+    zoom.value = nextZoom
+    await nextTick()
+    if (viewport.value !== element) return
+    await positionCenter(element, {
+      x: graphWidth.value / 2,
+      y: graphHeight.value / 2,
+    })
   }
 
   function measure(element: HTMLElement): void {
@@ -109,5 +144,5 @@ export function useCenteredFlowViewport(
     { flush: 'post' },
   )
 
-  return { surfaceSize, canvasOffset }
+  return { surfaceSize, canvasOffset, fitToViewport }
 }

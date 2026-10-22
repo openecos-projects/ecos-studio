@@ -65,4 +65,16 @@ describe('centered flow viewport', () => {
     expect(element.scrollTop).toBe(80)
     scope.stop()
   })
+
+  it('fits a large graph into the viewport with padding and recenters it', async () => {
+    const { element, zoom, result, scope } = await setup(1200, 900)
+
+    await result.fitToViewport()
+
+    expect(zoom.value).toBe(0.25)
+    expect(element.scrollLeft).toBe(0)
+    expect(element.scrollTop).toBe(0)
+    expect(result.canvasOffset.value).toEqual({ x: 50, y: 37.5 })
+    scope.stop()
+  })
 })

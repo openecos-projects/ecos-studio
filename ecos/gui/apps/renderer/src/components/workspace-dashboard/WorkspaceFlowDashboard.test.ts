@@ -110,9 +110,14 @@ describe('workspace flow diagram', () => {
     expect(wrapper.find('.log-dialog').exists()).toBe(false)
   })
 
-  it('keeps the status overview outside the movable canvas and preserves it when expanded', async () => {
+  it('keeps the status overview outside the movable canvas when fitting', async () => {
     const wrapper = render(false, true)
     const overview = wrapper.get('.test-overview').element
+    const viewport = wrapper.get('.flow-scroll').element as HTMLElement
+    Object.defineProperties(viewport, {
+      clientWidth: { configurable: true, value: 640 },
+      clientHeight: { configurable: true, value: 360 },
+    })
     expect(wrapper.get('.flow-overview').text()).toContain('Status overview')
     expect(wrapper.get('.flow-overview').element.parentElement).toBe(
       wrapper.get('.flow-viewport').element,
@@ -127,12 +132,11 @@ describe('workspace flow diagram', () => {
     const metrics = wrapper.get('.test-metrics').element
     await wrapper.get('input[aria-label="Flow diagram zoom"]').setValue('1')
     expect(wrapper.get('.test-overview').element).toBe(overview)
-    await wrapper.get('button[aria-label="Expand flow diagram"]').trigger('click')
-    expect(document.body.querySelector('.flow-overview .test-overview')).toBe(overview)
-    expect(document.body.querySelector('.flow-metrics .test-metrics')).toBe(metrics)
-    document.body
-      .querySelector<HTMLButtonElement>('button[aria-label="Restore flow diagram"]')!
-      .click()
+    await wrapper.get('button[aria-label="Fit flow diagram"]').trigger('click')
+    await nextTick()
+    await nextTick()
+    expect(wrapper.get('.flow-overview .test-overview').element).toBe(overview)
+    expect(wrapper.get('.flow-metrics .test-metrics').element).toBe(metrics)
     await nextTick()
     expect(wrapper.get('.test-overview').element).toBe(overview)
     wrapper.unmount()
@@ -206,22 +210,44 @@ describe('workspace flow diagram', () => {
     expect(wrapper.get('svg').text()).toContain('Harden → signoff-package-review')
   })
 
-  it('expands the existing diagram without replacing any step cards', async () => {
+  it('fits and centers the existing diagram without replacing any step cards', async () => {
     const wrapper = render(false)
     const step = wrapper.find('.flow-step-card').element
-    await wrapper.get('button[aria-label="Expand flow diagram"]').trigger('click')
-    expect(
-      document.body.querySelector('.workspace-flow-dashboard.is-expanded'),
-    ).not.toBeNull()
-    expect(document.body.querySelector('.flow-step-card')).toBe(step)
-    document.body
-      .querySelector<HTMLButtonElement>('button[aria-label="Restore flow diagram"]')!
-      .click()
+    const viewport = wrapper.get('.flow-scroll').element as HTMLElement
+    Object.defineProperties(viewport, {
+      clientWidth: { configurable: true, value: 800 },
+      clientHeight: { configurable: true, value: 600 },
+    })
+    const canvas = wrapper.get('.flow-canvas').element as HTMLElement
+    const graphWidth = Number.parseFloat(canvas.style.width)
+    const graphHeight = Number.parseFloat(canvas.style.height)
+    const expectedZoom = Math.max(
+      0.25,
+      Math.min(
+        1.5,
+        Math.floor(Math.min((800 - 48) / graphWidth, (600 - 48) / graphHeight) * 20) / 20,
+      ),
+    )
+
+    await wrapper.get('button[aria-label="Fit flow diagram"]').trigger('click')
     await nextTick()
-    expect(wrapper.get('.workspace-flow-dashboard').classes()).not.toContain(
+    await nextTick()
+    await nextTick()
+
+    expect(wrapper.get('output').text()).toBe(`${Math.round(expectedZoom * 100)}%`)
+    expect(wrapper.find('.flow-step-card').element).toBe(step)
+    const canvasLeft = Number.parseFloat(canvas.style.left)
+    const canvasTop = Number.parseFloat(canvas.style.top)
+    expect(viewport.scrollLeft).toBeCloseTo(
+      Math.max(0, canvasLeft + (graphWidth * expectedZoom) / 2 - 400),
+    )
+    expect(viewport.scrollTop).toBeCloseTo(
+      Math.max(0, canvasTop + (graphHeight * expectedZoom) / 2 - 300),
+    )
+    expect(wrapper.find('.workspace-flow-dashboard').classes()).not.toContain(
       'is-expanded',
     )
-    expect(wrapper.find('.flow-step-card').element).toBe(step)
+    await nextTick()
     wrapper.unmount()
   })
 
@@ -266,7 +292,7 @@ describe('workspace flow diagram', () => {
     wrapper.unmount()
   })
 
-  it('pans horizontally and vertically with the left mouse button and stops on release', async () => {
+  it('shows grabbing on left-button press and pans after the drag threshold', async () => {
     const wrapper = render(false)
     await nextTick()
     const viewport = wrapper.get('.flow-scroll')
@@ -282,6 +308,7 @@ describe('workspace flow diagram', () => {
       clientX: 100,
       clientY: 100,
     })
+    expect(viewport.classes()).toContain('is-panning')
     await viewport.trigger('pointermove', {
       pointerId: 1,
       buttons: 1,
@@ -289,7 +316,7 @@ describe('workspace flow diagram', () => {
       clientY: 99,
     })
     expect(element.scrollLeft).toBe(100)
-    expect(viewport.classes()).not.toContain('is-panning')
+    expect(viewport.classes()).toContain('is-panning')
     await viewport.trigger('pointermove', {
       pointerId: 1,
       buttons: 1,
@@ -321,6 +348,7 @@ describe('workspace flow diagram', () => {
     const element = viewport.element as HTMLElement
     element.scrollLeft = 100
     for (const [target, pointerType, button] of [
+      [wrapper.get('.flow-step-card'), 'mouse', 0],
       [wrapper.get('button[aria-label="LVS reports"]'), 'mouse', 0],
       [wrapper.get('.flow-canvas'), 'mouse', 2],
       [wrapper.get('.flow-canvas'), 'touch', 0],
