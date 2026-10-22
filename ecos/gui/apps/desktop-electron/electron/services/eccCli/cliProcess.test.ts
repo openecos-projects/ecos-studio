@@ -68,6 +68,26 @@ it('uses stdout when a plain CLI error is not written to stderr', async () => {
   })
 })
 
+it('prefers a structured CLI error over loader warnings on stderr', async () => {
+  const cli = new EccCliProcess({
+    resolveLaunch: () => ({
+      command: process.execPath,
+      args: [
+        '-e',
+        [
+          'process.stderr.write("bash: /opt/conda/lib/libtinfo.so.6: no version information available (required by bash)\\n")',
+          'process.stdout.write("kind=error error=env_not_ready component=sizer\\n")',
+          'process.exit(1)',
+        ].join(';'),
+      ],
+    }),
+  })
+  await expect(cli.run([])).rejects.toMatchObject({
+    code: 'env_not_ready',
+    message: 'kind=error error=env_not_ready component=sizer',
+  })
+})
+
 it('extracts a stable code from the default pretty error output', async () => {
   const cli = new EccCliProcess({
     resolveLaunch: () => ({

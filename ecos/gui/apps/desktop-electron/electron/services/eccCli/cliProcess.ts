@@ -38,8 +38,14 @@ export class EccCliCommandError extends Error {
     readonly stderr: string,
     readonly stdout: string,
   ) {
+    const stderrText = stderr.trim()
+    const stdoutText = stdout.trim()
+    // ECC writes structured command failures to stdout. Prefer that over
+    // loader noise on stderr (for example the conda libtinfo version warning)
+    // so callers surface the actual failure instead of only the warning.
     const message =
-      stderr.trim() || stdout.trim() || `ECC CLI exited with status ${exitCode}`
+      (eccErrorCode(stdoutText) ? stdoutText : stderrText || stdoutText) ||
+      `ECC CLI exited with status ${exitCode}`
     super(message)
     this.name = 'EccCliCommandError'
     this.code = eccErrorCode(message)
