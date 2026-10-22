@@ -3,6 +3,7 @@ import DbTrendsPanel from './DbTrendsPanel.vue'
 import DrcPanel from './DrcPanel.vue'
 import PowerSummaryPanel from './PowerSummaryPanel.vue'
 import StaPanel from './StaPanel.vue'
+import StepDetailsPanel from './StepDetailsPanel.vue'
 import StepResourcesPanel from './StepResourcesPanel.vue'
 import type {
   DbTrendModel,
@@ -11,6 +12,7 @@ import type {
   StepResourcesModel,
 } from './flowInsightsData'
 import type { PowerSummaryModel } from './powerSummary'
+import type { StepDetailsModel } from './stepDetails'
 
 export interface FlowInsightsAvailabilityContext {
   stepResources: StepResourcesModel | null
@@ -18,6 +20,8 @@ export interface FlowInsightsAvailabilityContext {
   drc: DrcLayerTypeMatrix | null
   sta: StaOverviewModel | null
   powerSummary: PowerSummaryModel | null
+  lvsSummary: StepDetailsModel | null
+  antennaSummary: StepDetailsModel | null
 }
 
 export interface FlowInsightsModuleAvailability {
@@ -44,6 +48,26 @@ export const FLOW_INSIGHT_MODULES: FlowInsightsModuleDescriptor[] = [
     availability: () => ({
       available: true,
       hint: 'Power summary from powerAnalysis',
+    }),
+  },
+  {
+    id: 'lvs',
+    title: 'LVS',
+    icon: 'ri-git-compare-line',
+    component: StepDetailsPanel,
+    availability: () => ({
+      available: true,
+      hint: 'LVS entity and connectivity results',
+    }),
+  },
+  {
+    id: 'antenna',
+    title: 'Antenna',
+    icon: 'ri-radar-line',
+    component: StepDetailsPanel,
+    availability: () => ({
+      available: true,
+      hint: 'Antenna check coverage and violations',
     }),
   },
   {

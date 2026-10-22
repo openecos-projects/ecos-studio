@@ -32,6 +32,8 @@ describe('FlowInsightsPanel', () => {
         drc: null,
         sta: null,
         powerSummary: null,
+        lvsSummary: null,
+        antennaSummary: null,
       },
       global: {
         stubs: {
@@ -40,18 +42,52 @@ describe('FlowInsightsPanel', () => {
           DbTrendsPanel: true,
           DrcPanel: true,
           StaPanel: true,
+          StepDetailsPanel: true,
         },
       },
     })
 
-    expect(wrapper.findAll('.data-snapshot-tile')).toHaveLength(5)
+    expect(wrapper.findAll('.data-snapshot-tile')).toHaveLength(7)
     expect(wrapper.findAll('.data-snapshot-cell')).toHaveLength(9)
-    expect(wrapper.findAll('.data-snapshot-cell.is-empty')).toHaveLength(4)
+    expect(wrapper.findAll('.data-snapshot-cell.is-empty')).toHaveLength(2)
     expect(wrapper.text()).toContain('Step Trends')
+    expect(wrapper.text()).toContain('LVS')
+    expect(wrapper.text()).toContain('Antenna')
     expect(wrapper.text()).not.toContain('Congestion')
     await wrapper.setProps({ dialogOnly: true, selectedModule: 'timing' })
     expect(wrapper.find('.data-snapshot-grid').exists()).toBe(false)
     expect(wrapper.find('.flow-insights-header').exists()).toBe(false)
     expect(wrapper.findComponent({ name: 'StaPanel' }).exists()).toBe(true)
+  })
+
+  it('opens LVS and antenna details in dialog-only mode', async () => {
+    const wrapper = mount(FlowInsightsPanel, {
+      props: {
+        steps: [],
+        stepResources: null,
+        dbTrends: null,
+        drc: null,
+        sta: null,
+        powerSummary: null,
+        lvsSummary: null,
+        antennaSummary: null,
+        dialogOnly: true,
+        selectedModule: 'lvs',
+      },
+      global: {
+        stubs: {
+          Dialog: { template: '<div><slot /></div>' },
+          StepDetailsPanel: {
+            name: 'StepDetailsPanel',
+            props: ['title', 'source'],
+            template: '<div>{{ title }} · {{ source }}</div>',
+          },
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('LVS Results · lvs.step.json')
+    await wrapper.setProps({ selectedModule: 'antenna' })
+    expect(wrapper.text()).toContain('Antenna Check · antennaCheck.step.json')
   })
 })

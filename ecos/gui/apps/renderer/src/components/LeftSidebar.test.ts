@@ -60,13 +60,15 @@ describe('RTL workspace navigation', () => {
     const links = wrapper.findAllComponents({ name: 'RouterLink' })
     expect(wrapper.text()).not.toContain('Project')
     expect(wrapper.text()).toContain('Dashboard')
-    expect(wrapper.findAll('a')).toHaveLength(6)
+    expect(wrapper.findAll('a')).toHaveLength(8)
     expect(links.map((link) => link.props('to'))).toEqual([
       { path: '/workspace/home', query: state.route.query },
-      ...['resources', 'db-trends', 'drc', 'timing', 'power'].map((insight) => ({
-        path: '/workspace/home',
-        query: { ...state.route.query, insight },
-      })),
+      ...['resources', 'db-trends', 'drc', 'timing', 'power', 'lvs', 'antenna'].map(
+        (insight) => ({
+          path: '/workspace/home',
+          query: { ...state.route.query, insight },
+        }),
+      ),
     ])
     expect(links.map((link) => link.text())).toEqual([
       'Dashboard',
@@ -75,6 +77,8 @@ describe('RTL workspace navigation', () => {
       'DRC',
       'Timing',
       'Power',
+      'LVS',
+      'Antenna',
     ])
   })
 

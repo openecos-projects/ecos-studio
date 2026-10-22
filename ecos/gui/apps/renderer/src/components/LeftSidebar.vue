@@ -166,9 +166,13 @@ function frequencyOrNA(value: number): string {
 }
 const currentStage = computed(() => route.query.insight ?? 'home')
 const sidebarInsightModules = [
-  ...FLOW_INSIGHT_MODULES.filter((module) => !['power', 'timing'].includes(module.id)),
+  ...FLOW_INSIGHT_MODULES.filter(
+    (module) => !['power', 'lvs', 'antenna', 'timing'].includes(module.id),
+  ),
   ...FLOW_INSIGHT_MODULES.filter((module) => module.id === 'timing'),
   ...FLOW_INSIGHT_MODULES.filter((module) => module.id === 'power'),
+  ...FLOW_INSIGHT_MODULES.filter((module) => module.id === 'lvs'),
+  ...FLOW_INSIGHT_MODULES.filter((module) => module.id === 'antenna'),
 ]
 const insightStages = sidebarInsightModules.map((module) => ({
   label: module.title,

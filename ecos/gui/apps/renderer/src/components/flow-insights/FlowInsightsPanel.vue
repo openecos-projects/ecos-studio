@@ -59,6 +59,22 @@
           :loading="powerSummaryLoading"
           :error="powerSummaryError"
         />
+        <StepDetailsPanel
+          v-else-if="activeTab === 'lvs'"
+          title="LVS Results"
+          source="lvs.step.json"
+          :summary="lvsSummary"
+          :loading="lvsSummaryLoading"
+          :error="lvsSummaryError"
+        />
+        <StepDetailsPanel
+          v-else-if="activeTab === 'antenna'"
+          title="Antenna Check"
+          source="antennaCheck.step.json"
+          :summary="antennaSummary"
+          :loading="antennaSummaryLoading"
+          :error="antennaSummaryError"
+        />
         <StepResourcesPanel
           v-else-if="activeTab === 'resources'"
           :model="stepResources"
@@ -90,8 +106,10 @@ import DbTrendsPanel from './DbTrendsPanel.vue'
 import DrcPanel from './DrcPanel.vue'
 import PowerSummaryPanel from './PowerSummaryPanel.vue'
 import StaPanel from './StaPanel.vue'
+import StepDetailsPanel from './StepDetailsPanel.vue'
 import { resolveFlowInsightModules } from './flowInsightsModule'
 import type { PowerSummaryModel } from './powerSummary'
+import type { StepDetailsModel } from './stepDetails'
 import type {
   DbTrendModel,
   DrcLayerTypeMatrix,
@@ -117,6 +135,12 @@ const props = defineProps<{
   powerSummary: PowerSummaryModel | null
   powerSummaryLoading?: boolean
   powerSummaryError?: string | null
+  lvsSummary: StepDetailsModel | null
+  lvsSummaryLoading?: boolean
+  lvsSummaryError?: string | null
+  antennaSummary: StepDetailsModel | null
+  antennaSummaryLoading?: boolean
+  antennaSummaryError?: string | null
   staCriticalPaths?: StaCriticalPathsModel | null
   timingArtifacts?: WorkspaceArtifactDescriptor[]
   timingIssuesArtifact?: WorkspaceArtifactDescriptor | null
@@ -142,6 +166,8 @@ const modules = computed(() =>
     drc: props.drc,
     sta: props.sta,
     powerSummary: props.powerSummary,
+    lvsSummary: props.lvsSummary,
+    antennaSummary: props.antennaSummary,
   }),
 )
 

@@ -113,6 +113,12 @@
         :power-summary="powerSummary"
         :power-summary-loading="powerSummaryLoading"
         :power-summary-error="powerSummaryError"
+        :lvs-summary="lvsSummary"
+        :lvs-summary-loading="lvsSummaryLoading"
+        :lvs-summary-error="lvsSummaryError"
+        :antenna-summary="antennaSummary"
+        :antenna-summary-loading="antennaSummaryLoading"
+        :antenna-summary-error="antennaSummaryError"
         :sta-critical-paths="flowInsightStaPaths"
         :timing-artifacts="flowInsightTimingArtifacts"
         :timing-issues-artifact="flowInsightTimingIssuesArtifact"
@@ -199,6 +205,7 @@ import { useBackendFlowLogs } from '@/composables/useBackendFlowLogs'
 import { type HomeLayoutThumbnail } from '@/composables/useHomeSnapshots'
 import { useFlowInsights } from '@/composables/useFlowInsights'
 import { usePowerSummary } from '@/composables/usePowerSummary'
+import { useAntennaSummary, useLvsSummary } from '@/composables/useStepDetails'
 import { useBackendWorkspaceQor } from '@/composables/useBackendWorkspaceQor'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
@@ -260,6 +267,16 @@ const {
   loading: powerSummaryLoading,
   error: powerSummaryError,
 } = usePowerSummary()
+const {
+  summary: lvsSummary,
+  loading: lvsSummaryLoading,
+  error: lvsSummaryError,
+} = useLvsSummary()
+const {
+  summary: antennaSummary,
+  loading: antennaSummaryLoading,
+  error: antennaSummaryError,
+} = useAntennaSummary()
 const flowInsightSteps = computed(() => flowInsightResources.value?.steps ?? [])
 const { state: qorComparisonState } = useBackendWorkspaceQor()
 const showQor = ref(false)
