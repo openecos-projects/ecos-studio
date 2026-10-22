@@ -120,17 +120,24 @@ const workspaceConfiguration = computed(() => {
     ? section.data
     : null
 })
-const currentWorkspaceName = computed(() => {
-  if (workspaceIdentity.value?.workspaceName) {
-    return workspaceIdentity.value.workspaceName
+const currentWorkspaceLabel = computed(() => {
+  if (workspaceIdentity.value?.workspaceId) return workspaceIdentity.value.workspaceId
+  const routeWorkspaceId = route.query.workspaceId
+  if (typeof routeWorkspaceId === 'string' && routeWorkspaceId.trim()) {
+    return routeWorkspaceId.trim()
   }
   const pathName = currentProject.value?.path?.split(/[/\\]/).filter(Boolean).pop()
-  return pathName || currentProject.value?.name || null
+  return (
+    workspaceIdentity.value?.workspaceName ||
+    pathName ||
+    currentProject.value?.name ||
+    null
+  )
 })
 const chipInfo = computed(() => [
   { label: 'Project', value: valueOrNA(workspaceIdentity.value?.projectName) },
   { label: 'SoC Template', value: valueOrNA(mpcDisplayName.value) },
-  { label: 'Workspace', value: valueOrNA(currentWorkspaceName.value) },
+  { label: 'Workspace', value: valueOrNA(currentWorkspaceLabel.value) },
   { label: 'PDK', value: valueOrNA(workspaceConfiguration.value?.pdk) },
   { label: 'Design', value: valueOrNA(workspaceConfiguration.value?.design) },
   { label: 'Top Module', value: valueOrNA(workspaceConfiguration.value?.topModule) },

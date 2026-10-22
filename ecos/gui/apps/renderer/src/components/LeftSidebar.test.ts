@@ -14,7 +14,11 @@ const state = vi.hoisted(() => ({
   ],
   projection: {
     data: {
-      identity: { projectName: 'soc-demo', workspaceName: 'base' },
+      identity: {
+        projectName: 'soc-demo',
+        workspaceId: 'ws_0002',
+        workspaceName: 'soc-demo',
+      },
       configuration: {
         status: 'ready' as const,
         data: {
@@ -92,6 +96,12 @@ describe('RTL workspace navigation', () => {
       dialogText.indexOf('Key Metrics'),
     )
     expect(dialogText).toContain('soc-demo')
+    const workspaceLabel = Array.from(document.body.querySelectorAll('dt')).find(
+      (element) => element.textContent?.trim() === 'Workspace',
+    )
+    expect(workspaceLabel?.parentElement?.querySelector('dd')?.textContent).toBe(
+      'ws_0002',
+    )
     expect(dialogText).toContain('ics55')
     expect(dialogText).toContain('500 MHz')
     expect(dialogText).toContain('Instance Number')
