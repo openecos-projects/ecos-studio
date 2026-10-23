@@ -168,6 +168,26 @@ describe('BackgroundTasksButton', () => {
     wrapper.unmount()
   })
 
+  it('uses the project name instead of the design name for task identity', async () => {
+    discoverProjectForWorkspace.mockResolvedValueOnce({
+      design_name: 'gcd',
+      name: 'gcd3',
+      root_path: '/benchmark/gcd3',
+      workspaces: [{ workspace_path: '/benchmark/gcd3/ws_0001' }],
+    })
+    const store = useBackgroundOperationStore()
+    store.operations = [operation({ workspaceDirectory: '/benchmark/gcd3/ws_0001' })]
+    const wrapper = mount(BackgroundTasksButton)
+
+    await wrapper.get('.background-tasks-trigger').trigger('click')
+    await vi.waitFor(() => {
+      expect(wrapper.text()).toContain('gcd3 / ws_0001')
+    })
+    expect(wrapper.text()).not.toContain('gcd / ws_0001')
+
+    wrapper.unmount()
+  })
+
   it('opens a background Optimization Episode in its owning Agent Session', async () => {
     const episodes = useOptimizationEpisodeStore()
     episodes.episodes = [

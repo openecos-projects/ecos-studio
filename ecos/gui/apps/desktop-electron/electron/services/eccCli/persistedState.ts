@@ -15,6 +15,8 @@ const ENOENT_RETRY_ATTEMPTS = 2
 const ENOENT_RETRY_DELAY_MS = 75
 
 export interface PersistedFlowStep {
+  checklistBlocked?: boolean
+  checklistFailedItems?: string[]
   name: string
   peakMemory: number
   runtime: string
@@ -98,7 +100,24 @@ export async function readWorkspaceFlowFile(path: string): Promise<PersistedFlow
     ) {
       throw new Error('Workspace flow step is invalid.')
     }
+    const checklist = isRecord(value.checklist_status) ? value.checklist_status : null
+    const checklistBlocked =
+      checklist?.status === 'blocked' || checklist?.blocked === true
+    const checklistFailedItems = Array.isArray(checklist?.failed_items)
+      ? checklist.failed_items
+          .filter(
+            (item): item is string =>
+              typeof item === 'string' && item.length > 0 && item.length <= 512,
+          )
+          .slice(0, 64)
+      : []
     return {
+      ...(checklistBlocked
+        ? {
+            checklistBlocked: true,
+            ...(checklistFailedItems.length ? { checklistFailedItems } : {}),
+          }
+        : {}),
       name: value.name,
       peakMemory:
         typeof value['peak memory (mb)'] === 'number' ? value['peak memory (mb)'] : 0,

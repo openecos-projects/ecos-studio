@@ -3,6 +3,11 @@ import type { PersistedFlow } from './persistedState'
 
 const ADVISORY_STEPS = new Set(['antennaCheck', 'emir'])
 
+export interface BlockedFlowStep {
+  failedItems: string[]
+  step: string
+}
+
 export function terminalState(
   flow: PersistedFlow,
   cancelled: boolean,
@@ -27,4 +32,16 @@ export function terminalState(
     return 'succeeded'
   }
   return 'interrupted'
+}
+
+export function blockedFlowStep(flow: PersistedFlow): BlockedFlowStep | null {
+  for (const step of flow.steps) {
+    if (!step.checklistBlocked) continue
+    if (['Success', 'Skipped'].includes(step.state)) continue
+    return {
+      failedItems: step.checklistFailedItems ?? [],
+      step: step.name,
+    }
+  }
+  return null
 }

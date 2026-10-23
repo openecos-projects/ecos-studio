@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { terminalState } from './operationOutcome'
+import { blockedFlowStep, terminalState } from './operationOutcome'
 import type { PersistedFlow, PersistedFlowStep } from './persistedState'
 
-function step(name: string, state: string): PersistedFlowStep {
-  return { name, state, peakMemory: 0, runtime: '', tool: 'ecc' }
+function step(
+  name: string,
+  state: string,
+  checklist?: Pick<PersistedFlowStep, 'checklistBlocked' | 'checklistFailedItems'>,
+): PersistedFlowStep {
+  return { name, state, peakMemory: 0, runtime: '', tool: 'ecc', ...checklist }
 }
 
 describe('ECC operation outcome', () => {
@@ -38,5 +42,27 @@ describe('ECC operation outcome', () => {
       'interrupted',
     )
     expect(terminalState({ steps: [] }, false)).toBe('interrupted')
+  })
+
+  it('reports the required step blocked by the gcd3 STA prerequisite gate', () => {
+    const flow: PersistedFlow = {
+      steps: [
+        step('sta', 'Success', {
+          checklistBlocked: true,
+          checklistFailedItems: ['quality.sta.hold_closed'],
+        }),
+        step('emir', 'Success'),
+        step('Harden', 'Unstart', {
+          checklistBlocked: true,
+          checklistFailedItems: ['prerequisite:sta'],
+        }),
+      ],
+    }
+
+    expect(terminalState(flow, false)).toBe('succeeded')
+    expect(blockedFlowStep(flow)).toEqual({
+      failedItems: ['prerequisite:sta'],
+      step: 'Harden',
+    })
   })
 })

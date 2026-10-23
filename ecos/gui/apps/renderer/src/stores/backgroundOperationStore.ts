@@ -274,18 +274,21 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
         seenOutcomes.delete(seenOutcomes.values().next().value!)
       }
       notifications.addNotification({
+        ...(outcome.flowBlock
+          ? { detail: outcome.flowBlock.failedItems.join('\n') }
+          : {}),
         key: `runtime-outcome:${key}`,
-        message:
-          outcome.error?.message ??
-          `${workspaceName(outcome.workspaceDirectory)}: ${outcome.currentStep || outcome.step || 'Flow'} ${outcome.state}.`,
-        severity:
-          outcome.state === 'succeeded'
+        message: outcomeMessage(outcome),
+        severity: outcome.flowBlock
+          ? 'warn'
+          : outcome.state === 'succeeded'
             ? 'info'
             : outcome.state === 'cancelled'
               ? 'warn'
               : 'error',
-        title:
-          outcome.state === 'succeeded'
+        title: outcome.flowBlock
+          ? 'Flow blocked'
+          : outcome.state === 'succeeded'
             ? 'Flow completed'
             : outcome.state === 'cancelled'
               ? 'Flow cancelled'
@@ -294,6 +297,19 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
                 : 'Flow failed',
       })
     }
+  }
+
+  function outcomeMessage(outcome: EccBackgroundOperationOutcome): string {
+    if (outcome.flowBlock) {
+      const reasons = outcome.flowBlock.failedItems.length
+        ? `: ${outcome.flowBlock.failedItems.join(', ')}`
+        : ''
+      return `${workspaceName(outcome.workspaceDirectory)}: ${outcome.flowBlock.step} blocked${reasons}.`
+    }
+    return (
+      outcome.error?.message ??
+      `${workspaceName(outcome.workspaceDirectory)}: ${outcome.currentStep || outcome.step || 'Flow'} ${outcome.state}.`
+    )
   }
 
   function publishRecoveryFailures(recoveries: EccBackgroundOperationRecovery[]): void {

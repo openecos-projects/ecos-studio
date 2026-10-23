@@ -367,6 +367,14 @@ export interface EccRuntimeOperation {
   currentTool: string
   error: { code: string; message: string } | null
   flow?: { steps: EccRuntimeStepSnapshot[] }
+  /**
+   * Set when the run stopped before a required step because a checklist gate
+   * blocked it. The operation itself completed, but the flow did not succeed.
+   */
+  flowBlock?: {
+    failedItems: string[]
+    step: string
+  }
   interruptibility?: EccRuntimeInterruptibility
   kind: EccRuntimeOperationKind
   operationId: string

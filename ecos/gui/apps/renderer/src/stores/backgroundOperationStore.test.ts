@@ -250,6 +250,37 @@ describe('backgroundOperationStore', () => {
     )
   })
 
+  it('publishes a completed operation with a blocked flow as a warning', async () => {
+    const blocked = {
+      ...operation('blocked', '/benchmark/gcd3/ws_0001'),
+      currentStep: 'Harden',
+      flowBlock: {
+        failedItems: ['prerequisite:sta'],
+        step: 'Harden',
+      },
+      state: 'succeeded' as const,
+    }
+    runtime.operationProjection.mockResolvedValue({
+      creations: [],
+      finalizations: [],
+      generation: 2,
+      operations: [],
+      outcomes: [blocked],
+    })
+    const store = useBackgroundOperationStore()
+
+    await store.start()
+
+    expect(addNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detail: 'prerequisite:sta',
+        message: 'ws_0001: Harden blocked: prerequisite:sta.',
+        severity: 'warn',
+        title: 'Flow blocked',
+      }),
+    )
+  })
+
   it('publishes an automatically reconciled creation only once', async () => {
     runtime.operationProjection.mockResolvedValue({
       creations: [
