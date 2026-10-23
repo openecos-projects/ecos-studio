@@ -11,7 +11,6 @@
         :project-name="isWelcome ? null : currentProject?.name"
         :workspace-path="currentProject?.path ?? null"
         :has-workspace="Boolean(currentProject?.path)"
-        :workspace-design-tool="currentProject?.designTool"
         @menu-action="handleMenuAction"
         @step-config="showStepConfigDialog = true"
       />
