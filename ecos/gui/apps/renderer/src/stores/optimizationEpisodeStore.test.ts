@@ -92,6 +92,25 @@ describe('optimizationEpisodeStore', () => {
     })
   })
 
+  it('drops and keeps hiding episodes from a removed Project', async () => {
+    agent.optimizationProjection.mockResolvedValue({
+      episodes: [episode()],
+      generation: 3,
+    })
+    const store = useOptimizationEpisodeStore()
+    await store.start()
+
+    store.forgetProject('/work/demo')
+    expect(store.episodes).toEqual([])
+
+    await store.refresh()
+    expect(store.episodes).toEqual([])
+
+    store.rememberProject('/work/demo')
+    await store.refresh()
+    expect(store.episodes).toHaveLength(1)
+  })
+
   it('refreshes on invalidation and rejects an older projection', async () => {
     let invalidate!: (event: DesktopAgentOptimizationEpisodeInvalidatedEvent) => void
     agent.onOptimizationProjectionInvalidated.mockImplementation((listener) => {

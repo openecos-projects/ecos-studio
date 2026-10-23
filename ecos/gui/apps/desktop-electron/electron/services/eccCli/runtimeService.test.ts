@@ -1019,6 +1019,102 @@ describe('ECC CLI live flow projection', () => {
     ])
     await service.shutdown()
   })
+
+  it('adopts a registered CLI flow when the background projection refreshes', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ecc-runtime-adopt-flow-'))
+    temporaryDirectories.push(projectRoot)
+    const workspaceDirectory = join(projectRoot, 'ws_1')
+    await mkdir(join(workspaceDirectory, 'home'), { recursive: true })
+    const runId = '22222222-2222-4222-8222-222222222222'
+    const timestamp = '2026-09-28T00:00:00.000Z'
+    await writeFile(
+      join(projectRoot, 'project.json'),
+      JSON.stringify({
+        schema_version: 1,
+        project_id: 'project-1',
+        name: 'Demo',
+        design_name: 'gcd',
+        description: '',
+        root_path: projectRoot,
+        created_at: timestamp,
+        updated_at: timestamp,
+        base_design: {},
+        objectives: { primary: '', directions: {} },
+        workspaces: [
+          {
+            workspace_id: 'ws_1',
+            name: 'ws_1',
+            workspace_path: workspaceDirectory,
+            source_workspace_id: null,
+            branch_from: null,
+            start_step: 'Synth',
+            end_step: 'Harden',
+            status: 'running',
+            created_at: timestamp,
+            updated_at: timestamp,
+            parameter_patch: {},
+          },
+        ],
+        mpc: null,
+        best_workspace: null,
+        qor_baseline: null,
+        runtime_processes: {
+          ws_1: {
+            schema_version: 1,
+            run_id: runId,
+            pid: 1234,
+            pgid: 1234,
+            process_start_id: 'start-1',
+            boot_id: 'boot-1',
+            host_id: 'host-1',
+            workspace_path: workspaceDirectory,
+            started_at: 1,
+            runtime_id: 'runtime-1',
+            log_path: `log/${runId}.log`,
+          },
+        },
+      }),
+    )
+    await writeFile(
+      join(workspaceDirectory, 'home', 'flow.json'),
+      JSON.stringify({
+        schema_version: 1,
+        steps: [
+          {
+            name: 'Synthesis',
+            state: 'Ongoing',
+            tool: 'yosys',
+            runtime: '',
+            'peak memory (mb)': 64,
+          },
+        ],
+      }),
+    )
+    const service = new EccCliRuntimeService({
+      resolveLaunch: vi.fn(),
+      runtimeId: 'runtime-1',
+    })
+    vi.spyOn(service as any, 'processIsAlive').mockResolvedValue(true)
+    ;(service as any).sessions.set('handle-1', {
+      directory: workspaceDirectory,
+      handle: 'handle-1',
+      projectRoot,
+      workspaceId: 'ws_1',
+      workspaceRevision: 1,
+    })
+
+    const projection = await service.reconcileOperationProjection()
+
+    expect(projection.operations).toEqual([
+      expect.objectContaining({
+        currentStep: 'Synthesis',
+        operationId: runId,
+        projectRoot,
+        workspaceDirectory,
+      }),
+    ])
+    await service.shutdown()
+  })
 })
 
 describe('ECC CLI Workspace discovery', () => {

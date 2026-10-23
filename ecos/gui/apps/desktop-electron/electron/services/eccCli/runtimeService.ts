@@ -971,6 +971,7 @@ export class EccCliRuntimeService {
         .filter((tracked) => !isTerminal(tracked.operation.state))
         .map((tracked) => ({
           ...tracked.operation,
+          projectRoot: tracked.projectRoot,
           workspaceDirectory: tracked.session.directory,
           workspaceHandle: tracked.session.handle,
         })),
@@ -978,6 +979,7 @@ export class EccCliRuntimeService {
         const tracked = this.operations.get(operation.operationId)
         return {
           ...operation,
+          ...(tracked ? { projectRoot: tracked.projectRoot } : {}),
           workspaceDirectory: tracked?.session.directory ?? '',
           workspaceHandle: tracked?.session.handle ?? '',
         }
@@ -987,6 +989,12 @@ export class EccCliRuntimeService {
   }
 
   async reconcileOperationProjection() {
+    await Promise.allSettled(
+      [...this.sessions.values()].map(async (session) => {
+        const manifest = await readProjectManifest(session.projectRoot)
+        await this.restoreRegisteredOperation(session, manifest)
+      }),
+    )
     await Promise.allSettled(
       [...this.operations.values()]
         .filter((tracked) => !isTerminal(tracked.operation.state))

@@ -12,6 +12,7 @@ export const useOptimizationEpisodeStore = defineStore('optimizationEpisodes', (
   const episodes = ref<DesktopAgentOptimizationEpisodeSummary[]>([])
   const generation = ref(-1)
   const issue = ref<string | null>(null)
+  const hiddenProjectRoots = ref<string[]>([])
   let requestSequence = 0
   let unsubscribe: (() => void) | null = null
   let observedStates = new Map<string, DesktopAgentOptimizationEpisodeState>()
@@ -23,9 +24,12 @@ export const useOptimizationEpisodeStore = defineStore('optimizationEpisodes', (
     try {
       const projection = await agent.optimizationProjection()
       if (sequence !== requestSequence || projection.generation < generation.value) return
-      notifyEpisodeTransitions(projection.episodes, generation.value < 0)
+      const visibleEpisodes = projection.episodes.filter(
+        (episode) => !belongsToHiddenProject(episode),
+      )
+      notifyEpisodeTransitions(visibleEpisodes, generation.value < 0)
       generation.value = projection.generation
-      episodes.value = projection.episodes
+      episodes.value = visibleEpisodes
       issue.value = null
     } catch (error) {
       if (sequence !== requestSequence) return
@@ -51,7 +55,37 @@ export const useOptimizationEpisodeStore = defineStore('optimizationEpisodes', (
     episodes.value = []
     generation.value = -1
     issue.value = null
+    hiddenProjectRoots.value = []
     observedStates = new Map()
+  }
+
+  function forgetProject(projectRoot: string): void {
+    const normalized = normalizeProjectRoot(projectRoot)
+    if (!normalized) return
+    if (!hiddenProjectRoots.value.includes(normalized)) {
+      hiddenProjectRoots.value = [...hiddenProjectRoots.value, normalized]
+    }
+    episodes.value = episodes.value.filter((episode) => !belongsToHiddenProject(episode))
+  }
+
+  function rememberProject(projectRoot: string): void {
+    const normalized = normalizeProjectRoot(projectRoot)
+    if (!normalized) return
+    hiddenProjectRoots.value = hiddenProjectRoots.value.filter(
+      (hidden) => hidden !== normalized,
+    )
+  }
+
+  function belongsToHiddenProject(
+    episode: DesktopAgentOptimizationEpisodeSummary,
+  ): boolean {
+    const directory = normalizeProjectRoot(episode.parentWorkspaceDirectory)
+    return (
+      Boolean(directory) &&
+      hiddenProjectRoots.value.some(
+        (hidden) => directory === hidden || directory.startsWith(`${hidden}/`),
+      )
+    )
   }
 
   function episodeForSession(
@@ -162,6 +196,8 @@ export const useOptimizationEpisodeStore = defineStore('optimizationEpisodes', (
     dispose,
     episodeForParent,
     episodeForSession,
+    forgetProject,
+    rememberProject,
     refresh,
     start,
     waitForTerminal,
@@ -174,6 +210,10 @@ function optionalAgent() {
   } catch {
     return undefined
   }
+}
+
+function normalizeProjectRoot(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/+$/, '')
 }
 
 const TERMINAL_STATES = new Set<DesktopAgentOptimizationEpisodeState>([

@@ -386,11 +386,13 @@ export interface EccRuntimeOperation {
 }
 
 export interface EccBackgroundOperation extends EccRuntimeOperation {
+  projectRoot?: string
   workspaceDirectory: string
   workspaceHandle: string
 }
 
 export interface EccBackgroundOperationOutcome extends EccRuntimeOperation {
+  projectRoot?: string
   workspaceDirectory: string
   workspaceHandle: string
 }
@@ -404,6 +406,7 @@ export interface EccBackgroundOperationRecovery {
 
 export interface EccBackgroundFinalization {
   issue?: string
+  projectRoot?: string
   state: 'finalizing' | 'snapshot-failed'
   workspaceDirectory: string
   workspaceHandle: string

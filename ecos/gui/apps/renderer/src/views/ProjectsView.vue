@@ -1134,6 +1134,7 @@ import {
   isShutdownInProgress,
   useBackgroundOperationStore,
 } from '@/stores/backgroundOperationStore'
+import { useOptimizationEpisodeStore } from '@/stores/optimizationEpisodeStore'
 import { useProjectConsistencyStore } from '@/stores/projectConsistencyStore'
 import {
   createProjectManifestMpcSnapshot,
@@ -1170,6 +1171,7 @@ const router = useRouter()
 const { openProject, showToast, currentProject } = useWorkspace()
 const projectComparisonSession = useBackendProjectComparisonSession()
 const backgroundOperations = useBackgroundOperationStore()
+const optimizationEpisodes = useOptimizationEpisodeStore()
 const projectConsistency = useProjectConsistencyStore()
 const inconsistentProjectRoots = computed(
   () =>
@@ -2437,6 +2439,8 @@ async function importProject() {
     const project = await loadProjectFromRoot(directory)
     const manifest = await readProjectManifest(project.path)
     projectHistory.value = await rememberProjectHistoryEntry(project)
+    backgroundOperations.rememberProject(project.path)
+    optimizationEpisodes.rememberProject(project.path)
     projectManifests.value = {
       ...projectManifests.value,
       [project.path]: manifest,
@@ -2617,6 +2621,8 @@ async function nextAvailableWorkspaceId(
 
 async function removeProjectFromHistory(project: Project) {
   projectHistory.value = await removeProjectHistoryEntry(project.path)
+  backgroundOperations.forgetProject(project.path)
+  optimizationEpisodes.forgetProject(project.path)
   const nextManifests = { ...projectManifests.value }
   delete nextManifests[project.path]
   projectManifests.value = nextManifests
@@ -2947,6 +2953,8 @@ async function applyProjectManifestForProject(
   projectHistory.value = await rememberProjectHistoryEntry(
     projectFromManifest(manifest, normalizedRoot),
   )
+  backgroundOperations.rememberProject(normalizedRoot)
+  optimizationEpisodes.rememberProject(normalizedRoot)
   if (
     selectedProjectId.value === projectRoot ||
     selectedProjectId.value === normalizedRoot

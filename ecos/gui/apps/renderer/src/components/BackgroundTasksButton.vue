@@ -323,6 +323,8 @@ function openTasks(): void {
     new CustomEvent(topbarOverlayEvent, { detail: 'background-tasks' }),
   )
   open.value = true
+  void store.refresh()
+  void optimizationEpisodes.refresh()
 }
 
 function handleOverlay(event: Event): void {
