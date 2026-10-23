@@ -92,6 +92,7 @@ impl GpuTileWorker {
                             &geometry,
                             owner,
                             owner.and_then(|owner| db.owner_name(owner)),
+                            shape.id,
                         ) {
                             label.category = category;
                             label.context_only = context_only;
