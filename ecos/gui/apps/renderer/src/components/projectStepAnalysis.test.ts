@@ -564,6 +564,95 @@ function mixedWorkspace(
 }
 
 describe('buildStepTabs and buildStepWorkspaceChips', () => {
+  it('marks coverage-limited analysis incomplete even when every artifact is present', () => {
+    const workspace = workspaceSummaryFixture('ws_a', {
+      Synth: stepSnapshotFixture({
+        step: 'Synth',
+        analysisStatus: 'incomplete',
+        missingMetrics: [
+          {
+            step: 'Synth',
+            metricName: 'synthesis_leakage_power',
+            reason: 'The synthesis power report is unavailable.',
+            evidence: evidenceFixture(),
+          },
+        ],
+      }),
+    })
+    const issues = buildStepIssues(workspace, 'Synth')
+
+    const [tab] = buildStepTabs([compareSummaryFixture('Synth')], workspace)
+    const verdict = buildStepVerdict(workspace, 'Synth', issues)
+
+    expect(tab.analysisAvailability).toBe('incomplete')
+    expect(verdict.status).toBe('incomplete')
+    expect(verdict.facts).toEqual(
+      expect.arrayContaining([
+        { label: 'Coverage', value: 'incomplete', tone: 'warn' },
+        { label: 'Missing', value: '1 metric', tone: 'warn' },
+      ]),
+    )
+  })
+
+  it('renders checklist-backed report items as report findings', () => {
+    const workspace = workspaceSummaryFixture('ws_a', {
+      'Antenna Check': stepSnapshotFixture({
+        step: 'Antenna Check',
+        reportOnly: true,
+        artifactStatus: 'missing',
+        summaryArtifactStatus: 'missing',
+        hotspotArtifactStatus: 'missing',
+        summaryStatus: null,
+        reportItems: [
+          {
+            id: 'antenna_ratio',
+            title: 'Antenna ratio',
+            state: 'warning',
+            blocked: false,
+            summary: 'One net exceeds the antenna ratio gate.',
+            source: 'checklist.json',
+          },
+          {
+            id: 'antenna_diode',
+            title: 'Antenna diode insertion',
+            state: 'pass',
+            blocked: false,
+            summary: 'Antenna diodes are present where required.',
+            source: 'checklist.json',
+          },
+        ],
+      }),
+    })
+
+    const issues = buildStepIssues(workspace, 'Antenna Check')
+    const [tab] = buildStepTabs([compareSummaryFixture('Antenna Check')], workspace)
+    const verdict = buildStepVerdict(workspace, 'Antenna Check', issues)
+
+    expect(issues).toEqual([
+      expect.objectContaining({
+        channel: 'report',
+        severity: 'warning',
+        blocking: false,
+        kind: 'Step report',
+        title: 'Antenna ratio',
+        actual: 'warning',
+        source: 'checklist.json',
+        diagnosis: 'One net exceeds the antenna ratio gate.',
+      }),
+    ])
+    expect(tab).toMatchObject({
+      blockingCount: 0,
+      findingCount: 1,
+      analysisAvailability: 'incomplete',
+    })
+    expect(verdict).toMatchObject({ status: 'incomplete', label: 'Incomplete' })
+    expect(verdict.facts).toContainEqual({
+      label: 'Report checks',
+      value: '1/2',
+      tone: 'warn',
+    })
+  })
+
   it('counts issues per step for the selected workspace', () => {
     const workspace = workspaceSummaryFixture('ws_a', {
       Route: stepSnapshotFixture({

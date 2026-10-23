@@ -373,6 +373,8 @@ const STEP_TOOL_LABELS: Record<string, string> = {
   dreamplace: 'DreamPlace',
   yosys: 'Yosys',
   yosys_lec: 'Yosys LEC',
+  kepler_formal: 'Kepler Formal',
+  lec_dual: 'Dual LEC',
   klayout: 'KLayout',
   sizer: 'Sizer',
 }

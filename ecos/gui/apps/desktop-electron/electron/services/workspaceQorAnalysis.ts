@@ -4,8 +4,10 @@ import {
   projectManifestFlowSteps,
   type EccEngineeringSnapshot,
   type EccQorSnapshotExtension,
+  type EccSnapshotChecklistProjection,
   type MetricComparison,
   type MetricValue,
+  type ProjectAnalysisReportItem,
   type ProjectManifest,
   type ProjectManifestFlowStep,
   type QorStepSummary,
@@ -37,7 +39,7 @@ export type WorkspaceEngineeringFacts = Pick<
   EccEngineeringSnapshot,
   'metrics' | 'qorSnapshotExtension'
 > &
-  Partial<Pick<EccEngineeringSnapshot, 'flow' | 'signoffAssessment'>>
+  Partial<Pick<EccEngineeringSnapshot, 'checklist' | 'flow' | 'signoffAssessment'>>
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -240,6 +242,28 @@ function snapshotComparisonMetrics(
   )
 }
 
+function snapshotReportItems(
+  checklist: EccSnapshotChecklistProjection | undefined,
+): Partial<Record<ProjectManifestFlowStep, ProjectAnalysisReportItem[]>> {
+  const grouped: Partial<Record<ProjectManifestFlowStep, ProjectAnalysisReportItem[]>> =
+    {}
+  for (const item of checklist?.items ?? []) {
+    const step = parseProjectManifestFlowStep(item.step)
+    if (!step) continue
+    const items = grouped[step] ?? []
+    items.push({
+      id: item.id,
+      title: item.title,
+      state: item.state,
+      blocked: item.blocked,
+      summary: item.summary,
+      source: null,
+    })
+    grouped[step] = items
+  }
+  return grouped
+}
+
 export function projectQorInputForWorkspace(
   manifest: ProjectManifest,
   workspaceId: string,
@@ -264,6 +288,7 @@ export function projectQorInputForWorkspace(
     qorSnapshotExtension: snapshot.qorSnapshotExtension,
     stepHotspotTexts: {},
     stepMetricTexts: {},
+    stepReportItems: snapshotReportItems(engineeringSnapshot?.checklist),
     stepStatuses: statuses,
     stepSummaryTexts: {},
     workspaceId,

@@ -1,15 +1,17 @@
 import {
   parseProjectManifestFlowStep,
-  type BackendProjectFindingsIssueCode,
+  projectManagementWorkspaceStepAnalysisSpecs,
   type BackendProjectStepFindings,
   type BackendProjectStepFindingsResult,
   type EccEngineeringAnalysisArtifactRef,
   type EccPersistedEngineeringSnapshot,
   type ProjectAnalysisSnapshot,
+  type ProjectAnalysisStepSnapshot,
   type ProjectManifestFlowStep,
   type ProjectQorMetricRecord,
 } from '@ecos-studio/shared'
 import type { VerifiedProjectArtifactsReadResult } from './projectManagementReadService'
+import { buildProjectAnalysisStepSnapshot } from './projectAnalysisSnapshot'
 
 interface FindingsArtifactReader {
   readVerifiedArtifacts(request: {
@@ -31,6 +33,7 @@ export interface CommittedFindingsResult {
 export interface CommittedFindingsWorkspace extends CommittedFindingsResult {
   previous?: CommittedFindingsResult
   projectWorkspaceId: string
+  workspaceName?: string
   workspacePath: string
 }
 
@@ -148,7 +151,6 @@ export class ProjectStepFindingsService {
       }
     }
     const artifacts = declaredArtifacts(source.engineeringSnapshot, step)
-    if (!artifacts.ok) return artifacts
 
     const generation = context.generation
     const key = cacheKey(
@@ -170,16 +172,23 @@ export class ProjectStepFindingsService {
     }
     if (!read.ok) return this.readFailure(read, key, context, request)
 
+    const artifactIssues = uniqueArtifactIssues([
+      ...artifacts.missing.map(({ reference }) => ({
+        code: 'ARTIFACT_REFERENCE_MISSING' as const,
+        reference,
+      })),
+      ...(read.issues ?? []),
+    ])
     const resultData = {
       ...data,
-      ...(read.issues && read.issues.length > 0
-        ? {
-            artifactIssues: read.issues.map((issue) => ({
-              code: issue.code,
-              reference: issue.reference,
-            })),
-          }
-        : {}),
+      details: rehydrateDetails(
+        data.details,
+        artifacts.data,
+        read.texts ?? {},
+        source,
+        request.projectWorkspaceId,
+      ),
+      ...(artifactIssues.length > 0 ? { artifactIssues } : {}),
     }
     this.cache.set(key, resultData)
     if (this.cache.size > MAX_VERIFIED_FINDINGS_CACHE_ENTRIES) {
@@ -240,25 +249,97 @@ function hasCommittedStepResults(
 function declaredArtifacts(
   snapshot: Pick<EccPersistedEngineeringSnapshot, 'artifacts'>,
   step: ProjectManifestFlowStep,
-):
-  | { ok: true; data: Array<{ reference: string }> }
-  | { ok: false; code: BackendProjectFindingsIssueCode } {
-  const kinds = ['qor_metrics', 'qor_summary', 'qor_hotspots']
+): {
+  data: DeclaredFindingsArtifact[]
+  missing: Array<{ kind: FindingsArtifactKind; reference: string }>
+} {
+  const spec = projectManagementWorkspaceStepAnalysisSpecs.find(
+    (candidate) => candidate.step === step,
+  )
+  if (!spec) return { data: [], missing: [] }
+  const kinds: FindingsArtifactKind[] = ['qor_metrics', 'qor_summary', 'qor_hotspots']
   if (step === 'STA') kinds.push('sta_timing_issues')
-  const artifacts: Array<{ reference: string }> = []
+  const producer =
+    spec.eccStepIds.find((eccStepId) =>
+      snapshot.artifacts.some(
+        (artifact) =>
+          artifact.stepId === eccStepId &&
+          artifact.availability === 'available' &&
+          kinds.includes(artifact.kind as FindingsArtifactKind),
+      ),
+    ) ?? spec.eccStepIds[0]
+  const artifacts: DeclaredFindingsArtifact[] = []
+  const missing: Array<{ kind: FindingsArtifactKind; reference: string }> = []
   for (const kind of kinds) {
     const artifact = snapshot.artifacts.find(
       (candidate: EccEngineeringAnalysisArtifactRef) =>
-        candidate.kind === kind &&
-        candidate.availability === 'available' &&
-        parseProjectManifestFlowStep(candidate.stepId) === step,
+        candidate.kind === kind && candidate.stepId === producer,
     )
-    if (!artifact) {
-      return { ok: false, code: 'ARTIFACT_REFERENCE_MISSING' }
+    if (artifact?.availability === 'available') {
+      artifacts.push({ kind, reference: artifact.reference, stepId: artifact.stepId })
+    } else {
+      missing.push({ kind, reference: artifact?.reference ?? specPath(spec, kind) })
     }
-    artifacts.push({ reference: artifact.reference })
   }
-  return { ok: true, data: artifacts }
+  return { data: artifacts, missing }
+}
+
+type FindingsArtifactKind =
+  | 'qor_metrics'
+  | 'qor_summary'
+  | 'qor_hotspots'
+  | 'sta_timing_issues'
+
+interface DeclaredFindingsArtifact {
+  kind: FindingsArtifactKind
+  reference: string
+  stepId: string
+}
+
+function specPath(
+  spec: (typeof projectManagementWorkspaceStepAnalysisSpecs)[number],
+  kind: FindingsArtifactKind,
+): string {
+  if (kind === 'qor_metrics') return spec.metricsPath
+  if (kind === 'qor_summary') return spec.summaryPath
+  if (kind === 'qor_hotspots') return spec.hotspotsPath
+  return 'sta_ecc/analysis/sta_timing_issues.json'
+}
+
+function rehydrateDetails(
+  details: ProjectAnalysisStepSnapshot,
+  artifacts: readonly DeclaredFindingsArtifact[],
+  texts: Record<string, string>,
+  workspace: CommittedFindingsResult & { workspaceName?: string },
+  projectWorkspaceId: string,
+): ProjectAnalysisStepSnapshot {
+  const textFor = (kind: FindingsArtifactKind): string | undefined => {
+    const artifact = artifacts.find((candidate) => candidate.kind === kind)
+    return artifact ? texts[artifact.reference] : undefined
+  }
+  const hydrated = buildProjectAnalysisStepSnapshot({
+    flowStatus: details.flowStatus,
+    hotspotText: textFor('qor_hotspots'),
+    metricsText: textFor('qor_metrics'),
+    reportItems: details.reportItems,
+    staTimingIssuesText: details.step === 'STA' ? textFor('sta_timing_issues') : null,
+    step: details.step,
+    summaryText: textFor('qor_summary'),
+    workspaceId: workspace.engineeringSnapshot.workspaceId,
+    workspaceName: workspace.workspaceName ?? projectWorkspaceId,
+  })
+  return {
+    ...hydrated,
+    metrics: hydrated.metrics.length > 0 ? hydrated.metrics : details.metrics,
+  }
+}
+
+function uniqueArtifactIssues(
+  issues: NonNullable<BackendProjectStepFindings['artifactIssues']>,
+): NonNullable<BackendProjectStepFindings['artifactIssues']> {
+  const unique = new Map<string, (typeof issues)[number]>()
+  for (const issue of issues) unique.set(`${issue.code}\0${issue.reference}`, issue)
+  return [...unique.values()]
 }
 
 function cacheKey(

@@ -38,7 +38,7 @@ export const ECC_CATALOG_END_STEP: EccFlowStep = ECC_FLOW_STEPS[ECC_FLOW_STEPS.l
 /** Default tool names when extending a short source flow to the catalog end. */
 export const ECC_DEFAULT_STEP_TOOLS: Record<EccFlowStep, string> = {
   Synthesis: 'yosys',
-  lec: 'yosys_lec',
+  lec: 'kepler_formal',
   preFloorplan: 'ecc',
   macroPlacement: 'dreamplace',
   postFloorplan: 'ecc',
@@ -53,7 +53,7 @@ export const ECC_DEFAULT_STEP_TOOLS: Record<EccFlowStep, string> = {
   antennaCheck: 'ecc',
   lvs: 'ecc',
   filler: 'ecc',
-  postRouteLec: 'yosys_lec',
+  postRouteLec: 'kepler_formal',
   RCX: 'ecc',
   sta: 'ecc',
   powerAnalysis: 'ecc',

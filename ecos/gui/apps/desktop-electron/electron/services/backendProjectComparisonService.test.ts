@@ -990,6 +990,135 @@ describe('BackendProjectComparisonService', () => {
     })
   })
 
+  it('rehydrates Step Findings from verified artifact text', async () => {
+    const fixture = representativeProjectComparisonFixture()
+    const metricsText = JSON.stringify({
+      schema_version: 3,
+      integrity: {
+        invalid_detail_ids: [],
+        invalid_metric_source_ids: [],
+        status: 'pass',
+      },
+      metrics: [
+        {
+          analysis_group: 'route_quality',
+          category: 'routability_physical',
+          confidence: 'high',
+          corner: null,
+          corner_context: null,
+          direction: 'lower_is_better',
+          display_name: 'Route Wirelength',
+          id: 'route_wirelength',
+          project_role: 'final',
+          rating: { gate: false, score: true, trend: true },
+          scope: 'final_route',
+          source: {
+            kind: 'feature',
+            path: 'feature/route.step.json',
+            selector: '/metrics/route_wirelength',
+          },
+          step_role: 'primary',
+          unit: 'um',
+          value: 4210,
+        },
+      ],
+    })
+    const summaryText = JSON.stringify({
+      schema_version: 4,
+      analysis_status: 'incomplete',
+      quality_status: 'pass',
+      gates: [],
+      missing_metrics: [
+        {
+          metric_id: 'route_congestion',
+          reason: 'The congestion report is unavailable.',
+          evidence: {
+            availability: 'source_file_missing',
+            diagnosis: 'Required congestion report is unavailable.',
+            source: {
+              kind: 'feature',
+              path: 'feature/route.step.json',
+              selector: '/metrics/congestion',
+            },
+          },
+        },
+      ],
+    })
+    const hotspotsText = JSON.stringify({
+      schema_version: 3,
+      hotspots: [
+        {
+          metric_id: 'route_wirelength',
+          display_name: 'Long route',
+          severity: 'warning',
+          value: 4210,
+          source: {
+            kind: 'feature',
+            path: 'feature/route.step.json',
+            selector: '/metrics/route_wirelength',
+          },
+          description: 'The longest route exceeds the review threshold.',
+        },
+      ],
+    })
+    const readVerifiedArtifacts = vi.fn().mockResolvedValue({
+      ok: true,
+      texts: {
+        'route_ecc/analysis/qor_metrics.json': metricsText,
+        'route_ecc/analysis/qor_summary.json': summaryText,
+        'route_ecc/analysis/qor_hotspots.json': hotspotsText,
+      },
+    })
+    const service = new BackendProjectComparisonService(
+      {
+        readEngineeringSnapshot: async ({ workspacePath }) =>
+          snapshotResult(fixture.engineeringSnapshots[workspacePath.split('/').at(-1)!]!),
+        readManifest: async () => fixture.manifest,
+        readVerifiedArtifacts,
+        resolveProjectRoot: async (path) => path,
+      },
+      watcherHarness().create,
+    )
+    const selected = await service.selectProject(11, {
+      projectRootLocator: '/projects/gcd',
+    })
+    if (!selected.ok) throw new Error('selection failed')
+    await service.getComparison(11, selected.projectComparisonContextId)
+
+    const findings = await service.getStepFindings(11, {
+      projectComparisonContextId: selected.projectComparisonContextId,
+      projectWorkspaceId: 'ws_0002',
+      step: 'Route',
+    })
+
+    expect(findings).toMatchObject({
+      ok: true,
+      data: {
+        details: {
+          analysisStatus: 'incomplete',
+          artifactStatus: 'available',
+          hotspotArtifactStatus: 'available',
+          metrics: [{ metricName: 'route_wirelength', value: 4210 }],
+          missingMetrics: [
+            {
+              metricName: 'route_congestion',
+              reason: 'The congestion report is unavailable.',
+            },
+          ],
+          hotspots: [
+            {
+              metric: 'route_wirelength',
+              severity: 'warning',
+              value: 4210,
+            },
+          ],
+          summaryArtifactStatus: 'available',
+          summaryStatus: 'pass',
+        },
+      },
+    })
+  })
+
   it('returns available Findings with per-artifact read warnings', async () => {
     const fixture = representativeProjectComparisonFixture()
     const readVerifiedArtifacts = vi.fn().mockResolvedValue({
@@ -1092,19 +1221,20 @@ describe('BackendProjectComparisonService', () => {
     expect(readVerifiedArtifacts.mock.calls.at(-1)?.[0].artifacts).toHaveLength(4)
   })
 
-  it('rejects each missing Step Findings declaration without reading another detail', async () => {
+  it('keeps readable Step Findings when one declared detail is missing', async () => {
     for (const [stepId, kind] of [
       ['Route', 'qor_summary'],
       ['Route', 'qor_hotspots'],
       ['STA', 'sta_timing_issues'],
     ] as const) {
       const fixture = representativeProjectComparisonFixture()
+      const producerStepId = stepId === 'Route' ? 'route' : 'sta'
       const artifact = fixture.engineeringSnapshots.ws_0001!.artifacts.find(
-        (candidate) => candidate.stepId === stepId && candidate.kind === kind,
+        (candidate) => candidate.stepId === producerStepId && candidate.kind === kind,
       )
       if (!artifact) throw new Error(`missing ${stepId} ${kind} artifact`)
       artifact.availability = 'missing'
-      const readVerifiedArtifacts = vi.fn()
+      const readVerifiedArtifacts = vi.fn().mockResolvedValue({ ok: true, texts: {} })
       const service = new BackendProjectComparisonService(
         {
           readEngineeringSnapshot: async ({ workspacePath }) =>
@@ -1129,15 +1259,30 @@ describe('BackendProjectComparisonService', () => {
           projectWorkspaceId: 'ws_0001',
           step: stepId,
         }),
-      ).resolves.toEqual({ ok: false, code: 'ARTIFACT_REFERENCE_MISSING' })
-      expect(readVerifiedArtifacts).not.toHaveBeenCalled()
+      ).resolves.toMatchObject({
+        ok: true,
+        data: {
+          artifactIssues: [
+            expect.objectContaining({
+              code: 'ARTIFACT_REFERENCE_MISSING',
+              reference: artifact.reference,
+            }),
+          ],
+        },
+      })
+      expect(readVerifiedArtifacts).toHaveBeenCalledOnce()
+      expect(
+        readVerifiedArtifacts.mock.calls[0]?.[0].artifacts.map(
+          (candidate: { reference: string }) => candidate.reference,
+        ),
+      ).not.toContain(artifact.reference)
     }
   })
 
   it('keeps projection metrics visible when the step metrics artifact is missing', async () => {
     const fixture = representativeProjectComparisonFixture()
     const artifact = fixture.engineeringSnapshots.ws_0001!.artifacts.find(
-      (candidate) => candidate.stepId === 'Route' && candidate.kind === 'qor_metrics',
+      (candidate) => candidate.stepId === 'route' && candidate.kind === 'qor_metrics',
     )
     if (!artifact) throw new Error('missing Route qor_metrics artifact')
     artifact.availability = 'missing'

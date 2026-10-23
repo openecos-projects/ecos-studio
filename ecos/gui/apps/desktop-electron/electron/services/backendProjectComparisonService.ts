@@ -504,6 +504,9 @@ export class BackendProjectComparisonService {
                 ? snapshotResult.sections.qorSnapshotExtension.data
                 : undefined
             const engineeringFacts = {
+              ...(snapshotResult.sections.checklist.status === 'ready'
+                ? { checklist: snapshotResult.sections.checklist.data }
+                : {}),
               metrics: snapshotResult.sections.metrics.data,
               ...(qorSnapshotExtension ? { qorSnapshotExtension } : {}),
               ...(flow ? { flow } : {}),

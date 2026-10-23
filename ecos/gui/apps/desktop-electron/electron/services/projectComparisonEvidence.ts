@@ -79,6 +79,9 @@ export function projectComparisonEvidence(
     const flow =
       stale.sections.flow.status === 'ready' ? stale.sections.flow.data : undefined
     const input = projectQorInputForWorkspace(manifest, workspace.workspace_id, {
+      ...(stale.sections.checklist.status === 'ready'
+        ? { checklist: stale.sections.checklist.data }
+        : {}),
       metrics: stale.sections.metrics.data,
       ...(flow ? { flow } : {}),
       ...(stale.sections.signoff.status === 'ready'
@@ -116,6 +119,7 @@ export function projectComparisonEvidence(
       ]),
     ),
     projectWorkspaceId: workspace.workspace_id,
+    workspaceName: workspace.name || workspace.workspace_id,
     workspacePath: workspace.workspace_path,
     ...(previous ? { previous } : {}),
   }

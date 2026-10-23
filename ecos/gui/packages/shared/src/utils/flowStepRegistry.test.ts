@@ -113,8 +113,37 @@ describe('flow step registry', () => {
     ])
     expect(flowStepDefinition('Place')).toMatchObject({
       eccNames: ['preplace', 'place', 'diff_sizing'],
+      qorProducerEccNames: ['place', 'preplace', 'diff_sizing'],
       layoutEccNames: ['place'],
     })
+    expect(flowStepDefinition('Floor').qorProducerEccNames).toEqual([
+      'postFloorplan',
+      'preFloorplan',
+      'macroPlacement',
+    ])
+    expect(flowStepDefinition('LEC').tool).toBe('kepler_formal')
+    expect(flowStepDefinition('Post-route LEC').tool).toBe('kepler_formal')
+  })
+
+  it("mirrors ECC's scored-step and report-only contracts", () => {
+    expect(
+      flowStepRegistry.filter((step) => step.qorScored).map((step) => step.id),
+    ).toEqual([
+      'Synth',
+      'Floor',
+      'Place',
+      'CTS',
+      'Legal',
+      'Route',
+      'LVS',
+      'DRC',
+      'RCX',
+      'STA',
+      'Harden',
+    ])
+    expect(
+      flowStepRegistry.filter((step) => step.reportOnly).map((step) => step.id),
+    ).toEqual(['Antenna Check', 'Post-route LEC', 'EMIR'])
   })
 })
 

@@ -23,6 +23,7 @@ export type StepVerdictStatus = QorGateStatus | 'no_data'
 
 /** Which artifact list a finding was read from. A fact, unlike a severity ranking. */
 export type StepIssueChannel =
+  | 'report'
   | 'blocking'
   | 'hard-gate'
   | 'signoff'
@@ -262,6 +263,7 @@ export interface StepTab {
  * a claim that one channel outranks another.
  */
 const CHANNEL_ORDER: readonly StepIssueChannel[] = [
+  'report',
   'blocking',
   'hard-gate',
   'signoff',
@@ -275,6 +277,7 @@ const CHANNEL_ORDER: readonly StepIssueChannel[] = [
 ]
 
 const CHANNEL_LABELS: Record<StepIssueChannel, string> = {
+  report: 'Report',
   blocking: 'Blocking issue',
   'hard-gate': 'Hard gate',
   signoff: 'Signoff',
@@ -446,7 +449,34 @@ export function buildStepIssues(
 
   const base = { workspaceId: summary.workspaceId, workspaceName: summary.workspaceName }
 
-  if (snapshot.flowStatus === 'success') {
+  if (snapshot.reportOnly) {
+    for (const item of snapshot.reportItems ?? []) {
+      if (item.state === 'pass' || item.state === 'skipped') continue
+      const blocking = item.blocked || item.state === 'failed' || item.state === 'blocked'
+      issues.push({
+        ...base,
+        id: `report-${summary.workspaceId}-${item.id}`,
+        channel: 'report',
+        severity: blocking
+          ? 'critical'
+          : item.state === 'warning' || item.state === 'unavailable'
+            ? 'warning'
+            : null,
+        blocking,
+        kind: 'Step report',
+        title: item.title,
+        metric: item.id,
+        actual: item.state,
+        expected: null,
+        condition: null,
+        location: item.source,
+        source: item.source ?? 'checklist.json',
+        diagnosis: item.summary,
+      })
+    }
+  }
+
+  if (snapshot.flowStatus === 'success' && !snapshot.reportOnly) {
     for (const artifact of ARTIFACTS) {
       const status = snapshot[artifact.key]
       if (status === 'available') continue
@@ -773,6 +803,23 @@ export function matchesStepIssueFilter(issue: StepIssue, filterId: string): bool
   return issue.channel === filterId
 }
 
+function reportStatus(
+  items: NonNullable<ProjectAnalysisStepSnapshot['reportItems']>,
+): StepVerdictStatus {
+  if (items.length === 0) return 'unavailable'
+  if (
+    items.some(
+      (item) => item.blocked || item.state === 'failed' || item.state === 'blocked',
+    )
+  ) {
+    return 'blocked'
+  }
+  if (items.some((item) => item.state === 'warning' || item.state === 'unavailable')) {
+    return 'incomplete'
+  }
+  return 'pass'
+}
+
 export function buildStepVerdict(
   summary: ProjectWorkspaceSummary | null | undefined,
   step: string,
@@ -789,7 +836,13 @@ export function buildStepVerdict(
   }
 
   const counts = countStepIssues(issues)
-  const status = snapshot.summaryStatus ?? null
+  const status = snapshot.reportOnly
+    ? reportStatus(snapshot.reportItems ?? [])
+    : snapshot.summaryStatus === 'blocked' || snapshot.summaryStatus === 'incomplete'
+      ? snapshot.summaryStatus
+      : snapshot.analysisStatus === 'incomplete'
+        ? 'incomplete'
+        : (snapshot.summaryStatus ?? null)
 
   const availableArtifacts = ARTIFACTS.filter(
     (artifact) => snapshot[artifact.key] === 'available',
@@ -809,22 +862,55 @@ export function buildStepVerdict(
             ? 'bad'
             : 'neutral',
     },
-    {
-      label: 'Artifacts',
-      value: `${availableArtifacts}/${ARTIFACTS.length}`,
-      tone:
-        invalidArtifacts > 0
-          ? 'bad'
-          : availableArtifacts < ARTIFACTS.length
-            ? 'warn'
-            : 'good',
-    },
-    {
-      label: 'Metrics',
-      value: String(snapshot.metrics.length),
-      tone: snapshot.metrics.length > 0 ? 'neutral' : 'warn',
-    },
   ]
+
+  if (snapshot.reportOnly) {
+    const reportItems = snapshot.reportItems ?? []
+    const passed = reportItems.filter((item) => item.state === 'pass').length
+    facts.push({
+      label: 'Report checks',
+      value: `${passed}/${reportItems.length}`,
+      tone:
+        reportItems.length === 0
+          ? 'warn'
+          : passed === reportItems.length
+            ? 'good'
+            : 'warn',
+    })
+  } else {
+    facts.push(
+      {
+        label: 'Artifacts',
+        value: `${availableArtifacts}/${ARTIFACTS.length}`,
+        tone:
+          invalidArtifacts > 0
+            ? 'bad'
+            : availableArtifacts < ARTIFACTS.length
+              ? 'warn'
+              : 'good',
+      },
+      {
+        label: 'Metrics',
+        value: String(snapshot.metrics.length),
+        tone: snapshot.metrics.length > 0 ? 'neutral' : 'warn',
+      },
+    )
+  }
+
+  if (snapshot.analysisStatus) {
+    facts.push({
+      label: 'Coverage',
+      value: snapshot.analysisStatus,
+      tone: snapshot.analysisStatus === 'valid' ? 'good' : 'warn',
+    })
+  }
+  if ((snapshot.missingMetrics?.length ?? 0) > 0) {
+    facts.push({
+      label: 'Missing',
+      value: `${snapshot.missingMetrics.length} ${snapshot.missingMetrics.length === 1 ? 'metric' : 'metrics'}`,
+      tone: 'warn',
+    })
+  }
 
   const coverage = cornerCoverage(snapshot, step)
   if (coverage) {
