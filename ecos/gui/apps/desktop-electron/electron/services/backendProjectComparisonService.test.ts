@@ -990,6 +990,62 @@ describe('BackendProjectComparisonService', () => {
     })
   })
 
+  it('projects overview status from the artifact index and bounded summaries', async () => {
+    const fixture = representativeProjectComparisonFixture()
+    const summaryText = JSON.stringify({
+      schema_version: 4,
+      analysis_status: 'valid',
+      quality_status: 'pass',
+      gates: [],
+      missing_metrics: [],
+    })
+    const readStepAnalysisSummaries = vi
+      .fn()
+      .mockImplementation(
+        async ({ artifacts }: { artifacts: Array<{ reference: string }> }) => ({
+          ok: true,
+          texts: Object.fromEntries(
+            artifacts.map(({ reference }) => [reference, summaryText]),
+          ),
+        }),
+      )
+    const readVerifiedArtifacts = vi.fn()
+    const service = new BackendProjectComparisonService(
+      {
+        readEngineeringSnapshot: async ({ workspacePath }) =>
+          snapshotResult(fixture.engineeringSnapshots[workspacePath.split('/').at(-1)!]!),
+        readManifest: async () => fixture.manifest,
+        readStepAnalysisSummaries,
+        readVerifiedArtifacts,
+        resolveProjectRoot: async (path) => path,
+      },
+      watcherHarness().create,
+    )
+    const selected = await service.selectProject(11, {
+      projectRootLocator: '/projects/gcd',
+    })
+    if (!selected.ok) throw new Error('selection failed')
+    const comparison = await service.getComparison(
+      11,
+      selected.projectComparisonContextId,
+    )
+    if (!comparison.ok || !('data' in comparison.data.workspaceSnapshots)) {
+      throw new Error('comparison failed')
+    }
+
+    expect(comparison.data.workspaceSnapshots.data.items[0]?.steps.Route).toMatchObject({
+      artifactStatus: 'available',
+      summaryArtifactStatus: 'available',
+      hotspotArtifactStatus: 'available',
+      analysisSummaryLoaded: true,
+      artifactStatusProbed: true,
+      analysisStatus: 'valid',
+      summaryStatus: 'pass',
+    })
+    expect(readStepAnalysisSummaries).toHaveBeenCalled()
+    expect(readVerifiedArtifacts).not.toHaveBeenCalled()
+  })
+
   it('rehydrates Step Findings from verified artifact text', async () => {
     const fixture = representativeProjectComparisonFixture()
     const metricsText = JSON.stringify({
@@ -1224,7 +1280,6 @@ describe('BackendProjectComparisonService', () => {
   it('keeps readable Step Findings when one declared detail is missing', async () => {
     for (const [stepId, kind] of [
       ['Route', 'qor_summary'],
-      ['Route', 'qor_hotspots'],
       ['STA', 'sta_timing_issues'],
     ] as const) {
       const fixture = representativeProjectComparisonFixture()
@@ -1277,6 +1332,45 @@ describe('BackendProjectComparisonService', () => {
         ),
       ).not.toContain(artifact.reference)
     }
+  })
+
+  it('keeps an optional hotspot omission out of Step Findings artifact issues', async () => {
+    const fixture = representativeProjectComparisonFixture()
+    const artifact = fixture.engineeringSnapshots.ws_0001!.artifacts.find(
+      (candidate) => candidate.stepId === 'route' && candidate.kind === 'qor_hotspots',
+    )
+    if (!artifact) throw new Error('missing Route qor_hotspots artifact')
+    artifact.availability = 'missing'
+    const readVerifiedArtifacts = vi.fn().mockResolvedValue({ ok: true, texts: {} })
+    const service = new BackendProjectComparisonService(
+      {
+        readEngineeringSnapshot: async ({ workspacePath }) =>
+          snapshotResult(fixture.engineeringSnapshots[workspacePath.split('/').at(-1)!]!),
+        readManifest: async () => fixture.manifest,
+        readVerifiedArtifacts,
+        resolveProjectRoot: async (path) => path,
+      },
+      watcherHarness().create,
+    )
+    const selected = await service.selectProject(11, {
+      projectRootLocator: '/projects/gcd',
+    })
+    if (!selected.ok) throw new Error('selection failed')
+    await service.getComparison(11, selected.projectComparisonContextId)
+
+    const result = await service.getStepFindings(11, {
+      projectComparisonContextId: selected.projectComparisonContextId,
+      projectWorkspaceId: 'ws_0001',
+      step: 'Route',
+    })
+
+    expect(result).toMatchObject({ ok: true })
+    expect(result.ok && result.data.artifactIssues).toBeUndefined()
+    expect(
+      readVerifiedArtifacts.mock.calls[0]?.[0].artifacts.map(
+        (candidate: { reference: string }) => candidate.reference,
+      ),
+    ).not.toContain(artifact.reference)
   })
 
   it('keeps projection metrics visible when the step metrics artifact is missing', async () => {

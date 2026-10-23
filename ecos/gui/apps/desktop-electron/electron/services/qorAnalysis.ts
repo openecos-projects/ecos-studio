@@ -7,6 +7,7 @@ import {
   type ProjectStepStatus,
   type QorScalarStatus,
 } from '@ecos-studio/shared'
+import type { ProjectAnalysisArtifactStatuses } from './projectAnalysisArtifacts'
 
 /**
  * Metric-level grouping reported by per-step analysis artifacts. Distinct from the
@@ -44,6 +45,10 @@ export interface ProjectQorWorkspaceInput {
   stepSummaryTexts?: Partial<Record<FlowStep, string | null>>
   stepHotspotTexts?: Partial<Record<FlowStep, string | null>>
   stepReportItems?: Partial<Record<FlowStep, ProjectAnalysisReportItem[]>>
+  /** Availability read from the Snapshot artifact index instead of lazy content. */
+  stepArtifactStatuses?: Partial<Record<FlowStep, ProjectAnalysisArtifactStatuses>>
+  /** True when per-step QoR summaries were read for the overview status. */
+  analysisSummaryLoaded?: boolean
   staTimingIssuesText?: string | null
   stepStatuses: Record<string, ProjectStepStatus>
   normalizedMetrics?: ProjectQorMetricRecord[]
@@ -764,10 +769,11 @@ function buildWorkspaceDataQuality(
   }
 }
 
-// Gate evaluation order is deliberate (geometry/netlist gates before
-// extraction/timing): the first failing gate decides the verdict. Membership
-// must match the registry's `gate` steps — pinned by qorAnalysis.test.ts.
-export const PROJECT_GATE_STEPS: FlowStep[] = ['DRC', 'LVS', 'RCX', 'STA']
+// Gate membership comes from the canonical step registry so workspace readiness
+// cannot drift from the step metadata used by the rest of the UI.
+export const PROJECT_GATE_STEPS: FlowStep[] = flowStepRegistry
+  .filter((step) => step.gate === true)
+  .map((step) => step.id)
 
 function workspaceGateSteps(
   stepStatuses: ProjectQorWorkspaceInput['stepStatuses'],

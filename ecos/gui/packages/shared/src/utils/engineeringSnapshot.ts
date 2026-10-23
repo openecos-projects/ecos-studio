@@ -269,6 +269,10 @@ function validFlow(value: unknown): value is EccEngineeringSnapshot['flow'] {
 function validChecklist(value: unknown): value is EccSnapshotChecklistProjection {
   if (
     !record(value) ||
+    (value.status !== undefined &&
+      !['ready', 'attention', 'blocked'].includes(String(value.status))) ||
+    (value.requirementsStatus !== undefined &&
+      !['none', 'present'].includes(String(value.requirementsStatus))) ||
     !Array.isArray(value.items) ||
     value.items.length > ENGINEERING_SNAPSHOT_CHECKLIST_LIMIT
   )

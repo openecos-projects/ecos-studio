@@ -11,6 +11,7 @@ import {
   type BackendProjectStepFindingsResult,
   type EccRuntimeOperation,
   type ProjectManifest,
+  type ProjectManifestFlowStep,
   type ReadIssue,
 } from '@ecos-studio/shared'
 import { projectQorInputForWorkspace, workspaceFlowStates } from './workspaceQorAnalysis'
@@ -40,6 +41,7 @@ import {
   type ProjectComparisonInput,
   workspaceIssue,
 } from './projectComparisonProjection'
+import { projectStepSummaryArtifactRefs } from './projectAnalysisArtifacts'
 
 interface ProjectComparisonReader {
   resolveProjectRoot?(projectRoot: string): Promise<string>
@@ -49,6 +51,11 @@ interface ProjectComparisonReader {
     workspacePath: string
   }): Promise<ProjectEngineeringSnapshotReadResult>
   readVerifiedArtifacts?(request: {
+    projectRoot: string
+    workspacePath: string
+    artifacts: Array<{ reference: string }>
+  }): Promise<VerifiedProjectArtifactsReadResult>
+  readStepAnalysisSummaries?(request: {
     projectRoot: string
     workspacePath: string
     artifacts: Array<{ reference: string }>
@@ -503,7 +510,17 @@ export class BackendProjectComparisonService {
               snapshotResult.sections.qorSnapshotExtension.status === 'ready'
                 ? snapshotResult.sections.qorSnapshotExtension.data
                 : undefined
+            const artifacts =
+              snapshotResult.sections.artifacts.status === 'ready'
+                ? snapshotResult.sections.artifacts.data
+                : undefined
+            const stepSummaries = await this.readStepSummaryTexts(
+              context.projectRoot,
+              workspace.workspace_path,
+              artifacts,
+            )
             const engineeringFacts = {
+              ...(artifacts ? { artifacts } : {}),
               ...(snapshotResult.sections.checklist.status === 'ready'
                 ? { checklist: snapshotResult.sections.checklist.data }
                 : {}),
@@ -518,6 +535,10 @@ export class BackendProjectComparisonService {
               manifest,
               workspace.workspace_id,
               engineeringFacts,
+              {
+                stepSummaryTexts: stepSummaries.texts,
+                stepSummariesLoaded: stepSummaries.loaded,
+              },
             )
             return input
               ? {
@@ -671,6 +692,39 @@ export class BackendProjectComparisonService {
       return result
     } catch (error) {
       return queryFailure('read-failed', error)
+    }
+  }
+
+  private async readStepSummaryTexts(
+    projectRoot: string,
+    workspacePath: string,
+    artifacts: Parameters<typeof projectStepSummaryArtifactRefs>[0],
+  ): Promise<{
+    texts: Partial<Record<ProjectManifestFlowStep, string>>
+    loaded: boolean
+  }> {
+    const refs = projectStepSummaryArtifactRefs(artifacts)
+    if (refs.length === 0 || !this.reader.readStepAnalysisSummaries) {
+      return { texts: {}, loaded: false }
+    }
+    try {
+      const read = await this.reader.readStepAnalysisSummaries({
+        projectRoot,
+        workspacePath,
+        artifacts: refs.map(({ reference }) => ({ reference })),
+      })
+      if (!read.ok) return { texts: {}, loaded: false }
+      return {
+        texts: Object.fromEntries(
+          refs.flatMap(({ reference, step }) => {
+            const text = read.texts[reference]
+            return text ? [[step, text]] : []
+          }),
+        ),
+        loaded: true,
+      }
+    } catch {
+      return { texts: {}, loaded: false }
     }
   }
 }

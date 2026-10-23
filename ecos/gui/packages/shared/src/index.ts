@@ -573,6 +573,7 @@ export { isHdlFilePath } from './utils/hdlPath.ts'
 export { isVerilogIdentifier } from './utils/verilogIdentifier.ts'
 export { normalizeParameterKey, normalizeParameterKeys } from './utils/parameterKeys.ts'
 export {
+  projectAnalysisArtifactPolicy,
   projectManagementFrontendWorkspaceStepAnalysisSpecs,
   projectManagementFrontendWorkspaceSummaryPaths,
   projectManagementStaTimingIssuesPath,
@@ -580,6 +581,11 @@ export {
   projectManagementWorkspaceSummaryPaths,
   projectManagementWorkspaceSummaryPathsFor,
 } from './utils/projectManagementSummary.ts'
+export type {
+  ProjectAnalysisArtifactKind,
+  ProjectAnalysisArtifactPolicy,
+} from './utils/projectManagementSummary.ts'
+export { stepAnalysisAvailability } from './utils/projectAnalysisAvailability.ts'
 export { validateMpcSpec } from './utils/mpcSpec.ts'
 export type { ValidatedMpcSpec, ValidatedMpcSpecDesign } from './utils/mpcSpec.ts'
 export {

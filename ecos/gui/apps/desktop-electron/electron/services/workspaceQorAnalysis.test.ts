@@ -9,6 +9,7 @@ import {
 } from '@ecos-studio/shared'
 import { describe, expect, it } from 'vitest'
 import { buildProjectQorTrendSummary } from './qorAnalysis'
+import { buildProjectComparisonSnapshots } from './projectComparisonProjection'
 import {
   analyzeWorkspaceQor,
   projectQorInputForWorkspace,
@@ -232,6 +233,64 @@ describe('analyzeWorkspaceQor', () => {
 
     expect(input?.qorSnapshotExtension).toBe(extension)
     expect(summary?.qorSnapshotExtension).toBe(extension)
+  })
+
+  it('uses the artifact index and loaded summaries for overview step status', () => {
+    const snapshot = engineeringSnapshot(5000)
+    snapshot.artifacts = [
+      {
+        artifactId: 'route-metrics',
+        availability: 'available',
+        kind: 'qor_metrics',
+        name: 'qor_metrics.json',
+        stepId: 'route',
+      },
+      {
+        artifactId: 'route-summary',
+        availability: 'available',
+        kind: 'qor_summary',
+        name: 'qor_summary.json',
+        stepId: 'route',
+      },
+      {
+        artifactId: 'route-hotspots',
+        availability: 'available',
+        kind: 'qor_hotspots',
+        name: 'qor_hotspots.json',
+        stepId: 'route',
+      },
+    ]
+    const manifest = {
+      project_id: 'project-1',
+      name: 'demo',
+      design_name: 'gcd',
+      workspaces: [workspace('current', 'Current')],
+      qor_baseline: null,
+    } as ProjectManifest
+    const input = projectQorInputForWorkspace(manifest, 'current', snapshot, {
+      stepSummariesLoaded: true,
+      stepSummaryTexts: {
+        Route: JSON.stringify({
+          schema_version: 4,
+          step: 'route',
+          analysis_status: 'valid',
+          quality_status: 'pass',
+          gates: [],
+          missing_metrics: [],
+        }),
+      },
+    })
+    const analysis = buildProjectComparisonSnapshots([input!])[0]!
+
+    expect(analysis.steps.Route).toMatchObject({
+      artifactStatus: 'available',
+      summaryArtifactStatus: 'available',
+      hotspotArtifactStatus: 'available',
+      analysisSummaryLoaded: true,
+      artifactStatusProbed: true,
+      analysisStatus: 'valid',
+      summaryStatus: 'pass',
+    })
   })
 
   it('validates and projects a schema v6 Snapshot produced by ECC', () => {

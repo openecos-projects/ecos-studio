@@ -166,3 +166,30 @@ export function projectManagementWorkspaceSummaryPathsFor(
     ? projectManagementFrontendWorkspaceSummaryPaths
     : projectManagementWorkspaceSummaryPaths
 }
+
+export type ProjectAnalysisArtifactKind =
+  | 'qor_metrics'
+  | 'qor_summary'
+  | 'qor_hotspots'
+  | 'sta_timing_issues'
+
+export interface ProjectAnalysisArtifactPolicy {
+  requiredKinds: readonly ProjectAnalysisArtifactKind[]
+  optionalKinds: readonly ProjectAnalysisArtifactKind[]
+}
+
+/** Per-step artifact requirements shared by Electron main and the renderer. */
+export function projectAnalysisArtifactPolicy(
+  step: string,
+): ProjectAnalysisArtifactPolicy {
+  if (!projectManagementWorkspaceStepAnalysisSpecs.some((spec) => spec.step === step)) {
+    return { requiredKinds: [], optionalKinds: [] }
+  }
+  return {
+    requiredKinds:
+      step === 'STA'
+        ? ['qor_metrics', 'qor_summary', 'sta_timing_issues']
+        : ['qor_metrics', 'qor_summary'],
+    optionalKinds: ['qor_hotspots'],
+  }
+}

@@ -62,6 +62,8 @@ export interface FlowStepDefinition {
   qorScored?: boolean
   /** ECC publishes checklist/report evidence instead of a QoR artifact trio. */
   reportOnly?: boolean
+  /** Advisory report steps must not be promoted to blocking analysis failures. */
+  analysisRequirement?: 'required' | 'advisory' | 'optional'
   /** Optional check/optimization step a project may exclude from its ledger. */
   skippable?: boolean
   /** Home/step dashboards may present layout imagery for this step. */
@@ -213,6 +215,7 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
     metricIdPrefixes: [],
     tool: 'ecc',
     reportOnly: true,
+    analysisRequirement: 'advisory',
   },
   {
     id: 'Post-route LEC',
@@ -225,6 +228,7 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
     skippable: true,
     flowStartDisabled: true,
     reportOnly: true,
+    analysisRequirement: 'required',
   },
   {
     id: 'RCX',
@@ -269,6 +273,7 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
     metricIdPrefixes: [],
     tool: 'ecc',
     reportOnly: true,
+    analysisRequirement: 'advisory',
   },
   {
     id: 'Harden',

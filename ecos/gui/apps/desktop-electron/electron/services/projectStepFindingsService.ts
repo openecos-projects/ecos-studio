@@ -1,5 +1,6 @@
 import {
   parseProjectManifestFlowStep,
+  projectAnalysisArtifactPolicy,
   projectManagementWorkspaceStepAnalysisSpecs,
   type BackendProjectStepFindings,
   type BackendProjectStepFindingsResult,
@@ -8,6 +9,7 @@ import {
   type ProjectAnalysisSnapshot,
   type ProjectAnalysisStepSnapshot,
   type ProjectManifestFlowStep,
+  type ProjectAnalysisArtifactKind,
   type ProjectQorMetricRecord,
 } from '@ecos-studio/shared'
 import type { VerifiedProjectArtifactsReadResult } from './projectManagementReadService'
@@ -257,38 +259,40 @@ function declaredArtifacts(
     (candidate) => candidate.step === step,
   )
   if (!spec) return { data: [], missing: [] }
-  const kinds: FindingsArtifactKind[] = ['qor_metrics', 'qor_summary', 'qor_hotspots']
-  if (step === 'STA') kinds.push('sta_timing_issues')
-  const producer =
-    spec.eccStepIds.find((eccStepId) =>
-      snapshot.artifacts.some(
-        (artifact) =>
-          artifact.stepId === eccStepId &&
-          artifact.availability === 'available' &&
-          kinds.includes(artifact.kind as FindingsArtifactKind),
-      ),
-    ) ?? spec.eccStepIds[0]
+  const policy = projectAnalysisArtifactPolicy(step)
+  const kinds = [...new Set([...policy.requiredKinds, ...policy.optionalKinds])]
+  const policyRequired = new Set(policy.requiredKinds)
   const artifacts: DeclaredFindingsArtifact[] = []
   const missing: Array<{ kind: FindingsArtifactKind; reference: string }> = []
   for (const kind of kinds) {
-    const artifact = snapshot.artifacts.find(
-      (candidate: EccEngineeringAnalysisArtifactRef) =>
-        candidate.kind === kind && candidate.stepId === producer,
-    )
+    const artifact = findDeclaredArtifact(snapshot.artifacts, spec.eccStepIds, kind)
     if (artifact?.availability === 'available') {
       artifacts.push({ kind, reference: artifact.reference, stepId: artifact.stepId })
-    } else {
+    } else if (artifact?.required ?? policyRequired.has(kind)) {
       missing.push({ kind, reference: artifact?.reference ?? specPath(spec, kind) })
     }
   }
   return { data: artifacts, missing }
 }
 
-type FindingsArtifactKind =
-  | 'qor_metrics'
-  | 'qor_summary'
-  | 'qor_hotspots'
-  | 'sta_timing_issues'
+function findDeclaredArtifact(
+  artifacts: readonly EccEngineeringAnalysisArtifactRef[],
+  eccStepIds: readonly string[],
+  kind: FindingsArtifactKind,
+): EccEngineeringAnalysisArtifactRef | undefined {
+  let fallback: EccEngineeringAnalysisArtifactRef | undefined
+  for (const stepId of eccStepIds) {
+    const candidates = artifacts.filter(
+      (artifact) => artifact.stepId === stepId && artifact.kind === kind,
+    )
+    const available = candidates.find((artifact) => artifact.availability === 'available')
+    if (available) return available
+    fallback ??= candidates[0]
+  }
+  return fallback
+}
+
+type FindingsArtifactKind = ProjectAnalysisArtifactKind
 
 interface DeclaredFindingsArtifact {
   kind: FindingsArtifactKind

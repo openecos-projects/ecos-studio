@@ -573,6 +573,8 @@ export interface EccEngineeringAnalysisArtifactRef {
   name: string
   reference: string
   stepId: string
+  /** Producer declaration for the step's analysis contract. */
+  required?: boolean
   sha256?: string
   sizeBytes?: number
 }
@@ -722,6 +724,8 @@ export interface EccSnapshotChecklistItem {
 
 /** Snapshot v6 checklist projection (bounded to 512 items by the producer). */
 export interface EccSnapshotChecklistProjection {
+  status?: 'ready' | 'attention' | 'blocked'
+  requirementsStatus?: 'none' | 'present'
   items: EccSnapshotChecklistItem[]
 }
 
@@ -753,6 +757,8 @@ export interface EccSnapshotArtifactDescriptor {
   availability: 'available' | 'missing'
   kind: string
   name: string
+  /** Producer declaration for the step's analysis contract. */
+  required?: boolean
   stepId: string
 }
 

@@ -79,6 +79,7 @@ export function projectComparisonEvidence(
     const flow =
       stale.sections.flow.status === 'ready' ? stale.sections.flow.data : undefined
     const input = projectQorInputForWorkspace(manifest, workspace.workspace_id, {
+      artifacts: stale.sections.artifacts.data,
       ...(stale.sections.checklist.status === 'ready'
         ? { checklist: stale.sections.checklist.data }
         : {}),

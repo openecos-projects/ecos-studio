@@ -19,7 +19,7 @@ import type {
 
 export type StepIssueSeverity = 'critical' | 'warning' | 'info'
 export type StepTone = 'good' | 'warn' | 'bad' | 'neutral'
-export type StepVerdictStatus = QorGateStatus | 'no_data'
+export type StepVerdictStatus = QorGateStatus | 'advisory' | 'no_data'
 
 /** Which artifact list a finding was read from. A fact, unlike a severity ranking. */
 export type StepIssueChannel =
@@ -476,8 +476,15 @@ export function buildStepIssues(
     }
   }
 
-  if (snapshot.flowStatus === 'success' && !snapshot.reportOnly) {
+  if (
+    snapshot.flowStatus === 'success' &&
+    !snapshot.reportOnly &&
+    snapshot.artifactStatusProbed !== false
+  ) {
     for (const artifact of ARTIFACTS) {
+      if (artifact.key === 'hotspotArtifactStatus' && snapshot.hotspotRequired !== true) {
+        continue
+      }
       const status = snapshot[artifact.key]
       if (status === 'available') continue
       issues.push({
@@ -805,6 +812,7 @@ export function matchesStepIssueFilter(issue: StepIssue, filterId: string): bool
 
 function reportStatus(
   items: NonNullable<ProjectAnalysisStepSnapshot['reportItems']>,
+  requirement: ProjectAnalysisStepSnapshot['analysisRequirement'],
 ): StepVerdictStatus {
   if (items.length === 0) return 'unavailable'
   if (
@@ -815,7 +823,7 @@ function reportStatus(
     return 'blocked'
   }
   if (items.some((item) => item.state === 'warning' || item.state === 'unavailable')) {
-    return 'incomplete'
+    return requirement === 'advisory' ? 'advisory' : 'incomplete'
   }
   return 'pass'
 }
@@ -837,17 +845,21 @@ export function buildStepVerdict(
 
   const counts = countStepIssues(issues)
   const status = snapshot.reportOnly
-    ? reportStatus(snapshot.reportItems ?? [])
+    ? reportStatus(snapshot.reportItems ?? [], snapshot.analysisRequirement)
     : snapshot.summaryStatus === 'blocked' || snapshot.summaryStatus === 'incomplete'
       ? snapshot.summaryStatus
       : snapshot.analysisStatus === 'incomplete'
         ? 'incomplete'
         : (snapshot.summaryStatus ?? null)
 
-  const availableArtifacts = ARTIFACTS.filter(
+  const requiredArtifacts = ARTIFACTS.filter(
+    (artifact) =>
+      artifact.key !== 'hotspotArtifactStatus' || snapshot.hotspotRequired === true,
+  )
+  const availableArtifacts = requiredArtifacts.filter(
     (artifact) => snapshot[artifact.key] === 'available',
   ).length
-  const invalidArtifacts = ARTIFACTS.filter(
+  const invalidArtifacts = requiredArtifacts.filter(
     (artifact) => snapshot[artifact.key] === 'invalid',
   ).length
 
@@ -881,11 +893,11 @@ export function buildStepVerdict(
     facts.push(
       {
         label: 'Artifacts',
-        value: `${availableArtifacts}/${ARTIFACTS.length}`,
+        value: `${availableArtifacts}/${requiredArtifacts.length}`,
         tone:
           invalidArtifacts > 0
             ? 'bad'
-            : availableArtifacts < ARTIFACTS.length
+            : availableArtifacts < requiredArtifacts.length
               ? 'warn'
               : 'good',
       },
@@ -1527,6 +1539,7 @@ function verdictLabel(status: StepVerdictStatus): string {
       pass: 'Pass',
       blocked: 'Blocked',
       incomplete: 'Incomplete',
+      advisory: 'Advisory',
       unavailable: 'Unavailable',
       no_data: 'No analysis',
     }[status] ?? status
@@ -1626,6 +1639,7 @@ function stepWorkspaceStatusLabel(
   if (counts.total > 0) return `${step}: ${counts.total} findings reported`
   if (availability === 'incomplete') return `${step} analysis incomplete`
   if (availability === 'unavailable') return `${step} analysis unavailable`
+  if (availability === 'pending') return `${step}: analysis details not loaded`
   return `${step} analysis clean`
 }
 
