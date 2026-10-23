@@ -3,11 +3,15 @@ import { mount } from '@vue/test-utils'
 import { nextTick, reactive, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const state = vi.hoisted(() => ({ steps: null as any, session: null as any }))
+const state = vi.hoisted(() => ({
+  steps: null as any,
+  session: null as any,
+  loading: null as any,
+}))
 vi.mock('@/composables/useBackendFlowStages', () => ({
   useBackendFlowStages: () => ({
     projectedSteps: state.steps,
-    isLoading: ref(false),
+    isLoading: state.loading,
     error: ref(null),
   }),
 }))
@@ -21,6 +25,7 @@ import WorkspaceFlowDashboard from './WorkspaceFlowDashboard.vue'
 
 describe('workspace flow diagram', () => {
   beforeEach(() => {
+    state.loading = ref(false)
     state.steps = ref(
       [
         'Synthesis',
@@ -248,6 +253,66 @@ describe('workspace flow diagram', () => {
       'is-expanded',
     )
     await nextTick()
+    wrapper.unmount()
+  })
+
+  it('fits the first flow layout automatically when the workspace opens', async () => {
+    const wrapper = render(false)
+    const viewport = wrapper.get('.flow-scroll').element as HTMLElement
+    Object.defineProperties(viewport, {
+      clientWidth: { configurable: true, value: 800 },
+      clientHeight: { configurable: true, value: 600 },
+    })
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+    await nextTick()
+    await nextTick()
+
+    const canvas = wrapper.get('.flow-canvas').element as HTMLElement
+    const graphWidth = Number.parseFloat(canvas.style.width)
+    const graphHeight = Number.parseFloat(canvas.style.height)
+    const expectedZoom = Math.max(
+      0.25,
+      Math.min(
+        1.5,
+        Math.floor(Math.min((800 - 48) / graphWidth, (600 - 48) / graphHeight) * 20) / 20,
+      ),
+    )
+
+    expect(wrapper.get('output').text()).toBe(`${Math.round(expectedZoom * 100)}%`)
+    wrapper.unmount()
+  })
+
+  it('waits for loaded workspace content before the initial fit', async () => {
+    state.loading.value = true
+    const wrapper = render(false)
+    const viewport = wrapper.get('.flow-scroll').element as HTMLElement
+    Object.defineProperties(viewport, {
+      clientWidth: { configurable: true, value: 800 },
+      clientHeight: { configurable: true, value: 600 },
+    })
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+    await nextTick()
+    await nextTick()
+    expect(wrapper.get('output').text()).toBe('75%')
+
+    state.loading.value = false
+    await nextTick()
+    await nextTick()
+    await nextTick()
+
+    const canvas = wrapper.get('.flow-canvas').element as HTMLElement
+    const graphWidth = Number.parseFloat(canvas.style.width)
+    const graphHeight = Number.parseFloat(canvas.style.height)
+    const expectedZoom = Math.max(
+      0.25,
+      Math.min(
+        1.5,
+        Math.floor(Math.min((800 - 48) / graphWidth, (600 - 48) / graphHeight) * 20) / 20,
+      ),
+    )
+    expect(wrapper.get('output').text()).toBe(`${Math.round(expectedZoom * 100)}%`)
     wrapper.unmount()
   })
 

@@ -235,12 +235,16 @@ const positionedSteps = computed(() =>
 )
 const graphWidth = computed(() => layout.value.width)
 const graphHeight = computed(() => layout.value.height)
+const flowContentReady = computed(
+  () => Boolean(session.workspaceContextId) && !isLoading.value && steps.value.length > 0,
+)
 const { surfaceSize, canvasOffset, fitToViewport } = useCenteredFlowViewport(
   flowScroll,
   graphWidth,
   graphHeight,
   zoom,
   computed(() => session.workspaceContextId),
+  flowContentReady,
 )
 const selectedStep = computed(
   () => steps.value.find((step) => step.id === selectedId.value) ?? null,

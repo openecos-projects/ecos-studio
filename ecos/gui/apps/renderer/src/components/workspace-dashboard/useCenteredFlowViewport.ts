@@ -10,12 +10,18 @@ export function useCenteredFlowViewport(
   graphHeight: Readonly<Ref<number>>,
   zoom: Ref<number>,
   workspaceKey: Readonly<Ref<unknown>>,
+  contentReady?: Readonly<Ref<boolean>>,
 ) {
+  const autoFitReady = contentReady ?? ref(false)
   const size = ref({ width: 0, height: 0 })
   let updateVersion = 0
   let observedElement: HTMLElement | null = null
   let lastCenteredSize = { width: 0, height: 0 }
   let lastMeasuredZoom = zoom.value
+  let hasAutoFitted = false
+  let autoFitWorkspaceKey: unknown
+  let autoFitInFlight = false
+  let autoFitPending = false
   const surfaceSize = computed(() => ({
     width: Math.max(size.value.width, graphWidth.value * zoom.value),
     height: Math.max(size.value.height, graphHeight.value * zoom.value),
@@ -39,9 +45,9 @@ export function useCenteredFlowViewport(
     )
   }
 
-  async function fitToViewport(): Promise<void> {
+  async function fitToViewport(): Promise<boolean> {
     const element = viewport.value
-    if (!element) return
+    if (!element) return false
     measure(element)
     const availableWidth = element.clientWidth - FIT_PADDING * 2
     const availableHeight = element.clientHeight - FIT_PADDING * 2
@@ -51,7 +57,7 @@ export function useCenteredFlowViewport(
       graphWidth.value <= 0 ||
       graphHeight.value <= 0
     )
-      return
+      return false
 
     const rawZoom = Math.min(
       availableWidth / graphWidth.value,
@@ -63,11 +69,44 @@ export function useCenteredFlowViewport(
     )
     zoom.value = nextZoom
     await nextTick()
-    if (viewport.value !== element) return
+    if (viewport.value !== element) return false
     await positionCenter(element, {
       x: graphWidth.value / 2,
       y: graphHeight.value / 2,
     })
+    return true
+  }
+
+  function needsAutoFit(): boolean {
+    return (
+      autoFitReady.value &&
+      (!hasAutoFitted || !Object.is(autoFitWorkspaceKey, workspaceKey.value))
+    )
+  }
+
+  function scheduleAutoFit(element: HTMLElement): void {
+    if (!needsAutoFit()) return
+    if (autoFitInFlight) {
+      autoFitPending = true
+      return
+    }
+    const key = workspaceKey.value
+    autoFitInFlight = true
+    void fitToViewport()
+      .then((fitted) => {
+        if (fitted && viewport.value === element && Object.is(key, workspaceKey.value)) {
+          autoFitWorkspaceKey = key
+          hasAutoFitted = true
+        }
+      })
+      .finally(() => {
+        autoFitInFlight = false
+        if (autoFitPending) {
+          autoFitPending = false
+          const current = viewport.value
+          if (current) scheduleAutoFit(current)
+        }
+      })
   }
 
   function measure(element: HTMLElement): void {
@@ -99,7 +138,8 @@ export function useCenteredFlowViewport(
       (width !== lastCenteredSize.width || height !== lastCenteredSize.height)
     ) {
       lastCenteredSize = { width, height }
-      void positionCenter(element, center)
+      if (needsAutoFit()) scheduleAutoFit(element)
+      else void positionCenter(element, center)
     }
   }
 
@@ -130,15 +170,17 @@ export function useCenteredFlowViewport(
   )
 
   watch(
-    [graphWidth, graphHeight, workspaceKey],
+    [graphWidth, graphHeight, workspaceKey, autoFitReady],
     () => {
       const element = viewport.value
       if (element && size.value.width && size.value.height) {
         lastCenteredSize = { width: size.value.width, height: size.value.height }
-        void positionCenter(element, {
-          x: graphWidth.value / 2,
-          y: graphHeight.value / 2,
-        })
+        if (needsAutoFit()) scheduleAutoFit(element)
+        else
+          void positionCenter(element, {
+            x: graphWidth.value / 2,
+            y: graphHeight.value / 2,
+          })
       }
     },
     { flush: 'post' },
