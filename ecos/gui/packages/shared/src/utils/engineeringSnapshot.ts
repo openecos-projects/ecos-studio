@@ -182,8 +182,12 @@ export function validateEngineeringSnapshot(
     return { ok: false, issue: invalidIssue() }
   }
   // Artifact references are a path-safety boundary: they fail closed like the
-  // producer instead of degrading to an empty section.
-  if (!validArtifacts(value.artifacts)) {
+  // producer instead of degrading to an empty section. Duplicate identities
+  // from older producers are harmless for display; normalize them here so a
+  // typed projection supersedes its generic counterpart without rejecting the
+  // whole snapshot (and hiding the flow).
+  const artifacts = normalizeArtifacts(value.artifacts)
+  if (!artifacts) {
     return {
       ok: false,
       issue: {
@@ -238,7 +242,7 @@ export function validateEngineeringSnapshot(
       hotspotPreview: validHotspotPreview(value.hotspotPreview)
         ? ready(value.hotspotPreview)
         : unavailable('ENGINEERING_HOTSPOT_PREVIEW_INVALID'),
-      artifacts: ready(value.artifacts),
+      artifacts: ready(artifacts),
     },
   }
 }
@@ -659,13 +663,14 @@ function validSignoffDetail(value: unknown): boolean {
   )
 }
 
-function validArtifacts(value: unknown[]): value is EccEngineeringAnalysisArtifactRef[] {
-  const ids = new Set<string>()
-  return value.every((artifact) => {
+function normalizeArtifacts(
+  value: unknown[],
+): EccEngineeringAnalysisArtifactRef[] | null {
+  const artifacts = new Map<string, EccEngineeringAnalysisArtifactRef>()
+  for (const artifact of value) {
     if (
       !record(artifact) ||
       !nonEmptyString(artifact.artifactId) ||
-      ids.has(artifact.artifactId) ||
       !nonEmptyString(artifact.kind) ||
       !nonEmptyString(artifact.name) ||
       // Workspace-level artifacts (e.g. the home checklist) have no owning
@@ -674,13 +679,17 @@ function validArtifacts(value: unknown[]): value is EccEngineeringAnalysisArtifa
       !safeRelativePath(artifact.reference) ||
       !['available', 'missing'].includes(String(artifact.availability))
     ) {
-      return false
+      return null
     }
     // Legacy `sha256`/`sizeBytes` fields are tolerated but ignored: the artifact
-    // index only carries identity, kind, reference, and availability.
-    ids.add(artifact.artifactId)
-    return true
-  })
+    // index only carries identity, kind, reference, and availability. A later
+    // entry with the same identity is the typed projection and wins.
+    artifacts.set(
+      artifact.artifactId,
+      artifact as unknown as EccEngineeringAnalysisArtifactRef,
+    )
+  }
+  return [...artifacts.values()]
 }
 
 function safeRelativePath(value: unknown): boolean {
