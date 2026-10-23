@@ -9,12 +9,17 @@
         v-for="dimension in insights.dimensions"
         :key="dimension.key"
         class="dash-qphys-row"
+        :title="dimension.hint"
       >
         <span class="dash-qphys-label">{{ dimension.label }}</span>
         <span
           class="dash-qphys-bar"
           role="img"
-          :aria-label="dimension.label + ' ' + dimension.display + ' of 100'"
+          :aria-label="
+            dimension.percent === null
+              ? dimension.label + ' ' + dimension.display
+              : dimension.label + ' ' + dimension.display + ' of 100'
+          "
         >
           <i
             :class="dashboardToneClass(dimension.tone)"
@@ -113,7 +118,8 @@ function formatRatio(value: number | null): string {
 
 function formatPower(totalUw: number | null, budgetUw: number | null): string {
   const total = totalUw === null ? 'NR' : totalUw.toFixed(1) + ' uW'
-  const budget = budgetUw === null ? 'NR' : budgetUw.toFixed(1) + ' uW budget'
+  const budget =
+    budgetUw === null ? 'no budget declared' : budgetUw.toFixed(1) + ' uW budget'
   return total + ' · ' + budget
 }
 </script>
@@ -175,7 +181,7 @@ function formatPower(totalUw: number | null, budgetUw: number | null): string {
 
 .dash-qphys-row {
   display: grid;
-  grid-template-columns: minmax(150px, 0.35fr) minmax(120px, 1.8fr) 48px minmax(
+  grid-template-columns: minmax(150px, 0.35fr) minmax(120px, 1.8fr) 68px minmax(
       100px,
       0.35fr
     );
