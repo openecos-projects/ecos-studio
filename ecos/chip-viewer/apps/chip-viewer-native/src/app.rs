@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -35,8 +34,13 @@ use crate::map_data::{ColormapMode, HeatmapData, MapCatalog, MapItem};
 
 mod gpu_overview;
 mod gpu_tile_worker;
+mod label_layout;
 mod snapshot_reload;
 use gpu_tile_worker::GpuTileWorker;
+use label_layout::{
+    ResolvedLabels, ShapeLabelCandidate, ShapeLabelCollector, ShapeLabelKey, ShapeLabelKind,
+    ShapeLabelOverlay,
+};
 use snapshot_reload::{PendingReload, ReloadCompletion};
 
 const SNAPSHOT_REFRESH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
@@ -92,6 +96,7 @@ pub struct CanvasRenderStats {
 }
 
 struct GpuCachedLabel {
+    shape_id: ShapeId,
     key: ShapeLabelKey,
     rect: Rect32,
     text: String,
@@ -4151,6 +4156,10 @@ impl LoadedViewer {
         let is_interacting = (response.dragged()
             || response.drag_started()
             || (ui.ctx().input(|i| i.zoom_delta()) - 1.0).abs() > 1e-5
+            || (response.hovered()
+                && ui
+                    .ctx()
+                    .input(|i| i.raw_scroll_delta.y.abs() > f32::EPSILON))
             || self.focus_animation.is_some())
             && !pointer_over_heatmap;
 
@@ -4338,17 +4347,15 @@ impl LoadedViewer {
                             let screen_rect =
                                 shape_screen_rect(label.rect, world, canvas, self.zoom, self.pan);
                             let visible_rect = screen_rect.intersect(canvas);
-                            if screen_rect.is_positive()
-                                && visible_rect.is_positive()
-                                && visible_rect.width() >= 12.0
-                                && visible_rect.height() >= 8.0
-                            {
-                                self.label_collector.insert(ShapeLabelOverlay {
+                            if screen_rect.is_positive() && visible_rect.is_positive() {
+                                self.label_collector.insert(ShapeLabelCandidate {
                                     key: label.key.clone(),
-                                    rect: screen_rect,
+                                    anchor_rect: screen_rect,
                                     text: label.text.clone(),
                                     kind: label.kind,
-                                    rank_area: visible_rect.width() * visible_rect.height(),
+                                    rank_area: visible_rect.area(),
+                                    selected: self.selected == Some(label.shape_id),
+                                    highlighted: self.highlighted.contains(&label.shape_id),
                                 });
                             }
                         }
@@ -4442,10 +4449,12 @@ impl LoadedViewer {
                         drawn += 1;
                         estimated_primitives += prim_count;
                         if !is_interacting {
-                            if let Some(label) = shape_label_overlay(
+                            if let Some(label) = shape_label_candidate(
                                 geometry,
                                 owner,
                                 owner.and_then(|owner| self.db.owner_name(owner)),
+                                self.selected == Some(shape.id),
+                                self.highlighted.contains(&shape.id),
                                 world,
                                 canvas,
                                 self.zoom,
@@ -4457,6 +4466,9 @@ impl LoadedViewer {
                     }
                 }
             }
+        }
+        if !is_interacting {
+            self.queue_selected_pin_label(world, canvas);
         }
         // The heatmap is an overlay: paint it after the geometry (and after
         // the view-tile overview branch) so rows / obstructions / instances
@@ -4488,10 +4500,30 @@ impl LoadedViewer {
             self.pan,
         );
 
+        let resolved_labels = if is_interacting {
+            ResolvedLabels::default()
+        } else {
+            let ctx = ui.ctx().clone();
+            self.label_collector.resolve(canvas, move |text, size| {
+                ctx.fonts(|fonts| {
+                    fonts
+                        .layout_no_wrap(
+                            text.to_owned(),
+                            egui::FontId::proportional(size),
+                            egui::Color32::WHITE,
+                        )
+                        .size()
+                })
+            })
+        };
         let mut label_paint_duration = Duration::ZERO;
         if !is_interacting {
             let label_paint_start = collect_stats.then(Instant::now);
-            for overlay in self.label_collector.binned_overlays() {
+            for overlay in resolved_labels
+                .labels
+                .iter()
+                .filter(|label| !label.selected)
+            {
                 paint_shape_label_overlay(&painter, overlay, canvas);
             }
             if let Some(start) = label_paint_start {
@@ -4615,6 +4647,17 @@ impl LoadedViewer {
             }
         }
 
+        if !is_interacting {
+            if let Some(selected_label) = resolved_labels.labels.iter().find(|label| label.selected)
+            {
+                let selected_paint_start = collect_stats.then(Instant::now);
+                paint_shape_label_overlay(&painter, selected_label, canvas);
+                if let Some(start) = selected_paint_start {
+                    label_paint_duration += start.elapsed();
+                }
+            }
+        }
+
         if let Some(draft) = &self.draft {
             let screen =
                 world_to_screen_rect(draft.requested_bbox, world, canvas, self.zoom, self.pan);
@@ -4686,7 +4729,7 @@ impl LoadedViewer {
                 label_paint_time_ms: label_paint_duration.as_secs_f32() * 1000.0,
                 drawn_shapes: drawn,
                 estimated_primitives,
-                label_count: self.label_collector.len(),
+                label_count: resolved_labels.labels.len(),
                 use_view_tiles,
                 zoom: self.zoom,
                 lod: view_lod,
@@ -7923,6 +7966,43 @@ impl LoadedViewer {
             .any(|layer| layer.name.trim().to_ascii_uppercase().starts_with("VIA"))
     }
 
+    fn queue_selected_pin_label(&mut self, world: Rect32, canvas: egui::Rect) {
+        let Some(shape_id) = self.selected else {
+            return;
+        };
+        let Some(shape) = self.db.find_shape(shape_id) else {
+            return;
+        };
+        if !self.shape_is_visible(shape) || !self.shape_is_drawn_at_current_zoom(shape) {
+            return;
+        }
+        let Some(owner) = self.db.owner_for_shape(shape) else {
+            return;
+        };
+        let Some(owner_type) = OwnerType::from_raw(owner.owner_type) else {
+            return;
+        };
+        if !matches!(
+            owner_type,
+            OwnerType::PinPortShape | OwnerType::InstancePinPortShape | OwnerType::IoPinPortShape
+        ) {
+            return;
+        }
+        if let Some(candidate) = shape_label_candidate(
+            self.db.shape_geometry(shape),
+            Some(owner),
+            self.db.owner_name(owner),
+            true,
+            self.highlighted.contains(&shape_id),
+            world,
+            canvas,
+            self.zoom,
+            self.pan,
+        ) {
+            self.label_collector.insert(candidate);
+        }
+    }
+
     fn shape_is_visible(&self, shape: &ShapeRecord) -> bool {
         let owner_type = self
             .db
@@ -9239,81 +9319,6 @@ enum ScreenShapePrimitive {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum ShapeLabelKind {
-    IoPin,
-    Pin,
-    Net,
-    Pdn,
-    Instance,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum ShapeLabelKey {
-    Named { kind: ShapeLabelKind, text: String },
-    Owner { owner_type: u8, owner_id: u64 },
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct ShapeLabelOverlay {
-    key: ShapeLabelKey,
-    rect: egui::Rect,
-    text: String,
-    kind: ShapeLabelKind,
-    rank_area: f32,
-}
-
-#[derive(Clone, Debug, Default)]
-struct ShapeLabelCollector {
-    overlays: std::collections::HashMap<ShapeLabelKey, ShapeLabelOverlay>,
-}
-
-impl ShapeLabelCollector {
-    fn insert(&mut self, overlay: ShapeLabelOverlay) {
-        self.overlays
-            .entry(overlay.key.clone())
-            .and_modify(|current| {
-                if overlay.rank_area > current.rank_area {
-                    *current = overlay.clone();
-                }
-            })
-            .or_insert(overlay);
-    }
-
-    fn len(&self) -> usize {
-        self.overlays.len()
-    }
-
-    fn clear(&mut self) {
-        self.overlays.clear();
-    }
-
-    fn binned_overlays(&self) -> Vec<&ShapeLabelOverlay> {
-        // Bin labels into 32x32 screen-space grid to prevent overlapping
-        let mut bins: std::collections::HashMap<(i32, i32), &ShapeLabelOverlay> =
-            std::collections::HashMap::with_capacity(self.overlays.len());
-        for overlay in self.overlays.values() {
-            let cx = overlay.rect.center().x;
-            let cy = overlay.rect.center().y;
-            let bx = (cx / 32.0).floor() as i32;
-            let by = (cy / 32.0).floor() as i32;
-
-            bins.entry((bx, by))
-                .and_modify(|current| {
-                    if overlay.rank_area > current.rank_area {
-                        *current = overlay;
-                    }
-                })
-                .or_insert(overlay);
-        }
-        bins.into_values().collect()
-    }
-
-    fn overlays(&self) -> impl Iterator<Item = &ShapeLabelOverlay> {
-        self.overlays.values()
-    }
-}
-
 fn paint_styled_shape_geometry(
     painter: &egui::Painter,
     geometry: ShapeGeometry,
@@ -9582,6 +9587,7 @@ fn shape_label_info(
     geometry: &ShapeGeometry,
     owner: Option<&OwnerRef>,
     owner_name: Option<&str>,
+    shape_id: ShapeId,
 ) -> Option<GpuCachedLabel> {
     let ShapeGeometry::Rect(rect) = geometry else {
         return None;
@@ -9589,20 +9595,12 @@ fn shape_label_info(
     let owner = owner?;
     let owner_type = OwnerType::from_raw(owner.owner_type)?;
     let owner_name = owner_name?.trim();
-
-    let kind = match owner_type {
-        OwnerType::IoPinPortShape => ShapeLabelKind::IoPin,
-        OwnerType::PinPortShape if owner.path0 == 0 => ShapeLabelKind::IoPin,
-        OwnerType::PinPortShape | OwnerType::InstancePinPortShape => ShapeLabelKind::Pin,
-        OwnerType::NetWireSegment => ShapeLabelKind::Net,
-        OwnerType::SpecialWireSegment => ShapeLabelKind::Pdn,
-        OwnerType::InstanceBBox => ShapeLabelKind::Instance,
-        _ => return None,
-    };
+    let kind = shape_label_kind(owner_type, owner)?;
     let text = shape_label_text(kind, owner_type, owner, owner_name)?;
     let key = shape_label_key(kind, owner, owner_name);
 
     Some(GpuCachedLabel {
+        shape_id,
         key,
         rect: *rect,
         text,
@@ -9612,15 +9610,29 @@ fn shape_label_info(
     })
 }
 
-fn shape_label_overlay(
+fn shape_label_kind(owner_type: OwnerType, owner: &OwnerRef) -> Option<ShapeLabelKind> {
+    Some(match owner_type {
+        OwnerType::IoPinPortShape => ShapeLabelKind::IoPin,
+        OwnerType::PinPortShape if owner.path0 == 0 => ShapeLabelKind::IoPin,
+        OwnerType::PinPortShape | OwnerType::InstancePinPortShape => ShapeLabelKind::Pin,
+        OwnerType::NetWireSegment => ShapeLabelKind::Net,
+        OwnerType::SpecialWireSegment => ShapeLabelKind::Pdn,
+        OwnerType::InstanceBBox => ShapeLabelKind::Instance,
+        _ => return None,
+    })
+}
+
+fn shape_label_candidate(
     geometry: ShapeGeometry,
     owner: Option<&OwnerRef>,
     owner_name: Option<&str>,
+    selected: bool,
+    highlighted: bool,
     world: Rect32,
     canvas: egui::Rect,
     zoom: f32,
     pan: egui::Vec2,
-) -> Option<ShapeLabelOverlay> {
+) -> Option<ShapeLabelCandidate> {
     let ShapeGeometry::Rect(rect) = geometry else {
         return None;
     };
@@ -9629,32 +9641,22 @@ fn shape_label_overlay(
     if !screen_rect.is_positive() || !visible_rect.is_positive() {
         return None;
     }
-    if visible_rect.width() < 12.0 || visible_rect.height() < 8.0 {
-        return None;
-    }
 
     let owner = owner?;
     let owner_type = OwnerType::from_raw(owner.owner_type)?;
     let owner_name = owner_name?.trim();
-
-    let kind = match owner_type {
-        OwnerType::IoPinPortShape => ShapeLabelKind::IoPin,
-        OwnerType::PinPortShape if owner.path0 == 0 => ShapeLabelKind::IoPin,
-        OwnerType::PinPortShape | OwnerType::InstancePinPortShape => ShapeLabelKind::Pin,
-        OwnerType::NetWireSegment => ShapeLabelKind::Net,
-        OwnerType::SpecialWireSegment => ShapeLabelKind::Pdn,
-        OwnerType::InstanceBBox => ShapeLabelKind::Instance,
-        _ => return None,
-    };
+    let kind = shape_label_kind(owner_type, owner)?;
     let text = shape_label_text(kind, owner_type, owner, owner_name)?;
     let key = shape_label_key(kind, owner, owner_name);
 
-    Some(ShapeLabelOverlay {
+    Some(ShapeLabelCandidate {
         key,
-        rect: screen_rect,
+        anchor_rect: screen_rect,
         text,
         kind,
-        rank_area: visible_rect.width() * visible_rect.height(),
+        rank_area: visible_rect.area(),
+        selected,
+        highlighted,
     })
 }
 
@@ -9703,74 +9705,54 @@ fn paint_shape_label_overlay(
     overlay: &ShapeLabelOverlay,
     canvas: egui::Rect,
 ) -> bool {
-    let rect = overlay.rect.intersect(canvas);
-    if !rect.is_positive() {
+    let text_rect = overlay.rect.intersect(canvas);
+    let clip_rect = overlay.anchor_rect.intersect(canvas);
+    if !text_rect.is_positive() || !clip_rect.is_positive() {
         return false;
     }
 
-    let (min_size, max_size, color) = match overlay.kind {
-        ShapeLabelKind::IoPin => (
-            7.0,
-            12.0,
-            egui::Color32::from_rgba_unmultiplied(42, 32, 8, 210),
-        ),
-        ShapeLabelKind::Pin => (
-            6.0,
-            10.0,
-            egui::Color32::from_rgba_unmultiplied(245, 249, 255, 210),
-        ),
+    let (color, shadow) = match overlay.kind {
+        ShapeLabelKind::IoPin | ShapeLabelKind::Pin => {
+            (egui::Color32::WHITE, egui::Color32::from_black_alpha(230))
+        }
         ShapeLabelKind::Net => (
-            6.0,
-            11.0,
-            egui::Color32::from_rgba_unmultiplied(232, 250, 255, 190),
+            egui::Color32::from_rgba_unmultiplied(232, 250, 255, 220),
+            egui::Color32::from_black_alpha(210),
         ),
         ShapeLabelKind::Pdn => (
-            6.0,
-            11.0,
-            egui::Color32::from_rgba_unmultiplied(255, 239, 170, 215),
+            egui::Color32::from_rgba_unmultiplied(255, 239, 170, 230),
+            egui::Color32::from_black_alpha(210),
         ),
         ShapeLabelKind::Instance => (
-            8.0,
-            18.0,
-            egui::Color32::from_rgba_unmultiplied(235, 238, 242, 110),
+            egui::Color32::from_rgba_unmultiplied(235, 238, 242, 180),
+            egui::Color32::from_black_alpha(210),
         ),
     };
 
-    let Some(font_size) = centered_label_font_size(rect, &overlay.text, min_size, max_size) else {
-        return false;
+    let font = egui::FontId::proportional(overlay.font_size);
+    let clipped = painter.with_clip_rect(clip_rect);
+    let galley = painter.layout_no_wrap(overlay.text.clone(), font, color);
+    let angle = if overlay.vertical {
+        std::f32::consts::FRAC_PI_2
+    } else {
+        0.0
     };
-
-    let clipped = painter.with_clip_rect(rect.shrink(1.0));
-    clipped.text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        &overlay.text,
-        egui::FontId::proportional(font_size),
-        color,
+    let text_position = if overlay.vertical {
+        overlay.rect.center() + egui::vec2(overlay.text_size.y * 0.5, -overlay.text_size.x * 0.5)
+    } else {
+        overlay.rect.center() - overlay.text_size * 0.5
+    };
+    clipped.add(
+        egui::epaint::TextShape::new(text_position + egui::vec2(1.0, 1.0), galley.clone(), shadow)
+            .with_override_text_color(shadow)
+            .with_angle(angle),
+    );
+    clipped.add(
+        egui::epaint::TextShape::new(text_position, galley, color)
+            .with_override_text_color(color)
+            .with_angle(angle),
     );
     true
-}
-
-fn centered_label_font_size(
-    rect: egui::Rect,
-    text: &str,
-    min_size: f32,
-    max_size: f32,
-) -> Option<f32> {
-    if text.trim().is_empty() || !rect.is_positive() {
-        return None;
-    }
-    let available_width = (rect.width() - 4.0).max(0.0);
-    let available_height = (rect.height() - 2.0).max(0.0);
-    if available_width < min_size * 2.0 || available_height < min_size {
-        return None;
-    }
-
-    let char_count = text.chars().count().max(1) as f32;
-    let width_fit = available_width / (char_count * 0.58);
-    let height_fit = available_height * 0.58;
-    let size = width_fit.min(height_fit).min(max_size);
-    (size >= min_size).then_some(size)
 }
 
 fn draw_hatch_direction(
@@ -14414,7 +14396,28 @@ mod tests {
     }
 
     #[test]
-    fn shape_label_overlays_fit_centered_names_inside_rectangles() {
+    fn shape_label_kind_maps_supported_owners() {
+        for (owner_type, path0, expected) in [
+            (OwnerType::IoPinPortShape, 0, ShapeLabelKind::IoPin),
+            (OwnerType::PinPortShape, 0, ShapeLabelKind::IoPin),
+            (OwnerType::PinPortShape, 1, ShapeLabelKind::Pin),
+            (OwnerType::InstancePinPortShape, 1, ShapeLabelKind::Pin),
+            (OwnerType::NetWireSegment, 0, ShapeLabelKind::Net),
+            (OwnerType::SpecialWireSegment, 0, ShapeLabelKind::Pdn),
+            (OwnerType::InstanceBBox, 0, ShapeLabelKind::Instance),
+        ] {
+            let owner = OwnerRef {
+                owner_type: owner_type as u8,
+                path0,
+                ..OwnerRef::default()
+            };
+            assert_eq!(shape_label_kind(owner_type, &owner), Some(expected));
+        }
+        assert_eq!(shape_label_kind(OwnerType::Via, &OwnerRef::default()), None);
+    }
+
+    #[test]
+    fn cpu_and_gpu_pin_candidates_share_kind_name_and_key() {
         let world = Rect32 {
             lx: 0,
             ly: 0,
@@ -14428,141 +14431,34 @@ mod tests {
             hx: 300,
             hy: 220,
         });
-
-        let io_owner = OwnerRef {
-            owner_type: OwnerType::IoPinPortShape as u8,
-            ..OwnerRef::default()
-        };
-        let io_overlay = shape_label_overlay(
-            geometry,
-            Some(&io_owner),
-            Some("IO_PAD"),
-            world,
-            canvas,
-            1.0,
-            egui::Vec2::ZERO,
-        )
-        .expect("io pin label overlay");
-        assert_eq!(io_overlay.kind, ShapeLabelKind::IoPin);
-        assert!(centered_label_font_size(io_overlay.rect, &io_overlay.text, 7.0, 12.0).is_some());
-
-        let instance_owner = OwnerRef {
-            owner_type: OwnerType::InstanceBBox as u8,
-            ..OwnerRef::default()
-        };
-        let instance_overlay = shape_label_overlay(
-            geometry,
-            Some(&instance_owner),
-            Some("macro_pad_0"),
-            world,
-            canvas,
-            1.0,
-            egui::Vec2::ZERO,
-        )
-        .expect("instance label overlay");
-        assert_eq!(instance_overlay.kind, ShapeLabelKind::Instance);
-
-        let instance_pin_owner = OwnerRef {
+        let owner = OwnerRef {
             owner_type: OwnerType::InstancePinPortShape as u8,
             owner_id: 31,
             path0: 7,
             ..OwnerRef::default()
         };
-        let instance_pin_overlay = shape_label_overlay(
+
+        let gpu = shape_label_info(&geometry, Some(&owner), Some("BNDRY_CAP_143/VSS"), 42)
+            .expect("gpu pin candidate");
+        let cpu = shape_label_candidate(
             geometry,
-            Some(&instance_pin_owner),
-            Some("u0/A"),
+            Some(&owner),
+            Some("BNDRY_CAP_143/VSS"),
+            false,
+            false,
             world,
             canvas,
             1.0,
             egui::Vec2::ZERO,
         )
-        .expect("instance pin label overlay");
-        assert_eq!(instance_pin_overlay.kind, ShapeLabelKind::Pin);
-        assert_eq!(instance_pin_overlay.text, "A");
+        .expect("cpu pin candidate");
 
-        let net_owner = OwnerRef {
-            owner_type: OwnerType::NetWireSegment as u8,
-            owner_id: 41,
-            ..OwnerRef::default()
-        };
-        let net_overlay = shape_label_overlay(
-            geometry,
-            Some(&net_owner),
-            Some("clk"),
-            world,
-            canvas,
-            1.0,
-            egui::Vec2::ZERO,
-        )
-        .expect("net label overlay");
-        assert_eq!(net_overlay.kind, ShapeLabelKind::Net);
-        assert_eq!(net_overlay.text, "clk");
-
-        let pdn_owner = OwnerRef {
-            owner_type: OwnerType::SpecialWireSegment as u8,
-            owner_id: 42,
-            ..OwnerRef::default()
-        };
-        let pdn_overlay = shape_label_overlay(
-            geometry,
-            Some(&pdn_owner),
-            Some("VDD"),
-            world,
-            canvas,
-            1.0,
-            egui::Vec2::ZERO,
-        )
-        .expect("pdn label overlay");
-        assert_eq!(pdn_overlay.kind, ShapeLabelKind::Pdn);
-        assert_eq!(pdn_overlay.text, "VDD");
-
-        let small_net = shape_label_overlay(
-            ShapeGeometry::Rect(Rect32 {
-                lx: 100,
-                ly: 100,
-                hx: 140,
-                hy: 120,
-            }),
-            Some(&net_owner),
-            Some("data"),
-            world,
-            canvas,
-            1.0,
-            egui::Vec2::ZERO,
-        )
-        .expect("small net label overlay");
-        let larger_same_net_owner = OwnerRef {
-            owner_type: OwnerType::NetWireSegment as u8,
-            owner_id: 99,
-            ..OwnerRef::default()
-        };
-        let large_net = shape_label_overlay(
-            ShapeGeometry::Rect(Rect32 {
-                lx: 100,
-                ly: 100,
-                hx: 360,
-                hy: 180,
-            }),
-            Some(&larger_same_net_owner),
-            Some("data"),
-            world,
-            canvas,
-            1.0,
-            egui::Vec2::ZERO,
-        )
-        .expect("large net label overlay");
-        let large_area = large_net.rank_area;
-        let mut collector = ShapeLabelCollector::default();
-        collector.insert(small_net);
-        collector.insert(large_net);
-        let collected = collector.overlays().collect::<Vec<_>>();
-        assert_eq!(collected.len(), 1);
-        assert_eq!(collected[0].text, "data");
-        assert_eq!(collected[0].rank_area, large_area);
-
-        let tiny = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(10.0, 5.0));
-        assert!(centered_label_font_size(tiny, "too_long", 8.0, 18.0).is_none());
+        assert_eq!(gpu.shape_id, 42);
+        assert_eq!(gpu.kind, ShapeLabelKind::Pin);
+        assert_eq!(cpu.kind, gpu.kind);
+        assert_eq!(cpu.text, "VSS");
+        assert_eq!(cpu.text, gpu.text);
+        assert_eq!(cpu.key, gpu.key);
     }
 
     #[test]
