@@ -7,6 +7,15 @@
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.harden**
 
+<a id="parameter.harden.max_parallel_corners"></a>
+## parameter.harden.max_parallel_corners
+
+**Meaning:** The `max_parallel_corners` configuration field for Harden.
+
+**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **config.harden**
+
 <a id="parameter.harden.signoff"></a>
 ## parameter.harden.signoff
 

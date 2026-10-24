@@ -793,9 +793,5 @@ def _checklist_gate(payload: dict[str, Any], gate_id: str) -> GateResult:
     return GateResult.UNAVAILABLE
 
 
-def _optional_mpc_gate(
-    payload: dict[str, Any], gate_id: str, configured: bool
-) -> GateResult:
-    if not configured:
-        return GateResult.NOT_APPLICABLE
-    return _checklist_gate(payload, gate_id)
+def _optional_mpc_gate(payload: dict[str, Any], gate_id: str, configured: bool) -> GateResult:
+    return _checklist_gate(payload, gate_id) if configured else GateResult.NOT_APPLICABLE
