@@ -125,6 +125,8 @@ export interface DashboardQorDimension {
   state: string
   tone: DashboardTone
   percent: number | null
+  /** Why the dimension has no score, when the raw observation is still useful. */
+  hint?: string
 }
 
 export interface DashboardQorDiagnosis {
@@ -326,15 +328,9 @@ export function buildDashboardQorInsights(
     score: extension.score,
     scalarStatus: extension.scalarStatus,
     scoreTone: scoreTone(extension.scalarStatus),
-    dimensions: Object.entries(extension.qphys).map(([key, dimension]) => ({
-      key,
-      label: QOR_DIMENSION_LABELS[key] ?? key,
-      value: dimension.value,
-      display: dimension.value === null ? 'NR' : dimension.value.toFixed(1),
-      state: dimension.state,
-      tone: qorStateTone(dimension.state),
-      percent: dimension.value,
-    })),
+    dimensions: Object.entries(extension.qphys).map(([key, dimension]) =>
+      qorDimension(key, dimension, extension.power),
+    ),
     diagnoses: extension.diagnoses.map((diagnosis) => ({
       id: diagnosis.diagnosisId,
       state: diagnosis.state,
@@ -350,6 +346,53 @@ export function buildDashboardQorInsights(
     evidence: extension.evidence,
     feasibility: extension.feasibility,
     power: extension.power,
+  }
+}
+
+function qorDimension(
+  key: string,
+  dimension: EccQorSnapshotExtension['qphys'][string],
+  power: EccQorSnapshotExtension['power'],
+): DashboardQorDimension {
+  if (key === 'power' && dimension.value === null) {
+    const total = power.totalUw
+    const budget = power.budgetUw
+    if (total !== null && budget === null) {
+      return {
+        key,
+        label: QOR_DIMENSION_LABELS[key] ?? key,
+        value: null,
+        display: `${total.toFixed(1)} uW`,
+        state: 'NO BUDGET',
+        tone: 'neutral',
+        percent: null,
+        hint:
+          'Measured signoff power. Declare qor_power_budget_w to score Power; ' +
+          'without it, Power is excluded from the overall QoR score.',
+      }
+    }
+    return {
+      key,
+      label: QOR_DIMENSION_LABELS[key] ?? key,
+      value: null,
+      display: 'NR',
+      state: dimension.state,
+      tone: qorStateTone(dimension.state),
+      percent: null,
+      hint:
+        total === null
+          ? 'No signoff power measurement is available.'
+          : 'No power quality score is available.',
+    }
+  }
+  return {
+    key,
+    label: QOR_DIMENSION_LABELS[key] ?? key,
+    value: dimension.value,
+    display: dimension.value === null ? 'NR' : dimension.value.toFixed(1),
+    state: dimension.state,
+    tone: qorStateTone(dimension.state),
+    percent: dimension.value,
   }
 }
 

@@ -1,10 +1,13 @@
-import type {
-  EccQorSnapshotExtension,
-  ProjectManifestFlowStep as FlowStep,
-  ProjectManifestWorkspaceStatus as ProjectWorkspaceStatus,
-  ProjectStepStatus,
-  QorScalarStatus,
+import {
+  flowStepRegistry,
+  type EccQorSnapshotExtension,
+  type ProjectAnalysisReportItem,
+  type ProjectManifestFlowStep as FlowStep,
+  type ProjectManifestWorkspaceStatus as ProjectWorkspaceStatus,
+  type ProjectStepStatus,
+  type QorScalarStatus,
 } from '@ecos-studio/shared'
+import type { ProjectAnalysisArtifactStatuses } from './projectAnalysisArtifacts'
 
 /**
  * Metric-level grouping reported by per-step analysis artifacts. Distinct from the
@@ -41,6 +44,11 @@ export interface ProjectQorWorkspaceInput {
   stepMetricTexts: Partial<Record<FlowStep, string | null>>
   stepSummaryTexts?: Partial<Record<FlowStep, string | null>>
   stepHotspotTexts?: Partial<Record<FlowStep, string | null>>
+  stepReportItems?: Partial<Record<FlowStep, ProjectAnalysisReportItem[]>>
+  /** Availability read from the Snapshot artifact index instead of lazy content. */
+  stepArtifactStatuses?: Partial<Record<FlowStep, ProjectAnalysisArtifactStatuses>>
+  /** True when per-step QoR summaries were read for the overview status. */
+  analysisSummaryLoaded?: boolean
   staTimingIssuesText?: string | null
   stepStatuses: Record<string, ProjectStepStatus>
   normalizedMetrics?: ProjectQorMetricRecord[]
@@ -385,20 +393,14 @@ type QorMetricConfidence = ProjectQorMetricRecord['confidence']
 type QorMetricProjectRole = ProjectQorMetricRecord['projectRole']
 type QorMetricStepRole = ProjectQorMetricRecord['stepRole']
 
-const QOR_FLOW_STEPS: FlowStep[] = [
-  'Synth',
-  'Floor',
-  'Place',
-  'CTS',
-  'Legal',
-  'Route',
-  'DRC',
-  'LVS',
-  'Filler',
-  'RCX',
-  'STA',
-  'Harden',
-]
+// ECC's SCORED_STEP_VALUES consumes exactly these canonical steps. Filler is
+// emitted as a trend metric by ECC but is not a scoring input; Timing Opt and
+// Power Analysis publish QoR reports without contributing a score.
+export const PROJECT_QOR_SCORED_STEPS: FlowStep[] = flowStepRegistry
+  .filter((step) => step.qorScored)
+  .map((step) => step.id)
+
+const QOR_FLOW_STEPS = PROJECT_QOR_SCORED_STEPS
 
 const QOR_METRIC_CATEGORIES: QorMetricCategory[] = [
   'timing',
@@ -767,10 +769,11 @@ function buildWorkspaceDataQuality(
   }
 }
 
-// Gate evaluation order is deliberate (geometry/netlist gates before
-// extraction/timing): the first failing gate decides the verdict. Membership
-// must match the registry's `gate` steps — pinned by qorAnalysis.test.ts.
-export const PROJECT_GATE_STEPS: FlowStep[] = ['DRC', 'LVS', 'RCX', 'STA']
+// Gate membership comes from the canonical step registry so workspace readiness
+// cannot drift from the step metadata used by the rest of the UI.
+export const PROJECT_GATE_STEPS: FlowStep[] = flowStepRegistry
+  .filter((step) => step.gate === true)
+  .map((step) => step.id)
 
 function workspaceGateSteps(
   stepStatuses: ProjectQorWorkspaceInput['stepStatuses'],
@@ -2152,6 +2155,16 @@ export function hasCurrentQorSummaryText(text: string | null | undefined): boole
 export function qorSummaryStatus(text: string | null | undefined): QorGateStatus | null {
   const record = parseJsonObject(text)
   return qorGateStatusValue(record?.quality_status)
+}
+
+export function qorSummaryAnalysisStatus(
+  text: string | null | undefined,
+): 'valid' | 'incomplete' | null {
+  const record = parseJsonObject(text)
+  if (record?.schema_version !== 4) return null
+  return record.analysis_status === 'valid' || record.analysis_status === 'incomplete'
+    ? record.analysis_status
+    : null
 }
 
 function qorGateStatusValue(value: unknown): QorGateStatus | null {

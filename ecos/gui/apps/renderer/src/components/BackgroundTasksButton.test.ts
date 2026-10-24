@@ -13,7 +13,9 @@ const testState = vi.hoisted(() => ({
   currentProject: { path: '/projects/open/ws_open' } as { path: string } | null,
   execute: vi.fn(),
   openProject: vi.fn(),
+  operationProjection: vi.fn(),
   push: vi.fn(),
+  runtimeAvailable: false,
   showToast: vi.fn(),
 }))
 const { discoverProjectForWorkspace } = vi.hoisted(() => ({
@@ -24,7 +26,19 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ push: testState.push }),
 }))
 vi.mock('@/platform/desktop', () => ({
-  getDesktopApi: () => ({ productCommands: { execute: testState.execute } }),
+  getDesktopApi: () => ({
+    ...(testState.runtimeAvailable
+      ? {
+          ecc: {
+            runtime: {
+              onOperationProjectionInvalidated: () => () => undefined,
+              operationProjection: testState.operationProjection,
+            },
+          },
+        }
+      : {}),
+    productCommands: { execute: testState.execute },
+  }),
 }))
 vi.mock('@/composables/useWorkspace', () => ({
   useWorkspace: () => ({
@@ -75,6 +89,7 @@ describe('BackgroundTasksButton', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    testState.runtimeAvailable = false
     testState.currentProject = { path: '/projects/open/ws_open' }
     testState.execute.mockResolvedValue({
       accepted: true,
@@ -117,6 +132,59 @@ describe('BackgroundTasksButton', () => {
     expect(wrapper.text()).toContain('Creating Workspace')
 
     finishWorkspaceCreation(creationToken)
+    wrapper.unmount()
+  })
+
+  it('reloads running ECC flow tasks when opened', async () => {
+    testState.runtimeAvailable = true
+    testState.operationProjection.mockResolvedValueOnce({
+      creations: [],
+      finalizations: [],
+      generation: 0,
+      operations: [],
+      outcomes: [],
+    })
+    const wrapper = mount(BackgroundTasksButton)
+
+    await vi.waitFor(() => {
+      expect(testState.operationProjection).toHaveBeenCalledTimes(1)
+    })
+    testState.operationProjection.mockResolvedValueOnce({
+      creations: [],
+      finalizations: [],
+      generation: 1,
+      operations: [operation()],
+      outcomes: [],
+    })
+
+    await wrapper.get('.background-tasks-trigger').trigger('click')
+
+    await vi.waitFor(() => {
+      expect(testState.operationProjection).toHaveBeenCalledTimes(2)
+      expect(wrapper.text()).toContain('Route')
+      expect(wrapper.get('.background-tasks-trigger').text()).toContain('1')
+    })
+
+    wrapper.unmount()
+  })
+
+  it('uses the project name instead of the design name for task identity', async () => {
+    discoverProjectForWorkspace.mockResolvedValueOnce({
+      design_name: 'gcd',
+      name: 'gcd3',
+      root_path: '/benchmark/gcd3',
+      workspaces: [{ workspace_path: '/benchmark/gcd3/ws_0001' }],
+    })
+    const store = useBackgroundOperationStore()
+    store.operations = [operation({ workspaceDirectory: '/benchmark/gcd3/ws_0001' })]
+    const wrapper = mount(BackgroundTasksButton)
+
+    await wrapper.get('.background-tasks-trigger').trigger('click')
+    await vi.waitFor(() => {
+      expect(wrapper.text()).toContain('gcd3 / ws_0001')
+    })
+    expect(wrapper.text()).not.toContain('gcd / ws_0001')
+
     wrapper.unmount()
   })
 

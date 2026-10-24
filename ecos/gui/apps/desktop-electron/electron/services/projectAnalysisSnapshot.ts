@@ -1,9 +1,11 @@
-import type {
-  ProjectAnalysisAvailability,
-  ProjectAnalysisArtifactStatus,
-  ProjectAnalysisSnapshot,
-  ProjectAnalysisStepSnapshot,
-  ProjectManifestFlowStep as FlowStep,
+import {
+  flowStepDefinition,
+  type ProjectAnalysisArtifactStatus,
+  type ProjectAnalysisReportItem,
+  type ProjectAnalysisSnapshot,
+  type ProjectAnalysisStepSnapshot,
+  type ProjectAnalysisStatus,
+  type ProjectManifestFlowStep as FlowStep,
 } from '@ecos-studio/shared'
 import {
   hasCurrentQorHotspotText,
@@ -17,29 +19,13 @@ import {
   normalizeQorSummaryHardGateFailures,
   normalizeQorSummaryMissingMetrics,
   normalizeStaTimingIssues,
+  qorSummaryAnalysisStatus,
   qorSummaryStatus,
   resolveWorkspaceSignoffReadiness,
   resolveWorkspaceTimingConstraints,
   type ProjectQorWorkspaceInput,
 } from './qorAnalysis'
-
-/**
- * A snapshot exists for every flow step, including ones with no analysis files. Keep
- * object existence separate from whether the step has a complete, readable report.
- */
-export function stepAnalysisAvailability(
-  snapshot: ProjectAnalysisStepSnapshot | null | undefined,
-): ProjectAnalysisAvailability {
-  if (!snapshot || snapshot.artifactStatus !== 'available') return 'unavailable'
-  if (
-    snapshot.summaryArtifactStatus !== 'available' ||
-    snapshot.hotspotArtifactStatus !== 'available' ||
-    snapshot.summaryStatus === null
-  ) {
-    return 'incomplete'
-  }
-  return 'available'
-}
+import type { ProjectAnalysisArtifactStatuses } from './projectAnalysisArtifacts'
 
 export function buildProjectAnalysisSnapshot(
   input: ProjectQorWorkspaceInput,
@@ -61,20 +47,88 @@ function buildStepSnapshot(
   input: ProjectQorWorkspaceInput,
   step: FlowStep,
 ): ProjectAnalysisStepSnapshot {
-  const metricsText = input.stepMetricTexts[step]
-  const summaryText = input.stepSummaryTexts?.[step]
-  const hotspotText = input.stepHotspotTexts?.[step]
-  const staTimingAnalysis = step === 'STA' ? normalizeStaTimingIssues(input) : null
+  return buildProjectAnalysisStepSnapshot({
+    flowStatus: input.stepStatuses[step],
+    hotspotText: input.stepHotspotTexts?.[step],
+    metricsText: input.stepMetricTexts[step],
+    reportItems: input.stepReportItems?.[step],
+    artifactStatuses: input.stepArtifactStatuses?.[step],
+    artifactStatusProbed: input.stepArtifactStatuses?.[step] !== undefined,
+    hotspotRequired: input.stepArtifactStatuses?.[step]?.hotspotRequired ?? false,
+    analysisSummaryLoaded: input.analysisSummaryLoaded,
+    staTimingIssuesText: step === 'STA' ? input.staTimingIssuesText : null,
+    step,
+    summaryText: input.stepSummaryTexts?.[step],
+    workspaceId: input.workspaceId,
+    workspaceName: input.workspaceName,
+  })
+}
+
+export interface ProjectAnalysisStepTextInput {
+  workspaceId: string
+  workspaceName: string
+  step: FlowStep
+  flowStatus: ProjectAnalysisStepSnapshot['flowStatus']
+  metricsText: string | null | undefined
+  summaryText: string | null | undefined
+  hotspotText: string | null | undefined
+  staTimingIssuesText: string | null | undefined
+  reportItems?: ProjectAnalysisReportItem[]
+  artifactStatuses?: ProjectAnalysisArtifactStatuses
+  artifactStatusProbed?: boolean
+  hotspotRequired?: boolean
+  analysisSummaryLoaded?: boolean
+}
+
+/** Builds one step's detail from already-verified artifact text. */
+export function buildProjectAnalysisStepSnapshot(
+  input: ProjectAnalysisStepTextInput,
+): ProjectAnalysisStepSnapshot {
+  const { step } = input
+  const metricsText = input.metricsText
+  const summaryText = input.summaryText
+  const hotspotText = input.hotspotText
+  const staTimingAnalysis =
+    step === 'STA'
+      ? normalizeStaTimingIssues({
+          branchFrom: null,
+          createdAt: '',
+          staTimingIssuesText: input.staTimingIssuesText,
+          status: 'success',
+          stepHotspotTexts: {},
+          stepMetricTexts: {},
+          stepStatuses: {},
+          workspaceId: input.workspaceId,
+          workspaceKey: input.workspaceId,
+          workspaceName: input.workspaceName,
+        })
+      : null
+  const analysisStatus: ProjectAnalysisStatus = qorSummaryAnalysisStatus(summaryText)
+  const analysisSummaryLoaded = input.analysisSummaryLoaded ?? true
 
   return {
     step,
-    flowStatus: input.stepStatuses[step],
-    artifactStatus: analysisArtifactStatus(metricsText),
-    summaryArtifactStatus: summaryArtifactStatus(summaryText),
-    hotspotArtifactStatus: hotspotArtifactStatus(hotspotText),
+    flowStatus: input.flowStatus,
+    artifactStatus:
+      input.artifactStatuses?.artifactStatus ?? analysisArtifactStatus(metricsText),
+    summaryArtifactStatus: summaryText
+      ? summaryArtifactStatus(summaryText)
+      : (input.artifactStatuses?.summaryArtifactStatus ??
+        summaryArtifactStatus(summaryText)),
+    hotspotArtifactStatus: hotspotText
+      ? hotspotArtifactStatus(hotspotText)
+      : (input.artifactStatuses?.hotspotArtifactStatus ??
+        hotspotArtifactStatus(hotspotText)),
+    analysisSummaryLoaded,
+    artifactStatusProbed: input.artifactStatusProbed ?? true,
+    hotspotRequired: input.hotspotRequired ?? false,
+    analysisStatus,
+    reportOnly: flowStepDefinition(step).reportOnly === true,
+    analysisRequirement: flowStepDefinition(step).analysisRequirement ?? 'required',
+    reportItems: input.reportItems ?? [],
     metrics: normalizeQorMetrics({
       workspaceId: input.workspaceId,
-      workspaceKey: input.workspaceKey,
+      workspaceKey: input.workspaceId,
       step,
       text: metricsText,
     }),

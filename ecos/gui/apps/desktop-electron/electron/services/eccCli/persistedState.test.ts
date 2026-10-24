@@ -47,6 +47,36 @@ describe('readWorkspaceFlow', () => {
     })
   })
 
+  it('retains checklist blocks that stop a required flow step', async () => {
+    const root = await writeFlow({
+      schema_version: 1,
+      steps: [
+        {
+          name: 'Harden',
+          state: 'Unstart',
+          checklist_status: {
+            status: 'blocked',
+            blocked: true,
+            failed_items: ['prerequisite:sta'],
+          },
+        },
+      ],
+    })
+    await expect(readWorkspaceFlow(root)).resolves.toEqual({
+      steps: [
+        {
+          checklistBlocked: true,
+          checklistFailedItems: ['prerequisite:sta'],
+          name: 'Harden',
+          peakMemory: 0,
+          runtime: '',
+          state: 'Unstart',
+          tool: '',
+        },
+      ],
+    })
+  })
+
   it('rejects missing and unsupported schema versions', async () => {
     const missing = await writeFlow({ steps: [] })
     const future = await writeFlow({ schema_version: 2, steps: [] })

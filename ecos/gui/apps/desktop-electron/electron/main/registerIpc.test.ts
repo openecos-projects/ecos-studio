@@ -241,6 +241,9 @@ function registerHandlers(
     appInfoService: {
       getVersions: vi.fn(),
     },
+    environmentDoctorService: {
+      run: vi.fn(),
+    },
     createWindow: vi.fn(),
     eccRuntimeService: {
       cancelOperation: vi.fn(),
@@ -2118,6 +2121,43 @@ describe('registerIpc', () => {
     expect(handler).toBeDefined()
     await expect(handler?.({ sender: { id: 'web-contents' } })).resolves.toEqual(versions)
     expect(services.appInfoService.getVersions).toHaveBeenCalledTimes(1)
+  })
+
+  it('runs ECC environment diagnostics for the current workspace project root', async () => {
+    const { handlers, services } = registerHandlers()
+    const window = {
+      isDestroyed: () => false,
+      focus: vi.fn(),
+      isMinimized: () => false,
+      restore: vi.fn(),
+      show: vi.fn(),
+      webContents: { send: vi.fn() },
+    }
+    workspaceWindowRegistry.register('/work/demo', window)
+    fromWebContents.mockReturnValue(window)
+    const result = {
+      summary: {
+        status: 'ok' as const,
+        checked: 1,
+        failed: 0,
+        attention: 0,
+        detail: 'ecc 0.1.0a12',
+        installedAt: null,
+      },
+      components: [],
+      projectPath: '/work/demo',
+    }
+    services.environmentDoctorService?.run.mockResolvedValue(result)
+    services.eccRuntimeService.discoverProject.mockResolvedValue({
+      projectId: 'demo',
+      projectRoot: '/work',
+    })
+
+    const handler = handlers.get(desktopApiIpcChannels.appGetEnvironmentDoctor)
+
+    await expect(handler?.({ sender: { id: 'web-contents' } })).resolves.toEqual(result)
+    expect(services.eccRuntimeService.discoverProject).toHaveBeenCalledWith('/work/demo')
+    expect(services.environmentDoctorService?.run).toHaveBeenCalledWith('/work')
   })
 
   it('lists typed PDK Installation snapshots', async () => {

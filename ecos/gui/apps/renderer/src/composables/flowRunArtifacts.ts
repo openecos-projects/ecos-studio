@@ -1,4 +1,8 @@
-import type { WorkspaceResourceFile, WorkspaceStepResource } from '@ecos-studio/shared'
+import {
+  isLayoutFlowStep,
+  type WorkspaceResourceFile,
+  type WorkspaceStepResource,
+} from '@ecos-studio/shared'
 import { sameFlowStepName } from '@/api/type'
 
 export interface FlowStepRunArtifacts {
@@ -70,10 +74,11 @@ export function flowStepRunArtifacts(step: WorkspaceStepResource): FlowStepRunAr
     )
     .sort((left, right) => left.path.localeCompare(right.path))
 
-  // Keep a declared layout path even before the file appears. The runtime can
-  // commit the step before KLayout finishes writing the PNG; capture retries
-  // that path on the terminal inspection instead of treating it as absent.
-  const layout = step.resources.output.image ?? null
+  // Keep a declared layout path only for ECC steps that publish a geometry
+  // snapshot. Internal placement helpers such as preplace do not emit one.
+  const layout = isLayoutFlowStep(step.name)
+    ? (step.resources.output.image ?? null)
+    : null
   return {
     reports,
     layout,

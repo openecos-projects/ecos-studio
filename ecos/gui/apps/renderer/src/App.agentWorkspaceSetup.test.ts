@@ -96,6 +96,25 @@ describe('agent workspace creation', () => {
   })
 })
 
+describe('workspace update', () => {
+  it('opens the workspace wizard for backend workspaces instead of refreshing config in place', () => {
+    const start = source.indexOf('async function openWorkspaceReconfigureWizard')
+    const end = source.indexOf(
+      'async function buildReconfigureWizardInitialConfig',
+      start,
+    )
+    const updateSource = source.slice(start, end)
+
+    expect(updateSource).not.toContain("=== 'backend'")
+    expect(updateSource).not.toContain('refreshConfigApi')
+    expect(updateSource).toContain('buildReconfigureWizardInitialConfig')
+    expect(updateSource).toContain(
+      'reconfigureWorkspacePath.value = normalizedWorkspacePath',
+    )
+    expect(updateSource).toContain('showNewProjectWizard.value = true')
+  })
+})
+
 describe('quick start resources', () => {
   it('positions both creation dialogs beside the Agent for the entire Quick Start', () => {
     expect(source).toContain(
@@ -227,7 +246,9 @@ describe('quick start resources', () => {
       'preFloorplan',
       'macroPlacement',
       'postFloorplan',
+      'preplace',
       'place',
+      'diff_sizing',
       'CTS',
       'legalization',
       'Timing optimization',

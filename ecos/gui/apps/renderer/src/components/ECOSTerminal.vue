@@ -171,11 +171,12 @@ import {
   watch,
 } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
-import { Terminal, type ITheme } from '@xterm/xterm'
+import { Terminal, type IDisposable, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { getDesktopApi } from '@/platform/desktop'
+import { copyTerminalSelection, readTerminalClipboard } from './terminalClipboard'
 import '@xterm/xterm/css/xterm.css'
 
 const props = defineProps<{
@@ -253,6 +254,8 @@ interface TerminalRecord {
   sessionId: string | null
   shellStartPromise: Promise<void> | null
   surfaceElement: HTMLElement | null
+  selectionChangeListener: IDisposable | null
+  contextMenuHandler: ((event: MouseEvent) => void) | null
   terminal: Terminal
 }
 
@@ -316,6 +319,8 @@ function createTerminalRecord(): TerminalRecord {
     sessionId: null,
     shellStartPromise: null,
     surfaceElement: null,
+    selectionChangeListener: null,
+    contextMenuHandler: null,
     terminal,
   }
 
@@ -340,8 +345,45 @@ function setTerminalSurface(
   if (!record.opened) {
     record.terminal.open(element)
     record.opened = true
+    bindTerminalClipboard(record)
     fitTerminalAfterLayout()
   }
+}
+
+function bindTerminalClipboard(record: TerminalRecord) {
+  record.selectionChangeListener = record.terminal.onSelectionChange(() => {
+    const selection = record.terminal.getSelection()
+    void copyTerminalSelection(selection).catch(() => {
+      /* Clipboard permissions may be unavailable in packaged environments. */
+    })
+  })
+
+  const terminalElement = record.terminal.element
+  if (!terminalElement) return
+
+  record.contextMenuHandler = (event: MouseEvent) => {
+    event.preventDefault()
+    record.terminal.focus()
+
+    void readTerminalClipboard()
+      .then((text) => {
+        if (text) record.terminal.paste(text)
+      })
+      .catch(() => {
+        /* Clipboard permissions may be unavailable in packaged environments. */
+      })
+  }
+  terminalElement.addEventListener('contextmenu', record.contextMenuHandler)
+}
+
+function unbindTerminalClipboard(record: TerminalRecord) {
+  record.selectionChangeListener?.dispose()
+  record.selectionChangeListener = null
+
+  if (record.contextMenuHandler && record.terminal.element) {
+    record.terminal.element.removeEventListener('contextmenu', record.contextMenuHandler)
+  }
+  record.contextMenuHandler = null
 }
 
 function findRecordBySessionId(sessionId: string) {
@@ -510,6 +552,7 @@ async function deleteTerminal(localId: string) {
   )
 
   await stopShellSession(record)
+  unbindTerminalClipboard(record)
   record.terminal.dispose()
   record.surfaceElement = null
   terminalRecords.value = remainingRecords
@@ -714,6 +757,7 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   for (const record of terminalRecords.value) {
     void stopShellSession(record)
+    unbindTerminalClipboard(record)
     record.terminal.dispose()
   }
 })

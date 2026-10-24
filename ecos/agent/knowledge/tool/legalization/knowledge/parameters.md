@@ -124,6 +124,177 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.buffering_continuous_relaxed_optimization"></a>
+## parameter.legalization.buffering_continuous_relaxed_optimization
+
+**Meaning:** The continuous relaxed-buffer optimization switch.
+
+**Role:** It enables relaxed repeater-count optimization in the joint buffering lane.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.buffering_continuous_steps"></a>
+## parameter.legalization.buffering_continuous_steps
+
+**Meaning:** The standalone buffering optimizer step count.
+
+**Role:** It bounds continuous buffering optimization before discrete projection.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.buffering_discrete_count_proximal_lambda"></a>
+## parameter.legalization.buffering_discrete_count_proximal_lambda
+
+**Meaning:** The proximal penalty for discrete repeater-count changes.
+
+**Role:** It stabilizes discrete net-gradient updates around the relaxed repeater count.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.buffering_fixed_bsu_index"></a>
+## parameter.legalization.buffering_fixed_bsu_index
+
+**Meaning:** An optional fixed legal buffer index.
+
+**Role:** It pins Segment buffering to one buffer master resolved from the legal buffer table.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.buffering_fixed_buffer_master"></a>
+## parameter.legalization.buffering_fixed_buffer_master
+
+**Meaning:** The physical buffer master used for Segment buffering.
+
+**Role:** It selects the library cell inserted by Segment buffering.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.buffering_max_repeaters_per_segment"></a>
+## parameter.legalization.buffering_max_repeaters_per_segment
+
+**Meaning:** The maximum accepted repeaters on one segment.
+
+**Role:** It caps physical repeater insertion during discrete buffering.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.buffering_mode"></a>
+## parameter.legalization.buffering_mode
+
+**Meaning:** The buffering representation.
+
+**Role:** It selects the `segment` or `candidate` buffering lane and its matching defaults.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.buffering_route_b_selection_fraction"></a>
+## parameter.legalization.buffering_route_b_selection_fraction
+
+**Meaning:** The fraction of segment candidates selected in one discrete buffering batch.
+
+**Role:** It controls how sparsely candidates are sampled during net-gradient buffering.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.buffering_segment_count_timing_backend"></a>
+## parameter.legalization.buffering_segment_count_timing_backend
+
+**Meaning:** The timing implementation for Segment buffering.
+
+**Role:** It selects the compiled segment-transfer backend used for repeater-count gradients.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.buffering_segment_count_tns_gradient"></a>
+## parameter.legalization.buffering_segment_count_tns_gradient
+
+**Meaning:** The TNS-gradient switch for segment repeater counts.
+
+**Role:** It adds total-negative-slack sensitivity to continuous count optimization.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.buffering_segment_count_z_init"></a>
+## parameter.legalization.buffering_segment_count_z_init
+
+**Meaning:** The initial relaxed repeater count on each segment.
+
+**Role:** It seeds continuous segment-count optimization before projection.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.buffering_segment_integer_projection_interval"></a>
+## parameter.legalization.buffering_segment_integer_projection_interval
+
+**Meaning:** The interval between periodic integer buffer projections.
+
+**Role:** It schedules projection during global placement; zero disables periodic projection.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.buffering_segment_integer_projection_project_bsu"></a>
+## parameter.legalization.buffering_segment_integer_projection_project_bsu
+
+**Meaning:** The buffer-master projection switch.
+
+**Role:** It projects legal buffer master indices together with integer repeater counts.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.buffering_segment_integer_projection_start_step"></a>
+## parameter.legalization.buffering_segment_integer_projection_start_step
+
+**Meaning:** The first step eligible for periodic buffer projection.
+
+**Role:** It delays integer projection until the configured global-placement step.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.buffering_segment_live_geometry"></a>
+## parameter.legalization.buffering_segment_live_geometry
+
+**Meaning:** The live-geometry timing switch.
+
+**Role:** It refreshes buffered-segment timing from the current placement geometry.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.buffering_segment_projection_min_z_to_insert"></a>
+## parameter.legalization.buffering_segment_projection_min_z_to_insert
+
+**Meaning:** The minimum relaxed count eligible for physical insertion.
+
+**Role:** It gates which fractional repeater counts become physical buffers.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.buffering_segment_strategy"></a>
+## parameter.legalization.buffering_segment_strategy
+
+**Meaning:** The segment-count optimization strategy.
+
+**Role:** It selects continuous optimization or discrete net-gradient updates.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.buffering_segment_transfer_backend"></a>
+## parameter.legalization.buffering_segment_transfer_backend
+
+**Meaning:** The native segment timing-transfer implementation.
+
+**Role:** It selects the backend used to propagate timing across buffered segments.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.cell_model_schema"></a>
+## parameter.legalization.cell_model_schema
+
+**Meaning:** The cell timing-model schema.
+
+**Role:** It selects the piecewise-linear timing model; a null value inherits the flow default.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.cell_padding_x"></a>
 ## parameter.legalization.cell_padding_x
 
@@ -187,12 +358,93 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.diff_sizing_coefficients_cap"></a>
+## parameter.legalization.diff_sizing_coefficients_cap
+
+**Meaning:** The `diff_sizing_coefficients.cap` configuration field for legalization.
+
+**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.diff_sizing_coefficients_slew"></a>
+## parameter.legalization.diff_sizing_coefficients_slew
+
+**Meaning:** The `diff_sizing_coefficients.slew` configuration field for legalization.
+
+**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.diff_sizing_coefficients_tns"></a>
+## parameter.legalization.diff_sizing_coefficients_tns
+
+**Meaning:** The `diff_sizing_coefficients.tns` configuration field for legalization.
+
+**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.diff_sizing_coefficients_wns"></a>
+## parameter.legalization.diff_sizing_coefficients_wns
+
+**Meaning:** The `diff_sizing_coefficients.wns` configuration field for legalization.
+
+**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.diff_sizing_continuous_steps"></a>
+## parameter.legalization.diff_sizing_continuous_steps
+
+**Meaning:** The number of continuous differential-sizing steps.
+
+**Role:** It bounds continuous sizing before discrete refinement; zero disables the continuous phase.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.diff_timing_driven_placement"></a>
+## parameter.legalization.diff_timing_driven_placement
+
+**Meaning:** The differentiable timing-driven placement switch.
+
+**Role:** It adds timing gradients to the placement objective when enabled.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.differentiable_timing_obj"></a>
 ## parameter.legalization.differentiable_timing_obj
 
 **Meaning:** The differentiable-timing-objective switch.
 
 **Role:** The current ECOS execution boundary disables it, so it is not added to the placement objective.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.discrete_gradient_topk_shared_budget_percent"></a>
+## parameter.legalization.discrete_gradient_topk_shared_budget_percent
+
+**Meaning:** The percentage of sizeable cells sharing one size or VT action budget.
+
+**Role:** It controls competition for a shared discrete optimization budget.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.discrete_gradient_topk_up_percent"></a>
+## parameter.legalization.discrete_gradient_topk_up_percent
+
+**Meaning:** The percentage of cells eligible for discrete upsizing.
+
+**Role:** It limits the candidate set for discrete upsizing.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.discrete_gradient_topk_vt_percent"></a>
+## parameter.legalization.discrete_gradient_topk_vt_percent
+
+**Meaning:** The percentage of cells eligible for VT changes.
+
+**Role:** It limits the candidate set for discrete threshold-voltage substitution.
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
@@ -223,6 +475,15 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.early_stop_restore_best"></a>
+## parameter.legalization.early_stop_restore_best
+
+**Meaning:** The early-stop best-state restore switch.
+
+**Role:** It restores the best continuous sizing state instead of the final iterate.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.enable_fillers"></a>
 ## parameter.legalization.enable_fillers
 
@@ -241,12 +502,39 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.enhanced_inflation_flag"></a>
+## parameter.legalization.enhanced_inflation_flag
+
+**Meaning:** The enhanced inflation-controller switch.
+
+**Role:** It enables the enhanced outer-loop inflation schedule.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.enhanced_inflation_replay_best_round_flag"></a>
+## parameter.legalization.enhanced_inflation_replay_best_round_flag
+
+**Meaning:** The enhanced-inflation best-round replay switch.
+
+**Role:** It replays the best recorded round after inflated geometry is rolled back.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.evaluate_pl"></a>
 ## parameter.legalization.evaluate_pl
 
 **Meaning:** The existing-placement evaluation-mode switch.
 
 **Role:** When enabled, it disables the normal optimization path and evaluates the input placement.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.flow_kind"></a>
+## parameter.legalization.flow_kind
+
+**Meaning:** The optimization profile executed by the placement step.
+
+**Role:** It selects placement, sizing, joint, buffering, or STA behavior and applies the matching defaults.
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
@@ -340,6 +628,42 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.gpugr_bottom_routing_layer"></a>
+## parameter.legalization.gpugr_bottom_routing_layer
+
+**Meaning:** The inclusive bottom routing layer passed to GPUGR.
+
+**Role:** It sets the lower bound of the congestion-evaluation layer range; empty uses the first LEF routing layer.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.gpugr_final_eval_flag"></a>
+## parameter.legalization.gpugr_final_eval_flag
+
+**Meaning:** The final GPUGR evaluation switch.
+
+**Role:** It runs a routability evaluation after placement completes.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.gpugr_final_eval_rrr_iters"></a>
+## parameter.legalization.gpugr_final_eval_rrr_iters
+
+**Meaning:** The RRR iteration count for the final GPUGR evaluation.
+
+**Role:** It controls the effort of the post-placement routing evaluation.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.gpugr_top_routing_layer"></a>
+## parameter.legalization.gpugr_top_routing_layer
+
+**Meaning:** The inclusive top routing layer passed to GPUGR.
+
+**Role:** It sets the upper bound of the congestion-evaluation layer range; empty uses the last LEF routing layer.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.ignore_net_degree"></a>
 ## parameter.legalization.ignore_net_degree
 
@@ -355,6 +679,15 @@
 **Meaning:** The threshold for ignoring high-weight nets.
 
 **Role:** It filters excessively weighted nets from weighted-HPWL evaluation.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.inflation_min_interval"></a>
+## parameter.legalization.inflation_min_interval
+
+**Meaning:** The minimum interval between applied inflation rounds.
+
+**Role:** It prevents another inflation update before the configured number of global-placement steps; zero disables the guard.
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
@@ -376,6 +709,96 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.joint_buffer_commit_period"></a>
+## parameter.legalization.joint_buffer_commit_period
+
+**Meaning:** The optimizer interval between joint physical-buffer commits.
+
+**Role:** It controls how often joint optimization applies buffering changes to native geometry.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.joint_buffer_outer_iterations"></a>
+## parameter.legalization.joint_buffer_outer_iterations
+
+**Meaning:** The maximum number of refresh-separated joint optimizer windows.
+
+**Role:** It bounds outer joint-optimization iterations.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.joint_quality_profile"></a>
+## parameter.legalization.joint_quality_profile
+
+**Meaning:** The optional canonical joint-optimization profile.
+
+**Role:** It selects a predefined joint schedule and validates its required parameter combination.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.joint_segment_virtual_density_enabled"></a>
+## parameter.legalization.joint_segment_virtual_density_enabled
+
+**Meaning:** The virtual-buffer density switch.
+
+**Role:** It includes persistent virtual buffer footprints in placement density.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.l_direction_use_gpugr"></a>
+## parameter.legalization.l_direction_use_gpugr
+
+**Meaning:** The L-direction GPUGR source switch.
+
+**Role:** It resolves L-shaped routing directions from GPUGR entries instead of iRT EGR guides.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.l_shape_capacity_al_enable"></a>
+## parameter.legalization.l_shape_capacity_al_enable
+
+**Meaning:** The L-shape capacity-memory switch.
+
+**Role:** It uses per-routing-bin AL multiplier memory as the hard-GGR capacity-pressure source.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.l_shape_grad_target_ratio"></a>
+## parameter.legalization.l_shape_grad_target_ratio
+
+**Meaning:** The target L-shape routing-gradient ratio.
+
+**Role:** It balances the weighted routability gradient against the base wirelength and density gradient.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.l_shape_grad_target_ratio_max"></a>
+## parameter.legalization.l_shape_grad_target_ratio_max
+
+**Meaning:** The maximum adaptive L-shape gradient ratio.
+
+**Role:** It caps the routability gradient target during optimization.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.l_shape_gradient_mode"></a>
+## parameter.legalization.l_shape_gradient_mode
+
+**Meaning:** The L-shape routing-gradient mode.
+
+**Role:** It selects fixed-field translation guidance or full differentiation through positions and segment dimensions.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.l_shape_overflow_threshold"></a>
+## parameter.legalization.l_shape_overflow_threshold
+
+**Meaning:** The overflow threshold for L-shape routability activation.
+
+**Role:** It allows disabled L-shape force to start or re-enable below the configured placement overflow.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.l_shape_routability_flag"></a>
 ## parameter.legalization.l_shape_routability_flag
 
@@ -394,12 +817,30 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.l_shape_use_ggr_topology"></a>
+## parameter.legalization.l_shape_use_ggr_topology
+
+**Meaning:** The L-shape GGR-topology switch.
+
+**Role:** It uses a GGR-exported topology pack instead of refreshing diff-side FLUTE topology.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.lef_input"></a>
 ## parameter.legalization.lef_input
 
 **Meaning:** The LEF file set.
 
 **Role:** It provides technology layers, sites, and cell geometry to the placement database.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.legalize_before_each_inflation_flag"></a>
+## parameter.legalization.legalize_before_each_inflation_flag
+
+**Meaning:** The pre-inflation legalization switch.
+
+**Role:** It waits for the overflow target, legalizes geometry, evaluates congestion, and reapplies cumulative inflation before area adjustment.
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
@@ -583,6 +1024,33 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.openroad_vt_suffixes"></a>
+## parameter.legalization.openroad_vt_suffixes
+
+**Meaning:** The OpenROAD VT suffixes used to classify equivalent Liberty cells.
+
+**Role:** It groups equivalent threshold-voltage cells for discrete substitution.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.overflow_reference_mode"></a>
+## parameter.legalization.overflow_reference_mode
+
+**Meaning:** The overflow-normalization reference mode.
+
+**Role:** It selects whether the initial global-placement area or the current published movable area normalizes density overflow.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.piecewise_gradient_mode"></a>
+## parameter.legalization.piecewise_gradient_mode
+
+**Meaning:** The piecewise cell-gradient implementation.
+
+**Role:** It selects the `linear6_ste` or `native_piecewise` gradient path.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.pin2pin_accumulate_weight"></a>
 ## parameter.legalization.pin2pin_accumulate_weight
 
@@ -655,6 +1123,33 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.place_io_engine"></a>
+## parameter.legalization.place_io_engine
+
+**Meaning:** The physical database backend used by DREAMPlace.
+
+**Role:** It selects the ECC-backed placement database.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.placement_initial_learning_rate_max"></a>
+## parameter.legalization.placement_initial_learning_rate_max
+
+**Meaning:** The optional cap on the estimated initial placement learning rate.
+
+**Role:** It limits the first global-placement step size when present.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.placement_sizing_mode"></a>
+## parameter.legalization.placement_sizing_mode
+
+**Meaning:** The placement optimization lane.
+
+**Role:** It selects placement-only, sizing-only, or joint placement and sizing.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.plot_flag"></a>
 ## parameter.legalization.plot_flag
 
@@ -679,6 +1174,42 @@
 **Meaning:** The random seed.
 
 **Role:** It initializes Python, Torch, and CUDA random state for reproducible initial perturbations. Under a fixed seed the placement chain is bitwise-deterministic, producing identical signoff QoR across replays, so a seed change is a real QoR variable rather than measurement noise; ECOS pins candidate reruns to the workspace baseline seed so cross-candidate comparisons stay seed-matched.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.rc_tcl"></a>
+## parameter.legalization.rc_tcl
+
+**Meaning:** The OpenROAD RC setup Tcl script.
+
+**Role:** It supplies parasitics setup, resolved relative to the PDK root when the path is relative.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.real_size_execution_mode"></a>
+## parameter.legalization.real_size_execution_mode
+
+**Meaning:** The real-size execution mode.
+
+**Role:** It selects continuous-only sizing or a warmup-to-discrete transition.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.real_size_warmup_steps"></a>
+## parameter.legalization.real_size_warmup_steps
+
+**Meaning:** The number of real-size Adam steps before discrete transition.
+
+**Role:** It sets the warmup duration for warmup-to-discrete execution.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.relaxed_buffer_timing_integration_mode"></a>
+## parameter.legalization.relaxed_buffer_timing_integration_mode
+
+**Meaning:** The virtual-buffer timing-integration provider.
+
+**Role:** It selects how relaxed buffering participates in timing propagation.
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
@@ -772,6 +1303,15 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.sizing_parameterization"></a>
+## parameter.legalization.sizing_parameterization
+
+**Meaning:** The continuous sizing coordinate representation.
+
+**Role:** It selects logits or real-size coordinates for sizing optimization.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.sort_nets_by_degree"></a>
 ## parameter.legalization.sort_nets_by_degree
 
@@ -808,6 +1348,33 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.timing_aggregation_mode"></a>
+## parameter.legalization.timing_aggregation_mode
+
+**Meaning:** The AAT and RAT aggregation mode.
+
+**Role:** It selects hard maximum and minimum reductions or smooth log-sum-exp aggregation while retaining hard endpoint WNS and TNS.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_aggregation_tau_ps"></a>
+## parameter.legalization.timing_aggregation_tau_ps
+
+**Meaning:** The temperature for smooth AAT and RAT aggregation.
+
+**Role:** It controls how closely smooth aggregation approaches hard maxima and minima.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_coeff_growth_factor"></a>
+## parameter.legalization.timing_coeff_growth_factor
+
+**Meaning:** The WNS and TNS coefficient growth multiplier.
+
+**Role:** It scales timing coefficients at each density-weight update; one disables growth.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.timing_eval_flag"></a>
 ## parameter.legalization.timing_eval_flag
 
@@ -817,12 +1384,183 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.timing_grad_balance_target_ratio"></a>
+## parameter.legalization.timing_grad_balance_target_ratio
+
+**Meaning:** The target timing-to-wirelength gradient balance.
+
+**Role:** It balances weighted timing and wirelength gradient norms; zero disables automatic balancing.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_obj_profile"></a>
+## parameter.legalization.timing_obj_profile
+
+**Meaning:** The timing-objective profiling switch.
+
+**Role:** It enables performance counters for timing-objective evaluation.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_obj_profile_interval"></a>
+## parameter.legalization.timing_obj_profile_interval
+
+**Meaning:** The timing-objective profile interval.
+
+**Role:** It sets how many global-placement steps separate performance summaries.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_objective_lane"></a>
+## parameter.legalization.timing_objective_lane
+
+**Meaning:** The timing-objective term selection.
+
+**Role:** It selects timing-only terms or timing with slew and capacitance terms.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_opt_buffering_enabled"></a>
+## parameter.legalization.timing_opt_buffering_enabled
+
+**Meaning:** The timing-window buffering switch.
+
+**Role:** It enables Segment buffering inside electrical timing-optimization windows.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_opt_coefficients_cap"></a>
+## parameter.legalization.timing_opt_coefficients_cap
+
+**Meaning:** The `timing_opt_coefficients.cap` configuration field for legalization.
+
+**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_opt_coefficients_mode"></a>
+## parameter.legalization.timing_opt_coefficients_mode
+
+**Meaning:** The `timing_opt_coefficients.mode` configuration field for legalization.
+
+**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_opt_coefficients_slew"></a>
+## parameter.legalization.timing_opt_coefficients_slew
+
+**Meaning:** The `timing_opt_coefficients.slew` configuration field for legalization.
+
+**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_opt_coefficients_tns"></a>
+## parameter.legalization.timing_opt_coefficients_tns
+
+**Meaning:** The `timing_opt_coefficients.tns` configuration field for legalization.
+
+**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_opt_coefficients_wns"></a>
+## parameter.legalization.timing_opt_coefficients_wns
+
+**Meaning:** The `timing_opt_coefficients.wns` configuration field for legalization.
+
+**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_opt_enabled"></a>
+## parameter.legalization.timing_opt_enabled
+
+**Meaning:** The electrical timing-optimization switch.
+
+**Role:** It enables timing-optimization windows during placement.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.timing_opt_flag"></a>
 ## parameter.legalization.timing_opt_flag
 
 **Meaning:** The timing-optimization switch.
 
 **Role:** The current ECOS execution boundary disables it, so it does not participate in the placement algorithm.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_opt_max_windows"></a>
+## parameter.legalization.timing_opt_max_windows
+
+**Meaning:** The maximum number of timing-optimization windows.
+
+**Role:** It caps electrical timing-optimization passes in one placement run.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_opt_overflow_milestones"></a>
+## parameter.legalization.timing_opt_overflow_milestones
+
+**Meaning:** The overflow milestones that trigger timing-optimization windows.
+
+**Role:** It defines descending one-shot thresholds; an empty list uses inflation-triggered windows.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_opt_sizing_rounds"></a>
+## parameter.legalization.timing_opt_sizing_rounds
+
+**Meaning:** The maximum discrete size and VT rounds per timing window.
+
+**Role:** It caps discrete refinement inside each electrical timing-optimization window.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_placement_carrier"></a>
+## parameter.legalization.timing_placement_carrier
+
+**Meaning:** The coordinate timing method.
+
+**Role:** It selects direct-loss or pin-to-pin timing controls while preserving mutually exclusive global-placement paths.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_rc_mode"></a>
+## parameter.legalization.timing_rc_mode
+
+**Meaning:** The timing-parasitics source.
+
+**Role:** It selects placement estimates or global-route parasitics, which require native ECC CPU sizing or STA.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_surrogate_mode"></a>
+## parameter.legalization.timing_surrogate_mode
+
+**Meaning:** The cell timing-evaluation mode.
+
+**Role:** It selects automatic, mixed, LUT-only, or surrogate-only timing evaluation.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_topology_enable_overflow_threshold"></a>
+## parameter.legalization.timing_topology_enable_overflow_threshold
+
+**Meaning:** The overflow threshold for timing-topology updates.
+
+**Role:** It activates topology updates when density overflow falls below the configured value.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_topology_refresh_interval"></a>
+## parameter.legalization.timing_topology_refresh_interval
+
+**Meaning:** The timing-topology refresh interval.
+
+**Role:** It sets the number of global-placement steps between full topology refreshes.
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 

@@ -404,7 +404,8 @@
 }
 
 .verdict-badge.incomplete,
-.verdict-badge.unavailable {
+.verdict-badge.unavailable,
+.verdict-badge.advisory {
   background: var(--warn-color);
 }
 

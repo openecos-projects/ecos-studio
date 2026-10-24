@@ -24,6 +24,18 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
   return {
     app: {
       getVersions,
+      getEnvironmentDoctor: async () => ({
+        summary: {
+          status: 'unknown' as const,
+          checked: 0,
+          failed: 0,
+          attention: 0,
+          detail: null,
+          installedAt: null,
+        },
+        components: [],
+        projectPath: null,
+      }),
     },
     productCommands: {
       execute: async () => ({ accepted: false, operationId: '', state: '' }),
@@ -289,5 +301,32 @@ describe('useVersion', () => {
     await loadVersions()
 
     expect(getVersions).toHaveBeenCalledTimes(1)
+  })
+
+  it('refreshes versions when requested', async () => {
+    const getVersions = vi
+      .fn()
+      .mockResolvedValueOnce({
+        gui: '0.1.0-alpha.4',
+        runtime: 'ECC CLI',
+        ecc: '0.1.0a4',
+        dreamplace: '0.1.0a2',
+      })
+      .mockResolvedValueOnce({
+        gui: '0.1.0-alpha.4',
+        runtime: 'ECC CLI',
+        ecc: '0.1.0a5',
+        dreamplace: '0.1.0a3',
+      })
+    setWindow({ ecosDesktop: createDesktopBridge(getVersions) })
+    const { useVersion } = await import('./useVersion')
+
+    const { refreshVersions, versions } = useVersion()
+    await refreshVersions()
+    expect(versions.value?.ecc).toBe('0.1.0a4')
+
+    await refreshVersions()
+    expect(versions.value?.ecc).toBe('0.1.0a5')
+    expect(getVersions).toHaveBeenCalledTimes(2)
   })
 })

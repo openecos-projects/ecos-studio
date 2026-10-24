@@ -694,6 +694,40 @@ describe('ProjectManagementReadService', () => {
     })
   })
 
+  it('reads overview summaries in bounded artifact batches', async () => {
+    const { projectRoot, workspaceRoot } = await createProject()
+    const references = Array.from(
+      { length: 5 },
+      (_, index) => `step_${index}_ecc/analysis/qor_summary.json`,
+    )
+    for (const [index, reference] of references.entries()) {
+      await mkdir(join(workspaceRoot, `step_${index}_ecc`, 'analysis'), {
+        recursive: true,
+      })
+      await writeFile(
+        join(workspaceRoot, reference),
+        JSON.stringify({ schema_version: 4, step: `step_${index}` }),
+      )
+    }
+    const service = createReadService()
+
+    await expect(
+      service.readStepAnalysisSummaries({
+        artifacts: references.map((reference) => ({ reference })),
+        projectRoot,
+        workspacePath: workspaceRoot,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      texts: Object.fromEntries(
+        references.map((reference, index) => [
+          reference,
+          JSON.stringify({ schema_version: 4, step: `step_${index}` }),
+        ]),
+      ),
+    })
+  })
+
   it('keeps valid current artifacts when another artifact is unavailable', async () => {
     const { projectRoot, workspaceRoot } = await createProject()
     const validReference = 'route_ecc/analysis/qor_metrics.json'

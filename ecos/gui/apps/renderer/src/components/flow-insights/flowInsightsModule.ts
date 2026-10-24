@@ -1,23 +1,27 @@
 import type { Component } from 'vue'
-import CongestionPanel from './CongestionPanel.vue'
 import DbTrendsPanel from './DbTrendsPanel.vue'
 import DrcPanel from './DrcPanel.vue'
+import PowerSummaryPanel from './PowerSummaryPanel.vue'
 import StaPanel from './StaPanel.vue'
+import StepDetailsPanel from './StepDetailsPanel.vue'
 import StepResourcesPanel from './StepResourcesPanel.vue'
 import type {
-  CongestionMapTileModel,
   DbTrendModel,
   DrcLayerTypeMatrix,
   StaOverviewModel,
   StepResourcesModel,
 } from './flowInsightsData'
+import type { PowerSummaryModel } from './powerSummary'
+import type { StepDetailsModel } from './stepDetails'
 
 export interface FlowInsightsAvailabilityContext {
   stepResources: StepResourcesModel | null
   dbTrends: DbTrendModel | null
-  congestionTiles: CongestionMapTileModel[]
   drc: DrcLayerTypeMatrix | null
   sta: StaOverviewModel | null
+  powerSummary: PowerSummaryModel | null
+  lvsSummary: StepDetailsModel | null
+  antennaSummary: StepDetailsModel | null
 }
 
 export interface FlowInsightsModuleAvailability {
@@ -36,6 +40,36 @@ export interface FlowInsightsModuleDescriptor {
 }
 
 export const FLOW_INSIGHT_MODULES: FlowInsightsModuleDescriptor[] = [
+  {
+    id: 'power',
+    title: 'Power',
+    icon: 'ri-flashlight-line',
+    component: PowerSummaryPanel,
+    availability: () => ({
+      available: true,
+      hint: 'Power summary from powerAnalysis',
+    }),
+  },
+  {
+    id: 'lvs',
+    title: 'LVS',
+    icon: 'ri-git-compare-line',
+    component: StepDetailsPanel,
+    availability: () => ({
+      available: true,
+      hint: 'LVS entity and connectivity results',
+    }),
+  },
+  {
+    id: 'antenna',
+    title: 'Antenna',
+    icon: 'ri-radar-line',
+    component: StepDetailsPanel,
+    availability: () => ({
+      available: true,
+      hint: 'Antenna check coverage and violations',
+    }),
+  },
   {
     id: 'resources',
     title: 'Step Trends',
@@ -56,18 +90,6 @@ export const FLOW_INSIGHT_MODULES: FlowInsightsModuleDescriptor[] = [
       hint: context.dbTrends?.rows.length
         ? 'Metric × step matrix with deltas'
         : 'Waiting for step db statistics',
-    }),
-  },
-  {
-    id: 'congestion',
-    title: 'Congestion',
-    icon: 'ri-fire-line',
-    component: CongestionPanel,
-    availability: (context) => ({
-      available: context.congestionTiles.length > 0,
-      hint: context.congestionTiles.length
-        ? 'EGR / RUDY / density maps'
-        : 'Waiting for place / CTS maps',
     }),
   },
   {

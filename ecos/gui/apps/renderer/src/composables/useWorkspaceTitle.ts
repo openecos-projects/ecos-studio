@@ -6,7 +6,7 @@ import { discoverProjectForWorkspace } from '@/utils/projectManagementRead'
 // Top bar title, identical to the Background Tasks identity label
 // ("{project} / {workspace}"). Resolved synchronously from the route query so
 // the title does not depend on asynchronously restored workspace state; the
-// project manifest owner (design_name) upgrades it once discovered. Routes
+// project manifest name upgrades it once discovered. Routes
 // outside the workspace shell show no title, so a stale workspace name never
 // leaks into home pages such as Backend Design.
 export function useWorkspaceTitle(options: {
@@ -51,7 +51,7 @@ async function resolveManifestOwner(workspacePath: string): Promise<string> {
     const listed = manifest?.workspaces.some(
       (workspace) => normalizePath(workspace.workspace_path) === workspacePath,
     )
-    return listed ? (manifest?.design_name || manifest?.name || '').trim() : ''
+    return listed ? (manifest?.name || '').trim() : ''
   } catch {
     return ''
   }

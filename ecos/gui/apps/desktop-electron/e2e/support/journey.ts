@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import type { Page } from 'playwright-core'
 import type {
   EccRuntimeOperation,
@@ -229,7 +229,7 @@ export async function openWorkspaceInUi(page: Page, ws: WorkspaceJourney): Promi
 
   // Wait until the dashboard has mounted and shows live workspace data: flow
   // steps through the same overview seam the Flow status panel reads, and the
-  // design parameters in Chip Basic Info.
+  // project/workspace identity in the application title.
   await page.locator('.home-dashboard').waitFor({ state: 'visible', timeout: 60_000 })
   const deadline = Date.now() + 120_000
   for (;;) {
@@ -241,9 +241,11 @@ export async function openWorkspaceInUi(page: Page, ws: WorkspaceJourney): Promi
     await new Promise((resolve) => setTimeout(resolve, 1_000))
   }
   await page.waitForFunction(
-    (name) =>
-      document.querySelector('.home-dashboard')?.textContent?.includes(name) ?? false,
-    ws.designName,
+    (workspaceName) => {
+      const title = document.querySelector('.project-name')?.textContent?.trim() ?? ''
+      return title.endsWith(` / ${workspaceName}`)
+    },
+    basename(ws.workspaceDir),
     { timeout: 60_000 },
   )
 }

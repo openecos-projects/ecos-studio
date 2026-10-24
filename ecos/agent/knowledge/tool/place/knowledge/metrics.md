@@ -84,7 +84,7 @@
 
 **Boundary:** The desktop map gallery displays only PNG files present in `feature/density_map`; the feature map records the source paths, so a declared map is not proof that its image exists in a workspace.
 
-**Source evidence:** **gui.map_gallery**, **ecc.service**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.density**
+**Source evidence:** **gui.map_gallery**, **ecc.metrics**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.density**
 
 <a id="metric.place.map.macro_density"></a>
 ## metric.place.map.macro_density
@@ -95,7 +95,7 @@
 
 **Boundary:** The desktop map gallery displays only PNG files present in `feature/density_map`; the feature map records the source paths, so a declared map is not proof that its image exists in a workspace.
 
-**Source evidence:** **gui.map_gallery**, **ecc.service**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.density**
+**Source evidence:** **gui.map_gallery**, **ecc.metrics**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.density**
 
 <a id="metric.place.map.stdcell_density"></a>
 ## metric.place.map.stdcell_density
@@ -106,7 +106,7 @@
 
 **Boundary:** The desktop map gallery displays only PNG files present in `feature/density_map`; the feature map records the source paths, so a declared map is not proof that its image exists in a workspace.
 
-**Source evidence:** **gui.map_gallery**, **ecc.service**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.density**
+**Source evidence:** **gui.map_gallery**, **ecc.metrics**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.density**
 
 <a id="metric.place.map.pin_density"></a>
 ## metric.place.map.pin_density
@@ -117,7 +117,7 @@
 
 **Boundary:** The desktop map gallery displays only PNG files present in `feature/density_map`; the feature map records the source paths, so a declared map is not proof that its image exists in a workspace.
 
-**Source evidence:** **gui.map_gallery**, **ecc.service**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.density**
+**Source evidence:** **gui.map_gallery**, **ecc.metrics**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.density**
 
 <a id="metric.place.map.macro_pin_density"></a>
 ## metric.place.map.macro_pin_density
@@ -128,7 +128,7 @@
 
 **Boundary:** The desktop map gallery displays only PNG files present in `feature/density_map`; the feature map records the source paths, so a declared map is not proof that its image exists in a workspace.
 
-**Source evidence:** **gui.map_gallery**, **ecc.service**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.density**
+**Source evidence:** **gui.map_gallery**, **ecc.metrics**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.density**
 
 <a id="metric.place.map.stdcell_pin_density"></a>
 ## metric.place.map.stdcell_pin_density
@@ -139,7 +139,7 @@
 
 **Boundary:** The desktop map gallery displays only PNG files present in `feature/density_map`; the feature map records the source paths, so a declared map is not proof that its image exists in a workspace.
 
-**Source evidence:** **gui.map_gallery**, **ecc.service**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.density**
+**Source evidence:** **gui.map_gallery**, **ecc.metrics**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.density**
 
 <a id="metric.place.map.net_density"></a>
 ## metric.place.map.net_density
@@ -150,7 +150,7 @@
 
 **Boundary:** The desktop map gallery displays only PNG files present in `feature/density_map`; the feature map records the source paths, so a declared map is not proof that its image exists in a workspace.
 
-**Source evidence:** **gui.map_gallery**, **ecc.service**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.density**
+**Source evidence:** **gui.map_gallery**, **ecc.metrics**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.density**
 
 <a id="metric.place.map.global_net_density"></a>
 ## metric.place.map.global_net_density
@@ -161,7 +161,7 @@
 
 **Boundary:** The desktop map gallery displays only PNG files present in `feature/density_map`; the feature map records the source paths, so a declared map is not proof that its image exists in a workspace.
 
-**Source evidence:** **gui.map_gallery**, **ecc.service**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.density**
+**Source evidence:** **gui.map_gallery**, **ecc.metrics**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.density**
 
 <a id="metric.place.map.local_net_density"></a>
 ## metric.place.map.local_net_density
@@ -172,7 +172,7 @@
 
 **Boundary:** The desktop map gallery displays only PNG files present in `feature/density_map`; the feature map records the source paths, so a declared map is not proof that its image exists in a workspace.
 
-**Source evidence:** **gui.map_gallery**, **ecc.service**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.density**
+**Source evidence:** **gui.map_gallery**, **ecc.metrics**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.density**
 
 <a id="metric.place.map.egr_horizontal"></a>
 ## metric.place.map.egr_horizontal
@@ -183,7 +183,7 @@
 
 **Boundary:** The map is a placement-time estimator. It is visible only when its PNG is emitted for the workspace; it does not establish detailed-routing success.
 
-**Source evidence:** **gui.map_gallery**, **ecc.service**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.congestion**
+**Source evidence:** **gui.map_gallery**, **ecc.metrics**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.congestion**
 
 <a id="metric.place.map.rudy_horizontal"></a>
 ## metric.place.map.rudy_horizontal
@@ -194,7 +194,7 @@
 
 **Boundary:** The map is a placement-time estimator. It is visible only when its PNG is emitted for the workspace; it does not establish detailed-routing success.
 
-**Source evidence:** **gui.map_gallery**, **ecc.service**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.congestion**
+**Source evidence:** **gui.map_gallery**, **ecc.metrics**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.congestion**
 
 <a id="metric.place.map.lutrudy_horizontal"></a>
 ## metric.place.map.lutrudy_horizontal
@@ -205,7 +205,7 @@
 
 **Boundary:** The map is a placement-time estimator. It is visible only when its PNG is emitted for the workspace; it does not establish detailed-routing success.
 
-**Source evidence:** **gui.map_gallery**, **ecc.service**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.congestion**
+**Source evidence:** **gui.map_gallery**, **ecc.metrics**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.congestion**
 
 <a id="metric.place.map.egr_vertical"></a>
 ## metric.place.map.egr_vertical
@@ -216,7 +216,7 @@
 
 **Boundary:** The map is a placement-time estimator. It is visible only when its PNG is emitted for the workspace; it does not establish detailed-routing success.
 
-**Source evidence:** **gui.map_gallery**, **ecc.service**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.congestion**
+**Source evidence:** **gui.map_gallery**, **ecc.metrics**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.congestion**
 
 <a id="metric.place.map.rudy_vertical"></a>
 ## metric.place.map.rudy_vertical
@@ -227,7 +227,7 @@
 
 **Boundary:** The map is a placement-time estimator. It is visible only when its PNG is emitted for the workspace; it does not establish detailed-routing success.
 
-**Source evidence:** **gui.map_gallery**, **ecc.service**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.congestion**
+**Source evidence:** **gui.map_gallery**, **ecc.metrics**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.congestion**
 
 <a id="metric.place.map.lutrudy_vertical"></a>
 ## metric.place.map.lutrudy_vertical
@@ -238,7 +238,7 @@
 
 **Boundary:** The map is a placement-time estimator. It is visible only when its PNG is emitted for the workspace; it does not establish detailed-routing success.
 
-**Source evidence:** **gui.map_gallery**, **ecc.service**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.congestion**
+**Source evidence:** **gui.map_gallery**, **ecc.metrics**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.congestion**
 
 <a id="metric.place.map.egr_union"></a>
 ## metric.place.map.egr_union
@@ -249,7 +249,7 @@
 
 **Boundary:** The map is a placement-time estimator. It is visible only when its PNG is emitted for the workspace; it does not establish detailed-routing success.
 
-**Source evidence:** **gui.map_gallery**, **ecc.service**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.congestion**
+**Source evidence:** **gui.map_gallery**, **ecc.metrics**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.congestion**
 
 <a id="metric.place.map.rudy_union"></a>
 ## metric.place.map.rudy_union
@@ -260,7 +260,7 @@
 
 **Boundary:** The map is a placement-time estimator. It is visible only when its PNG is emitted for the workspace; it does not establish detailed-routing success.
 
-**Source evidence:** **gui.map_gallery**, **ecc.service**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.congestion**
+**Source evidence:** **gui.map_gallery**, **ecc.metrics**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.congestion**
 
 <a id="metric.place.map.lutrudy_union"></a>
 ## metric.place.map.lutrudy_union
@@ -271,4 +271,4 @@
 
 **Boundary:** The map is a placement-time estimator. It is visible only when its PNG is emitted for the workspace; it does not establish detailed-routing success.
 
-**Source evidence:** **gui.map_gallery**, **ecc.service**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.congestion**
+**Source evidence:** **gui.map_gallery**, **ecc.metrics**, **ecc.feature_union**, **ecc.feature_parser**, **ecc.congestion**

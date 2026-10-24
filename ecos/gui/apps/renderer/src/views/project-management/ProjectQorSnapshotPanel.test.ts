@@ -86,4 +86,41 @@ describe('ProjectQorSnapshotPanel', () => {
     expect(wrapper.get('.dash-qphys-empty').text()).toBe('QoR v3 Snapshot unavailable')
     expect(wrapper.get('.dash-section-head small').text()).toBe('QoR v3')
   })
+
+  it('shows measured power and explains that an undeclared budget is not scored', () => {
+    const wrapper = mount(ProjectQorSnapshotPanel, {
+      props: {
+        insights: insights({
+          dimensions: [
+            {
+              key: 'power',
+              label: 'Power',
+              value: null,
+              display: '61.3 uW',
+              state: 'NO BUDGET',
+              tone: 'neutral',
+              percent: null,
+              hint: 'Declare qor_power_budget_w to score Power.',
+            },
+          ],
+          power: {
+            totalUw: 61.285,
+            budgetUw: null,
+            sourceKind: 'signoff',
+            corner: 'powerAnalysis',
+          },
+        }),
+      },
+    })
+
+    expect(wrapper.get('.dash-qphys-value').text()).toBe('61.3 uW')
+    expect(wrapper.get('.dash-qphys-state').text()).toBe('NO BUDGET')
+    expect(wrapper.get('.dash-qphys-row').attributes('title')).toContain(
+      'qor_power_budget_w',
+    )
+    expect(wrapper.get('.dash-qphys-bar').attributes('aria-label')).toBe('Power 61.3 uW')
+    expect(wrapper.get('.dash-qor-facts').text()).toContain(
+      '61.3 uW · no budget declared',
+    )
+  })
 })

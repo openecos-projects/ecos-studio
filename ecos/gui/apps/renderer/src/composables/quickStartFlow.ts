@@ -20,7 +20,9 @@ const STAGES: Record<EccFlowStep, [string, string]> = {
   preFloorplan: ['布局规划初始化', '构建初始版图并自动放置输入输出引脚'],
   macroPlacement: ['宏单元布局', '确定硬宏单元在版图中的位置'],
   postFloorplan: ['布局规划完成', '应用宏单元位置并生成完整的版图规划'],
+  preplace: ['预布局', '为后续标准单元布局准备初始设计状态'],
   place: ['全局布局', '安排标准单元位置，兼顾线长、密度和拥塞'],
+  diff_sizing: ['差异化尺寸优化', '根据布局和时序目标调整单元尺寸'],
   CTS: ['时钟树综合', '构建时钟分配网络，控制时钟偏斜和延迟'],
   legalization: ['布局合法化', '消除单元重叠，并将单元对齐到合法位置'],
   'Timing optimization': [

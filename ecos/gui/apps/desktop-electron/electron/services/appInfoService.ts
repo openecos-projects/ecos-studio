@@ -11,6 +11,8 @@ export interface AppInfoServiceOptions {
   appVersionProvider: () => string
   command?: string
   env?: NodeJS.ProcessEnv
+  envProvider?: () => NodeJS.ProcessEnv | Promise<NodeJS.ProcessEnv>
+  resolveCommand?: () => string | null | Promise<string | null>
   spawn?: SpawnLike
 }
 
@@ -38,12 +40,18 @@ export class AppInfoService {
   private readonly appVersionProvider: () => string
   private readonly command: string
   private readonly env: NodeJS.ProcessEnv
+  private readonly envProvider:
+    | (() => NodeJS.ProcessEnv | Promise<NodeJS.ProcessEnv>)
+    | null
+  private readonly resolveCommand: (() => string | null | Promise<string | null>) | null
   private readonly spawnImpl: SpawnLike
 
   constructor(options: AppInfoServiceOptions) {
     this.appVersionProvider = options.appVersionProvider
     this.command = options.command ?? 'ecc'
     this.env = { ...(options.env ?? process.env) }
+    this.envProvider = options.envProvider ?? null
+    this.resolveCommand = options.resolveCommand ?? null
     this.spawnImpl = options.spawn ?? spawnChild
   }
 
@@ -105,10 +113,23 @@ export class AppInfoService {
   }
 
   private async runEccCommand(args: string[]): Promise<string | null> {
+    let command = this.command
+    let env = this.env
+    try {
+      if (this.resolveCommand) {
+        const resolved = await this.resolveCommand()
+        if (!resolved) return null
+        command = resolved
+      }
+      if (this.envProvider) env = { ...(await this.envProvider()) }
+    } catch {
+      return null
+    }
+
     return await new Promise((resolve) => {
       let stdout = ''
-      const child = this.spawnImpl(this.command, args, {
-        env: this.env,
+      const child = this.spawnImpl(command, args, {
+        env,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
 

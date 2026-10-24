@@ -10,7 +10,6 @@ import {
   buildRuntimeWaterfallModel,
   buildStaCriticalPathsModel,
   buildStaOverviewModel,
-  congestionCandidatePngPaths,
   buildStepResourcesModel,
   canonicalStepKey,
   describeMetricDelta,
@@ -184,50 +183,6 @@ describe('flow insights data', () => {
     expect(filler?.values).toEqual([0, 3673])
   })
 
-  it('keeps CTS egr tiles and drops missing RUDY / density maps', () => {
-    const steps = insightSteps(['place', 'CTS'])
-    const existing = new Set([
-      `${steps[0].directory}/feature/egr_congestion_map/place_egr_union_overflow.png`,
-      `${steps[1].directory}/feature/egr_congestion_map/CTS_egr_union_overflow.png`,
-    ])
-    const tiles = buildCongestionTiles(steps, existing)
-    expect(tiles.map((tile) => tile.id)).toEqual(['place-egr-union', 'CTS-egr-union'])
-    const withStats = tiles.map((tile, index) => ({
-      ...tile,
-      stats:
-        index === 0
-          ? { max: 18, total: 466, hotspotCount: 12 }
-          : { max: 4, total: 20, hotspotCount: 3 },
-    }))
-    expect(buildCongestionComparisonModel(withStats)).toEqual([
-      { stepKey: 'Place', stepName: 'place', total: 466, max: 18 },
-      { stepKey: 'CTS', stepName: 'CTS', total: 20, max: 4 },
-    ])
-  })
-
-  it('enumerates every congestion/density map candidate PNG for one step', () => {
-    const [place] = insightSteps(['place'])
-    expect(congestionCandidatePngPaths(place)).toEqual([
-      '/ws/place_ecc/feature/egr_congestion_map/place_egr_horizontal_overflow.png',
-      '/ws/place_ecc/feature/egr_congestion_map/place_egr_vertical_overflow.png',
-      '/ws/place_ecc/feature/egr_congestion_map/place_egr_union_overflow.png',
-      '/ws/place_ecc/feature/RUDY_map/place_rudy_horizontal.png',
-      '/ws/place_ecc/feature/RUDY_map/place_rudy_vertical.png',
-      '/ws/place_ecc/feature/RUDY_map/place_rudy_union.png',
-      '/ws/place_ecc/feature/RUDY_map/place_lut_rudy_horizontal.png',
-      '/ws/place_ecc/feature/RUDY_map/place_lut_rudy_vertical.png',
-      '/ws/place_ecc/feature/RUDY_map/place_lut_rudy_union.png',
-      '/ws/place_ecc/feature/density_map/place_allcell_density.png',
-    ])
-    // Candidates and tile derivation must agree on the path convention
-    const existing = new Set([
-      '/ws/place_ecc/feature/egr_congestion_map/place_egr_union_overflow.png',
-    ])
-    expect(buildCongestionTiles([place], existing).map((tile) => tile.pngPath)).toEqual([
-      ...existing,
-    ])
-  })
-
   it('keeps DRC related route/LA cards independent of the CSV total', () => {
     expect(
       buildDrcRelatedMetrics({
@@ -259,6 +214,28 @@ describe('flow insights data', () => {
     expect(drc?.totalCount).toBe(0)
     expect(drc?.totalByLayer).toEqual([0, 0, 0])
     expect(drc?.types[0]?.total).toBe(0)
+  })
+
+  it('builds CSV map tiles without requiring PNG previews', () => {
+    const steps = insightSteps(['place', 'CTS'])
+    const existing = new Set([
+      `${steps[0].directory}/feature/egr_congestion_map/place_egr_union_overflow.csv`,
+      `${steps[1].directory}/feature/egr_congestion_map/CTS_egr_union_overflow.csv`,
+    ])
+    const tiles = buildCongestionTiles(steps, existing)
+    expect(tiles.map((tile) => tile.csvPath)).toEqual([...existing])
+    expect(tiles.every((tile) => tile.layoutCsvPath.endsWith('/layout.csv'))).toBe(true)
+    expect(
+      buildCongestionComparisonModel(
+        tiles.map((tile, index) => ({
+          ...tile,
+          stats: { max: index + 1, total: index + 2, hotspotCount: index + 3 },
+        })),
+      ),
+    ).toEqual([
+      { stepKey: 'Place', stepName: 'place', total: 2, max: 1 },
+      { stepKey: 'CTS', stepName: 'CTS', total: 3, max: 2 },
+    ])
   })
 
   it('builds STA corner overview from per-corner summaries and takes min WNS as worst', () => {

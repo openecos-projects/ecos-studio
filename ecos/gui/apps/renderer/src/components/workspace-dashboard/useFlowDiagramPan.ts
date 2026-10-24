@@ -9,6 +9,7 @@ export function useFlowDiagramPan(viewport: Ref<HTMLElement | null>) {
     y: number
     left: number
     top: number
+    dragged: boolean
   } | null = null
   let suppressClick = false
   let clickTimer: ReturnType<typeof setTimeout> | undefined
@@ -40,7 +41,7 @@ export function useFlowDiagramPan(viewport: Ref<HTMLElement | null>) {
     if (!element || !(target instanceof Element)) return
     if (
       target.closest(
-        'button, a, input, select, textarea, [role="button"], [contenteditable]:not([contenteditable="false"])',
+        '.positioned-step, button, a, input, select, textarea, [role="button"], [contenteditable]:not([contenteditable="false"])',
       )
     )
       return
@@ -53,6 +54,7 @@ export function useFlowDiagramPan(viewport: Ref<HTMLElement | null>) {
         return
     }
     cancelPan()
+    isPanning.value = true
     gesture = {
       pointerId: event.pointerId,
       element,
@@ -60,6 +62,7 @@ export function useFlowDiagramPan(viewport: Ref<HTMLElement | null>) {
       y: event.clientY,
       left: element.scrollLeft,
       top: element.scrollTop,
+      dragged: false,
     }
     element.setPointerCapture?.(event.pointerId)
     event.preventDefault()
@@ -73,8 +76,8 @@ export function useFlowDiagramPan(viewport: Ref<HTMLElement | null>) {
     }
     const deltaX = event.clientX - gesture.x
     const deltaY = event.clientY - gesture.y
-    if (!isPanning.value && Math.hypot(deltaX, deltaY) < 4) return
-    isPanning.value = true
+    if (!gesture.dragged && Math.hypot(deltaX, deltaY) < 4) return
+    gesture.dragged = true
     gesture.element.scrollLeft = Math.max(0, gesture.left - deltaX)
     gesture.element.scrollTop = Math.max(0, gesture.top - deltaY)
     event.preventDefault()
@@ -82,7 +85,7 @@ export function useFlowDiagramPan(viewport: Ref<HTMLElement | null>) {
 
   function endPan(event: PointerEvent): void {
     if (!gesture || event.pointerId !== gesture.pointerId) return
-    const dragged = isPanning.value
+    const dragged = gesture.dragged
     stopPan()
     suppressClick = dragged
     clickTimer = setTimeout(() => {

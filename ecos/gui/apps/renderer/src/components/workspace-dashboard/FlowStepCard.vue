@@ -113,8 +113,9 @@ defineEmits<{
 .flow-step-card {
   display: flex;
   flex-direction: column;
-  width: 150px;
-  height: 184px;
+  box-sizing: border-box;
+  width: var(--flow-step-width, 156px);
+  height: var(--flow-step-height, 164px);
   overflow: hidden;
   border: 1px solid var(--border-color);
   border-radius: 6px;
@@ -127,12 +128,13 @@ defineEmits<{
     box-shadow 160ms ease;
 }
 header {
-  flex: 0 0 27px;
-  padding: 5px 7px;
+  flex: 0 0 24px;
+  padding: 4px 7px;
+  box-sizing: border-box;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
 }
 .step-resources {
@@ -197,7 +199,7 @@ footer {
   justify-content: space-between;
   align-items: center;
   gap: 4px;
-  padding: 4px 7px;
+  padding: 3px 7px;
 }
 footer {
   border-top: 1px solid var(--border-color);

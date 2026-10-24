@@ -8,13 +8,11 @@ import WorkspaceWorkbench from './WorkspaceWorkbench.vue'
 import workbenchSource from './WorkspaceWorkbench.vue?raw'
 import logSource from './FlowLogPanel.vue?raw'
 import { useAgentShellStore } from '@/stores/agentShellStore'
-import { useWorkspaceInformationPanel } from '@/composables/useWorkspaceInformationPanel'
 
 describe('WorkspaceWorkbench Agent panel', () => {
   beforeEach(() => {
     localStorage.clear()
     setActivePinia(createPinia())
-    useWorkspaceInformationPanel().informationPanelVisible.value = true
   })
 
   it('preserves the log minimum height and keeps Agent sizing independent of message content', () => {
@@ -110,34 +108,10 @@ describe('WorkspaceWorkbench Agent panel', () => {
     expect(wrapper.find('.flow-status').exists()).toBe(false)
     expect(wrapper.find('.old-log').exists()).toBe(false)
     expect(wrapper.get('.workspace-agent').text()).toBe('true')
-    useWorkspaceInformationPanel().toggleInformationPanel()
-    await nextTick()
-    expect(wrapper.classes()).toContain('is-information-hidden')
-    useWorkspaceInformationPanel().toggleInformationPanel()
-    await nextTick()
-    expect(wrapper.classes()).not.toContain('is-information-hidden')
     store.closeWorkspaceAgent()
     await nextTick()
     expect(wrapper.find('.workspace-agent').exists()).toBe(false)
     expect(wrapper.classes()).toContain('is-agent-hidden')
-    wrapper.unmount()
-  })
-
-  it('leaves the shared Frontend workbench unchanged when the RTL information panel is hidden', () => {
-    useWorkspaceInformationPanel().informationPanelVisible.value = false
-    const wrapper = mount(WorkspaceWorkbench, {
-      props: { flowTitle: 'Frontend', nodes: [] },
-      global: {
-        stubs: {
-          Splitter: { template: '<div><slot /></div>' },
-          SplitterPanel: { template: '<div><slot /></div>' },
-          FlowStatusStrip: true,
-          FlowRunControl: true,
-          ChatInspectorPanel: true,
-        },
-      },
-    })
-    expect(wrapper.classes()).not.toContain('is-information-hidden')
     wrapper.unmount()
   })
 })

@@ -2,6 +2,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import PrimeVue from 'primevue/config'
+import GenericStepConfigView from './GenericStepConfigView.vue'
 import StepConfigValueBlock from './StepConfigValueBlock.vue'
 
 /** PrimeVue controls need the app plugin; stub them so the block's own markup is under test. */
@@ -78,6 +79,15 @@ describe('StepConfigValueBlock', () => {
   it('keeps mutation buttons in editable mode', () => {
     const wrapper = mountBlock(['x'], { readonly: false })
     expect(wrapper.findAll('.sc-pro-btn').length).toBeGreaterThan(0)
+  })
+
+  it('does not inert the editable value tree', async () => {
+    const wrapper = mount(GenericStepConfigView, {
+      props: { modelValue: { value: 1 } },
+      global: { stubs: primevueStubs },
+    })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.sc-pro').attributes('inert')).toBeUndefined()
   })
 
   it('renders the JSON fallback block at the maximum depth', () => {

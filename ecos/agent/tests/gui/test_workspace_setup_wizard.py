@@ -207,7 +207,7 @@ def test_existing_project_branch_requires_project_json_and_uses_workspace_name(
 
     _send(provider, session_id, "6")
     assert provider.sessions[session_id].phase == "workspace_rtl"
-    assert provider.sessions[session_id].workspace_setup.flow_end == "place"
+    assert provider.sessions[session_id].workspace_setup.flow_end == "preplace"
 
 
 def test_existing_project_branch_keeps_all_known_projects_selectable(tmp_path: Path) -> None:

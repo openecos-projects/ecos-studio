@@ -191,4 +191,62 @@ describe('AppInfoService', () => {
       runtime: 'ECC CLI',
     })
   })
+
+  it('refreshes the runtime command and environment for each lookup', async () => {
+    const harness = createSpawnHarness()
+    const envProvider = vi
+      .fn()
+      .mockResolvedValueOnce({ PATH: '/runtime/v1' })
+      .mockResolvedValueOnce({ PATH: '/runtime/v2' })
+    const resolveCommand = vi
+      .fn()
+      .mockResolvedValueOnce('/runtime/v1/ecc')
+      .mockResolvedValueOnce('/runtime/v2/ecc')
+    const service = new AppInfoService({
+      appVersionProvider: () => '0.1.0-alpha.6',
+      envProvider,
+      resolveCommand,
+      spawn: harness.spawn,
+    })
+
+    const first = service.getVersions()
+    await flushAsyncWork()
+    harness.children[0].stdout.emit('data', JSON.stringify({ ecc: '0.1.0a12' }))
+    harness.children[0].emit('close', 0, null)
+    await first
+
+    const second = service.getVersions()
+    await flushAsyncWork()
+    harness.children[1].stdout.emit('data', JSON.stringify({ ecc: '0.1.0a13' }))
+    harness.children[1].emit('close', 0, null)
+    await second
+
+    expect(harness.spawn).toHaveBeenNthCalledWith(
+      1,
+      '/runtime/v1/ecc',
+      ['version', '--json'],
+      expect.objectContaining({ env: { PATH: '/runtime/v1' } }),
+    )
+    expect(harness.spawn).toHaveBeenNthCalledWith(
+      2,
+      '/runtime/v2/ecc',
+      ['version', '--json'],
+      expect.objectContaining({ env: { PATH: '/runtime/v2' } }),
+    )
+  })
+
+  it('does not fall back to a host ECC command when the runtime is unresolved', async () => {
+    const harness = createSpawnHarness()
+    const service = new AppInfoService({
+      appVersionProvider: () => '0.1.0-alpha.6',
+      resolveCommand: () => null,
+      spawn: harness.spawn,
+    })
+
+    await expect(service.getVersions()).resolves.toMatchObject({
+      ecc: 'unknown',
+      runtime: 'ECC CLI',
+    })
+    expect(harness.spawn).not.toHaveBeenCalled()
+  })
 })

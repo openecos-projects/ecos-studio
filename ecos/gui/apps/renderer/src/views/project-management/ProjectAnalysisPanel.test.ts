@@ -280,7 +280,7 @@ describe('ProjectAnalysisPanel workspace comparison', () => {
       workspaceSummaries: [
         workspaceSummaryFixture('ws_a', {
           Route: stepSnapshotFixture({
-            hotspotArtifactStatus: 'missing',
+            summaryArtifactStatus: 'missing',
             blockingIssues: [
               {
                 step: 'Route',

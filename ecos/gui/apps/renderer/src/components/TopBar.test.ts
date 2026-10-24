@@ -2,7 +2,7 @@
 
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const testState = vi.hoisted(() => ({
   route: { path: '/workspace/demo', query: {} },
@@ -28,8 +28,16 @@ vi.mock('@/stores/agentShellStore', async () => {
   const agentStore = {
     homeAgentOpen: ref(false),
     workspaceAgentOpen: ref(false),
+    closeHomeAgent: vi.fn(() => {
+      agentStore.homeAgentOpen.value = false
+    }),
+    closeWorkspaceAgent: vi.fn(() => {
+      agentStore.workspaceAgentOpen.value = false
+    }),
     toggleHomeAgent: vi.fn(),
-    toggleWorkspaceAgent: vi.fn(),
+    toggleWorkspaceAgent: vi.fn(() => {
+      agentStore.workspaceAgentOpen.value = !agentStore.workspaceAgentOpen.value
+    }),
   }
   return { useAgentShellStore: () => agentStore }
 })
@@ -53,7 +61,16 @@ vi.mock('@/components/ShutdownStatusButton.vue', () => ({
 }))
 
 import TopBar from './TopBar.vue'
-import { useWorkspaceInformationPanel } from '@/composables/useWorkspaceInformationPanel'
+
+beforeEach(async () => {
+  const { useAgentShellStore } = await import('@/stores/agentShellStore')
+  const store = useAgentShellStore()
+  store.closeHomeAgent()
+  store.closeWorkspaceAgent()
+  vi.clearAllMocks()
+  testState.route.path = '/workspace/demo'
+  testState.route.query = {}
+})
 
 describe('TopBar title', () => {
   it('toggles the workspace Agent panel from the workspace route', async () => {
@@ -67,25 +84,14 @@ describe('TopBar title', () => {
     await button.trigger('click')
     expect(store.toggleWorkspaceAgent).toHaveBeenCalledTimes(1)
     expect(store.toggleHomeAgent).not.toHaveBeenCalled()
+    await nextTick()
+    expect(button.attributes('aria-pressed')).toBe('true')
 
-    wrapper.unmount()
-  })
-
-  it('toggles the RTL information area immediately before the theme button', async () => {
-    testState.route.path = '/workspace/home'
-    useWorkspaceInformationPanel().informationPanelVisible.value = true
-    const wrapper = mount(TopBar, {
-      props: { hasWorkspace: true, workspaceDesignTool: 'backend' },
-    })
-    const button = wrapper.get('.information-panel-btn')
-    expect(button.attributes('aria-expanded')).toBe('true')
-    expect(button.element.nextElementSibling?.classList.contains('theme-btn')).toBe(true)
     await button.trigger('click')
-    expect(button.attributes('aria-expanded')).toBe('false')
-    expect(button.attributes('aria-label')).toBe('Show information panel')
-    await wrapper.setProps({ workspaceDesignTool: 'frontend' })
-    expect(wrapper.find('.information-panel-btn').exists()).toBe(false)
-    useWorkspaceInformationPanel().informationPanelVisible.value = true
+    expect(store.toggleWorkspaceAgent).toHaveBeenCalledTimes(2)
+    await nextTick()
+    expect(button.attributes('aria-pressed')).toBe('false')
+
     wrapper.unmount()
   })
   it('shows the Background Tasks identity label from the route query before project state loads', async () => {

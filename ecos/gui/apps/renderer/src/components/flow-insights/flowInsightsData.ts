@@ -6,7 +6,7 @@
  * - qor_metrics.json：step.resources.analysis.metrics
  * - step.db.json：step.resources.feature.db
  * - drc_statis.csv：step.resources.analysis.statis_csv
- * - 拥塞/密度图：step.directory/feature/<map_dir>/<step>_<kind>.{png,csv} + layout.csv
+ * - 拥塞/密度图 CSV：step.directory/feature/<map_dir>/<step>_<kind>.csv + layout.csv
  * - STA corner：step.resources.report.sta（嵌套 corner 目录中的 qor_summary.json）
  */
 import { flowStepRegistry } from '@ecos-studio/shared'
@@ -603,7 +603,7 @@ export function metricHeatLevel(
 }
 
 /* ------------------------------------------------------------------ *
- * 模块③：拥塞 / 密度图枚举
+ * 模块③：拥塞 / 密度 CSV 数据
  * ------------------------------------------------------------------ */
 
 export type CongestionMapKind = 'egr' | 'rudy' | 'lut_rudy' | 'density'
@@ -612,12 +612,9 @@ export interface CongestionMapTileModel {
   id: string
   step: FlowInsightStep
   mapKind: CongestionMapKind
-  /** horizontal / vertical / union；density 图为 '' */
   direction: 'horizontal' | 'vertical' | 'union' | ''
   label: string
-  pngPath: string
   csvPath: string
-  /** 网格 → die 坐标映射文件（与 png/csv 同目录） */
   layoutCsvPath: string
   sourceRevision?: number
   stats: CongestionMapStats | null
@@ -671,27 +668,9 @@ const CONGESTION_MAP_SPECS: CongestionMapSpec[] = [
 export interface CongestionMapAvailability {
   stepName: string
   step: FlowInsightStep
-  files: Array<{ pngPath: string; csvPath: string; layoutCsvPath: string }>
+  files: Array<{ csvPath: string; layoutCsvPath: string }>
 }
 
-/** Candidate congestion/density map PNG paths for one step, per the map specs. */
-export function congestionCandidatePngPaths(step: FlowInsightStep): string[] {
-  const paths: string[] = []
-  for (const spec of CONGESTION_MAP_SPECS) {
-    for (const direction of spec.directions) {
-      const fileStem = spec.filePrefixPattern
-        .replace('{step}', step.name)
-        .replace('{direction}', direction)
-      paths.push(`${step.directory}/feature/${spec.directory}/${fileStem}.png`)
-    }
-  }
-  return paths
-}
-
-/**
- * 构建拥塞图 tile 列表。png/csv 内容存在性由调用方（异步读取）补充，
- * 此函数只负责路径推导与规格匹配。
- */
 export function buildCongestionTiles(
   steps: FlowInsightStep[],
   existingFiles: Set<string>,
@@ -704,10 +683,9 @@ export function buildCongestionTiles(
           .replace('{step}', step.name)
           .replace('{direction}', direction)
         const directory = `${step.directory}/feature/${spec.directory}`
-        const pngPath = `${directory}/${fileStem}.png`
         const csvPath = `${directory}/${fileStem}.csv`
         const layoutCsvPath = `${directory}/layout.csv`
-        if (!existingFiles.has(pngPath)) continue
+        if (!existingFiles.has(csvPath)) continue
         const directionLabel = direction
           ? ` ${direction[0].toUpperCase()}${direction.slice(1)}`
           : ''
@@ -717,7 +695,6 @@ export function buildCongestionTiles(
           mapKind: spec.mapKind,
           direction,
           label: `${spec.labelPrefix}${directionLabel}`,
-          pngPath,
           csvPath,
           layoutCsvPath,
           stats: null,
@@ -728,7 +705,6 @@ export function buildCongestionTiles(
   return tiles
 }
 
-/** 解析网格 CSV（逗号分隔的数值矩阵）→ max/total/热点格数。 */
 export function parseCongestionCsv(content: string): CongestionMapStats | null {
   if (!content.trim()) return null
   let max = 0
@@ -758,7 +734,6 @@ export interface CongestionComparisonPoint {
   max: number | null
 }
 
-/** 每个 step 取 EGR union（否则任意 EGR）的 max/total，供 step 间对比折线。 */
 export function buildCongestionComparisonModel(
   tiles: CongestionMapTileModel[],
 ): CongestionComparisonPoint[] {

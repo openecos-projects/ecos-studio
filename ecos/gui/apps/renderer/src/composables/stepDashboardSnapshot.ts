@@ -6,11 +6,7 @@ import {
   type WorkspaceTimingPathsDetail,
   type WorkspaceTimingSummaryDetail,
 } from '@ecos-studio/shared'
-import {
-  canonicalStepKey,
-  type CongestionMapTileModel,
-  type StaOverviewModel,
-} from '@/components/flow-insights/flowInsightsData'
+import { type StaOverviewModel } from '@/components/flow-insights/flowInsightsData'
 import {
   checklistSummary,
   lecInsights,
@@ -33,7 +29,6 @@ import {
   type StepDesignStatis,
 } from '@/components/step-dashboard/stepDashboardData'
 import {
-  congestionTilesFromArtifacts,
   drcSummaryFromSnapshot,
   staCriticalPathsFromSnapshot,
   staOverviewFromSnapshot,
@@ -73,9 +68,6 @@ export interface StepDashboardData {
   timingAnalysis: StepDashboardTimingAnalysis | null
   layoutUrl: string | null
   layoutAvailability: 'available' | 'missing' | 'stale' | null
-  mapUrl: string | null
-  congestionTiles: CongestionMapTileModel[]
-  congestionTileUrls: Map<string, string>
   designStatis: StepDesignStatis | null
   hasGeometry: boolean
   reports: StepDashboardReport[]
@@ -255,16 +247,6 @@ export function snapshotStepDashboardData(
     }
   }
   const keyMetrics = detail.analysis.metrics.map(dashboardMetric)
-  const insightStep = {
-    directory: '',
-    key: canonicalStepKey(detail.step.name),
-    name: detail.step.name,
-    peakMemoryMb: detail.step.peakMemoryMb ?? null,
-    runtimeSeconds: detail.step.runtimeSeconds ?? null,
-    state: detail.step.state,
-    successful: detail.step.state === 'succeeded' || detail.step.state === 'skipped',
-    tool: detail.step.toolId ?? '',
-  }
   const normalizedStep = detail.step.name.trim().toLowerCase()
   const distributions = metricDistributions(detail)
   const sta = staDashboardInsights(detail.analysis.sta ?? null)
@@ -351,13 +333,6 @@ export function snapshotStepDashboardData(
     layoutAvailability:
       detail.artifacts.find((artifact) => artifact.kind === 'layout_image')
         ?.availability ?? null,
-    mapUrl: null,
-    congestionTiles: congestionTilesFromArtifacts(
-      detail.artifacts,
-      [insightStep],
-      detail.analysis.congestion ?? [],
-    ),
-    congestionTileUrls: new Map(),
     designStatis: designStatistics(detail),
     hasGeometry: detail.artifacts.some(
       (artifact) =>

@@ -448,12 +448,35 @@ describe('Engineering Snapshot v6 sections', () => {
     })
   })
 
-  it('rejects duplicate artifact identities', () => {
+  it('deduplicates artifact identities and keeps the later typed projection', () => {
     const snapshot = fixtureSnapshot()
     const artifacts = snapshot.artifacts as Array<Record<string, unknown>>
-    artifacts.push({ ...artifacts[0]! })
+    const duplicate: Record<string, unknown> = { ...artifacts[0]!, kind: 'power_report' }
+    artifacts.push(duplicate)
 
-    expect(validateEngineeringSnapshot(snapshot).ok).toBe(false)
+    const validated = validateEngineeringSnapshot(snapshot)
+    expect(validated.ok).toBe(true)
+    if (!validated.ok || validated.sections.artifacts.status !== 'ready') return
+    expect(validated.sections.artifacts.data).toHaveLength(artifacts.length - 1)
+    expect(
+      validated.sections.artifacts.data.find(
+        (artifact) => artifact.artifactId === duplicate.artifactId,
+      ),
+    ).toMatchObject({ kind: 'power_report' })
+  })
+
+  it('still rejects unsafe entries when an artifact identity is duplicated', () => {
+    const snapshot = fixtureSnapshot()
+    const artifacts = snapshot.artifacts as Array<Record<string, unknown>>
+    artifacts.push({ ...artifacts[0]!, reference: '../outside.json' })
+
+    expect(validateEngineeringSnapshot(snapshot)).toEqual({
+      ok: false,
+      issue: {
+        code: 'ENGINEERING_ARTIFACT_INVALID',
+        recovery: SNAPSHOT_REBUILD_REQUIRED,
+      },
+    })
   })
 })
 

@@ -1,6 +1,5 @@
 import type {
   WorkspaceArtifactDescriptor,
-  WorkspaceCongestionStatistic,
   WorkspaceDrcInsights,
   WorkspaceFlowInsightsSummary,
   WorkspaceOverviewCore,
@@ -10,7 +9,6 @@ import {
   buildDrcRelatedMetrics,
   buildStepResourcesModel,
   canonicalStepKey,
-  type CongestionMapTileModel,
   type DbTrendMetricRow,
   type DbTrendModel,
   type DrcLayerTypeMatrix,
@@ -31,8 +29,6 @@ export interface FlowInsightsData {
     num: InstanceCompositionModel
     area: InstanceCompositionModel
   } | null
-  congestionTiles: CongestionMapTileModel[]
-  congestionTileUrls: Map<string, string>
   drc: DrcLayerTypeMatrix | null
   drcRelated: DrcRelatedMetrics
   sta: StaOverviewModel | null
@@ -227,60 +223,6 @@ export function staCriticalPathsFromSnapshot(
   }
 }
 
-export function congestionTilesFromArtifacts(
-  artifacts: WorkspaceArtifactDescriptor[],
-  steps: FlowInsightStep[],
-  statistics: WorkspaceCongestionStatistic[] = [],
-): CongestionMapTileModel[] {
-  return artifacts.flatMap((artifact) => {
-    if (artifact.kind !== 'congestion_image' || artifact.availability !== 'available') {
-      return []
-    }
-    const step = steps.find(
-      (candidate) =>
-        candidate.name.trim().toLowerCase() === artifact.stepId?.trim().toLowerCase(),
-    )
-    if (!step) return []
-    const name = artifact.name.toLowerCase()
-    const mapKind = name.includes('lut_rudy')
-      ? 'lut_rudy'
-      : name.includes('rudy')
-        ? 'rudy'
-        : name.includes('density')
-          ? 'density'
-          : 'egr'
-    const direction = name.includes('horizontal')
-      ? 'horizontal'
-      : name.includes('vertical')
-        ? 'vertical'
-        : name.includes('union')
-          ? 'union'
-          : ''
-    return [
-      {
-        id: artifact.artifactId,
-        step,
-        mapKind,
-        direction,
-        label: artifact.name.replace(/\.png$/i, ''),
-        pngPath: artifact.artifactId,
-        csvPath: '',
-        layoutCsvPath: '',
-        ...(artifact.sourceRevision === undefined
-          ? {}
-          : { sourceRevision: artifact.sourceRevision }),
-        stats:
-          statistics.find(
-            (statistic) =>
-              statistic.stepId.toLowerCase() === step.name.toLowerCase() &&
-              statistic.mapKind === mapKind &&
-              statistic.direction === direction,
-          ) ?? null,
-      } satisfies CongestionMapTileModel,
-    ]
-  })
-}
-
 export function buildSnapshotFlowInsights(
   overview: WorkspaceOverviewCore | null | undefined,
 ): FlowInsightsData | null {
@@ -313,11 +255,6 @@ export function buildSnapshotFlowInsights(
     artifacts?.status === 'ready' || artifacts?.status === 'partial'
       ? artifacts.data.items
       : []
-  const maps = congestionTilesFromArtifacts(
-    artifactItems,
-    steps,
-    insights.data.congestion,
-  )
   return {
     signature: `${revision.data.workspaceId}:${revision.data.workspaceRevision}`,
     stepResources: buildStepResourcesModel(steps),
@@ -328,8 +265,6 @@ export function buildSnapshotFlowInsights(
           area: composition(steps, insights.data, 'area'),
         }
       : null,
-    congestionTiles: maps,
-    congestionTileUrls: new Map(),
     drc: drcSummaryFromSnapshot(insights.data.drc),
     drcRelated: buildDrcRelatedMetrics({
       drcCount: insights.data.drc.totalCount,

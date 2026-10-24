@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   engineeringSnapshotMetricStep,
+  parseProjectManifestFlowStep,
   projectManifestFlowSteps,
   validateEngineeringSnapshot,
   type EccPersistedEngineeringSnapshot,
@@ -25,7 +26,8 @@ function invalidated(
     invalidatedStepIds: [...steps],
   }
   snapshot.artifacts = snapshot.artifacts.filter(
-    (artifact) => !steps.includes(artifact.stepId),
+    (artifact) =>
+      !steps.includes(parseProjectManifestFlowStep(artifact.stepId) ?? artifact.stepId),
   )
   snapshot.flow = {
     steps: projectManifestFlowSteps.map((name) => ({
@@ -53,7 +55,7 @@ async function harness(steps: readonly string[] = projectManifestFlowSteps) {
   const previous = fixture.engineeringSnapshots.ws_0002!
   const current = invalidated(previous, steps)
   ;(previous.flow as { steps: Array<{ state: string }> }).steps[0]!.state = 'Warning'
-  const readVerifiedArtifacts = vi.fn().mockResolvedValue({ ok: true, files: [] })
+  const readVerifiedArtifacts = vi.fn().mockResolvedValue({ ok: true, texts: {} })
   const read = () => ({ ...validated(current), staleSnapshot: validated(previous) })
   const service = new BackendProjectComparisonService(
     {
@@ -164,9 +166,13 @@ describe('Project Comparison previous results', () => {
     })
     expect(readVerifiedArtifacts).toHaveBeenCalledWith(
       expect.objectContaining({
-        artifacts: previous.artifacts
-          .filter((artifact) => artifact.stepId === 'Legal')
-          .map(({ reference }) => ({ reference })),
+        artifacts: expect.arrayContaining(
+          previous.artifacts
+            .filter(
+              (artifact) => parseProjectManifestFlowStep(artifact.stepId) === 'Legal',
+            )
+            .map(({ reference, stepId, kind }) => ({ reference, stepId, kind })),
+        ),
       }),
     )
   })
@@ -188,7 +194,9 @@ describe('Project Comparison previous results', () => {
       steps: projectManifestFlowSteps.map((name) => ({ name, state: 'Success' })),
     }
     current.artifacts.push(
-      ...previous.artifacts.filter((artifact) => artifact.stepId === 'Legal'),
+      ...previous.artifacts.filter(
+        (artifact) => parseProjectManifestFlowStep(artifact.stepId) === 'Legal',
+      ),
     )
     await service.refreshComparison(11, contextId)
     expect(await findings('Legal')).toMatchObject({

@@ -92,6 +92,7 @@ import type {
   DesktopModelProfileUpsertRequest,
 } from './desktopCodex.ts'
 import type { CliInstallState, CliInstallerProgressEvent } from './cliInstaller.ts'
+import type { EnvironmentDoctorResult } from './environmentDoctor.ts'
 
 export type DesktopSettingsValue =
   | string
@@ -299,6 +300,7 @@ export type WorkspaceOpenOrFocusResult =
 export interface DesktopApi {
   app: {
     getVersions(): Promise<VersionInfo>
+    getEnvironmentDoctor(): Promise<EnvironmentDoctorResult>
     getQuickStartResources?(): Promise<QuickStartBuiltinResources>
     getQuickStartRoot?(): Promise<string>
     prepareQuickStartProject?(name: string): Promise<string>

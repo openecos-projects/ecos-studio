@@ -53,16 +53,36 @@
       @update:visible="onDialogVisibilityChange"
     >
       <div class="data-snapshot-dialog-body">
-        <StepResourcesPanel v-if="activeTab === 'resources'" :model="stepResources" />
+        <PowerSummaryPanel
+          v-if="activeTab === 'power'"
+          :summary="powerSummary"
+          :loading="powerSummaryLoading"
+          :error="powerSummaryError"
+        />
+        <StepDetailsPanel
+          v-else-if="activeTab === 'lvs'"
+          title="LVS Results"
+          source="lvs.step.json"
+          :summary="lvsSummary"
+          :loading="lvsSummaryLoading"
+          :error="lvsSummaryError"
+        />
+        <StepDetailsPanel
+          v-else-if="activeTab === 'antenna'"
+          title="Antenna Check"
+          source="antennaCheck.step.json"
+          :summary="antennaSummary"
+          :loading="antennaSummaryLoading"
+          :error="antennaSummaryError"
+        />
+        <StepResourcesPanel
+          v-else-if="activeTab === 'resources'"
+          :model="stepResources"
+        />
         <DbTrendsPanel
           v-else-if="activeTab === 'db-trends'"
           :model="dbTrends"
           :composition="instanceComposition"
-        />
-        <CongestionPanel
-          v-else-if="activeTab === 'congestion'"
-          :tiles="congestionTiles"
-          :tile-urls="congestionTileUrls"
         />
         <DrcPanel v-else-if="activeTab === 'drc'" :model="drc" :related="drcRelated" />
         <StaPanel
@@ -83,12 +103,14 @@ import Dialog from 'primevue/dialog'
 import type { WorkspaceArtifactDescriptor } from '@ecos-studio/shared'
 import StepResourcesPanel from './StepResourcesPanel.vue'
 import DbTrendsPanel from './DbTrendsPanel.vue'
-import CongestionPanel from './CongestionPanel.vue'
 import DrcPanel from './DrcPanel.vue'
+import PowerSummaryPanel from './PowerSummaryPanel.vue'
 import StaPanel from './StaPanel.vue'
+import StepDetailsPanel from './StepDetailsPanel.vue'
 import { resolveFlowInsightModules } from './flowInsightsModule'
+import type { PowerSummaryModel } from './powerSummary'
+import type { StepDetailsModel } from './stepDetails'
 import type {
-  CongestionMapTileModel,
   DbTrendModel,
   DrcLayerTypeMatrix,
   DrcRelatedMetrics,
@@ -107,16 +129,22 @@ const props = defineProps<{
     num: InstanceCompositionModel
     area: InstanceCompositionModel
   } | null
-  congestionTiles: CongestionMapTileModel[]
-  congestionTileUrls: Map<string, string>
   drc: DrcLayerTypeMatrix | null
   drcRelated?: DrcRelatedMetrics | null
   sta: StaOverviewModel | null
+  powerSummary: PowerSummaryModel | null
+  powerSummaryLoading?: boolean
+  powerSummaryError?: string | null
+  lvsSummary: StepDetailsModel | null
+  lvsSummaryLoading?: boolean
+  lvsSummaryError?: string | null
+  antennaSummary: StepDetailsModel | null
+  antennaSummaryLoading?: boolean
+  antennaSummaryError?: string | null
   staCriticalPaths?: StaCriticalPathsModel | null
   timingArtifacts?: WorkspaceArtifactDescriptor[]
   timingIssuesArtifact?: WorkspaceArtifactDescriptor | null
   loading?: boolean
-  loadCongestion?: () => void | Promise<void>
   dialogOnly?: boolean
   selectedModule?: string | null
 }>()
@@ -135,9 +163,11 @@ const modules = computed(() =>
   resolveFlowInsightModules({
     stepResources: props.stepResources,
     dbTrends: props.dbTrends,
-    congestionTiles: props.congestionTiles,
     drc: props.drc,
     sta: props.sta,
+    powerSummary: props.powerSummary,
+    lvsSummary: props.lvsSummary,
+    antennaSummary: props.antennaSummary,
   }),
 )
 
@@ -156,7 +186,6 @@ function openModule(moduleId: string): void {
   activeTab.value = moduleId
   dialogMaximized.value = false
   dialogVisible.value = true
-  if (moduleId === 'congestion') void props.loadCongestion?.()
 }
 
 function onDialogVisibilityChange(visible: boolean): void {

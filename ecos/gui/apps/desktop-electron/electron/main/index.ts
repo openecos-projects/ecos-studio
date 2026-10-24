@@ -13,6 +13,11 @@ import { createAgentRuntimeFromEnvironment } from '../services/agent/agentProvid
 import { CodexDependencyService } from '../services/agent/codexDependencyService'
 import { ModelProfileService } from '../services/agent/modelProfileService'
 import { AppInfoService } from '../services/appInfoService'
+import { EccCliCommandError, EccCliProcess } from '../services/eccCli/cliProcess'
+import {
+  EnvironmentDoctorService,
+  environmentDoctorLimits,
+} from '../services/environmentDoctorService'
 import { BackendWorkspaceService } from '../services/backendWorkspaceService'
 import { ProjectComparisonFileWatcher } from '../services/projectComparisonFileWatcher'
 import { BackendProjectComparisonService } from '../services/backendProjectComparisonService'
@@ -94,6 +99,7 @@ let workspaceReplacementRecovery: Promise<void> | null = null
 let projectScopeService: ProjectScopeService | null = null
 let services: {
   appInfoService: AppInfoService
+  environmentDoctorService: EnvironmentDoctorService
   backendWorkspaceService: BackendWorkspaceService
   backendProjectComparisonService: BackendProjectComparisonService
   projectWorkspaceFlowService: ProjectWorkspaceFlowService
@@ -188,7 +194,8 @@ function getDesktopServices() {
   }
   const appInfoService = new AppInfoService({
     appVersionProvider: () => app.getVersion(),
-    env: runtimeEnv,
+    envProvider: () => runtimeEnvProvider(),
+    resolveCommand: () => resolveDurableEccExecutable(eccRuntimeOptions),
   })
   let eccRuntimeService: EccCliRuntimeService | undefined
   const runtimeInUse = () =>
@@ -237,6 +244,34 @@ function getDesktopServices() {
       designTool,
     })
   }
+  const eccCliProcess = new EccCliProcess({
+    resolveLaunch: () => {
+      const executable = resolveDurableEccExecutable(eccRuntimeOptions)
+      if (!executable) {
+        throw new Error(
+          'The ECC runtime is not installed yet. Wait for the runtime installation to finish and try again.',
+        )
+      }
+      return { command: executable }
+    },
+    envProvider: () => runtimeEnvProvider(),
+  })
+  const environmentDoctorService = new EnvironmentDoctorService({
+    runner: async (args) => {
+      try {
+        return await eccCliProcess.run(args, environmentDoctorLimits())
+      } catch (error) {
+        if (error instanceof EccCliCommandError) {
+          return {
+            exitCode: error.exitCode,
+            stdout: error.stdout,
+            stderr: error.stderr,
+          }
+        }
+        throw error
+      }
+    },
+  })
   eccRuntimeService = new EccCliRuntimeService({
     envProvider: runtimeEnvProvider,
     resolveLaunch: async () => {
@@ -404,6 +439,7 @@ function getDesktopServices() {
 
   services = {
     appInfoService,
+    environmentDoctorService,
     backendWorkspaceService,
     backendProjectComparisonService,
     projectWorkspaceFlowService,
@@ -502,6 +538,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       agentQuickRunRoot: join(app.getPath('userData'), 'quick-runs'),
       agentRuntimeService: agentRuntimeService ?? undefined,
       appInfoService: desktopServices.appInfoService,
+      environmentDoctorService: desktopServices.environmentDoctorService,
       backendWorkspaceService: desktopServices.backendWorkspaceService,
       backendProjectComparisonService: desktopServices.backendProjectComparisonService,
       projectWorkspaceFlowService: desktopServices.projectWorkspaceFlowService,

@@ -316,16 +316,6 @@
               <i class="ri-bar-chart-box-line" aria-hidden="true" />
               <h2>Data Insights</h2>
             </div>
-            <button
-              v-if="data.mapUrl"
-              type="button"
-              class="dashboard-icon-button"
-              title="Open map snapshot"
-              aria-label="Open map snapshot"
-              @click="openImagePreview('Analysis map', data.mapUrl)"
-            >
-              <i class="ri-map-2-line" aria-hidden="true" />
-            </button>
           </header>
           <div v-if="isSynthesisStep" class="data-body synthesis-data-body">
             <section class="synthesis-insight-column">
@@ -839,20 +829,6 @@
                 <span>No floorplan metrics</span>
               </div>
             </section>
-
-            <section class="floorplan-insight-column">
-              <header class="floorplan-insight-header">
-                <div>
-                  <i class="ri-bar-chart-grouped-line" aria-hidden="true" />
-                  <h3>Snapshot</h3>
-                </div>
-              </header>
-              <StepSnapshotPanel
-                :actions="congestionSnapshotActions"
-                @open="openDataSummary()"
-                @action="onSnapshotAction"
-              />
-            </section>
           </div>
           <div v-else class="data-body">
             <figure v-if="selectedDataChart" class="distribution-chart">
@@ -963,22 +939,6 @@
       class="dialog-image-preview"
       :src="imagePreview.url"
       :alt="imagePreview.label"
-    />
-  </Dialog>
-
-  <Dialog
-    v-model:visible="showCongestionDialog"
-    modal
-    maximizable
-    :header="congestionDialogTitle"
-    :style="{ width: 'min(1080px, calc(100vw - 40px))' }"
-    :content-style="{ height: 'min(72vh, 680px)', overflow: 'auto' }"
-    :draggable="false"
-  >
-    <CongestionPanel
-      v-if="data?.congestionTiles.length"
-      :tiles="data.congestionTiles"
-      :tile-urls="data.congestionTileUrls"
     />
   </Dialog>
 
@@ -1148,7 +1108,6 @@ import { useStepConfigInfo } from '@/composables/useStepConfigInfo'
 import { useStepReportDialog } from '@/composables/useStepReportDialog'
 import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
 import { useWorkspace } from '@/composables/useWorkspace'
-import CongestionPanel from './flow-insights/CongestionPanel.vue'
 import { getDesktopApi } from '@/platform/desktop'
 import { buildChipViewerOpenRequest, canOpenChipViewer } from './drawingAreaChipViewer'
 import StatusPieChart from './home/StatusPieChart.vue'
@@ -1203,7 +1162,6 @@ const showTimingAnalysis = ref(false)
 const selectedTimingCorner = ref<string | null>(null)
 const showStaCornerDetails = ref(false)
 const showDataSummary = ref(false)
-const showCongestionDialog = ref(false)
 const showStepConfiguration = ref(false)
 const dataSummaryFocusId = ref<string | null>(null)
 const imagePreview = ref({ label: '', url: '', visible: false })
@@ -1353,24 +1311,6 @@ const drcSnapshotActions = computed<StepSnapshotAction[]>(() => [
   },
 ])
 
-/** Mirrors the Home dashboard's Data Snapshot Congestion module tile, shown when
- * this step's own feature congestion maps exist (place / CTS). */
-const congestionSnapshotActions = computed<StepSnapshotAction[]>(() =>
-  data.value?.congestionTiles.length
-    ? [
-        {
-          id: 'congestion',
-          icon: 'ri-fire-line',
-          label: 'Congestion',
-          caption: 'EGR / RUDY / density maps',
-        },
-      ]
-    : [],
-)
-
-const congestionDialogTitle = computed(
-  () => `Congestion · ${data.value?.step ?? currentStep.value}`,
-)
 const largestBar = computed(() =>
   Math.max(1, ...(selectedDataChart.value?.bars.map((bar) => bar.value) ?? [1])),
 )
@@ -1518,7 +1458,6 @@ function openDataSummary(snapshotId: string | null = null): void {
 
 function onSnapshotAction(actionId: string): void {
   if (actionId === 'drc') openDataSummary()
-  else if (actionId === 'congestion') showCongestionDialog.value = true
 }
 
 async function openChipViewer(mode: 'view' | 'edit' = 'view'): Promise<void> {

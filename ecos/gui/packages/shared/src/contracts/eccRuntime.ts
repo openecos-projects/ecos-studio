@@ -61,6 +61,11 @@ export interface EccWorkspaceUpdateRequest
   extends EccWorkspaceMutationRequest, EccWorkspaceSpecValidationRequest {
   commandId: string
   /**
+   * ecc.toml persistence intent for this update. Consumed by the Electron
+   * bridge (stripped before the request reaches ECC).
+   */
+  eccPdkConfig?: EccWorkspacePdkConfigPersist
+  /**
    * Keep the replaced Workspace generation as a sibling backup directory.
    * Omitted when false so older ECC runtimes (which reject unknown fields)
    * still accept the update; ECC treats a missing flag as false.
@@ -362,6 +367,14 @@ export interface EccRuntimeOperation {
   currentTool: string
   error: { code: string; message: string } | null
   flow?: { steps: EccRuntimeStepSnapshot[] }
+  /**
+   * Set when the run stopped before a required step because a checklist gate
+   * blocked it. The operation itself completed, but the flow did not succeed.
+   */
+  flowBlock?: {
+    failedItems: string[]
+    step: string
+  }
   interruptibility?: EccRuntimeInterruptibility
   kind: EccRuntimeOperationKind
   operationId: string
@@ -381,11 +394,13 @@ export interface EccRuntimeOperation {
 }
 
 export interface EccBackgroundOperation extends EccRuntimeOperation {
+  projectRoot?: string
   workspaceDirectory: string
   workspaceHandle: string
 }
 
 export interface EccBackgroundOperationOutcome extends EccRuntimeOperation {
+  projectRoot?: string
   workspaceDirectory: string
   workspaceHandle: string
 }
@@ -399,6 +414,7 @@ export interface EccBackgroundOperationRecovery {
 
 export interface EccBackgroundFinalization {
   issue?: string
+  projectRoot?: string
   state: 'finalizing' | 'snapshot-failed'
   workspaceDirectory: string
   workspaceHandle: string
@@ -568,6 +584,8 @@ export interface EccEngineeringAnalysisArtifactRef {
   name: string
   reference: string
   stepId: string
+  /** Producer declaration for the step's analysis contract. */
+  required?: boolean
   sha256?: string
   sizeBytes?: number
 }
@@ -717,6 +735,8 @@ export interface EccSnapshotChecklistItem {
 
 /** Snapshot v6 checklist projection (bounded to 512 items by the producer). */
 export interface EccSnapshotChecklistProjection {
+  status?: 'ready' | 'attention' | 'blocked'
+  requirementsStatus?: 'none' | 'present'
   items: EccSnapshotChecklistItem[]
 }
 
@@ -748,6 +768,8 @@ export interface EccSnapshotArtifactDescriptor {
   availability: 'available' | 'missing'
   kind: string
   name: string
+  /** Producer declaration for the step's analysis contract. */
+  required?: boolean
   stepId: string
 }
 

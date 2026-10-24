@@ -323,6 +323,8 @@ function openTasks(): void {
     new CustomEvent(topbarOverlayEvent, { detail: 'background-tasks' }),
   )
   open.value = true
+  void store.refresh()
+  void optimizationEpisodes.refresh()
 }
 
 function handleOverlay(event: Event): void {
@@ -480,7 +482,7 @@ async function resolveDesignOwners(directories: string[]): Promise<void> {
         const listed = manifest?.workspaces.some(
           (workspace) => normalizePath(workspace.workspace_path) === directory,
         )
-        const owner = listed ? (manifest?.design_name || manifest?.name || '').trim() : ''
+        const owner = listed ? (manifest?.name || '').trim() : ''
         return [directory, owner] as const
       } catch {
         return [directory, ''] as const

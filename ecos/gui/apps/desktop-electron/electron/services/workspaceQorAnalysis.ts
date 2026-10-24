@@ -3,9 +3,12 @@ import {
   parseProjectManifestFlowStep,
   projectManifestFlowSteps,
   type EccEngineeringSnapshot,
+  type EccEngineeringAnalysisArtifactRef,
   type EccQorSnapshotExtension,
+  type EccSnapshotChecklistProjection,
   type MetricComparison,
   type MetricValue,
+  type ProjectAnalysisReportItem,
   type ProjectManifest,
   type ProjectManifestFlowStep,
   type QorStepSummary,
@@ -18,6 +21,7 @@ import {
   type ProjectQorMetricRecord,
   type ProjectQorWorkspaceInput,
 } from './qorAnalysis'
+import { projectAnalysisArtifactStatuses } from './projectAnalysisArtifacts'
 
 type ProjectStepStatus = NonNullable<
   ProjectQorWorkspaceInput['stepStatuses'][ProjectManifestFlowStep]
@@ -36,8 +40,19 @@ interface SnapshotQorProjection {
 export type WorkspaceEngineeringFacts = Pick<
   EccEngineeringSnapshot,
   'metrics' | 'qorSnapshotExtension'
-> &
-  Partial<Pick<EccEngineeringSnapshot, 'flow' | 'signoffAssessment'>>
+> & {
+  artifacts?: Array<
+    Pick<
+      EccEngineeringAnalysisArtifactRef,
+      'availability' | 'kind' | 'required' | 'stepId'
+    >
+  >
+} & Partial<Pick<EccEngineeringSnapshot, 'checklist' | 'flow' | 'signoffAssessment'>>
+
+export interface ProjectQorInputOptions {
+  stepSummaryTexts?: ProjectQorWorkspaceInput['stepSummaryTexts']
+  stepSummariesLoaded?: boolean
+}
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -240,10 +255,33 @@ function snapshotComparisonMetrics(
   )
 }
 
+function snapshotReportItems(
+  checklist: EccSnapshotChecklistProjection | undefined,
+): Partial<Record<ProjectManifestFlowStep, ProjectAnalysisReportItem[]>> {
+  const grouped: Partial<Record<ProjectManifestFlowStep, ProjectAnalysisReportItem[]>> =
+    {}
+  for (const item of checklist?.items ?? []) {
+    const step = parseProjectManifestFlowStep(item.step)
+    if (!step) continue
+    const items = grouped[step] ?? []
+    items.push({
+      id: item.id,
+      title: item.title,
+      state: item.state,
+      blocked: item.blocked,
+      summary: item.summary,
+      source: null,
+    })
+    grouped[step] = items
+  }
+  return grouped
+}
+
 export function projectQorInputForWorkspace(
   manifest: ProjectManifest,
   workspaceId: string,
   engineeringSnapshot?: WorkspaceEngineeringFacts | null,
+  options: ProjectQorInputOptions = {},
 ): WorkspaceQorInput | null {
   const workspace = manifest.workspaces.find(
     (candidate) => candidate.workspace_id === workspaceId,
@@ -264,8 +302,11 @@ export function projectQorInputForWorkspace(
     qorSnapshotExtension: snapshot.qorSnapshotExtension,
     stepHotspotTexts: {},
     stepMetricTexts: {},
+    stepReportItems: snapshotReportItems(engineeringSnapshot?.checklist),
+    stepArtifactStatuses: projectAnalysisArtifactStatuses(engineeringSnapshot?.artifacts),
+    analysisSummaryLoaded: options.stepSummariesLoaded ?? false,
     stepStatuses: statuses,
-    stepSummaryTexts: {},
+    stepSummaryTexts: options.stepSummaryTexts ?? {},
     workspaceId,
     workspaceName: workspace.name || workspaceId,
     workspaceKey: workspaceId,

@@ -65,7 +65,7 @@ const LEGACY_STEP_TOOLS: Record<string, string> = {
   antennaCheck: 'ecc',
   lvs: 'ecc',
   filler: 'ecc',
-  postRouteLec: 'yosys_lec',
+  postRouteLec: 'kepler_formal',
   RCX: 'ecc',
   sta: 'ecc',
   powerAnalysis: 'ecc',
@@ -83,6 +83,7 @@ function defaultStepTool(stepName: string): string {
   return LEGACY_STEP_TOOLS[stepName] ?? GENERIC_STEP_TOOL
 }
 const STAGE_OUTPUT_SUFFIXES = ['.def.gz', '.v.gz', '.gds']
+const LEC_STEP_TOOLS = new Set(['yosys_lec', 'kepler_formal', 'lec_dual'])
 
 /** Sizer publishes underscored lowercase directory and file stems. */
 function sizerStepStem(stepName: string): string {
@@ -334,7 +335,7 @@ async function verifyWorkspaceRerunContract(
   )
   // LEC stages publish an equivalence result JSON instead of layout outputs.
   const isLecResultArtifact =
-    targetTool === 'yosys_lec' &&
+    LEC_STEP_TOOLS.has(targetTool) &&
     contract.source_stage_artifact === `${stageOutputPrefix}_result.json`
   if (!isStageArtifact && !isLecResultArtifact) {
     throw new Error('Workspace rerun source artifact does not match the completed stage.')
