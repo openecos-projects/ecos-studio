@@ -69,7 +69,9 @@ _STAGE_DIRECTORIES = {
     ECCStepName.PRE_FLOORPLAN: "preFloorplan_ecc",
     ECCStepName.MACRO_PLACEMENT: "macroPlacement_dreamplace",
     ECCStepName.POST_FLOORPLAN: "postFloorplan_ecc",
+    ECCStepName.PREPLACE: "preplace_sizer",
     ECCStepName.PLACEMENT: "place_dreamplace",
+    ECCStepName.DIFF_SIZING: "diff_sizing_dreamplace",
     ECCStepName.CTS: "CTS_ecc",
     ECCStepName.LEGALIZATION: "legalization_dreamplace",
     ECCStepName.TIMING_OPT: "timing_optimization_sizer",
@@ -791,9 +793,5 @@ def _checklist_gate(payload: dict[str, Any], gate_id: str) -> GateResult:
     return GateResult.UNAVAILABLE
 
 
-def _optional_mpc_gate(
-    payload: dict[str, Any], gate_id: str, configured: bool
-) -> GateResult:
-    if not configured:
-        return GateResult.NOT_APPLICABLE
-    return _checklist_gate(payload, gate_id)
+def _optional_mpc_gate(payload: dict[str, Any], gate_id: str, configured: bool) -> GateResult:
+    return _checklist_gate(payload, gate_id) if configured else GateResult.NOT_APPLICABLE

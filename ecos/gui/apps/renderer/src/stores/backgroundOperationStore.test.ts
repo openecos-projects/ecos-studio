@@ -126,6 +126,63 @@ describe('backgroundOperationStore', () => {
     expect(store.operations.map((item) => item.operationId)).toEqual(['a', 'b'])
   })
 
+  it('drops and keeps hiding tasks from a removed Project', async () => {
+    const projectRoot = '/benchmark/gcd3'
+    runtime.operationProjection.mockResolvedValue({
+      creations: [
+        {
+          creationId: 'creation-1',
+          projectRoot,
+          status: 'active',
+          targetDirectory: `${projectRoot}/ws_0002`,
+          updatedAt: 20,
+        },
+      ],
+      finalizations: [
+        {
+          projectRoot,
+          state: 'finalizing',
+          workspaceDirectory: `${projectRoot}/ws_0001`,
+          workspaceHandle: 'handle-a',
+          workspaceId: 'ws_0001',
+        },
+      ],
+      generation: 2,
+      operations: [
+        {
+          ...operation('a', `${projectRoot}/ws_0001`),
+          projectRoot,
+        },
+        {
+          ...operation('b', '/benchmark/other/ws_0001'),
+          projectRoot: '/benchmark/other',
+        },
+      ],
+      outcomes: [],
+    })
+    const store = useBackgroundOperationStore()
+
+    await store.start()
+    store.forgetProject(projectRoot)
+
+    expect(store.operations.map((item) => item.operationId)).toEqual(['b'])
+    expect(store.finalizations).toEqual([])
+    expect(store.creations).toEqual([])
+
+    await store.refresh()
+
+    expect(store.operations.map((item) => item.operationId)).toEqual(['b'])
+    expect(store.finalizations).toEqual([])
+    expect(store.creations).toEqual([])
+
+    store.rememberProject(projectRoot)
+    await store.refresh()
+
+    expect(store.operations.map((item) => item.operationId)).toEqual(['a', 'b'])
+    expect(store.finalizations).toHaveLength(1)
+    expect(store.creations).toHaveLength(1)
+  })
+
   it('rejects late requests and snapshots older than the committed generation', async () => {
     let invalidate!: (event: EccBackgroundOperationInvalidatedEvent) => void
     runtime.onOperationProjectionInvalidated.mockImplementation((listener) => {
@@ -190,6 +247,37 @@ describe('backgroundOperationStore', () => {
     expect(addNotification).toHaveBeenCalledOnce()
     expect(addNotification).toHaveBeenCalledWith(
       expect.objectContaining({ message: 'Route failed.', title: 'Flow failed' }),
+    )
+  })
+
+  it('publishes a completed operation with a blocked flow as a warning', async () => {
+    const blocked = {
+      ...operation('blocked', '/benchmark/gcd3/ws_0001'),
+      currentStep: 'Harden',
+      flowBlock: {
+        failedItems: ['prerequisite:sta'],
+        step: 'Harden',
+      },
+      state: 'succeeded' as const,
+    }
+    runtime.operationProjection.mockResolvedValue({
+      creations: [],
+      finalizations: [],
+      generation: 2,
+      operations: [],
+      outcomes: [blocked],
+    })
+    const store = useBackgroundOperationStore()
+
+    await store.start()
+
+    expect(addNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detail: 'prerequisite:sta',
+        message: 'ws_0001: Harden blocked: prerequisite:sta.',
+        severity: 'warn',
+        title: 'Flow blocked',
+      }),
     )
   })
 

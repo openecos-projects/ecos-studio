@@ -26,7 +26,6 @@ PLACE_SOURCE_PATHS = {
     "ecc.feature_manager": "ecc/chipcompiler/thirdparty/ecc-tools/src/feature/feature_manager.cpp",
     "ecc.feature_summary": "ecc/chipcompiler/thirdparty/ecc-tools/src/feature/parser/feature_parser.cpp",
     "ecc.geometry": "ecc/chipcompiler/thirdparty/ecc-tools/src/database/manager/builder/geometry_builder/GeometrySnapshotWriter.cpp",
-    "ecc.service": "ecc/chipcompiler/tools/ecc/service.py",
     "ecc.feature_union": "ecc/chipcompiler/thirdparty/ecc-tools/src/feature/builder/feature_eval_union.cpp",
     "ecc.feature_parser": "ecc/chipcompiler/thirdparty/ecc-tools/src/feature/parser/feature_parser_eval.cpp",
     "ecc.density": "ecc/chipcompiler/thirdparty/ecc-tools/src/feature/evaluation/src/module/density/density_eval.cpp",
@@ -170,6 +169,81 @@ PLACE_PARAMETER_SEMANTICS = {
     "start_iter": ("The weight-update or optimization start iteration.", "It delays activation of the related update path."),
     "max_net_weight": ("The net-weight upper bound.", "It prevents a small number of nets from dominating the placement objective."),
     "base_design_name": ("The base design name.", "It is used to name placement outputs and intermediate files."),
+    "buffering_continuous_relaxed_optimization": ("The continuous relaxed-buffer optimization switch.", "It enables relaxed repeater-count optimization in the joint buffering lane."),
+    "buffering_continuous_steps": ("The standalone buffering optimizer step count.", "It bounds continuous buffering optimization before discrete projection."),
+    "buffering_discrete_count_proximal_lambda": ("The proximal penalty for discrete repeater-count changes.", "It stabilizes discrete net-gradient updates around the relaxed repeater count."),
+    "buffering_fixed_bsu_index": ("An optional fixed legal buffer index.", "It pins Segment buffering to one buffer master resolved from the legal buffer table."),
+    "buffering_fixed_buffer_master": ("The physical buffer master used for Segment buffering.", "It selects the library cell inserted by Segment buffering."),
+    "buffering_max_repeaters_per_segment": ("The maximum accepted repeaters on one segment.", "It caps physical repeater insertion during discrete buffering."),
+    "buffering_mode": ("The buffering representation.", "It selects the `segment` or `candidate` buffering lane and its matching defaults."),
+    "buffering_route_b_selection_fraction": ("The fraction of segment candidates selected in one discrete buffering batch.", "It controls how sparsely candidates are sampled during net-gradient buffering."),
+    "buffering_segment_count_timing_backend": ("The timing implementation for Segment buffering.", "It selects the compiled segment-transfer backend used for repeater-count gradients."),
+    "buffering_segment_count_tns_gradient": ("The TNS-gradient switch for segment repeater counts.", "It adds total-negative-slack sensitivity to continuous count optimization."),
+    "buffering_segment_count_z_init": ("The initial relaxed repeater count on each segment.", "It seeds continuous segment-count optimization before projection."),
+    "buffering_segment_integer_projection_interval": ("The interval between periodic integer buffer projections.", "It schedules projection during global placement; zero disables periodic projection."),
+    "buffering_segment_integer_projection_project_bsu": ("The buffer-master projection switch.", "It projects legal buffer master indices together with integer repeater counts."),
+    "buffering_segment_integer_projection_start_step": ("The first step eligible for periodic buffer projection.", "It delays integer projection until the configured global-placement step."),
+    "buffering_segment_live_geometry": ("The live-geometry timing switch.", "It refreshes buffered-segment timing from the current placement geometry."),
+    "buffering_segment_projection_min_z_to_insert": ("The minimum relaxed count eligible for physical insertion.", "It gates which fractional repeater counts become physical buffers."),
+    "buffering_segment_strategy": ("The segment-count optimization strategy.", "It selects continuous optimization or discrete net-gradient updates."),
+    "buffering_segment_transfer_backend": ("The native segment timing-transfer implementation.", "It selects the backend used to propagate timing across buffered segments."),
+    "cell_model_schema": ("The cell timing-model schema.", "It selects the piecewise-linear timing model; a null value inherits the flow default."),
+    "diff_sizing_coefficients": ("The differential-sizing WNS, TNS, capacitance, and slew coefficients.", "It weights the continuous sizing objective in the standalone diff-sizing profile."),
+    "diff_sizing_continuous_steps": ("The number of continuous differential-sizing steps.", "It bounds continuous sizing before discrete refinement; zero disables the continuous phase."),
+    "diff_timing_driven_placement": ("The differentiable timing-driven placement switch.", "It adds timing gradients to the placement objective when enabled."),
+    "discrete_gradient_topk_shared_budget_percent": ("The percentage of sizeable cells sharing one size or VT action budget.", "It controls competition for a shared discrete optimization budget."),
+    "discrete_gradient_topk_up_percent": ("The percentage of cells eligible for discrete upsizing.", "It limits the candidate set for discrete upsizing."),
+    "discrete_gradient_topk_vt_percent": ("The percentage of cells eligible for VT changes.", "It limits the candidate set for discrete threshold-voltage substitution."),
+    "early_stop_restore_best": ("The early-stop best-state restore switch.", "It restores the best continuous sizing state instead of the final iterate."),
+    "enhanced_inflation_flag": ("The enhanced inflation-controller switch.", "It enables the enhanced outer-loop inflation schedule."),
+    "enhanced_inflation_replay_best_round_flag": ("The enhanced-inflation best-round replay switch.", "It replays the best recorded round after inflated geometry is rolled back."),
+    "flow_kind": ("The optimization profile executed by the placement step.", "It selects placement, sizing, joint, buffering, or STA behavior and applies the matching defaults."),
+    "gpugr_bottom_routing_layer": ("The inclusive bottom routing layer passed to GPUGR.", "It sets the lower bound of the congestion-evaluation layer range; empty uses the first LEF routing layer."),
+    "gpugr_final_eval_flag": ("The final GPUGR evaluation switch.", "It runs a routability evaluation after placement completes."),
+    "gpugr_final_eval_rrr_iters": ("The RRR iteration count for the final GPUGR evaluation.", "It controls the effort of the post-placement routing evaluation."),
+    "gpugr_top_routing_layer": ("The inclusive top routing layer passed to GPUGR.", "It sets the upper bound of the congestion-evaluation layer range; empty uses the last LEF routing layer."),
+    "inflation_min_interval": ("The minimum interval between applied inflation rounds.", "It prevents another inflation update before the configured number of global-placement steps; zero disables the guard."),
+    "joint_buffer_commit_period": ("The optimizer interval between joint physical-buffer commits.", "It controls how often joint optimization applies buffering changes to native geometry."),
+    "joint_buffer_outer_iterations": ("The maximum number of refresh-separated joint optimizer windows.", "It bounds outer joint-optimization iterations."),
+    "joint_quality_profile": ("The optional canonical joint-optimization profile.", "It selects a predefined joint schedule and validates its required parameter combination."),
+    "joint_segment_virtual_density_enabled": ("The virtual-buffer density switch.", "It includes persistent virtual buffer footprints in placement density."),
+    "l_direction_use_gpugr": ("The L-direction GPUGR source switch.", "It resolves L-shaped routing directions from GPUGR entries instead of iRT EGR guides."),
+    "l_shape_capacity_al_enable": ("The L-shape capacity-memory switch.", "It uses per-routing-bin AL multiplier memory as the hard-GGR capacity-pressure source."),
+    "l_shape_grad_target_ratio": ("The target L-shape routing-gradient ratio.", "It balances the weighted routability gradient against the base wirelength and density gradient."),
+    "l_shape_grad_target_ratio_max": ("The maximum adaptive L-shape gradient ratio.", "It caps the routability gradient target during optimization."),
+    "l_shape_gradient_mode": ("The L-shape routing-gradient mode.", "It selects fixed-field translation guidance or full differentiation through positions and segment dimensions."),
+    "l_shape_overflow_threshold": ("The overflow threshold for L-shape routability activation.", "It allows disabled L-shape force to start or re-enable below the configured placement overflow."),
+    "l_shape_use_ggr_topology": ("The L-shape GGR-topology switch.", "It uses a GGR-exported topology pack instead of refreshing diff-side FLUTE topology."),
+    "legalize_before_each_inflation_flag": ("The pre-inflation legalization switch.", "It waits for the overflow target, legalizes geometry, evaluates congestion, and reapplies cumulative inflation before area adjustment."),
+    "openroad_vt_suffixes": ("The OpenROAD VT suffixes used to classify equivalent Liberty cells.", "It groups equivalent threshold-voltage cells for discrete substitution."),
+    "overflow_reference_mode": ("The overflow-normalization reference mode.", "It selects whether the initial global-placement area or the current published movable area normalizes density overflow."),
+    "piecewise_gradient_mode": ("The piecewise cell-gradient implementation.", "It selects the `linear6_ste` or `native_piecewise` gradient path."),
+    "place_io_engine": ("The physical database backend used by DREAMPlace.", "It selects the ECC-backed placement database."),
+    "placement_initial_learning_rate_max": ("The optional cap on the estimated initial placement learning rate.", "It limits the first global-placement step size when present."),
+    "placement_sizing_mode": ("The placement optimization lane.", "It selects placement-only, sizing-only, or joint placement and sizing."),
+    "rc_tcl": ("The OpenROAD RC setup Tcl script.", "It supplies parasitics setup, resolved relative to the PDK root when the path is relative."),
+    "real_size_execution_mode": ("The real-size execution mode.", "It selects continuous-only sizing or a warmup-to-discrete transition."),
+    "real_size_warmup_steps": ("The number of real-size Adam steps before discrete transition.", "It sets the warmup duration for warmup-to-discrete execution."),
+    "relaxed_buffer_timing_integration_mode": ("The virtual-buffer timing-integration provider.", "It selects how relaxed buffering participates in timing propagation."),
+    "sizing_parameterization": ("The continuous sizing coordinate representation.", "It selects logits or real-size coordinates for sizing optimization."),
+    "timing_aggregation_mode": ("The AAT and RAT aggregation mode.", "It selects hard maximum and minimum reductions or smooth log-sum-exp aggregation while retaining hard endpoint WNS and TNS."),
+    "timing_aggregation_tau_ps": ("The temperature for smooth AAT and RAT aggregation.", "It controls how closely smooth aggregation approaches hard maxima and minima."),
+    "timing_coeff_growth_factor": ("The WNS and TNS coefficient growth multiplier.", "It scales timing coefficients at each density-weight update; one disables growth."),
+    "timing_grad_balance_target_ratio": ("The target timing-to-wirelength gradient balance.", "It balances weighted timing and wirelength gradient norms; zero disables automatic balancing."),
+    "timing_obj_profile": ("The timing-objective profiling switch.", "It enables performance counters for timing-objective evaluation."),
+    "timing_obj_profile_interval": ("The timing-objective profile interval.", "It sets how many global-placement steps separate performance summaries."),
+    "timing_objective_lane": ("The timing-objective term selection.", "It selects timing-only terms or timing with slew and capacitance terms."),
+    "timing_opt_buffering_enabled": ("The timing-window buffering switch.", "It enables Segment buffering inside electrical timing-optimization windows."),
+    "timing_opt_coefficients": ("The sizing-window coefficient policy.", "It inherits live timing coefficients or applies fixed WNS, TNS, capacitance, and slew weights during sizing rounds."),
+    "timing_opt_enabled": ("The electrical timing-optimization switch.", "It enables timing-optimization windows during placement."),
+    "timing_opt_max_windows": ("The maximum number of timing-optimization windows.", "It caps electrical timing-optimization passes in one placement run."),
+    "timing_opt_overflow_milestones": ("The overflow milestones that trigger timing-optimization windows.", "It defines descending one-shot thresholds; an empty list uses inflation-triggered windows."),
+    "timing_opt_sizing_rounds": ("The maximum discrete size and VT rounds per timing window.", "It caps discrete refinement inside each electrical timing-optimization window."),
+    "timing_placement_carrier": ("The coordinate timing method.", "It selects direct-loss or pin-to-pin timing controls while preserving mutually exclusive global-placement paths."),
+    "timing_rc_mode": ("The timing-parasitics source.", "It selects placement estimates or global-route parasitics, which require native ECC CPU sizing or STA."),
+    "timing_surrogate_mode": ("The cell timing-evaluation mode.", "It selects automatic, mixed, LUT-only, or surrogate-only timing evaluation."),
+    "timing_topology_enable_overflow_threshold": ("The overflow threshold for timing-topology updates.", "It activates topology updates when density overflow falls below the configured value."),
+    "timing_topology_refresh_interval": ("The timing-topology refresh interval.", "It sets the number of global-placement steps between full topology refreshes."),
 }
 
 
@@ -277,15 +351,15 @@ def _add_density_map_metrics(entries: list[dict[str, object]], documents: dict[s
         ("local_net_density", ("local net density", "local net density map"), "A per-bin map of single-bin net counts.", "ECC selects nets whose bounding boxes remain inside one bin and increments only that bin."),
     )
     for name, aliases, meaning, calculation in records:
-        _add_metric(entries, documents, name=f"place.map.{name}", aliases=aliases, meaning=meaning, calculation=calculation, boundary=boundary, evidence=("gui.map_gallery", "ecc.service", "ecc.feature_union", "ecc.feature_parser", "ecc.density"))
+        _add_metric(entries, documents, name=f"place.map.{name}", aliases=aliases, meaning=meaning, calculation=calculation, boundary=boundary, evidence=("gui.map_gallery", "ecc.metrics", "ecc.feature_union", "ecc.feature_parser", "ecc.density"))
 
 
 def _add_congestion_map_metrics(entries: list[dict[str, object]], documents: dict[str, list[str]]) -> None:
     boundary = "The map is a placement-time estimator. It is visible only when its PNG is emitted for the workspace; it does not establish detailed-routing success."
     for direction, layer_scope in (("horizontal", "horizontal-preferred routing layers"), ("vertical", "vertical-preferred routing layers"), ("union", "all routing layers")):
-        _add_metric(entries, documents, name=f"place.map.egr_{direction}", aliases=(f"egr {direction}", f"egr {direction} map", f"{direction} egr map"), meaning=f"An early-global-routing overflow map summed over {layer_scope}.", calculation=f"ECC reads `overflow_map_*` CSV files from the early router, selects {layer_scope}, and sums matching matrices cell by cell. The resulting path is stored under `/Congestion/map/egr/{direction}`.", boundary=boundary, evidence=("gui.map_gallery", "ecc.service", "ecc.feature_union", "ecc.feature_parser", "ecc.congestion"))
-        _add_metric(entries, documents, name=f"place.map.rudy_{direction}", aliases=(f"rudy {direction}", f"rudy {direction} map", f"{direction} rudy map"), meaning=f"A {direction}-direction RUDY routing-demand map.", calculation=f"For each net bounding box and overlapping bin, ECC accumulates `overlap_area / grid_area` times the reciprocal bbox height for horizontal demand, the reciprocal bbox width for vertical demand, or their sum for union. A zero dimension uses reciprocal `1.0`; the path is `/Congestion/map/rudy/{direction}`.", boundary=boundary, evidence=("gui.map_gallery", "ecc.service", "ecc.feature_union", "ecc.feature_parser", "ecc.congestion"))
-        _add_metric(entries, documents, name=f"place.map.lutrudy_{direction}", aliases=(f"lutrudy {direction}", f"lut rudy {direction}", f"lutrudy {direction} map"), meaning=f"A {direction}-direction LUT-RUDY routing-demand map.", calculation=f"ECC applies the RUDY overlap accumulation, then scales each non-degenerate directional reciprocal by `getLUT(pin_count, aspect_ratio, l_ness)` before writing `/Congestion/map/lutrudy/{direction}`.", boundary=boundary, evidence=("gui.map_gallery", "ecc.service", "ecc.feature_union", "ecc.feature_parser", "ecc.congestion"))
+        _add_metric(entries, documents, name=f"place.map.egr_{direction}", aliases=(f"egr {direction}", f"egr {direction} map", f"{direction} egr map"), meaning=f"An early-global-routing overflow map summed over {layer_scope}.", calculation=f"ECC reads `overflow_map_*` CSV files from the early router, selects {layer_scope}, and sums matching matrices cell by cell. The resulting path is stored under `/Congestion/map/egr/{direction}`.", boundary=boundary, evidence=("gui.map_gallery", "ecc.metrics", "ecc.feature_union", "ecc.feature_parser", "ecc.congestion"))
+        _add_metric(entries, documents, name=f"place.map.rudy_{direction}", aliases=(f"rudy {direction}", f"rudy {direction} map", f"{direction} rudy map"), meaning=f"A {direction}-direction RUDY routing-demand map.", calculation=f"For each net bounding box and overlapping bin, ECC accumulates `overlap_area / grid_area` times the reciprocal bbox height for horizontal demand, the reciprocal bbox width for vertical demand, or their sum for union. A zero dimension uses reciprocal `1.0`; the path is `/Congestion/map/rudy/{direction}`.", boundary=boundary, evidence=("gui.map_gallery", "ecc.metrics", "ecc.feature_union", "ecc.feature_parser", "ecc.congestion"))
+        _add_metric(entries, documents, name=f"place.map.lutrudy_{direction}", aliases=(f"lutrudy {direction}", f"lut rudy {direction}", f"lutrudy {direction} map"), meaning=f"A {direction}-direction LUT-RUDY routing-demand map.", calculation=f"ECC applies the RUDY overlap accumulation, then scales each non-degenerate directional reciprocal by `getLUT(pin_count, aspect_ratio, l_ness)` before writing `/Congestion/map/lutrudy/{direction}`.", boundary=boundary, evidence=("gui.map_gallery", "ecc.metrics", "ecc.feature_union", "ecc.feature_parser", "ecc.congestion"))
 
 
 def _add_metrics(entries: list[dict[str, object]], documents: dict[str, list[str]]) -> None:

@@ -18,6 +18,7 @@ function routeWorkspace(workspaceId: string, wirelength = 1000): ProjectWorkspac
     Route: stepSnapshotFixture({
       summaryStatus: 'blocked',
       hotspotArtifactStatus: 'missing',
+      hotspotRequired: true,
       metrics: [
         metricRecordFixture({
           metricName: 'route_drc_count',
@@ -139,6 +140,22 @@ describe('ProjectStepAnalysisPanel', () => {
 
     await rail[1].trigger('click')
     expect(wrapper.emitted('select-step')).toEqual([['DRC']])
+  })
+
+  it('renders a pending step as neutral while its details remain lazy', () => {
+    const workspace = workspaceSummaryFixture('ws_a', {
+      Route: stepSnapshotFixture({
+        analysisSummaryLoaded: false,
+        artifactStatusProbed: true,
+      }),
+    })
+    const wrapper = mountPanel({ workspaceSummaries: [workspace] })
+
+    const rail = wrapper.get('.step-rail-item')
+    const mark = rail.get('.step-rail-mark')
+    expect(mark.classes()).toContain('none')
+    expect(mark.text()).toBe('')
+    expect(rail.attributes('title')).toContain('load when selected')
   })
 
   it('leads with a verdict for the selected workspace and step', () => {
@@ -762,6 +779,7 @@ describe('ProjectStepAnalysisPanel', () => {
         artifactStatus: 'missing',
         summaryArtifactStatus: 'missing',
         hotspotArtifactStatus: 'missing',
+        hotspotRequired: true,
         summaryStatus: null,
       }),
     })

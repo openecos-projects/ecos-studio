@@ -56,10 +56,20 @@ export interface FlowStepDefinition {
   metricIdPrefixes: readonly string[]
   /** Default tool binding per ECC `rtl2gds/builder.py`. */
   tool: string
+  /** ECC steps that can publish this canonical step's QoR artifacts, in priority order. */
+  qorProducerEccNames?: readonly string[]
+  /** ECC's scoring contract consumes this step when present and successful. */
+  qorScored?: boolean
+  /** ECC publishes checklist/report evidence instead of a QoR artifact trio. */
+  reportOnly?: boolean
+  /** Advisory report steps must not be promoted to blocking analysis failures. */
+  analysisRequirement?: 'required' | 'advisory' | 'optional'
   /** Optional check/optimization step a project may exclude from its ledger. */
   skippable?: boolean
   /** Home/step dashboards may present layout imagery for this step. */
   layout?: boolean
+  /** Persisted ECC names in this family that actually publish layout imagery. */
+  layoutEccNames?: readonly string[]
   /** Signoff gate step (QoR project gate). */
   gate?: boolean
   /** Structural-change step for db trend jump attribution (filler inserts). */
@@ -77,6 +87,7 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
     metricScopes: ['synthesis'],
     metricIdPrefixes: ['synthesis'],
     tool: 'yosys',
+    qorScored: true,
   },
   {
     id: 'LEC',
@@ -85,7 +96,7 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
     aliases: [],
     metricScopes: ['lec'],
     metricIdPrefixes: [],
-    tool: 'yosys_lec',
+    tool: 'kepler_formal',
     skippable: true,
     flowStartDisabled: true,
   },
@@ -97,19 +108,24 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
     aliases: ['macro', 'macroplace'],
     metricScopes: ['prefloorplan', 'macroplacement', 'postfloorplan', 'floorplan'],
     metricIdPrefixes: [],
+    qorProducerEccNames: ['postFloorplan', 'preFloorplan', 'macroPlacement'],
+    qorScored: true,
     // preFloorplan/postFloorplan run on ecc; macroPlacement runs on dreamplace.
     tool: 'ecc',
     layout: true,
   },
   {
     id: 'Place',
-    eccNames: ['place'],
+    eccNames: ['preplace', 'place', 'diff_sizing'],
     label: 'Place',
     aliases: ['placement'],
     metricScopes: ['placement'],
     metricIdPrefixes: ['place'],
+    qorProducerEccNames: ['place', 'preplace', 'diff_sizing'],
+    qorScored: true,
     tool: 'dreamplace',
     layout: true,
+    layoutEccNames: ['place'],
   },
   {
     id: 'CTS',
@@ -119,6 +135,7 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
     metricScopes: ['cts'],
     metricIdPrefixes: ['clock', 'cts'],
     tool: 'ecc',
+    qorScored: true,
     layout: true,
   },
   {
@@ -129,6 +146,7 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
     metricScopes: ['legalization'],
     metricIdPrefixes: [],
     tool: 'dreamplace',
+    qorScored: true,
     layout: true,
   },
   {
@@ -150,6 +168,7 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
     metricScopes: ['final_route'],
     metricIdPrefixes: ['route'],
     tool: 'ecc',
+    qorScored: true,
     layout: true,
   },
   {
@@ -173,6 +192,7 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
     tool: 'ecc',
     layout: true,
     gate: true,
+    qorScored: true,
   },
   {
     id: 'DRC',
@@ -184,6 +204,7 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
     tool: 'ecc',
     layout: true,
     gate: true,
+    qorScored: true,
   },
   {
     id: 'Antenna Check',
@@ -193,6 +214,8 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
     metricScopes: ['antennacheck'],
     metricIdPrefixes: [],
     tool: 'ecc',
+    reportOnly: true,
+    analysisRequirement: 'advisory',
   },
   {
     id: 'Post-route LEC',
@@ -201,9 +224,11 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
     aliases: ['postlec'],
     metricScopes: ['postroutelec'],
     metricIdPrefixes: [],
-    tool: 'yosys_lec',
+    tool: 'kepler_formal',
     skippable: true,
     flowStartDisabled: true,
+    reportOnly: true,
+    analysisRequirement: 'required',
   },
   {
     id: 'RCX',
@@ -216,6 +241,7 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
     layout: true,
     gate: true,
     structural: true,
+    qorScored: true,
   },
   {
     id: 'STA',
@@ -227,6 +253,7 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
     tool: 'ecc',
     layout: true,
     gate: true,
+    qorScored: true,
   },
   {
     id: 'Power Analysis',
@@ -245,6 +272,8 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
     metricScopes: ['emir'],
     metricIdPrefixes: [],
     tool: 'ecc',
+    reportOnly: true,
+    analysisRequirement: 'advisory',
   },
   {
     id: 'Harden',
@@ -256,6 +285,7 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
     tool: 'ecc',
     layout: true,
     structural: true,
+    qorScored: true,
   },
 ]
 
@@ -329,5 +359,17 @@ export function isObsoleteFlowStepName(value: string): boolean {
 /** True when home/step dashboards may present layout imagery for the step. */
 export function isLayoutFlowStep(value: string): boolean {
   const step = parseProjectManifestFlowStep(value)
-  return step !== null && flowStepDefinition(step).layout === true
+  if (step === null) return false
+  const definition = flowStepDefinition(step)
+  if (!definition.layout) return false
+  if (!definition.layoutEccNames) return true
+  if (
+    definition.layoutEccNames.some(
+      (name) => name.toLowerCase() === value.trim().toLowerCase(),
+    )
+  )
+    return true
+  return !definition.eccNames.some(
+    (name) => name.toLowerCase() === value.trim().toLowerCase(),
+  )
 }

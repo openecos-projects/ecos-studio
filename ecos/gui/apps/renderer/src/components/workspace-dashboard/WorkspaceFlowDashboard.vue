@@ -1,186 +1,173 @@
 <template>
-  <div v-show="expanded" class="flow-dashboard-placeholder" aria-hidden="true" />
-  <Teleport to="body" :disabled="!expanded">
-    <section
-      class="workspace-flow-dashboard"
-      :class="{ 'is-expanded': expanded }"
-      aria-label="Flow diagram"
-      @keydown.esc="expanded = false"
-    >
-      <header class="flow-header">
-        <h2><i class="ri-node-tree" aria-hidden="true" /> Flow</h2>
-        <label
-          >Zoom
-          <input
-            type="range"
-            :value="zoom"
-            min="0.25"
-            max="1.5"
-            step="0.05"
-            aria-label="Flow diagram zoom"
-            :aria-valuetext="`${Math.round(zoom * 100)}%`"
-            @input="void setZoom(Number(($event.target as HTMLInputElement).value))"
-          />
-          <output>{{ Math.round(zoom * 100) }}%</output></label
-        >
-        <FlowRunControl />
-        <button
-          type="button"
-          class="flow-expand"
-          :aria-label="expanded ? 'Restore flow diagram' : 'Expand flow diagram'"
-          :title="expanded ? 'Restore flow diagram' : 'Expand flow diagram'"
-          :aria-expanded="expanded"
-          @click="expanded = !expanded"
-        >
-          <i
-            :class="expanded ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'"
-            aria-hidden="true"
-          />
-        </button>
-      </header>
-      <div class="flow-viewport">
+  <section class="workspace-flow-dashboard" aria-label="Flow diagram">
+    <header class="flow-header">
+      <h2><i class="ri-node-tree" aria-hidden="true" /> Flow</h2>
+      <label
+        >Zoom
+        <input
+          type="range"
+          :value="zoom"
+          min="0.25"
+          max="1.5"
+          step="0.05"
+          aria-label="Flow diagram zoom"
+          :aria-valuetext="`${Math.round(zoom * 100)}%`"
+          @input="void setZoom(Number(($event.target as HTMLInputElement).value))"
+        />
+        <output>{{ Math.round(zoom * 100) }}%</output></label
+      >
+      <FlowRunControl />
+      <button
+        type="button"
+        class="flow-fit"
+        aria-label="Fit flow diagram"
+        title="Fit flow diagram"
+        @click="fitDiagram"
+      >
+        <i class="ri-aspect-ratio-line" aria-hidden="true" />
+      </button>
+    </header>
+    <div class="flow-viewport">
+      <p v-if="error" class="flow-empty" role="alert">{{ error }}</p>
+      <p v-else-if="!steps.length" class="flow-empty" role="status">
+        {{ isLoading ? 'Loading flow…' : 'No flow steps are available.' }}
+      </p>
+      <div
+        v-else
+        ref="flowScroll"
+        class="flow-scroll"
+        :class="{ 'is-panning': isPanning }"
+        tabindex="0"
+        aria-label="Scrollable flow diagram"
+        @wheel="onFlowWheel"
+        @pointerdown="startPan"
+        @pointermove="movePan"
+        @pointerup="endPan"
+        @pointercancel="cancelPan"
+        @lostpointercapture="lostPanCapture"
+        @click.capture="preventDragClick"
+        @dragstart.prevent
+      >
         <div
-          v-if="$slots.overview"
-          class="flow-overview"
-          aria-label="Flow status overview"
-        >
-          <slot name="overview" />
-        </div>
-        <p v-if="error" class="flow-empty" role="alert">{{ error }}</p>
-        <p v-else-if="!steps.length" class="flow-empty" role="status">
-          {{ isLoading ? 'Loading flow…' : 'No flow steps are available.' }}
-        </p>
-        <div
-          v-else
-          ref="flowScroll"
-          class="flow-scroll"
-          :class="{ 'is-panning': isPanning }"
-          tabindex="0"
-          aria-label="Scrollable flow diagram"
-          @wheel="onFlowWheel"
-          @pointerdown="startPan"
-          @pointermove="movePan"
-          @pointerup="endPan"
-          @pointercancel="cancelPan"
-          @lostpointercapture="lostPanCapture"
-          @click.capture="preventDragClick"
-          @dragstart.prevent
+          class="flow-size"
+          :style="{
+            width: `${surfaceSize.width}px`,
+            height: `${surfaceSize.height}px`,
+          }"
         >
           <div
-            class="flow-size"
+            class="flow-canvas"
             :style="{
-              width: `${surfaceSize.width}px`,
-              height: `${surfaceSize.height}px`,
+              width: `${graphWidth}px`,
+              height: `${graphHeight}px`,
+              left: `${canvasOffset.x}px`,
+              top: `${canvasOffset.y}px`,
+              transform: `scale(${zoom})`,
+              '--flow-step-width': `${FLOW_CARD.width}px`,
+              '--flow-step-height': `${FLOW_CARD.height}px`,
             }"
           >
-            <div
-              class="flow-canvas"
-              :style="{
-                width: `${graphWidth}px`,
-                height: `${graphHeight}px`,
-                left: `${canvasOffset.x}px`,
-                top: `${canvasOffset.y}px`,
-                transform: `scale(${zoom})`,
-              }"
+            <svg
+              class="flow-edges"
+              :width="graphWidth"
+              :height="graphHeight"
+              aria-label="Flow dependencies"
             >
-              <svg
-                class="flow-edges"
-                :width="graphWidth"
-                :height="graphHeight"
-                aria-label="Flow dependencies"
-              >
-                <defs>
-                  <marker
-                    :id="arrowId"
-                    viewBox="0 0 10 10"
-                    refX="9"
-                    refY="5"
-                    markerWidth="6"
-                    markerHeight="6"
-                    orient="auto"
-                  >
-                    <path d="M 0 0 L 10 5 L 0 10 z" />
-                  </marker>
-                </defs>
-                <path
-                  v-for="edge in topology.edges"
-                  :key="`${edge.from}:${edge.to}`"
-                  :d="edgePath(edge)"
-                  :marker-end="`url(#${arrowId})`"
+              <defs>
+                <marker
+                  :id="arrowId"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto"
                 >
-                  <title>{{ edge.from }} → {{ edge.to }}</title>
-                </path>
-              </svg>
-              <FlowStepCard
-                v-for="node in positionedSteps"
-                :key="node.step.id"
-                :step="node.step"
-                class="positioned-step"
-                :style="{ left: `${node.x}px`, top: `${node.y}px` }"
-                @run="openDetails('run', $event)"
-                @checklist="openDetails('checklist', $event)"
-                @reports="openDetails('reports', $event)"
-                @log="openDetails('log', $event)"
-                @layout="openLayout"
-              />
-              <FlowSignoffCard
-                v-if="signoffPosition"
-                class="positioned-step"
-                :style="{ left: `${signoffPosition.x}px`, top: `${signoffPosition.y}px` }"
-                :eligible="
-                  checksPassed && steps[steps.length - 1]?.status === 'succeeded'
-                "
-              />
-            </div>
+                  <path d="M 0 0 L 10 5 L 0 10 z" />
+                </marker>
+              </defs>
+              <path
+                v-for="edge in topology.edges"
+                :key="`${edge.from}:${edge.to}`"
+                :d="edgePath(edge)"
+                :marker-end="`url(#${arrowId})`"
+              >
+                <title>{{ edge.from }} → {{ edge.to }}</title>
+              </path>
+            </svg>
+            <FlowStepCard
+              v-for="node in positionedSteps"
+              :key="node.step.id"
+              :step="node.step"
+              class="positioned-step"
+              :style="{ left: `${node.x}px`, top: `${node.y}px` }"
+              @run="openDetails('run', $event)"
+              @checklist="openDetails('checklist', $event)"
+              @reports="openDetails('reports', $event)"
+              @log="openDetails('log', $event)"
+              @layout="openLayout"
+            />
+            <FlowSignoffCard
+              v-if="signoffPosition"
+              class="positioned-step"
+              :style="{ left: `${signoffPosition.x}px`, top: `${signoffPosition.y}px` }"
+              :eligible="checksPassed && steps[steps.length - 1]?.status === 'succeeded'"
+            />
           </div>
         </div>
       </div>
-      <StepChecklistDialog
-        v-if="selectedStep && detailKind === 'checklist'"
-        :key="selectedStep.id"
-        :step="selectedStep"
-        @close="closeDetails"
-      />
-      <StepReportsDialog
-        v-if="selectedStep && detailKind === 'reports'"
-        :key="selectedStep.id"
-        :step="selectedStep"
-        @close="closeDetails"
-      />
-      <StepLogDialog
-        v-if="selectedStep && detailKind === 'log'"
-        :key="selectedStep.id"
-        :step="selectedStep"
-        @close="closeDetails"
-      />
-      <Dialog
-        :visible="Boolean(selectedStep && detailKind === 'run')"
-        modal
-        :header="`Run ${selectedStep?.label ?? 'step'}`"
-        :style="{ width: 'min(440px, calc(100vw - 32px))' }"
-        :draggable="false"
-        @update:visible="closeDetails"
+      <div v-if="$slots.overview" class="flow-overview" aria-label="Flow status overview">
+        <slot name="overview" />
+      </div>
+      <div v-if="$slots.metrics" class="flow-metrics" aria-label="Flow key metrics">
+        <slot name="metrics" />
+      </div>
+    </div>
+    <StepChecklistDialog
+      v-if="selectedStep && detailKind === 'checklist'"
+      :key="selectedStep.id"
+      :step="selectedStep"
+      @close="closeDetails"
+    />
+    <StepReportsDialog
+      v-if="selectedStep && detailKind === 'reports'"
+      :key="selectedStep.id"
+      :step="selectedStep"
+      @close="closeDetails"
+    />
+    <StepLogDialog
+      v-if="selectedStep && detailKind === 'log'"
+      :key="selectedStep.id"
+      :step="selectedStep"
+      @close="closeDetails"
+    />
+    <Dialog
+      :visible="Boolean(selectedStep && detailKind === 'run')"
+      modal
+      :header="`Run ${selectedStep?.label ?? 'step'}`"
+      :style="{ width: 'min(440px, calc(100vw - 32px))' }"
+      :draggable="false"
+      @update:visible="closeDetails"
+    >
+      <p
+        v-if="selectedStep && isFinalizationStep(selectedStep) && !checksPassed"
+        role="status"
       >
-        <p
-          v-if="selectedStep && isFinalizationStep(selectedStep) && !checksPassed"
-          role="status"
+        Harden and Signoff require mandatory verification steps and their checklists to
+        pass.
+      </p>
+      <div v-else-if="selectedStep && detailKind === 'run'" class="step-run-action">
+        <span
+          >Run {{ selectedStep.label }} using the current workspace configuration.</span
         >
-          Harden and Signoff require mandatory verification steps and their checklists to
-          pass.
-        </p>
-        <div v-else-if="selectedStep && detailKind === 'run'" class="step-run-action">
-          <span
-            >Run {{ selectedStep.label }} using the current workspace configuration.</span
-          >
-          <FlowRunControl
-            :key="selectedStep.id"
-            :step="selectedStep.path"
-            :status="selectedStep.status"
-          />
-        </div>
-      </Dialog>
-    </section>
-  </Teleport>
+        <FlowRunControl
+          :key="selectedStep.id"
+          :step="selectedStep.path"
+          :status="selectedStep.status"
+        />
+      </div>
+    </Dialog>
+  </section>
 </template>
 
 <script setup lang="ts">
@@ -208,6 +195,7 @@ import StepLogDialog from './StepLogDialog.vue'
 import FlowSignoffCard from './FlowSignoffCard.vue'
 import { useFlowDiagramPan } from './useFlowDiagramPan'
 import { useCenteredFlowViewport } from './useCenteredFlowViewport'
+import { FLOW_CARD, flowGraphLayout } from './flowGraphLayout'
 
 const emit = defineEmits<{ layout: [thumbnail: HomeLayoutThumbnail] }>()
 const { projectedSteps, isLoading, error } = useBackendFlowStages()
@@ -215,7 +203,6 @@ const { layoutThumbnails } = useHomeSnapshots()
 const session = useBackendWorkspaceSession()
 const arrowId = `flow-arrow-${useId()}`
 const zoom = ref(0.75)
-const expanded = ref(false)
 const flowScroll = ref<HTMLElement | null>(null)
 const {
   isPanning,
@@ -240,27 +227,24 @@ const steps = computed(() =>
 const topology = computed(() =>
   withSignoffMilestone(buildFlowTopology(steps.value), steps.value),
 )
-const positions = computed(
-  () =>
-    new Map(
-      topology.value.nodes.map((node) => [
-        node.id,
-        { x: 12 + node.column * 194, y: 12 + node.row * 202 },
-      ]),
-    ),
-)
+const layout = computed(() => flowGraphLayout(topology.value))
+const positions = computed(() => layout.value.positions)
 const signoffPosition = computed(() => positions.value.get(SIGNOFF_MILESTONE_ID))
 const positionedSteps = computed(() =>
   steps.value.map((step) => ({ step, ...positions.value.get(step.id)! })),
 )
-const graphWidth = computed(() => Math.max(1, topology.value.columns) * 194 - 20)
-const graphHeight = computed(() => topology.value.rows * 202)
-const { surfaceSize, canvasOffset } = useCenteredFlowViewport(
+const graphWidth = computed(() => layout.value.width)
+const graphHeight = computed(() => layout.value.height)
+const flowContentReady = computed(
+  () => Boolean(session.workspaceContextId) && !isLoading.value && steps.value.length > 0,
+)
+const { surfaceSize, canvasOffset, fitToViewport } = useCenteredFlowViewport(
   flowScroll,
   graphWidth,
   graphHeight,
   zoom,
   computed(() => session.workspaceContextId),
+  flowContentReady,
 )
 const selectedStep = computed(
   () => steps.value.find((step) => step.id === selectedId.value) ?? null,
@@ -282,9 +266,9 @@ function isFinalizationStep(step: DashboardFlowStep): boolean {
 function edgePath(edge: FlowEdge): string {
   const from = positions.value.get(edge.from)!
   const to = positions.value.get(edge.to)!
-  const startX = from.x + 150
-  const startY = from.y + 88
-  const endY = to.y + 88
+  const startX = from.x + FLOW_CARD.width
+  const startY = from.y + FLOW_CARD.height / 2
+  const endY = to.y + FLOW_CARD.height / 2
   const midpoint = startX + (to.x - startX) / 2
   return `M ${startX} ${startY} H ${midpoint} V ${endY} H ${to.x - 3}`
 }
@@ -295,6 +279,10 @@ function openDetails(kind: typeof detailKind.value, step: DashboardFlowStep): vo
 function closeDetails(): void {
   selectedId.value = null
   detailKind.value = null
+}
+function fitDiagram(): void {
+  cancelPan()
+  void fitToViewport()
 }
 function openLayout(step: DashboardFlowStep): void {
   if (step.thumbnail) emit('layout', step.thumbnail)
@@ -347,6 +335,7 @@ watch(selectedStep, (step) => {
 
 <style scoped>
 .workspace-flow-dashboard {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -357,14 +346,7 @@ watch(selectedStep, (step) => {
   background: var(--bg-primary);
 }
 
-.workspace-flow-dashboard.is-expanded {
-  position: fixed;
-  inset: 60px 12px 36px 76px;
-  z-index: 900;
-  box-shadow: 0 12px 40px color-mix(in srgb, var(--text-primary) 25%, transparent);
-}
-
-.flow-expand {
+.flow-fit {
   border: 1px solid var(--border-color);
   border-radius: 4px;
   background: transparent;
@@ -374,7 +356,7 @@ watch(selectedStep, (step) => {
   height: 25px;
 }
 
-.flow-expand:focus-visible {
+.flow-fit:focus-visible {
   outline: 2px solid var(--accent-color);
 }
 .flow-header {
@@ -412,7 +394,7 @@ output {
 .flow-viewport {
   position: relative;
   flex: 1;
-  min-height: 0;
+  min-height: 240px;
   min-width: 0;
   overflow: hidden;
 }
@@ -423,17 +405,33 @@ output {
   scrollbar-gutter: stable both-edges;
   cursor: grab;
 }
-.flow-overview {
+.flow-overview,
+.flow-metrics {
   position: absolute;
-  top: 8px;
   left: 8px;
-  z-index: 1;
+  z-index: 2;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  align-items: stretch;
   gap: 8px;
+  flex: 0 0 auto;
+  width: fit-content;
   max-width: calc(100% - 16px);
+  box-sizing: border-box;
   pointer-events: none;
 }
-.flow-overview :deep(> *) {
+.flow-overview {
+  top: 8px;
+}
+.flow-metrics {
+  bottom: 8px;
+}
+.flow-overview :deep(> *),
+.flow-metrics :deep(> *) {
+  align-self: stretch;
+  width: fit-content;
+  max-width: 100%;
   pointer-events: auto;
 }
 .flow-scroll.is-panning,
@@ -452,6 +450,7 @@ output {
 }
 .positioned-step {
   position: absolute;
+  cursor: default;
 }
 .flow-edges {
   position: absolute;

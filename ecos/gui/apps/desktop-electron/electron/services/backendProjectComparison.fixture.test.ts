@@ -29,7 +29,7 @@ describe('representativeProjectComparisonFixture', () => {
       const declaredArtifacts = projectManagementWorkspaceStepAnalysisSpecs.flatMap(
         (spec) =>
           [spec.metricsPath, spec.summaryPath, spec.hotspotsPath].map(
-            (reference) => [spec.step, reference] as const,
+            (reference) => [spec.eccStepIds[0], reference] as const,
           ),
       )
       for (const [stepId, reference] of declaredArtifacts) {
@@ -48,7 +48,7 @@ describe('representativeProjectComparisonFixture', () => {
         source: { kind: 'feature', path: expect.any(String) },
         step_role: expect.any(String),
       })
-      expect(snapshot.artifacts).toHaveLength(37)
+      expect(snapshot.artifacts).toHaveLength(43)
       expect(snapshot.signoffAssessment.status).toBe('ready')
       expect(snapshot.qorSnapshotExtension).toMatchObject({
         scoringEngine: 'qor-v3',

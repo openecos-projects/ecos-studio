@@ -299,6 +299,36 @@ describe('buildDashboardQorInsights', () => {
       power: null,
     })
   })
+
+  it('shows measured power as not scored when no budget is declared', () => {
+    const summary = trendSummaryWithScoresFixture()
+    const extension = qorSnapshotExtension()
+    extension.qphys.power = {
+      value: null,
+      state: 'UNKNOWN',
+      featureIds: ['F_PWR_LEAK_FRAC'],
+    }
+    extension.power = {
+      totalUw: 61.285,
+      budgetUw: null,
+      sourceKind: 'signoff',
+      corner: 'powerAnalysis',
+    }
+    summary.workspaces[1]!.qorSnapshotExtension = extension
+
+    const insights = buildDashboardQorInsights(summary, 'ws_b')
+
+    expect(insights.dimensions.find((dimension) => dimension.key === 'power')).toEqual({
+      key: 'power',
+      label: 'Power',
+      value: null,
+      display: '61.3 uW',
+      state: 'NO BUDGET',
+      tone: 'neutral',
+      percent: null,
+      hint: expect.stringContaining('excluded from the overall QoR score'),
+    })
+  })
 })
 
 describe('buildDashboardWorkspaceRows', () => {

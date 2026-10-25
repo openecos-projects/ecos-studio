@@ -197,6 +197,7 @@ export async function executeProductCommand(
         workspaceBindings: draft.workspaceBindings,
         workspaceHandle,
         workspaceSpec: draft.workspaceSpec,
+        ...(draft.eccPdkConfig ? { eccPdkConfig: draft.eccPdkConfig } : {}),
         ...(request.payload.retainBackup === true ? { retainBackup: true } : {}),
       })
       if (isRecord(updated) && typeof updated.directory === 'string') {

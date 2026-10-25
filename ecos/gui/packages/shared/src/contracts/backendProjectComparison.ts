@@ -368,7 +368,22 @@ export interface ProjectQorTimingSummary {
 }
 
 export type ProjectAnalysisArtifactStatus = 'available' | 'missing' | 'invalid'
-export type ProjectAnalysisAvailability = 'available' | 'incomplete' | 'unavailable'
+export type ProjectAnalysisAvailability =
+  | 'available'
+  | 'incomplete'
+  | 'unavailable'
+  | 'pending'
+export type ProjectAnalysisStatus = 'valid' | 'incomplete' | null
+
+/** One checklist-projected fact for a step that publishes a report, not QoR. */
+export interface ProjectAnalysisReportItem {
+  id: string
+  title: string
+  state: string
+  blocked: boolean
+  summary: string
+  source: string | null
+}
 
 export interface ProjectAnalysisStepSnapshot {
   step: FlowStep
@@ -376,6 +391,19 @@ export interface ProjectAnalysisStepSnapshot {
   artifactStatus: ProjectAnalysisArtifactStatus
   summaryArtifactStatus: ProjectAnalysisArtifactStatus
   hotspotArtifactStatus: ProjectAnalysisArtifactStatus
+  /** True when the step's QoR summary content was read for this projection. */
+  analysisSummaryLoaded?: boolean
+  /** True when artifact statuses came from the Snapshot index or verified content. */
+  artifactStatusProbed?: boolean
+  /** Whether a missing hotspot index makes the step incomplete. */
+  hotspotRequired?: boolean
+  /** `qor_summary.json`'s completeness declaration, independent of its quality gate. */
+  analysisStatus?: ProjectAnalysisStatus
+  /** ECC publishes a checklist-backed report for this step instead of QoR artifacts. */
+  reportOnly?: boolean
+  /** Whether report-backed evidence blocks signoff or is advisory only. */
+  analysisRequirement?: 'required' | 'advisory' | 'optional'
+  reportItems?: ProjectAnalysisReportItem[]
   metrics: ProjectQorMetricRecord[]
   summaryStatus: QorGateStatus | null
   blockingIssues: ProjectQorBlockingIssue[]

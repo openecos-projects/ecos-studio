@@ -101,11 +101,12 @@ function engineeringSnapshot(
     })
   }
   for (const spec of projectManagementWorkspaceStepAnalysisSpecs) {
-    analysisFile(spec.step, 'qor_metrics', spec.metricsPath)
-    analysisFile(spec.step, 'qor_summary', spec.summaryPath)
-    analysisFile(spec.step, 'qor_hotspots', spec.hotspotsPath)
+    const stepId = spec.eccStepIds[0]
+    analysisFile(stepId, 'qor_metrics', spec.metricsPath)
+    analysisFile(stepId, 'qor_summary', spec.summaryPath)
+    analysisFile(stepId, 'qor_hotspots', spec.hotspotsPath)
     if (spec.step === 'STA') {
-      analysisFile(spec.step, 'sta_timing_issues', projectManagementStaTimingIssuesPath)
+      analysisFile(stepId, 'sta_timing_issues', projectManagementStaTimingIssuesPath)
     }
   }
   const metrics = projectManifestFlowSteps.flatMap((step, stepIndex) =>
@@ -114,7 +115,37 @@ function engineeringSnapshot(
   return {
     artifacts,
     cause: 'flow_step.success',
-    checklist: { items: [] },
+    checklist: {
+      items: [
+        {
+          id: 'artifact.antennacheck.report',
+          title: 'Antenna check report',
+          state: 'pass',
+          blocked: false,
+          step: 'antennaCheck',
+          category: 'artifact',
+          summary: 'Antenna check report is present and non-empty.',
+        },
+        {
+          id: 'artifact.postroutelec.result',
+          title: 'LEC result',
+          state: 'pass',
+          blocked: false,
+          step: 'postRouteLec',
+          category: 'artifact',
+          summary: 'LEC proved equivalence.',
+        },
+        {
+          id: 'flow.emir.completed',
+          title: 'emir flow completed',
+          state: 'warning',
+          blocked: false,
+          step: 'emir',
+          category: 'flow',
+          summary: 'Advisory analysis completed; review its report and coverage.',
+        },
+      ],
+    },
     flow: {
       steps: projectManifestFlowSteps.map((name) => ({ name, state: 'Success' })),
     },

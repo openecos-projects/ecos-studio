@@ -2,7 +2,6 @@
   <div
     class="workspace-workbench"
     :class="{
-      'is-information-hidden': agentOnly && !informationPanelVisible,
       'is-agent-hidden': agentOnly && !workspaceAgentOpen,
       'is-agent-only': agentOnly,
     }"
@@ -44,7 +43,6 @@ import { storeToRefs } from 'pinia'
 import Splitter from 'primevue/splitter'
 import SplitterPanel from 'primevue/splitterpanel'
 import ChatInspectorPanel from '@/components/ChatInspectorPanel.vue'
-import { useWorkspaceInformationPanel } from '@/composables/useWorkspaceInformationPanel'
 import FlowRunControl from './FlowRunControl.vue'
 import FlowStatusStrip from './FlowStatusStrip.vue'
 import {
@@ -68,7 +66,6 @@ const props = withDefaults(
 )
 
 const agentShell = useAgentShellStore()
-const { informationPanelVisible } = useWorkspaceInformationPanel()
 const { workspaceAgentOpen } = storeToRefs(agentShell)
 
 const selectedFlowNode = ref<FlowStatusNode | null>(findInitialNode(props.nodes))
@@ -142,14 +139,11 @@ defineSlots<{
   width: 100%;
 }
 
-.is-information-hidden :deep(.p-splitter-gutter),
-.is-information-hidden .workspace-workbench-right,
 .is-agent-hidden :deep(.p-splitter-gutter),
 .is-agent-hidden .workspace-workbench-right {
   display: none;
 }
 
-.is-information-hidden .workspace-workbench-left,
 .is-agent-hidden .workspace-workbench-left {
   flex-basis: 100% !important;
   flex-grow: 1;

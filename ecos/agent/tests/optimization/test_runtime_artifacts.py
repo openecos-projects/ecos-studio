@@ -48,7 +48,9 @@ _STAGES = (
     "preFloorplan",
     "macroPlacement",
     "postFloorplan",
+    "preplace",
     "place",
+    "diff_sizing",
     "CTS",
     "legalization",
     "Timing optimization",
@@ -122,7 +124,7 @@ def _alignment(
 def test_optimization_runtime_uses_the_earliest_rerun_stage(tmp_path: Path) -> None:
     _write_flow(tmp_path)
 
-    assert _optimization_rerun_runtime_seconds(tmp_path) == sum(range(16))
+    assert _optimization_rerun_runtime_seconds(tmp_path) == sum(range(18))
 
 
 @pytest.mark.parametrize("state", ["Incomplete", "Unstart", "Success"])
@@ -135,7 +137,7 @@ def test_advisory_analysis_does_not_gate_runtime_evidence(tmp_path: Path, state:
         for name in ("antennaCheck", "emir")
     )
     path.write_text(json.dumps(payload))
-    assert _optimization_rerun_runtime_seconds(tmp_path) == sum(range(16)) + (
+    assert _optimization_rerun_runtime_seconds(tmp_path) == sum(range(18)) + (
         4 if state == "Success" else 0
     )
 

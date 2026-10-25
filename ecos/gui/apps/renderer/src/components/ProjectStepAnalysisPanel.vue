@@ -12,7 +12,9 @@
         class="step-rail-item"
         :class="{
           selected: tab.step === selectedStep,
-          muted: tab.analysisAvailability === 'unavailable',
+          muted:
+            tab.analysisAvailability === 'unavailable' ||
+            tab.analysisAvailability === 'pending',
         }"
         :aria-pressed="tab.step === selectedStep"
         :title="stepTabTitle(tab)"
@@ -994,6 +996,8 @@ function stepTabTitle(tab: StepTab): string {
   if (tab.analysisAvailability === 'unavailable')
     return `${tab.step}: analysis unavailable`
   if (tab.analysisAvailability === 'incomplete') return `${tab.step}: analysis incomplete`
+  if (tab.analysisAvailability === 'pending')
+    return `${tab.step}: analysis details load when selected`
   return `${tab.step}: ${tab.findingCount} findings, ${tab.blockingCount} listed as blocking`
 }
 

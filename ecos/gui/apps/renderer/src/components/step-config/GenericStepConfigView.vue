@@ -17,7 +17,7 @@ withDefaults(
   <div
     class="sc-pro sc-cards max-w-full min-w-0"
     :class="{ 'is-readonly': readonly }"
-    :inert="readonly"
+    :inert="readonly ? true : undefined"
     data-accent="indigo"
   >
     <StepConfigValueBlock

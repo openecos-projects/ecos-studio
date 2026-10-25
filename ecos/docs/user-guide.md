@@ -1259,6 +1259,11 @@ failure). The panel lists:
 - In-progress workspace creations, including a _Creation needs recovery_ hint.
 - Final snapshot saves, with a **Retry** button on failure.
 
+Opening the panel refreshes the list from the running ECC runtime. A flow
+started through `ecc run` in a loaded Workspace appears here without reopening
+the Workspace. Tasks whose Project has been removed from Project Management are
+cleaned up with it.
+
 ### Closing Studio
 
 Closing Studio leaves detached backend ECC flows running. Reopen their

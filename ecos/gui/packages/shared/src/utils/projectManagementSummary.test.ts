@@ -26,15 +26,48 @@ describe('projectManagementWorkspaceSummaryPaths', () => {
   })
 
   it('is the unique bounded summary allowlist derived from every analysis step', () => {
-    expect(projectManagementWorkspaceStepAnalysisSpecs).toHaveLength(12)
-    expect(projectManagementWorkspaceStepAnalysisSpecs.map((spec) => spec.step)).toEqual(
-      expect.arrayContaining(['DRC', 'LVS', 'Filler']),
-    )
+    expect(projectManagementWorkspaceStepAnalysisSpecs).toHaveLength(14)
+    expect(projectManagementWorkspaceStepAnalysisSpecs.map((spec) => spec.step)).toEqual([
+      'Synth',
+      'Floor',
+      'Place',
+      'CTS',
+      'Legal',
+      'Timing Opt',
+      'Route',
+      'Filler',
+      'LVS',
+      'DRC',
+      'RCX',
+      'STA',
+      'Power Analysis',
+      'Harden',
+    ])
     expect(
       projectManagementWorkspaceStepAnalysisSpecs.find((spec) => spec.step === 'LVS'),
     ).toMatchObject({
+      eccStepIds: ['lvs'],
       metricsPath: 'lvs_ecc/analysis/qor_metrics.json',
       summaryPath: 'lvs_ecc/analysis/qor_summary.json',
+    })
+    expect(
+      projectManagementWorkspaceStepAnalysisSpecs.find((spec) => spec.step === 'Floor'),
+    ).toMatchObject({
+      eccStepIds: ['postFloorplan', 'preFloorplan', 'macroPlacement'],
+      metricsPath: 'postFloorplan_ecc/analysis/qor_metrics.json',
+    })
+    expect(
+      projectManagementWorkspaceStepAnalysisSpecs.find((spec) => spec.step === 'Place'),
+    ).toMatchObject({
+      eccStepIds: ['place', 'preplace', 'diff_sizing'],
+      metricsPath: 'place_dreamplace/analysis/qor_metrics.json',
+    })
+    expect(
+      projectManagementWorkspaceStepAnalysisSpecs.find(
+        (spec) => spec.step === 'Timing Opt',
+      ),
+    ).toMatchObject({
+      metricsPath: 'timing_optimization_sizer/analysis/qor_metrics.json',
     })
     expect(projectManagementWorkspaceSummaryPaths).not.toContain('home/flow.json')
     expect(projectManagementWorkspaceSummaryPaths).not.toContain('config/cts_ecc.json')

@@ -1,12 +1,12 @@
 // @vitest-environment happy-dom
 
 import { mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import FlowInsightsPanel from './FlowInsightsPanel.vue'
-import type { CongestionMapTileModel, FlowInsightStep } from './flowInsightsData'
+import type { FlowInsightStep } from './flowInsightsData'
 
 describe('FlowInsightsPanel', () => {
-  it('renders typed module availability and lazy-loads congestion on selection', async () => {
+  it('renders typed module availability and opens timing in dialog-only mode', async () => {
     const step: FlowInsightStep = {
       directory: '',
       key: 'Place',
@@ -17,18 +17,6 @@ describe('FlowInsightsPanel', () => {
       peakMemoryMb: 64,
       successful: true,
     }
-    const tile: CongestionMapTileModel = {
-      id: 'congestion-place',
-      step,
-      mapKind: 'egr',
-      direction: 'union',
-      label: 'Place EGR',
-      pngPath: 'congestion-place',
-      csvPath: '',
-      layoutCsvPath: '',
-      stats: { max: 3, total: 6, hotspotCount: 2 },
-    }
-    const loadCongestion = vi.fn()
     const wrapper = mount(FlowInsightsPanel, {
       props: {
         steps: [step],
@@ -41,40 +29,65 @@ describe('FlowInsightsPanel', () => {
           memoryBottleneckIndex: 0,
         },
         dbTrends: null,
-        congestionTiles: [tile],
-        congestionTileUrls: new Map(),
         drc: null,
         sta: null,
-        loadCongestion,
+        powerSummary: null,
+        lvsSummary: null,
+        antennaSummary: null,
       },
       global: {
         stubs: {
           Dialog: { template: '<div><slot /></div>' },
           StepResourcesPanel: true,
           DbTrendsPanel: true,
-          CongestionPanel: true,
           DrcPanel: true,
           StaPanel: true,
+          StepDetailsPanel: true,
         },
       },
     })
 
-    expect(wrapper.findAll('.data-snapshot-tile')).toHaveLength(5)
+    expect(wrapper.findAll('.data-snapshot-tile')).toHaveLength(7)
     expect(wrapper.findAll('.data-snapshot-cell')).toHaveLength(9)
-    expect(wrapper.findAll('.data-snapshot-cell.is-empty')).toHaveLength(4)
+    expect(wrapper.findAll('.data-snapshot-cell.is-empty')).toHaveLength(2)
     expect(wrapper.text()).toContain('Step Trends')
-    expect(wrapper.text()).toContain('Congestion')
-    const congestion = wrapper
-      .findAll<HTMLButtonElement>('.data-snapshot-tile')
-      .find((button) => button.text().includes('Congestion'))
-    await congestion?.trigger('click')
-
-    expect(loadCongestion).toHaveBeenCalledOnce()
+    expect(wrapper.text()).toContain('LVS')
+    expect(wrapper.text()).toContain('Antenna')
+    expect(wrapper.text()).not.toContain('Congestion')
     await wrapper.setProps({ dialogOnly: true, selectedModule: 'timing' })
     expect(wrapper.find('.data-snapshot-grid').exists()).toBe(false)
     expect(wrapper.find('.flow-insights-header').exists()).toBe(false)
     expect(wrapper.findComponent({ name: 'StaPanel' }).exists()).toBe(true)
-    await wrapper.setProps({ selectedModule: 'congestion' })
-    expect(loadCongestion).toHaveBeenCalledTimes(2)
+  })
+
+  it('opens LVS and antenna details in dialog-only mode', async () => {
+    const wrapper = mount(FlowInsightsPanel, {
+      props: {
+        steps: [],
+        stepResources: null,
+        dbTrends: null,
+        drc: null,
+        sta: null,
+        powerSummary: null,
+        lvsSummary: null,
+        antennaSummary: null,
+        dialogOnly: true,
+        selectedModule: 'lvs',
+      },
+      global: {
+        stubs: {
+          Dialog: { template: '<div><slot /></div>' },
+          StepDetailsPanel: {
+            name: 'StepDetailsPanel',
+            props: ['title', 'source'],
+            template: '<div>{{ title }} · {{ source }}</div>',
+          },
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('LVS Results · lvs.step.json')
+    await wrapper.setProps({ selectedModule: 'antenna' })
+    expect(wrapper.text()).toContain('Antenna Check · antennaCheck.step.json')
   })
 })

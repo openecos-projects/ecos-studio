@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -67,10 +67,6 @@ const MAP_HEATMAP_MIN_WIDTH: f32 = 270.0;
 const MAP_HEATMAP_MAX_GRID_SIZE: f32 = 300.0;
 const MAP_HEATMAP_VERTICAL_OVERHEAD: f32 = 142.0;
 const MAP_FOCUS_ANIMATION_DURATION_SECONDS: f64 = 0.22;
-const MAP_THUMBNAIL_WIDTH: u32 = 128;
-const MAP_THUMBNAIL_HEIGHT: u32 = 96;
-const MAP_THUMBNAIL_MAX_DIMENSION: u32 = 8192;
-const MAP_THUMBNAIL_MAX_DECODE_BYTES: u64 = 128 * 1024 * 1024;
 const COORDINATE_RULER_THICKNESS: f32 = 20.0;
 const COORDINATE_RULER_TARGET_TICK_PX: f32 = 80.0;
 const RULER_EDGE_SNAP_RADIUS_PX: f32 = 10.0;
@@ -251,8 +247,6 @@ struct LoadedViewer {
     previous_map_item: Option<(crate::map_data::MapItem, Option<PathBuf>)>,
     active_heatmap: Option<ActiveHeatmap>,
     map_item_error: Option<String>,
-    map_thumbnails: BTreeMap<PathBuf, MapThumbnailState>,
-    map_thumbnail_worker: Option<MapThumbnailWorker>,
     selected_map_bbox: Option<Rect32>,
     focus_animation: Option<FocusAnimation>,
     zoom: f32,
@@ -508,27 +502,6 @@ impl ActiveHeatmap {
             self.refresh_hash();
         }
     }
-}
-
-enum MapThumbnailState {
-    Loading,
-    Ready(egui::TextureHandle),
-    Failed,
-}
-
-struct MapThumbnailWorker {
-    request_sender: Sender<PathBuf>,
-    result_receiver: Receiver<MapThumbnailResult>,
-}
-
-struct MapThumbnailResult {
-    path: PathBuf,
-    decoded: Result<DecodedMapThumbnail, String>,
-}
-
-struct DecodedMapThumbnail {
-    size: [usize; 2],
-    rgba: Vec<u8>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2273,7 +2246,6 @@ impl LoadedViewer {
             .and_then(|catalog| catalog.categories.first())
             .map(|category| BTreeSet::from([category.id.clone()]))
             .unwrap_or_default();
-        let map_thumbnail_worker = map_catalog.as_ref().map(|_| spawn_map_thumbnail_worker());
         let macro_staging = macro_staging_path.as_deref().and_then(|path| {
             MacroStagingState::load(path, &db).or_else(|| {
                 log::warn!(
@@ -2343,8 +2315,6 @@ impl LoadedViewer {
             previous_map_item: None,
             active_heatmap: None,
             map_item_error: None,
-            map_thumbnails: BTreeMap::new(),
-            map_thumbnail_worker,
             selected_map_bbox: None,
             focus_animation: None,
             zoom: 1.0,
@@ -2584,7 +2554,6 @@ impl LoadedViewer {
     }
 
     fn map_sidebar(&mut self, ui: &mut egui::Ui) {
-        self.poll_map_thumbnail_results(ui.ctx());
         ui.horizontal(|ui| {
             section_heading(ui, "MAP DATA");
             if let Some(catalog) = &self.map_catalog {
@@ -2676,32 +2645,9 @@ impl LoadedViewer {
                     .default_open(default_open)
                     .show(ui, |ui| {
                         for item in &category.items {
-                            let texture_id = self.map_thumbnail_id(ui.ctx(), &item.png_path);
-                            let available =
-                                item.csv_path.is_some() && category.layout_path.is_some();
-                            let selected = self.selected_map_item.as_ref() == Some(&item.png_path);
+                            let available = category.layout_path.is_some();
+                            let selected = self.selected_map_item.as_ref() == Some(&item.csv_path);
                             ui.horizontal(|ui| {
-                                if let Some(texture_id) = texture_id {
-                                    ui.add(
-                                        egui::Image::new((texture_id, egui::vec2(52.0, 40.0)))
-                                            .fit_to_exact_size(egui::vec2(52.0, 40.0))
-                                            .corner_radius(3.0),
-                                    );
-                                } else {
-                                    let (rect, _) = ui.allocate_exact_size(
-                                        egui::vec2(52.0, 40.0),
-                                        egui::Sense::hover(),
-                                    );
-                                    ui.painter().rect_filled(rect, 3.0, ecos_canvas());
-                                    ui.painter().text(
-                                        rect.center(),
-                                        egui::Align2::CENTER_CENTER,
-                                        "PNG",
-                                        egui::FontId::monospace(10.0),
-                                        ecos_text_secondary(),
-                                    );
-                                }
-
                                 let button_width = ui.available_width().max(80.0);
                                 let response = ui.add_enabled(
                                     available,
@@ -2716,9 +2662,7 @@ impl LoadedViewer {
                                 );
                                 let response = if available {
                                     response
-                                        .on_hover_text(format!("Open {}", item.png_path.display()))
-                                } else if item.csv_path.is_none() {
-                                    response.on_disabled_hover_text("Matching CSV file is missing")
+                                        .on_hover_text(format!("Open {}", item.csv_path.display()))
                                 } else {
                                     response.on_disabled_hover_text("layout.csv is missing")
                                 };
@@ -2735,30 +2679,26 @@ impl LoadedViewer {
     }
 
     fn activate_map_item(&mut self, item: &MapItem, layout_path: Option<&Path>) {
-        if let Some(current_png) = &self.selected_map_item {
-            if current_png != &item.png_path {
+        if let Some(current_csv) = &self.selected_map_item {
+            if current_csv != &item.csv_path {
                 if let Some(catalog) = &self.map_catalog {
-                    if let Some((curr_item, curr_layout)) = catalog.find_item_by_png(current_png) {
+                    if let Some((curr_item, curr_layout)) = catalog.find_item_by_csv(current_csv) {
                         self.previous_map_item =
                             Some((curr_item.clone(), curr_layout.map(|p| p.to_path_buf())));
                     }
                 }
             }
         }
-        self.selected_map_item = Some(item.png_path.clone());
+        self.selected_map_item = Some(item.csv_path.clone());
         self.active_heatmap = None;
         self.map_item_error = None;
         self.selected_map_bbox = None;
 
-        let Some(csv_path) = item.csv_path.as_deref() else {
-            self.map_item_error = Some(format!("matching CSV is missing for {}", item.label));
-            return;
-        };
         let Some(layout_path) = layout_path else {
             self.map_item_error = Some(format!("layout.csv is missing for {}", item.label));
             return;
         };
-        match HeatmapData::load(csv_path, layout_path) {
+        match HeatmapData::load(&item.csv_path, layout_path) {
             Ok(data) => {
                 self.active_heatmap = Some(ActiveHeatmap::new(item.label.clone(), data));
             }
@@ -2771,54 +2711,6 @@ impl LoadedViewer {
             return;
         };
         self.activate_map_item(&prev_item, prev_layout.as_deref());
-    }
-
-    fn map_thumbnail_id(&mut self, ctx: &egui::Context, path: &Path) -> Option<egui::TextureId> {
-        if !self.map_thumbnails.contains_key(path) {
-            let state = self
-                .map_thumbnail_worker
-                .as_ref()
-                .filter(|worker| worker.request_sender.send(path.to_path_buf()).is_ok())
-                .map_or(MapThumbnailState::Failed, |_| MapThumbnailState::Loading);
-            self.map_thumbnails.insert(path.to_path_buf(), state);
-            ctx.request_repaint_after(Duration::from_millis(32));
-        }
-        match self.map_thumbnails.get(path) {
-            Some(MapThumbnailState::Ready(texture)) => Some(texture.id()),
-            Some(MapThumbnailState::Loading | MapThumbnailState::Failed) | None => None,
-        }
-    }
-
-    fn poll_map_thumbnail_results(&mut self, ctx: &egui::Context) {
-        let results = self
-            .map_thumbnail_worker
-            .as_ref()
-            .map(|worker| worker.result_receiver.try_iter().collect::<Vec<_>>())
-            .unwrap_or_default();
-        for result in results {
-            let state = match result.decoded {
-                Ok(decoded) => {
-                    let image = egui::ColorImage::from_rgba_unmultiplied(
-                        decoded.size,
-                        decoded.rgba.as_slice(),
-                    );
-                    MapThumbnailState::Ready(ctx.load_texture(
-                        format!("map-preview:{}", result.path.display()),
-                        image,
-                        egui::TextureOptions::LINEAR,
-                    ))
-                }
-                Err(_) => MapThumbnailState::Failed,
-            };
-            self.map_thumbnails.insert(result.path, state);
-        }
-        if self
-            .map_thumbnails
-            .values()
-            .any(|state| matches!(state, MapThumbnailState::Loading))
-        {
-            ctx.request_repaint_after(Duration::from_millis(32));
-        }
     }
 
     fn sidebar_contents(&mut self, ui: &mut egui::Ui) {
@@ -8576,46 +8468,6 @@ fn analysis_tab_button(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
     response.clicked()
 }
 
-fn spawn_map_thumbnail_worker() -> MapThumbnailWorker {
-    let (request_sender, request_receiver) = mpsc::channel::<PathBuf>();
-    let (result_sender, result_receiver) = mpsc::channel::<MapThumbnailResult>();
-    thread::spawn(move || {
-        while let Ok(path) = request_receiver.recv() {
-            let decoded = decode_map_thumbnail(&path);
-            if result_sender
-                .send(MapThumbnailResult { path, decoded })
-                .is_err()
-            {
-                break;
-            }
-        }
-    });
-    MapThumbnailWorker {
-        request_sender,
-        result_receiver,
-    }
-}
-
-fn decode_map_thumbnail(path: &Path) -> Result<DecodedMapThumbnail, String> {
-    let mut reader = image::ImageReader::open(path)
-        .and_then(image::ImageReader::with_guessed_format)
-        .map_err(|err| format!("failed to open map preview {}: {err}", path.display()))?;
-    let mut limits = image::Limits::default();
-    limits.max_image_width = Some(MAP_THUMBNAIL_MAX_DIMENSION);
-    limits.max_image_height = Some(MAP_THUMBNAIL_MAX_DIMENSION);
-    limits.max_alloc = Some(MAP_THUMBNAIL_MAX_DECODE_BYTES);
-    reader.limits(limits);
-    let image = reader
-        .decode()
-        .map_err(|err| format!("failed to decode map preview {}: {err}", path.display()))?
-        .thumbnail(MAP_THUMBNAIL_WIDTH, MAP_THUMBNAIL_HEIGHT)
-        .to_rgba8();
-    Ok(DecodedMapThumbnail {
-        size: [image.width() as usize, image.height() as usize],
-        rgba: image.into_raw(),
-    })
-}
-
 fn map_heatmap_layout(canvas: egui::Rect, rows: usize, columns: usize) -> (egui::Vec2, egui::Vec2) {
     let popup_width = (canvas.width() * MAP_HEATMAP_WIDTH_FRACTION)
         .clamp(MAP_HEATMAP_MIN_WIDTH, MAP_HEATMAP_MAX_WIDTH)
@@ -13932,7 +13784,7 @@ mod tests {
     }
 
     #[test]
-    fn map_catalog_find_item_by_png_locates_matching_item_and_layout() {
+    fn map_catalog_find_item_by_csv_locates_matching_item_and_layout() {
         let catalog = MapCatalog {
             categories: vec![crate::map_data::MapCategory {
                 id: "cat1".to_string(),
@@ -13940,41 +13792,21 @@ mod tests {
                 layout_path: Some(PathBuf::from("/tmp/layout.csv")),
                 items: vec![crate::map_data::MapItem {
                     label: "Item 1".to_string(),
-                    png_path: PathBuf::from("/tmp/item1.png"),
-                    csv_path: Some(PathBuf::from("/tmp/item1.csv")),
+                    csv_path: PathBuf::from("/tmp/item1.csv"),
                 }],
             }],
             warnings: Vec::new(),
         };
 
-        let found = catalog.find_item_by_png(Path::new("/tmp/item1.png"));
+        let found = catalog.find_item_by_csv(Path::new("/tmp/item1.csv"));
         assert!(found.is_some());
         let (item, layout) = found.unwrap();
         assert_eq!(item.label, "Item 1");
         assert_eq!(layout, Some(Path::new("/tmp/layout.csv")));
 
         assert!(catalog
-            .find_item_by_png(Path::new("/tmp/missing.png"))
+            .find_item_by_csv(Path::new("/tmp/missing.csv"))
             .is_none());
-    }
-
-    #[test]
-    fn map_thumbnail_decoder_downsizes_and_enforces_dimension_limit() {
-        let directory = temp_snapshot_dir("map-thumbnail-limits");
-        let preview_path = directory.join("preview.png");
-        image::RgbaImage::new(256, 192).save(&preview_path).unwrap();
-
-        let preview = decode_map_thumbnail(&preview_path).unwrap();
-        assert_eq!(preview.size, [128, 96]);
-        assert_eq!(preview.rgba.len(), 128 * 96 * 4);
-
-        let oversized_path = directory.join("oversized.png");
-        image::RgbaImage::new(MAP_THUMBNAIL_MAX_DIMENSION + 1, 1)
-            .save(&oversized_path)
-            .unwrap();
-        assert!(decode_map_thumbnail(&oversized_path).is_err());
-
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

@@ -114,6 +114,43 @@ describe('WorkspaceResourceService', () => {
     })
   })
 
+  it('accepts ECC geometry manifests without requiring a GDS file', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'place', tool: 'ecc' }])
+    const outputDirectory = join(root, 'place_ecc', 'output')
+    await mkdir(join(outputDirectory, 'geometry'), { recursive: true })
+    await writeFile(join(outputDirectory, 'gcd_place.def.gz'), 'def', 'utf8')
+    await writeFile(join(outputDirectory, 'gcd_place.v.gz'), 'verilog', 'utf8')
+    await writeFile(join(outputDirectory, 'geometry', 'geometry.manifest'), '{}', 'utf8')
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const index = await service.getIndex()
+    const layout = await service.resolveStepInfo({ id: 'layout', step: 'place' })
+
+    expect(layout.response).toBe('available')
+    expect(layout.missing).not.toContain(join(outputDirectory, 'gcd_place.gds'))
+    expect(index.flow.steps[0].resources.output.verilog).toMatchObject({
+      path: join(outputDirectory, 'gcd_place.v.gz'),
+      exists: true,
+    })
+  })
+
+  it('keeps resolving legacy uncompressed Verilog outputs', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'place', tool: 'ecc' }])
+    const outputDirectory = join(root, 'place_ecc', 'output')
+    await mkdir(outputDirectory, { recursive: true })
+    await writeFile(join(outputDirectory, 'gcd_place.v'), 'verilog', 'utf8')
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const index = await service.getIndex()
+
+    expect(index.flow.steps[0].resources.output.verilog).toMatchObject({
+      path: join(outputDirectory, 'gcd_place.v'),
+      exists: true,
+    })
+  })
+
   it('builds the resource index from home/params.toml workspaces', async () => {
     const root = await tempWorkspace()
     const outputDirectory = join(root, 'place_ecc', 'output')
@@ -252,6 +289,38 @@ describe('WorkspaceResourceService', () => {
       exists: true,
       kind: 'log',
     })
+  })
+
+  it('indexes Sizer output names and geometry manifests', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'Timing optimization', tool: 'sizer' }])
+    const outputDirectory = join(root, 'timing_optimization_sizer', 'output')
+    await mkdir(join(outputDirectory, 'geometry'), { recursive: true })
+    await mkdir(join(outputDirectory, 'gcd_Timing optimization_db'), { recursive: true })
+    await writeFile(join(outputDirectory, 'gcd_timing_optimization.def.gz'), 'def')
+    await writeFile(join(outputDirectory, 'gcd_timing_optimization.v.gz'), 'verilog')
+    await writeFile(
+      join(outputDirectory, 'gcd_Timing optimization_db', 'design.idb'),
+      'db',
+    )
+    await writeFile(join(outputDirectory, 'geometry', 'geometry.manifest'), '{}')
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const index = await service.getIndex()
+    const layout = await service.resolveStepInfo({
+      id: 'layout',
+      step: 'Timing optimization',
+    })
+
+    expect(index.flow.steps[0].resources.output.def).toMatchObject({
+      path: join(outputDirectory, 'gcd_timing_optimization.def.gz'),
+      exists: true,
+    })
+    expect(index.flow.steps[0].resources.output.verilog).toMatchObject({
+      path: join(outputDirectory, 'gcd_timing_optimization.v.gz'),
+      exists: true,
+    })
+    expect(layout.response).toBe('available')
   })
 
   it('exposes workspace-level view package tech resources from the design view directory', async () => {
@@ -754,18 +823,18 @@ describe('WorkspaceResourceService', () => {
     })
   })
 
-  it('returns density map PNGs in the renderer map gallery shape', async () => {
+  it('returns density map CSVs in the renderer map gallery shape', async () => {
     const root = await tempWorkspace()
     await writeWorkspace(root, [{ name: 'place', tool: 'ecc' }])
     await mkdir(join(root, 'place_ecc', 'feature', 'density_map'), { recursive: true })
     await writeFile(
-      join(root, 'place_ecc', 'feature', 'density_map', 'cell_density.png'),
-      'png',
+      join(root, 'place_ecc', 'feature', 'density_map', 'cell_density.csv'),
+      '0,1',
       'utf8',
     )
     await writeFile(
-      join(root, 'place_ecc', 'feature', 'density_map', 'rudy-horizontal.png'),
-      'png',
+      join(root, 'place_ecc', 'feature', 'density_map', 'rudy-horizontal.csv'),
+      '0,1',
       'utf8',
     )
     await writeFile(
@@ -783,11 +852,11 @@ describe('WorkspaceResourceService', () => {
       response: 'available',
       info: {
         cell_density: {
-          path: join(root, 'place_ecc', 'feature', 'density_map', 'cell_density.png'),
+          path: join(root, 'place_ecc', 'feature', 'density_map', 'cell_density.csv'),
           info: [],
         },
         'rudy-horizontal': {
-          path: join(root, 'place_ecc', 'feature', 'density_map', 'rudy-horizontal.png'),
+          path: join(root, 'place_ecc', 'feature', 'density_map', 'rudy-horizontal.csv'),
           info: [],
         },
       },

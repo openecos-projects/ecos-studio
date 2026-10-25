@@ -25,11 +25,13 @@ import { useWorkspace } from '../composables/useWorkspace'
 import { useWorkspaceAgentFlowCapture } from '../composables/workspaceAgentFlowCapture'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
+import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
 
 const { currentProject, workspaceSession } = useWorkspace()
 const route = useRoute()
 const agentShell = useAgentShellStore()
 const backendWorkspaceSession = useBackendWorkspaceSession()
+const backgroundOperations = useBackgroundOperationStore()
 useWorkspaceAgentFlowCapture()
 const showLeftSidebar = computed(() => route.path !== '/workspace/projects')
 const workspaceViewKey = computed(
@@ -56,6 +58,10 @@ watch(
         void backendWorkspaceSession.start(path, {
           forceRefresh: activeSessionReplaced,
         })
+        // Replacing a Workspace session (for example after Update Workspace)
+        // invalidates any previous runtime projection. Reconcile it here so a
+        // transient unknown projection cannot keep the Run button spinning.
+        void backgroundOperations.refresh()
       }
     }
     if (!path || !previousPath || path === previousPath) return

@@ -86,22 +86,22 @@ describe('useWorkspaceTitle', () => {
     expect(title.value).toBe('gcd')
   })
 
-  it('upgrades the owner to the manifest design name once discovered', async () => {
+  it('upgrades the owner to the project manifest name once discovered', async () => {
     testState.route.query = {
-      projectRoot: '/work/gcd',
+      projectRoot: '/work/gcd3',
       projectName: 'gcd',
-      workspaceId: 'ws_0036',
+      workspaceId: 'ws_0001',
     }
     testState.discoverProjectForWorkspace.mockResolvedValue(
-      manifest({ designName: 'gcd_v2', name: 'gcd', workspaces: ['/work/gcd/ws_0036'] }),
+      manifest({ designName: 'gcd', name: 'gcd3', workspaces: ['/work/gcd3/ws_0001'] }),
     )
     const title = useWorkspaceTitle({
-      workspacePath: ref('/work/gcd/ws_0036'),
+      workspacePath: ref('/work/gcd3/ws_0001'),
       fallbackName: ref(null),
     })
-    expect(title.value).toBe('gcd / ws_0036')
+    expect(title.value).toBe('gcd / ws_0001')
     await vi.waitFor(() => {
-      expect(title.value).toBe('gcd_v2 / ws_0036')
+      expect(title.value).toBe('gcd3 / ws_0001')
     })
   })
 
@@ -148,13 +148,19 @@ describe('useWorkspaceTitle', () => {
           }),
       )
       .mockResolvedValueOnce(
-        manifest({ designName: 'second', workspaces: ['/work/second/ws_0002'] }),
+        manifest({
+          designName: 'gcd',
+          name: 'second',
+          workspaces: ['/work/second/ws_0002'],
+        }),
       )
     const title = useWorkspaceTitle({ workspacePath, fallbackName: ref(null) })
 
     workspacePath.value = '/work/second/ws_0002'
     await nextTick()
-    resolveFirst(manifest({ designName: 'first', workspaces: ['/work/gcd/ws_0036'] }))
+    resolveFirst(
+      manifest({ designName: 'gcd', name: 'first', workspaces: ['/work/gcd/ws_0036'] }),
+    )
     await vi.waitFor(() => {
       expect(title.value).toBe('second / ws_0002')
     })

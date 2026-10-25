@@ -3,6 +3,7 @@ import { flowStepRegistry } from '@ecos-studio/shared'
 import {
   buildProjectQorTrendSummary,
   normalizeQorMetrics,
+  PROJECT_QOR_SCORED_STEPS,
   PROJECT_GATE_STEPS,
 } from './qorAnalysis'
 
@@ -40,6 +41,16 @@ describe('qorAnalysis', () => {
       .filter((step) => step.gate)
       .map((step) => step.id)
     expect([...PROJECT_GATE_STEPS].sort()).toEqual([...registryGateSteps].sort())
+  })
+
+  it("keeps scoring membership in sync with ECC's scored steps", () => {
+    const registryScoredSteps = flowStepRegistry
+      .filter((step) => step.qorScored)
+      .map((step) => step.id)
+    expect(PROJECT_QOR_SCORED_STEPS).toEqual(registryScoredSteps)
+    expect(PROJECT_QOR_SCORED_STEPS).not.toContain('Filler')
+    expect(PROJECT_QOR_SCORED_STEPS).not.toContain('Timing Opt')
+    expect(PROJECT_QOR_SCORED_STEPS).not.toContain('Power Analysis')
   })
 
   it('normalizes metric polarity without owning the ECC scoring policy', () => {

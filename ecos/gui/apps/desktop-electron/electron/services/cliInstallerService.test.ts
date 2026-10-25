@@ -700,6 +700,20 @@ describe('CliInstallerService', () => {
     expect(status.error).toBeNull()
   })
 
+  it('does not flag equivalent PEP 440 and semver spellings as drift', async () => {
+    const root = createTempDir('ecos-cli-installer-external-pep440-')
+    const externalBin = createExternalEccBinDir(root)
+    const { service } = createService({
+      externalBinDir: externalBin,
+      expectedVersion: '0.1.0-alpha.12',
+      spawnResult: { code: 0, output: 'ecc 0.1.0a12' },
+    })
+
+    const status = await service.status()
+    expect(status.installedVersion).toBe('0.1.0a12')
+    expect(status.warning).toBeNull()
+  })
+
   it('reports an external runtime self-check failure', async () => {
     const root = createTempDir('ecos-cli-installer-external-broken-')
     const externalBin = createExternalEccBinDir(root)

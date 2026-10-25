@@ -34,6 +34,7 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
   const issue = ref<string | null>(null)
   const loading = ref(false)
   const shutdownStatus = ref<DesktopShutdownStatus>(idleShutdownStatus())
+  const hiddenProjectRoots = ref<string[]>([])
   let requestSequence = 0
   let unsubscribe: (() => void) | null = null
   let unsubscribeShutdown: (() => void) | null = null
@@ -52,29 +53,43 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
     try {
       const projection = await runtime.operationProjection()
       if (sequence !== requestSequence || projection.generation < generation.value) return
-      generation.value = projection.generation
-      operations.value = projection.operations
-      finalizations.value = projection.finalizations
-      creations.value = projection.creations
-      const recoveries = projection.recoveries ?? []
-      setBackendFlowProjectionUnknown(
-        recoveries.map((recovery) => recovery.workspaceDirectory),
+      const visibleOperations = projection.operations.filter(
+        (operation) => !belongsToHiddenProject(operation),
       )
-      publishCreationRecoveries(projection.creations)
-      publishOutcomes(projection.outcomes)
-      publishRecoveryFailures(recoveries)
+      const visibleFinalizations = projection.finalizations.filter(
+        (finalization) => !belongsToHiddenProject(finalization),
+      )
+      const visibleCreations = projection.creations.filter(
+        (creation) => !belongsToHiddenProject(creation),
+      )
+      const visibleOutcomes = projection.outcomes.filter(
+        (outcome) => !belongsToHiddenProject(outcome),
+      )
+      const visibleRecoveries = (projection.recoveries ?? []).filter(
+        (recovery) => !belongsToHiddenProject(recovery),
+      )
+      generation.value = projection.generation
+      operations.value = visibleOperations
+      finalizations.value = visibleFinalizations
+      creations.value = visibleCreations
+      setBackendFlowProjectionUnknown(
+        visibleRecoveries.map((recovery) => recovery.workspaceDirectory),
+      )
+      publishCreationRecoveries(visibleCreations)
+      publishOutcomes(visibleOutcomes)
+      publishRecoveryFailures(visibleRecoveries)
       updateAuthoritativeBackendFlowState(
         [
-          ...projection.operations.map((operation) => operation.workspaceDirectory),
-          ...projection.outcomes.map((operation) => operation.workspaceDirectory),
-          ...projection.finalizations.map(
-            (finalization) => finalization.workspaceDirectory,
-          ),
+          ...visibleOperations.map((operation) => operation.workspaceDirectory),
+          ...visibleOutcomes.map((operation) => operation.workspaceDirectory),
+          ...visibleFinalizations.map((finalization) => finalization.workspaceDirectory),
         ],
-        projection.operations.map((operation) => operation.workspaceDirectory),
+        visibleOperations.map((operation) => operation.workspaceDirectory),
       )
       setBackendFlowProjectionReady(true)
-      const failedRecovery = recoveries.find((recovery) => recovery.state === 'failed')
+      const failedRecovery = visibleRecoveries.find(
+        (recovery) => recovery.state === 'failed',
+      )
       issue.value = failedRecovery
         ? `${workspaceName(failedRecovery.workspaceDirectory)}: recovery after an interrupted run failed. Reopen the Workspace to retry.`
         : null
@@ -122,6 +137,7 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
     operations.value = []
     finalizations.value = []
     creations.value = []
+    hiddenProjectRoots.value = []
     issue.value = null
     loading.value = false
     shutdownStatus.value = idleShutdownStatus()
@@ -133,6 +149,49 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
         operation.workspaceId === workspaceId &&
         (workspaceRevision === undefined ||
           operation.workspaceRevision === workspaceRevision),
+    )
+  }
+
+  function forgetProject(projectRoot: string): void {
+    const normalized = normalizeProjectRoot(projectRoot)
+    if (!normalized) return
+    if (!hiddenProjectRoots.value.includes(normalized)) {
+      hiddenProjectRoots.value = [...hiddenProjectRoots.value, normalized]
+    }
+    operations.value = operations.value.filter(
+      (operation) => !belongsToHiddenProject(operation),
+    )
+    finalizations.value = finalizations.value.filter(
+      (finalization) => !belongsToHiddenProject(finalization),
+    )
+    creations.value = creations.value.filter(
+      (creation) => !belongsToHiddenProject(creation),
+    )
+  }
+
+  function rememberProject(projectRoot: string): void {
+    const normalized = normalizeProjectRoot(projectRoot)
+    if (!normalized) return
+    hiddenProjectRoots.value = hiddenProjectRoots.value.filter(
+      (hidden) => hidden !== normalized,
+    )
+  }
+
+  function belongsToHiddenProject(task: {
+    projectRoot?: string
+    targetDirectory?: string
+    workspaceDirectory?: string
+  }): boolean {
+    const projectRoot = normalizeProjectRoot(task.projectRoot ?? '')
+    if (projectRoot) return hiddenProjectRoots.value.includes(projectRoot)
+    const directory = normalizeProjectRoot(
+      task.workspaceDirectory ?? task.targetDirectory ?? '',
+    )
+    return (
+      Boolean(directory) &&
+      hiddenProjectRoots.value.some(
+        (hidden) => directory === hidden || directory.startsWith(`${hidden}/`),
+      )
     )
   }
 
@@ -215,18 +274,21 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
         seenOutcomes.delete(seenOutcomes.values().next().value!)
       }
       notifications.addNotification({
+        ...(outcome.flowBlock
+          ? { detail: outcome.flowBlock.failedItems.join('\n') }
+          : {}),
         key: `runtime-outcome:${key}`,
-        message:
-          outcome.error?.message ??
-          `${workspaceName(outcome.workspaceDirectory)}: ${outcome.currentStep || outcome.step || 'Flow'} ${outcome.state}.`,
-        severity:
-          outcome.state === 'succeeded'
+        message: outcomeMessage(outcome),
+        severity: outcome.flowBlock
+          ? 'warn'
+          : outcome.state === 'succeeded'
             ? 'info'
             : outcome.state === 'cancelled'
               ? 'warn'
               : 'error',
-        title:
-          outcome.state === 'succeeded'
+        title: outcome.flowBlock
+          ? 'Flow blocked'
+          : outcome.state === 'succeeded'
             ? 'Flow completed'
             : outcome.state === 'cancelled'
               ? 'Flow cancelled'
@@ -235,6 +297,19 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
                 : 'Flow failed',
       })
     }
+  }
+
+  function outcomeMessage(outcome: EccBackgroundOperationOutcome): string {
+    if (outcome.flowBlock) {
+      const reasons = outcome.flowBlock.failedItems.length
+        ? `: ${outcome.flowBlock.failedItems.join(', ')}`
+        : ''
+      return `${workspaceName(outcome.workspaceDirectory)}: ${outcome.flowBlock.step} blocked${reasons}.`
+    }
+    return (
+      outcome.error?.message ??
+      `${workspaceName(outcome.workspaceDirectory)}: ${outcome.currentStep || outcome.step || 'Flow'} ${outcome.state}.`
+    )
   }
 
   function publishRecoveryFailures(recoveries: EccBackgroundOperationRecovery[]): void {
@@ -280,6 +355,7 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
     creations,
     dispose,
     finalizations,
+    forgetProject,
     generation,
     issue,
     continueCreation,
@@ -288,6 +364,7 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
     operationForWorkspace,
     operations,
     refresh,
+    rememberProject,
     retryFinalSnapshot,
     reviewShutdownOptions,
     shutdownStatus,
@@ -315,4 +392,8 @@ function workspaceName(directory: string): string {
       .split(/[\\/]/)
       .pop() || directory
   )
+}
+
+function normalizeProjectRoot(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/+$/, '')
 }

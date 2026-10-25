@@ -121,6 +121,7 @@ describe('buildStepIssues', () => {
     const succeeded = workspaceSummaryFixture('ws_a', {
       Route: stepSnapshotFixture({
         hotspotArtifactStatus: 'missing',
+        hotspotRequired: true,
         summaryArtifactStatus: 'invalid',
       }),
     })
@@ -128,6 +129,7 @@ describe('buildStepIssues', () => {
       Route: stepSnapshotFixture({
         flowStatus: 'unstart',
         hotspotArtifactStatus: 'missing',
+        hotspotRequired: true,
         summaryArtifactStatus: 'invalid',
       }),
     })
@@ -239,6 +241,7 @@ describe('buildStepIssueFilters', () => {
   const workspace = workspaceSummaryFixture('ws_a', {
     Route: stepSnapshotFixture({
       hotspotArtifactStatus: 'missing',
+      hotspotRequired: true,
       blockingIssues: [
         {
           step: 'Route',
@@ -321,6 +324,7 @@ describe('buildStepVerdict', () => {
           step: 'STA',
           summaryStatus: 'blocked',
           hotspotArtifactStatus: 'missing',
+          hotspotRequired: true,
           metrics: [
             metricRecordFixture({ metricName: 'sta_corner_count', value: 2 }),
             metricRecordFixture({ metricName: 'sta_expected_corner_count', value: 4 }),
@@ -564,6 +568,96 @@ function mixedWorkspace(
 }
 
 describe('buildStepTabs and buildStepWorkspaceChips', () => {
+  it('marks coverage-limited analysis incomplete even when every artifact is present', () => {
+    const workspace = workspaceSummaryFixture('ws_a', {
+      Synth: stepSnapshotFixture({
+        step: 'Synth',
+        analysisStatus: 'incomplete',
+        missingMetrics: [
+          {
+            step: 'Synth',
+            metricName: 'synthesis_leakage_power',
+            reason: 'The synthesis power report is unavailable.',
+            evidence: evidenceFixture(),
+          },
+        ],
+      }),
+    })
+    const issues = buildStepIssues(workspace, 'Synth')
+
+    const [tab] = buildStepTabs([compareSummaryFixture('Synth')], workspace)
+    const verdict = buildStepVerdict(workspace, 'Synth', issues)
+
+    expect(tab.analysisAvailability).toBe('incomplete')
+    expect(verdict.status).toBe('incomplete')
+    expect(verdict.facts).toEqual(
+      expect.arrayContaining([
+        { label: 'Coverage', value: 'incomplete', tone: 'warn' },
+        { label: 'Missing', value: '1 metric', tone: 'warn' },
+      ]),
+    )
+  })
+
+  it('renders checklist-backed report items as report findings', () => {
+    const workspace = workspaceSummaryFixture('ws_a', {
+      'Antenna Check': stepSnapshotFixture({
+        step: 'Antenna Check',
+        reportOnly: true,
+        analysisRequirement: 'advisory',
+        artifactStatus: 'missing',
+        summaryArtifactStatus: 'missing',
+        hotspotArtifactStatus: 'missing',
+        summaryStatus: null,
+        reportItems: [
+          {
+            id: 'antenna_ratio',
+            title: 'Antenna ratio',
+            state: 'warning',
+            blocked: false,
+            summary: 'One net exceeds the antenna ratio gate.',
+            source: 'checklist.json',
+          },
+          {
+            id: 'antenna_diode',
+            title: 'Antenna diode insertion',
+            state: 'pass',
+            blocked: false,
+            summary: 'Antenna diodes are present where required.',
+            source: 'checklist.json',
+          },
+        ],
+      }),
+    })
+
+    const issues = buildStepIssues(workspace, 'Antenna Check')
+    const [tab] = buildStepTabs([compareSummaryFixture('Antenna Check')], workspace)
+    const verdict = buildStepVerdict(workspace, 'Antenna Check', issues)
+
+    expect(issues).toEqual([
+      expect.objectContaining({
+        channel: 'report',
+        severity: 'warning',
+        blocking: false,
+        kind: 'Step report',
+        title: 'Antenna ratio',
+        actual: 'warning',
+        source: 'checklist.json',
+        diagnosis: 'One net exceeds the antenna ratio gate.',
+      }),
+    ])
+    expect(tab).toMatchObject({
+      blockingCount: 0,
+      findingCount: 1,
+      analysisAvailability: 'available',
+    })
+    expect(verdict).toMatchObject({ status: 'advisory', label: 'Advisory' })
+    expect(verdict.facts).toContainEqual({
+      label: 'Report checks',
+      value: '1/2',
+      tone: 'warn',
+    })
+  })
+
   it('counts issues per step for the selected workspace', () => {
     const workspace = workspaceSummaryFixture('ws_a', {
       Route: stepSnapshotFixture({
@@ -602,7 +696,10 @@ describe('buildStepTabs and buildStepWorkspaceChips', () => {
   it('describes each workspace with its QoR status tone and issue counts', () => {
     const workspaces = [
       workspaceSummaryFixture('ws_a', {
-        Route: stepSnapshotFixture({ hotspotArtifactStatus: 'missing' }),
+        Route: stepSnapshotFixture({
+          hotspotArtifactStatus: 'missing',
+          hotspotRequired: true,
+        }),
       }),
       workspaceSummaryFixture('ws_b', { Route: stepSnapshotFixture({}) }),
     ]
@@ -656,5 +753,84 @@ describe('buildStepTabs and buildStepWorkspaceChips', () => {
       findingCount: 0,
       analysisAvailability: 'unavailable',
     })
+  })
+
+  it('keeps an unloaded overview step pending without inventing artifact issues', () => {
+    const workspace = workspaceSummaryFixture('ws_a', {
+      Route: stepSnapshotFixture({
+        artifactStatus: 'missing',
+        summaryArtifactStatus: 'missing',
+        hotspotArtifactStatus: 'missing',
+        analysisSummaryLoaded: false,
+        artifactStatusProbed: false,
+        summaryStatus: null,
+      }),
+    })
+
+    const issues = buildStepIssues(workspace, 'Route')
+    const [tab] = buildStepTabs([compareSummaryFixture('Route')], workspace)
+
+    expect(issues).toEqual([])
+    expect(tab).toMatchObject({
+      step: 'Route',
+      blockingCount: 0,
+      findingCount: 0,
+      analysisAvailability: 'pending',
+    })
+  })
+
+  it('uses probed artifact availability while the step contents stay lazy', () => {
+    const workspace = workspaceSummaryFixture('ws_a', {
+      Route: stepSnapshotFixture({
+        analysisSummaryLoaded: false,
+        artifactStatusProbed: true,
+      }),
+    })
+
+    const [tab] = buildStepTabs([compareSummaryFixture('Route')], workspace)
+
+    expect(buildStepIssues(workspace, 'Route')).toEqual([])
+    expect(tab.analysisAvailability).toBe('pending')
+  })
+
+  it('reports probed missing artifacts even when the summary is not loaded', () => {
+    const workspace = workspaceSummaryFixture('ws_a', {
+      Route: stepSnapshotFixture({
+        artifactStatus: 'missing',
+        summaryArtifactStatus: 'missing',
+        hotspotArtifactStatus: 'missing',
+        hotspotRequired: true,
+        analysisSummaryLoaded: false,
+        artifactStatusProbed: true,
+        summaryStatus: null,
+      }),
+    })
+
+    const [tab] = buildStepTabs([compareSummaryFixture('Route')], workspace)
+
+    expect(buildStepIssues(workspace, 'Route')).toHaveLength(3)
+    expect(tab).toMatchObject({
+      findingCount: 3,
+      analysisAvailability: 'incomplete',
+    })
+  })
+
+  it('does not infer missing artifacts for a step with no QoR artifact contract', () => {
+    const workspace = workspaceSummaryFixture('ws_a', {
+      LEC: stepSnapshotFixture({
+        step: 'LEC',
+        artifactStatus: 'missing',
+        summaryArtifactStatus: 'missing',
+        hotspotArtifactStatus: 'missing',
+        analysisSummaryLoaded: true,
+        artifactStatusProbed: false,
+        summaryStatus: null,
+      }),
+    })
+
+    const [tab] = buildStepTabs([compareSummaryFixture('LEC')], workspace)
+
+    expect(buildStepIssues(workspace, 'LEC')).toEqual([])
+    expect(tab.analysisAvailability).toBe('unavailable')
   })
 })

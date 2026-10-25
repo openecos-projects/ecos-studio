@@ -3,6 +3,7 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   statSync,
   writeFileSync,
 } from 'node:fs'
@@ -178,13 +179,43 @@ function packagedSizerEnv(
   if (platform !== 'linux') return {}
 
   const root = join(binariesPath, 'sizer')
-  if (
-    !existsSync(join(root, 'bin', 'Sizer')) ||
-    !existsSync(join(root, 'src', 'sizer_os.tcl'))
-  ) {
+  return isValidSizerRoot(root) ? { CHIPCOMPILER_ECC_SIZER_ROOT: root } : {}
+}
+
+function isValidSizerRoot(root: string): boolean {
+  return (
+    existsSync(join(root, 'bin', 'Sizer')) &&
+    existsSync(join(root, 'src', 'sizer_os.tcl'))
+  )
+}
+
+/**
+ * Resolve the Sizer runtime installed by the ECC installer. Development and
+ * external-runtime launches do not carry the generated host CLI wrapper, so
+ * they must not rely on inherited tool roots pointing at an old checkout.
+ */
+function installedSizerEnv(options: EccRuntimeEnvOptions): NodeJS.ProcessEnv {
+  if (options.platform !== 'linux') return {}
+  const versionsRoot = join(resolveDataHome(options), 'ecc', 'tools', 'ecc-sizer')
+  let versions: string[]
+  try {
+    versions = readdirSync(versionsRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+      .map((entry) => join(versionsRoot, entry.name))
+      .filter(isValidSizerRoot)
+      .sort((left, right) =>
+        left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }),
+      )
+  } catch {
     return {}
   }
-  return { CHIPCOMPILER_ECC_SIZER_ROOT: root }
+  const root = versions.at(-1)
+  return root ? { CHIPCOMPILER_ECC_SIZER_ROOT: root } : {}
+}
+
+function withoutInheritedSizerEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const { CHIPCOMPILER_ECC_SIZER_ROOT: _ignored, ...rest } = env
+  return rest
 }
 
 function packagedChipViewerEnv(resourcesPath: string): NodeJS.ProcessEnv {
@@ -353,10 +384,23 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
     return { ...options.env }
   }
 
-  const nextPath = prependPath(options.env, developmentBinDir, options.platform)
-  const sizerEnv = options.env.CHIPCOMPILER_ECC_SIZER_ROOT?.trim()
-    ? {}
-    : packagedSizerEnv(resolvePackagedBinariesPath(options), options.platform)
+  const inheritedSizerRoot = options.env.CHIPCOMPILER_ECC_SIZER_ROOT?.trim()
+  const baseEnv =
+    inheritedSizerRoot && !isValidSizerRoot(inheritedSizerRoot)
+      ? withoutInheritedSizerEnv(options.env)
+      : options.env
+  const nextPath = prependPath(baseEnv, developmentBinDir, options.platform)
+  const sizerEnv = inheritedSizerRoot
+    ? isValidSizerRoot(inheritedSizerRoot)
+      ? {}
+      : {
+          ...installedSizerEnv(options),
+          ...packagedSizerEnv(resolvePackagedBinariesPath(options), options.platform),
+        }
+    : {
+        ...installedSizerEnv(options),
+        ...packagedSizerEnv(resolvePackagedBinariesPath(options), options.platform),
+      }
   // An external bundle ships the same _internal layout as a packaged one;
   // its native tools need the library path in development mode too.
   const libraryEnv = externalRuntimeBin
@@ -364,7 +408,7 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
     : {}
 
   return {
-    ...options.env,
+    ...baseEnv,
     ...sizerEnv,
     ...libraryEnv,
     [nextPath.key]: nextPath.value,

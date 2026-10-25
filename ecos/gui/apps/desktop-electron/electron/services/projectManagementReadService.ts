@@ -491,6 +491,40 @@ export class ProjectManagementReadService {
     }
   }
 
+  async readStepAnalysisSummaries(request: {
+    projectRoot: string
+    workspacePath: string
+    artifacts: Array<{ reference: string }>
+  }): Promise<VerifiedProjectArtifactsReadResult> {
+    const references = new Set(request.artifacts.map((artifact) => artifact.reference))
+    if (
+      request.artifacts.length < 1 ||
+      request.artifacts.length > 32 ||
+      references.size !== request.artifacts.length
+    ) {
+      return { ok: false, code: 'ARTIFACT_REFERENCE_OUTSIDE_WORKSPACE', reference: '' }
+    }
+    const texts: Record<string, string> = {}
+    const issues: NonNullable<
+      Extract<VerifiedProjectArtifactsReadResult, { ok: true }>['issues']
+    > = []
+    for (let index = 0; index < request.artifacts.length; index += 4) {
+      const read = await this.readVerifiedArtifacts({
+        projectRoot: request.projectRoot,
+        workspacePath: request.workspacePath,
+        artifacts: request.artifacts.slice(index, index + 4),
+      })
+      if (!read.ok) return read
+      Object.assign(texts, read.texts)
+      if (read.issues) issues.push(...read.issues)
+    }
+    return {
+      ok: true,
+      texts,
+      ...(issues.length > 0 ? { issues } : {}),
+    }
+  }
+
   async readVerifiedArtifact(request: {
     projectRoot: string
     workspacePath: string

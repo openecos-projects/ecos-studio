@@ -1,4 +1,7 @@
-import type { EccWorkspaceCreateRequest } from '@ecos-studio/shared'
+import type {
+  EccWorkspaceCreateRequest,
+  EccWorkspaceUpdateRequest,
+} from '@ecos-studio/shared'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -308,6 +311,7 @@ describe('ECC CLI workspace command planning', () => {
         commandId: 'refresh-1',
         expectedWorkspaceRevision: 4,
         force: true,
+        keepBackup: true,
         projectRoot: '/projects/demo',
         workspaceId: 'ws_1',
       }),
@@ -323,6 +327,7 @@ describe('ECC CLI workspace command planning', () => {
       'refresh-1',
       '--no-wait',
       '--force',
+      '--keep-backup',
     ])
   })
 
@@ -596,6 +601,199 @@ describe('ECC CLI Workspace configuration boundary', () => {
   })
 })
 
+describe('ECC CLI Workspace update transaction', () => {
+  function serviceWithSession() {
+    const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
+    ;(service as any).sessions.set('handle-1', {
+      directory: '/projects/demo/ws_1',
+      handle: 'handle-1',
+      projectRoot: '/projects/demo',
+      workspaceId: 'ws_1',
+      workspaceRevision: 4,
+    })
+    return service
+  }
+
+  it('persists Wizard project settings, refreshes with a backup, and applies parameters', async () => {
+    const input = request()
+    const commands: string[][] = []
+    vi.spyOn(EccCliProcess.prototype, 'run').mockImplementation(async (args) => {
+      commands.push([...args])
+      return { exitCode: 0, stderr: '', stdout: '' }
+    })
+    const readSnapshot = vi.spyOn(
+      await import('./engineeringSnapshotReader'),
+      'readPersistedEngineeringSnapshot',
+    )
+    readSnapshot
+      .mockResolvedValueOnce({
+        workspaceBindings: input.workspaceBindings,
+        workspaceRevision: 4,
+        workspaceSpec: input.workspaceSpec,
+      } as never)
+      .mockResolvedValueOnce({ workspaceRevision: 5 } as never)
+      .mockResolvedValueOnce({ workspaceRevision: 6 } as never)
+    const update: EccWorkspaceUpdateRequest = {
+      commandId: 'update-1',
+      eccPdkConfig: {
+        externalPaths: ['/macros/sram'],
+        overrides: { lefs: ['/macros/sram/sram.lef'] },
+      },
+      expectedWorkspaceRevision: 4,
+      retainBackup: true,
+      workspaceBindings: input.workspaceBindings,
+      workspaceHandle: 'handle-1',
+      workspaceSpec: input.workspaceSpec,
+    }
+
+    await expect(serviceWithSession().updateWorkspace(update)).resolves.toMatchObject({
+      directory: '/projects/demo/ws_1',
+      workspaceRevision: 6,
+      workspaceId: 'ws_1',
+    })
+
+    expect(commands.map((args) => args.slice(0, 2))).toEqual([
+      ['project', 'apply'],
+      ['workspace', 'refresh'],
+      ['param', 'apply'],
+    ])
+    expect(commands[0]).toEqual(
+      expect.arrayContaining([
+        '--set',
+        'design.top=gcd_top',
+        '--set',
+        'pdk.external_paths=["/macros/sram"]',
+        '--set',
+        'pdk.overrides.lefs=["/macros/sram/sram.lef"]',
+      ]),
+    )
+    expect(commands[1]).toEqual([
+      'workspace',
+      'refresh',
+      'ws_1',
+      '--project',
+      '/projects/demo',
+      '--expected-revision',
+      '4',
+      '--command-id',
+      'update-1',
+      '--no-wait',
+      '--force',
+      '--keep-backup',
+    ])
+    expect(commands[2]).toEqual([
+      'param',
+      'apply',
+      '--project',
+      '/projects/demo',
+      '--workspace',
+      'ws_1',
+      '--expected-revision',
+      '5',
+      '--command-id',
+      'update-1:parameters',
+      '--no-wait',
+      '--set',
+      'design.frequency_mhz=500',
+      '--set',
+      'place.density=0.63',
+    ])
+  })
+})
+
+describe('ECC CLI workspace refresh legacy RTL recovery', () => {
+  async function serviceWithLegacyWorkspace() {
+    const root = await mkdtemp(join(tmpdir(), 'ecc-refresh-recovery-'))
+    temporaryDirectories.push(root)
+    const workspace = join(root, 'ws_1')
+    await mkdir(join(workspace, 'origin'), { recursive: true })
+    await writeFile(join(workspace, 'origin', 'gcd.v'), 'module gcd(); endmodule')
+    await writeFile(join(workspace, 'origin', 'gcd.sdc'), 'create_clock')
+    const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
+    ;(service as any).sessions.set('handle-1', {
+      directory: workspace,
+      handle: 'handle-1',
+      projectRoot: root,
+      workspaceId: 'ws_1',
+      workspaceRevision: 36,
+    })
+    vi.spyOn(
+      await import('./engineeringSnapshotReader'),
+      'readPersistedEngineeringSnapshot',
+    ).mockResolvedValue({ workspaceRevision: 37 } as never)
+    return { root, workspace, service }
+  }
+
+  const MISSING_RTL_ERROR = () =>
+    new EccCliCommandError(
+      1,
+      'kind=error error=step_input_missing step_input_missing: Synthesis requires design.rtl',
+      '',
+    )
+
+  it('imports workspace origin RTL into the project and retries the refresh', async () => {
+    const { root, workspace, service } = await serviceWithLegacyWorkspace()
+    let refreshAttempts = 0
+    const run = vi
+      .spyOn(EccCliProcess.prototype, 'run')
+      .mockImplementation(async (args) => {
+        if (args[0] === 'workspace' && args[1] === 'refresh') {
+          refreshAttempts += 1
+          if (refreshAttempts === 1) throw MISSING_RTL_ERROR()
+        }
+        return { exitCode: 0, stderr: '', stdout: '' }
+      })
+
+    await expect(
+      service.refreshConfig({ workspaceHandle: 'handle-1' }),
+    ).resolves.toMatchObject({
+      directory: workspace,
+      refreshed: true,
+      workspaceRevision: 37,
+    })
+    expect(refreshAttempts).toBe(2)
+    expect(run).toHaveBeenCalledWith(
+      [
+        'rtl',
+        'import',
+        '--project',
+        root,
+        '--verilog',
+        join(workspace, 'origin', 'gcd.v'),
+        '--plain',
+      ],
+      { cwd: root },
+    )
+  })
+
+  it('surfaces unrelated refresh failures without importing RTL', async () => {
+    const { service } = await serviceWithLegacyWorkspace()
+    const run = vi.spyOn(EccCliProcess.prototype, 'run').mockImplementation(async () => {
+      throw new EccCliCommandError(1, 'kind=error error=derived_configs_modified', '')
+    })
+
+    await expect(service.refreshConfig({ workspaceHandle: 'handle-1' })).rejects.toThrow(
+      'derived_configs_modified',
+    )
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(run.mock.calls.some((call) => call[0][0] === 'rtl')).toBe(false)
+  })
+
+  it('keeps the original failure when the workspace has no origin RTL', async () => {
+    const { workspace, service } = await serviceWithLegacyWorkspace()
+    const { rm } = await import('node:fs/promises')
+    await rm(join(workspace, 'origin', 'gcd.v'), { force: true })
+    const run = vi.spyOn(EccCliProcess.prototype, 'run').mockImplementation(async () => {
+      throw MISSING_RTL_ERROR()
+    })
+
+    await expect(service.refreshConfig({ workspaceHandle: 'handle-1' })).rejects.toThrow(
+      'requires design.rtl',
+    )
+    expect(run).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('ECC CLI Workspace parameter projection', () => {
   it('reads legacy flat Snapshot values through the catalog mapping', () => {
     expect(
@@ -817,6 +1015,102 @@ describe('ECC CLI live flow projection', () => {
             }),
           ],
         },
+      }),
+    ])
+    await service.shutdown()
+  })
+
+  it('adopts a registered CLI flow when the background projection refreshes', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ecc-runtime-adopt-flow-'))
+    temporaryDirectories.push(projectRoot)
+    const workspaceDirectory = join(projectRoot, 'ws_1')
+    await mkdir(join(workspaceDirectory, 'home'), { recursive: true })
+    const runId = '22222222-2222-4222-8222-222222222222'
+    const timestamp = '2026-09-28T00:00:00.000Z'
+    await writeFile(
+      join(projectRoot, 'project.json'),
+      JSON.stringify({
+        schema_version: 1,
+        project_id: 'project-1',
+        name: 'Demo',
+        design_name: 'gcd',
+        description: '',
+        root_path: projectRoot,
+        created_at: timestamp,
+        updated_at: timestamp,
+        base_design: {},
+        objectives: { primary: '', directions: {} },
+        workspaces: [
+          {
+            workspace_id: 'ws_1',
+            name: 'ws_1',
+            workspace_path: workspaceDirectory,
+            source_workspace_id: null,
+            branch_from: null,
+            start_step: 'Synth',
+            end_step: 'Harden',
+            status: 'running',
+            created_at: timestamp,
+            updated_at: timestamp,
+            parameter_patch: {},
+          },
+        ],
+        mpc: null,
+        best_workspace: null,
+        qor_baseline: null,
+        runtime_processes: {
+          ws_1: {
+            schema_version: 1,
+            run_id: runId,
+            pid: 1234,
+            pgid: 1234,
+            process_start_id: 'start-1',
+            boot_id: 'boot-1',
+            host_id: 'host-1',
+            workspace_path: workspaceDirectory,
+            started_at: 1,
+            runtime_id: 'runtime-1',
+            log_path: `log/${runId}.log`,
+          },
+        },
+      }),
+    )
+    await writeFile(
+      join(workspaceDirectory, 'home', 'flow.json'),
+      JSON.stringify({
+        schema_version: 1,
+        steps: [
+          {
+            name: 'Synthesis',
+            state: 'Ongoing',
+            tool: 'yosys',
+            runtime: '',
+            'peak memory (mb)': 64,
+          },
+        ],
+      }),
+    )
+    const service = new EccCliRuntimeService({
+      resolveLaunch: vi.fn(),
+      runtimeId: 'runtime-1',
+    })
+    vi.spyOn(service as any, 'processIsAlive').mockResolvedValue(true)
+    ;(service as any).sessions.set('handle-1', {
+      directory: workspaceDirectory,
+      handle: 'handle-1',
+      projectRoot,
+      workspaceId: 'ws_1',
+      workspaceRevision: 1,
+    })
+
+    const projection = await service.reconcileOperationProjection()
+
+    expect(projection.operations).toEqual([
+      expect.objectContaining({
+        currentStep: 'Synthesis',
+        operationId: runId,
+        projectRoot,
+        workspaceDirectory,
       }),
     ])
     await service.shutdown()

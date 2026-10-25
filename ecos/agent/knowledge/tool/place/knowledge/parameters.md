@@ -26,6 +26,62 @@
 
 **Role:** It provides logical connectivity; ECOS replaces it with the current step input at runtime.
 
+<a id="parameter.dreamplace.flow_kind"></a>
+## parameter.dreamplace.flow_kind
+
+**Meaning:** The optimization profile executed by the placement step.
+
+**Role:** It selects placement, sizing, joint, buffering, or STA behavior and applies the matching defaults.
+
+<a id="parameter.dreamplace.timing_rc_mode"></a>
+## parameter.dreamplace.timing_rc_mode
+
+**Meaning:** The timing-parasitics source.
+
+**Role:** It selects placement estimates or global-route parasitics, which require native ECC CPU sizing or STA.
+
+<a id="parameter.dreamplace.cell_model_schema"></a>
+## parameter.dreamplace.cell_model_schema
+
+**Meaning:** The cell timing-model schema.
+
+**Role:** It selects the piecewise-linear timing model; a null value inherits the flow default.
+
+<a id="parameter.dreamplace.piecewise_gradient_mode"></a>
+## parameter.dreamplace.piecewise_gradient_mode
+
+**Meaning:** The piecewise cell-gradient implementation.
+
+**Role:** It selects the `linear6_ste` or `native_piecewise` gradient path.
+
+<a id="parameter.dreamplace.joint_quality_profile"></a>
+## parameter.dreamplace.joint_quality_profile
+
+**Meaning:** The optional canonical joint-optimization profile.
+
+**Role:** It selects a predefined joint schedule and validates its required parameter combination.
+
+<a id="parameter.dreamplace.buffering_fixed_buffer_master"></a>
+## parameter.dreamplace.buffering_fixed_buffer_master
+
+**Meaning:** The physical buffer master used for Segment buffering.
+
+**Role:** It selects the library cell inserted by Segment buffering.
+
+<a id="parameter.dreamplace.place_io_engine"></a>
+## parameter.dreamplace.place_io_engine
+
+**Meaning:** The physical database backend used by DREAMPlace.
+
+**Role:** It selects the ECC-backed placement database.
+
+<a id="parameter.dreamplace.rc_tcl"></a>
+## parameter.dreamplace.rc_tcl
+
+**Meaning:** The OpenROAD RC setup Tcl script.
+
+**Role:** It supplies parasitics setup, resolved relative to the PDK root when the path is relative.
+
 <a id="parameter.dreamplace.gpu"></a>
 ## parameter.dreamplace.gpu
 
@@ -165,6 +221,13 @@
 **Meaning:** The acceptable global-placement overflow threshold.
 
 **Role:** The parameter is effective when the final global-placement overflow is strictly below the actual threshold. A known final overflow at or above the threshold is inactive; missing or negative sentinel overflow is unknown. No stopping-cause trace is required.
+
+<a id="parameter.dreamplace.overflow_reference_mode"></a>
+## parameter.dreamplace.overflow_reference_mode
+
+**Meaning:** The overflow-normalization reference mode.
+
+**Role:** It selects whether the initial global-placement area or the current published movable area normalizes density overflow.
 
 <a id="parameter.dreamplace.dtype"></a>
 ## parameter.dreamplace.dtype
@@ -368,6 +431,20 @@
 **Meaning:** The overflow threshold for node-area adjustment.
 
 **Role:** It determines when congestion-driven placement begins area adjustment.
+
+<a id="parameter.dreamplace.inflation_min_interval"></a>
+## parameter.dreamplace.inflation_min_interval
+
+**Meaning:** The minimum interval between applied inflation rounds.
+
+**Role:** It prevents another inflation update before the configured number of global-placement steps; zero disables the guard.
+
+<a id="parameter.dreamplace.l_shape_gradient_mode"></a>
+## parameter.dreamplace.l_shape_gradient_mode
+
+**Meaning:** The L-shape routing-gradient mode.
+
+**Role:** It selects fixed-field translation guidance or full differentiation through positions and segment dimensions.
 
 <a id="parameter.dreamplace.two_stage_density_scaler"></a>
 ## parameter.dreamplace.two_stage_density_scaler
@@ -600,6 +677,13 @@
 
 **Role:** The current ECOS execution boundary disables it, so it does not participate in the placement algorithm.
 
+<a id="parameter.dreamplace.diff_timing_driven_placement"></a>
+## parameter.dreamplace.diff_timing_driven_placement
+
+**Meaning:** The differentiable timing-driven placement switch.
+
+**Role:** It adds timing gradients to the placement objective when enabled.
+
 <a id="parameter.dreamplace.enable_net_weighting"></a>
 ## parameter.dreamplace.enable_net_weighting
 
@@ -677,6 +761,76 @@
 
 **Role:** It delays activation of the related update path.
 
+<a id="parameter.dreamplace.timing_opt_enabled"></a>
+## parameter.dreamplace.timing_opt_enabled
+
+**Meaning:** The electrical timing-optimization switch.
+
+**Role:** It enables timing-optimization windows during placement.
+
+<a id="parameter.dreamplace.timing_opt_buffering_enabled"></a>
+## parameter.dreamplace.timing_opt_buffering_enabled
+
+**Meaning:** The timing-window buffering switch.
+
+**Role:** It enables Segment buffering inside electrical timing-optimization windows.
+
+<a id="parameter.dreamplace.timing_opt_max_windows"></a>
+## parameter.dreamplace.timing_opt_max_windows
+
+**Meaning:** The maximum number of timing-optimization windows.
+
+**Role:** It caps electrical timing-optimization passes in one placement run.
+
+<a id="parameter.dreamplace.timing_opt_overflow_milestones"></a>
+## parameter.dreamplace.timing_opt_overflow_milestones
+
+**Meaning:** The overflow milestones that trigger timing-optimization windows.
+
+**Role:** It defines descending one-shot thresholds; an empty list uses inflation-triggered windows.
+
+<a id="parameter.dreamplace.timing_opt_sizing_rounds"></a>
+## parameter.dreamplace.timing_opt_sizing_rounds
+
+**Meaning:** The maximum discrete size and VT rounds per timing window.
+
+**Role:** It caps discrete refinement inside each electrical timing-optimization window.
+
+<a id="parameter.dreamplace.timing_coeff_growth_factor"></a>
+## parameter.dreamplace.timing_coeff_growth_factor
+
+**Meaning:** The WNS and TNS coefficient growth multiplier.
+
+**Role:** It scales timing coefficients at each density-weight update; one disables growth.
+
+<a id="parameter.dreamplace.timing_opt_coefficients"></a>
+## parameter.dreamplace.timing_opt_coefficients
+
+**Meaning:** The sizing-window coefficient policy.
+
+**Role:** It inherits live timing coefficients or applies fixed WNS, TNS, capacitance, and slew weights during sizing rounds.
+
+<a id="parameter.dreamplace.diff_sizing_continuous_steps"></a>
+## parameter.dreamplace.diff_sizing_continuous_steps
+
+**Meaning:** The number of continuous differential-sizing steps.
+
+**Role:** It bounds continuous sizing before discrete refinement; zero disables the continuous phase.
+
+<a id="parameter.dreamplace.diff_sizing_coefficients"></a>
+## parameter.dreamplace.diff_sizing_coefficients
+
+**Meaning:** The differential-sizing WNS, TNS, capacitance, and slew coefficients.
+
+**Role:** It weights the continuous sizing objective in the standalone diff-sizing profile.
+
+<a id="parameter.dreamplace.timing_placement_carrier"></a>
+## parameter.dreamplace.timing_placement_carrier
+
+**Meaning:** The coordinate timing method.
+
+**Role:** It selects direct-loss or pin-to-pin timing controls while preserving mutually exclusive global-placement paths.
+
 <a id="parameter.dreamplace.max_net_weight"></a>
 ## parameter.dreamplace.max_net_weight
 
@@ -690,3 +844,374 @@
 **Meaning:** The base design name.
 
 **Role:** It is used to name placement outputs and intermediate files.
+
+<a id="parameter.dreamplace.buffering_continuous_steps"></a>
+## parameter.dreamplace.buffering_continuous_steps
+
+**Meaning:** The standalone buffering optimizer step count.
+
+**Role:** It bounds continuous buffering optimization before discrete projection.
+
+<a id="parameter.dreamplace.buffering_segment_count_timing_backend"></a>
+## parameter.dreamplace.buffering_segment_count_timing_backend
+
+**Meaning:** The timing implementation for Segment buffering.
+
+**Role:** It selects the compiled segment-transfer backend used for repeater-count gradients.
+
+<a id="parameter.dreamplace.discrete_gradient_topk_up_percent"></a>
+## parameter.dreamplace.discrete_gradient_topk_up_percent
+
+**Meaning:** The percentage of cells eligible for discrete upsizing.
+
+**Role:** It limits the candidate set for discrete upsizing.
+
+<a id="parameter.dreamplace.discrete_gradient_topk_vt_percent"></a>
+## parameter.dreamplace.discrete_gradient_topk_vt_percent
+
+**Meaning:** The percentage of cells eligible for VT changes.
+
+**Role:** It limits the candidate set for discrete threshold-voltage substitution.
+
+<a id="parameter.dreamplace.joint_buffer_commit_period"></a>
+## parameter.dreamplace.joint_buffer_commit_period
+
+**Meaning:** The optimizer interval between joint physical-buffer commits.
+
+**Role:** It controls how often joint optimization applies buffering changes to native geometry.
+
+<a id="parameter.dreamplace.joint_buffer_outer_iterations"></a>
+## parameter.dreamplace.joint_buffer_outer_iterations
+
+**Meaning:** The maximum number of refresh-separated joint optimizer windows.
+
+**Role:** It bounds outer joint-optimization iterations.
+
+<a id="parameter.dreamplace.early_stop_restore_best"></a>
+## parameter.dreamplace.early_stop_restore_best
+
+**Meaning:** The early-stop best-state restore switch.
+
+**Role:** It restores the best continuous sizing state instead of the final iterate.
+
+<a id="parameter.dreamplace.placement_initial_learning_rate_max"></a>
+## parameter.dreamplace.placement_initial_learning_rate_max
+
+**Meaning:** The optional cap on the estimated initial placement learning rate.
+
+**Role:** It limits the first global-placement step size when present.
+
+<a id="parameter.dreamplace.real_size_execution_mode"></a>
+## parameter.dreamplace.real_size_execution_mode
+
+**Meaning:** The real-size execution mode.
+
+**Role:** It selects continuous-only sizing or a warmup-to-discrete transition.
+
+<a id="parameter.dreamplace.real_size_warmup_steps"></a>
+## parameter.dreamplace.real_size_warmup_steps
+
+**Meaning:** The number of real-size Adam steps before discrete transition.
+
+**Role:** It sets the warmup duration for warmup-to-discrete execution.
+
+<a id="parameter.dreamplace.sizing_parameterization"></a>
+## parameter.dreamplace.sizing_parameterization
+
+**Meaning:** The continuous sizing coordinate representation.
+
+**Role:** It selects logits or real-size coordinates for sizing optimization.
+
+<a id="parameter.dreamplace.timing_surrogate_mode"></a>
+## parameter.dreamplace.timing_surrogate_mode
+
+**Meaning:** The cell timing-evaluation mode.
+
+**Role:** It selects automatic, mixed, LUT-only, or surrogate-only timing evaluation.
+
+<a id="parameter.dreamplace.timing_topology_refresh_interval"></a>
+## parameter.dreamplace.timing_topology_refresh_interval
+
+**Meaning:** The timing-topology refresh interval.
+
+**Role:** It sets the number of global-placement steps between full topology refreshes.
+
+<a id="parameter.dreamplace.timing_topology_enable_overflow_threshold"></a>
+## parameter.dreamplace.timing_topology_enable_overflow_threshold
+
+**Meaning:** The overflow threshold for timing-topology updates.
+
+**Role:** It activates topology updates when density overflow falls below the configured value.
+
+<a id="parameter.dreamplace.timing_objective_lane"></a>
+## parameter.dreamplace.timing_objective_lane
+
+**Meaning:** The timing-objective term selection.
+
+**Role:** It selects timing-only terms or timing with slew and capacitance terms.
+
+<a id="parameter.dreamplace.timing_aggregation_mode"></a>
+## parameter.dreamplace.timing_aggregation_mode
+
+**Meaning:** The AAT and RAT aggregation mode.
+
+**Role:** It selects hard maximum and minimum reductions or smooth log-sum-exp aggregation while retaining hard endpoint WNS and TNS.
+
+<a id="parameter.dreamplace.timing_aggregation_tau_ps"></a>
+## parameter.dreamplace.timing_aggregation_tau_ps
+
+**Meaning:** The temperature for smooth AAT and RAT aggregation.
+
+**Role:** It controls how closely smooth aggregation approaches hard maxima and minima.
+
+<a id="parameter.dreamplace.timing_grad_balance_target_ratio"></a>
+## parameter.dreamplace.timing_grad_balance_target_ratio
+
+**Meaning:** The target timing-to-wirelength gradient balance.
+
+**Role:** It balances weighted timing and wirelength gradient norms; zero disables automatic balancing.
+
+<a id="parameter.dreamplace.placement_sizing_mode"></a>
+## parameter.dreamplace.placement_sizing_mode
+
+**Meaning:** The placement optimization lane.
+
+**Role:** It selects placement-only, sizing-only, or joint placement and sizing.
+
+<a id="parameter.dreamplace.openroad_vt_suffixes"></a>
+## parameter.dreamplace.openroad_vt_suffixes
+
+**Meaning:** The OpenROAD VT suffixes used to classify equivalent Liberty cells.
+
+**Role:** It groups equivalent threshold-voltage cells for discrete substitution.
+
+<a id="parameter.dreamplace.l_direction_use_gpugr"></a>
+## parameter.dreamplace.l_direction_use_gpugr
+
+**Meaning:** The L-direction GPUGR source switch.
+
+**Role:** It resolves L-shaped routing directions from GPUGR entries instead of iRT EGR guides.
+
+<a id="parameter.dreamplace.l_shape_use_ggr_topology"></a>
+## parameter.dreamplace.l_shape_use_ggr_topology
+
+**Meaning:** The L-shape GGR-topology switch.
+
+**Role:** It uses a GGR-exported topology pack instead of refreshing diff-side FLUTE topology.
+
+<a id="parameter.dreamplace.l_shape_capacity_al_enable"></a>
+## parameter.dreamplace.l_shape_capacity_al_enable
+
+**Meaning:** The L-shape capacity-memory switch.
+
+**Role:** It uses per-routing-bin AL multiplier memory as the hard-GGR capacity-pressure source.
+
+<a id="parameter.dreamplace.l_shape_overflow_threshold"></a>
+## parameter.dreamplace.l_shape_overflow_threshold
+
+**Meaning:** The overflow threshold for L-shape routability activation.
+
+**Role:** It allows disabled L-shape force to start or re-enable below the configured placement overflow.
+
+<a id="parameter.dreamplace.enhanced_inflation_flag"></a>
+## parameter.dreamplace.enhanced_inflation_flag
+
+**Meaning:** The enhanced inflation-controller switch.
+
+**Role:** It enables the enhanced outer-loop inflation schedule.
+
+<a id="parameter.dreamplace.enhanced_inflation_replay_best_round_flag"></a>
+## parameter.dreamplace.enhanced_inflation_replay_best_round_flag
+
+**Meaning:** The enhanced-inflation best-round replay switch.
+
+**Role:** It replays the best recorded round after inflated geometry is rolled back.
+
+<a id="parameter.dreamplace.legalize_before_each_inflation_flag"></a>
+## parameter.dreamplace.legalize_before_each_inflation_flag
+
+**Meaning:** The pre-inflation legalization switch.
+
+**Role:** It waits for the overflow target, legalizes geometry, evaluates congestion, and reapplies cumulative inflation before area adjustment.
+
+<a id="parameter.dreamplace.gpugr_bottom_routing_layer"></a>
+## parameter.dreamplace.gpugr_bottom_routing_layer
+
+**Meaning:** The inclusive bottom routing layer passed to GPUGR.
+
+**Role:** It sets the lower bound of the congestion-evaluation layer range; empty uses the first LEF routing layer.
+
+<a id="parameter.dreamplace.gpugr_top_routing_layer"></a>
+## parameter.dreamplace.gpugr_top_routing_layer
+
+**Meaning:** The inclusive top routing layer passed to GPUGR.
+
+**Role:** It sets the upper bound of the congestion-evaluation layer range; empty uses the last LEF routing layer.
+
+<a id="parameter.dreamplace.gpugr_final_eval_flag"></a>
+## parameter.dreamplace.gpugr_final_eval_flag
+
+**Meaning:** The final GPUGR evaluation switch.
+
+**Role:** It runs a routability evaluation after placement completes.
+
+<a id="parameter.dreamplace.gpugr_final_eval_rrr_iters"></a>
+## parameter.dreamplace.gpugr_final_eval_rrr_iters
+
+**Meaning:** The RRR iteration count for the final GPUGR evaluation.
+
+**Role:** It controls the effort of the post-placement routing evaluation.
+
+<a id="parameter.dreamplace.discrete_gradient_topk_shared_budget_percent"></a>
+## parameter.dreamplace.discrete_gradient_topk_shared_budget_percent
+
+**Meaning:** The percentage of sizeable cells sharing one size or VT action budget.
+
+**Role:** It controls competition for a shared discrete optimization budget.
+
+<a id="parameter.dreamplace.buffering_mode"></a>
+## parameter.dreamplace.buffering_mode
+
+**Meaning:** The buffering representation.
+
+**Role:** It selects the `segment` or `candidate` buffering lane and its matching defaults.
+
+<a id="parameter.dreamplace.buffering_segment_strategy"></a>
+## parameter.dreamplace.buffering_segment_strategy
+
+**Meaning:** The segment-count optimization strategy.
+
+**Role:** It selects continuous optimization or discrete net-gradient updates.
+
+<a id="parameter.dreamplace.buffering_segment_count_z_init"></a>
+## parameter.dreamplace.buffering_segment_count_z_init
+
+**Meaning:** The initial relaxed repeater count on each segment.
+
+**Role:** It seeds continuous segment-count optimization before projection.
+
+<a id="parameter.dreamplace.buffering_fixed_bsu_index"></a>
+## parameter.dreamplace.buffering_fixed_bsu_index
+
+**Meaning:** An optional fixed legal buffer index.
+
+**Role:** It pins Segment buffering to one buffer master resolved from the legal buffer table.
+
+<a id="parameter.dreamplace.buffering_max_repeaters_per_segment"></a>
+## parameter.dreamplace.buffering_max_repeaters_per_segment
+
+**Meaning:** The maximum accepted repeaters on one segment.
+
+**Role:** It caps physical repeater insertion during discrete buffering.
+
+<a id="parameter.dreamplace.buffering_route_b_selection_fraction"></a>
+## parameter.dreamplace.buffering_route_b_selection_fraction
+
+**Meaning:** The fraction of segment candidates selected in one discrete buffering batch.
+
+**Role:** It controls how sparsely candidates are sampled during net-gradient buffering.
+
+<a id="parameter.dreamplace.buffering_segment_transfer_backend"></a>
+## parameter.dreamplace.buffering_segment_transfer_backend
+
+**Meaning:** The native segment timing-transfer implementation.
+
+**Role:** It selects the backend used to propagate timing across buffered segments.
+
+<a id="parameter.dreamplace.buffering_segment_live_geometry"></a>
+## parameter.dreamplace.buffering_segment_live_geometry
+
+**Meaning:** The live-geometry timing switch.
+
+**Role:** It refreshes buffered-segment timing from the current placement geometry.
+
+<a id="parameter.dreamplace.buffering_segment_integer_projection_interval"></a>
+## parameter.dreamplace.buffering_segment_integer_projection_interval
+
+**Meaning:** The interval between periodic integer buffer projections.
+
+**Role:** It schedules projection during global placement; zero disables periodic projection.
+
+<a id="parameter.dreamplace.buffering_segment_integer_projection_start_step"></a>
+## parameter.dreamplace.buffering_segment_integer_projection_start_step
+
+**Meaning:** The first step eligible for periodic buffer projection.
+
+**Role:** It delays integer projection until the configured global-placement step.
+
+<a id="parameter.dreamplace.buffering_segment_integer_projection_project_bsu"></a>
+## parameter.dreamplace.buffering_segment_integer_projection_project_bsu
+
+**Meaning:** The buffer-master projection switch.
+
+**Role:** It projects legal buffer master indices together with integer repeater counts.
+
+<a id="parameter.dreamplace.buffering_discrete_count_proximal_lambda"></a>
+## parameter.dreamplace.buffering_discrete_count_proximal_lambda
+
+**Meaning:** The proximal penalty for discrete repeater-count changes.
+
+**Role:** It stabilizes discrete net-gradient updates around the relaxed repeater count.
+
+<a id="parameter.dreamplace.relaxed_buffer_timing_integration_mode"></a>
+## parameter.dreamplace.relaxed_buffer_timing_integration_mode
+
+**Meaning:** The virtual-buffer timing-integration provider.
+
+**Role:** It selects how relaxed buffering participates in timing propagation.
+
+<a id="parameter.dreamplace.joint_segment_virtual_density_enabled"></a>
+## parameter.dreamplace.joint_segment_virtual_density_enabled
+
+**Meaning:** The virtual-buffer density switch.
+
+**Role:** It includes persistent virtual buffer footprints in placement density.
+
+<a id="parameter.dreamplace.buffering_segment_projection_min_z_to_insert"></a>
+## parameter.dreamplace.buffering_segment_projection_min_z_to_insert
+
+**Meaning:** The minimum relaxed count eligible for physical insertion.
+
+**Role:** It gates which fractional repeater counts become physical buffers.
+
+<a id="parameter.dreamplace.buffering_continuous_relaxed_optimization"></a>
+## parameter.dreamplace.buffering_continuous_relaxed_optimization
+
+**Meaning:** The continuous relaxed-buffer optimization switch.
+
+**Role:** It enables relaxed repeater-count optimization in the joint buffering lane.
+
+<a id="parameter.dreamplace.buffering_segment_count_tns_gradient"></a>
+## parameter.dreamplace.buffering_segment_count_tns_gradient
+
+**Meaning:** The TNS-gradient switch for segment repeater counts.
+
+**Role:** It adds total-negative-slack sensitivity to continuous count optimization.
+
+<a id="parameter.dreamplace.timing_obj_profile"></a>
+## parameter.dreamplace.timing_obj_profile
+
+**Meaning:** The timing-objective profiling switch.
+
+**Role:** It enables performance counters for timing-objective evaluation.
+
+<a id="parameter.dreamplace.timing_obj_profile_interval"></a>
+## parameter.dreamplace.timing_obj_profile_interval
+
+**Meaning:** The timing-objective profile interval.
+
+**Role:** It sets how many global-placement steps separate performance summaries.
+
+<a id="parameter.dreamplace.l_shape_grad_target_ratio"></a>
+## parameter.dreamplace.l_shape_grad_target_ratio
+
+**Meaning:** The target L-shape routing-gradient ratio.
+
+**Role:** It balances the weighted routability gradient against the base wirelength and density gradient.
+
+<a id="parameter.dreamplace.l_shape_grad_target_ratio_max"></a>
+## parameter.dreamplace.l_shape_grad_target_ratio_max
+
+**Meaning:** The maximum adaptive L-shape gradient ratio.
+
+**Role:** It caps the routability gradient target during optimization.

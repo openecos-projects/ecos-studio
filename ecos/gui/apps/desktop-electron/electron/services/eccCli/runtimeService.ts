@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { lstat, open, realpath, stat } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
+import { lstat, open, readdir, realpath, stat } from 'node:fs/promises'
+import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path'
 import type {
   EccBackgroundOperationLogResult,
   EccBackgroundOperationProjection,
@@ -64,7 +64,7 @@ import {
   type EccCliProcessOptions,
 } from './cliProcess'
 import { parseEccLineRecords, parseJsonLiteral } from './lineRecords'
-import { terminalState } from './operationOutcome'
+import { blockedFlowStep, terminalState } from './operationOutcome'
 import {
   discoverProject,
   readProjectManifest,
@@ -512,16 +512,53 @@ export class EccCliRuntimeService {
     request: EccWorkspaceUpdateRequest,
   ): Promise<EccWorkspaceUpdateResult> {
     const session = this.requireSession(request.workspaceHandle)
+    const currentConfiguration = await this.readWorkspaceConfiguration(session.directory)
+    const rtlImport = workspaceRtlImport(
+      request,
+      session.projectRoot,
+      currentConfiguration,
+    )
+    if (rtlImport) await this.runWorkspaceMutation(session, rtlImport)
+
+    const projectSettings = projectSettingsArgs(request)
+    if (projectSettings.length) {
+      this.assertProjectWritable(session.projectRoot)
+      await this.cli.run(
+        [
+          'project',
+          'apply',
+          '--project',
+          session.projectRoot,
+          ...projectSettings,
+          '--no-wait',
+        ],
+        { cwd: session.projectRoot },
+      )
+    }
+
     await this.runWorkspaceMutation(
       session,
       workspaceRefreshArgs({
         commandId: request.commandId,
         expectedWorkspaceRevision: request.expectedWorkspaceRevision,
         force: true,
+        keepBackup: request.retainBackup === true,
         projectRoot: session.projectRoot,
         workspaceId: session.workspaceId,
       }),
     )
+
+    const parameters = isRecord(request.workspaceSpec.parameters)
+      ? request.workspaceSpec.parameters
+      : {}
+    if (Object.keys(parameters).length) {
+      await this.applyWorkspaceParameters(
+        session,
+        parameters,
+        session.workspaceRevision,
+        `${request.commandId}:parameters`,
+      )
+    }
     return updateResult(session)
   }
 
@@ -703,16 +740,25 @@ export class EccCliRuntimeService {
     request: EccWorkspaceRefreshConfigRequest,
   ): Promise<EccWorkspaceRefreshConfigResult> {
     const session = this.requireSession(request.workspaceHandle)
-    await this.runWorkspaceMutation(
-      session,
-      workspaceRefreshArgs({
-        commandId: randomUUID(),
-        expectedWorkspaceRevision: request.expectedWorkspaceRevision,
-        force: request.force,
-        projectRoot: session.projectRoot,
-        workspaceId: session.workspaceId,
-      }),
-    )
+    const refresh = () =>
+      this.runWorkspaceMutation(
+        session,
+        workspaceRefreshArgs({
+          commandId: randomUUID(),
+          expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+          force: request.force,
+          projectRoot: session.projectRoot,
+          workspaceId: session.workspaceId,
+        }),
+      )
+    try {
+      await refresh()
+    } catch (error) {
+      const rtlImport = await legacyOriginRtlImportArgs(error, session)
+      if (!rtlImport) throw error
+      await this.runWorkspaceMutation(session, rtlImport)
+      await refresh()
+    }
     return {
       directory: session.directory,
       refreshed: true,
@@ -925,6 +971,7 @@ export class EccCliRuntimeService {
         .filter((tracked) => !isTerminal(tracked.operation.state))
         .map((tracked) => ({
           ...tracked.operation,
+          projectRoot: tracked.projectRoot,
           workspaceDirectory: tracked.session.directory,
           workspaceHandle: tracked.session.handle,
         })),
@@ -932,6 +979,7 @@ export class EccCliRuntimeService {
         const tracked = this.operations.get(operation.operationId)
         return {
           ...operation,
+          ...(tracked ? { projectRoot: tracked.projectRoot } : {}),
           workspaceDirectory: tracked?.session.directory ?? '',
           workspaceHandle: tracked?.session.handle ?? '',
         }
@@ -941,6 +989,12 @@ export class EccCliRuntimeService {
   }
 
   async reconcileOperationProjection() {
+    await Promise.allSettled(
+      [...this.sessions.values()].map(async (session) => {
+        const manifest = await readProjectManifest(session.projectRoot)
+        await this.restoreRegisteredOperation(session, manifest)
+      }),
+    )
     await Promise.allSettled(
       [...this.operations.values()]
         .filter((tracked) => !isTerminal(tracked.operation.state))
@@ -1296,6 +1350,10 @@ export class EccCliRuntimeService {
     }
     if (tracked.registrationPending) return
     const terminal = terminalState(flow, tracked.requestedCancel)
+    const flowBlock =
+      terminal === 'succeeded' && tracked.operation.kind === 'flow'
+        ? blockedFlowStep(flow)
+        : null
     tracked.operation = {
       ...tracked.operation,
       error:
@@ -1303,6 +1361,7 @@ export class EccCliRuntimeService {
           ? { code: 'flow_failed', message: 'ECC flow failed.' }
           : null,
       flow,
+      ...(flowBlock ? { flowBlock } : {}),
       state: terminal,
       updatedAt: now(),
     }
@@ -1750,7 +1809,7 @@ function workspaceFlowArgs(spec: Record<string, unknown>): string[] {
  * Absolute source paths of the request's design inputs, keyed by input role.
  */
 export function inputRolePaths(
-  request: EccWorkspaceCreateRequest,
+  request: Pick<EccWorkspaceCreateRequest, 'workspaceSpec' | 'workspaceBindings'>,
 ): Map<string, string[]> {
   const spec = request.workspaceSpec
   const bindings = request.workspaceBindings
@@ -1813,7 +1872,38 @@ function workspaceCreateRtlImport(
   })
 }
 
-export function projectSettingsArgs(request: EccWorkspaceCreateRequest): string[] {
+function workspaceRtlImport(
+  request: Pick<EccWorkspaceCreateRequest, 'workspaceSpec' | 'workspaceBindings'>,
+  projectRoot: string,
+  current: Pick<EccWorkspaceCreateRequest, 'workspaceSpec' | 'workspaceBindings'>,
+): string[] | null {
+  const requested = inputRolePaths(request)
+  if (sameInputRolePaths(requested, inputRolePaths(current))) return null
+  return rtlImportArgs(projectRoot, {
+    filelist: requested.get('filelist')?.[0],
+    verilog: requested.get('rtl') ?? [],
+  })
+}
+
+function sameInputRolePaths(
+  left: Map<string, string[]>,
+  right: Map<string, string[]>,
+): boolean {
+  if (left.size !== right.size) return false
+  for (const [role, paths] of left) {
+    const other = right.get(role)
+    if (!other || other.length !== paths.length) return false
+    if (paths.some((path, index) => path !== other[index])) return false
+  }
+  return true
+}
+
+export function projectSettingsArgs(
+  request: Pick<
+    EccWorkspaceCreateRequest,
+    'workspaceSpec' | 'workspaceBindings' | 'eccPdkConfig'
+  >,
+): string[] {
   const spec = request.workspaceSpec
   const bindings = request.workspaceBindings
   const design = requireRecord(spec.design)
@@ -1986,6 +2076,7 @@ export function workspaceRefreshArgs(options: {
   commandId: string
   expectedWorkspaceRevision?: number
   force?: boolean
+  keepBackup?: boolean
   projectRoot: string
   workspaceId: string
 }): string[] {
@@ -2002,7 +2093,43 @@ export function workspaceRefreshArgs(options: {
     options.commandId,
     '--no-wait',
     ...(options.force ? ['--force'] : []),
+    ...(options.keepBackup ? ['--keep-backup'] : []),
   ]
+}
+
+const ORIGIN_RTL_SUFFIXES = new Set(['.v', '.sv', '.svh', '.vh'])
+
+/**
+ * Legacy projects predate project-level `design.rtl`: their RTL sources only
+ * exist inside the workspace `origin/` directory, so `ecc workspace refresh`
+ * fails its step-input preflight with `step_input_missing`. Recover by
+ * importing those origin sources into the project through `ecc rtl import`
+ * (ECC remains the only writer of project configuration), then the caller
+ * retries the refresh.
+ */
+async function legacyOriginRtlImportArgs(
+  error: unknown,
+  session: WorkspaceSession,
+): Promise<string[] | null> {
+  if (
+    !(error instanceof EccCliCommandError) ||
+    error.code !== 'step_input_missing' ||
+    !error.message.includes('requires design.rtl')
+  ) {
+    return null
+  }
+  const originDirectory = join(session.directory, 'origin')
+  let entries: string[]
+  try {
+    entries = await readdir(originDirectory)
+  } catch {
+    return null
+  }
+  const verilog = entries
+    .filter((name) => ORIGIN_RTL_SUFFIXES.has(extname(name).toLowerCase()))
+    .map((name) => join(originDirectory, name))
+    .sort()
+  return rtlImportArgs(session.projectRoot, { verilog })
 }
 
 function parameterArgs(value: unknown): string[] {

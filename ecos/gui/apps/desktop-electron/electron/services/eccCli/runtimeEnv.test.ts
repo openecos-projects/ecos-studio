@@ -110,6 +110,58 @@ describe('createEccRuntimeEnv', () => {
     expect(env.CHIPCOMPILER_ECC_SIZER_ROOT).toBe(sizerRoot)
   })
 
+  it('replaces an invalid inherited Sizer root with the installed runtime', () => {
+    const fixture = createRepoFixture()
+    writeFileSync(join(fixture.repoRoot, 'ecc', 'pyproject.toml'), '')
+    const wrapperDir = join(fixture.repoRoot, 'ecos', 'scripts')
+    mkdirSync(wrapperDir, { recursive: true })
+    writeFileSync(join(wrapperDir, 'ecc-wrapper.sh'), '#!/usr/bin/env bash\n')
+    const dataHome = join(fixture.repoRoot, 'data-home')
+    const sizerRoot = join(dataHome, 'ecc', 'tools', 'ecc-sizer', '0.1.0-alpha')
+    mkdirSync(join(sizerRoot, 'bin'), { recursive: true })
+    mkdirSync(join(sizerRoot, 'src'), { recursive: true })
+    writeFileSync(join(sizerRoot, 'bin', 'Sizer'), '#!/usr/bin/env bash\n')
+    writeFileSync(join(sizerRoot, 'src', 'sizer_os.tcl'), '')
+
+    const env = createEccRuntimeEnv({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: {
+        CHIPCOMPILER_ECC_SIZER_ROOT: '/stale/checkout/ecc-sizer',
+        PATH: '/usr/bin',
+      },
+      isPackaged: false,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+      dataHome,
+    })
+
+    expect(env.CHIPCOMPILER_ECC_SIZER_ROOT).toBe(sizerRoot)
+  })
+
+  it('drops an invalid inherited Sizer root when no runtime is installed', () => {
+    const fixture = createRepoFixture()
+    writeFileSync(join(fixture.repoRoot, 'ecc', 'pyproject.toml'), '')
+    const wrapperDir = join(fixture.repoRoot, 'ecos', 'scripts')
+    mkdirSync(wrapperDir, { recursive: true })
+    writeFileSync(join(wrapperDir, 'ecc-wrapper.sh'), '#!/usr/bin/env bash\n')
+
+    const env = createEccRuntimeEnv({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: {
+        CHIPCOMPILER_ECC_SIZER_ROOT: '/stale/checkout/ecc-sizer',
+        PATH: '/usr/bin',
+      },
+      isPackaged: false,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+      dataHome: join(fixture.repoRoot, 'empty-data-home'),
+    })
+
+    expect(env.CHIPCOMPILER_ECC_SIZER_ROOT).toBeUndefined()
+  })
+
   it('leaves Windows development env unchanged', () => {
     const fixture = createRepoFixture()
     writeFileSync(join(fixture.repoRoot, 'ecc', 'pyproject.toml'), '')

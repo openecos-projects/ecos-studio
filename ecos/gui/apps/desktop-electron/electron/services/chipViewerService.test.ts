@@ -102,11 +102,9 @@ function createService(options: {
   existingPaths?: string[]
   fileExists?: (path: string) => boolean
   files?: Record<string, string>
-  getFileModifiedTime?: (path: string) => Promise<number | null>
   includeDefaultDefPath?: boolean
   isPackaged?: boolean
   layoutEditRuntime?: NonNullable<ChipViewerServiceOptions['layoutEditRuntime']>
-  modifiedTimes?: Record<string, number>
   onWorkspaceRevisionChanged?: ChipViewerServiceOptions['onWorkspaceRevisionChanged']
   openLogFile?: (path: string, flags: string) => number
   readBinaryFile?: ChipViewerServiceOptions['readBinaryFile']
@@ -131,7 +129,6 @@ function createService(options: {
       existingPaths.add(path)
     }
   }
-  const modifiedTimes = new Map(Object.entries(options.modifiedTimes ?? {}))
   const execFile = options.execFile ?? vi.fn(async () => ({ stderr: '', stdout: '' }))
   const spawnedProcess = createSpawnedViewerProcess()
   const unref = spawnedProcess.unref
@@ -230,13 +227,6 @@ function createService(options: {
     execFile,
     fileExists: (path) =>
       existingPaths.has(path) || (options.fileExists ? options.fileExists(path) : false),
-    getFileModifiedTime:
-      options.getFileModifiedTime ??
-      (async (path) => {
-        const modifiedTime = modifiedTimes.get(path)
-        if (modifiedTime !== undefined) return modifiedTime
-        return existingPaths.has(path) ? 100 : null
-      }),
     isPackaged: options.isPackaged ?? false,
     layoutEditRuntime,
     onWorkspaceRevisionChanged: options.onWorkspaceRevisionChanged,
@@ -842,28 +832,6 @@ describe('ChipViewerService', () => {
       `No saved layout data is available for ${STEP_NAME}: manifest meta file does not exist: ${GEOMETRY_META}. Run this step again to generate layout data before opening Chip Viewer.`,
     )
     expect(execFile).not.toHaveBeenCalled()
-  })
-
-  it('rejects stale saved geometry when the source DEF is newer', async () => {
-    const devBinaries = devChipViewerPaths()
-    const { execFile, service, spawnProcess } = createService({
-      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
-      modifiedTimes: {
-        [DEF_PATH]: 300,
-        [GEOMETRY_MANIFEST]: 250,
-      },
-    })
-
-    await expect(
-      service.open({
-        projectPath: PROJECT_ROOT,
-        step: STEP_NAME,
-      }),
-    ).rejects.toThrow(
-      `No saved layout data is available for ${STEP_NAME}: geometry manifest is older than DEF: ${DEF_PATH}. Run this step again to generate layout data before opening Chip Viewer.`,
-    )
-    expect(execFile).not.toHaveBeenCalled()
-    expect(spawnProcess).not.toHaveBeenCalled()
   })
 
   it('bridges an instance move through the ECC edit session without publishing artifacts', async () => {

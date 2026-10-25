@@ -283,6 +283,11 @@ export interface DesktopBridgeServices {
   appInfoService: {
     getVersions(): Promise<VersionInfo>
   }
+  environmentDoctorService: {
+    run(
+      projectPath?: string | null,
+    ): Promise<import('@ecos-studio/shared').EnvironmentDoctorResult>
+  }
   createWindow?(options?: { initialRoute?: string }): Promise<void>
   settingsStore: {
     delete(key: string): Promise<void>
@@ -1761,6 +1766,17 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.appGetVersions, async () => {
     return await services.appInfoService.getVersions()
+  })
+
+  handle(desktopApiIpcChannels.appGetEnvironmentDoctor, async (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const workspacePath = window ? workspaceWindowRegistry.getPathForWindow(window) : null
+    const discoveredProject = workspacePath
+      ? await services.eccRuntimeService.discoverProject(workspacePath)
+      : null
+    return await services.environmentDoctorService.run(
+      discoveredProject?.projectRoot ?? workspacePath,
+    )
   })
 
   handle(desktopApiIpcChannels.appGetQuickStartRoot, async () => {

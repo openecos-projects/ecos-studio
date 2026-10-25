@@ -9,7 +9,7 @@ import {
   type FSWatcher,
   watch as watchFsDirectoryCallback,
 } from 'node:fs'
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 import {
   normalizeLocalPath,
@@ -91,7 +91,6 @@ interface ExecFileResult {
   stderr: string
 }
 type ExecFileRunner = (file: string, args: string[]) => Promise<ExecFileResult>
-type GetFileModifiedTime = (path: string) => Promise<number | null>
 type ReadTextFile = (path: string) => Promise<string>
 type RenameFile = (from: string, to: string) => Promise<void>
 type WriteTextFile = (path: string, content: string) => Promise<void>
@@ -219,7 +218,6 @@ export interface ChipViewerServiceOptions {
   execFile?: ExecFileRunner
   ensureDirectory?: EnsureDirectory
   fileExists?: FileExists
-  getFileModifiedTime?: GetFileModifiedTime
   isPackaged: boolean
   layoutEditRuntime?: LayoutEditRuntime
   /**
@@ -267,11 +265,6 @@ type ChipViewerMode = NonNullable<ChipViewerOpenRequest['mode']>
 
 type MacroStagingResult = { path: string } | { warning: string }
 
-interface SnapshotSourcePath {
-  label: string
-  path: string
-}
-
 interface ViewerLogPaths {
   stderr: string
   stdout: string
@@ -314,14 +307,6 @@ async function defaultWriteTextFile(path: string, content: string): Promise<void
 
 async function defaultEnsureDirectory(path: string): Promise<void> {
   await mkdir(path, { recursive: true })
-}
-
-async function defaultGetFileModifiedTime(path: string): Promise<number | null> {
-  try {
-    return (await stat(path)).mtimeMs
-  } catch {
-    return null
-  }
 }
 
 function defaultWatchDirectory(
@@ -515,14 +500,6 @@ function geometryDeltaMessage(geometryDelta: Record<string, unknown>): string {
     : 'geometry updated'
 }
 
-function savedGeometrySourcePaths(snapshotInputs: SnapshotInputs): SnapshotSourcePath[] {
-  return [
-    { label: 'DEF', path: snapshotInputs.defPath },
-    { label: 'DB', path: snapshotInputs.dbPath },
-    { label: 'GDS', path: snapshotInputs.gdsPath },
-  ]
-}
-
 function isPathInside(rootPath: string, targetPath: string): boolean {
   const normalizedRoot = normalizeLocalPath(rootPath).replace(/[\\/]+$/, '')
   const normalizedTarget = normalizeLocalPath(targetPath)
@@ -659,7 +636,6 @@ export class ChipViewerService {
   private readonly ensureDirectory: EnsureDirectory
   private readonly execFile: ExecFileRunner
   private readonly fileExists: FileExists
-  private readonly getFileModifiedTime: GetFileModifiedTime
   private readonly isPackaged: boolean
   private readonly layoutEditRuntime?: LayoutEditRuntime
   private readonly openLogFile: OpenLogFile
@@ -694,7 +670,6 @@ export class ChipViewerService {
     this.execFile =
       options.execFile ?? ((file, args) => defaultExecFile(file, args, this.env))
     this.fileExists = options.fileExists ?? existsSync
-    this.getFileModifiedTime = options.getFileModifiedTime ?? defaultGetFileModifiedTime
     this.isPackaged = options.isPackaged
     this.layoutEditRuntime = options.layoutEditRuntime
     this.openLogFile = options.openLogFile ?? openSync
@@ -1948,25 +1923,6 @@ export class ChipViewerService {
     )
   }
 
-  private async findStaleSnapshotSource(
-    manifestPath: string,
-    sourcePaths: SnapshotSourcePath[],
-  ): Promise<SnapshotSourcePath | null> {
-    const manifestModifiedTime = await this.getFileModifiedTime(manifestPath)
-    if (manifestModifiedTime === null) {
-      return { label: 'manifest', path: manifestPath }
-    }
-
-    for (const sourcePath of sourcePaths) {
-      const sourceModifiedTime = await this.getFileModifiedTime(sourcePath.path)
-      if (sourceModifiedTime !== null && sourceModifiedTime > manifestModifiedTime) {
-        return sourcePath
-      }
-    }
-
-    return null
-  }
-
   private async findInvalidSnapshotManifest(
     manifestPath: string,
     requireDrc: boolean = false,
@@ -2060,16 +2016,6 @@ export class ChipViewerService {
     )
     if (invalidManifest) {
       unavailable(invalidManifest)
-    }
-
-    const staleSource = await this.findStaleSnapshotSource(
-      snapshotInputs.manifestPath,
-      savedGeometrySourcePaths(snapshotInputs),
-    )
-    if (staleSource) {
-      unavailable(
-        `geometry manifest is older than ${staleSource.label}: ${staleSource.path}`,
-      )
     }
   }
 }

@@ -22,8 +22,7 @@ pub struct MapCategory {
 #[derive(Clone, Debug)]
 pub struct MapItem {
     pub label: String,
-    pub png_path: PathBuf,
-    pub csv_path: Option<PathBuf>,
+    pub csv_path: PathBuf,
 }
 
 #[derive(Clone, Debug)]
@@ -85,10 +84,10 @@ impl MapCatalog {
         self.item_count() == 0
     }
 
-    pub fn find_item_by_png(&self, path: &Path) -> Option<(&MapItem, Option<&Path>)> {
+    pub fn find_item_by_csv(&self, path: &Path) -> Option<(&MapItem, Option<&Path>)> {
         for category in &self.categories {
             for item in &category.items {
-                if item.png_path == path {
+                if item.csv_path == path {
                     return Some((item, category.layout_path.as_deref()));
                 }
             }
@@ -486,30 +485,31 @@ fn colormap_plasma(x: f32) -> (f32, f32, f32) {
 fn discover_category(id: &str, directory: &Path) -> Result<MapCategory, String> {
     let entries = fs::read_dir(directory)
         .map_err(|err| format!("failed to read map category {}: {err}", directory.display()))?;
-    let mut png_paths = entries
+    let mut csv_paths = entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| {
             path.extension()
                 .and_then(|extension| extension.to_str())
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("png"))
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("csv"))
+                && path
+                    .file_name()
+                    .is_some_and(|name| !name.to_string_lossy().eq_ignore_ascii_case("layout.csv"))
         })
         .collect::<Vec<_>>();
-    png_paths.sort_by_key(|path| {
+    csv_paths.sort_by_key(|path| {
         path.file_name()
             .map(|name| name.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default()
     });
 
-    let items = png_paths
+    let items = csv_paths
         .into_iter()
-        .filter_map(|png_path| {
-            let stem = png_path.file_stem()?.to_string_lossy().into_owned();
-            let csv_path = png_path.with_extension("csv");
+        .filter_map(|csv_path| {
+            let stem = csv_path.file_stem()?.to_string_lossy().into_owned();
             Some(MapItem {
                 label: humanize_identifier(&stem),
-                png_path,
-                csv_path: csv_path.is_file().then_some(csv_path),
+                csv_path,
             })
         })
         .collect();
@@ -639,11 +639,10 @@ mod tests {
     }
 
     #[test]
-    fn discovers_map_categories_and_pairs_png_with_csv() {
+    fn discovers_map_categories_from_csv_without_png_previews() {
         let root = temp_directory("map-catalog");
         let density = root.join("density_map");
         fs::create_dir_all(&density).unwrap();
-        fs::write(density.join("place_density.png"), b"preview").unwrap();
         fs::write(density.join("place_density.csv"), b"0.0,1.0\n").unwrap();
         fs::write(
             density.join("layout.csv"),
@@ -658,7 +657,10 @@ mod tests {
         assert_eq!(catalog.categories[0].id, "density_map");
         assert_eq!(catalog.categories[0].label, "DENSITY");
         assert_eq!(catalog.categories[0].items.len(), 1);
-        assert!(catalog.categories[0].items[0].csv_path.is_some());
+        assert_eq!(
+            catalog.categories[0].items[0].csv_path,
+            density.join("place_density.csv")
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
