@@ -182,6 +182,7 @@ export const desktopApiEventChannels = {
   resourcesProgress: 'resources:progress',
   resourcesChanged: 'resources:changed',
   resourcesUpdatesDetected: 'resources:updates-detected',
+  settingsDownloadSourceChanged: 'settings:download-source-changed',
   designRuntimeEvent: 'design-runtime:event',
   eccRuntimeOperationProjectionInvalidated:
     'ecc:runtime-operation-projection-invalidated',

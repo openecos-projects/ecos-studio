@@ -37,8 +37,10 @@
             :active-tab="statusFilter"
             :result-count="filteredRows.length"
             :refreshing="pluginStore.refreshing"
+            :download-source="downloadSource"
             @select-tab="statusFilter = $event"
             @refresh="pluginStore.refresh()"
+            @select-download-source="handleDownloadSourceChange"
           />
 
           <PluginFrontendReadiness
@@ -78,7 +80,13 @@ import PluginManagerToolbar from '@/components/plugins/PluginManagerToolbar.vue'
 import PluginResourceCardGrid from '@/components/plugins/PluginResourceCardGrid.vue'
 import { usePluginStore } from '@/stores/pluginStore'
 import { usePdkManager } from '@/composables/usePdkManager'
-import { getDesktopApi } from '@/platform/desktop'
+import { getDesktopApi, getOptionalDesktopApi } from '@/platform/desktop'
+import {
+  DEFAULT_DESKTOP_DOWNLOAD_SOURCE,
+  DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY,
+  normalizeDesktopDownloadSource,
+  type DesktopDownloadSource,
+} from '@ecos-studio/shared'
 import {
   compactResourceMessage,
   resourceToRow,
@@ -104,6 +112,21 @@ const searchQuery = ref('')
 const categoryFilter = ref<CategoryFilter>('all')
 const statusFilter = ref<StatusFilter>('all')
 const importingResourceIds = ref<Set<string>>(new Set())
+const downloadSource = ref<DesktopDownloadSource>(DEFAULT_DESKTOP_DOWNLOAD_SOURCE)
+// The value last confirmed in the settings store: what the switch rolls back
+// to when persisting a new selection fails. Broadcasts from other windows
+// also confirm their committed value here.
+let confirmedDownloadSource: DesktopDownloadSource = DEFAULT_DESKTOP_DOWNLOAD_SOURCE
+// Generation counters for user selections: the mount-time restore applies
+// only before the first click, a failed persist may roll back only the
+// still-current selection, and broadcasts update the switch only while no
+// local persist is in flight.
+let downloadSourceSelectionSeq = 0
+let downloadSourceSettledSeq = 0
+// A broadcast committed from another window invalidates a pending mount-time
+// restore: the broadcast already reflects the newer stored value.
+let downloadSourceBroadcastReceived = false
+let unsubscribeDownloadSourceChanged: (() => void) | undefined
 
 const resourceRows = computed<ResourceRow[]>(() => {
   return pluginStore.resources.map((resource) => {
@@ -131,16 +154,96 @@ const frontendSummary = computed(() => frontendReadiness(resourceRows.value))
 
 onMounted(() => {
   void pluginStore.fetchTools()
+  // The preference is process-wide: when another window commits a change,
+  // follow it here. An in-flight local selection still wins until its own
+  // persist resolves.
+  const desktopApi = getOptionalDesktopApi()
+  unsubscribeDownloadSourceChanged = desktopApi?.settings.onDownloadSourceChanged?.(
+    (source) => {
+      downloadSourceBroadcastReceived = true
+      confirmedDownloadSource = source
+      // An in-flight local selection keeps the switch until its own persist
+      // resolves; afterwards the latest committed value wins again.
+      if (downloadSourceSettledSeq === downloadSourceSelectionSeq) {
+        downloadSource.value = source
+      }
+    },
+  )
+  void restoreDownloadSource(desktopApi)
 })
 
 onUnmounted(() => {
   pluginStore.cleanup()
+  unsubscribeDownloadSourceChanged?.()
+  unsubscribeDownloadSourceChanged = undefined
 })
 
 function clearFilters(): void {
   searchQuery.value = ''
   categoryFilter.value = 'all'
   statusFilter.value = 'all'
+}
+
+async function restoreDownloadSource(
+  desktopApi = getOptionalDesktopApi(),
+): Promise<void> {
+  if (!desktopApi) return
+  try {
+    const saved = await desktopApi.settings.get(DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY)
+    const restored =
+      normalizeDesktopDownloadSource(saved) ?? DEFAULT_DESKTOP_DOWNLOAD_SOURCE
+    // A user selection or a broadcast committed while the read was in flight
+    // wins: both already reflect a newer value than this read can return.
+    if (downloadSourceSelectionSeq === 0 && !downloadSourceBroadcastReceived) {
+      confirmedDownloadSource = restored
+      downloadSource.value = restored
+    }
+  } catch (error) {
+    console.warn('[PluginToolsView] Failed to restore the download source:', error)
+  }
+}
+
+async function handleDownloadSourceChange(source: DesktopDownloadSource): Promise<void> {
+  const selection = ++downloadSourceSelectionSeq
+  downloadSource.value = source
+  try {
+    // Electron main validates the value and applies it to the resource
+    // manager once the setting is durably stored.
+    await getDesktopApi().settings.set(DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY, source)
+    // Only the newest settled persist confirms the stored value; an older
+    // late-resolving write was superseded by a newer committed one.
+    if (selection > downloadSourceSettledSeq) {
+      downloadSourceSettledSeq = selection
+      // Another window may have committed a newer value while this write was
+      // in flight; re-read so the rollback target and the switch follow the
+      // store rather than this window's own request.
+      confirmedDownloadSource = await readCommittedDownloadSource(source)
+      if (selection === downloadSourceSelectionSeq) {
+        downloadSource.value = confirmedDownloadSource
+      }
+    }
+  } catch (error) {
+    if (selection > downloadSourceSettledSeq) {
+      downloadSourceSettledSeq = selection
+    }
+    // Roll back only the still-current selection, and only to the last value
+    // confirmed in the store; a newer selection owns the switch.
+    if (selection === downloadSourceSelectionSeq) {
+      downloadSource.value = confirmedDownloadSource
+    }
+    console.warn('[PluginToolsView] Failed to persist the download source:', error)
+  }
+}
+
+async function readCommittedDownloadSource(
+  fallback: DesktopDownloadSource,
+): Promise<DesktopDownloadSource> {
+  try {
+    const stored = await getDesktopApi().settings.get(DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY)
+    return normalizeDesktopDownloadSource(stored) ?? fallback
+  } catch {
+    return fallback
+  }
 }
 
 async function handleCardAction(
