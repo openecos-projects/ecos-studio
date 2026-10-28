@@ -260,6 +260,7 @@ import { useWorkspace } from '@/composables/useWorkspace'
 import { useFlowRunner } from '@/composables/useFlowRunner'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
+import { launchDefView } from '@/composables/useDefViewLaunch'
 import {
   hasCanonicalDieDimensions,
   losslessNumberList,
@@ -370,6 +371,7 @@ const { runAllFlow } = useFlowRunner()
 const { loadPdks, pdkNameDialogVisible, pdkNameDraft, confirmPdkName, cancelPdkName } =
   usePdkManager()
 const { loadVersions } = useVersion()
+const { handleViewDef } = useDefViewMenuAction()
 const { showToast } = useWorkspace()
 const { showManageDialog, openManageDialog } = useDesignFiles()
 const {
@@ -2010,6 +2012,34 @@ async function adjustZoom(action: AppMenuAction): Promise<void> {
   )
 }
 
+/** View > DEF: pick a DEF, build a defview workspace, and open it in Chip Viewer. */
+function useDefViewMenuAction() {
+  const handleViewDef = async () => {
+    const api = desktopApi.value ?? (await waitForDesktopApi())
+    const picked = await api.dialog.pickFiles({
+      title: 'Select a DEF layout to view',
+      filters: [{ name: 'DEF Layout', extensions: ['def', 'def.gz'] }],
+    })
+    if (!picked?.length) return
+    await launchDefView(picked[0]!, {
+      createProject: (config) => newProject(config),
+      workspaceHandle: () =>
+        workspaceSession.value.state === 'active'
+          ? workspaceSession.value.workspaceId
+          : null,
+      workspaceRevision: () => {
+        const revision = workspaceSession.value.workspaceRevision
+        if (!Number.isInteger(revision)) {
+          throw new Error('The current Workspace revision is unavailable.')
+        }
+        return revision!
+      },
+      showToast,
+    })
+  }
+  return { handleViewDef }
+}
+
 const { handleMenuAction } = useAppMenuActions({
   createWindow: async () => {
     const api = await waitForDesktopApi()
@@ -2036,6 +2066,7 @@ const { handleMenuAction } = useAppMenuActions({
   },
   manageDesignFiles: openManageDialog,
   adjustZoom,
+  viewDef: handleViewDef,
 })
 useAppWindowClose(closeProject)
 
