@@ -3,6 +3,56 @@ import { describe, expect, it } from 'vitest'
 import { buildWorkspaceCreationModel } from './workspaceCreationModel'
 
 describe('buildWorkspaceCreationModel', () => {
+  it.each([
+    { catalogMaximum: null, preset: undefined, explicit: undefined, expected: 13 },
+    {
+      catalogMaximum: null,
+      preset: [{ MAX: ['RC0', 'RC1'] }],
+      explicit: undefined,
+      expected: 2,
+    },
+    {
+      catalogMaximum: null,
+      preset: [{ MAX: ['RC0', 'RC1'] }],
+      explicit: [{ MAX: Array.from({ length: 17 }, (_, index) => `RC${index}`) }],
+      expected: 17,
+    },
+    { catalogMaximum: 4, preset: undefined, explicit: undefined, expected: 4 },
+    { catalogMaximum: null, preset: [], explicit: undefined, expected: 1 },
+  ])(
+    'bounds STA choices by effective signoff and runtime support: %j',
+    ({ catalogMaximum, preset, explicit, expected }) => {
+      const discovery = {
+        parameterCatalog: [
+          { id: 'sta.max_parallel_corners', default: 1, range: [1, catalogMaximum] },
+          {
+            id: 'sta.signoff',
+            default: [
+              {
+                MAX: ['Cworst', 'RCworst'],
+                WCL: ['Cworst', 'RCworst'],
+                TYP: ['TYPICAL'],
+                MIN: ['Cworst', 'RCworst', 'Cbest', 'RCbest'],
+                ML: ['Cworst', 'RCworst', 'Cbest', 'RCbest'],
+              },
+            ],
+          },
+        ],
+      }
+      const model = buildWorkspaceCreationModel(discovery, [], {
+        projectPresetParameters: preset ? { 'sta.signoff': preset } : {},
+        explicitParameters: explicit ? { 'sta.signoff': explicit } : {},
+      })
+      expect(model.parameters[0]).toEqual({
+        definition: { id: 'sta.max_parallel_corners', default: 1, range: [1, expected] },
+        state: 'defaulted',
+        source: 'catalogDefault',
+        value: 1,
+      })
+      expect(discovery.parameterCatalog[0]?.range).toEqual([1, catalogMaximum])
+    },
+  )
+
   it('keeps defaulted and inapplicable parameters discoverable', () => {
     const model = buildWorkspaceCreationModel(
       {

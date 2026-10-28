@@ -14,7 +14,7 @@ export function buildWorkspaceCreationModel(
     ? discovery.parameterCatalog.filter(isRecord)
     : []
   const applicableSteps = flowSteps(discovery, request.flowId)
-  return {
+  const model: WorkspaceCreationModel = {
     controls: {
       flowBoundaries: true,
       manualPdkFiles: true,
@@ -69,6 +69,36 @@ export function buildWorkspaceCreationModel(
     }),
     pdkInstallations,
   }
+  applyStaCornerLimit(model)
+  return model
+}
+
+function applyStaCornerLimit(model: WorkspaceCreationModel): void {
+  const parallel = model.parameters.find(
+    (parameter) => parameter.definition.id === 'sta.max_parallel_corners',
+  )
+  const signoff = model.parameters.find(
+    (parameter) => parameter.definition.id === 'sta.signoff',
+  )?.value
+  if (!parallel || !Array.isArray(signoff)) return
+  const cornerCount = signoff
+    .filter(isRecord)
+    .reduce(
+      (total, group) =>
+        total +
+        Object.values(group).reduce<number>(
+          (count, corners) => count + (Array.isArray(corners) ? corners.length : 0),
+          0,
+        ),
+      0,
+    )
+  const range = parallel.definition.range
+  const catalogMaximum = Array.isArray(range) ? range[1] : null
+  const maximum =
+    typeof catalogMaximum === 'number' && Number.isSafeInteger(catalogMaximum)
+      ? Math.min(cornerCount, catalogMaximum)
+      : cornerCount
+  parallel.definition = { ...parallel.definition, range: [1, Math.max(1, maximum)] }
 }
 
 function flowSteps(

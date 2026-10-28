@@ -2014,7 +2014,16 @@ export function workspaceCreateCommands(
 ): string[][] {
   const workspaceId = basename(resolve(request.targetDirectory))
   if (request.deriveFrom) {
-    const parameters = requireRecord(request.workspaceSpec.parameters ?? {})
+    const flow = requireRecord(request.workspaceSpec.flow)
+    if (
+      typeof flow.fromStepId !== 'string' ||
+      !flow.fromStepId.trim() ||
+      typeof flow.throughStepId !== 'string' ||
+      !flow.throughStepId.trim()
+    ) {
+      throw new Error('Creating from output requires a continuation step and endpoint.')
+    }
+    const parameters = parameterArgs(request.workspaceSpec.parameters)
     return [
       [
         'workspace',
@@ -2023,24 +2032,25 @@ export function workspaceCreateCommands(
         workspaceId,
         '--project',
         projectRoot,
-        ...(request.deriveFrom.sourceStep
-          ? ['--from', request.deriveFrom.sourceStep]
-          : []),
+        '--from',
+        flow.fromStepId,
+        '--to',
+        flow.throughStepId,
         '--command-id',
         request.commandId,
         '--no-wait',
       ],
-      ...(parameters['sta.max_parallel_corners'] !== undefined
+      ...(parameters.length
         ? [
             [
               'param',
-              'set',
-              'sta.max_parallel_corners',
-              JSON.stringify(parameters['sta.max_parallel_corners']),
+              'apply',
               '--project',
               projectRoot,
               '--workspace',
               workspaceId,
+              '--no-wait',
+              ...parameters,
             ],
           ]
         : []),

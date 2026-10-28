@@ -351,7 +351,9 @@ source. Complete this phase before choosing the remaining workspace settings.
 **Step 4 — Flow Setup.** Define the execution range of the RTL-to-GDS flow:
 
 When the range includes STA, **STA maximum parallel corners** selects an integer
-from 1 to 4 (default 1, serial). ECC stores `sta.max_parallel_corners` in
+from 1 to the configured signoff corner combination count (default 1, serial;
+13 combinations for the standard ICS55 configuration). The choices also respect
+the installed ECC runtime's supported range. ECC stores `sta.max_parallel_corners` in
 `home/params.toml`. The runtime may use fewer workers when CPU or memory is
 limited. Keep the setting at 1 for large designs or constrained hosts.
 
@@ -427,6 +429,12 @@ the wizard is prefilled:
   Verilog and SDC default to the source workspace configuration.
 - **PDK Config** and **Spec Setting** default to the source workspace's
   selection and parameters.
+
+Creation uses `ecc workspace derive SOURCE TARGET --from NEXT_STEP --to END_STEP`, followed by
+`ecc param apply --workspace TARGET --set KEY=VALUE ...` for the selected parameters.
+ECC copies the selected output into the target's `origin/` inputs and generates
+`home/flow.json` with only the selected inclusive start/end range. The new steps
+start as unstarted, and the target is registered with its own identity and range.
 
 ### Updating a Workspace
 

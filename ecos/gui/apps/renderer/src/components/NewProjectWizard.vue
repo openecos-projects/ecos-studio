@@ -557,13 +557,18 @@
                       v-model.number="config.parameters.sta_max_parallel_corners"
                       class="rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2 text-sm text-(--text-primary)"
                     >
-                      <option v-for="count in 4" :key="count" :value="count">
+                      <option
+                        v-for="count in staParallelCornerLimit"
+                        :key="count"
+                        :value="count"
+                      >
                         {{ count }}
                       </option>
                     </select>
                     <p class="mt-2 text-xs text-(--text-secondary)">
-                      Defaults to 1 (serial). Available memory may reduce concurrency;
-                      parallel STA requires Linux.
+                      Defaults to 1 (serial). Up to {{ staParallelCornerLimit }} signoff
+                      corner combinations. Available CPUs and memory may reduce
+                      concurrency; parallel STA requires Linux.
                     </p>
                   </div>
 
@@ -1878,7 +1883,10 @@ const initialDesignInputFingerprint = designInputFingerprint({
 const { model: workspaceCreationModel, refresh: refreshWorkspaceCreationModel } =
   useWorkspaceCreationModel({
     designTool: () => props.initialConfig?.designTool,
-    flowId: wizardFlowId,
+    flowId: () => {
+      const flowId = discoveredFlowDefinition.value?.flowId
+      return typeof flowId === 'string' ? flowId : 'rtl2gds'
+    },
     inputMode: () => (startsFromSynthesis.value ? 'rtl' : 'postSynthesis'),
     mpc: () => projectMpc.value as Record<string, unknown> | null,
     pdk: () =>
@@ -2065,6 +2073,20 @@ const projectDesignName = ref(
 )
 const projectMpc = ref<ProjectManifestMpc | null>(null)
 const projectPresetParameters = ref<Record<string, unknown>>({})
+const staParallelCornerLimit = computed(() => {
+  const range = workspaceCreationModel.value?.parameters.find(
+    (parameter) => parameter.definition.id === 'sta.max_parallel_corners',
+  )?.definition.range
+  const maximum = Array.isArray(range) ? range[1] : null
+  return typeof maximum === 'number' && Number.isSafeInteger(maximum) && maximum >= 1
+    ? maximum
+    : 1
+})
+watch(staParallelCornerLimit, (maximum) => {
+  if (Number(config.value.parameters.sta_max_parallel_corners ?? 1) > maximum) {
+    config.value.parameters.sta_max_parallel_corners = maximum
+  }
+})
 const projectManifestError = ref('')
 const selectedProjectIsFrontend = ref(false)
 const isLoadingProjectManifest = ref(false)
@@ -3961,7 +3983,7 @@ function specReady() {
     Number(params.max_fanout) > 0 &&
     Number.isInteger(params.sta_max_parallel_corners ?? 1) &&
     Number(params.sta_max_parallel_corners ?? 1) >= 1 &&
-    Number(params.sta_max_parallel_corners ?? 1) <= 4
+    Number(params.sta_max_parallel_corners ?? 1) <= staParallelCornerLimit.value
 
   if (!hasCoreFields || projectManifestError.value || isLoadingProjectManifest.value) {
     return false
