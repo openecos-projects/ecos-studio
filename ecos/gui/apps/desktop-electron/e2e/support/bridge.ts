@@ -6,6 +6,7 @@
 import type {
   DesktopApi,
   EccBackgroundOperationProjection,
+  ProjectManifest,
   ProjectWorkspaceFlows,
   ProjectWorkspaceFlowsRequest,
 } from '@ecos-studio/shared'
@@ -28,7 +29,7 @@ export interface E2EBridge {
     mutate(request: unknown): Promise<unknown>
   }
   projectManagement: {
-    readManifest(projectRoot: string): Promise<{ project_id?: string } | null>
+    readManifest(projectRoot: string): Promise<ProjectManifest | null>
     watchWorkspaceFlows(
       request: ProjectWorkspaceFlowsRequest,
     ): Promise<ProjectWorkspaceFlows>

@@ -67,6 +67,69 @@ describe('readPersistedEngineeringSnapshot', () => {
     expect(snapshot.signoffAssessment.status).toBe('blocked')
   })
 
+  it('preserves workspace configuration and bindings for backend consumers', async () => {
+    const workspaceSpec = {
+      design: { topModule: 'gcd', clockPort: 'clk' },
+      inputs: [{ inputId: 'filelist', role: 'filelist' }],
+      pdk: { name: 'icsprout55' },
+      extension: { producerOption: true },
+    }
+    const workspaceBindings = {
+      inputs: { filelist: join(directory, 'origin', 'sources.f') },
+      pdk: { root: '/pdks/icsprout55', version: '1' },
+    }
+    writeFileSync(
+      join(directory, 'home', 'engineering-snapshot.json'),
+      JSON.stringify({
+        ...JSON.parse(fixtureText('v6-valid.json')),
+        workspaceSpec,
+        workspaceBindings,
+        unknownProjection: { ignored: true },
+      }),
+    )
+
+    const snapshot = await readPersistedEngineeringSnapshot(directory)
+
+    expect(snapshot.workspaceSpec).toEqual(workspaceSpec)
+    expect(snapshot.workspaceBindings).toEqual(workspaceBindings)
+    expect(snapshot).not.toHaveProperty('unknownProjection')
+  })
+
+  it.each([4, 6])(
+    'accepts v%s snapshots without optional workspace configuration',
+    async (schemaVersion) => {
+      const snapshot = JSON.parse(fixtureText('v6-valid.json'))
+      snapshot.schemaVersion = schemaVersion
+      delete snapshot.workspaceSpec
+      delete snapshot.workspaceBindings
+      writeFileSync(
+        join(directory, 'home', 'engineering-snapshot.json'),
+        JSON.stringify(snapshot),
+      )
+
+      const result = await readPersistedEngineeringSnapshot(directory)
+
+      expect(result.workspaceSpec).toBeUndefined()
+      expect(result.workspaceBindings).toBeUndefined()
+    },
+  )
+
+  it.each(['workspaceSpec', 'workspaceBindings'] as const)(
+    'rejects malformed %s containers',
+    async (field) => {
+      for (const value of [null, [], 'invalid', 1, true]) {
+        writeFileSync(
+          join(directory, 'home', 'engineering-snapshot.json'),
+          JSON.stringify({ ...JSON.parse(fixtureText('v6-valid.json')), [field]: value }),
+        )
+
+        await expect(readPersistedEngineeringSnapshot(directory)).rejects.toThrow(
+          'ENGINEERING_SNAPSHOT_INVALID',
+        )
+      }
+    },
+  )
+
   it.each([
     ['v6-invalid-schema-version.json', 'ENGINEERING_SNAPSHOT_SCHEMA_UNSUPPORTED'],
     ['v6-invalid-missing-workspace-id.json', 'ENGINEERING_SNAPSHOT_INVALID'],

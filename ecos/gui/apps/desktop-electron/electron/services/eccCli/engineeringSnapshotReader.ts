@@ -12,6 +12,10 @@ function readyData<T>(section: ReadSection<T>): T {
   return section.data
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 export async function readPersistedEngineeringSnapshot(
   directory: string,
   expectedWorkspaceId?: string,
@@ -37,11 +41,23 @@ export async function readPersistedEngineeringSnapshot(
   } catch {
     throw new Error('ENGINEERING_SNAPSHOT_INVALID')
   }
+  if (!isRecord(parsed)) throw new Error('ENGINEERING_SNAPSHOT_INVALID')
   const validated = validateEngineeringSnapshot(parsed, expectedWorkspaceId)
   if (!validated.ok) throw new Error(validated.issue.code)
+  const configuration: Pick<
+    EccPersistedEngineeringSnapshot,
+    'workspaceSpec' | 'workspaceBindings'
+  > = {}
+  for (const field of ['workspaceSpec', 'workspaceBindings'] as const) {
+    const value = parsed[field]
+    if (value === undefined) continue
+    if (!isRecord(value)) throw new Error('ENGINEERING_SNAPSHOT_INVALID')
+    configuration[field] = value
+  }
   const { qorSnapshotExtension } = validated.sections
   return {
     ...validated.snapshot,
+    ...configuration,
     artifacts: readyData(validated.sections.artifacts),
     checklist: readyData(validated.sections.checklist),
     flow: readyData(validated.sections.flow),
