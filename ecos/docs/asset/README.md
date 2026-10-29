@@ -34,5 +34,13 @@ credentials out of the profile, retain the actual result states, wait for
 loading and transitions to finish, and check images in both GitHub Markdown
 and the application’s User Guide. Update captions when behavior changes.
 
+`workspace-reuse-rtl.png` and `workspace-reuse-filelist.png` were captured on
+2026-10-29 by the repeated-workspace desktop E2E using the snapshot-reader fix.
+Each shows the third creation wizard after a second workspace was successfully
+created from the corresponding import mode. The `gcd` top module remains
+selected, both existing workspace source copies match the imported RTL, and
+Create Workspace is enabled. These captures use isolated application settings
+and the real GCD design; no UI state was altered for the images.
+
 `ecos-studio-solution.png` is the conceptual diagram used by the repository
 root README, rather than a screenshot of the application UI.
