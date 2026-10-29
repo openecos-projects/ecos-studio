@@ -61,6 +61,7 @@ vi.mock('@/components/ShutdownStatusButton.vue', () => ({
 }))
 
 import TopBar from './TopBar.vue'
+import { appMenuActionIds } from '@ecos-studio/shared'
 
 beforeEach(async () => {
   const { useAgentShellStore } = await import('@/stores/agentShellStore')
@@ -112,6 +113,26 @@ describe('TopBar title', () => {
 })
 
 describe('TopBar signoff export menu', () => {
+  it('opens DEF layout preview from the View menu without an active workspace', async () => {
+    testState.route.path = '/'
+    const wrapper = mount(TopBar, { props: { hasWorkspace: false } })
+
+    const viewMenu = wrapper
+      .findAll('button.menu-btn')
+      .find((item) => item.text() === 'View')
+    await viewMenu!.trigger('click')
+
+    const defLayout = wrapper
+      .findAll('button.dropdown-item')
+      .find((item) => item.text().includes('DEF Layout'))
+    expect(defLayout).toBeDefined()
+    await defLayout!.trigger('click')
+    expect(wrapper.emitted('menu-action')).toEqual([[appMenuActionIds.viewDef]])
+    expect(wrapper.findAll('button.dropdown-item')).toHaveLength(0)
+
+    wrapper.unmount()
+  })
+
   it('disables signoff export while a flow is running and explains why', async () => {
     const wrapper = mount(TopBar, {
       props: { hasWorkspace: true, signoffExportDisabled: true },

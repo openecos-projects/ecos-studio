@@ -920,6 +920,14 @@ layouts — large layout data stays out of the Electron renderer.
 
 ### Opening the Chip Viewer
 
+To preview a standalone DEF layout, choose **View → DEF Layout** and select a
+`.def` or `.def.gz` file. Studio uses an available PDK installation to create a
+new workspace beside the file, runs its `defview` step, and opens the resulting
+layout in Chip Viewer. Install a PDK through Resource Manager before using this
+action.
+
+![View menu with the standalone DEF Layout action](asset/def-layout-menu.png)
+
 Click a step card's layout thumbnail in the Flow diagram. The viewer opens the
 saved geometry snapshot for that step.
 

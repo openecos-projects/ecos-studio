@@ -381,6 +381,12 @@ const menus = computed<Menu[]>(() => [
     action: 'view',
     children: [
       {
+        label: 'DEF Layout',
+        icon: 'ri-layout-line',
+        event: appMenuActionIds.viewDef,
+      },
+      { separator: true },
+      {
         label: 'Zoom In',
         icon: 'ri-zoom-in-line',
         shortcut: '⌘+',
