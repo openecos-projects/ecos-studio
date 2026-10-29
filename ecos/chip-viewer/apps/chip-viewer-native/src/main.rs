@@ -2,6 +2,7 @@ mod app;
 mod camera3d;
 mod canvas_gpu;
 mod canvas_gpu3d;
+mod clock_tree;
 mod instance_visibility;
 mod macro_interaction;
 mod macro_ops;

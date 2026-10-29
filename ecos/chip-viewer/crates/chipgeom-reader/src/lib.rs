@@ -12,6 +12,10 @@ use chipgeom_format::{
 use memmap2::{Mmap, MmapOptions};
 use thiserror::Error;
 
+mod clock_tree;
+use clock_tree::ClockTreeRead;
+pub use clock_tree::ClockTreeSnapshot;
+
 #[derive(Debug, Error)]
 pub enum GeometryReadError {
     #[error("manifest is missing key {0}")]
@@ -54,6 +58,13 @@ pub struct GeometryManifest {
     pub buses: Option<PathBuf>,
     pub groups: Option<PathBuf>,
     pub drc: Option<PathBuf>,
+    pub clock_tree_schema_version: Option<u32>,
+    pub clock_tree_meta: Option<PathBuf>,
+    pub clock_tree_nodes: Option<PathBuf>,
+    pub clock_tree_edges: Option<PathBuf>,
+    pub clock_tree_timing: Option<PathBuf>,
+    pub clock_tree_strings: Option<PathBuf>,
+    pub clock_tree_error: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -217,6 +228,7 @@ pub struct GeometrySnapshot {
     net_metadata: Vec<NetMetadata>,
     bus_metadata: Vec<BusMetadata>,
     group_metadata: Vec<GroupMetadata>,
+    clock_tree: OnceLock<ClockTreeRead>,
 }
 
 enum GeometryDeltaStorage {
@@ -357,6 +369,7 @@ impl GeometrySnapshot {
             net_metadata,
             bus_metadata,
             group_metadata,
+            clock_tree: OnceLock::new(),
         };
         snapshot.validate_manifest_counts()?;
         Ok(snapshot)
@@ -438,6 +451,26 @@ impl GeometrySnapshot {
         &self.group_metadata
     }
 
+    /// Whether the manifest declares the optional clock-tree extension.
+    pub fn has_clock_tree_manifest(&self) -> bool {
+        self.manifest.clock_tree_meta.is_some()
+    }
+
+    /// Load and validate the clock-tree extension on first use.
+    ///
+    /// A damaged or unsupported extension is reported separately from the
+    /// physical snapshot so callers can keep the layout usable.
+    pub fn clock_tree(&self) -> Result<Option<&ClockTreeSnapshot>> {
+        match self
+            .clock_tree
+            .get_or_init(|| clock_tree::load(&self.manifest))
+        {
+            ClockTreeRead::Absent => Ok(None),
+            ClockTreeRead::Available(snapshot) => Ok(Some(snapshot)),
+            ClockTreeRead::Invalid(message) => anyhow::bail!("{message}"),
+        }
+    }
+
     pub fn mapped_bytes(&self) -> GeometryMappedBytes {
         GeometryMappedBytes {
             meta: self.meta.len(),
@@ -512,23 +545,24 @@ fn read_manifest(path: &Path) -> Result<GeometryManifest> {
     }
 
     let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let safe_path = |key: &str, value: &str| -> Result<PathBuf> {
+        let relative = Path::new(value);
+        if relative.as_os_str().is_empty()
+            || !relative
+                .components()
+                .all(|component| matches!(component, Component::Normal(_)))
+        {
+            anyhow::bail!("unsafe {key} snapshot path: {value}");
+        }
+        let candidate = base.join(relative);
+        if candidate.exists() && !candidate.canonicalize()?.starts_with(base.canonicalize()?) {
+            anyhow::bail!("{key} snapshot path escapes geometry directory: {value}");
+        }
+        Ok(candidate)
+    };
     let drc = values
         .get("drc")
-        .map(|value| {
-            let relative = Path::new(value);
-            if relative.as_os_str().is_empty()
-                || !relative
-                    .components()
-                    .all(|component| matches!(component, Component::Normal(_)))
-            {
-                anyhow::bail!("unsafe DRC snapshot path: {value}");
-            }
-            let candidate = base.join(relative);
-            if candidate.exists() && !candidate.canonicalize()?.starts_with(base.canonicalize()?) {
-                anyhow::bail!("DRC snapshot path escapes geometry directory: {value}");
-            }
-            Ok(candidate)
-        })
+        .map(|value| safe_path("DRC", value))
         .transpose()?;
     let required = |key: &'static str| -> Result<String> {
         values
@@ -563,6 +597,53 @@ fn read_manifest(path: &Path) -> Result<GeometryManifest> {
             .transpose()
     };
 
+    let mut clock_tree_error = None;
+    let clock_keys = [
+        "clock_tree_meta",
+        "clock_tree_nodes",
+        "clock_tree_edges",
+        "clock_tree_timing",
+        "clock_tree_strings",
+    ];
+    let present_clock_keys = clock_keys
+        .iter()
+        .filter(|key| values.get(**key).is_some_and(|value| !value.is_empty()))
+        .count();
+    let mut optional_clock_path = |key: &str| -> Option<PathBuf> {
+        let value = values.get(key)?;
+        if value.is_empty() {
+            return None;
+        }
+        match safe_path(key, value) {
+            Ok(path) => Some(path),
+            Err(error) => {
+                clock_tree_error = Some(error.to_string());
+                None
+            }
+        }
+    };
+    let clock_tree_meta = optional_clock_path("clock_tree_meta");
+    let clock_tree_nodes = optional_clock_path("clock_tree_nodes");
+    let clock_tree_edges = optional_clock_path("clock_tree_edges");
+    let clock_tree_timing = optional_clock_path("clock_tree_timing");
+    let clock_tree_strings = optional_clock_path("clock_tree_strings");
+    let clock_tree_schema_version = match values.get("clock_tree_schema_version") {
+        Some(value) => match value.parse::<u32>() {
+            Ok(version) => Some(version),
+            Err(error) => {
+                clock_tree_error = Some(format!("invalid clock_tree_schema_version: {error}"));
+                None
+            }
+        },
+        None => None,
+    };
+    if clock_tree_error.is_none()
+        && ((present_clock_keys > 0 && present_clock_keys < clock_keys.len())
+            || (clock_tree_schema_version.is_some() && present_clock_keys < clock_keys.len()))
+    {
+        clock_tree_error = Some("clock-tree manifest extension is incomplete".to_string());
+    }
+
     Ok(GeometryManifest {
         path: path.to_path_buf(),
         schema_version: required("schema_version")?.parse()?,
@@ -596,6 +677,13 @@ fn read_manifest(path: &Path) -> Result<GeometryManifest> {
         buses: values.get("buses").map(|value| base.join(value)),
         groups: values.get("groups").map(|value| base.join(value)),
         drc,
+        clock_tree_schema_version,
+        clock_tree_meta,
+        clock_tree_nodes,
+        clock_tree_edges,
+        clock_tree_timing,
+        clock_tree_strings,
+        clock_tree_error,
     })
 }
 
@@ -1202,6 +1290,7 @@ fn payload_bytes(mmap: &[u8]) -> &[u8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chipgeom_format::{ClockTreeStage, ClockTreeStatus, CLOCK_TIMING_PREDECESSOR_VALID};
     use std::io::Write;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1220,6 +1309,49 @@ mod tests {
         };
 
         assert_eq!(mapped.total(), 450);
+    }
+
+    #[test]
+    fn reads_cpp_clock_tree_cts_fixture() {
+        let snapshot_dir = temp_snapshot_dir("clock-tree-cts-fixture");
+        let manifest_path = write_clock_tree_fixture(&snapshot_dir);
+
+        let manifest = read_manifest(&manifest_path).unwrap();
+        let ClockTreeRead::Available(snapshot) = clock_tree::load(&manifest) else {
+            panic!("fixture should load as an available clock tree");
+        };
+
+        assert_eq!(snapshot.meta.stage, ClockTreeStage::Cts as u16);
+        assert_eq!(snapshot.meta.status, ClockTreeStatus::CompleteTiming as u16);
+        assert_eq!(snapshot.clocks.len(), 1);
+        assert_eq!(snapshot.nodes.len(), 41);
+        assert_eq!(snapshot.edges.len(), 40);
+        assert_eq!(snapshot.timing.len(), 164);
+        assert_eq!(snapshot.clock_name(&snapshot.clocks[0]), Some("clk"));
+        assert!(snapshot
+            .timing
+            .iter()
+            .any(|timing| timing.flags & CLOCK_TIMING_PREDECESSOR_VALID != 0));
+
+        std::fs::remove_dir_all(snapshot_dir).unwrap();
+    }
+
+    #[test]
+    fn truncated_cpp_clock_tree_fixture_is_isolated() {
+        let snapshot_dir = temp_snapshot_dir("clock-tree-cts-truncated");
+        let manifest_path = write_clock_tree_fixture(&snapshot_dir);
+        let timing_path = snapshot_dir.join("geometry.clock_tree.timing.bin");
+        let mut timing = std::fs::read(&timing_path).unwrap();
+        timing.pop();
+        std::fs::write(&timing_path, timing).unwrap();
+
+        let manifest = read_manifest(&manifest_path).unwrap();
+        let ClockTreeRead::Invalid(error) = clock_tree::load(&manifest) else {
+            panic!("truncated fixture should be reported as an invalid extension");
+        };
+        assert!(error.contains("payload length is invalid"), "{error}");
+
+        std::fs::remove_dir_all(snapshot_dir).unwrap();
     }
 
     #[test]
@@ -1822,6 +1954,59 @@ mod tests {
         assert_eq!(snapshot.name_by_id(2), None);
 
         std::fs::remove_dir_all(snapshot_dir).unwrap();
+    }
+
+    fn write_clock_tree_fixture(snapshot_dir: &Path) -> PathBuf {
+        for (name, bytes) in [
+            (
+                "geometry.clock_tree.meta.bin",
+                &include_bytes!("../testdata/clock_tree_gcd20_cts/geometry.clock_tree.meta.bin")[..],
+            ),
+            (
+                "geometry.clock_tree.nodes.bin",
+                &include_bytes!("../testdata/clock_tree_gcd20_cts/geometry.clock_tree.nodes.bin")[..],
+            ),
+            (
+                "geometry.clock_tree.edges.bin",
+                &include_bytes!("../testdata/clock_tree_gcd20_cts/geometry.clock_tree.edges.bin")[..],
+            ),
+            (
+                "geometry.clock_tree.timing.bin",
+                &include_bytes!("../testdata/clock_tree_gcd20_cts/geometry.clock_tree.timing.bin")
+                    [..],
+            ),
+            (
+                "geometry.clock_tree.strings.bin",
+                &include_bytes!("../testdata/clock_tree_gcd20_cts/geometry.clock_tree.strings.bin")
+                    [..],
+            ),
+        ] {
+            std::fs::write(snapshot_dir.join(name), bytes).unwrap();
+        }
+        let manifest_path = snapshot_dir.join("geometry.manifest");
+        std::fs::write(
+            &manifest_path,
+            "schema_version=1\n\
+             shape_count=0\n\
+             owner_count=33150\n\
+             payload_size=0\n\
+             meta=geometry.meta.bin\n\
+             shapes=geometry.shapes.bin\n\
+             owners=geometry.owners.bin\n\
+             payload=geometry.payload.bin\n\
+             names=geometry.names.bin\n\
+             name_index=geometry.name_index.bin\n\
+             sidmap=geometry.sidmap.bin\n\
+             view=geometry.view.bin\n\
+             clock_tree_schema_version=1\n\
+             clock_tree_meta=geometry.clock_tree.meta.bin\n\
+             clock_tree_nodes=geometry.clock_tree.nodes.bin\n\
+             clock_tree_edges=geometry.clock_tree.edges.bin\n\
+             clock_tree_timing=geometry.clock_tree.timing.bin\n\
+             clock_tree_strings=geometry.clock_tree.strings.bin\n",
+        )
+        .unwrap();
+        manifest_path
     }
 
     fn temp_snapshot_dir(test_name: &str) -> PathBuf {

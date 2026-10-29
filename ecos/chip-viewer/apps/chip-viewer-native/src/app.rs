@@ -32,6 +32,7 @@ use crate::macro_staging::{
 };
 use crate::map_data::{ColormapMode, HeatmapData, MapCatalog, MapItem};
 
+mod clock_tree;
 mod gpu_overview;
 mod gpu_tile_worker;
 mod label_layout;
@@ -239,6 +240,7 @@ struct LoadedViewer {
     selected_drc: Option<usize>,
     antenna_overlay: Option<AntennaOverlay>,
     selected_antenna: Option<usize>,
+    clock_tree: Option<crate::clock_tree::ClockTreePanel>,
     map_catalog: Option<MapCatalog>,
     map_catalog_error: Option<String>,
     analysis_tab: AnalysisTab,
@@ -2226,6 +2228,7 @@ impl LoadedViewer {
         let drc_data_path = db.snapshot().manifest().drc.clone().or(drc_data_path);
         let drc_overlay = DrcOverlay::load(drc_data_path, drc_statis_path);
         let antenna_overlay = AntennaOverlay::load(antenna_data_path, antenna_statis_path);
+        let clock_tree = crate::clock_tree::ClockTreePanel::new(std::sync::Arc::clone(&db));
         let (map_catalog, map_catalog_error) = match map_root_path.as_deref() {
             Some(root) => match MapCatalog::discover(root) {
                 Ok(catalog) if !catalog.is_empty() => (Some(catalog), None),
@@ -2307,6 +2310,7 @@ impl LoadedViewer {
             selected_drc: None,
             antenna_overlay,
             selected_antenna: None,
+            clock_tree,
             map_catalog,
             map_catalog_error,
             analysis_tab,
@@ -2714,6 +2718,13 @@ impl LoadedViewer {
     }
 
     fn sidebar_contents(&mut self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical()
+            .id_salt("viewer_sidebar")
+            .auto_shrink([false, false])
+            .show(ui, |ui| self.sidebar_sections(ui));
+    }
+
+    fn sidebar_sections(&mut self, ui: &mut egui::Ui) {
         let section_heights = sidebar_section_heights(ui.available_height());
         let available_width = ui.available_width();
 
@@ -2741,6 +2752,10 @@ impl LoadedViewer {
             egui::Layout::top_down(egui::Align::Min),
             |ui| self.sidebar_interaction_section(ui, section_heights.interaction),
         );
+        if self.clock_tree.is_some() {
+            ui.separator();
+            self.clock_tree_sidebar(ui);
+        }
     }
 
     fn sidebar_view_section(&mut self, ui: &mut egui::Ui) {
@@ -8336,6 +8351,7 @@ impl eframe::App for ChipViewerApp {
             self.canvas(ui);
         });
         if let ViewerState::Loaded(loaded) = &mut self.state {
+            loaded.show_clock_tree_graph(ctx);
             loaded.show_close_confirmation(ctx);
             loaded.show_session_action_progress(ctx);
             loaded.show_shortcuts_overlay(ctx);

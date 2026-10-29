@@ -94,6 +94,7 @@ export function backendWorkspaceOptions(
     const mapped = parameterDisplayIndex?.[displayKey]
     return mapped && mapped.trim() ? mapped : fallback
   }
+  const clockTreeSpecKey = parameterDisplayIndex?.clock_tree?.trim() ?? ''
   const inputs: Array<{ inputId: string; role: string }> = []
   const inputBindings: Record<string, string> = {}
   const addInput = (inputId: string, role: string, path: string) => {
@@ -336,6 +337,11 @@ export function backendWorkspaceOptions(
                 parameters.target_overflow,
                 0.1,
               ),
+            }
+          : {}),
+        ...(clockTreeSpecKey
+          ? {
+              [clockTreeSpecKey]: parameters.clock_tree === true,
             }
           : {}),
       },

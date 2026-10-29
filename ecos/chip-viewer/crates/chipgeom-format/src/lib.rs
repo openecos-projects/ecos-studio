@@ -2,8 +2,12 @@ use bytemuck::{Pod, Zeroable};
 use serde::{Deserialize, Serialize};
 
 pub const GEOMETRY_SCHEMA_VERSION: u32 = 1;
+const _: () = assert!(cfg!(target_endian = "little"));
 pub const GEOMETRY_FILE_MAGIC: u64 = 0x4543_4745_4f4d_3031;
 pub const GEOMETRY_FILE_HEADER_SIZE: usize = core::mem::size_of::<GeometryFileHeader>();
+
+mod clock_tree;
+pub use clock_tree::*;
 
 pub type ShapeId = u64;
 pub type ShapeVersion = u32;
@@ -166,6 +170,11 @@ pub enum GeometryFileKind {
     View = 9,
     SidMap = 10,
     Delta = 11,
+    ClockTreeMeta = 12,
+    ClockTreeNodes = 13,
+    ClockTreeEdges = 14,
+    ClockTreeTiming = 15,
+    ClockTreeStrings = 16,
 }
 
 #[repr(C)]
@@ -316,6 +325,8 @@ mod tests {
         assert_eq!(GeometryFileKind::Delta as u16, 11);
         assert_eq!(core::mem::size_of::<GeometryDeltaRecord>(), 72);
         assert_eq!(GeometryFileKind::View as u16, 9);
+        assert_eq!(GeometryFileKind::ClockTreeMeta as u16, 12);
+        assert_eq!(GeometryFileKind::ClockTreeStrings as u16, 16);
         assert_eq!(core::mem::size_of::<GeometryViewTileRecord>(), 36);
     }
 

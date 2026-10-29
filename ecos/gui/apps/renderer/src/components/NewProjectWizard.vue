@@ -1462,6 +1462,24 @@
                         class="w-full rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
                       />
                     </div>
+                    <label
+                      class="flex cursor-pointer items-start gap-3 rounded-lg border border-(--border-color) bg-(--bg-primary)/55 px-3 py-2.5 md:col-span-2"
+                    >
+                      <input
+                        v-model="config.parameters.clock_tree"
+                        type="checkbox"
+                        class="mt-0.5 h-4 w-4 accent-(--accent-color)"
+                      />
+                      <span>
+                        <span class="block text-sm font-semibold text-(--text-primary)"
+                          >Clock-tree visualization</span
+                        >
+                        <span class="mt-1 block text-xs text-(--text-secondary)"
+                          >Capture clock topology and timing at postFloorplan, CTS, and
+                          filler. Adds snapshot files and CTS/filler analysis time.</span
+                        >
+                      </span>
+                    </label>
                   </div>
 
                   <div
@@ -2186,6 +2204,7 @@ function createInitialConfig(
       clock: '',
       frequency_max: 50,
       max_fanout: 32,
+      clock_tree: false,
       sta_max_parallel_corners: 1,
       die_area_mode: dieAreaMode.value,
       die_width: 100,
@@ -3182,6 +3201,13 @@ function applyProjectParameterDefaults(
     'max_fanout',
     firstNumber(parameters.max_fanout, parameters['Max Fanout']),
   )
+  setBooleanParameterDefault(
+    'clock_tree',
+    firstBoolean(
+      parameters.clock_tree,
+      isRecord(parameters.geometry) ? parameters.geometry.clock_tree : undefined,
+    ),
+  )
   setNumberParameterDefault(
     'die_width',
     firstNumber(parameters.die_width, parameters['Die Width']),
@@ -3245,6 +3271,13 @@ function setNumberParameterDefault(key: string, value: unknown) {
   }
 }
 
+function setBooleanParameterDefault(key: string, value: unknown) {
+  if (typeof value !== 'boolean' || hasInitialParameterValue(key)) return
+  if (config.value.parameters[key] === false) {
+    config.value.parameters[key] = value
+  }
+}
+
 function hasInitialConfigValue(key: keyof WorkspaceConfig) {
   return (
     props.initialConfig?.[key] !== undefined ||
@@ -3274,6 +3307,13 @@ function firstNumber(...values: unknown[]) {
       const parsed = Number(value)
       if (Number.isFinite(parsed)) return parsed
     }
+  }
+  return null
+}
+
+function firstBoolean(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === 'boolean') return value
   }
   return null
 }
