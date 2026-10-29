@@ -54,7 +54,14 @@ const wizardMocks = vi.hoisted(() => {
         },
       ],
     },
-    parameters: [],
+    parameters: [
+      {
+        definition: { id: 'sta.max_parallel_corners', default: 1, range: [1, 13] },
+        state: 'defaulted',
+        source: 'catalogDefault',
+        value: 1,
+      },
+    ],
     pdkInstallations: [],
   })
   return {
@@ -1459,9 +1466,15 @@ describe('NewProjectWizard behavior', () => {
 
     const startSelect = wrapper.get('select')
     const parallelCorners = wrapper.get('#sta-max-parallel-corners')
+    expect(wizardMocks.getWorkspaceCreationModel).toHaveBeenCalledWith(
+      expect.objectContaining({ flowId: 'rtl2gds' }),
+    )
     expect((parallelCorners.element as HTMLSelectElement).value).toBe('1')
-    await parallelCorners.setValue('3')
-    expect((parallelCorners.element as HTMLSelectElement).value).toBe('3')
+    expect(
+      parallelCorners.findAll('option').map((option) => option.element.value),
+    ).toEqual(Array.from({ length: 13 }, (_, index) => String(index + 1)))
+    await parallelCorners.setValue('13')
+    expect((parallelCorners.element as HTMLSelectElement).value).toBe('13')
     expect(wizard.flowStartStep).toBe('Synthesis')
     await startSelect.setValue('CTS')
     await flushPromises()
@@ -1471,6 +1484,49 @@ describe('NewProjectWizard behavior', () => {
     expect(wizard.isFlowStepSelected('Synthesis')).toBe(false)
     expect(wizard.isFlowStepSelected('CTS')).toBe(true)
     wrapper.unmount()
+  })
+
+  it('reduces the STA selection when the effective signoff limit shrinks', async () => {
+    const wrapper = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          standaloneWorkspace: true,
+          parameters: { sta_max_parallel_corners: 13 },
+        },
+      },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    await flushPromises()
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      config: { parameters: { sta_max_parallel_corners: number } }
+      refreshWorkspaceCreationModel(): Promise<void>
+    }
+    wizard.currentStep = 4
+    await flushPromises()
+    expect(
+      (wrapper.get('#sta-max-parallel-corners').element as HTMLSelectElement).value,
+    ).toBe('13')
+    const model = wizardMocks.defaultWorkspaceCreationModel()
+    model.parameters[0]!.definition.range = [1, 2]
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue(model)
+    await wizard.refreshWorkspaceCreationModel()
+    await flushPromises()
+    expect(wizard.config.parameters.sta_max_parallel_corners).toBe(2)
+    expect(wrapper.get('#sta-max-parallel-corners').findAll('option')).toHaveLength(2)
+    expect(
+      (wrapper.get('#sta-max-parallel-corners').element as HTMLSelectElement).value,
+    ).toBe('2')
+    wrapper.unmount()
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue(
+      wizardMocks.defaultWorkspaceCreationModel(),
+    )
   })
 
   it('leaves flow steps unavailable when discovery has no flow definitions', async () => {

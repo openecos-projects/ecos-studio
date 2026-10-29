@@ -175,7 +175,11 @@ export function backendWorkspaceOptions(
   const endStep = config.flow_config?.end_step || flowSteps[flowSteps.length - 1]
   const selectedSteps = new Set([...flowSteps, startStep, endStep].filter(Boolean))
   const flowId =
-    selectedSteps.size === 1 && selectedSteps.has('Synthesis') ? 'syn_sta' : 'rtl2gds'
+    selectedSteps.size === 1 && selectedSteps.has('defview')
+      ? 'defview'
+      : selectedSteps.size === 1 && selectedSteps.has('Synthesis')
+        ? 'syn_sta'
+        : 'rtl2gds'
   // Mirrors ECC's applicability aliases (ecc/chipcompiler/engine/workspace_spec.py
   // _parameter_applies_to_flow); an empty step set means the full flow.
   const normalizedSteps = new Set([...selectedSteps].map((step) => step.toLowerCase()))
@@ -238,7 +242,12 @@ export function backendWorkspaceOptions(
         topModule: String(parameters.top_module || 'top'),
         clockPort: String(parameters.clock || 'clk'),
       },
-      inputMode: config.design_input_mode === 'post_synthesis' ? 'postSynthesis' : 'rtl',
+      inputMode:
+        config.design_input_mode === 'def'
+          ? 'def'
+          : config.design_input_mode === 'post_synthesis'
+            ? 'postSynthesis'
+            : 'rtl',
       inputs,
       pdk: {
         familyId: config.pdk || 'ics55',

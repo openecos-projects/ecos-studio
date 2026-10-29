@@ -18,6 +18,7 @@ export const desktopMenuEventIds = {
   exportSignoffPackage: 'export_signoff_package',
   exportDesignSummary: 'export_design_summary',
   exportDesignMetrics: 'export_design_summary',
+  viewDef: 'view_def',
 } as const
 
 export type DesktopMenuEventId =
@@ -37,6 +38,7 @@ export const appMenuActionIds = {
   exportSignoffPackage: desktopMenuEventIds.exportSignoffPackage,
   exportDesignSummary: desktopMenuEventIds.exportDesignSummary,
   exportDesignMetrics: desktopMenuEventIds.exportDesignSummary,
+  viewDef: desktopMenuEventIds.viewDef,
 } as const
 
 export type AppMenuAction = (typeof appMenuActionIds)[keyof typeof appMenuActionIds]

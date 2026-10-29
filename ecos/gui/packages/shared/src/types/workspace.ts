@@ -71,7 +71,7 @@ export interface WorkspaceConfig {
   origin_verilog: string
   rtl_list: string[]
   filelist?: string
-  design_input_mode?: 'rtl' | 'post_synthesis'
+  design_input_mode?: 'rtl' | 'post_synthesis' | 'def'
   sdc?: string
   pdk_config_mode?: 'default' | 'manual'
   /** External PDK directories (macro LEF/lib pools) declared in ecc.toml. */

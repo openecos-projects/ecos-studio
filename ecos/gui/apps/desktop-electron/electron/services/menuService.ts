@@ -128,6 +128,8 @@ export function registerApplicationMenu(options: ApplicationMenuOptions = {}): v
   template.push({
     label: 'View',
     submenu: [
+      createMenuAction('DEF Layout', appMenuActionIds.viewDef),
+      { type: 'separator' },
       createMenuAction('Zoom In', appMenuActionIds.zoomIn, 'CmdOrCtrl+='),
       createMenuAction('Zoom Out', appMenuActionIds.zoomOut, 'CmdOrCtrl+-'),
       createMenuAction('Reset Zoom', appMenuActionIds.zoomReset, 'CmdOrCtrl+0'),

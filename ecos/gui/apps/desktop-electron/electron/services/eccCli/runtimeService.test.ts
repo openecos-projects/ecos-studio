@@ -185,13 +185,14 @@ describe('ECC CLI workspace command planning', () => {
     input.deriveFrom = { sourceStep: 'placement', workspaceId: 'ws_source' }
     expect(workspaceCreateCommands(input, '/projects/demo')[1]).toEqual([
       'param',
-      'set',
-      'sta.max_parallel_corners',
-      '3',
+      'apply',
       '--project',
       '/projects/demo',
       '--workspace',
       'ws_1',
+      '--no-wait',
+      '--set',
+      'sta.max_parallel_corners=3',
     ])
   })
 
@@ -263,6 +264,11 @@ describe('ECC CLI workspace command planning', () => {
       deriveFrom: { sourceStep: 'placement', workspaceId: 'ws_source' },
       projectMode: 'select',
     })
+    input.workspaceSpec.flow = {
+      flowId: 'rtl2gds',
+      fromStepId: 'diff_sizing',
+      throughStepId: 'Harden',
+    }
     expect(workspaceCreateCommands(input, '/projects/demo')).toEqual([
       [
         'workspace',
@@ -272,12 +278,43 @@ describe('ECC CLI workspace command planning', () => {
         '--project',
         '/projects/demo',
         '--from',
-        'placement',
+        'diff_sizing',
+        '--to',
+        'Harden',
         '--command-id',
         'command-1',
         '--no-wait',
       ],
+      [
+        'param',
+        'apply',
+        '--project',
+        '/projects/demo',
+        '--workspace',
+        'ws_1',
+        '--no-wait',
+        '--set',
+        'design.frequency_mhz=500',
+        '--set',
+        'place.density=0.63',
+      ],
     ])
+  })
+
+  it('requires a continuation step before deriving and preserves inherited parameters for an empty patch', () => {
+    const input = request({
+      deriveFrom: { sourceStep: 'placement', workspaceId: 'ws_source' },
+    })
+    input.workspaceSpec.parameters = {}
+    expect(workspaceCreateCommands(input, '/projects/demo')).toHaveLength(1)
+    input.workspaceSpec.flow = { flowId: 'rtl2gds', fromStepId: 'place' }
+    expect(() => workspaceCreateCommands(input, '/projects/demo')).toThrow(
+      'requires a continuation step and endpoint',
+    )
+    input.workspaceSpec.flow = { flowId: 'rtl2gds' }
+    expect(() => workspaceCreateCommands(input, '/projects/demo')).toThrow(
+      'requires a continuation step',
+    )
   })
 
   it('maps all supported Project fields into one apply command', () => {
@@ -503,7 +540,10 @@ describe('ECC CLI RTL import planning', () => {
       }),
     )
 
-    expect(commands.map((args) => args.slice(0, 2))).toEqual([['workspace', 'derive']])
+    expect(commands.map((args) => args.slice(0, 2))).toEqual([
+      ['workspace', 'derive'],
+      ['param', 'apply'],
+    ])
   })
 
   it('imports RTL after init for a standalone Project creation mutation', async () => {

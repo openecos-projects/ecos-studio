@@ -14,6 +14,7 @@ interface AppMenuActionDependencies {
   showNewProjectWizard(): void
   manageDesignFiles?(): void | Promise<void>
   adjustZoom?(action: AppMenuAction): void | Promise<void>
+  viewDef?(): void | Promise<void>
 }
 
 export function useAppMenuActions({
@@ -29,6 +30,7 @@ export function useAppMenuActions({
   showNewProjectWizard,
   manageDesignFiles,
   adjustZoom,
+  viewDef,
 }: AppMenuActionDependencies) {
   const handleMenuAction = async (action: AppMenuAction) => {
     switch (action) {
@@ -45,6 +47,9 @@ export function useAppMenuActions({
         break
       case appMenuActionIds.manageDesignFiles:
         await manageDesignFiles?.()
+        break
+      case appMenuActionIds.viewDef:
+        await viewDef?.()
         break
       case appMenuActionIds.reconfigureWorkspace:
         await reconfigureWorkspace?.()
@@ -100,6 +105,7 @@ export function useAppMenuActions({
     [appMenuActionIds.exportDesignSummary]: () => {
       void handleMenuAction(appMenuActionIds.exportDesignSummary)
     },
+    [appMenuActionIds.viewDef]: () => void handleMenuAction(appMenuActionIds.viewDef),
     [appMenuActionIds.zoomIn]: () => void handleMenuAction(appMenuActionIds.zoomIn),
     [appMenuActionIds.zoomOut]: () => void handleMenuAction(appMenuActionIds.zoomOut),
     [appMenuActionIds.zoomReset]: () => void handleMenuAction(appMenuActionIds.zoomReset),
