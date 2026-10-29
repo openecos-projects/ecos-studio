@@ -21,6 +21,8 @@ use rstar::{RTree, RTreeObject, AABB};
 mod view_tiles;
 pub use view_tiles::ViewTileIndex;
 
+pub mod clock_tree;
+
 pub struct ChipViewDb {
     connectivity_index: ConnectivityIndex,
     layer_index: LayerShapeIndex,
@@ -1782,6 +1784,15 @@ impl ChipViewDb {
 
     pub fn snapshot(&self) -> &GeometrySnapshot {
         &self.snapshot
+    }
+
+    /// Load the optional clock-tree extension lazily when the viewer opens it.
+    pub fn clock_tree(&self) -> Result<Option<&chipgeom_reader::ClockTreeSnapshot>> {
+        self.snapshot.clock_tree()
+    }
+
+    pub fn has_clock_tree_manifest(&self) -> bool {
+        self.snapshot.has_clock_tree_manifest()
     }
 
     pub fn stats(&self) -> SnapshotStats {
