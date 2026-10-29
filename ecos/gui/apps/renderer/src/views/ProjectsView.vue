@@ -783,7 +783,11 @@
       </section>
     </div>
 
-    <div v-if="showProjectMpcSelection" class="project-modal-scrim" role="presentation">
+    <div
+      v-if="showProjectMpcSelection"
+      class="project-modal-scrim mpc-selection-scrim"
+      role="presentation"
+    >
       <section
         ref="projectMpcSelectionDialog"
         class="project-modal-dialog mpc-selection-dialog"
@@ -800,90 +804,126 @@
         >
           <i class="ri-close-line"></i>
         </button>
-        <header>
-          <p class="manager-eyebrow">Project template</p>
-          <h2 id="project-mpc-selection-title">Select Managed MPC</h2>
-          <p>Choose an installed MPC and return to the New Project form.</p>
+        <header class="mpc-selection-dialog__header">
+          <div>
+            <p class="manager-eyebrow">Project template</p>
+            <h2 id="project-mpc-selection-title">Select Managed MPC</h2>
+            <p>Choose the template that defines this backend project.</p>
+          </div>
         </header>
 
-        <div v-if="isLoadingProjectMpcs" class="modal-help">Loading managed MPCs...</div>
-        <div v-else-if="projectMpcLoadError" class="modal-error">
-          {{ projectMpcLoadError }}
-        </div>
-        <div v-else-if="projectMpcs.length === 0" class="modal-help">
-          No eligible managed MPCs are installed.
-        </div>
-        <div v-else class="grid gap-2">
-          <button
-            v-for="mpc in projectMpcs"
-            :key="mpc.resource_id"
-            type="button"
-            class="flex items-center justify-between rounded-lg border px-3 py-2 text-left transition-colors"
-            :class="
-              mpc.resource_id === projectRootDraft.mpcId
-                ? 'border-(--accent-color) bg-(--accent-color)/10'
-                : 'border-(--border-color) hover:border-(--accent-color)/50'
-            "
-            :data-resource-id="mpc.resource_id"
-            :aria-pressed="mpc.resource_id === projectRootDraft.mpcId"
-            @click="selectProjectMpcCandidate(mpc.resource_id)"
+        <div class="mpc-selection-dialog__body">
+          <section
+            class="mpc-selection-dialog__picker"
+            aria-labelledby="mpc-picker-title"
           >
-            <span>
-              <strong class="block">{{ mpc.display_name }}</strong>
-              <small class="text-(--text-secondary)">{{ mpc.installed_version }}</small>
-            </span>
-            <i
-              v-if="mpc.resource_id === projectRootDraft.mpcId"
-              class="ri-check-line text-(--accent-color)"
-              aria-hidden="true"
-            ></i>
-          </button>
-        </div>
+            <div class="mpc-selection-dialog__section-heading">
+              <div>
+                <p class="mpc-selection-dialog__label">Available templates</p>
+                <h3 id="mpc-picker-title">Managed MPC</h3>
+              </div>
+              <span v-if="projectMpcs.length" class="mpc-selection-dialog__count">
+                {{ projectMpcs.length }} installed
+              </span>
+            </div>
 
-        <p v-if="isLoadingProjectMpcSpec" class="modal-help">
-          Loading MPC design specification...
-        </p>
-        <p v-else-if="projectMpcSpecError" class="modal-error">
-          {{ projectMpcSpecError }}
-        </p>
-        <template v-else-if="selectedProjectMpcCandidate && selectedProjectMpcDesign">
-          <label v-if="projectMpcDesigns.length > 1" class="form-field">
-            <span>MPC Design</span>
-            <select v-model="selectedProjectMpcDesignIndex">
-              <option
-                v-for="design in projectMpcDesigns"
-                :key="design.index"
-                :value="design.index"
+            <div v-if="isLoadingProjectMpcs" class="mpc-selection-dialog__state">
+              <i class="ri-loader-4-line ri-spin" aria-hidden="true"></i>
+              <span>Loading managed MPCs...</span>
+            </div>
+            <div
+              v-else-if="projectMpcLoadError"
+              class="mpc-selection-dialog__state is-error"
+            >
+              {{ projectMpcLoadError }}
+            </div>
+            <div v-else-if="projectMpcs.length === 0" class="mpc-selection-dialog__state">
+              No eligible managed MPCs are installed.
+            </div>
+            <div v-else class="mpc-selection-dialog__options">
+              <button
+                v-for="mpc in projectMpcs"
+                :key="mpc.resource_id"
+                type="button"
+                class="mpc-selection-option"
+                :class="{
+                  'is-selected': mpc.resource_id === projectRootDraft.mpcId,
+                }"
+                :data-resource-id="mpc.resource_id"
+                :aria-pressed="mpc.resource_id === projectRootDraft.mpcId"
+                @click="selectProjectMpcCandidate(mpc.resource_id)"
               >
-                {{ design.designName }}
-              </option>
-            </select>
-          </label>
-          <MpcTemplatePreview :design="selectedProjectMpcDesign" />
-        </template>
+                <span class="mpc-selection-option__icon" aria-hidden="true">
+                  <i class="ri-layout-grid-line"></i>
+                </span>
+                <span class="mpc-selection-option__copy">
+                  <strong>{{ mpc.display_name }}</strong>
+                  <small>Version {{ mpc.installed_version }}</small>
+                </span>
+                <span class="mpc-selection-option__status">
+                  <span v-if="mpc.resource_id === projectRootDraft.mpcId">Selected</span>
+                  <i
+                    v-if="mpc.resource_id === projectRootDraft.mpcId"
+                    class="ri-check-line"
+                    aria-hidden="true"
+                  ></i>
+                </span>
+              </button>
+            </div>
+          </section>
 
-        <p v-if="projectMpcSelectionError" class="modal-error">
-          {{ projectMpcSelectionError }}
-        </p>
-        <footer class="modal-actions">
-          <button
-            type="button"
-            class="secondary-button"
-            @click="cancelProjectMpcSelection"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            class="primary-button"
-            :disabled="
-              isLoadingProjectMpcs || isLoadingProjectMpcSpec || !selectedProjectMpc
-            "
-            @click="confirmProjectMpcSelection"
-          >
-            <i class="ri-check-line"></i>
-            <span>Select</span>
-          </button>
+          <div v-if="isLoadingProjectMpcSpec" class="mpc-selection-dialog__state">
+            <i class="ri-loader-4-line ri-spin" aria-hidden="true"></i>
+            <span>Loading MPC design specification...</span>
+          </div>
+          <p v-else-if="projectMpcSpecError" class="mpc-selection-dialog__state is-error">
+            {{ projectMpcSpecError }}
+          </p>
+          <template v-else-if="selectedProjectMpcCandidate && selectedProjectMpcDesign">
+            <label v-if="projectMpcDesigns.length > 1" class="form-field">
+              <span>MPC Design</span>
+              <select v-model="selectedProjectMpcDesignIndex">
+                <option
+                  v-for="design in projectMpcDesigns"
+                  :key="design.index"
+                  :value="design.index"
+                >
+                  {{ design.designName }}
+                </option>
+              </select>
+            </label>
+            <MpcTemplatePreview :design="selectedProjectMpcDesign" />
+          </template>
+        </div>
+
+        <footer class="modal-actions mpc-selection-dialog__actions">
+          <p v-if="projectMpcSelectionError" class="modal-error">
+            {{ projectMpcSelectionError }}
+          </p>
+          <span v-else class="mpc-selection-dialog__hint">
+            <i class="ri-information-line" aria-hidden="true"></i>
+            You can change this later in the project manifest.
+          </span>
+          <div class="mpc-selection-dialog__action-buttons">
+            <button
+              type="button"
+              class="secondary-button"
+              @click="cancelProjectMpcSelection"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="primary-button"
+              :disabled="
+                isLoadingProjectMpcs || isLoadingProjectMpcSpec || !selectedProjectMpc
+              "
+              @click="confirmProjectMpcSelection"
+            >
+              <i class="ri-check-line"></i>
+              <span>Use template</span>
+            </button>
+          </div>
         </footer>
       </section>
     </div>
@@ -2002,6 +2042,7 @@ function closeWorkspaceFlowPopover() {
 }
 
 function updateWorkspaceFlowPopoverPosition() {
+  if (showNewProjectDialog.value || showProjectMpcSelection.value) return
   const target = popoverWorkspaceTarget.value
   if (!target) return
   const trigger = document.querySelector<HTMLElement>(
