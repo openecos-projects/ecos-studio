@@ -2752,10 +2752,6 @@ impl LoadedViewer {
             egui::Layout::top_down(egui::Align::Min),
             |ui| self.sidebar_interaction_section(ui, section_heights.interaction),
         );
-        if self.clock_tree.is_some() {
-            ui.separator();
-            self.clock_tree_sidebar(ui);
-        }
     }
 
     fn sidebar_view_section(&mut self, ui: &mut egui::Ui) {
@@ -8340,6 +8336,14 @@ impl eframe::App for ChipViewerApp {
                     .default_width(292.0)
                     .show(ctx, |ui| loaded.analysis_sidebar(ui));
             }
+            if loaded.clock_tree.is_some() {
+                egui::SidePanel::left("chip_viewer_clock_tree")
+                    .resizable(true)
+                    .min_width(260.0)
+                    .max_width(460.0)
+                    .default_width(320.0)
+                    .show(ctx, |ui| loaded.clock_tree_controls(ui));
+            }
         }
         egui::SidePanel::right("chip_viewer_operations")
             .resizable(true)
@@ -8347,11 +8351,13 @@ impl eframe::App for ChipViewerApp {
             .max_width(460.0)
             .default_width(320.0)
             .show(ctx, |ui| self.sidebar(ui));
+        if let ViewerState::Loaded(loaded) = &mut self.state {
+            loaded.show_clock_tree_graph(ctx);
+        }
         egui::CentralPanel::default().show(ctx, |ui| {
             self.canvas(ui);
         });
         if let ViewerState::Loaded(loaded) = &mut self.state {
-            loaded.show_clock_tree_graph(ctx);
             loaded.show_close_confirmation(ctx);
             loaded.show_session_action_progress(ctx);
             loaded.show_shortcuts_overlay(ctx);

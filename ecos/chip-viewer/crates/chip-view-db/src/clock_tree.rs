@@ -107,6 +107,7 @@ pub struct ClockGraphIndex {
     pub info: ClockInfo,
     pub nodes: Vec<ClockNode>,
     pub edges: Vec<ClockEdge>,
+    pub timed_node_count: usize,
     pub children: Vec<Vec<usize>>,
     pub parents: Vec<Vec<usize>>,
     pub roots: Vec<usize>,
@@ -320,6 +321,11 @@ impl ClockGraphIndex {
             entries.dedup();
         }
 
+        let timed_node_count = nodes
+            .iter()
+            .filter(|node| node.arrival_ns.is_some())
+            .count();
+
         Ok(Self {
             info: ClockInfo {
                 name: snapshot
@@ -333,6 +339,7 @@ impl ClockGraphIndex {
             },
             nodes,
             edges,
+            timed_node_count,
             children,
             parents,
             roots,

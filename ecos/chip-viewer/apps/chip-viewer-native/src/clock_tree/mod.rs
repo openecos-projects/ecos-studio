@@ -1,4 +1,5 @@
 mod graph;
+mod layout;
 mod panel;
 
 use std::collections::{HashMap, HashSet};
@@ -7,6 +8,8 @@ use std::sync::{mpsc, Arc};
 use chip_view_db::clock_tree::{ClockNode, ClockTreeView};
 use chip_view_db::ChipViewDb;
 use chipgeom_format::{ClockTreeAnalysisSource, ClockTreeStage, ClockTreeStatus};
+
+use layout::TreeRow;
 
 pub(crate) enum LayoutTarget {
     Node(ClockNode),
@@ -24,18 +27,10 @@ struct LayoutMatch {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-enum TreeAxis {
+enum TreeColorMode {
     #[default]
-    Level,
+    Structure,
     Delay,
-}
-
-#[derive(Clone, Debug)]
-struct TreeRow {
-    node: usize,
-    depth: usize,
-    parent: Option<usize>,
-    reference: bool,
 }
 
 pub(crate) struct ClockTreePanel {
@@ -46,17 +41,21 @@ pub(crate) struct ClockTreePanel {
     started: bool,
     clock: usize,
     selected: Option<usize>,
-    expanded: HashSet<usize>,
+    collapsed: HashSet<usize>,
     search: String,
     only_issues: bool,
     rows: Vec<TreeRow>,
+    render_rows: Vec<usize>,
+    y_bands: Vec<layout::YBand>,
     rows_dirty: bool,
-    truncated: bool,
     focus_selected: bool,
     delay_bounds: (f64, f64),
-    axis: TreeAxis,
+    color_mode: TreeColorMode,
     zoom: f32,
     pan: egui::Vec2,
+    zoom_step: i32,
+    center_root_view: bool,
+    fit_tree_view: bool,
     open: bool,
     pub(crate) last_layout_selection: Option<u64>,
     pending_layout_matches: Vec<LayoutMatch>,
@@ -75,17 +74,21 @@ impl ClockTreePanel {
             started: false,
             clock: 0,
             selected: None,
-            expanded: HashSet::new(),
+            collapsed: HashSet::new(),
             search: String::new(),
             only_issues: false,
             rows: Vec::new(),
+            render_rows: Vec::new(),
+            y_bands: Vec::new(),
             rows_dirty: true,
-            truncated: false,
             focus_selected: false,
             delay_bounds: (0.0, 1.0),
-            axis: TreeAxis::Level,
+            color_mode: TreeColorMode::Structure,
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
+            zoom_step: 0,
+            center_root_view: false,
+            fit_tree_view: false,
             open: false,
             last_layout_selection: None,
             pending_layout_matches: Vec::new(),
@@ -142,17 +145,11 @@ impl ClockTreePanel {
 
     fn reset_clock(&mut self) {
         self.selected = None;
-        self.expanded.clear();
-        if let Some(index) = self
-            .data
-            .as_ref()
-            .and_then(|data| data.view.clocks.get(self.clock))
-        {
-            self.expanded.extend(index.roots.iter().copied());
-        }
+        self.collapsed.clear();
         self.rows_dirty = true;
-        self.zoom = 1.0;
-        self.pan = egui::Vec2::ZERO;
+        self.zoom_step = 0;
+        self.center_root_view = false;
+        self.fit_tree_view = true;
     }
 
     fn select(&mut self, node: usize) {
@@ -165,7 +162,9 @@ impl ClockTreePanel {
         };
         self.selected = Some(node);
         self.focus_selected = true;
-        self.expanded.extend(index.path_to(node));
+        for ancestor in index.path_to(node) {
+            self.collapsed.remove(&ancestor);
+        }
         self.rows_dirty = true;
     }
 

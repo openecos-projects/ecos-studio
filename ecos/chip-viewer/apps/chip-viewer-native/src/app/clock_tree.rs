@@ -1,9 +1,12 @@
-use super::{focus_target_for_shape_ids, LoadedViewer, PendingFocus};
+use super::{focus_target_for_shape_ids, section_heading, LoadedViewer, PendingFocus};
 use crate::clock_tree::LayoutTarget;
 use chipgeom_format::{OwnerType, Rect32};
 
 impl LoadedViewer {
-    pub(super) fn clock_tree_sidebar(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn clock_tree_controls(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(8.0);
+        section_heading(ui, "CLOCK TREE");
+        ui.add_space(4.0);
         let names = self
             .selected
             .and_then(|id| self.db.find_shape(id))
@@ -42,8 +45,8 @@ impl LoadedViewer {
         }
         let action = egui::TopBottomPanel::bottom("clock_tree_graph")
             .resizable(true)
-            .default_height(300.0)
-            .min_height(160.0)
+            .default_height(420.0)
+            .min_height(220.0)
             .show(ctx, |ui| {
                 self.clock_tree
                     .as_mut()
@@ -64,12 +67,28 @@ impl LoadedViewer {
                     hx: node.x_dbu,
                     hy: node.y_dbu,
                 });
-                let mut shapes = self.db.query_pin_name(&node.name);
+                let mut shapes = node
+                    .owner_index
+                    .and_then(|owner_index| {
+                        self.db
+                            .snapshot()
+                            .owners()
+                            .get(owner_index as usize)
+                            .and_then(|owner| {
+                                OwnerType::from_raw(owner.owner_type)
+                                    .map(|owner_type| (owner_type, owner.owner_id))
+                            })
+                    })
+                    .map(|(owner_type, owner_id)| self.db.query_owner_shapes(owner_type, owner_id))
+                    .unwrap_or_default();
                 if shapes.is_empty() && !node.instance_name.is_empty() {
                     shapes = self.db.query_owner_name_for_owner_types(
                         &node.instance_name,
                         &[OwnerType::InstanceBBox],
                     );
+                }
+                if shapes.is_empty() {
+                    shapes = self.db.query_pin_name(&node.name);
                 }
                 (node.name.clone(), shapes, fallback)
             }

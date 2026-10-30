@@ -85,6 +85,10 @@ impl ClockTreePanel {
         ));
         if ui.button("Open clock graph").clicked() {
             self.open = true;
+            self.collapsed.clear();
+            self.rows_dirty = true;
+            self.center_root_view = false;
+            self.fit_tree_view = true;
         }
         if self.open && ui.button("Close clock graph").clicked() {
             self.open = false;
