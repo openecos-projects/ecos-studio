@@ -226,10 +226,12 @@ fn layout_rows(index: &ClockGraphIndex, rows: &mut [TreeRow]) {
             while let Some(child_index) = child {
                 let column = child_ordinal % columns;
                 let fan_row = child_ordinal / columns;
-                rows[child_index].x = f64::from(fan_left + column as f32 * LEAF_COLUMN_SPACING);
+                let child_x = fan_left + column as f32 * LEAF_COLUMN_SPACING;
+                rows[child_index].x = f64::from(child_x);
                 rows[child_index].y = rows[row_index].y
                     + f64::from(LEVEL_SPACING + fan_row as f32 * LEAF_ROW_SPACING);
                 rows[child_index].leaf_fan = true;
+                subtree_start[child_index] = child_x - subtree_width[child_index] * 0.5;
                 child_ordinal += 1;
                 child = next_sibling[child_index];
             }
@@ -254,11 +256,17 @@ fn layout_rows(index: &ClockGraphIndex, rows: &mut [TreeRow]) {
     }
 
     for row_index in 0..node_count {
-        let Some(first) = first_child[row_index] else {
-            continue;
-        };
-        let last = last_child[row_index].unwrap_or(first);
-        rows[row_index].x = (rows[first].x + rows[last].x) * 0.5;
+        let mut child = first_child[row_index];
+        let mut left = f64::INFINITY;
+        let mut right = f64::NEG_INFINITY;
+        while let Some(child_index) = child {
+            left = left.min(rows[child_index].x);
+            right = right.max(rows[child_index].x);
+            child = next_sibling[child_index];
+        }
+        if left.is_finite() {
+            rows[row_index].x = (left + right) * 0.5;
+        }
     }
 }
 
@@ -409,5 +417,40 @@ mod tests {
             "layout width: {minimum_x}..{maximum_x}"
         );
         assert!(layout.y_bands.len() > 300);
+    }
+
+    #[test]
+    fn sibling_leaf_fans_keep_their_nodes_under_each_parent() {
+        let mut children = vec![vec![]; 37];
+        children[0] = vec![1, 2];
+        children[1] = (3..=19).collect();
+        children[2] = (20..=36).collect();
+        let index = test_index(children);
+        let layout = visible_rows(&index, &HashSet::new(), "", false);
+
+        let row_for = |node| layout.rows.iter().find(|row| row.node == node).unwrap();
+        let child_columns = |node: usize| {
+            index.children[node]
+                .iter()
+                .map(|&child| {
+                    let child = layout.rows.iter().find(|row| row.node == child).unwrap();
+                    (child.x, child.y)
+                })
+                .collect::<Vec<_>>()
+        };
+        let first = child_columns(1);
+        let second = child_columns(2);
+        let first_min = first.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
+        let first_max = first
+            .iter()
+            .map(|(x, _)| *x)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let second_min = second.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
+
+        assert!(first_max > first_min);
+        assert!(first_max < second_min);
+        assert_eq!(row_for(1).x, (first_min + first_max) * 0.5);
+        assert_eq!(first[0].1, first[4].1);
+        assert!(first[5].1 > first[0].1);
     }
 }
