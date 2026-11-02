@@ -12,7 +12,6 @@ pub(super) const LEAF_ROW_SPACING: f32 = 20.0;
 
 const LEAF_COLUMN_SPACING: f32 = 20.0;
 const LEAF_DELAY_VERTICAL_SPAN: f32 = 180.0;
-const MAX_LEAF_DELAY_COLUMNS: usize = 20;
 const MAX_LEAF_FAN_COLUMNS: usize = 32;
 const LEAF_FAN_THRESHOLD: usize = 8;
 const SUBTREE_GAP: f32 = 16.0;
@@ -51,22 +50,22 @@ pub(super) struct TreeLayout {
     pub(super) leaf_delay_axis: Option<LeafDelayAxis>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum TreeLayoutMode {
+    Hierarchy,
+    Delay,
+}
+
 fn is_terminal_leaf(index: &ClockGraphIndex, node: usize) -> bool {
     let node = &index.nodes[node];
     node.sink || node.kind == chipgeom_format::ClockNodeKind::Sink
 }
 
-pub(super) fn leaf_delay_bounds(index: &ClockGraphIndex) -> Option<(f64, f64)> {
+pub(super) fn delay_axis_bounds(index: &ClockGraphIndex) -> Option<(f64, f64)> {
     let mut maximum = f64::NEG_INFINITY;
     let mut count = 0usize;
-    for (node, _) in index.nodes.iter().enumerate() {
-        if !is_terminal_leaf(index, node) {
-            continue;
-        }
-        let Some(arrival) = index.nodes[node]
-            .arrival_ns
-            .filter(|value| value.is_finite())
-        else {
+    for node in &index.nodes {
+        let Some(arrival) = node.arrival_ns.filter(|value| value.is_finite()) else {
             continue;
         };
         maximum = maximum.max(arrival);
@@ -82,6 +81,7 @@ pub(super) fn visible_rows(
     collapsed: &HashSet<usize>,
     search: &str,
     only_issues: bool,
+    mode: TreeLayoutMode,
 ) -> TreeLayout {
     let query = search.trim().to_lowercase();
     let filtering = !query.is_empty() || only_issues;
@@ -161,11 +161,15 @@ pub(super) fn visible_rows(
         }
     }
 
-    let leaf_delay_axis = layout_rows(index, &mut rows);
+    let leaf_delay_axis = layout_rows(index, &mut rows, mode);
     build_spatial_index(rows, leaf_delay_axis)
 }
 
-fn layout_rows(index: &ClockGraphIndex, rows: &mut [TreeRow]) -> Option<LeafDelayAxis> {
+fn layout_rows(
+    index: &ClockGraphIndex,
+    rows: &mut [TreeRow],
+    mode: TreeLayoutMode,
+) -> Option<LeafDelayAxis> {
     let node_count = rows.len();
     if node_count == 0 {
         return None;
@@ -195,7 +199,9 @@ fn layout_rows(index: &ClockGraphIndex, rows: &mut [TreeRow]) -> Option<LeafDela
         .iter()
         .map(|row| is_terminal_leaf(index, row.node))
         .collect::<Vec<_>>();
-    let delay_bounds = leaf_delay_bounds(index);
+    let delay_bounds = (mode == TreeLayoutMode::Delay)
+        .then(|| delay_axis_bounds(index))
+        .flatten();
     let mut subtree_delay_sum = vec![0.0_f64; node_count];
     let mut subtree_delay_count = vec![0usize; node_count];
     for row_index in (0..node_count).rev() {
@@ -222,7 +228,7 @@ fn layout_rows(index: &ClockGraphIndex, rows: &mut [TreeRow]) -> Option<LeafDela
         .map(|(sum, count)| (*count > 0).then(|| sum / *count as f64))
         .collect::<Vec<_>>();
     for row_index in 0..node_count {
-        if child_count[row_index] < 2 {
+        if mode == TreeLayoutMode::Hierarchy || child_count[row_index] < 2 {
             continue;
         }
         let mut children = Vec::with_capacity(child_count[row_index]);
@@ -246,7 +252,6 @@ fn layout_rows(index: &ClockGraphIndex, rows: &mut [TreeRow]) -> Option<LeafDela
         next_sibling[*children.last().expect("siblings are non-empty")] = None;
     }
     let mut fan_columns = vec![0usize; node_count];
-    let mut delayed_leaf_group = vec![false; node_count];
     for row_index in 0..node_count {
         if child_count[row_index] == 0 {
             continue;
@@ -261,37 +266,20 @@ fn layout_rows(index: &ClockGraphIndex, rows: &mut [TreeRow]) -> Option<LeafDela
         if !all_leaf_children {
             continue;
         }
-        if delay_bounds.is_some() && child_count[row_index] >= 2 {
-            delayed_leaf_group[row_index] = true;
-            fan_columns[row_index] = child_count[row_index].min(MAX_LEAF_DELAY_COLUMNS);
+        if mode == TreeLayoutMode::Delay && delay_bounds.is_some() && child_count[row_index] >= 2 {
+            // Keep timed leaves on one horizontal row so their vertical
+            // position can match the shared delay axis exactly.
+            fan_columns[row_index] = child_count[row_index];
         } else if child_count[row_index] >= LEAF_FAN_THRESHOLD {
             let columns = ((child_count[row_index] as f32 * 1.25).sqrt().ceil() as usize)
                 .clamp(4, MAX_LEAF_FAN_COLUMNS);
             fan_columns[row_index] = columns;
         }
     }
-    let leaf_delay_top = delayed_leaf_group
-        .iter()
-        .enumerate()
-        .filter(|(_, delayed)| **delayed)
-        .map(|(row_index, _)| rows[row_index].y + f64::from(LEVEL_SPACING))
-        .fold(f64::NEG_INFINITY, f64::max);
-    let maximum_delay_fan_rows = delayed_leaf_group
-        .iter()
-        .enumerate()
-        .filter(|(_, delayed)| **delayed)
-        .map(|(row_index, _)| {
-            let columns = fan_columns[row_index].min(child_count[row_index]).max(1);
-            child_count[row_index].div_ceil(columns)
-        })
-        .max()
-        .unwrap_or(1);
     let delay_axis_top = rows.iter().map(|row| row.y).fold(f64::INFINITY, f64::min);
-    let delay_axis_bottom = leaf_delay_top
-        + f64::from(
-            (maximum_delay_fan_rows.saturating_sub(1)) as f32 * LEAF_ROW_SPACING
-                + LEAF_DELAY_VERTICAL_SPAN,
-        );
+    let maximum_depth = rows.iter().map(|row| row.depth).max().unwrap_or(0);
+    let delay_axis_bottom =
+        f64::from(maximum_depth as f32 * LEVEL_SPACING + LEAF_DELAY_VERTICAL_SPAN);
 
     let mut subtree_width = vec![0.0_f32; node_count];
     for row_index in (0..node_count).rev() {
@@ -330,54 +318,6 @@ fn layout_rows(index: &ClockGraphIndex, rows: &mut [TreeRow]) -> Option<LeafDela
         let width = subtree_width[row_index];
         rows[row_index].x = f64::from(start + width * 0.5);
         if child_count[row_index] == 0 {
-            continue;
-        }
-        if delayed_leaf_group[row_index] {
-            let Some((_, maximum)) = delay_bounds else {
-                continue;
-            };
-            let columns = fan_columns[row_index].min(child_count[row_index]).max(1);
-            let fan_rows = child_count[row_index].div_ceil(columns);
-            let delay_span = delay_axis_bottom - delay_axis_top;
-            let fan_width = (columns - 1) as f32 * LEAF_COLUMN_SPACING;
-            let fan_left = rows[row_index].x as f32 - fan_width * 0.5;
-            let mut leaves = Vec::with_capacity(child_count[row_index]);
-            let mut child = first_child[row_index];
-            while let Some(child_index) = child {
-                let arrival = index.nodes[rows[child_index].node]
-                    .arrival_ns
-                    .filter(|value| value.is_finite());
-                leaves.push((arrival, child_index));
-                child = next_sibling[child_index];
-            }
-            leaves.sort_by(|(left_arrival, left), (right_arrival, right)| {
-                match (left_arrival, right_arrival) {
-                    (Some(left_arrival), Some(right_arrival)) => {
-                        left_arrival.total_cmp(right_arrival)
-                    }
-                    (Some(_), None) => std::cmp::Ordering::Less,
-                    (None, Some(_)) => std::cmp::Ordering::Greater,
-                    (None, None) => std::cmp::Ordering::Equal,
-                }
-                .then_with(|| left.cmp(right))
-            });
-
-            for (ordinal, (arrival, child_index)) in leaves.into_iter().enumerate() {
-                let column = ordinal % columns;
-                let fan_row = ordinal / columns;
-                let delay_fraction = arrival
-                    .map(|arrival| (arrival / maximum).clamp(0.0, 1.0) as f32)
-                    .unwrap_or(0.0);
-                let child_x = fan_left + column as f32 * LEAF_COLUMN_SPACING;
-                let fan_backoff = fan_rows.saturating_sub(1 + fan_row) as f32 * LEAF_ROW_SPACING;
-                let delay_y =
-                    delay_axis_top + delay_fraction as f64 * delay_span - f64::from(fan_backoff);
-                rows[child_index].x = f64::from(child_x);
-                rows[child_index].y = delay_y.max(rows[row_index].y + f64::from(LEVEL_SPACING));
-                rows[child_index].leaf_fan = true;
-                rows[child_index].delay_positioned = true;
-                subtree_start[child_index] = child_x - subtree_width[child_index] * 0.5;
-            }
             continue;
         }
         if fan_columns[row_index] > 0 {
@@ -431,8 +371,23 @@ fn layout_rows(index: &ClockGraphIndex, rows: &mut [TreeRow]) -> Option<LeafDela
             rows[row_index].x = (left + right) * 0.5;
         }
     }
+    if mode == TreeLayoutMode::Hierarchy {
+        return None;
+    }
     delay_bounds.and_then(|(minimum_ns, maximum_ns)| {
-        leaf_delay_top.is_finite().then_some(LeafDelayAxis {
+        let delay_span = delay_axis_bottom - delay_axis_top;
+        for row in rows.iter_mut() {
+            let Some(arrival) = index.nodes[row.node]
+                .arrival_ns
+                .filter(|value| value.is_finite())
+            else {
+                continue;
+            };
+            let delay_fraction = (arrival / maximum_ns).clamp(0.0, 1.0);
+            row.y = delay_axis_top + delay_fraction * delay_span;
+            row.delay_positioned = true;
+        }
+        delay_axis_top.is_finite().then_some(LeafDelayAxis {
             minimum_ns,
             maximum_ns,
             top_y: delay_axis_top,
@@ -538,7 +493,13 @@ mod tests {
     #[test]
     fn top_down_layout_centers_parents_over_their_children() {
         let index = test_index(vec![vec![1, 2], vec![3, 4], vec![], vec![], vec![]]);
-        let layout = visible_rows(&index, &HashSet::new(), "", false);
+        let layout = visible_rows(
+            &index,
+            &HashSet::new(),
+            "",
+            false,
+            TreeLayoutMode::Hierarchy,
+        );
 
         assert_eq!(
             layout.rows.iter().map(|row| row.depth).collect::<Vec<_>>(),
@@ -557,7 +518,7 @@ mod tests {
     fn collapsed_branch_is_ignored_by_default_expanded_layout() {
         let index = test_index(vec![vec![1, 2], vec![3, 4], vec![], vec![], vec![]]);
         let collapsed = HashSet::from([1]);
-        let layout = visible_rows(&index, &collapsed, "", false);
+        let layout = visible_rows(&index, &collapsed, "", false, TreeLayoutMode::Hierarchy);
 
         assert_eq!(layout.rows.len(), 3);
         assert_eq!(
@@ -571,7 +532,13 @@ mod tests {
         let mut children = vec![vec![]; 10_001];
         children[0] = (1..=10_000).collect();
         let index = test_index(children);
-        let layout = visible_rows(&index, &HashSet::new(), "", false);
+        let layout = visible_rows(
+            &index,
+            &HashSet::new(),
+            "",
+            false,
+            TreeLayoutMode::Hierarchy,
+        );
 
         let minimum_x = layout
             .rows
@@ -599,7 +566,7 @@ mod tests {
         }
         index.timed_node_count = 4;
 
-        let layout = visible_rows(&index, &HashSet::new(), "", false);
+        let layout = visible_rows(&index, &HashSet::new(), "", false, TreeLayoutMode::Delay);
         let row_for = |node| layout.rows.iter().find(|row| row.node == node).unwrap();
 
         assert!(layout.rows[1..].iter().all(|row| row.delay_positioned));
@@ -621,6 +588,54 @@ mod tests {
     }
 
     #[test]
+    fn every_timed_node_height_matches_the_delay_axis() {
+        let mut index = test_index(vec![vec![1], vec![2], vec![3], vec![]]);
+        for (node, arrival) in [(0, 0.0), (1, 0.10), (2, 0.25), (3, 0.40)] {
+            index.nodes[node].arrival_ns = Some(arrival);
+        }
+        index.timed_node_count = 4;
+
+        let layout = visible_rows(&index, &HashSet::new(), "", false, TreeLayoutMode::Delay);
+        let axis = layout.leaf_delay_axis.expect("delay axis");
+        let axis_span = axis.bottom_y - axis.top_y;
+
+        for row in &layout.rows {
+            let arrival = index.nodes[row.node].arrival_ns.expect("timed node");
+            let expected = axis.top_y + arrival / axis.maximum_ns * axis_span;
+            assert!(
+                (row.y - expected).abs() < 1e-9,
+                "node {} y={} expected={}",
+                row.node,
+                row.y,
+                expected
+            );
+            assert!(row.delay_positioned);
+        }
+    }
+
+    #[test]
+    fn hierarchy_mode_ignores_arrival_for_node_height() {
+        let mut index = test_index(vec![vec![1], vec![2], vec![3], vec![]]);
+        for (node, arrival) in [(0, 0.0), (1, 0.01), (2, 0.02), (3, 0.40)] {
+            index.nodes[node].arrival_ns = Some(arrival);
+        }
+        index.timed_node_count = 4;
+
+        let layout = visible_rows(
+            &index,
+            &HashSet::new(),
+            "",
+            false,
+            TreeLayoutMode::Hierarchy,
+        );
+        for row in &layout.rows {
+            assert!((row.y - row.depth as f64 * f64::from(LEVEL_SPACING)).abs() < 1e-9);
+            assert!(!row.delay_positioned);
+        }
+        assert!(layout.leaf_delay_axis.is_none());
+    }
+
+    #[test]
     fn sibling_fans_are_ordered_from_early_to_late_delay() {
         let mut index = test_index(vec![
             vec![1, 2],
@@ -636,7 +651,7 @@ mod tests {
         }
         index.timed_node_count = 4;
 
-        let layout = visible_rows(&index, &HashSet::new(), "", false);
+        let layout = visible_rows(&index, &HashSet::new(), "", false, TreeLayoutMode::Delay);
         let row_for = |node| layout.rows.iter().find(|row| row.node == node).unwrap();
         let early_max = [5, 6]
             .into_iter()
@@ -677,7 +692,7 @@ mod tests {
         }
         index.timed_node_count = 4;
 
-        let layout = visible_rows(&index, &HashSet::new(), "", false);
+        let layout = visible_rows(&index, &HashSet::new(), "", false, TreeLayoutMode::Delay);
         let row_for = |node| layout.rows.iter().find(|row| row.node == node).unwrap();
 
         assert!((row_for(3).y - row_for(6).y).abs() < 1e-9);
@@ -692,7 +707,13 @@ mod tests {
         children[1] = (3..=19).collect();
         children[2] = (20..=36).collect();
         let index = test_index(children);
-        let layout = visible_rows(&index, &HashSet::new(), "", false);
+        let layout = visible_rows(
+            &index,
+            &HashSet::new(),
+            "",
+            false,
+            TreeLayoutMode::Hierarchy,
+        );
 
         let row_for = |node| layout.rows.iter().find(|row| row.node == node).unwrap();
         let child_columns = |node: usize| {

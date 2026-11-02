@@ -27,9 +27,9 @@ struct LayoutMatch {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-enum TreeColorMode {
+enum TreeViewMode {
     #[default]
-    Structure,
+    Hierarchy,
     Delay,
 }
 
@@ -51,7 +51,7 @@ pub(crate) struct ClockTreePanel {
     focus_selected: bool,
     delay_bounds: (f64, f64),
     leaf_delay_axis: Option<layout::LeafDelayAxis>,
-    color_mode: TreeColorMode,
+    view_mode: TreeViewMode,
     zoom: f32,
     pan: egui::Vec2,
     zoom_step: i32,
@@ -85,7 +85,7 @@ impl ClockTreePanel {
             focus_selected: false,
             delay_bounds: (0.0, 1.0),
             leaf_delay_axis: None,
-            color_mode: TreeColorMode::Structure,
+            view_mode: TreeViewMode::Hierarchy,
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
             zoom_step: 0,

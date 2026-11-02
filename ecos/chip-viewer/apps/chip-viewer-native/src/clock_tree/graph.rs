@@ -4,7 +4,7 @@ use super::layout::{
     self, LeafDelayAxis, TreeRow, LEAF_HEIGHT, LEAF_ROW_SPACING, LEAF_WIDTH, NODE_HEIGHT,
     NODE_WIDTH,
 };
-use super::{ClockTreePanel, LayoutTarget, TreeColorMode};
+use super::{ClockTreePanel, LayoutTarget, TreeViewMode};
 
 const VIEW_PADDING: f32 = 28.0;
 const MIN_ZOOM: f32 = 0.002;
@@ -86,14 +86,14 @@ fn delay_color(value: f64, bounds: (f64, f64)) -> egui::Color32 {
 fn node_color(
     index: &ClockGraphIndex,
     node: &ClockNode,
-    color_mode: TreeColorMode,
+    view_mode: TreeViewMode,
     delay_bounds: (f64, f64),
 ) -> egui::Color32 {
     if !index.issues[node.index].is_empty() {
         egui::Color32::from_rgb(163, 66, 62)
     } else if node.arrival_ns.is_none() && index.summary.valid_sink_count > 0 {
         egui::Color32::from_gray(65)
-    } else if color_mode == TreeColorMode::Delay {
+    } else if view_mode == TreeViewMode::Delay {
         node.arrival_ns
             .map_or(egui::Color32::from_gray(65), |arrival| {
                 delay_color(arrival, delay_bounds)
@@ -286,8 +286,9 @@ impl ClockTreePanel {
         let timed_nodes = index.timed_node_count;
         let has_timing = timed_nodes > 0;
         let complete_timing = timed_nodes == index.nodes.len();
-        if !has_timing {
-            self.color_mode = TreeColorMode::Structure;
+        if !has_timing && self.view_mode != TreeViewMode::Hierarchy {
+            self.view_mode = TreeViewMode::Hierarchy;
+            self.rows_dirty = true;
         }
         let mut action = None;
         ui.horizontal(|ui| {
@@ -298,9 +299,13 @@ impl ClockTreePanel {
             self.rows_dirty |= ui
                 .checkbox(&mut self.only_issues, "Attention paths")
                 .changed();
-            ui.selectable_value(&mut self.color_mode, TreeColorMode::Structure, "Hierarchy");
+            self.rows_dirty |= ui
+                .selectable_value(&mut self.view_mode, TreeViewMode::Hierarchy, "Hierarchy")
+                .changed();
             ui.add_enabled_ui(has_timing, |ui| {
-                ui.selectable_value(&mut self.color_mode, TreeColorMode::Delay, "Delay color");
+                self.rows_dirty |= ui
+                    .selectable_value(&mut self.view_mode, TreeViewMode::Delay, "Delay")
+                    .changed();
             });
             if ui.button("Close").clicked() {
                 self.open = false;
@@ -311,7 +316,7 @@ impl ClockTreePanel {
                 egui::Color32::YELLOW,
                 "Hierarchy view · insertion timing is unavailable for this clock.",
             );
-        } else if self.color_mode == TreeColorMode::Delay && !complete_timing {
+        } else if self.view_mode == TreeViewMode::Delay && !complete_timing {
             ui.colored_label(
                 egui::Color32::YELLOW,
                 format!(
@@ -320,10 +325,16 @@ impl ClockTreePanel {
                 ),
             );
         }
-        if let Some(axis) = self.leaf_delay_axis {
+        if self.view_mode == TreeViewMode::Hierarchy {
+            ui.label(
+                egui::RichText::new("Hierarchy view · node height follows topology depth")
+                    .small()
+                    .color(egui::Color32::from_gray(170)),
+            );
+        } else if let Some(axis) = self.leaf_delay_axis {
             ui.label(
                 egui::RichText::new(format!(
-                    "Leaf Y = insertion delay (early ↑ / late ↓) · {:.4}–{:.4} ns",
+                    "Node Y = insertion delay from root (0 → late ↓) · {:.4}–{:.4} ns",
                     axis.minimum_ns, axis.maximum_ns
                 ))
                 .small()
@@ -370,8 +381,17 @@ impl ClockTreePanel {
             ui.label("Scroll: zoom · Drag: pan · Double-click: fold · Click: locate");
         });
         if self.rows_dirty {
-            let layout =
-                layout::visible_rows(index, &self.collapsed, &self.search, self.only_issues);
+            let layout_mode = match self.view_mode {
+                TreeViewMode::Hierarchy => layout::TreeLayoutMode::Hierarchy,
+                TreeViewMode::Delay => layout::TreeLayoutMode::Delay,
+            };
+            let layout = layout::visible_rows(
+                index,
+                &self.collapsed,
+                &self.search,
+                self.only_issues,
+                layout_mode,
+            );
             self.rows = layout.rows;
             self.render_rows = layout.render_rows;
             self.y_bands = layout.y_bands;
@@ -527,7 +547,7 @@ impl ClockTreePanel {
                     }
                 }
 
-                let color = node_color(index, node, self.color_mode, self.delay_bounds);
+                let color = node_color(index, node, self.view_mode, self.delay_bounds);
                 if is_leaf(index, row) {
                     if leaf_is_dot(child_size) {
                         painter.circle_filled(point, child_size.x.max(1.0) * 0.5, color);
