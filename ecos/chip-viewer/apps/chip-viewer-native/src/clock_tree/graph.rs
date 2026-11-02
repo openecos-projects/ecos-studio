@@ -1,7 +1,7 @@
 use chip_view_db::clock_tree::{ClockGraphIndex, ClockNode};
 
 use super::layout::{
-    self, LeafDelayAxis, TreeRow, LEAF_HEIGHT, LEAF_ROW_SPACING, LEAF_WIDTH, NODE_HEIGHT,
+    self, TreeAxis, TreeAxisKind, TreeRow, LEAF_HEIGHT, LEAF_ROW_SPACING, LEAF_WIDTH, NODE_HEIGHT,
     NODE_WIDTH,
 };
 use super::{layout_target_for_node, ClockTreePanel, LayoutTarget, TreeViewMode};
@@ -15,9 +15,9 @@ const LEAF_TRIANGLE_MIN_PIXELS: f32 = 4.4;
 const MIN_NODE_HIT_SIZE: f32 = 8.0;
 const MAX_EDGE_INTERACTIONS: usize = 1200;
 const MIN_EDGE_INTERACTION_ZOOM: f32 = 0.4;
-const FANOUT_RAIL_OFFSET: f32 = 12.0;
-const DELAY_AXIS_WIDTH: f32 = 72.0;
-const DELAY_AXIS_TICK_TARGET_PX: f32 = 32.0;
+const FANOUT_RAIL_OFFSET: f32 = 14.0;
+const TREE_AXIS_WIDTH: f32 = 72.0;
+const TREE_AXIS_TICK_TARGET_PX: f32 = 30.0;
 
 fn delay_tick_decimals(step: f64) -> usize {
     if step >= 0.01 {
@@ -44,8 +44,8 @@ fn is_leaf(index: &ClockGraphIndex, row: &TreeRow) -> bool {
 fn leaf_visual_size(zoom: f32) -> egui::Vec2 {
     let detail = smoothstep(0.24, 0.7, zoom);
     let normal = egui::vec2(
-        (LEAF_WIDTH * zoom).clamp(4.0, 24.0),
-        (LEAF_HEIGHT * zoom).clamp(4.0, 20.0),
+        (LEAF_WIDTH * zoom).clamp(4.0, 18.0),
+        (LEAF_HEIGHT * zoom).clamp(4.0, 16.0),
     );
     egui::vec2(2.2, 2.2) * (1.0 - detail) + normal * detail
 }
@@ -68,6 +68,14 @@ fn triangle_vertices(point: egui::Pos2, size: egui::Vec2, apex_up: bool) -> [egu
             egui::pos2(point.x + half.x, point.y - half.y),
             egui::pos2(point.x, point.y + half.y),
         ]
+    }
+}
+
+fn fanout_rail_y(start_y: f32, end_y: f32) -> f32 {
+    if end_y <= start_y {
+        (start_y + end_y) * 0.5
+    } else {
+        (start_y + FANOUT_RAIL_OFFSET).min(start_y + (end_y - start_y) * 0.55)
     }
 }
 
@@ -96,29 +104,39 @@ fn node_hit_size(index: &ClockGraphIndex, row: &TreeRow, zoom: f32) -> egui::Vec
 fn delay_color(value: f64, bounds: (f64, f64)) -> egui::Color32 {
     let range = (bounds.1 - bounds.0).max(0.001);
     let t = ((value - bounds.0) / range).clamp(0.0, 1.0);
-    let red = (32.0 + 223.0 * t) as u8;
-    let green = (80.0 + 135.0 * (1.0 - (2.0 * t - 1.0).abs())) as u8;
-    let blue = (220.0 * (1.0 - t)) as u8;
-    egui::Color32::from_rgb(red, green, blue)
+    let (from, to, local) = if t < 0.55 {
+        ((232.0, 210.0, 58.0), (255.0, 146.0, 32.0), t / 0.55)
+    } else {
+        ((255.0, 146.0, 32.0), (226.0, 48.0, 38.0), (t - 0.55) / 0.45)
+    };
+    egui::Color32::from_rgb(
+        (from.0 + (to.0 - from.0) * local) as u8,
+        (from.1 + (to.1 - from.1) * local) as u8,
+        (from.2 + (to.2 - from.2) * local) as u8,
+    )
 }
 
 fn node_color(
     index: &ClockGraphIndex,
     node: &ClockNode,
+    row: &TreeRow,
     view_mode: TreeViewMode,
     delay_bounds: (f64, f64),
+    maximum_depth: usize,
 ) -> egui::Color32 {
     if !index.issues[node.index].is_empty() {
         egui::Color32::from_rgb(163, 66, 62)
-    } else if node.arrival_ns.is_none() && index.summary.valid_sink_count > 0 {
-        egui::Color32::from_gray(65)
-    } else if view_mode == TreeViewMode::Delay {
-        node.arrival_ns
-            .map_or(egui::Color32::from_gray(65), |arrival| {
-                delay_color(arrival, delay_bounds)
-            })
     } else {
-        egui::Color32::from_rgb(41, 94, 120)
+        match view_mode {
+            TreeViewMode::RealDelay => node
+                .arrival_ns
+                .map_or(egui::Color32::from_gray(65), |arrival| {
+                    delay_color(arrival, delay_bounds)
+                }),
+            TreeViewMode::UnitDelay => {
+                delay_color(row.depth as f64, (0.0, maximum_depth.max(1) as f64))
+            }
+        }
     }
 }
 
@@ -206,13 +224,13 @@ impl ClockTreePanel {
         self.pan = rect.size() * 0.5 - bounds.center().to_vec2() * self.zoom;
     }
 
-    fn paint_delay_axis(
+    fn paint_tree_axis(
         &self,
         painter: &egui::Painter,
         rect: egui::Rect,
         origin: egui::Pos2,
         zoom: f32,
-        axis: LeafDelayAxis,
+        axis: TreeAxis,
     ) {
         let top_y = origin.y + axis.top_y as f32 * zoom;
         let bottom_y = origin.y + axis.bottom_y as f32 * zoom;
@@ -222,32 +240,31 @@ impl ClockTreePanel {
 
         let gutter = egui::Rect::from_min_max(
             rect.min,
-            egui::pos2(rect.left() + DELAY_AXIS_WIDTH, rect.bottom()),
+            egui::pos2(rect.left() + TREE_AXIS_WIDTH, rect.bottom()),
         );
         painter.rect_filled(
             gutter,
             0.0,
             egui::Color32::from_rgba_unmultiplied(15, 20, 27, 230),
         );
+        let axis_label = match axis.kind {
+            TreeAxisKind::Level => "LEVEL",
+            TreeAxisKind::DelayNs => "DELAY (ns)",
+        };
         painter.text(
             egui::pos2(rect.left() + 8.0, rect.top() + 8.0),
             egui::Align2::LEFT_TOP,
-            "DELAY (ns)",
+            axis_label,
             egui::FontId::proportional(10.0),
             egui::Color32::from_gray(185),
         );
 
-        let axis_x = rect.left() + DELAY_AXIS_WIDTH - 10.0;
+        let axis_x = rect.left() + TREE_AXIS_WIDTH - 10.0;
         let line_top = top_y.max(rect.top() + 2.0);
         let line_bottom = bottom_y.min(rect.bottom() - 8.0);
         if line_bottom <= line_top {
             return;
         }
-        let intervals = ((line_bottom - line_top) / DELAY_AXIS_TICK_TARGET_PX)
-            .round()
-            .clamp(2.0, 8.0) as usize;
-        let range = axis.maximum_ns - axis.minimum_ns;
-        let decimals = delay_tick_decimals(range / intervals as f64);
         let axis_color = egui::Color32::from_rgb(117, 139, 158);
         let guide_color = egui::Color32::from_rgba_unmultiplied(117, 139, 158, 64);
 
@@ -258,13 +275,10 @@ impl ClockTreePanel {
             ],
             egui::Stroke::new(1.0, axis_color),
         );
-        for interval in 0..=intervals {
-            let fraction = interval as f32 / intervals as f32;
-            let y = top_y + (bottom_y - top_y) * fraction;
+        let paint_tick = |y: f32, label: String| {
             if y < line_top - 0.5 || y > line_bottom + 0.5 {
-                continue;
+                return;
             }
-            let delay = axis.minimum_ns + range * f64::from(fraction);
             painter.line_segment(
                 [egui::pos2(axis_x - 5.0, y), egui::pos2(axis_x, y)],
                 egui::Stroke::new(1.0, axis_color),
@@ -281,10 +295,40 @@ impl ClockTreePanel {
             painter.text(
                 egui::pos2(axis_x - 8.0, y),
                 egui::Align2::RIGHT_CENTER,
-                format!("{delay:.decimals$}"),
+                label,
                 egui::FontId::proportional(9.0),
                 egui::Color32::from_gray(182),
             );
+        };
+
+        match axis.kind {
+            TreeAxisKind::Level => {
+                let maximum_level = axis.maximum.round().max(0.0) as usize;
+                let maximum_ticks =
+                    (((line_bottom - line_top) / TREE_AXIS_TICK_TARGET_PX).floor() as usize).max(1);
+                let step = (maximum_level as f32 / maximum_ticks as f32)
+                    .ceil()
+                    .max(1.0) as usize;
+                for level in (0..=maximum_level).step_by(step) {
+                    let fraction = level as f32 / maximum_level.max(1) as f32;
+                    paint_tick(top_y + (bottom_y - top_y) * fraction, level.to_string());
+                }
+            }
+            TreeAxisKind::DelayNs => {
+                let intervals = ((line_bottom - line_top) / TREE_AXIS_TICK_TARGET_PX)
+                    .round()
+                    .clamp(2.0, 8.0) as usize;
+                let range = axis.maximum - axis.minimum;
+                let decimals = delay_tick_decimals(range / intervals as f64);
+                for interval in 0..=intervals {
+                    let fraction = interval as f32 / intervals as f32;
+                    let delay = axis.minimum + range * f64::from(fraction);
+                    paint_tick(
+                        top_y + (bottom_y - top_y) * fraction,
+                        format!("{delay:.decimals$}"),
+                    );
+                }
+            }
         }
     }
 
@@ -305,8 +349,8 @@ impl ClockTreePanel {
         let timed_nodes = index.timed_node_count;
         let has_timing = timed_nodes > 0;
         let complete_timing = timed_nodes == index.nodes.len();
-        if !has_timing && self.view_mode != TreeViewMode::Hierarchy {
-            self.view_mode = TreeViewMode::Hierarchy;
+        if !has_timing && self.view_mode != TreeViewMode::UnitDelay {
+            self.view_mode = TreeViewMode::UnitDelay;
             self.rows_dirty = true;
         }
         let mut action = None;
@@ -319,11 +363,11 @@ impl ClockTreePanel {
                 .checkbox(&mut self.only_issues, "Attention paths")
                 .changed();
             self.rows_dirty |= ui
-                .selectable_value(&mut self.view_mode, TreeViewMode::Hierarchy, "Hierarchy")
+                .selectable_value(&mut self.view_mode, TreeViewMode::UnitDelay, "Unit delay")
                 .changed();
             ui.add_enabled_ui(has_timing, |ui| {
                 self.rows_dirty |= ui
-                    .selectable_value(&mut self.view_mode, TreeViewMode::Delay, "Delay")
+                    .selectable_value(&mut self.view_mode, TreeViewMode::RealDelay, "Real delay")
                     .changed();
             });
             if ui.button("Close").clicked() {
@@ -333,28 +377,28 @@ impl ClockTreePanel {
         if !has_timing {
             ui.colored_label(
                 egui::Color32::YELLOW,
-                "Hierarchy view · insertion timing is unavailable for this clock.",
+                "Unit delay view · insertion timing is unavailable for this clock.",
             );
-        } else if self.view_mode == TreeViewMode::Delay && !complete_timing {
+        } else if self.view_mode == TreeViewMode::RealDelay && !complete_timing {
             ui.colored_label(
                 egui::Color32::YELLOW,
                 format!(
-                    "Partial timing: {timed_nodes}/{} nodes have an arrival; grey nodes keep their hierarchy position.",
+                    "Partial timing: {timed_nodes}/{} nodes have an arrival; untimed nodes stay at their unit-delay level.",
                     index.nodes.len()
                 ),
             );
         }
-        if self.view_mode == TreeViewMode::Hierarchy {
+        if self.view_mode == TreeViewMode::UnitDelay {
             ui.label(
-                egui::RichText::new("Hierarchy view · node height follows topology depth")
+                egui::RichText::new("Unit delay view · node height follows topology level")
                     .small()
                     .color(egui::Color32::from_gray(170)),
             );
-        } else if let Some(axis) = self.leaf_delay_axis {
+        } else if let Some(axis) = self.tree_axis {
             ui.label(
                 egui::RichText::new(format!(
                     "Node Y = insertion delay from root (0 → late ↓) · {:.4}–{:.4} ns",
-                    axis.minimum_ns, axis.maximum_ns
+                    axis.minimum, axis.maximum
                 ))
                 .small()
                 .color(egui::Color32::from_gray(170)),
@@ -401,8 +445,8 @@ impl ClockTreePanel {
         });
         if self.rows_dirty {
             let layout_mode = match self.view_mode {
-                TreeViewMode::Hierarchy => layout::TreeLayoutMode::Hierarchy,
-                TreeViewMode::Delay => layout::TreeLayoutMode::Delay,
+                TreeViewMode::UnitDelay => layout::TreeLayoutMode::UnitDelay,
+                TreeViewMode::RealDelay => layout::TreeLayoutMode::RealDelay,
             };
             let layout = layout::visible_rows(
                 index,
@@ -414,15 +458,11 @@ impl ClockTreePanel {
             self.rows = layout.rows;
             self.render_rows = layout.render_rows;
             self.y_bands = layout.y_bands;
-            self.leaf_delay_axis = layout.leaf_delay_axis;
-            let arrivals = index.nodes.iter().filter_map(|node| node.arrival_ns);
-            self.delay_bounds = arrivals
-                .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), value| {
-                    (min.min(value), max.max(value))
-                });
-            if !self.delay_bounds.0.is_finite() {
-                self.delay_bounds = (0.0, 1.0);
-            }
+            self.tree_axis = layout.axis;
+            self.delay_bounds = layout
+                .axis
+                .filter(|axis| axis.kind == TreeAxisKind::DelayNs)
+                .map_or((0.0, 1.0), |axis| (axis.minimum, axis.maximum));
             self.rows_dirty = false;
         }
         if self.rows.is_empty() {
@@ -497,6 +537,15 @@ impl ClockTreePanel {
             .sum::<usize>();
         let interact_with_edges =
             visible_count <= MAX_EDGE_INTERACTIONS && zoom >= MIN_EDGE_INTERACTION_ZOOM;
+        let maximum_depth = self.rows.iter().map(|row| row.depth).max().unwrap_or(1);
+        let edge_alpha = (zoom * 1.8).clamp(0.32, 1.0);
+        let edge_stroke = egui::Stroke::new(
+            (zoom * 1.1).clamp(0.55, 1.4),
+            egui::Color32::from_rgba_unmultiplied(116, 132, 148, (edge_alpha * 255.0) as u8),
+        );
+        let mut edge_shapes = Vec::with_capacity(visible_count);
+        let mut node_shapes = Vec::with_capacity(visible_count);
+        let mut labels = Vec::new();
         let mut net_clicked = None;
         for visible in &visible_ranges {
             for &ordinal in &self.render_rows[visible.clone()] {
@@ -510,20 +559,14 @@ impl ClockTreePanel {
                     let parent_size = node_visual_size(index, parent_row, zoom);
                     let start = egui::pos2(parent_point.x, parent_point.y + parent_size.y * 0.5);
                     let end = egui::pos2(point.x, point.y - child_size.y * 0.5);
-                    let rail_y = (start.y + FANOUT_RAIL_OFFSET).min(end.y);
+                    let rail_y = fanout_rail_y(start.y, end.y);
                     let points = vec![
                         start,
                         egui::pos2(start.x, rail_y),
                         egui::pos2(end.x, rail_y),
                         end,
                     ];
-                    painter.add(egui::Shape::line(
-                        points,
-                        egui::Stroke::new(
-                            (zoom * 1.1).clamp(0.55, 1.4),
-                            egui::Color32::from_gray(95),
-                        ),
-                    ));
+                    edge_shapes.push(egui::Shape::line(points, edge_stroke));
                     if interact_with_edges {
                         if let Some(edge_index) = index
                             .edge_by_pair
@@ -566,16 +609,27 @@ impl ClockTreePanel {
                     }
                 }
 
-                let color = node_color(index, node, self.view_mode, self.delay_bounds);
+                let color = node_color(
+                    index,
+                    node,
+                    row,
+                    self.view_mode,
+                    self.delay_bounds,
+                    maximum_depth,
+                );
                 if is_leaf(index, row) {
                     if leaf_is_dot(child_size) {
-                        painter.circle_filled(point, child_size.x.max(1.0) * 0.5, color);
+                        node_shapes.push(egui::Shape::circle_filled(
+                            point,
+                            child_size.x.max(1.0) * 0.5,
+                            color,
+                        ));
                         if self.selected == Some(row.node) {
-                            painter.circle_stroke(
+                            node_shapes.push(egui::Shape::circle_stroke(
                                 point,
                                 child_size.x.max(1.0) * 0.5 + 1.0,
                                 egui::Stroke::new(1.0, egui::Color32::WHITE),
-                            );
+                            ));
                         }
                     } else {
                         let triangle = triangle_vertices(point, child_size, true);
@@ -584,24 +638,27 @@ impl ClockTreePanel {
                         } else {
                             egui::Stroke::NONE
                         };
-                        painter.add(egui::Shape::convex_polygon(
+                        node_shapes.push(egui::Shape::convex_polygon(
                             triangle.to_vec(),
                             color,
                             stroke,
                         ));
                     }
-                    if zoom >= LEAF_LABEL_ZOOM || self.selected == Some(row.node) {
+                    let fan_has_room =
+                        row.fan_spacing <= f32::EPSILON || row.fan_spacing * zoom >= 8.0;
+                    if self.selected == Some(row.node) || (zoom >= LEAF_LABEL_ZOOM && fan_has_room)
+                    {
                         let label: String = node.name.chars().take(20).collect();
                         let label = node
                             .arrival_ns
                             .map_or(label.clone(), |arrival| format!("{label}\n{arrival:.4} ns"));
-                        painter.text(
+                        labels.push((
                             egui::pos2(point.x, point.y + child_size.y * 0.5 + 2.0),
                             egui::Align2::CENTER_TOP,
                             label,
                             egui::FontId::proportional((10.0 * zoom).clamp(7.0, 13.0)),
                             egui::Color32::from_gray(205),
-                        );
+                        ));
                     }
                 } else {
                     let triangle = triangle_vertices(point, child_size, false);
@@ -610,7 +667,7 @@ impl ClockTreePanel {
                     } else {
                         egui::Stroke::NONE
                     };
-                    painter.add(egui::Shape::convex_polygon(
+                    node_shapes.push(egui::Shape::convex_polygon(
                         triangle.to_vec(),
                         color,
                         stroke,
@@ -629,27 +686,33 @@ impl ClockTreePanel {
                         let arrival = node
                             .arrival_ns
                             .map_or_else(|| "?".to_string(), |value| format!("{value:.4} ns"));
-                        painter.text(
+                        labels.push((
                             point,
                             egui::Align2::CENTER_CENTER,
                             format!("{prefix}{label}\n{arrival}"),
                             egui::FontId::proportional((11.0 * zoom).clamp(6.0, 18.0)),
                             egui::Color32::WHITE,
-                        );
+                        ));
                     }
                 }
             }
         }
 
-        if let Some(axis) = self.leaf_delay_axis {
-            self.paint_delay_axis(&painter, rect, origin, zoom, axis);
+        painter.extend(edge_shapes);
+        painter.extend(node_shapes);
+        for (point, align, text, font, color) in labels {
+            painter.text(point, align, text, font, color);
+        }
+
+        if let Some(axis) = self.tree_axis {
+            self.paint_tree_axis(&painter, rect, origin, zoom, axis);
         }
 
         let pointer = response
             .hover_pos()
             .or_else(|| response.interact_pointer_pos())
             .filter(|pointer| {
-                self.leaf_delay_axis.is_none() || pointer.x >= rect.left() + DELAY_AXIS_WIDTH
+                self.tree_axis.is_none() || pointer.x >= rect.left() + TREE_AXIS_WIDTH
             });
         let hovered = pointer.and_then(|pointer| {
             row_at_position(
@@ -756,5 +819,23 @@ mod tests {
         assert_eq!(delay_tick_decimals(0.002), 4);
         assert_eq!(delay_tick_decimals(0.0002), 5);
         assert_eq!(delay_tick_decimals(0.00002), 6);
+    }
+
+    #[test]
+    fn delay_color_ramps_from_yellow_through_orange_to_red() {
+        let early = delay_color(0.0, (0.0, 1.0));
+        let middle = delay_color(0.55, (0.0, 1.0));
+        let late = delay_color(1.0, (0.0, 1.0));
+
+        assert!(early.r() > 200 && early.g() > 180 && early.b() < 100);
+        assert!(middle.r() > 240 && middle.g() > 100 && middle.g() < 190);
+        assert!(late.r() > 190 && late.g() < 100 && late.b() < 100);
+    }
+
+    #[test]
+    fn fanout_rail_stays_near_the_parent() {
+        assert_eq!(fanout_rail_y(100.0, 400.0), 100.0 + FANOUT_RAIL_OFFSET);
+        assert_eq!(fanout_rail_y(100.0, 108.0), 104.4);
+        assert_eq!(fanout_rail_y(100.0, 90.0), 95.0);
     }
 }

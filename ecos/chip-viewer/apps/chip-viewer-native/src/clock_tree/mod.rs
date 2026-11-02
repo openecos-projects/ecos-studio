@@ -50,9 +50,9 @@ struct LayoutMatch {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 enum TreeViewMode {
+    UnitDelay,
     #[default]
-    Hierarchy,
-    Delay,
+    RealDelay,
 }
 
 pub(crate) struct ClockTreePanel {
@@ -72,7 +72,7 @@ pub(crate) struct ClockTreePanel {
     rows_dirty: bool,
     focus_selected: bool,
     delay_bounds: (f64, f64),
-    leaf_delay_axis: Option<layout::LeafDelayAxis>,
+    tree_axis: Option<layout::TreeAxis>,
     view_mode: TreeViewMode,
     zoom: f32,
     pan: egui::Vec2,
@@ -106,8 +106,8 @@ impl ClockTreePanel {
             rows_dirty: true,
             focus_selected: false,
             delay_bounds: (0.0, 1.0),
-            leaf_delay_axis: None,
-            view_mode: TreeViewMode::Hierarchy,
+            tree_axis: None,
+            view_mode: TreeViewMode::RealDelay,
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
             zoom_step: 0,
@@ -174,6 +174,17 @@ impl ClockTreePanel {
         self.zoom_step = 0;
         self.center_root_view = false;
         self.fit_tree_view = true;
+        self.view_mode = self
+            .data
+            .as_ref()
+            .and_then(|data| data.view.clocks.get(self.clock))
+            .map_or(TreeViewMode::UnitDelay, |index| {
+                if index.timed_node_count > 0 {
+                    TreeViewMode::RealDelay
+                } else {
+                    TreeViewMode::UnitDelay
+                }
+            });
     }
 
     fn select(&mut self, node: usize) {
