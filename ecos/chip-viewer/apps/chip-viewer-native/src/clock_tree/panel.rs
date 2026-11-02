@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use super::{analysis_label, measurement, stage_label, status_label, ClockTreePanel, LayoutTarget};
+use super::{
+    analysis_label, layout_target_for_node, measurement, stage_label, status_label, ClockTreePanel,
+    LayoutTarget,
+};
 
 impl ClockTreePanel {
     pub(crate) fn sidebar(&mut self, ui: &mut egui::Ui) -> Option<LayoutTarget> {
@@ -127,7 +130,7 @@ impl ClockTreePanel {
                     }
                     if node.position_valid {
                         if ui.button("Locate in layout").clicked() {
-                            action = Some(LayoutTarget::Node(node.clone()));
+                            action = Some(layout_target_for_node(index, selected));
                         }
                     } else {
                         ui.colored_label(

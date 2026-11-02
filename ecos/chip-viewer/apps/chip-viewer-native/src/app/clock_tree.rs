@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use super::{focus_target_for_shape_ids, LoadedViewer, PendingFocus};
 use crate::clock_tree::LayoutTarget;
 use chipgeom_format::{OwnerType, Rect32};
@@ -56,57 +58,49 @@ impl LoadedViewer {
         }
     }
 
+    fn net_layout_shapes(&self, name: &str) -> BTreeSet<u64> {
+        let mut shapes = self
+            .db
+            .query_owner_name_for_owner_types(
+                name,
+                &[OwnerType::NetWireSegment, OwnerType::SpecialWireSegment],
+            )
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        for endpoint in self.db.connectivity_for_net(name) {
+            shapes.extend(
+                self.db
+                    .query_endpoint_pin_name(&endpoint.instance_name, &endpoint.pin_name),
+            );
+        }
+        shapes
+    }
+
     fn focus_clock_target(&mut self, target: LayoutTarget) {
         let (label, shapes, fallback) = match target {
-            LayoutTarget::Node(node) => {
+            LayoutTarget::Node { node, net_names } => {
                 let fallback = node.position_valid.then_some(Rect32 {
                     lx: node.x_dbu,
                     ly: node.y_dbu,
                     hx: node.x_dbu,
                     hy: node.y_dbu,
                 });
-                let mut shapes = node
-                    .owner_index
-                    .and_then(|owner_index| {
-                        self.db
-                            .snapshot()
-                            .owners()
-                            .get(owner_index as usize)
-                            .and_then(|owner| {
-                                OwnerType::from_raw(owner.owner_type)
-                                    .map(|owner_type| (owner_type, owner.owner_id))
-                            })
-                    })
-                    .map(|(owner_type, owner_id)| self.db.query_owner_shapes(owner_type, owner_id))
-                    .unwrap_or_default();
-                if shapes.is_empty() && !node.instance_name.is_empty() {
-                    shapes = self.db.query_owner_name_for_owner_types(
-                        &node.instance_name,
-                        &[OwnerType::InstanceBBox],
-                    );
-                }
-                if shapes.is_empty() {
-                    shapes = self.db.query_pin_name(&node.name);
+                let mut shapes = self
+                    .db
+                    .query_endpoint_pin_name(&node.instance_name, &node.pin_name)
+                    .into_iter()
+                    .collect::<BTreeSet<_>>();
+                for net_name in net_names {
+                    shapes.extend(self.net_layout_shapes(&net_name));
                 }
                 (node.name.clone(), shapes, fallback)
             }
             LayoutTarget::Net(name) => {
-                let mut shapes = self.db.query_owner_name_for_owner_types(
-                    &name,
-                    &[OwnerType::NetWireSegment, OwnerType::SpecialWireSegment],
-                );
-                for endpoint in self.db.connectivity_for_net(&name) {
-                    let pin = if endpoint.instance_name.is_empty() {
-                        endpoint.pin_name.clone()
-                    } else {
-                        format!("{}/{}", endpoint.instance_name, endpoint.pin_name)
-                    };
-                    shapes.extend(self.db.query_pin_name(&pin));
-                }
+                let shapes = self.net_layout_shapes(&name);
                 (name, shapes, None)
             }
         };
-        self.highlighted = shapes.into_iter().collect();
+        self.highlighted = shapes;
         let focus = focus_target_for_shape_ids(&self.highlighted, |id| {
             self.db.find_shape(id).map(|shape| shape.bbox)
         });

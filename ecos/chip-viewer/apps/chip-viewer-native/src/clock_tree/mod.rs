@@ -2,18 +2,40 @@ mod graph;
 mod layout;
 mod panel;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{mpsc, Arc};
 
-use chip_view_db::clock_tree::{ClockNode, ClockTreeView};
+use chip_view_db::clock_tree::{ClockGraphIndex, ClockNode, ClockTreeView};
 use chip_view_db::ChipViewDb;
 use chipgeom_format::{ClockTreeAnalysisSource, ClockTreeStage, ClockTreeStatus};
 
 use layout::TreeRow;
 
 pub(crate) enum LayoutTarget {
-    Node(ClockNode),
+    Node {
+        node: ClockNode,
+        net_names: Vec<String>,
+    },
     Net(String),
+}
+
+fn layout_target_for_node(index: &ClockGraphIndex, node_index: usize) -> LayoutTarget {
+    let net_names = index
+        .edges_for_node
+        .get(node_index)
+        .into_iter()
+        .flatten()
+        .filter_map(|&edge_index| index.edges.get(edge_index))
+        .map(|edge| edge.net_name.as_str())
+        .filter(|name| !name.is_empty())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    LayoutTarget::Node {
+        node: index.nodes[node_index].clone(),
+        net_names,
+    }
 }
 
 struct ClockData {

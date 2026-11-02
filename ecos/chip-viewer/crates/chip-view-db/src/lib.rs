@@ -1489,6 +1489,80 @@ fn query_pin_shape_ids_from_endpoint_refs(
     shape_ids.into_iter().collect()
 }
 
+fn query_endpoint_pin_shape_ids_from_parts(
+    shapes: &[ShapeRecord],
+    owners: &[OwnerRef],
+    name_index: &OwnerNameIndex,
+    instance_name: &str,
+    pin_name: &str,
+) -> Vec<ShapeId> {
+    if instance_name.is_empty() {
+        let mut pin_names = lookup_name_variants(pin_name);
+        if let Some((_, local_pin_name)) = pin_name.rsplit_once('/') {
+            pin_names.extend(lookup_name_variants(local_pin_name));
+        }
+        let pin_names = pin_names.into_iter().collect::<BTreeSet<_>>();
+        return shapes
+            .iter()
+            .filter(|shape| shape.state == ShapeState::Alive as u8)
+            .filter(|shape| {
+                let Some(owner) = owners.get(shape.owner_index as usize) else {
+                    return false;
+                };
+                matches!(
+                    OwnerType::from_raw(owner.owner_type),
+                    Some(OwnerType::IoPinPortShape | OwnerType::PinPortShape)
+                ) && name_index
+                    .name_for_owner(owner.owner_type, owner.owner_id)
+                    .is_some_and(|name| pin_names.contains(name.trim()))
+            })
+            .map(|shape| shape.id)
+            .collect();
+    }
+
+    let instance_names = lookup_name_variants(instance_name)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    let instance_paths = shapes
+        .iter()
+        .filter(|shape| shape.state == ShapeState::Alive as u8)
+        .filter_map(|shape| owners.get(shape.owner_index as usize))
+        .filter(|owner| {
+            matches!(
+                OwnerType::from_raw(owner.owner_type),
+                Some(OwnerType::InstanceBBox | OwnerType::InstanceHalo)
+            ) && name_index
+                .name_for_owner(owner.owner_type, owner.owner_id)
+                .is_some_and(|name| instance_names.contains(name.trim()))
+        })
+        .map(|owner| owner.path0)
+        .collect::<BTreeSet<_>>();
+    if instance_paths.is_empty() {
+        return Vec::new();
+    }
+
+    let qualified = format!("{instance_name}/{pin_name}");
+    let pin_names = lookup_name_variants(&qualified)
+        .into_iter()
+        .chain(lookup_name_variants(pin_name))
+        .collect::<BTreeSet<_>>();
+    shapes
+        .iter()
+        .filter(|shape| shape.state == ShapeState::Alive as u8)
+        .filter(|shape| {
+            let Some(owner) = owners.get(shape.owner_index as usize) else {
+                return false;
+            };
+            OwnerType::from_raw(owner.owner_type) == Some(OwnerType::InstancePinPortShape)
+                && instance_paths.contains(&owner.path0)
+                && name_index
+                    .name_for_owner(owner.owner_type, owner.owner_id)
+                    .is_some_and(|name| pin_names.contains(name.trim()))
+        })
+        .map(|shape| shape.id)
+        .collect()
+}
+
 #[cfg(test)]
 fn endpoint_matches_pin(endpoint: &ConnectivityMetadata, pin_name: &str) -> bool {
     if let Some((instance_name, local_pin_name)) = pin_name.rsplit_once('/') {
@@ -1949,6 +2023,16 @@ impl ChipViewDb {
     pub fn query_pin_name(&self, pin_name: &str) -> Vec<ShapeId> {
         let endpoints = self.connectivity_for_pin(pin_name);
         query_pin_shape_ids_from_endpoint_refs(&self.name_index, &endpoints, pin_name)
+    }
+
+    pub fn query_endpoint_pin_name(&self, instance_name: &str, pin_name: &str) -> Vec<ShapeId> {
+        query_endpoint_pin_shape_ids_from_parts(
+            self.snapshot.shapes(),
+            self.snapshot.owners(),
+            &self.name_index,
+            instance_name,
+            pin_name,
+        )
     }
 
     pub fn connectivity_for_net(&self, net_name: &str) -> Vec<&ConnectivityMetadata> {
@@ -3359,6 +3443,95 @@ mod tests {
             query_pin_shape_ids_from_parts(&name_index, &[], "u0/A"),
             vec![2, 6]
         );
+    }
+
+    #[test]
+    fn endpoint_pin_query_disambiguates_duplicate_local_pin_names_by_instance_path() {
+        let owners = [
+            OwnerRef {
+                owner_type: OwnerType::InstanceBBox as u8,
+                owner_id: 20,
+                path0: 3,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::InstanceBBox as u8,
+                owner_id: 30,
+                path0: 7,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::InstancePinPortShape as u8,
+                owner_id: 21,
+                path0: 3,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::InstancePinPortShape as u8,
+                owner_id: 31,
+                path0: 7,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::IoPinPortShape as u8,
+                owner_id: 22,
+                ..OwnerRef::default()
+            },
+        ];
+        let shapes = [
+            ShapeRecord {
+                owner_index: 0,
+                ..shape(1, 1)
+            },
+            ShapeRecord {
+                owner_index: 1,
+                ..shape(2, 1)
+            },
+            ShapeRecord {
+                owner_index: 2,
+                ..shape(3, 2)
+            },
+            ShapeRecord {
+                owner_index: 3,
+                ..shape(4, 2)
+            },
+            ShapeRecord {
+                owner_index: 4,
+                ..shape(5, 3)
+            },
+        ];
+        let name_index = OwnerNameIndex::from_shapes_and_names(
+            &shapes,
+            &owners,
+            [
+                (OwnerType::InstanceBBox as u8, 20, "u0".to_string()),
+                (OwnerType::InstanceBBox as u8, 30, "u1".to_string()),
+                (OwnerType::InstancePinPortShape as u8, 21, "A".to_string()),
+                (OwnerType::InstancePinPortShape as u8, 31, "A".to_string()),
+                (OwnerType::IoPinPortShape as u8, 22, "CLK".to_string()),
+            ],
+        );
+
+        assert_eq!(
+            query_endpoint_pin_shape_ids_from_parts(&shapes, &owners, &name_index, "u0", "A"),
+            vec![3]
+        );
+        assert_eq!(
+            query_endpoint_pin_shape_ids_from_parts(&shapes, &owners, &name_index, "u1", "A"),
+            vec![4]
+        );
+        assert_eq!(
+            query_endpoint_pin_shape_ids_from_parts(&shapes, &owners, &name_index, "", "CLK"),
+            vec![5]
+        );
+        assert!(query_endpoint_pin_shape_ids_from_parts(
+            &shapes,
+            &owners,
+            &name_index,
+            "missing",
+            "A"
+        )
+        .is_empty());
     }
 
     #[test]

@@ -4,7 +4,7 @@ use super::layout::{
     self, LeafDelayAxis, TreeRow, LEAF_HEIGHT, LEAF_ROW_SPACING, LEAF_WIDTH, NODE_HEIGHT,
     NODE_WIDTH,
 };
-use super::{ClockTreePanel, LayoutTarget, TreeViewMode};
+use super::{layout_target_for_node, ClockTreePanel, LayoutTarget, TreeViewMode};
 
 const VIEW_PADDING: f32 = 28.0;
 const MIN_ZOOM: f32 = 0.002;
@@ -52,6 +52,23 @@ fn leaf_visual_size(zoom: f32) -> egui::Vec2 {
 
 fn leaf_is_dot(size: egui::Vec2) -> bool {
     size.x < LEAF_TRIANGLE_MIN_PIXELS
+}
+
+fn triangle_vertices(point: egui::Pos2, size: egui::Vec2, apex_up: bool) -> [egui::Pos2; 3] {
+    let half = size * 0.5;
+    if apex_up {
+        [
+            egui::pos2(point.x, point.y - half.y),
+            egui::pos2(point.x + half.x, point.y + half.y),
+            egui::pos2(point.x - half.x, point.y + half.y),
+        ]
+    } else {
+        [
+            egui::pos2(point.x - half.x, point.y - half.y),
+            egui::pos2(point.x + half.x, point.y - half.y),
+            egui::pos2(point.x, point.y + half.y),
+        ]
+    }
 }
 
 fn internal_visual_size(zoom: f32) -> egui::Vec2 {
@@ -559,17 +576,17 @@ impl ClockTreePanel {
                             );
                         }
                     } else {
-                        let triangle = vec![
-                            egui::pos2(point.x, point.y - child_size.y * 0.5),
-                            egui::pos2(point.x + child_size.x * 0.5, point.y + child_size.y * 0.5),
-                            egui::pos2(point.x - child_size.x * 0.5, point.y + child_size.y * 0.5),
-                        ];
+                        let triangle = triangle_vertices(point, child_size, true);
                         let stroke = if self.selected == Some(row.node) {
                             egui::Stroke::new(1.5, egui::Color32::WHITE)
                         } else {
                             egui::Stroke::NONE
                         };
-                        painter.add(egui::Shape::convex_polygon(triangle, color, stroke));
+                        painter.add(egui::Shape::convex_polygon(
+                            triangle.to_vec(),
+                            color,
+                            stroke,
+                        ));
                     }
                     if zoom >= LEAF_LABEL_ZOOM || self.selected == Some(row.node) {
                         let label: String = node.name.chars().take(20).collect();
@@ -585,16 +602,17 @@ impl ClockTreePanel {
                         );
                     }
                 } else {
-                    let node_rect = egui::Rect::from_center_size(point, child_size);
-                    painter.rect_filled(node_rect, (4.0 * zoom).clamp(1.0, 6.0), color);
-                    if self.selected == Some(row.node) {
-                        painter.rect_stroke(
-                            node_rect,
-                            (4.0 * zoom).clamp(1.0, 6.0),
-                            egui::Stroke::new((1.5 * zoom).clamp(1.0, 2.0), egui::Color32::WHITE),
-                            egui::StrokeKind::Inside,
-                        );
-                    }
+                    let triangle = triangle_vertices(point, child_size, false);
+                    let stroke = if self.selected == Some(row.node) {
+                        egui::Stroke::new((1.5 * zoom).clamp(1.0, 2.0), egui::Color32::WHITE)
+                    } else {
+                        egui::Stroke::NONE
+                    };
+                    painter.add(egui::Shape::convex_polygon(
+                        triangle.to_vec(),
+                        color,
+                        stroke,
+                    ));
                     if zoom >= MIN_INTERNAL_LABEL_ZOOM {
                         let prefix = if row.reference {
                             "↪ "
@@ -610,7 +628,7 @@ impl ClockTreePanel {
                             .arrival_ns
                             .map_or_else(|| "?".to_string(), |value| format!("{value:.4} ns"));
                         painter.text(
-                            node_rect.center(),
+                            point,
                             egui::Align2::CENTER_CENTER,
                             format!("{prefix}{label}\n{arrival}"),
                             egui::FontId::proportional((11.0 * zoom).clamp(6.0, 18.0)),
@@ -668,7 +686,7 @@ impl ClockTreePanel {
             });
             if response.clicked() {
                 self.selected = Some(row.node);
-                action = Some(LayoutTarget::Node(index.nodes[row.node].clone()));
+                action = Some(layout_target_for_node(index, row.node));
             }
             if response.double_clicked() && !row.reference {
                 let node = row.node;
@@ -707,6 +725,15 @@ mod tests {
 
         assert!(size.x >= 5.0);
         assert!(size.y >= 4.0);
+    }
+
+    #[test]
+    fn non_leaf_triangle_points_down() {
+        let triangle = triangle_vertices(egui::pos2(10.0, 20.0), egui::vec2(20.0, 10.0), false);
+
+        assert_eq!(triangle[0], egui::pos2(0.0, 15.0));
+        assert_eq!(triangle[1], egui::pos2(20.0, 15.0));
+        assert_eq!(triangle[2], egui::pos2(10.0, 25.0));
     }
 
     #[test]
