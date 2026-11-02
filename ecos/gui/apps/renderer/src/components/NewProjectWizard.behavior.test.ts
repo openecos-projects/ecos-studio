@@ -1458,6 +1458,7 @@ describe('NewProjectWizard behavior', () => {
     const wizard = wrapper.vm as unknown as {
       currentStep: number
       flowStartStep: string
+      flowEndStep: string
       selectedFlowSteps: string[]
       isFlowStepSelected(stepName: string): boolean
     }
@@ -1483,6 +1484,36 @@ describe('NewProjectWizard behavior', () => {
     expect(wizard.selectedFlowSteps[0]).toBe('CTS')
     expect(wizard.isFlowStepSelected('Synthesis')).toBe(false)
     expect(wizard.isFlowStepSelected('CTS')).toBe(true)
+    const checkboxState = () =>
+      Object.fromEntries(
+        wrapper
+          .findAll('[data-flow-step-card]')
+          .map((card) => [
+            card.attributes('data-flow-step-card'),
+            (card.get('input[type="checkbox"]').element as HTMLInputElement).checked,
+          ]),
+      )
+    expect(checkboxState()).toMatchObject({ Synthesis: false, CTS: true })
+
+    const legalizationCheckbox = wrapper.get(
+      '[data-flow-step-card="legalization"] input[type="checkbox"]',
+    )
+    expect((legalizationCheckbox.element as HTMLInputElement).checked).toBe(true)
+    await legalizationCheckbox.trigger('click')
+    await flushPromises()
+    expect(wizard.flowEndStep).toBe('legalization')
+    expect((legalizationCheckbox.element as HTMLInputElement).checked).toBe(true)
+
+    await startSelect.setValue('Timing optimization')
+    await flushPromises()
+    expect(wizard.flowStartStep).toBe('Timing optimization')
+    expect(wizard.flowEndStep).toBe('Timing optimization')
+    expect(wizard.selectedFlowSteps).toEqual(['Timing optimization'])
+    expect(checkboxState()).toMatchObject({
+      CTS: false,
+      legalization: false,
+      'Timing optimization': true,
+    })
     wrapper.unmount()
   })
 
@@ -1548,6 +1579,115 @@ describe('NewProjectWizard behavior', () => {
     await flushPromises()
     expect(wrapper.text()).not.toContain('Clock-tree visualization')
     wrapper.unmount()
+  })
+
+  it('starts the flow range at a discovered start step and disables earlier cards', async () => {
+    const model = wizardMocks.defaultWorkspaceCreationModel()
+    model.discovery.flowDefinitions[0]!.stepIds = [
+      'Synthesis',
+      'preFloorplan',
+      'preplace',
+      'place',
+      'CTS',
+      'Harden',
+    ]
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue(model)
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { standaloneWorkspace: true } },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    await flushPromises()
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      flowStartStep: string
+      flowEndStep: string
+      selectedFlowSteps: string[]
+      isFlowStepSelected(stepName: string): boolean
+    }
+    wizard.currentStep = 4
+    await flushPromises()
+
+    await wrapper.get('select').setValue('preplace')
+    await flushPromises()
+
+    expect(wizard.flowStartStep).toBe('preplace')
+    expect(wizard.flowEndStep).toBe('Harden')
+    expect(wizard.selectedFlowSteps).toEqual(['preplace', 'place', 'CTS', 'Harden'])
+    expect(wizard.isFlowStepSelected('Synthesis')).toBe(false)
+    expect(
+      (
+        wrapper.get('[data-flow-step-card="Synthesis"] input[type="checkbox"]')
+          .element as HTMLInputElement
+      ).checked,
+    ).toBe(false)
+    expect(
+      (
+        wrapper.get('[data-flow-step-card="preplace"] input[type="checkbox"]')
+          .element as HTMLInputElement
+      ).checked,
+    ).toBe(true)
+    expect(
+      wrapper.get('[data-flow-step-card="Synthesis"] button').attributes('disabled'),
+    ).toBeDefined()
+    expect(
+      wrapper.get('[data-flow-step-card="preplace"] button').attributes('disabled'),
+    ).toBeUndefined()
+
+    await wrapper.get('[data-flow-step-card="Synthesis"]').trigger('click')
+    expect(wizard.flowStartStep).toBe('preplace')
+    wrapper.unmount()
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue(
+      wizardMocks.defaultWorkspaceCreationModel(),
+    )
+  })
+
+  it('restores a persisted start step from ECC discovery', async () => {
+    const model = wizardMocks.defaultWorkspaceCreationModel()
+    model.discovery.flowDefinitions[0]!.stepIds = [
+      'Synthesis',
+      'preFloorplan',
+      'preplace',
+      'place',
+      'CTS',
+      'Harden',
+    ]
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue(model)
+    const wrapper = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          standaloneWorkspace: true,
+          flow_config: { start_step: 'preplace', end_step: 'Harden', steps: [] },
+        },
+      },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    await flushPromises()
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      flowStartStep: string
+      selectedFlowSteps: string[]
+    }
+    wizard.currentStep = 4
+    await flushPromises()
+
+    expect(wizard.flowStartStep).toBe('preplace')
+    expect(wizard.selectedFlowSteps[0]).toBe('preplace')
+    wrapper.unmount()
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue(
+      wizardMocks.defaultWorkspaceCreationModel(),
+    )
   })
 
   it('reduces the STA selection when the effective signoff limit shrinks', async () => {

@@ -574,9 +574,11 @@
                         :class="[
                           isFlowStepLocked(step.name)
                             ? 'cursor-not-allowed border-(--border-color)/60 bg-(--bg-secondary)/25 opacity-45'
-                            : isFlowStepRunnable(step.name)
-                              ? 'cursor-pointer border-(--accent-color) bg-(--accent-color)/10'
-                              : 'cursor-pointer border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45',
+                            : isFlowStepBeforeStart(step.name)
+                              ? 'cursor-not-allowed border-(--border-color)/60 bg-(--bg-secondary)/25 opacity-45'
+                              : isFlowStepRunnable(step.name)
+                                ? 'cursor-pointer border-(--accent-color) bg-(--accent-color)/10'
+                                : 'cursor-pointer border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45',
                           !isFlowStepLocked(step.name) &&
                           defaultSkippedFlowStepNames.has(step.name)
                             ? 'border-dashed'
@@ -587,7 +589,10 @@
                         <button
                           type="button"
                           class="flex w-full flex-1 cursor-pointer flex-col text-left disabled:cursor-not-allowed"
-                          :disabled="isFlowStepLocked(step.name)"
+                          :disabled="
+                            isFlowStepLocked(step.name) ||
+                            isFlowStepBeforeStart(step.name)
+                          "
                         >
                           <span class="mb-3 flex items-center justify-between gap-3">
                             <span class="flex min-w-0 items-center gap-2">
@@ -611,6 +616,7 @@
                               class="h-4 w-4 shrink-0 accent-(--accent-color)"
                               :checked="isFlowStepRunnable(step.name)"
                               readonly
+                              @click.prevent
                             />
                           </span>
                           <span
@@ -622,6 +628,12 @@
                             class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
                           >
                             Reused from source
+                          </span>
+                          <span
+                            v-else-if="isFlowStepBeforeStart(step.name)"
+                            class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
+                          >
+                            Before start
                           </span>
                           <span
                             v-else-if="defaultSkippedFlowStepNames.has(step.name)"
@@ -2385,10 +2397,14 @@ function resolveProjectRelativePath(projectRoot: string, path: string): string {
 }
 
 function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStepName {
-  const candidate = String(value ?? '')
+  const candidate = String(value ?? '').trim()
+  if (!candidate) return fallback
   const alias = FLOW_STEP_NAME_ALIASES[candidate.toLowerCase().replace(/[_\-\s]+/g, '')]
   if (alias) return alias
-  return KNOWN_FLOW_STEP_NAMES.has(candidate) ? candidate : fallback
+  if (KNOWN_FLOW_STEP_NAMES.has(candidate)) return candidate
+  // ECC discovery is authoritative. Preserve an unrecognized persisted value
+  // until the discovered chain arrives, then reset it if the chain omits it.
+  return candidate
 }
 
 function normalizeDieAreaMode(value: unknown): DieAreaMode {
@@ -2481,9 +2497,15 @@ const lockedFlowStepNames = computed(() => {
 })
 const canChooseFlowStartStep = computed(() => !sourceContext.value)
 const selectedFlowSteps = computed(() => {
-  const start = Math.min(flowStartIndex.value, flowEndIndex.value)
-  const end = Math.max(flowStartIndex.value, flowEndIndex.value)
+  const start = flowStartIndex.value
+  if (start < 0) return []
+  const end = Math.max(start, flowEndIndex.value)
   return flowStepOptions.value.slice(start, end + 1).map((step) => step.name)
+})
+const flowStepsBeforeStart = computed<ReadonlySet<string>>(() => {
+  const start = flowStartIndex.value
+  if (start <= 0) return NO_FLOW_STEP_NAMES
+  return new Set(flowStepOptions.value.slice(0, start).map((step) => step.name))
 })
 // Steps ECC will actually run for this range: the default skip policy still
 // applies (GUI submits no skip_steps), so default-skipped steps are in the
@@ -2866,6 +2888,9 @@ watch(flowStepOptions, (options) => {
 })
 
 watch([flowStartStep, flowEndStep], () => {
+  if (flowStartIndex.value >= 0 && flowEndIndex.value < flowStartIndex.value) {
+    flowEndStep.value = flowStartStep.value
+  }
   if (!designInputTypes.value.some((item) => item.key === activeDesignInputType.value)) {
     activeDesignInputType.value = designInputTypes.value[0]?.key ?? 'sdc'
   }
@@ -3402,17 +3427,17 @@ function isFlowStepRunnable(stepName: FlowStepName) {
   return isFlowStepSelected(stepName) && !defaultSkippedFlowStepNames.value.has(stepName)
 }
 
+function isFlowStepBeforeStart(stepName: FlowStepName) {
+  return flowStepsBeforeStart.value.has(stepName)
+}
+
 function setFlowBoundary(stepName: FlowStepName) {
-  if (isFlowStepLocked(stepName)) return
+  if (isFlowStepLocked(stepName) || isFlowStepBeforeStart(stepName)) return
   const index = flowStepOptions.value.findIndex((step) => step.name === stepName)
   if (index < 0) return
 
   const start = flowStartIndex.value
   const end = flowEndIndex.value
-  if (canChooseFlowStartStep.value && index < start) {
-    applyFlowStartStep(stepName)
-    return
-  }
   const nextEndIndex = index === end && end > start ? end - 1 : index
   const boundedEndIndex = Math.max(start, nextEndIndex)
   flowEndStep.value = flowStepOptions.value[boundedEndIndex].name
@@ -3420,7 +3445,11 @@ function setFlowBoundary(stepName: FlowStepName) {
 
 function selectFlowStartStep(event: Event) {
   const target = event.target as HTMLSelectElement
-  const stepName = normalizeFlowStepName(target.value, flowStartStep.value)
+  const stepName = flowStepOptions.value.find((step) => step.name === target.value)?.name
+  if (!stepName) {
+    target.value = flowStartStep.value
+    return
+  }
   if (stepName === flowStartStep.value) return
   if (!canChooseFlowStartStep.value || isFlowStepLocked(stepName)) {
     target.value = flowStartStep.value
