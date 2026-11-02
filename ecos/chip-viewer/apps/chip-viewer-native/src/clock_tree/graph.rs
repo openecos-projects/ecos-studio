@@ -72,10 +72,12 @@ fn triangle_vertices(point: egui::Pos2, size: egui::Vec2, apex_up: bool) -> [egu
 }
 
 fn internal_visual_size(zoom: f32) -> egui::Vec2 {
-    egui::vec2(
-        (NODE_WIDTH * zoom).clamp(5.0, NODE_WIDTH * 1.6),
-        (NODE_HEIGHT * zoom).clamp(4.0, NODE_HEIGHT * 1.6),
-    )
+    let overview = egui::vec2(
+        (NODE_WIDTH * zoom).clamp(5.0, 18.0),
+        (NODE_HEIGHT * zoom).clamp(4.0, 12.0),
+    );
+    let compact = smoothstep(0.35, 1.0, zoom);
+    overview * (1.0 - compact) + leaf_visual_size(zoom) * compact
 }
 
 fn node_visual_size(index: &ClockGraphIndex, row: &TreeRow, zoom: f32) -> egui::Vec2 {
@@ -725,6 +727,18 @@ mod tests {
 
         assert!(size.x >= 5.0);
         assert!(size.y >= 4.0);
+    }
+
+    #[test]
+    fn internal_nodes_converge_to_leaf_size_when_zoomed_in() {
+        for zoom in [1.0, 1.5, 2.0] {
+            assert_eq!(internal_visual_size(zoom), leaf_visual_size(zoom));
+        }
+
+        let overview = internal_visual_size(0.4);
+        let leaf = leaf_visual_size(0.4);
+        assert!(overview.x > leaf.x);
+        assert!(overview.y > leaf.y);
     }
 
     #[test]
