@@ -29,6 +29,11 @@ pub(super) struct LvsFocusRequest {
     pub(super) bbox: Rect32,
 }
 
+pub(super) enum LvsSidebarAction {
+    ToggleShowAll,
+    FocusGroup(LvsFocusRequest),
+}
+
 #[derive(Debug, PartialEq)]
 struct LvsConnectivityAnomaly {
     name: String,
@@ -111,11 +116,37 @@ impl LvsAnalysis {
         (!group.shapes.is_empty()).then_some(group.shapes.as_slice())
     }
 
-    fn sidebar(&self, ui: &mut egui::Ui, selected_group: Option<usize>) -> Option<LvsFocusRequest> {
-        let mut focus = None;
+    pub(super) fn all_shape_rects(&self) -> impl Iterator<Item = &Rect32> {
+        self.groups.iter().flat_map(|group| group.shapes.iter())
+    }
+
+    pub(super) fn all_bbox(&self) -> Option<Rect32> {
+        let mut bbox = None;
+        for group in &self.groups {
+            if let Some(group_bbox) = group.bbox {
+                union_bbox(&mut bbox, group_bbox);
+            }
+        }
+        bbox
+    }
+
+    fn sidebar(
+        &self,
+        ui: &mut egui::Ui,
+        selected_group: Option<usize>,
+        show_all: bool,
+    ) -> Option<LvsSidebarAction> {
+        let mut action = None;
         ui.horizontal(|ui| {
             section_heading(ui, "LVS ANOMALIES");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let label = if show_all { "Hide All" } else { "Show All" };
+                if ui
+                    .add_enabled(!self.groups.is_empty(), egui::Button::new(label).small())
+                    .clicked()
+                {
+                    action = Some(LvsSidebarAction::ToggleShowAll);
+                }
                 ui.label(
                     egui::RichText::new(format!("{} findings", self.anomaly_count()))
                         .small()
@@ -183,30 +214,55 @@ impl LvsAnalysis {
                     section_heading(ui, "FAULT GROUPS");
                     for (group_index, group) in self.groups.iter().enumerate() {
                         if lvs_fault_group_card(ui, group, selected_group == Some(group_index)) {
-                            focus = group.bbox.map(|bbox| LvsFocusRequest { group_index, bbox });
+                            action = group
+                                .bbox
+                                .map(|bbox| LvsFocusRequest { group_index, bbox })
+                                .map(LvsSidebarAction::FocusGroup);
                         }
                         ui.add_space(6.0);
                     }
                 }
             });
-        focus
+        action
     }
 }
 
 impl LoadedViewer {
     pub(super) fn lvs_sidebar(&mut self, ui: &mut egui::Ui) {
         let selected_group = self.selected_lvs_group;
-        let focus = self
+        let show_all = self.show_all_lvs;
+        let action = self
             .lvs_analysis
             .as_ref()
-            .and_then(|analysis| analysis.sidebar(ui, selected_group));
-        if let Some(focus) = focus {
-            self.selected_lvs_group = Some(focus.group_index);
-            self.pending_focus = Some(PendingFocus {
-                bbox: contextual_map_focus_bbox(focus.bbox),
-                select_shape_id: None,
-                transition: FocusTransition::Animated,
-            });
+            .and_then(|analysis| analysis.sidebar(ui, selected_group, show_all));
+        match action {
+            Some(LvsSidebarAction::ToggleShowAll) => {
+                self.show_all_lvs = !self.show_all_lvs;
+                self.selected_lvs_group = None;
+                if self.show_all_lvs {
+                    if let Some(bbox) = self
+                        .lvs_analysis
+                        .as_ref()
+                        .and_then(|analysis| analysis.all_bbox())
+                    {
+                        self.pending_focus = Some(PendingFocus {
+                            bbox: contextual_map_focus_bbox(bbox),
+                            select_shape_id: None,
+                            transition: FocusTransition::Animated,
+                        });
+                    }
+                }
+            }
+            Some(LvsSidebarAction::FocusGroup(focus)) => {
+                self.show_all_lvs = false;
+                self.selected_lvs_group = Some(focus.group_index);
+                self.pending_focus = Some(PendingFocus {
+                    bbox: contextual_map_focus_bbox(focus.bbox),
+                    select_shape_id: None,
+                    transition: FocusTransition::Animated,
+                });
+            }
+            None => {}
         }
     }
 }
@@ -655,6 +711,46 @@ mod tests {
         assert_eq!(
             component_summary(&group.components),
             "1, 2, 3, 4, 5, 6, 7, 8 +2 more"
+        );
+    }
+
+    #[test]
+    fn all_anomaly_shapes_cover_every_fault_group() {
+        let parsed = parse_lvs_json_text(
+            r#"{
+                "violations": [
+                    {
+                        "type": "PowerOpenVDD",
+                        "net": "VDD",
+                        "shapes": [{"rect": [0, 0, 10, 10]}, {"rect": [20, 20, 30, 30]}]
+                    },
+                    {
+                        "type": "PowerOpenVSS",
+                        "net": "VSS",
+                        "shapes": [{"rect": [100, 100, 110, 110]}]
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+        let analysis = LvsAnalysis {
+            data_path: PathBuf::from("lvs.step.json"),
+            run_state: parsed.run_state,
+            connectivity: parsed.connectivity,
+            entities: parsed.entities,
+            groups: parsed.groups,
+            load_error: None,
+        };
+
+        assert_eq!(analysis.all_shape_rects().count(), 3);
+        assert_eq!(
+            analysis.all_bbox(),
+            Some(Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 110,
+                hy: 110,
+            })
         );
     }
 

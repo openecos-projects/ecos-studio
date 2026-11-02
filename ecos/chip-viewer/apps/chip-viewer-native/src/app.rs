@@ -244,6 +244,7 @@ struct LoadedViewer {
     selected_antenna: Option<usize>,
     lvs_analysis: Option<lvs::LvsAnalysis>,
     selected_lvs_group: Option<usize>,
+    show_all_lvs: bool,
     clock_tree: Option<crate::clock_tree::ClockTreePanel>,
     map_catalog: Option<MapCatalog>,
     map_catalog_error: Option<String>,
@@ -2327,6 +2328,7 @@ impl LoadedViewer {
             selected_antenna: None,
             lvs_analysis,
             selected_lvs_group: None,
+            show_all_lvs: false,
             clock_tree,
             map_catalog,
             map_catalog_error,
@@ -4556,16 +4558,22 @@ impl LoadedViewer {
         }
 
         if self.analysis_tab == AnalysisTab::Lvs {
-            if let Some(rects) = self
-                .lvs_analysis
-                .as_ref()
-                .and_then(|analysis| analysis.selected_shape_rects(self.selected_lvs_group))
-            {
-                for rect in rects {
-                    if paint_lvs_anomaly_overlay(
-                        &painter, *rect, world, canvas, self.zoom, self.pan,
-                    ) {
-                        drawn += 1;
+            if let Some(analysis) = &self.lvs_analysis {
+                if self.show_all_lvs {
+                    for rect in analysis.all_shape_rects() {
+                        if paint_lvs_anomaly_overlay(
+                            &painter, *rect, world, canvas, self.zoom, self.pan,
+                        ) {
+                            drawn += 1;
+                        }
+                    }
+                } else if let Some(rects) = analysis.selected_shape_rects(self.selected_lvs_group) {
+                    for rect in rects {
+                        if paint_lvs_anomaly_overlay(
+                            &painter, *rect, world, canvas, self.zoom, self.pan,
+                        ) {
+                            drawn += 1;
+                        }
                     }
                 }
             }
@@ -5787,6 +5795,7 @@ impl LoadedViewer {
                     || self.selected_drc.is_some()
                     || self.selected_antenna.is_some()
                     || self.selected_lvs_group.is_some()
+                    || self.show_all_lvs
                     || self.selected_map_bbox.is_some()
                 {
                     self.selected = None;
@@ -5794,6 +5803,7 @@ impl LoadedViewer {
                     self.selected_drc = None;
                     self.selected_antenna = None;
                     self.selected_lvs_group = None;
+                    self.show_all_lvs = false;
                     self.selected_map_bbox = None;
                     if let Some(staging) = self.macro_staging.as_mut() {
                         staging.selection.clear();
