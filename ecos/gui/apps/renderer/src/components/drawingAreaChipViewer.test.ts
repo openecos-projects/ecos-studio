@@ -81,6 +81,11 @@ describe('drawing area chip viewer launch logic', () => {
       projectPath: '/work/gcd',
       step: 'route',
     })
+    expect(buildChipViewerOpenRequest('/work/gcd', 'Macro Placement', 'edit')).toEqual({
+      mode: 'edit',
+      projectPath: '/work/gcd',
+      step: 'macroPlacement',
+    })
   })
 
   it('uses different loading copy for read-only and edit launches', () => {

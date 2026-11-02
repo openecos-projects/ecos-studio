@@ -1417,83 +1417,75 @@ describe('ChipViewerService', () => {
     )
   })
 
-  it('publishes the macro staging manifest for preFloorplan edit sessions', async () => {
-    const devBinaries = devChipViewerPaths()
-    const geometryMasters = join(GEOMETRY_EPOCH_DIR, 'geometry.masters.txt')
-    const stagingPath = join(EDIT_SESSION_COMMAND_DIR, 'macro-staging.json')
-    const { renameFile, service, spawnProcess, writeTextFile } = createService({
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.viewer,
-        ...DEFAULT_MANIFEST_FILE_PATHS,
-      ],
-      files: {
-        [GEOMETRY_MANIFEST]: geometryManifest({
-          masters: 'epochs/1/geometry.masters.txt',
-        }),
-        [geometryMasters]: [
-          'name\ttype\tsite\tsymmetry\torigin_x\torigin_y\twidth\theight\tterm_count\tobs_count',
-          'SRAM_64x32\tBLOCK\tsite9\tX,Y\t0\t0\t40000\t30000\t120\t0',
-        ].join('\n'),
-        [DEF_PATH]: [
-          'VERSION 5.8 ;',
-          'DESIGN gcd ;',
-          'UNITS DISTANCE MICRONS 1000 ;',
-          'DIEAREA ( 0 0 ) ( 52000 53000 ) ;',
-          'COMPONENTS 2 ;',
-          '    - u_sram01 SRAM_64x32 ;',
-          '    - u_core_cell BUFX1 ;',
-          'END COMPONENTS',
-          'END DESIGN',
-        ].join('\n'),
-      },
-    })
-
-    const result = await service.open({
-      mode: 'edit',
-      projectPath: PROJECT_ROOT,
-      step: 'preFloorplan',
-    })
-
-    const stagingWrite = writeTextFile.mock.calls.find(
-      ([path]) => path === `${stagingPath}.tmp`,
-    )
-    expect(stagingWrite).toBeDefined()
-    expect(renameFile).toHaveBeenCalledWith(`${stagingPath}.tmp`, stagingPath)
-    expect(stagingWrite?.[1]).toMatchInlineSnapshot(`
-      "{
-        "schema": 1,
-        "dbuPerMicron": 1000,
-        "dieArea": {
-          "lx": 0,
-          "ly": 0,
-          "hx": 52000,
-          "hy": 53000
-        },
-        "macros": [
-          {
-            "name": "u_sram01",
-            "master": "SRAM_64x32",
-            "widthDbu": 40000,
-            "heightDbu": 30000,
-            "orient": "R0",
-            "placed": false
-          }
+  it.each(['preFloorplan', 'macroPlacement'])(
+    'publishes the macro staging manifest for %s edit sessions',
+    async (step) => {
+      const devBinaries = devChipViewerPaths()
+      const geometryMasters = join(GEOMETRY_EPOCH_DIR, 'geometry.masters.txt')
+      const stagingPath = join(EDIT_SESSION_COMMAND_DIR, 'macro-staging.json')
+      const { renameFile, service, spawnProcess, writeTextFile } = createService({
+        existingPaths: [
+          devBinaries.cargoManifest,
+          devBinaries.viewer,
+          ...DEFAULT_MANIFEST_FILE_PATHS,
         ],
-        "stdcellStaging": {
-          "count": 1,
-          "areaDbu": 0
-        }
-      }
-      "
-    `)
-    expect(spawnProcess).toHaveBeenCalledWith(
-      devBinaries.viewer,
-      expect.arrayContaining(['--macro-staging-file', stagingPath]),
-      expect.any(Object),
-    )
-    expect(result.macroStaging).toEqual({ enabled: true })
-  })
+        files: {
+          [GEOMETRY_MANIFEST]: geometryManifest({
+            masters: 'epochs/1/geometry.masters.txt',
+          }),
+          [geometryMasters]: [
+            'name\ttype\tsite\tsymmetry\torigin_x\torigin_y\twidth\theight\tterm_count\tobs_count',
+            'SRAM_64x32\tBLOCK\tsite9\tX,Y\t0\t0\t40000\t30000\t120\t0',
+          ].join('\n'),
+          [DEF_PATH]: [
+            'VERSION 5.8 ;',
+            'DESIGN gcd ;',
+            'UNITS DISTANCE MICRONS 1000 ;',
+            'DIEAREA ( 0 0 ) ( 52000 53000 ) ;',
+            'COMPONENTS 2 ;',
+            '    - u_sram01 SRAM_64x32 ;',
+            '    - u_core_cell BUFX1 ;',
+            'END COMPONENTS',
+            'END DESIGN',
+          ].join('\n'),
+        },
+      })
+
+      const result = await service.open({
+        mode: 'edit',
+        projectPath: PROJECT_ROOT,
+        step,
+      })
+
+      const stagingWrite = writeTextFile.mock.calls.find(
+        ([path]) => path === `${stagingPath}.tmp`,
+      )
+      expect(stagingWrite).toBeDefined()
+      expect(renameFile).toHaveBeenCalledWith(`${stagingPath}.tmp`, stagingPath)
+      expect(JSON.parse(stagingWrite?.[1] ?? '{}')).toEqual({
+        schema: 1,
+        dbuPerMicron: 1000,
+        dieArea: { lx: 0, ly: 0, hx: 52000, hy: 53000 },
+        macros: [
+          {
+            name: 'u_sram01',
+            master: 'SRAM_64x32',
+            widthDbu: 40000,
+            heightDbu: 30000,
+            orient: 'R0',
+            placed: false,
+          },
+        ],
+        stdcellStaging: { count: 1, areaDbu: 0 },
+      })
+      expect(spawnProcess).toHaveBeenCalledWith(
+        devBinaries.viewer,
+        expect.arrayContaining(['--macro-staging-file', stagingPath]),
+        expect.any(Object),
+      )
+      expect(result.macroStaging).toEqual({ enabled: true })
+    },
+  )
 
   it('still opens the viewer without macro staging when the DEF is malformed', async () => {
     const devBinaries = devChipViewerPaths()

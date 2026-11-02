@@ -155,56 +155,59 @@ describe('StepDashboard committed Snapshot rendering', () => {
     expect(dashboardSource).toMatch(/\.data-highlights\s*{[^}]*align-content: start/s)
   })
 
-  it('opens the macro placement edit session from preFloorplan geometry', async () => {
-    const preFloorplanDetail = detail()
-    preFloorplanDetail.step = {
-      stepId: 'preFloorplan',
-      order: 0,
-      name: 'preFloorplan',
-      state: 'succeeded',
-    }
-    preFloorplanDetail.artifacts.push({
-      artifactId: 'geometry-prefloorplan',
-      availability: 'available',
-      kind: 'layout_geometry',
-      name: 'gcd_preFloorplan',
-      stepId: 'preFloorplan',
-    })
-    testState.dashboard = {
-      currentStep: ref('preFloorplan'),
-      data: ref(snapshotStepDashboardData(preFloorplanDetail)),
-      error: ref(null),
-      loadTimingCorner: vi.fn(),
-      loading: ref(false),
-      refresh: vi.fn(),
-      timingDetailErrors: ref({}),
-      timingDetailLoading: ref([]),
-    }
+  it.each(['preFloorplan', 'macroPlacement'])(
+    'opens the macro placement edit session from %s geometry',
+    async (step) => {
+      const layoutDetail = detail()
+      layoutDetail.step = {
+        stepId: step,
+        order: 0,
+        name: step,
+        state: 'succeeded',
+      }
+      layoutDetail.artifacts.push({
+        artifactId: `geometry-${step}`,
+        availability: 'available',
+        kind: 'layout_geometry',
+        name: `gcd_${step}`,
+        stepId: step,
+      })
+      testState.dashboard = {
+        currentStep: ref(step),
+        data: ref(snapshotStepDashboardData(layoutDetail)),
+        error: ref(null),
+        loadTimingCorner: vi.fn(),
+        loading: ref(false),
+        refresh: vi.fn(),
+        timingDetailErrors: ref({}),
+        timingDetailLoading: ref([]),
+      }
 
-    const wrapper = mount(StepDashboard, {
-      global: {
-        stubs: {
-          Dialog: { template: '<div><slot /></div>' },
-          StatusPieChart: true,
-          StepConfigPanel: true,
-          TimingAnalysisDialog: true,
-          TimingCornerTable: true,
-          TimingKpis: true,
-          StepDataSummaryDialog: true,
-          StepSnapshotPanel: true,
+      const wrapper = mount(StepDashboard, {
+        global: {
+          stubs: {
+            Dialog: { template: '<div><slot /></div>' },
+            StatusPieChart: true,
+            StepConfigPanel: true,
+            TimingAnalysisDialog: true,
+            TimingCornerTable: true,
+            TimingKpis: true,
+            StepDataSummaryDialog: true,
+            StepSnapshotPanel: true,
+          },
         },
-      },
-    })
+      })
 
-    const placeMacrosButton = wrapper.get('[aria-label="Place Macros"]')
-    await placeMacrosButton.trigger('click')
+      const placeMacrosButton = wrapper.get('[aria-label="Place Macros"]')
+      await placeMacrosButton.trigger('click')
 
-    expect(testState.chipViewerOpen).toHaveBeenCalledWith({
-      mode: 'edit',
-      projectPath: '/project/ws-a',
-      step: 'preFloorplan',
-    })
-  })
+      expect(testState.chipViewerOpen).toHaveBeenCalledWith({
+        mode: 'edit',
+        projectPath: '/project/ws-a',
+        step,
+      })
+    },
+  )
 
   it('warns when macro staging falls back to move-only mode', async () => {
     const preFloorplanDetail = detail()

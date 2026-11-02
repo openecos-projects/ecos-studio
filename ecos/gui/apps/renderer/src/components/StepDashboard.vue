@@ -1180,11 +1180,12 @@ const chipViewerAvailable = computed(() =>
     step: chipViewerStep.value,
   }),
 )
-// Manual macro placement enters the layout edit session on the
-// preFloorplan result, before macroPlacement/postFloorplan run.
+// Manual macro placement can start from either the unplaced preFloorplan
+// result or the placed macroPlacement result.
 const macroPlacementAvailable = computed(
   () =>
-    chipViewerStep.value === StepEnum.PRE_FLOORPLAN &&
+    (chipViewerStep.value === StepEnum.PRE_FLOORPLAN ||
+      chipViewerStep.value === StepEnum.MACRO_PLACEMENT) &&
     data.value?.hasGeometry === true &&
     chipViewerAvailable.value,
 )
