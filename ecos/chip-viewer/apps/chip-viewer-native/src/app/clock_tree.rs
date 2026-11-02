@@ -1,11 +1,9 @@
-use super::{focus_target_for_shape_ids, section_heading, LoadedViewer, PendingFocus};
+use super::{focus_target_for_shape_ids, LoadedViewer, PendingFocus};
 use crate::clock_tree::LayoutTarget;
 use chipgeom_format::{OwnerType, Rect32};
 
 impl LoadedViewer {
     pub(super) fn clock_tree_controls(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(8.0);
-        section_heading(ui, "CLOCK TREE");
         ui.add_space(4.0);
         let names = self
             .selected

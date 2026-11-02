@@ -370,6 +370,7 @@ struct AntennaOverlay {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AnalysisTab {
     Antenna,
+    ClockTree,
     Drc,
     Map,
 }
@@ -2241,6 +2242,8 @@ impl LoadedViewer {
             AnalysisTab::Drc
         } else if antenna_overlay.is_some() {
             AnalysisTab::Antenna
+        } else if map_catalog.is_none() && clock_tree.is_some() {
+            AnalysisTab::ClockTree
         } else {
             AnalysisTab::Map
         };
@@ -2364,12 +2367,14 @@ impl LoadedViewer {
             || self.antenna_overlay.is_some()
             || self.map_catalog.is_some()
             || self.map_catalog_error.is_some()
+            || self.clock_tree.is_some()
     }
 
     fn analysis_sidebar(&mut self, ui: &mut egui::Ui) {
         let has_drc = self.drc_overlay.is_some();
         let has_antenna = self.antenna_overlay.is_some();
         let has_maps = self.map_catalog.is_some() || self.map_catalog_error.is_some();
+        let has_clock_tree = self.clock_tree.is_some();
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
@@ -2384,6 +2389,15 @@ impl LoadedViewer {
             if has_maps && analysis_tab_button(ui, "MAP", self.analysis_tab == AnalysisTab::Map) {
                 self.analysis_tab = AnalysisTab::Map;
             }
+            if has_clock_tree
+                && analysis_tab_button(
+                    ui,
+                    "CLOCK TREE",
+                    self.analysis_tab == AnalysisTab::ClockTree,
+                )
+            {
+                self.analysis_tab = AnalysisTab::ClockTree;
+            }
         });
         ui.add_space(4.0);
         ui.separator();
@@ -2391,6 +2405,7 @@ impl LoadedViewer {
         let show_drc = self.analysis_tab == AnalysisTab::Drc && has_drc;
         let show_antenna = self.analysis_tab == AnalysisTab::Antenna && has_antenna;
         let show_map = self.analysis_tab == AnalysisTab::Map && has_maps;
+        let show_clock_tree = self.analysis_tab == AnalysisTab::ClockTree && has_clock_tree;
 
         if show_drc {
             self.drc_sidebar(ui);
@@ -2398,12 +2413,16 @@ impl LoadedViewer {
             self.antenna_sidebar(ui);
         } else if show_map {
             self.map_sidebar(ui);
+        } else if show_clock_tree {
+            self.clock_tree_controls(ui);
         } else if has_drc {
             self.drc_sidebar(ui);
         } else if has_antenna {
             self.antenna_sidebar(ui);
         } else if has_maps {
             self.map_sidebar(ui);
+        } else if has_clock_tree {
+            self.clock_tree_controls(ui);
         }
     }
 
@@ -8336,14 +8355,6 @@ impl eframe::App for ChipViewerApp {
                     .default_width(292.0)
                     .show(ctx, |ui| loaded.analysis_sidebar(ui));
             }
-            if loaded.clock_tree.is_some() {
-                egui::SidePanel::left("chip_viewer_clock_tree")
-                    .resizable(true)
-                    .min_width(260.0)
-                    .max_width(460.0)
-                    .default_width(320.0)
-                    .show(ctx, |ui| loaded.clock_tree_controls(ui));
-            }
         }
         egui::SidePanel::right("chip_viewer_operations")
             .resizable(true)
@@ -8464,8 +8475,13 @@ fn section_heading(ui: &mut egui::Ui, label: &str) {
 }
 
 fn analysis_tab_button(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
+    let width = match label {
+        "ANTENNA" => 64.0,
+        "CLOCK TREE" => 92.0,
+        _ => 52.0,
+    };
     let response = ui.add_sized(
-        egui::vec2(52.0, 28.0),
+        egui::vec2(width, 28.0),
         egui::Button::new(
             egui::RichText::new(label)
                 .strong()

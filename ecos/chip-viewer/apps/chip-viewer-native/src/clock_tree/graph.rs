@@ -1,7 +1,8 @@
 use chip_view_db::clock_tree::{ClockGraphIndex, ClockNode};
 
 use super::layout::{
-    self, TreeRow, LEAF_HEIGHT, LEAF_ROW_SPACING, LEAF_WIDTH, NODE_HEIGHT, NODE_WIDTH,
+    self, LeafDelayAxis, TreeRow, LEAF_HEIGHT, LEAF_ROW_SPACING, LEAF_WIDTH, NODE_HEIGHT,
+    NODE_WIDTH,
 };
 use super::{ClockTreePanel, LayoutTarget, TreeColorMode};
 
@@ -14,6 +15,21 @@ const LEAF_TRIANGLE_MIN_PIXELS: f32 = 4.4;
 const MIN_NODE_HIT_SIZE: f32 = 8.0;
 const MAX_EDGE_INTERACTIONS: usize = 1200;
 const MIN_EDGE_INTERACTION_ZOOM: f32 = 0.4;
+const FANOUT_RAIL_OFFSET: f32 = 12.0;
+const DELAY_AXIS_WIDTH: f32 = 72.0;
+const DELAY_AXIS_TICK_TARGET_PX: f32 = 32.0;
+
+fn delay_tick_decimals(step: f64) -> usize {
+    if step >= 0.01 {
+        3
+    } else if step >= 0.001 {
+        4
+    } else if step >= 0.0001 {
+        5
+    } else {
+        6
+    }
+}
 
 fn smoothstep(edge0: f32, edge1: f32, value: f32) -> f32 {
     let t = ((value - edge0) / (edge1 - edge0).max(f32::EPSILON)).clamp(0.0, 1.0);
@@ -171,6 +187,88 @@ impl ClockTreePanel {
         self.pan = rect.size() * 0.5 - bounds.center().to_vec2() * self.zoom;
     }
 
+    fn paint_delay_axis(
+        &self,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        origin: egui::Pos2,
+        zoom: f32,
+        axis: LeafDelayAxis,
+    ) {
+        let top_y = origin.y + axis.top_y as f32 * zoom;
+        let bottom_y = origin.y + axis.bottom_y as f32 * zoom;
+        if bottom_y < rect.top() || top_y > rect.bottom() {
+            return;
+        }
+
+        let gutter = egui::Rect::from_min_max(
+            rect.min,
+            egui::pos2(rect.left() + DELAY_AXIS_WIDTH, rect.bottom()),
+        );
+        painter.rect_filled(
+            gutter,
+            0.0,
+            egui::Color32::from_rgba_unmultiplied(15, 20, 27, 230),
+        );
+        painter.text(
+            egui::pos2(rect.left() + 8.0, rect.top() + 8.0),
+            egui::Align2::LEFT_TOP,
+            "DELAY (ns)",
+            egui::FontId::proportional(10.0),
+            egui::Color32::from_gray(185),
+        );
+
+        let axis_x = rect.left() + DELAY_AXIS_WIDTH - 10.0;
+        let line_top = top_y.max(rect.top() + 2.0);
+        let line_bottom = bottom_y.min(rect.bottom() - 8.0);
+        if line_bottom <= line_top {
+            return;
+        }
+        let intervals = ((line_bottom - line_top) / DELAY_AXIS_TICK_TARGET_PX)
+            .round()
+            .clamp(2.0, 8.0) as usize;
+        let range = axis.maximum_ns - axis.minimum_ns;
+        let decimals = delay_tick_decimals(range / intervals as f64);
+        let axis_color = egui::Color32::from_rgb(117, 139, 158);
+        let guide_color = egui::Color32::from_rgba_unmultiplied(117, 139, 158, 64);
+
+        painter.line_segment(
+            [
+                egui::pos2(axis_x, line_top),
+                egui::pos2(axis_x, line_bottom),
+            ],
+            egui::Stroke::new(1.0, axis_color),
+        );
+        for interval in 0..=intervals {
+            let fraction = interval as f32 / intervals as f32;
+            let y = top_y + (bottom_y - top_y) * fraction;
+            if y < line_top - 0.5 || y > line_bottom + 0.5 {
+                continue;
+            }
+            let delay = axis.minimum_ns + range * f64::from(fraction);
+            painter.line_segment(
+                [egui::pos2(axis_x - 5.0, y), egui::pos2(axis_x, y)],
+                egui::Stroke::new(1.0, axis_color),
+            );
+            painter.extend(egui::Shape::dotted_line(
+                &[
+                    egui::pos2(axis_x + 2.0, y),
+                    egui::pos2(rect.right() - 8.0, y),
+                ],
+                guide_color,
+                6.0,
+                0.8,
+            ));
+            painter.text(
+                egui::pos2(axis_x - 8.0, y),
+                egui::Align2::RIGHT_CENTER,
+                format!("{delay:.decimals$}"),
+                egui::FontId::proportional(9.0),
+                egui::Color32::from_gray(182),
+            );
+        }
+    }
+
     pub(crate) fn graph_ui(&mut self, ui: &mut egui::Ui) -> Option<LayoutTarget> {
         if !self.open {
             return None;
@@ -222,6 +320,16 @@ impl ClockTreePanel {
                 ),
             );
         }
+        if let Some(axis) = self.leaf_delay_axis {
+            ui.label(
+                egui::RichText::new(format!(
+                    "Leaf Y = insertion delay (early ↑ / late ↓) · {:.4}–{:.4} ns",
+                    axis.minimum_ns, axis.maximum_ns
+                ))
+                .small()
+                .color(egui::Color32::from_gray(170)),
+            );
+        }
         ui.horizontal(|ui| {
             if ui.small_button("Collapse").clicked() {
                 self.collapsed.clear();
@@ -267,6 +375,7 @@ impl ClockTreePanel {
             self.rows = layout.rows;
             self.render_rows = layout.render_rows;
             self.y_bands = layout.y_bands;
+            self.leaf_delay_axis = layout.leaf_delay_axis;
             let arrivals = index.nodes.iter().filter_map(|node| node.arrival_ns);
             self.delay_bounds = arrivals
                 .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), value| {
@@ -362,17 +471,13 @@ impl ClockTreePanel {
                     let parent_size = node_visual_size(index, parent_row, zoom);
                     let start = egui::pos2(parent_point.x, parent_point.y + parent_size.y * 0.5);
                     let end = egui::pos2(point.x, point.y - child_size.y * 0.5);
-                    let middle_y = (start.y + end.y) * 0.5;
-                    let points = if row.leaf_fan {
-                        vec![start, end]
-                    } else {
-                        vec![
-                            start,
-                            egui::pos2(start.x, middle_y),
-                            egui::pos2(end.x, middle_y),
-                            end,
-                        ]
-                    };
+                    let rail_y = (start.y + FANOUT_RAIL_OFFSET).min(end.y);
+                    let points = vec![
+                        start,
+                        egui::pos2(start.x, rail_y),
+                        egui::pos2(end.x, rail_y),
+                        end,
+                    ];
                     painter.add(egui::Shape::line(
                         points,
                         egui::Stroke::new(
@@ -387,7 +492,7 @@ impl ClockTreePanel {
                             .copied()
                         {
                             if let Some(edge) = index.edges.get(edge_index) {
-                                let anchor = egui::pos2((start.x + end.x) * 0.5, middle_y);
+                                let anchor = egui::pos2(end.x, (rail_y + end.y) * 0.5);
                                 let hit = ui
                                     .interact(
                                         egui::Rect::from_center_size(
@@ -435,9 +540,9 @@ impl ClockTreePanel {
                         }
                     } else {
                         let triangle = vec![
-                            egui::pos2(point.x, point.y + child_size.y * 0.5),
-                            egui::pos2(point.x - child_size.x * 0.5, point.y - child_size.y * 0.5),
-                            egui::pos2(point.x + child_size.x * 0.5, point.y - child_size.y * 0.5),
+                            egui::pos2(point.x, point.y - child_size.y * 0.5),
+                            egui::pos2(point.x + child_size.x * 0.5, point.y + child_size.y * 0.5),
+                            egui::pos2(point.x - child_size.x * 0.5, point.y + child_size.y * 0.5),
                         ];
                         let stroke = if self.selected == Some(row.node) {
                             egui::Stroke::new(1.5, egui::Color32::WHITE)
@@ -448,6 +553,9 @@ impl ClockTreePanel {
                     }
                     if zoom >= LEAF_LABEL_ZOOM || self.selected == Some(row.node) {
                         let label: String = node.name.chars().take(20).collect();
+                        let label = node
+                            .arrival_ns
+                            .map_or(label.clone(), |arrival| format!("{label}\n{arrival:.4} ns"));
                         painter.text(
                             egui::pos2(point.x, point.y + child_size.y * 0.5 + 2.0),
                             egui::Align2::CENTER_TOP,
@@ -493,9 +601,16 @@ impl ClockTreePanel {
             }
         }
 
+        if let Some(axis) = self.leaf_delay_axis {
+            self.paint_delay_axis(&painter, rect, origin, zoom, axis);
+        }
+
         let pointer = response
             .hover_pos()
-            .or_else(|| response.interact_pointer_pos());
+            .or_else(|| response.interact_pointer_pos())
+            .filter(|pointer| {
+                self.leaf_delay_axis.is_none() || pointer.x >= rect.left() + DELAY_AXIS_WIDTH
+            });
         let hovered = pointer.and_then(|pointer| {
             row_at_position(
                 index,
@@ -572,5 +687,13 @@ mod tests {
 
         assert!(size.x >= 5.0);
         assert!(size.y >= 4.0);
+    }
+
+    #[test]
+    fn delay_axis_precision_tracks_tick_step() {
+        assert_eq!(delay_tick_decimals(0.02), 3);
+        assert_eq!(delay_tick_decimals(0.002), 4);
+        assert_eq!(delay_tick_decimals(0.0002), 5);
+        assert_eq!(delay_tick_decimals(0.00002), 6);
     }
 }
