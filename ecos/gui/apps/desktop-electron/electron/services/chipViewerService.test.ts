@@ -31,6 +31,7 @@ const GEOMETRY_VIEW = join(GEOMETRY_EPOCH_DIR, 'geometry.view.bin')
 const GEOMETRY_DRC = join(GEOMETRY_EPOCH_DIR, 'geometry.drc.json')
 const DRC_DATA_PATH = join(STEP_DIRECTORY, 'feature', 'drc.step.json')
 const DRC_STATIS_PATH = join(STEP_DIRECTORY, 'analysis', 'drc_statis.csv')
+const LVS_DATA_PATH = join(STEP_DIRECTORY, 'feature', 'lvs.step.json')
 const MAP_ROOT_PATH = join(STEP_DIRECTORY, 'feature')
 const EDIT_ROOT_DIR = join(STEP_DIRECTORY, '.chip-viewer', 'layout-edit')
 const EDIT_COMMAND_DIR = join(EDIT_ROOT_DIR, 'commands')
@@ -631,6 +632,60 @@ describe('ChipViewerService', () => {
     expect(spawnProcess).toHaveBeenCalledWith(
       devBinaries.viewer,
       ['--manifest', GEOMETRY_MANIFEST, '--mode', 'view', '--map-root', MAP_ROOT_PATH],
+      expect.objectContaining({
+        detached: true,
+        stdio: ['ignore', expect.any(Number), expect.any(Number)],
+      }),
+    )
+  })
+
+  it('passes the LVS anomaly report for the LVS stage', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { service, spawnProcess } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+        LVS_DATA_PATH,
+      ],
+      files: {},
+    })
+
+    await service.open({
+      projectPath: PROJECT_ROOT,
+      step: 'lvs',
+    })
+
+    expect(spawnProcess).toHaveBeenCalledWith(
+      devBinaries.viewer,
+      ['--manifest', GEOMETRY_MANIFEST, '--mode', 'view', '--lvs-data', LVS_DATA_PATH],
+      expect.objectContaining({
+        detached: true,
+        stdio: ['ignore', expect.any(Number), expect.any(Number)],
+      }),
+    )
+  })
+
+  it('does not pass the LVS anomaly report for an unrelated stage', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { service, spawnProcess } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+        LVS_DATA_PATH,
+      ],
+      files: {},
+    })
+
+    await service.open({
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
+    })
+
+    expect(spawnProcess).toHaveBeenCalledWith(
+      devBinaries.viewer,
+      ['--manifest', GEOMETRY_MANIFEST, '--mode', 'view'],
       expect.objectContaining({
         detached: true,
         stdio: ['ignore', expect.any(Number), expect.any(Number)],

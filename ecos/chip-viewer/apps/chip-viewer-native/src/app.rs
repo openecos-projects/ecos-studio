@@ -36,6 +36,7 @@ mod clock_tree;
 mod gpu_overview;
 mod gpu_tile_worker;
 mod label_layout;
+mod lvs;
 mod snapshot_reload;
 use gpu_tile_worker::GpuTileWorker;
 use label_layout::{
@@ -153,6 +154,7 @@ struct LoadingViewer {
     drc_statis_path: Option<PathBuf>,
     antenna_data_path: Option<PathBuf>,
     antenna_statis_path: Option<PathBuf>,
+    lvs_data_path: Option<PathBuf>,
     map_root_path: Option<PathBuf>,
     pub target_format: wgpu::TextureFormat,
     pub render_mode: crate::RenderMode,
@@ -240,6 +242,8 @@ struct LoadedViewer {
     selected_drc: Option<usize>,
     antenna_overlay: Option<AntennaOverlay>,
     selected_antenna: Option<usize>,
+    lvs_analysis: Option<lvs::LvsAnalysis>,
+    selected_lvs_group: Option<usize>,
     clock_tree: Option<crate::clock_tree::ClockTreePanel>,
     map_catalog: Option<MapCatalog>,
     map_catalog_error: Option<String>,
@@ -372,6 +376,7 @@ enum AnalysisTab {
     Antenna,
     ClockTree,
     Drc,
+    Lvs,
     Map,
 }
 
@@ -1545,6 +1550,7 @@ impl ChipViewerApp {
         drc_statis_path: Option<PathBuf>,
         antenna_data_path: Option<PathBuf>,
         antenna_statis_path: Option<PathBuf>,
+        lvs_data_path: Option<PathBuf>,
         map_root_path: Option<PathBuf>,
         target_format: wgpu::TextureFormat,
         render_mode: crate::RenderMode,
@@ -1573,6 +1579,7 @@ impl ChipViewerApp {
                 drc_statis_path,
                 antenna_data_path,
                 antenna_statis_path,
+                lvs_data_path,
                 map_root_path,
                 target_format,
                 render_mode,
@@ -1650,6 +1657,7 @@ impl ChipViewerApp {
                     loading.drc_statis_path.clone(),
                     loading.antenna_data_path.clone(),
                     loading.antenna_statis_path.clone(),
+                    loading.lvs_data_path.clone(),
                     loading.map_root_path.clone(),
                     loading.target_format,
                     loading.render_mode,
@@ -2212,6 +2220,7 @@ impl LoadedViewer {
         drc_statis_path: Option<PathBuf>,
         antenna_data_path: Option<PathBuf>,
         antenna_statis_path: Option<PathBuf>,
+        lvs_data_path: Option<PathBuf>,
         map_root_path: Option<PathBuf>,
         target_format: wgpu::TextureFormat,
         render_mode: crate::RenderMode,
@@ -2229,6 +2238,7 @@ impl LoadedViewer {
         let drc_data_path = db.snapshot().manifest().drc.clone().or(drc_data_path);
         let drc_overlay = DrcOverlay::load(drc_data_path, drc_statis_path);
         let antenna_overlay = AntennaOverlay::load(antenna_data_path, antenna_statis_path);
+        let lvs_analysis = lvs::LvsAnalysis::load(lvs_data_path);
         let clock_tree = crate::clock_tree::ClockTreePanel::new(std::sync::Arc::clone(&db));
         let (map_catalog, map_catalog_error) = match map_root_path.as_deref() {
             Some(root) => match MapCatalog::discover(root) {
@@ -2240,6 +2250,8 @@ impl LoadedViewer {
         };
         let analysis_tab = if drc_overlay.is_some() {
             AnalysisTab::Drc
+        } else if lvs_analysis.is_some() {
+            AnalysisTab::Lvs
         } else if antenna_overlay.is_some() {
             AnalysisTab::Antenna
         } else if map_catalog.is_none() && clock_tree.is_some() {
@@ -2313,6 +2325,8 @@ impl LoadedViewer {
             selected_drc: None,
             antenna_overlay,
             selected_antenna: None,
+            lvs_analysis,
+            selected_lvs_group: None,
             clock_tree,
             map_catalog,
             map_catalog_error,
@@ -2365,6 +2379,7 @@ impl LoadedViewer {
     fn has_analysis_panel(&self) -> bool {
         self.drc_overlay.is_some()
             || self.antenna_overlay.is_some()
+            || self.lvs_analysis.is_some()
             || self.map_catalog.is_some()
             || self.map_catalog_error.is_some()
             || self.clock_tree.is_some()
@@ -2373,6 +2388,7 @@ impl LoadedViewer {
     fn analysis_sidebar(&mut self, ui: &mut egui::Ui) {
         let has_drc = self.drc_overlay.is_some();
         let has_antenna = self.antenna_overlay.is_some();
+        let has_lvs = self.lvs_analysis.is_some();
         let has_maps = self.map_catalog.is_some() || self.map_catalog_error.is_some();
         let has_clock_tree = self.clock_tree.is_some();
         ui.add_space(8.0);
@@ -2385,6 +2401,9 @@ impl LoadedViewer {
                 && analysis_tab_button(ui, "ANTENNA", self.analysis_tab == AnalysisTab::Antenna)
             {
                 self.analysis_tab = AnalysisTab::Antenna;
+            }
+            if has_lvs && analysis_tab_button(ui, "LVS", self.analysis_tab == AnalysisTab::Lvs) {
+                self.analysis_tab = AnalysisTab::Lvs;
             }
             if has_maps && analysis_tab_button(ui, "MAP", self.analysis_tab == AnalysisTab::Map) {
                 self.analysis_tab = AnalysisTab::Map;
@@ -2404,6 +2423,7 @@ impl LoadedViewer {
 
         let show_drc = self.analysis_tab == AnalysisTab::Drc && has_drc;
         let show_antenna = self.analysis_tab == AnalysisTab::Antenna && has_antenna;
+        let show_lvs = self.analysis_tab == AnalysisTab::Lvs && has_lvs;
         let show_map = self.analysis_tab == AnalysisTab::Map && has_maps;
         let show_clock_tree = self.analysis_tab == AnalysisTab::ClockTree && has_clock_tree;
 
@@ -2411,6 +2431,8 @@ impl LoadedViewer {
             self.drc_sidebar(ui);
         } else if show_antenna {
             self.antenna_sidebar(ui);
+        } else if show_lvs {
+            self.lvs_sidebar(ui);
         } else if show_map {
             self.map_sidebar(ui);
         } else if show_clock_tree {
@@ -2419,6 +2441,8 @@ impl LoadedViewer {
             self.drc_sidebar(ui);
         } else if has_antenna {
             self.antenna_sidebar(ui);
+        } else if has_lvs {
+            self.lvs_sidebar(ui);
         } else if has_maps {
             self.map_sidebar(ui);
         } else if has_clock_tree {
@@ -4531,6 +4555,22 @@ impl LoadedViewer {
             }
         }
 
+        if self.analysis_tab == AnalysisTab::Lvs {
+            if let Some(rects) = self
+                .lvs_analysis
+                .as_ref()
+                .and_then(|analysis| analysis.selected_shape_rects(self.selected_lvs_group))
+            {
+                for rect in rects {
+                    if paint_lvs_anomaly_overlay(
+                        &painter, *rect, world, canvas, self.zoom, self.pan,
+                    ) {
+                        drawn += 1;
+                    }
+                }
+            }
+        }
+
         if self.analysis_tab == AnalysisTab::Map {
             if let Some(bbox) = self.selected_map_bbox {
                 paint_map_selection_overlay(&painter, bbox, world, canvas, self.zoom, self.pan);
@@ -5746,12 +5786,14 @@ impl LoadedViewer {
                         .is_some_and(|staging| !staging.selection.is_empty())
                     || self.selected_drc.is_some()
                     || self.selected_antenna.is_some()
+                    || self.selected_lvs_group.is_some()
                     || self.selected_map_bbox.is_some()
                 {
                     self.selected = None;
                     self.highlighted.clear();
                     self.selected_drc = None;
                     self.selected_antenna = None;
+                    self.selected_lvs_group = None;
                     self.selected_map_bbox = None;
                     if let Some(staging) = self.macro_staging.as_mut() {
                         staging.selection.clear();
@@ -9880,6 +9922,34 @@ fn paint_antenna_violation_overlay(
     true
 }
 
+fn paint_lvs_anomaly_overlay(
+    painter: &egui::Painter,
+    shape: Rect32,
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+) -> bool {
+    let rect =
+        expand_screen_rect_to_min_size(world_to_screen_rect(shape, world, canvas, zoom, pan), 3.0);
+    if !rect.intersects(canvas) {
+        return false;
+    }
+
+    painter.rect_filled(
+        rect,
+        0.0,
+        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 44),
+    );
+    painter.rect_stroke(
+        rect.expand(1.0),
+        0.0,
+        egui::Stroke::new(2.0_f32, egui::Color32::WHITE),
+        egui::StrokeKind::Inside,
+    );
+    true
+}
+
 fn drc_detail_lines(violation: &DrcViolation) -> Vec<String> {
     let mut lines = vec![
         format!("type: {}", violation.drc_type),
@@ -13088,6 +13158,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             wgpu::TextureFormat::Bgra8Unorm,
             crate::RenderMode::Gpu,
         );
@@ -13162,6 +13233,7 @@ mod tests {
             db,
             false,
             false,
+            None,
             None,
             None,
             None,
@@ -15273,6 +15345,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             wgpu::TextureFormat::Bgra8Unorm,
             crate::RenderMode::Gpu,
         );
@@ -15320,6 +15393,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             wgpu::TextureFormat::Bgra8Unorm,
             crate::RenderMode::Gpu,
         );
@@ -15350,6 +15424,7 @@ mod tests {
             db,
             false,
             false,
+            None,
             None,
             None,
             None,
@@ -15403,6 +15478,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             wgpu::TextureFormat::Bgra8Unorm,
             crate::RenderMode::Gpu,
         );
@@ -15422,6 +15498,7 @@ mod tests {
             db,
             false,
             false,
+            None,
             None,
             None,
             None,

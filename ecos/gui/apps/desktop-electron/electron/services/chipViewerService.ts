@@ -256,6 +256,7 @@ interface SnapshotInputs {
   editResultDirectory: string
   gdsPath: string
   imagePath: string
+  lvsDataPath?: string
   manifestPath: string
   mapRootPath?: string
   workspaceStepDirectory: string
@@ -564,6 +565,20 @@ function isDrcWorkspaceStep(
   })
 }
 
+function isLvsWorkspaceStep(
+  step: string,
+  stepLabel: string,
+  stepDirectory: string,
+): boolean {
+  const candidates = [step, stepLabel, basename(stepDirectory)]
+  return candidates.some((candidate) => {
+    const normalized = candidate.toLowerCase()
+    return (
+      normalized === 'lvs' || normalized === 'lvs_ecc' || normalized.startsWith('lvs_')
+    )
+  })
+}
+
 function normalizeChipViewerMode(mode: unknown): ChipViewerMode {
   if (mode === undefined || mode === 'view') {
     return 'view'
@@ -742,6 +757,9 @@ export class ChipViewerService {
     if (snapshotInputs.mapRootPath) {
       viewerArgs.push('--map-root', snapshotInputs.mapRootPath)
     }
+    if (snapshotInputs.lvsDataPath) {
+      viewerArgs.push('--lvs-data', snapshotInputs.lvsDataPath)
+    }
     if (mode === 'edit') {
       viewerArgs.push(
         '--edit-command-dir',
@@ -902,6 +920,8 @@ export class ChipViewerService {
     const drcStatisPath = join(workspaceStepDirectory, 'analysis', 'drc_statis.csv')
     const mapRootPath = join(workspaceStepDirectory, 'feature')
     const isDrcStep = isDrcWorkspaceStep(step, stepLabel, workspaceStepDirectory)
+    const lvsDataPath = join(workspaceStepDirectory, 'feature', 'lvs.step.json')
+    const isLvsStep = isLvsWorkspaceStep(step, stepLabel, workspaceStepDirectory)
 
     return {
       dbPath,
@@ -912,6 +932,7 @@ export class ChipViewerService {
       editResultDirectory: join(editDirectory, 'results'),
       gdsPath,
       imagePath,
+      lvsDataPath: isLvsStep && this.fileExists(lvsDataPath) ? lvsDataPath : undefined,
       manifestPath: join(geometryDir, 'geometry.manifest'),
       mapRootPath: this.fileExists(mapRootPath) ? mapRootPath : undefined,
       workspaceStepDirectory,
