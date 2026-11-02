@@ -339,7 +339,7 @@ export function backendWorkspaceOptions(
               ),
             }
           : {}),
-        ...(clockTreeSpecKey
+        ...(ctsApplies && clockTreeSpecKey
           ? {
               [clockTreeSpecKey]: parameters.clock_tree === true,
             }

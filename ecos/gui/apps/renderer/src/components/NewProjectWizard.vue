@@ -545,33 +545,6 @@
                     </div>
                   </div>
 
-                  <div v-if="isFlowStepRunnable('sta')" class="mb-5">
-                    <label
-                      for="sta-max-parallel-corners"
-                      class="mb-2 block text-sm font-semibold text-(--text-primary)"
-                    >
-                      STA maximum parallel corners
-                    </label>
-                    <select
-                      id="sta-max-parallel-corners"
-                      v-model.number="config.parameters.sta_max_parallel_corners"
-                      class="rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2 text-sm text-(--text-primary)"
-                    >
-                      <option
-                        v-for="count in staParallelCornerLimit"
-                        :key="count"
-                        :value="count"
-                      >
-                        {{ count }}
-                      </option>
-                    </select>
-                    <p class="mt-2 text-xs text-(--text-secondary)">
-                      Defaults to 1 (serial). Up to {{ staParallelCornerLimit }} signoff
-                      corner combinations. Available CPUs and memory may reduce
-                      concurrency; parallel STA requires Linux.
-                    </p>
-                  </div>
-
                   <p
                     v-if="sourceContext"
                     class="mb-5 rounded-lg border border-(--border-color) bg-(--bg-primary)/60 px-4 py-3 text-xs text-(--text-secondary)"
@@ -595,69 +568,122 @@
                       :key="step.name"
                       class="relative"
                     >
-                      <button
-                        type="button"
-                        class="flex h-full min-h-[104px] w-full cursor-pointer flex-col rounded-xl border p-4 text-left transition-colors duration-200"
+                      <div
+                        :data-flow-step-card="step.name"
+                        class="flex h-full min-h-[104px] flex-col rounded-xl border p-4 transition-colors duration-200"
                         :class="[
                           isFlowStepLocked(step.name)
                             ? 'cursor-not-allowed border-(--border-color)/60 bg-(--bg-secondary)/25 opacity-45'
                             : isFlowStepRunnable(step.name)
-                              ? 'border-(--accent-color) bg-(--accent-color)/10'
-                              : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45',
+                              ? 'cursor-pointer border-(--accent-color) bg-(--accent-color)/10'
+                              : 'cursor-pointer border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45',
                           !isFlowStepLocked(step.name) &&
                           defaultSkippedFlowStepNames.has(step.name)
                             ? 'border-dashed'
                             : '',
                         ]"
-                        :disabled="isFlowStepLocked(step.name)"
                         @click="setFlowBoundary(step.name)"
                       >
-                        <span class="mb-3 flex items-center justify-between gap-3">
-                          <span class="flex min-w-0 items-center gap-2">
-                            <span
-                              class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-xs font-bold"
-                              :class="
-                                isFlowStepRunnable(step.name)
-                                  ? 'border-(--accent-color) bg-(--accent-color) text-white'
-                                  : 'border-(--border-color) text-(--text-secondary)'
-                              "
-                            >
-                              <span>{{ index + 1 }}</span>
+                        <button
+                          type="button"
+                          class="flex w-full flex-1 cursor-pointer flex-col text-left disabled:cursor-not-allowed"
+                          :disabled="isFlowStepLocked(step.name)"
+                        >
+                          <span class="mb-3 flex items-center justify-between gap-3">
+                            <span class="flex min-w-0 items-center gap-2">
+                              <span
+                                class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-xs font-bold"
+                                :class="
+                                  isFlowStepRunnable(step.name)
+                                    ? 'border-(--accent-color) bg-(--accent-color) text-white'
+                                    : 'border-(--border-color) text-(--text-secondary)'
+                                "
+                              >
+                                <span>{{ index + 1 }}</span>
+                              </span>
+                              <span
+                                class="min-w-0 font-semibold break-words text-(--text-primary)"
+                                >{{ step.name }}</span
+                              >
                             </span>
-                            <span
-                              class="min-w-0 font-semibold break-words text-(--text-primary)"
-                              >{{ step.name }}</span
-                            >
+                            <input
+                              type="checkbox"
+                              class="h-4 w-4 shrink-0 accent-(--accent-color)"
+                              :checked="isFlowStepRunnable(step.name)"
+                              readonly
+                            />
                           </span>
-                          <input
-                            type="checkbox"
-                            class="h-4 w-4 shrink-0 accent-(--accent-color)"
-                            :checked="isFlowStepRunnable(step.name)"
-                            readonly
-                          />
-                        </span>
-                        <span class="flex-1 text-xs leading-5 text-(--text-secondary)">{{
-                          step.description
-                        }}</span>
-                        <span
-                          v-if="isFlowStepLocked(step.name)"
-                          class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
+                          <span
+                            class="flex-1 text-xs leading-5 text-(--text-secondary)"
+                            >{{ step.description }}</span
+                          >
+                          <span
+                            v-if="isFlowStepLocked(step.name)"
+                            class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
+                          >
+                            Reused from source
+                          </span>
+                          <span
+                            v-else-if="defaultSkippedFlowStepNames.has(step.name)"
+                            class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
+                          >
+                            Skipped by default
+                          </span>
+                          <span
+                            v-else-if="skippableFlowStepNames.has(step.name)"
+                            class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
+                          >
+                            Skippable
+                          </span>
+                        </button>
+
+                        <div
+                          v-if="step.name === 'CTS' && isFlowStepRunnable(step.name)"
+                          class="mt-4 border-t border-(--border-color)/70 pt-3"
+                          @click.stop
                         >
-                          Reused from source
-                        </span>
-                        <span
-                          v-else-if="defaultSkippedFlowStepNames.has(step.name)"
-                          class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
+                          <label
+                            for="cts-clock-tree-visualization"
+                            class="flex cursor-pointer items-center gap-2.5"
+                          >
+                            <input
+                              id="cts-clock-tree-visualization"
+                              v-model="config.parameters.clock_tree"
+                              type="checkbox"
+                              class="h-4 w-4 shrink-0 accent-(--accent-color)"
+                            />
+                            <span class="text-xs font-semibold text-(--text-primary)"
+                              >Clock-tree visualization</span
+                            >
+                          </label>
+                        </div>
+
+                        <div
+                          v-if="step.name === 'sta' && isFlowStepRunnable(step.name)"
+                          class="mt-4 border-t border-(--border-color)/70 pt-3"
+                          @click.stop
                         >
-                          Skipped by default
-                        </span>
-                        <span
-                          v-else-if="skippableFlowStepNames.has(step.name)"
-                          class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
-                        >
-                          Skippable
-                        </span>
-                      </button>
+                          <label
+                            for="sta-max-parallel-corners"
+                            class="block text-xs font-semibold text-(--text-primary)"
+                          >
+                            STA maximum parallel corners
+                          </label>
+                          <select
+                            id="sta-max-parallel-corners"
+                            v-model.number="config.parameters.sta_max_parallel_corners"
+                            class="mt-2 w-full cursor-pointer rounded-md border border-(--border-color) bg-(--bg-primary)/75 px-2 py-1.5 text-xs text-(--text-primary)"
+                          >
+                            <option
+                              v-for="count in staParallelCornerLimit"
+                              :key="count"
+                              :value="count"
+                            >
+                              {{ count }}
+                            </option>
+                          </select>
+                        </div>
+                      </div>
                       <span
                         v-if="index < flowStepOptions.length - 1 && (index + 1) % 4 !== 0"
                         class="flow-step-connector"
@@ -1462,24 +1488,6 @@
                         class="w-full rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
                       />
                     </div>
-                    <label
-                      class="flex cursor-pointer items-start gap-3 rounded-lg border border-(--border-color) bg-(--bg-primary)/55 px-3 py-2.5 md:col-span-2"
-                    >
-                      <input
-                        v-model="config.parameters.clock_tree"
-                        type="checkbox"
-                        class="mt-0.5 h-4 w-4 accent-(--accent-color)"
-                      />
-                      <span>
-                        <span class="block text-sm font-semibold text-(--text-primary)"
-                          >Clock-tree visualization</span
-                        >
-                        <span class="mt-1 block text-xs text-(--text-secondary)"
-                          >Capture clock topology and timing at postFloorplan, CTS, and
-                          filler. Adds snapshot files and CTS/filler analysis time.</span
-                        >
-                      </span>
-                    </label>
                   </div>
 
                   <div

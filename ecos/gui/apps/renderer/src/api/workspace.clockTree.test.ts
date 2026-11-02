@@ -34,4 +34,19 @@ describe('clock-tree workspace parameter projection', () => {
 
     expect(options.workspaceSpec.parameters).not.toHaveProperty('geometry.clock_tree')
   })
+
+  it('omits the parameter when CTS is outside the selected flow range', () => {
+    const workspaceConfig = config(true)
+    workspaceConfig.flow_config = {
+      start_step: 'route',
+      end_step: 'Harden',
+      steps: ['route', 'filler', 'RCX', 'sta', 'powerAnalysis', 'Harden'],
+    }
+
+    const options = backendWorkspaceOptions(workspaceConfig, '/workspace/clock-tree', {
+      clock_tree: 'geometry.clock_tree',
+    })
+
+    expect(options.workspaceSpec.parameters).not.toHaveProperty('geometry.clock_tree')
+  })
 })
