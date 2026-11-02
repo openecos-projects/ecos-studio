@@ -49,6 +49,7 @@ describe('WorkspaceStepConfigDialog', () => {
           { id: 'place.target_density', appliesTo: 'placement' },
           { id: 'cts.max_fanout', appliesTo: 'cts' },
           { id: 'route.top_layer', appliesTo: 'routing' },
+          { id: 'geometry.clock_tree', appliesTo: 'all' },
         ],
       },
     })

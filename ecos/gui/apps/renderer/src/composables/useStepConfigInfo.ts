@@ -8,6 +8,7 @@ import {
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
 import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
+import { isWorkspaceFlowSetupParameter } from '@/utils/stepConfigParameterVisibility'
 
 const stepEnumValues = Object.values(StepEnum)
 const FLOW_RUNNING_SAVE_BLOCKED_MESSAGE =
@@ -239,7 +240,13 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
         return
       }
       if (response.status === 'available' && Array.isArray(response.parameters)) {
-        const parameters = parameterValues(response.parameters)
+        const visibleParameters = response.parameters.filter(
+          (record) =>
+            !isRecord(record) ||
+            typeof record.param !== 'string' ||
+            !isWorkspaceFlowSetupParameter(record.param),
+        )
+        const parameters = parameterValues(visibleParameters)
         if (parameters === null) {
           responseKind.value = 'error'
           info.value = null
@@ -247,8 +254,8 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
           clearFileState()
           return
         }
-        stepConfigParameterDescriptions.value = parameterDescriptions(response.parameters)
-        stepConfigParameterTypes.value = parameterTypes(response.parameters)
+        stepConfigParameterDescriptions.value = parameterDescriptions(visibleParameters)
+        stepConfigParameterTypes.value = parameterTypes(visibleParameters)
         const payload = {
           parameters,
           stepId: response.stepId ?? response.step,
