@@ -138,6 +138,97 @@ describe('AgentWorkspaceSetupPanel', () => {
     })
   })
 
+  it('reinstalls and refreshes a persisted MPC snapshot whose resource is missing', async () => {
+    mocks.listResourcesApi
+      .mockResolvedValueOnce([registryMpc])
+      .mockResolvedValueOnce([installedMpc])
+    mocks.installResourceApi.mockResolvedValue({
+      status: 'started',
+      resource_id: registryMpc.id,
+    })
+    mocks.readMpcSpecApi.mockResolvedValue({
+      resource_id: installedMpc.id,
+      installed_version: installedMpc.installed_version,
+      spec_path: `${installedMpc.path}/spec/spec.json.in`,
+      spec: {
+        number: 1,
+        designs: [{ design_name: 'frame', core_template: { minimum_area: 100 } }],
+      },
+    })
+    const contractWithStaleMpc = {
+      ...workspaceContract,
+      mpc: {
+        resource_id: registryMpc.id,
+        display_name: registryMpc.display_name,
+        installed_version: '0.1.0',
+        path: '/missing/mpcs/mpc-frame/0.1.0',
+        spec_path: '/missing/mpcs/mpc-frame/0.1.0/spec/spec.json.in',
+        design: { index: 0, design_name: 'frame' },
+        core_template: { minimum_area: 100 },
+      },
+    } as DesktopAgentWorkspaceSetupContract
+
+    const wrapper = mount(AgentWorkspaceSetupPanel, {
+      props: { contract: contractWithStaleMpc },
+      global: { stubs: { AgentExecutionContractPanel: { template: '<div />' } } },
+    })
+    await flushPromises()
+    await wrapper.setProps({ createSetupId: contractWithStaleMpc.setup_id })
+    await flushPromises()
+
+    expect(mocks.installResourceApi).toHaveBeenCalledWith(registryMpc.id, '0.1.0')
+    expect(mocks.readMpcSpecApi).toHaveBeenCalledWith(installedMpc.id)
+    expect(wrapper.emitted('createWorkspace')?.[0]?.[1]).toMatchObject({
+      mpc: {
+        resource_id: registryMpc.id,
+        path: installedMpc.path,
+        spec_path: `${installedMpc.path}/spec/spec.json.in`,
+      },
+    })
+  })
+
+  it('keeps the persisted MPC design instead of selecting the first spec entry', async () => {
+    mocks.listResourcesApi.mockResolvedValue([installedMpc])
+    mocks.readMpcSpecApi.mockResolvedValue({
+      resource_id: installedMpc.id,
+      installed_version: installedMpc.installed_version,
+      spec_path: `${installedMpc.path}/spec/spec.json.in`,
+      spec: {
+        number: 2,
+        designs: [
+          { design_name: 'frame', core_template: { minimum_area: 100 } },
+          { design_name: 'second', core_template: { minimum_area: 200 } },
+        ],
+      },
+    })
+    const contractWithSecondDesign = {
+      ...workspaceContract,
+      mpc: {
+        resource_id: installedMpc.id,
+        display_name: installedMpc.display_name,
+        installed_version: installedMpc.installed_version,
+        path: installedMpc.path,
+        spec_path: `${installedMpc.path}/spec/spec.json.in`,
+        design: { index: 1, design_name: 'second' },
+        core_template: { minimum_area: 200 },
+      },
+    } as DesktopAgentWorkspaceSetupContract
+
+    const wrapper = mount(AgentWorkspaceSetupPanel, {
+      props: { contract: contractWithSecondDesign },
+      global: { stubs: { AgentExecutionContractPanel: { template: '<div />' } } },
+    })
+    await flushPromises()
+    await wrapper.setProps({ createSetupId: contractWithSecondDesign.setup_id })
+    await flushPromises()
+
+    expect(mocks.installResourceApi).not.toHaveBeenCalled()
+    expect(wrapper.emitted('createWorkspace')?.[0]?.[1]).toMatchObject({
+      mpc: { design: { index: 1, design_name: 'second' } },
+      parameters: { MPC: { core_template: { minimum_area: 200 } } },
+    })
+  })
+
   it('waits for an in-progress install before creating the workspace', async () => {
     vi.useFakeTimers()
     mocks.listResourcesApi
@@ -177,6 +268,47 @@ describe('AgentWorkspaceSetupPanel', () => {
     })
   })
 
+  it('waits when a previous panel instance already started the MPC install', async () => {
+    vi.useFakeTimers()
+    const installingMpc = {
+      ...registryMpc,
+      status: 'installing',
+      actions: ['cancel'],
+    } as const
+    mocks.listResourcesApi
+      .mockResolvedValueOnce([installingMpc])
+      .mockResolvedValueOnce([installingMpc])
+      .mockResolvedValueOnce([installedMpc])
+    mocks.readMpcSpecApi.mockResolvedValue({
+      resource_id: installedMpc.id,
+      installed_version: installedMpc.installed_version,
+      spec_path: `${installedMpc.path}/spec/spec.json.in`,
+      spec: {
+        number: 1,
+        designs: [{ design_name: 'frame', core_template: { minimum_area: 100 } }],
+      },
+    })
+
+    const wrapper = mount(AgentWorkspaceSetupPanel, {
+      props: { contract: workspaceContract },
+      global: { stubs: { AgentExecutionContractPanel: { template: '<div />' } } },
+    })
+    await flushPromises()
+    await wrapper.setProps({ createSetupId: workspaceContract.setup_id })
+    await flushPromises()
+    expect(wrapper.emitted('createWorkspace')).toBeUndefined()
+
+    await vi.runAllTimersAsync()
+    await flushPromises()
+
+    expect(mocks.installResourceApi).not.toHaveBeenCalled()
+    expect(wrapper.emitted('createWorkspace')).toHaveLength(1)
+    expect(wrapper.emitted('createWorkspace')?.[0]?.[1]).toMatchObject({
+      mpc: { resource_id: installedMpc.id },
+      parameters: { MPC: { core_template: { minimum_area: 100 } } },
+    })
+  })
+
   it('keeps confirmation available when Use has no usable resource', async () => {
     mocks.listResourcesApi.mockResolvedValue([])
     const wrapper = mount(AgentWorkspaceSetupPanel, {
@@ -190,8 +322,8 @@ describe('AgentWorkspaceSetupPanel', () => {
     expect(wrapper.emitted('createWorkspace')).toHaveLength(1)
     expect(wrapper.emitted('createWorkspace')?.[0]?.[1]).toMatchObject({
       mpc_enabled: true,
+      mpc: null,
     })
-    expect(wrapper.emitted('createWorkspace')?.[0]?.[1]).not.toHaveProperty('mpc')
   })
 
   it('creates from the frozen contract without reopening NewProjectWizard', () => {
@@ -225,6 +357,7 @@ describe('AgentWorkspaceSetupPanel', () => {
       'SoC-MPC Template',
       'SoC-MPC Design',
       'SoC-MPC Spec',
+      'SoC-MPC Status',
     ])
       expect(source).toContain(field)
     expect(source).not.toContain('<dl')
@@ -237,7 +370,6 @@ describe('AgentWorkspaceSetupPanel', () => {
 
   it('allows confirmation without an MPC template', () => {
     expect(source).not.toContain('choiceDisabled')
-    expect(source).not.toContain("'Unavailable'")
   })
 
   it('shows Workspace Name from the directory leaf and Design Name separately', () => {

@@ -333,8 +333,9 @@ Names must not contain spaces or Chinese characters.
 **Step 2 — Import RTL.** Select RTL files or a filelist. ECC copies the selected
 sources into the project's `rtl/` directory and records the design inputs at
 creation. You can reuse an existing project's imported sources; selecting new
-sources replaces that selection. A managed MPC can supply the project design
-source. Complete this phase before choosing the remaining workspace settings.
+sources replaces that selection. A managed MPC wraps the imported design in its
+frame template; it does not replace the design source. Complete this phase
+before choosing the remaining workspace settings.
 
 ![Import RTL reuses project sources or selects replacement sources](asset/wizard-02-rtl.png)
 
@@ -536,9 +537,10 @@ The **New project** dialog asks for:
 - **Managed MPC** — optionally bind an installed MPC template (_No MPC_ or a
   template from the dropdown). Templates with multiple designs show an **MPC
   Design** selector and a preview card. This field applies to backend projects.
-- **Import RTL** — required for a backend project without a managed MPC.
-  Select RTL files or a filelist; `ecc rtl import` copies them into the
-  project's `rtl/` directory.
+- **Import RTL** — required for every backend project, including projects with
+  a managed MPC. Select RTL files or a filelist; `ecc rtl import` copies them
+  into the project's `rtl/` directory, and the MPC wraps that design in its
+  frame template.
 
 The dialog previews the manifest path (`<location>/project.json`) and validates
 the inputs inline (missing directory, unloaded MPC spec, …). **Create** writes

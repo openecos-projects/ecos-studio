@@ -33,6 +33,7 @@ const emit = defineEmits<{
 const submittedSetupId = ref('')
 const resolvedContract = ref<DesktopAgentWorkspaceSetupContract>()
 const mpcLoading = ref(false)
+const mpcResolutionError = ref('')
 // ponytail: bounded install polling; replace with resource progress events if installs exceed 30s.
 const MPC_RESOLUTION_ATTEMPTS = 60
 const MPC_RESOLUTION_DELAY_MS = 500
@@ -41,8 +42,16 @@ const displayTitle = computed(() =>
 )
 const executionState = computed(() => {
   if (props.createSetupId === props.contract?.setup_id) return 'Running'
+  if (mpcResolutionError.value) return 'Needs attention'
+  if (mpcLoading.value) return 'Resolving MPC'
   if (!props.answeredOptionId) return 'Review'
   return 'Confirmed'
+})
+const mpcStatus = computed(() => {
+  if (!resolvedContract.value?.mpc_enabled) return 'Not requested'
+  if (mpcLoading.value) return 'Resolving selected resource'
+  if (mpcResolutionError.value) return mpcResolutionError.value
+  return resolvedContract.value.mpc ? 'Ready' : 'Unavailable'
 })
 const committedSummary = computed(() => {
   const contract = resolvedContract.value
@@ -86,6 +95,7 @@ const specRows = computed<[string, string][]>(() => {
     ['SoC-MPC Template', mpc?.display_name ?? '-'],
     ['SoC-MPC Design', mpc?.design.design_name ?? '-'],
     ['SoC-MPC Spec', mpc?.spec_path ?? '-'],
+    ['SoC-MPC Status', mpcStatus.value],
     ['Description', optionalValue(parameters.description)],
     ['Requires GUI Review', String(contract.requires_gui_review)],
     ['Setup ID', contract.setup_id],
@@ -98,7 +108,8 @@ watch(
   async ([contract, setupId]) => {
     if (contract && resolvedContract.value?.setup_id !== contract.setup_id) {
       resolvedContract.value = contract
-      if (contract.mpc_enabled && !contract.mpc) await resolveMpc(contract)
+      mpcResolutionError.value = ''
+      if (contract.mpc_enabled) await resolveMpc(contract)
     }
     if (!setupId) {
       submittedSetupId.value = ''
@@ -122,43 +133,96 @@ async function resolveMpc(contract: DesktopAgentWorkspaceSetupContract): Promise
   mpcLoading.value = true
   try {
     let resources = await listResourcesApi()
-    let candidate = resources
-      .map(projectMpcOptionFromResource)
-      .find((item): item is NonNullable<typeof item> => item !== null)
+    let candidate = mpcCandidate(resources, contract)
+    let installationPending = hasPendingMpcInstall(resources, contract)
     if (!candidate) {
-      const downloadable = resources.find(
-        (resource) =>
-          resource.type === 'mpc' &&
-          resource.actions.includes('install') &&
-          resource.available_versions.length > 0,
-      )
+      const downloadable = resources.find((resource) => {
+        if (!resource.actions.includes('install') || !resource.available_versions.length)
+          return false
+        if (contract.mpc) return resource.id === contract.mpc.resource_id
+        return resource.type === 'mpc'
+      })
       if (downloadable) {
-        await installResourceApi(downloadable.id, downloadable.available_versions[0])
-        for (
-          let attempt = 0;
-          attempt < MPC_RESOLUTION_ATTEMPTS && !candidate;
-          attempt += 1
-        ) {
-          if (attempt > 0) await delay(MPC_RESOLUTION_DELAY_MS)
-          resources = await listResourcesApi()
-          candidate = resources
-            .map(projectMpcOptionFromResource)
-            .find((item): item is NonNullable<typeof item> => item !== null)
-        }
+        const requestedVersion = contract.mpc?.installed_version
+        const version =
+          requestedVersion && downloadable.available_versions.includes(requestedVersion)
+            ? requestedVersion
+            : downloadable.available_versions[0]
+        await installResourceApi(downloadable.id, version)
+        installationPending = true
       }
     }
-    if (!candidate) return
+    if (!candidate && installationPending) {
+      for (
+        let attempt = 0;
+        attempt < MPC_RESOLUTION_ATTEMPTS && !candidate;
+        attempt += 1
+      ) {
+        if (attempt > 0) await delay(MPC_RESOLUTION_DELAY_MS)
+        resources = await listResourcesApi()
+        candidate = mpcCandidate(resources, contract)
+      }
+    }
+    if (!candidate) {
+      throw new Error(
+        contract.mpc
+          ? `Selected MPC resource ${contract.mpc.resource_id} is not available locally.`
+          : 'No installed or downloadable MPC resource is available.',
+      )
+    }
     const result = await readMpcSpecApi(candidate.resource_id)
-    const design = parseMpcSpecDesigns(result.spec)[0]
-    if (!design) return
+    const designs = parseMpcSpecDesigns(result.spec)
+    const desired = contract.mpc
+    const design = desired
+      ? (designs.find((item) => item.designName === desired.design.design_name) ??
+        designs[desired.design.index])
+      : designs[0]
+    if (!design) {
+      throw new Error(
+        desired
+          ? `MPC design ${desired.design.design_name || desired.design.index} is no longer available.`
+          : 'The MPC resource does not declare a design.',
+      )
+    }
     const mpc: ProjectManifestMpc = createProjectManifestMpcSnapshot(candidate, design)
     const parameters = { ...contract.parameters, MPC: mpc }
-    resolvedContract.value = { ...contract, mpc, parameters }
-  } catch {
-    // No usable installed resource: keep the explicit Use choice and allow creation.
+    if (resolvedContract.value?.setup_id === contract.setup_id)
+      resolvedContract.value = { ...contract, mpc, parameters }
+  } catch (error) {
+    const parameters = { ...contract.parameters, MPC: undefined }
+    mpcResolutionError.value =
+      error instanceof Error
+        ? error.message
+        : 'Unable to resolve the selected MPC resource.'
+    if (resolvedContract.value?.setup_id === contract.setup_id)
+      resolvedContract.value = { ...contract, mpc: null, parameters }
   } finally {
     mpcLoading.value = false
   }
+}
+
+function mpcCandidate(
+  resources: Awaited<ReturnType<typeof listResourcesApi>>,
+  contract: DesktopAgentWorkspaceSetupContract,
+) {
+  return resources
+    .map(projectMpcOptionFromResource)
+    .find(
+      (item): item is NonNullable<typeof item> =>
+        item !== null && (!contract.mpc || item.resource_id === contract.mpc.resource_id),
+    )
+}
+
+function hasPendingMpcInstall(
+  resources: Awaited<ReturnType<typeof listResourcesApi>>,
+  contract: DesktopAgentWorkspaceSetupContract,
+): boolean {
+  return resources.some(
+    (resource) =>
+      resource.type === 'mpc' &&
+      resource.status === 'installing' &&
+      (!contract.mpc || resource.id === contract.mpc.resource_id),
+  )
 }
 
 function delay(milliseconds: number): Promise<void> {

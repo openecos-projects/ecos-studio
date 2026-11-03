@@ -4206,6 +4206,23 @@ async function refreshTopModuleDiscovery() {
     config.value.parameters.top_module = committedTopModule
     return
   }
+  // MPC-backed projects do not expose user HDL to the wizard until the flow
+  // generates the core from the selected template. The project manifest still
+  // records the authoritative top module, so use it instead of blocking the
+  // Spec step on an empty HDL discovery result.
+  const mpcTopModule = mpcDesignProject.value
+    ? projectManifestTopModule.value ||
+      String(config.value.parameters.top_module || '').trim()
+    : ''
+  if (mpcTopModule) {
+    topModuleDiscovery.value = {
+      candidates: [mpcTopModule],
+      status: 'complete',
+      suggested: mpcTopModule,
+    }
+    config.value.parameters.top_module = mpcTopModule
+    return
+  }
   const fingerprint = currentDesignInputFingerprint()
   const pathsChanged = fingerprint !== lastTopModuleFingerprint.value
   const designName = String(config.value.parameters.design || '').trim()

@@ -14,6 +14,7 @@ import type {
 export interface E2EBridge {
   app: {
     getVersions(): Promise<Record<string, string | undefined>>
+    getQuickStartRoot?(): Promise<string>
   }
   cliInstaller: {
     getStatus(): Promise<{ status: string; error?: string | null }>
@@ -44,6 +45,7 @@ export interface E2EBridge {
     get(key: string): Promise<unknown>
     set(key: string, value: unknown): Promise<void>
   }
+  resources: Pick<DesktopApi['resources'], 'list' | 'install'>
   workspace: {
     registerProjectRoot(path: string): Promise<string>
   }

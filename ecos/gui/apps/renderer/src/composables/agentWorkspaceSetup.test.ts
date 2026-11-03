@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PdkInstallationSnapshot } from '@ecos-studio/shared'
 import type { WorkspaceConfig } from '@/types'
 import { backendWorkspaceOptions, createWorkspaceApi } from '@/api/workspace'
+import { mutateProjectManifest } from '@/api/projectManifest'
 import { prepareWorkspaceCreateBinding } from '../../../desktop-electron/electron/services/workspacePdkBindings'
 import { ProjectManifestService } from '../../../desktop-electron/electron/services/projectManifestService'
 import { prepareAgentWorkspaceConfig } from './agentWorkspaceSetup'
@@ -9,7 +10,13 @@ import { prepareAgentWorkspaceConfig } from './agentWorkspaceSetup'
 const mocks = vi.hoisted(() => ({
   importInstallation: vi.fn(),
   executeCommand: vi.fn(),
+  mutateProjectManifest: vi.fn(),
+  pathExists: vi.fn(),
   readManifest: vi.fn(),
+}))
+
+vi.mock('@/api/projectManifest', () => ({
+  mutateProjectManifest: mocks.mutateProjectManifest,
 }))
 
 vi.mock('@/platform/desktop', () => ({
@@ -17,6 +24,7 @@ vi.mock('@/platform/desktop', () => ({
     pdkInventory: { import: mocks.importInstallation },
     productCommands: { execute: mocks.executeCommand },
     projectManagement: { readManifest: mocks.readManifest },
+    workspace: { pathExists: mocks.pathExists },
   }),
 }))
 
@@ -49,11 +57,76 @@ const config: WorkspaceConfig = {
   },
 }
 
+const initializedManifest = {
+  project_id: 'proj_gcd_ab12cd34ef56',
+  name: 'gcd',
+  root_path: '/projects/gcd',
+  workspaces: [],
+}
+
 describe('Agent workspace PDK preparation', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     mocks.importInstallation.mockResolvedValue(installation)
+    mocks.pathExists.mockResolvedValue(true)
     mocks.readManifest.mockResolvedValue(null)
+    mocks.mutateProjectManifest.mockResolvedValue(initializedManifest)
+  })
+
+  it('initializes a new project before binding its PDK', async () => {
+    mocks.pathExists.mockResolvedValue(false)
+    mocks.mutateProjectManifest.mockResolvedValue({
+      project_id: 'proj_gcd_ab12cd34ef56',
+      name: 'gcd',
+      root_path: '/projects/gcd',
+      workspaces: [],
+    })
+
+    const prepared = await prepareAgentWorkspaceConfig(config)
+    const request = backendWorkspaceOptions(prepared, prepared.directory)
+
+    expect(mutateProjectManifest).toHaveBeenCalledWith('/projects/gcd', {
+      type: 'create',
+      name: 'gcd',
+      designName: 'gcd',
+      rtlImport: { verilog: ['/design/gcd.v'] },
+    })
+    expect(mocks.readManifest).not.toHaveBeenCalled()
+    expect(prepared.project_context).toMatchObject({
+      mode: 'select',
+      project_id: 'proj_gcd_ab12cd34ef56',
+    })
+    expect(request.projectId).toBe('proj_gcd_ab12cd34ef56')
+    expect(mocks.importInstallation).toHaveBeenCalled()
+  })
+
+  it('reuses a project initialized by an earlier failed workspace attempt', async () => {
+    mocks.readManifest.mockResolvedValue({
+      project_id: 'proj_gcd_existing',
+      name: 'GCD',
+      root_path: '/projects/gcd',
+      workspaces: [],
+    })
+
+    const prepared = await prepareAgentWorkspaceConfig(config)
+
+    expect(mutateProjectManifest).not.toHaveBeenCalled()
+    expect(prepared.project_context).toMatchObject({
+      mode: 'select',
+      project_id: 'proj_gcd_existing',
+      project_name: 'GCD',
+    })
+  })
+
+  it('adds an actionable recovery hint when a non-empty folder is not a project', async () => {
+    mocks.mutateProjectManifest.mockRejectedValue(
+      new Error('Project directory is not empty'),
+    )
+
+    await expect(prepareAgentWorkspaceConfig(config)).rejects.toThrow(
+      'Choose an empty project directory or an existing project',
+    )
+    expect(mocks.importInstallation).not.toHaveBeenCalled()
   })
 
   it('uses the persisted project identity when its name differs from the directory name', async () => {
@@ -140,6 +213,11 @@ describe('Agent workspace PDK preparation', () => {
       })
       expect(prepared).toEqual({
         ...config,
+        project_context: {
+          ...config.project_context,
+          mode: 'select',
+          project_id: initializedManifest.project_id,
+        },
         pdk_root: installation.root,
         pdk_installation_id: installation.id,
         pdk_requirement: { familyId: 'ics55', version, manualConfig: null },
@@ -148,7 +226,7 @@ describe('Agent workspace PDK preparation', () => {
     },
   )
 
-  it('creates an unbound project workspace without a persisted PDK Requirement', async () => {
+  it('binds a newly initialized project using its persisted identity', async () => {
     const dependencies = {
       pdkInventoryService: {
         resolveBinding: vi.fn().mockResolvedValue(null),
@@ -171,9 +249,7 @@ describe('Agent workspace PDK preparation', () => {
     ).resolves.toMatchObject({ response: 'success' })
     expect(dependencies.pdkInventoryService.bindInstallation).toHaveBeenCalledWith({
       installationId: installation.id,
-      // A brand-new project's identity is generated by `ecc init`, so the
-      // create request carries no derived id.
-      projectId: '',
+      projectId: initializedManifest.project_id,
       projectRoot: '/projects/gcd',
       requirement: { familyId: 'ics55', version: null, manualConfig: null },
     })
@@ -212,5 +288,22 @@ describe('Agent workspace PDK preparation', () => {
     expect(prepared.rtl_list).toEqual([])
     expect(prepared.filelist ?? '').toBe('')
     expect(selectConfig.rtl_list).toEqual(['/projects/gcd/rtl/gcd.v'])
+  })
+
+  it('imports a selected filelist while initializing a new project', async () => {
+    mocks.pathExists.mockResolvedValue(false)
+
+    await prepareAgentWorkspaceConfig({
+      ...config,
+      filelist: '/design/sources.f',
+      rtl_list: [],
+    })
+
+    expect(mutateProjectManifest).toHaveBeenCalledWith('/projects/gcd', {
+      type: 'create',
+      name: 'gcd',
+      designName: 'gcd',
+      rtlImport: { filelist: '/design/sources.f' },
+    })
   })
 })

@@ -210,7 +210,7 @@
     <Teleport to="body">
       <Transition name="runtime-backend-overlay">
         <div
-          v-if="runtimeBackendConnecting"
+          v-if="runtimeBackendConnecting && !quickStartRunning"
           class="runtime-backend-overlay"
           role="status"
           aria-busy="true"
