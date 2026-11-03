@@ -2,15 +2,16 @@
 
 The original desktop screenshots were captured on 2026-10-19 from ECOS Studio
 0.1.0-alpha.9 (GUI source at `18ab2e9c`, identical to `80c46cde`), using
-isolated application settings and the GCD RTL design. The project, MPC, and
-Agent images added or refreshed on 2026-11-03 use the current desktop flows and
-the same isolated-profile rule. They show the real UI; execution and checklist
-states have not been changed for the images.
+isolated application settings and the GCD RTL design. The project, MPC, Agent,
+and workspace images added or refreshed on 2026-11-03 use the current desktop
+flows and the same isolated-profile rule. They show the real UI; execution and
+checklist states have not been changed for the images.
 
-- `overview-light.png` and `overview-dark.png`: the same backend workspace in
-  both themes, with Agent hidden and the Flow zoom set to 55% so the full
-  graph fits. Harden succeeded; EMIR is incomplete because its process
-  technology file is unset. The checklist retains the advisory warnings.
+- `overview-light.png` and `overview-dark.png`: the same current backend
+  workspace in both themes, with Agent hidden and the Flow zoom set to 55% so
+  the full mainline and post-route branches fit. Harden succeeded; EMIR is
+  incomplete because its process technology file is unset. The checklist
+  retains the advisory warnings.
 - `home-light.png` and `project-management.png`: application entry points and
   project management.
 - `new-project-dialog.png`: the current New Project dialog, including the
@@ -26,9 +27,10 @@ states have not been changed for the images.
 - `step-checklist.png`, `step-reports.png`, `step-log.png`,
   `timing-analysis.png`, and `flow-configuration.png`: the current result and
   parameter dialogs. Dialog captures exclude the surrounding desktop.
-- `workspace-agent.png`: a configured Agent session bound to the GCD
-  workspace, showing the available operation choices beside the dashboard.
-  The setup card is closed and no credentials appear in the capture.
+- `workspace-agent.png`: the same current workspace with Agent open and its
+  operation dock expanded, showing rerun, continue, create-workspace, and
+  bounded-optimization choices beside the Flow dashboard. The setup card is
+  closed and no credentials appear in the capture.
 - `agent-quick-start.png`: the Home Agent after Quick Start was stopped before
   the ECC flow phase. The Project Management view reflects the setup state at
   that point.
