@@ -112,6 +112,50 @@ describe.runIf(runRealAgent)('product e2e: real Agent home options', () => {
       await launched.close()
     }
   }, 300_000)
+
+  it('keeps the model settings menu visible in the narrow home Agent panel', async () => {
+    const outDir = await resolveOutDir('agent-model-settings-narrow')
+    const launched = await launchAgentApp(outDir)
+    try {
+      await waitToolchainReady(launched.page)
+      await launched.page.getByRole('button', { name: 'ECOS Agent', exact: true }).click()
+      await launched.page.getByRole('dialog', { name: 'ECOS Agent' }).waitFor()
+      const trigger = launched.page.locator('.model-settings__trigger')
+      await trigger.waitFor({ state: 'visible', timeout: 60_000 })
+      await trigger.click()
+      const popover = launched.page.locator('.model-settings__popover')
+      await popover.waitFor({ state: 'visible' })
+
+      const layout = await launched.page.evaluate(() => {
+        const element = document.querySelector<HTMLElement>('.model-settings__popover')
+        if (!element) throw new Error('Model settings popover is missing.')
+        const rect = element.getBoundingClientRect()
+        const point = document.elementFromPoint(rect.left + 16, rect.top + 24)
+        return {
+          insideClippedPanel: Boolean(element.closest('.agent-chat')),
+          left: rect.left,
+          right: rect.right,
+          viewportWidth: window.innerWidth,
+          visibleAtLeftEdge: element.contains(point),
+          sourceOptionCount: element.querySelectorAll('.model-settings__source-option')
+            .length,
+        }
+      })
+
+      expect(layout.insideClippedPanel).toBe(false)
+      expect(layout.left).toBeGreaterThanOrEqual(0)
+      expect(layout.right).toBeLessThanOrEqual(layout.viewportWidth)
+      expect(layout.visibleAtLeftEdge).toBe(true)
+      expect(layout.sourceOptionCount).toBeGreaterThan(0)
+      await captureUi(launched.page, outDir, 'model-settings-narrow')
+      expect.hasAssertions()
+    } catch (error) {
+      await captureFailure(launched.page, launched.logs, outDir, error)
+      throw error
+    } finally {
+      await launched.close()
+    }
+  }, 60_000)
 })
 
 async function launchAgentApp(outDir: string): Promise<{
