@@ -341,8 +341,8 @@ function formatBoundingBox(value: unknown): string {
 <style scoped>
 .mpc-preview {
   display: grid;
-  gap: 16px;
-  margin-top: 12px;
+  gap: 18px;
+  margin-top: 20px;
 }
 
 .mpc-preview__heading,
@@ -364,13 +364,15 @@ function formatBoundingBox(value: unknown): string {
 }
 
 .mpc-preview__heading h3 {
-  font-size: 15px;
+  font-size: 18px;
+  letter-spacing: -0.02em;
 }
 
 .mpc-preview__eyebrow {
-  color: var(--text-secondary);
+  color: var(--accent-color);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 800;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
@@ -385,8 +387,10 @@ function formatBoundingBox(value: unknown): string {
 
 .mpc-preview__band {
   min-width: 0;
-  padding-top: 14px;
-  border-top: 1px solid var(--border-color);
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-secondary) 38%, var(--bg-primary));
 }
 
 .mpc-preview__band-heading {
@@ -395,19 +399,22 @@ function formatBoundingBox(value: unknown): string {
 
 .mpc-preview__band-heading h4 {
   margin-top: 2px;
-  font-size: 13px;
+  font-size: 14px;
+  letter-spacing: -0.01em;
 }
 
 .mpc-preview__grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 16px;
+  gap: 10px;
 }
 
 .mpc-preview-section {
   min-width: 0;
-  padding: 10px 0;
-  border-top: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  padding: 13px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-primary) 76%, transparent);
 }
 
 .mpc-preview-section--wide {
@@ -415,12 +422,16 @@ function formatBoundingBox(value: unknown): string {
 }
 
 .mpc-preview__grid--resources .mpc-preview-section--geometry {
-  grid-column: 2;
+  grid-column: auto;
 }
 
 .mpc-preview-section h5 {
   margin-bottom: 8px;
-  font-size: 12px;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .mpc-preview-section__heading span {
@@ -431,7 +442,8 @@ function formatBoundingBox(value: unknown): string {
 .mpc-preview-details {
   display: grid;
   grid-template-columns: minmax(88px, 0.38fr) minmax(0, 1fr);
-  gap: 5px 10px;
+  gap: 6px 12px;
+  line-height: 1.4;
   font-size: 11px;
 }
 
@@ -444,9 +456,12 @@ function formatBoundingBox(value: unknown): string {
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
+  color: var(--text-primary);
 }
 
 .mpc-preview-table-wrap {
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  border-radius: 8px;
   overflow-x: auto;
 }
 
@@ -465,11 +480,16 @@ function formatBoundingBox(value: unknown): string {
 .mpc-preview-table th,
 .mpc-preview-table td {
   max-width: 360px;
-  padding: 7px 8px;
+  padding: 8px 9px;
   border-top: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
   overflow-wrap: anywhere;
   text-align: left;
   vertical-align: top;
+}
+
+.mpc-preview-table tr:first-child th,
+.mpc-preview-table tr:first-child td {
+  border-top: 0;
 }
 
 .mpc-preview-table th {

@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { flushPromises, shallowMount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -168,6 +170,7 @@ vi.mock('@/platform/desktop', () => ({
 }))
 
 import ProjectsView from './ProjectsView.vue'
+import projectsViewSource from './ProjectsView.vue?raw'
 import RtlImportStep from '@/components/RtlImportStep.vue'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
 import { useProjectConsistencyStore } from '@/stores/projectConsistencyStore'
@@ -183,6 +186,11 @@ import {
   useWorkspaceWizardRequest,
 } from '@/utils/workspaceNavigation'
 import type { EccWorkspaceStepOutputsResult } from '@ecos-studio/shared'
+
+const projectsViewStyles = readFileSync(
+  resolve(process.cwd(), 'src/views/project-management/projectsView.css'),
+  'utf8',
+)
 
 function historyProject(index: number) {
   return {
@@ -772,6 +780,28 @@ describe('ProjectsView background lifecycle integration', () => {
         .findComponent(RtlImportStep)
         .vm.$emit('update:selection', { verilog, filelist })
     }
+  })
+
+  it('keeps the managed MPC selection dialog scrollable for long templates', () => {
+    expect(projectsViewStyles).toMatch(
+      /\.mpc-selection-dialog\s*\{[\s\S]*?max-height: calc\(100% - 8px\);[\s\S]*?overflow: hidden;/,
+    )
+    expect(projectsViewStyles).toMatch(
+      /\.mpc-selection-dialog__body\s*\{[\s\S]*?overflow-y: auto;/,
+    )
+  })
+
+  it('avoids full-screen blur while the nested MPC dialog is scrolling', () => {
+    expect(projectsViewStyles).toContain('.mpc-selection-scrim')
+    expect(projectsViewStyles).not.toMatch(
+      /\.mpc-selection-scrim\s*\{[\s\S]*?backdrop-filter:/,
+    )
+  })
+
+  it('does not reposition background workspace popovers while a project modal is open', () => {
+    expect(projectsViewSource).toContain(
+      'if (showNewProjectDialog.value || showProjectMpcSelection.value) return',
+    )
   })
 
   it('exposes the field names used by Quick Start project creation', async () => {
