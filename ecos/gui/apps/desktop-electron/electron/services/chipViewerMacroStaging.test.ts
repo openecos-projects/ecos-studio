@@ -42,9 +42,12 @@ function defWithComponents(components: string): string {
 }
 
 describe('isMacroPlacementStep', () => {
-  it('matches the preFloorplan step regardless of case and spacing', () => {
+  it('matches both macro placement edit steps regardless of case and spacing', () => {
     expect(isMacroPlacementStep('preFloorplan')).toBe(true)
     expect(isMacroPlacementStep(' prefloorplan ')).toBe(true)
+    expect(isMacroPlacementStep('macroPlacement')).toBe(true)
+    expect(isMacroPlacementStep(' MACROPLACEMENT ')).toBe(true)
+    expect(isMacroPlacementStep('Macro Placement')).toBe(true)
     expect(isMacroPlacementStep('PRE_FLOORPLAN')).toBe(false)
     expect(isMacroPlacementStep('postFloorplan')).toBe(false)
   })

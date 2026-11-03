@@ -56,6 +56,7 @@ import { catalogAppliesToFlowStep, formatStepToolName, StepEnum } from '@/api/ty
 import StepConfigPanel from '@/components/StepConfigPanel.vue'
 import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
 import { getDesktopApi } from '@/platform/desktop'
+import { isWorkspaceFlowSetupParameter } from '@/utils/stepConfigParameterVisibility'
 
 const {
   dynamicFlowStages,
@@ -129,7 +130,9 @@ onMounted(async () => {
       : []
     catalogApplies.value = catalog.flatMap((entry) => {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
-      const appliesTo = (entry as Record<string, unknown>).appliesTo
+      const record = entry as Record<string, unknown>
+      if (isWorkspaceFlowSetupParameter(record.id)) return []
+      const appliesTo = record.appliesTo
       return typeof appliesTo === 'string' ? [appliesTo] : []
     })
   } catch (cause) {

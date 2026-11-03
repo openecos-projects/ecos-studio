@@ -1,4 +1,5 @@
 import type { ChipViewerOpenRequest } from '@ecos-studio/shared'
+import { getStepMetadata } from '@/api/type'
 
 export type ChipViewerMode = NonNullable<ChipViewerOpenRequest['mode']>
 
@@ -36,7 +37,7 @@ export function buildChipViewerOpenRequest(
   return {
     mode,
     projectPath,
-    step,
+    step: getStepMetadata(step)?.path ?? step,
   }
 }
 

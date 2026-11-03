@@ -21,7 +21,7 @@
           <i class="ri-history-line" aria-hidden="true" />
           <span>{{ staleResultNotice.message }}</span>
         </div>
-        <WorkspaceFlowDashboard @layout="void openLayoutThumbnail($event)">
+        <WorkspaceFlowDashboard @layout="requestLayoutThumbnail">
           <template #overview>
             <section class="dashboard-section status-card qor-card flow-status-card">
               <header class="dashboard-section-header">
@@ -127,6 +127,12 @@
     </template>
   </WorkspaceWorkbench>
 
+  <MacroPlacementOpenDialog
+    v-model:visible="showMacroPlacementOpen"
+    @edit="void openPendingLayout('edit')"
+    @view="void openPendingLayout('view')"
+  />
+
   <Dialog
     v-model:visible="showChecklist"
     modal
@@ -181,7 +187,9 @@
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Dialog from 'primevue/dialog'
+import { sameFlowStepName, StepEnum } from '@/api/type'
 import WorkspaceFlowDashboard from '@/components/workspace-dashboard/WorkspaceFlowDashboard.vue'
+import MacroPlacementOpenDialog from '@/components/workspace-dashboard/MacroPlacementOpenDialog.vue'
 import WorkspaceWorkbench from '@/components/workbench/WorkspaceWorkbench.vue'
 import FlowInsightsPanel from '@/components/flow-insights/FlowInsightsPanel.vue'
 import StatusPieChart from '@/components/home/StatusPieChart.vue'
@@ -283,6 +291,8 @@ const showQor = ref(false)
 
 const showChecklist = ref(false)
 const openingLayoutStep = ref<string | null>(null)
+const pendingLayoutThumbnail = ref<HomeLayoutThumbnail | null>(null)
+const showMacroPlacementOpen = ref(false)
 const resolvedChecklistItems = checklistItems
 const {
   expandedFindingId: expandedEvidenceId,
@@ -372,7 +382,26 @@ function canOpenLayoutThumbnail(thumbnail: HomeLayoutThumbnail): boolean {
   })
 }
 
-async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void> {
+function requestLayoutThumbnail(thumbnail: HomeLayoutThumbnail): void {
+  if (sameFlowStepName(thumbnail.step, StepEnum.MACRO_PLACEMENT)) {
+    pendingLayoutThumbnail.value = thumbnail
+    showMacroPlacementOpen.value = true
+    return
+  }
+  void openLayoutThumbnail(thumbnail, 'view')
+}
+
+async function openPendingLayout(mode: 'view' | 'edit'): Promise<void> {
+  const thumbnail = pendingLayoutThumbnail.value
+  pendingLayoutThumbnail.value = null
+  showMacroPlacementOpen.value = false
+  if (thumbnail) await openLayoutThumbnail(thumbnail, mode)
+}
+
+async function openLayoutThumbnail(
+  thumbnail: HomeLayoutThumbnail,
+  mode: 'view' | 'edit',
+): Promise<void> {
   const projectPath = currentProject.value?.path
   if (!projectPath || !canOpenLayoutThumbnail(thumbnail)) return
 
@@ -380,7 +409,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   try {
     const desktopApi = getDesktopApi()
     await desktopApi.chipViewer.open(
-      buildChipViewerOpenRequest(projectPath, thumbnail.step, 'view'),
+      buildChipViewerOpenRequest(projectPath, thumbnail.step, mode),
     )
   } catch (error) {
     console.error(`Failed to open ChipView for ${thumbnail.step} from Home:`, error)

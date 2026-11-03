@@ -220,6 +220,48 @@ describe('useStepConfigInfo', () => {
     expect(result.stepConfigDraft.value).toEqual(parameters)
   })
 
+  it('hides workspace Flow Setup parameters from the Step configuration', async () => {
+    testState.route.path = '/workspace/Synthesis'
+    testState.readWorkspaceStepConfigurationApi.mockResolvedValue({
+      ...available(
+        { 'design.frequency_mhz': 200, 'geometry.clock_tree': true },
+        'Synthesis',
+      ),
+      parameters: [
+        {
+          applies: 'synthesis',
+          default: 200,
+          description: 'Frequency',
+          param: 'design.frequency_mhz',
+          type: 'int',
+          value: 200,
+        },
+        {
+          applies: 'all',
+          default: false,
+          description: 'Clock tree',
+          output_only: true,
+          param: 'geometry.clock_tree',
+          type: 'bool',
+          value: true,
+        },
+      ],
+    })
+
+    const result = scope.run(() => useStepConfigInfo())!
+
+    await vi.waitFor(() =>
+      expect(result.stepConfigDraft.value).toEqual({ 'design.frequency_mhz': 200 }),
+    )
+    expect(result.stepConfigParameterCount.value).toBe(1)
+    expect(result.stepConfigParameterDescriptions.value).toEqual({
+      'design.frequency_mhz': 'Frequency',
+    })
+    expect(result.stepConfigParameterTypes.value).toEqual({
+      'design.frequency_mhz': 'int',
+    })
+  })
+
   it('saves Step Parameters through one Product Command and advances Revision', async () => {
     testState.readWorkspaceStepConfigurationApi.mockImplementation(async () => {
       const revision = useWorkspaceLifecycle().session.value.workspaceRevision ?? 1

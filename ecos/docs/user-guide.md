@@ -929,7 +929,8 @@ action.
 ![View menu with the standalone DEF Layout action](asset/def-layout-menu.png)
 
 Click a step card's layout thumbnail in the Flow diagram. The viewer opens the
-saved geometry snapshot for that step.
+saved geometry snapshot for that step. For **macroPlacement**, choose **View
+layout** or **Enter edit mode** in the confirmation dialog.
 
 You can also use the built-in terminal:
 
@@ -993,8 +994,9 @@ Open **Edit → Config → Floorplan** to inspect `config/macro_location.tcl`.
 **Update** imports a prepared Tcl placement file. ECC's `macro` commands also
 manage manual placements; use `ecc macro --help` for the available operations.
 After changing placements, rerun the affected floorplan stages and their
-dependents to regenerate results. Opening a thumbnail or running `ecc chipview`
-opens a viewing session.
+dependents to regenerate results. Opening the **macroPlacement** thumbnail
+offers view and edit choices; other thumbnails and `ecc chipview` open a
+viewing session.
 
 ### Keyboard Shortcuts
 

@@ -4,20 +4,20 @@ import { Readable } from 'node:stream'
 /**
  * Macro staging support for the chip viewer layout edit session.
  *
- * After preFloorplan every instance is unplaced, and the geometry snapshot
- * skips unplaced instances. This module rebuilds the block-macro inventory
- * from two existing artifacts so the viewer can stage unplaced macros next
- * to the die: the step DEF (instance names, masters, placements) and the
- * geometry snapshot master metadata (block master sizes). Unplaced standard
- * cells are aggregated into a single count/area entry so the viewer can show
- * a placeholder blob without shipping every component.
+ * The preFloorplan snapshot leaves every instance unplaced, while a
+ * macroPlacement snapshot already contains placed macros. Either edit session
+ * rebuilds the block-macro inventory from two existing artifacts so the viewer
+ * can stage unplaced macros next to the die: the step DEF (instance names,
+ * masters, placements) and the geometry snapshot master metadata (block master
+ * sizes). Unplaced standard cells are aggregated into a single count/area entry
+ * so the viewer can show a placeholder blob without shipping every component.
  *
  * Step DEFs easily exceed the V8 maximum string length, so the DEF is
  * scanned as a statement stream instead of one decoded string.
  */
 
 /** Steps whose layout edit session is the manual macro-placement entry point. */
-const MACRO_PLACEMENT_STEPS = ['prefloorplan']
+const MACRO_PLACEMENT_STEPS = ['prefloorplan', 'macroplacement']
 
 /** DEF orientation names mapped to the R-notation shared with ECC Tcl. */
 export const DEF_TO_R_ORIENT: Record<string, string> = {
@@ -82,7 +82,7 @@ export interface StdcellStaging {
 export type ReadBinaryFile = (path: string) => Promise<Buffer>
 
 export function isMacroPlacementStep(step: string): boolean {
-  return MACRO_PLACEMENT_STEPS.includes(step.trim().toLowerCase())
+  return MACRO_PLACEMENT_STEPS.includes(step.trim().toLowerCase().replace(/\s+/g, ''))
 }
 
 /**

@@ -2,6 +2,7 @@ mod app;
 mod camera3d;
 mod canvas_gpu;
 mod canvas_gpu3d;
+mod clock_tree;
 mod instance_visibility;
 mod macro_interaction;
 mod macro_ops;
@@ -60,6 +61,10 @@ struct Args {
 
     #[arg(long)]
     antenna_statis: Option<PathBuf>,
+
+    /// LVS feature report for the current LVS workspace step.
+    #[arg(long)]
+    lvs_data: Option<PathBuf>,
 
     #[arg(long)]
     map_root: Option<PathBuf>,
@@ -499,6 +504,7 @@ fn main() -> Result<()> {
     let drc_statis = args.drc_statis.clone();
     let antenna_data = args.antenna_data.clone();
     let antenna_statis = args.antenna_statis.clone();
+    let lvs_data = args.lvs_data.clone();
     let map_root = args.map_root.clone();
 
     let run_result = eframe::run_native(
@@ -534,6 +540,7 @@ fn main() -> Result<()> {
                 drc_statis,
                 antenna_data,
                 antenna_statis,
+                lvs_data,
                 map_root,
                 _cc.wgpu_render_state
                     .as_ref()

@@ -545,33 +545,6 @@
                     </div>
                   </div>
 
-                  <div v-if="isFlowStepRunnable('sta')" class="mb-5">
-                    <label
-                      for="sta-max-parallel-corners"
-                      class="mb-2 block text-sm font-semibold text-(--text-primary)"
-                    >
-                      STA maximum parallel corners
-                    </label>
-                    <select
-                      id="sta-max-parallel-corners"
-                      v-model.number="config.parameters.sta_max_parallel_corners"
-                      class="rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2 text-sm text-(--text-primary)"
-                    >
-                      <option
-                        v-for="count in staParallelCornerLimit"
-                        :key="count"
-                        :value="count"
-                      >
-                        {{ count }}
-                      </option>
-                    </select>
-                    <p class="mt-2 text-xs text-(--text-secondary)">
-                      Defaults to 1 (serial). Up to {{ staParallelCornerLimit }} signoff
-                      corner combinations. Available CPUs and memory may reduce
-                      concurrency; parallel STA requires Linux.
-                    </p>
-                  </div>
-
                   <p
                     v-if="sourceContext"
                     class="mb-5 rounded-lg border border-(--border-color) bg-(--bg-primary)/60 px-4 py-3 text-xs text-(--text-secondary)"
@@ -595,69 +568,134 @@
                       :key="step.name"
                       class="relative"
                     >
-                      <button
-                        type="button"
-                        class="flex h-full min-h-[104px] w-full cursor-pointer flex-col rounded-xl border p-4 text-left transition-colors duration-200"
+                      <div
+                        :data-flow-step-card="step.name"
+                        class="flex h-full min-h-[104px] flex-col rounded-xl border p-4 transition-colors duration-200"
                         :class="[
                           isFlowStepLocked(step.name)
                             ? 'cursor-not-allowed border-(--border-color)/60 bg-(--bg-secondary)/25 opacity-45'
-                            : isFlowStepRunnable(step.name)
-                              ? 'border-(--accent-color) bg-(--accent-color)/10'
-                              : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45',
+                            : isFlowStepBeforeStart(step.name)
+                              ? 'cursor-not-allowed border-(--border-color)/60 bg-(--bg-secondary)/25 opacity-45'
+                              : isFlowStepRunnable(step.name)
+                                ? 'cursor-pointer border-(--accent-color) bg-(--accent-color)/10'
+                                : 'cursor-pointer border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45',
                           !isFlowStepLocked(step.name) &&
                           defaultSkippedFlowStepNames.has(step.name)
                             ? 'border-dashed'
                             : '',
                         ]"
-                        :disabled="isFlowStepLocked(step.name)"
                         @click="setFlowBoundary(step.name)"
                       >
-                        <span class="mb-3 flex items-center justify-between gap-3">
-                          <span class="flex min-w-0 items-center gap-2">
-                            <span
-                              class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-xs font-bold"
-                              :class="
-                                isFlowStepRunnable(step.name)
-                                  ? 'border-(--accent-color) bg-(--accent-color) text-white'
-                                  : 'border-(--border-color) text-(--text-secondary)'
-                              "
-                            >
-                              <span>{{ index + 1 }}</span>
+                        <button
+                          type="button"
+                          class="flex w-full flex-1 cursor-pointer flex-col text-left disabled:cursor-not-allowed"
+                          :disabled="
+                            isFlowStepLocked(step.name) ||
+                            isFlowStepBeforeStart(step.name)
+                          "
+                        >
+                          <span class="mb-3 flex items-center justify-between gap-3">
+                            <span class="flex min-w-0 items-center gap-2">
+                              <span
+                                class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-xs font-bold"
+                                :class="
+                                  isFlowStepRunnable(step.name)
+                                    ? 'border-(--accent-color) bg-(--accent-color) text-white'
+                                    : 'border-(--border-color) text-(--text-secondary)'
+                                "
+                              >
+                                <span>{{ index + 1 }}</span>
+                              </span>
+                              <span
+                                class="min-w-0 font-semibold break-words text-(--text-primary)"
+                                >{{ step.name }}</span
+                              >
                             </span>
-                            <span
-                              class="min-w-0 font-semibold break-words text-(--text-primary)"
-                              >{{ step.name }}</span
-                            >
+                            <input
+                              type="checkbox"
+                              class="h-4 w-4 shrink-0 accent-(--accent-color)"
+                              :checked="isFlowStepRunnable(step.name)"
+                              readonly
+                              @click.prevent
+                            />
                           </span>
-                          <input
-                            type="checkbox"
-                            class="h-4 w-4 shrink-0 accent-(--accent-color)"
-                            :checked="isFlowStepRunnable(step.name)"
-                            readonly
-                          />
-                        </span>
-                        <span class="flex-1 text-xs leading-5 text-(--text-secondary)">{{
-                          step.description
-                        }}</span>
-                        <span
-                          v-if="isFlowStepLocked(step.name)"
-                          class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
+                          <span
+                            class="flex-1 text-xs leading-5 text-(--text-secondary)"
+                            >{{ step.description }}</span
+                          >
+                          <span
+                            v-if="isFlowStepLocked(step.name)"
+                            class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
+                          >
+                            Reused from source
+                          </span>
+                          <span
+                            v-else-if="isFlowStepBeforeStart(step.name)"
+                            class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
+                          >
+                            Before start
+                          </span>
+                          <span
+                            v-else-if="defaultSkippedFlowStepNames.has(step.name)"
+                            class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
+                          >
+                            Skipped by default
+                          </span>
+                          <span
+                            v-else-if="skippableFlowStepNames.has(step.name)"
+                            class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
+                          >
+                            Skippable
+                          </span>
+                        </button>
+
+                        <div
+                          v-if="step.name === 'CTS' && isFlowStepRunnable(step.name)"
+                          class="mt-4 border-t border-(--border-color)/70 pt-3"
+                          @click.stop
                         >
-                          Reused from source
-                        </span>
-                        <span
-                          v-else-if="defaultSkippedFlowStepNames.has(step.name)"
-                          class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
+                          <label
+                            for="cts-clock-tree-visualization"
+                            class="flex cursor-pointer items-center gap-2.5"
+                          >
+                            <input
+                              id="cts-clock-tree-visualization"
+                              v-model="config.parameters.clock_tree"
+                              type="checkbox"
+                              class="h-4 w-4 shrink-0 accent-(--accent-color)"
+                            />
+                            <span class="text-xs font-semibold text-(--text-primary)"
+                              >Clock-tree visualization</span
+                            >
+                          </label>
+                        </div>
+
+                        <div
+                          v-if="step.name === 'sta' && isFlowStepRunnable(step.name)"
+                          class="mt-4 border-t border-(--border-color)/70 pt-3"
+                          @click.stop
                         >
-                          Skipped by default
-                        </span>
-                        <span
-                          v-else-if="skippableFlowStepNames.has(step.name)"
-                          class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
-                        >
-                          Skippable
-                        </span>
-                      </button>
+                          <label
+                            for="sta-max-parallel-corners"
+                            class="block text-xs font-semibold text-(--text-primary)"
+                          >
+                            STA maximum parallel corners
+                          </label>
+                          <select
+                            id="sta-max-parallel-corners"
+                            v-model.number="config.parameters.sta_max_parallel_corners"
+                            class="mt-2 w-full cursor-pointer rounded-md border border-(--border-color) bg-(--bg-primary)/75 px-2 py-1.5 text-xs text-(--text-primary)"
+                          >
+                            <option
+                              v-for="count in staParallelCornerLimit"
+                              :key="count"
+                              :value="count"
+                            >
+                              {{ count }}
+                            </option>
+                          </select>
+                        </div>
+                      </div>
                       <span
                         v-if="index < flowStepOptions.length - 1 && (index + 1) % 4 !== 0"
                         class="flow-step-connector"
@@ -2186,6 +2224,7 @@ function createInitialConfig(
       clock: '',
       frequency_max: 50,
       max_fanout: 32,
+      clock_tree: false,
       sta_max_parallel_corners: 1,
       die_area_mode: dieAreaMode.value,
       die_width: 100,
@@ -2358,10 +2397,14 @@ function resolveProjectRelativePath(projectRoot: string, path: string): string {
 }
 
 function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStepName {
-  const candidate = String(value ?? '')
+  const candidate = String(value ?? '').trim()
+  if (!candidate) return fallback
   const alias = FLOW_STEP_NAME_ALIASES[candidate.toLowerCase().replace(/[_\-\s]+/g, '')]
   if (alias) return alias
-  return KNOWN_FLOW_STEP_NAMES.has(candidate) ? candidate : fallback
+  if (KNOWN_FLOW_STEP_NAMES.has(candidate)) return candidate
+  // ECC discovery is authoritative. Preserve an unrecognized persisted value
+  // until the discovered chain arrives, then reset it if the chain omits it.
+  return candidate
 }
 
 function normalizeDieAreaMode(value: unknown): DieAreaMode {
@@ -2454,9 +2497,15 @@ const lockedFlowStepNames = computed(() => {
 })
 const canChooseFlowStartStep = computed(() => !sourceContext.value)
 const selectedFlowSteps = computed(() => {
-  const start = Math.min(flowStartIndex.value, flowEndIndex.value)
-  const end = Math.max(flowStartIndex.value, flowEndIndex.value)
+  const start = flowStartIndex.value
+  if (start < 0) return []
+  const end = Math.max(start, flowEndIndex.value)
   return flowStepOptions.value.slice(start, end + 1).map((step) => step.name)
+})
+const flowStepsBeforeStart = computed<ReadonlySet<string>>(() => {
+  const start = flowStartIndex.value
+  if (start <= 0) return NO_FLOW_STEP_NAMES
+  return new Set(flowStepOptions.value.slice(0, start).map((step) => step.name))
 })
 // Steps ECC will actually run for this range: the default skip policy still
 // applies (GUI submits no skip_steps), so default-skipped steps are in the
@@ -2839,6 +2888,9 @@ watch(flowStepOptions, (options) => {
 })
 
 watch([flowStartStep, flowEndStep], () => {
+  if (flowStartIndex.value >= 0 && flowEndIndex.value < flowStartIndex.value) {
+    flowEndStep.value = flowStartStep.value
+  }
   if (!designInputTypes.value.some((item) => item.key === activeDesignInputType.value)) {
     activeDesignInputType.value = designInputTypes.value[0]?.key ?? 'sdc'
   }
@@ -3182,6 +3234,13 @@ function applyProjectParameterDefaults(
     'max_fanout',
     firstNumber(parameters.max_fanout, parameters['Max Fanout']),
   )
+  setBooleanParameterDefault(
+    'clock_tree',
+    firstBoolean(
+      parameters.clock_tree,
+      isRecord(parameters.geometry) ? parameters.geometry.clock_tree : undefined,
+    ),
+  )
   setNumberParameterDefault(
     'die_width',
     firstNumber(parameters.die_width, parameters['Die Width']),
@@ -3245,6 +3304,13 @@ function setNumberParameterDefault(key: string, value: unknown) {
   }
 }
 
+function setBooleanParameterDefault(key: string, value: unknown) {
+  if (typeof value !== 'boolean' || hasInitialParameterValue(key)) return
+  if (config.value.parameters[key] === false) {
+    config.value.parameters[key] = value
+  }
+}
+
 function hasInitialConfigValue(key: keyof WorkspaceConfig) {
   return (
     props.initialConfig?.[key] !== undefined ||
@@ -3274,6 +3340,13 @@ function firstNumber(...values: unknown[]) {
       const parsed = Number(value)
       if (Number.isFinite(parsed)) return parsed
     }
+  }
+  return null
+}
+
+function firstBoolean(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === 'boolean') return value
   }
   return null
 }
@@ -3354,17 +3427,17 @@ function isFlowStepRunnable(stepName: FlowStepName) {
   return isFlowStepSelected(stepName) && !defaultSkippedFlowStepNames.value.has(stepName)
 }
 
+function isFlowStepBeforeStart(stepName: FlowStepName) {
+  return flowStepsBeforeStart.value.has(stepName)
+}
+
 function setFlowBoundary(stepName: FlowStepName) {
-  if (isFlowStepLocked(stepName)) return
+  if (isFlowStepLocked(stepName) || isFlowStepBeforeStart(stepName)) return
   const index = flowStepOptions.value.findIndex((step) => step.name === stepName)
   if (index < 0) return
 
   const start = flowStartIndex.value
   const end = flowEndIndex.value
-  if (canChooseFlowStartStep.value && index < start) {
-    applyFlowStartStep(stepName)
-    return
-  }
   const nextEndIndex = index === end && end > start ? end - 1 : index
   const boundedEndIndex = Math.max(start, nextEndIndex)
   flowEndStep.value = flowStepOptions.value[boundedEndIndex].name
@@ -3372,7 +3445,11 @@ function setFlowBoundary(stepName: FlowStepName) {
 
 function selectFlowStartStep(event: Event) {
   const target = event.target as HTMLSelectElement
-  const stepName = normalizeFlowStepName(target.value, flowStartStep.value)
+  const stepName = flowStepOptions.value.find((step) => step.name === target.value)?.name
+  if (!stepName) {
+    target.value = flowStartStep.value
+    return
+  }
   if (stepName === flowStartStep.value) return
   if (!canChooseFlowStartStep.value || isFlowStepLocked(stepName)) {
     target.value = flowStartStep.value

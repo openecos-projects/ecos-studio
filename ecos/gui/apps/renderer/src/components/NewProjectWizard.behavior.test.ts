@@ -1458,6 +1458,7 @@ describe('NewProjectWizard behavior', () => {
     const wizard = wrapper.vm as unknown as {
       currentStep: number
       flowStartStep: string
+      flowEndStep: string
       selectedFlowSteps: string[]
       isFlowStepSelected(stepName: string): boolean
     }
@@ -1483,7 +1484,210 @@ describe('NewProjectWizard behavior', () => {
     expect(wizard.selectedFlowSteps[0]).toBe('CTS')
     expect(wizard.isFlowStepSelected('Synthesis')).toBe(false)
     expect(wizard.isFlowStepSelected('CTS')).toBe(true)
+    const checkboxState = () =>
+      Object.fromEntries(
+        wrapper
+          .findAll('[data-flow-step-card]')
+          .map((card) => [
+            card.attributes('data-flow-step-card'),
+            (card.get('input[type="checkbox"]').element as HTMLInputElement).checked,
+          ]),
+      )
+    expect(checkboxState()).toMatchObject({ Synthesis: false, CTS: true })
+
+    const legalizationCheckbox = wrapper.get(
+      '[data-flow-step-card="legalization"] input[type="checkbox"]',
+    )
+    expect((legalizationCheckbox.element as HTMLInputElement).checked).toBe(true)
+    await legalizationCheckbox.trigger('click')
+    await flushPromises()
+    expect(wizard.flowEndStep).toBe('legalization')
+    expect((legalizationCheckbox.element as HTMLInputElement).checked).toBe(true)
+
+    await startSelect.setValue('Timing optimization')
+    await flushPromises()
+    expect(wizard.flowStartStep).toBe('Timing optimization')
+    expect(wizard.flowEndStep).toBe('Timing optimization')
+    expect(wizard.selectedFlowSteps).toEqual(['Timing optimization'])
+    expect(checkboxState()).toMatchObject({
+      CTS: false,
+      legalization: false,
+      'Timing optimization': true,
+    })
     wrapper.unmount()
+  })
+
+  it('keeps CTS and STA settings inside their selected flow cards', async () => {
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { standaloneWorkspace: true } },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    await flushPromises()
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      config: {
+        parameters: {
+          clock_tree: boolean
+          sta_max_parallel_corners: number
+        }
+      }
+    }
+    wizard.currentStep = 4
+    await flushPromises()
+
+    const ctsCard = wrapper.get('[data-flow-step-card="CTS"]')
+    const clockTree = ctsCard.get('#cts-clock-tree-visualization')
+    expect(ctsCard.text()).toContain('Clock-tree visualization')
+    expect((clockTree.element as HTMLInputElement).checked).toBe(false)
+    await clockTree.setValue(true)
+    expect(wizard.config.parameters.clock_tree).toBe(true)
+
+    const staCard = wrapper.get('[data-flow-step-card="sta"]')
+    const parallelCorners = staCard.get('#sta-max-parallel-corners')
+    expect((parallelCorners.element as HTMLSelectElement).value).toBe('1')
+    await parallelCorners.setValue('5')
+    expect(wizard.config.parameters.sta_max_parallel_corners).toBe(5)
+
+    await wrapper.get('[data-flow-step-card="postFloorplan"] button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#cts-clock-tree-visualization').exists()).toBe(false)
+    expect(wrapper.find('#sta-max-parallel-corners').exists()).toBe(false)
+
+    await wrapper.get('[data-flow-step-card="CTS"] button').trigger('click')
+    await flushPromises()
+    expect(
+      wrapper.find('[data-flow-step-card="CTS"] #cts-clock-tree-visualization').exists(),
+    ).toBe(true)
+    expect(wrapper.find('#sta-max-parallel-corners').exists()).toBe(false)
+
+    await wrapper.get('[data-flow-step-card="sta"] button').trigger('click')
+    await flushPromises()
+    expect(
+      (
+        wrapper.get('[data-flow-step-card="sta"] #sta-max-parallel-corners')
+          .element as HTMLSelectElement
+      ).value,
+    ).toBe('5')
+
+    wizard.currentStep = 7
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Clock-tree visualization')
+    wrapper.unmount()
+  })
+
+  it('starts the flow range at a discovered start step and disables earlier cards', async () => {
+    const model = wizardMocks.defaultWorkspaceCreationModel()
+    model.discovery.flowDefinitions[0]!.stepIds = [
+      'Synthesis',
+      'preFloorplan',
+      'preplace',
+      'place',
+      'CTS',
+      'Harden',
+    ]
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue(model)
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { standaloneWorkspace: true } },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    await flushPromises()
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      flowStartStep: string
+      flowEndStep: string
+      selectedFlowSteps: string[]
+      isFlowStepSelected(stepName: string): boolean
+    }
+    wizard.currentStep = 4
+    await flushPromises()
+
+    await wrapper.get('select').setValue('preplace')
+    await flushPromises()
+
+    expect(wizard.flowStartStep).toBe('preplace')
+    expect(wizard.flowEndStep).toBe('Harden')
+    expect(wizard.selectedFlowSteps).toEqual(['preplace', 'place', 'CTS', 'Harden'])
+    expect(wizard.isFlowStepSelected('Synthesis')).toBe(false)
+    expect(
+      (
+        wrapper.get('[data-flow-step-card="Synthesis"] input[type="checkbox"]')
+          .element as HTMLInputElement
+      ).checked,
+    ).toBe(false)
+    expect(
+      (
+        wrapper.get('[data-flow-step-card="preplace"] input[type="checkbox"]')
+          .element as HTMLInputElement
+      ).checked,
+    ).toBe(true)
+    expect(
+      wrapper.get('[data-flow-step-card="Synthesis"] button').attributes('disabled'),
+    ).toBeDefined()
+    expect(
+      wrapper.get('[data-flow-step-card="preplace"] button').attributes('disabled'),
+    ).toBeUndefined()
+
+    await wrapper.get('[data-flow-step-card="Synthesis"]').trigger('click')
+    expect(wizard.flowStartStep).toBe('preplace')
+    wrapper.unmount()
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue(
+      wizardMocks.defaultWorkspaceCreationModel(),
+    )
+  })
+
+  it('restores a persisted start step from ECC discovery', async () => {
+    const model = wizardMocks.defaultWorkspaceCreationModel()
+    model.discovery.flowDefinitions[0]!.stepIds = [
+      'Synthesis',
+      'preFloorplan',
+      'preplace',
+      'place',
+      'CTS',
+      'Harden',
+    ]
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue(model)
+    const wrapper = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          standaloneWorkspace: true,
+          flow_config: { start_step: 'preplace', end_step: 'Harden', steps: [] },
+        },
+      },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    await flushPromises()
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      flowStartStep: string
+      selectedFlowSteps: string[]
+    }
+    wizard.currentStep = 4
+    await flushPromises()
+
+    expect(wizard.flowStartStep).toBe('preplace')
+    expect(wizard.selectedFlowSteps[0]).toBe('preplace')
+    wrapper.unmount()
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue(
+      wizardMocks.defaultWorkspaceCreationModel(),
+    )
   })
 
   it('reduces the STA selection when the effective signoff limit shrinks', async () => {
@@ -1685,14 +1889,14 @@ describe('NewProjectWizard behavior', () => {
       'Timing optimization',
       'Harden',
     ])
-    const buttons = wrapper.findAll('button')
-    const skippedCards = buttons.filter((button) => button.text().includes('Skipped'))
+    const cards = wrapper.findAll('[data-flow-step-card]')
+    const skippedCards = cards.filter((card) => card.text().includes('Skipped'))
     expect(skippedCards).toHaveLength(1)
     expect(skippedCards[0].text()).toContain('lec')
     expect(skippedCards[0].classes()).toContain('border-dashed')
     const lecCheckbox = skippedCards[0].find('input[type="checkbox"]')
     expect((lecCheckbox.element as HTMLInputElement).checked).toBe(false)
-    const skippableCards = buttons.filter((button) => button.text().includes('Skippable'))
+    const skippableCards = cards.filter((card) => card.text().includes('Skippable'))
     expect(skippableCards).toHaveLength(1)
     expect(skippableCards[0].text()).toContain('Timing optimization')
     const skippableCheckbox = skippableCards[0].find('input[type="checkbox"]')
