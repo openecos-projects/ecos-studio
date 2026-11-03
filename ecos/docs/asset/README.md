@@ -1,16 +1,23 @@
 # Documentation images
 
-The desktop screenshots were captured on 2026-10-19 from ECOS Studio
+The original desktop screenshots were captured on 2026-10-19 from ECOS Studio
 0.1.0-alpha.9 (GUI source at `18ab2e9c`, identical to `80c46cde`), using
-isolated application settings and the GCD RTL design. They show the real UI;
-execution and checklist states have not been changed for the images.
+isolated application settings and the GCD RTL design. The project, MPC, and
+Agent images added or refreshed on 2026-11-03 use the current desktop flows and
+the same isolated-profile rule. They show the real UI; execution and checklist
+states have not been changed for the images.
 
 - `overview-light.png` and `overview-dark.png`: the same backend workspace in
   both themes, with Agent hidden and the Flow zoom set to 55% so the full
   graph fits. Harden succeeded; EMIR is incomplete because its process
   technology file is unset. The checklist retains the advisory warnings.
-- `home-light.png`, `project-management.png`, and `new-project.png`: application
-  entry points and project management.
+- `home-light.png` and `project-management.png`: application entry points and
+  project management.
+- `new-project-dialog.png`: the current New Project dialog, including the
+  required backend Import RTL section.
+- `managed-mpc-dialog.png`: Select Managed MPC, showing an installed template,
+  its selected design, resources, and I/O pins. The template is optional, but
+  when one is selected it wraps the separately imported design RTL.
 - `wizard-01-project.png` through `wizard-07-spec.png`: the seven backend
   workspace creation phases, using an existing project with imported RTL.
 - `resource-manager.png` and `resource-pdks.png`: resource catalog and a real
@@ -22,6 +29,16 @@ execution and checklist states have not been changed for the images.
 - `workspace-agent.png`: a configured Agent session bound to the GCD
   workspace, showing the available operation choices beside the dashboard.
   The setup card is closed and no credentials appear in the capture.
+- `agent-quick-start.png`: the Home Agent after Quick Start was stopped before
+  the ECC flow phase. The Project Management view reflects the setup state at
+  that point.
+- `agent-workspace-mpc-unavailable.png`: the Agent setup contract after an
+  explicitly selected MPC cannot be resolved. The contract remains visible and
+  marked **Needs attention** instead of silently dropping the selection.
+- `agent-optimize-authorization.png`: a completed-workspace optimization frozen
+  for authorization, followed by **Cancel**. No candidate workspace was created
+  and no optimization episode was executed. The capture uses the real
+  DeepSeek Flash-backed Agent profile with an isolated test configuration.
 - `frontend-rtl-setup.png`: the General RTL profile’s source and clock setup.
 - `chip-viewer.png`: the real native Viewer in fullscreen at 2560 × 1600,
   displaying the GCD route geometry with physical layers and drawing data

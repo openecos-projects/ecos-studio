@@ -339,6 +339,14 @@ before choosing the remaining workspace settings.
 
 ![Import RTL reuses project sources or selects replacement sources](asset/wizard-02-rtl.png)
 
+When you create another workspace from the same project, the project's imported
+RTL or filelist remains selected and Spec Setting keeps the project's top module
+instead of requiring another HDL discovery pass. See the
+[RTL-backed example](asset/workspace-reuse-rtl.png) and
+[filelist-backed example](asset/workspace-reuse-filelist.png).
+
+![Repeated workspace setup retains the project RTL and top module](asset/workspace-reuse-rtl.png)
+
 **Step 3 — Basic Info.**
 
 - **Workspace Name** (required; must not contain spaces or Chinese characters;
@@ -534,13 +542,18 @@ The **New project** dialog asks for:
   selected project type.
 - **Project Storage Location** — read-only field; click it or **Browse** to
   choose a directory.
-- **Managed MPC** — optionally bind an installed MPC template (_No MPC_ or a
-  template from the dropdown). Templates with multiple designs show an **MPC
-  Design** selector and a preview card. This field applies to backend projects.
+- **Managed MPC** — click the selector to open **Select Managed MPC**. The dialog
+  lists installed templates, shows the selected template's design, geometry,
+  resources, and I/O pins, and provides an **MPC Design** selector when the
+  template contains multiple designs. Choose **Use template** to bind it, or
+  **Clear** beside the selector to return to **No MPC selected**. This field
+  applies to backend projects.
 - **Import RTL** — required for every backend project, including projects with
   a managed MPC. Select RTL files or a filelist; `ecc rtl import` copies them
   into the project's `rtl/` directory, and the MPC wraps that design in its
   frame template.
+
+![Select Managed MPC previews the template design, resources, and I/O pins](asset/managed-mpc-dialog.png)
 
 The dialog previews the manifest path (`<location>/project.json`) and validates
 the inputs inline (missing directory, unloaded MPC spec, …). **Create** writes
@@ -548,7 +561,7 @@ the backend project's `ecc.toml` and `project.json`, imports its RTL, and
 registers the project. Creating a project does not run its flow; use the
 project row's **New** action to create a workspace next.
 
-![New Project selects Backend or Frontend and imports backend RTL](asset/new-project.png)
+![New Project selects Backend or Frontend and imports backend RTL](asset/new-project-dialog.png)
 
 ### Importing Projects and Workspaces
 
@@ -1044,11 +1057,15 @@ workspace and starts no flow.
 
 The Home Agent's **Get started** conversation also offers **Quick Start** for
 the built-in GCD example. It requires ready GCD, ICS55 PDK, and MPC resources;
-missing resources are reported before creation. The walkthrough opens Project
-Management, creates a project and workspace, and starts the full flow. Its
-final success or failure message follows the actual flow result. **Stop Quick
-Start** stops setup or requests cancellation of the flow after it has started;
-you can also use **Background Tasks → Cancel Flow**.
+missing resources are reported before creation. A selected MPC that cannot be
+downloaded or resolved is marked **Needs attention**, and confirmation fails
+without creating the workspace. The walkthrough opens Project Management,
+creates a project and workspace, and starts the full flow. Its final success or
+failure message follows the actual flow result. **Stop Quick Start** stops setup
+or requests cancellation of the flow after it has started; you can also use
+**Background Tasks → Cancel Flow**.
+
+![Quick Start stopped before the ECC flow phase](asset/agent-quick-start.png)
 
 ### Proposals and Confirmation
 
@@ -1064,13 +1081,24 @@ that you can expand (**Details / Hide details**).
   preserving the source workspace and its earlier results. Choose either the
   selected stage alone or continuation from that stage through Harden.
 - **Continue unfinished flow** resumes in the current workspace.
+- If a selected resource is no longer available, the contract shows
+  **Needs attention** and keeps the explicit selection visible. **Confirm and
+  start** then fails closed; it does not silently create the workspace without
+  the selected resource.
+
+![An unavailable selected MPC leaves the Agent contract in Needs attention](asset/agent-workspace-mpc-unavailable.png)
 
 ### Optimizing a Completed Design
 
 On Home, choose **Optimize a completed design**, select a baseline workspace
 completed through Harden, and describe the goal. You can also request
 optimization from a workspace chat. Review the proposed primary metric,
-metrics to preserve, and signoff gates before confirming the optimization.
+metrics to preserve, signoff gates, geometry mode, enabled parameter layers,
+and frozen objective hash before confirming the optimization. **Cancel** after
+authorization closes the proposal without creating a candidate workspace or
+running ECC.
+
+![Optimize authorization is cancellable before any candidate workspace or ECC run](asset/agent-optimize-authorization.png)
 
 Candidates execute in isolated workspaces. A baseline without noise
 calibration first runs three replays. Optimization has automatic execution,
