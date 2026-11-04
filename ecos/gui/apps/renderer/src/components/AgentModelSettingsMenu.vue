@@ -15,63 +15,72 @@
       <i class="ri-arrow-up-s-line" aria-hidden="true"></i>
     </button>
 
-    <div
-      v-if="open"
-      class="model-settings__popover"
-      role="dialog"
-      aria-label="Agent model settings"
-    >
+    <Teleport to="body">
       <div
-        v-for="section in sections"
-        :key="section.key"
-        class="model-settings__entry"
-        @pointerenter="showFlyout(section.key, $event)"
-        @focusin="showFlyout(section.key, $event)"
+        v-if="open"
+        ref="popoverRef"
+        class="model-settings__popover"
+        :style="popoverStyle"
+        role="dialog"
+        aria-label="Agent model settings"
+        @keydown.esc.stop.prevent="close"
       >
-        <button
-          type="button"
-          class="model-settings__row"
-          aria-haspopup="menu"
-          :aria-expanded="activeFlyout === section.key"
-          @click="openFlyout(section.key, $event)"
+        <div
+          v-for="section in sections"
+          :key="section.key"
+          class="model-settings__entry"
+          @pointerenter="showFlyout(section.key, $event)"
+          @focusin="showFlyout(section.key, $event)"
         >
-          <span>{{ section.label }}</span>
-          <strong>{{ section.current }}</strong>
-          <i class="ri-arrow-right-s-line" aria-hidden="true"></i>
-        </button>
-      </div>
-
-      <p v-if="error" class="model-settings__error" role="status">{{ error }}</p>
-
-      <div
-        v-if="profiles?.length"
-        class="model-settings__source"
-        role="radiogroup"
-        aria-label="模型来源"
-      >
-        <p class="model-settings__source-label">模型来源</p>
-        <div class="model-settings__source-options">
           <button
-            v-for="profile in profiles"
-            :key="profile.id"
             type="button"
-            class="model-settings__source-option"
-            role="radio"
-            :aria-checked="activeProfileId === profile.id"
-            :class="{
-              'model-settings__source-option--active': activeProfileId === profile.id,
-            }"
-            :disabled="busy"
-            @click="selectSource(profile.id)"
+            class="model-settings__row"
+            aria-haspopup="menu"
+            :aria-expanded="activeFlyout === section.key"
+            @click="openFlyout(section.key, $event)"
           >
-            {{ profile.name }}
+            <span>{{ section.label }}</span>
+            <strong>{{ section.current }}</strong>
+            <i class="ri-arrow-right-s-line" aria-hidden="true"></i>
           </button>
         </div>
-        <button type="button" class="model-settings__configure" @click="openApiConfig()">
-          管理模型配置…
-        </button>
+
+        <p v-if="error" class="model-settings__error" role="status">{{ error }}</p>
+
+        <div
+          v-if="profiles?.length"
+          class="model-settings__source"
+          role="radiogroup"
+          aria-label="模型来源"
+        >
+          <p class="model-settings__source-label">模型来源</p>
+          <div class="model-settings__source-options">
+            <button
+              v-for="profile in profiles"
+              :key="profile.id"
+              type="button"
+              class="model-settings__source-option"
+              role="radio"
+              :aria-checked="activeProfileId === profile.id"
+              :class="{
+                'model-settings__source-option--active': activeProfileId === profile.id,
+              }"
+              :disabled="busy"
+              @click="selectSource(profile.id)"
+            >
+              {{ profile.name }}
+            </button>
+          </div>
+          <button
+            type="button"
+            class="model-settings__configure"
+            @click="openApiConfig()"
+          >
+            管理模型配置…
+          </button>
+        </div>
       </div>
-    </div>
+    </Teleport>
 
     <Teleport to="body">
       <div
@@ -132,9 +141,15 @@ const emit = defineEmits<{
 
 const rootRef = ref<HTMLElement | null>(null)
 const triggerRef = ref<HTMLButtonElement | null>(null)
+const popoverRef = ref<HTMLElement | null>(null)
 const flyoutRef = ref<HTMLElement | null>(null)
 const open = ref(false)
 const activeFlyout = ref<'model' | 'effort' | null>(null)
+const popoverStyle = ref<{
+  left: string
+  top: string
+  visibility: 'hidden' | 'visible'
+}>({ left: '0px', top: '0px', visibility: 'hidden' })
 const flyoutStyle = ref<{
   left: string
   top: string
@@ -185,6 +200,28 @@ const activeSection = computed(() =>
   sections.value.find((section) => section.key === activeFlyout.value),
 )
 
+function positionPopover(): void {
+  const trigger = triggerRef.value
+  const popover = popoverRef.value
+  if (!trigger || !popover) return
+  const anchorRect = trigger.getBoundingClientRect()
+  const gap = 8
+  const margin = 12
+  const width = popover.offsetWidth
+  const height = popover.offsetHeight
+  const maxLeft = Math.max(margin, window.innerWidth - width - margin)
+  const left = Math.max(margin, Math.min(anchorRect.right - width, maxLeft))
+  const above = anchorRect.top - gap - height
+  const top = Math.max(
+    margin,
+    Math.min(
+      above >= margin ? above : anchorRect.bottom + gap,
+      window.innerHeight - height - margin,
+    ),
+  )
+  popoverStyle.value = { left: `${left}px`, top: `${top}px`, visibility: 'visible' }
+}
+
 async function showFlyout(key: 'model' | 'effort', event: Event): Promise<void> {
   const anchor = event.currentTarget as HTMLElement
   const anchorRect = anchor.getBoundingClientRect()
@@ -211,9 +248,16 @@ async function openFlyout(key: 'model' | 'effort', event: Event): Promise<void> 
   flyoutRef.value?.querySelector<HTMLButtonElement>('.model-settings__option')?.focus()
 }
 
-function toggle(): void {
-  open.value = !open.value
+async function toggle(): Promise<void> {
   activeFlyout.value = null
+  if (open.value) {
+    open.value = false
+    return
+  }
+  open.value = true
+  popoverStyle.value = { left: '0px', top: '0px', visibility: 'hidden' }
+  await nextTick()
+  positionPopover()
 }
 
 function close(): void {
@@ -243,14 +287,27 @@ function onDocumentPointerDown(event: PointerEvent): void {
   if (
     open.value &&
     !rootRef.value?.contains(target) &&
+    !popoverRef.value?.contains(target) &&
     !flyoutRef.value?.contains(target)
   ) {
     close()
   }
 }
 
-onMounted(() => document.addEventListener('pointerdown', onDocumentPointerDown))
-onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerDown))
+function onViewportChange(): void {
+  if (open.value) positionPopover()
+}
+
+onMounted(() => {
+  document.addEventListener('pointerdown', onDocumentPointerDown)
+  document.addEventListener('scroll', onViewportChange, true)
+  window.addEventListener('resize', onViewportChange)
+})
+onUnmounted(() => {
+  document.removeEventListener('pointerdown', onDocumentPointerDown)
+  document.removeEventListener('scroll', onViewportChange, true)
+  window.removeEventListener('resize', onViewportChange)
+})
 </script>
 
 <style scoped>
@@ -306,11 +363,11 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 }
 
 .model-settings__popover {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 0.55rem);
-  z-index: 20;
-  width: min(18rem, calc(100vw - 3rem));
+  position: fixed;
+  z-index: 900;
+  width: min(18rem, calc(100vw - 1.5rem));
+  max-height: calc(100vh - 1.5rem);
+  overflow-y: auto;
   padding: 0.3rem;
   border: 1px solid var(--border-color);
   border-radius: 1.25rem;
@@ -345,8 +402,12 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 }
 
 .model-settings__row strong {
+  min-width: 0;
+  overflow: hidden;
   color: var(--text-secondary);
   font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .model-settings__option {
@@ -418,6 +479,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 }
 
 .model-settings__source-option {
+  min-width: 0;
   padding: 0.3rem 0.4rem;
   border: 1px solid var(--border-color);
   border-radius: 0.375rem;
@@ -426,7 +488,9 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
   font-size: 0.6875rem;
   font-weight: 500;
   line-height: 1.3;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  text-align: left;
+  white-space: normal;
 }
 
 .model-settings__source-option--active {

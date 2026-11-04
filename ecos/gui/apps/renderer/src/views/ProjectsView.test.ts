@@ -24,6 +24,8 @@ const testState = vi.hoisted(() => ({
   comparisonProjection: { data: null as unknown, status: 'idle' },
   projectManifestOverride: null as unknown,
   mutateProjectManifest: vi.fn(),
+  listResourcesApi: vi.fn(),
+  readMpcSpecApi: vi.fn(),
   selectProject: vi.fn(async (_projectRoot: string) => undefined),
   watchWorkspaceFlows: vi.fn(),
   pickDirectory: vi.fn(async (_options?: unknown) => '/projects/demo'),
@@ -144,6 +146,10 @@ vi.mock('./project-management/frontendProjectWorkspaceData', () => ({
 vi.mock('@/api/projectManifest', () => ({
   mutateProjectManifest: (...args: unknown[]) => testState.mutateProjectManifest(...args),
 }))
+vi.mock('@/api/plugin', () => ({
+  listResourcesApi: (...args: unknown[]) => testState.listResourcesApi(...args),
+  readMpcSpecApi: (...args: unknown[]) => testState.readMpcSpecApi(...args),
+}))
 vi.mock('@/platform/desktop', () => ({
   getOptionalDesktopApi: () => ({
     projectManagement: {
@@ -252,6 +258,9 @@ describe('ProjectsView background lifecycle integration', () => {
     })
     testState.mutateProjectManifest.mockReset()
     testState.mutateProjectManifest.mockResolvedValue(null)
+    testState.listResourcesApi.mockReset()
+    testState.listResourcesApi.mockResolvedValue([])
+    testState.readMpcSpecApi.mockReset()
     testState.pickDirectory.mockReset()
     testState.pickDirectory.mockResolvedValue('/projects/demo')
   })
@@ -769,6 +778,83 @@ describe('ProjectsView background lifecycle integration', () => {
         }),
       )
       expect(wrapper.find('.new-project-dialog').exists()).toBe(false)
+    })
+
+    it('imports the user RTL when a managed MPC is selected', async () => {
+      const { createProjectManifestDraft } = await import('@ecos-studio/shared')
+      testState.mutateProjectManifest.mockResolvedValue(
+        createProjectManifestDraft({
+          rootPath: '/projects/demo',
+          name: 'demo',
+          designName: 'gcd',
+          projectType: 'backend',
+        }),
+      )
+      const wrapper = shallowMount(ProjectsView)
+      await flushPromises()
+      await openNewProjectDialog(wrapper)
+      const vm = wrapper.vm as unknown as {
+        projectMpcs: unknown[]
+        projectMpcDesigns: unknown[]
+        selectedProjectMpcDesignIndex: number | null
+        projectRootDraft: { mpcId: string }
+      }
+      testState.readMpcSpecApi.mockResolvedValue({
+        resource_id: 'mpc:mpc-frame',
+        installed_version: '0.1.0',
+        spec_path: '/resources/mpcs/mpc-frame/0.1.0/spec/spec.json.in',
+        spec: {
+          designs: [
+            {
+              design_name: 'mpc-frame-template',
+              io_pins: { number: 1, list: [{ name: 'clock' }] },
+              core_template: { name: '@MODULE@', minimum_area: 100 },
+            },
+          ],
+        },
+      })
+      vm.projectMpcs = [
+        {
+          resource_id: 'mpc:mpc-frame',
+          display_name: 'MPC Frame',
+          installed_version: '0.1.0',
+          path: '/resources/mpcs/mpc-frame/0.1.0',
+          spec_path: '/resources/mpcs/mpc-frame/0.1.0/spec/spec.json.in',
+        },
+      ]
+      vm.projectRootDraft.mpcId = 'mpc:mpc-frame'
+      vm.projectMpcDesigns = [
+        {
+          index: 0,
+          designName: 'mpc-frame-template',
+          dbu: null,
+          die: {},
+          core: {},
+          ioPins: { declaredCount: 1, list: [{ name: 'clock' }], other: {} },
+          other: {},
+          coreTemplate: { name: '@MODULE@', minimum_area: 100 },
+        },
+      ]
+      vm.selectedProjectMpcDesignIndex = 0
+      await flushPromises()
+      expect(wrapper.find('.project-rtl-import').exists()).toBe(true)
+      selectDialogRtl(wrapper, ['/projects/demo/rtl/gcd.v'])
+
+      await wrapper.get('.new-project-dialog .path-picker button').trigger('click')
+      await flushPromises()
+      await wrapper
+        .get('.new-project-dialog footer button.primary-button')
+        .trigger('click')
+      await flushPromises()
+
+      expect(testState.mutateProjectManifest).toHaveBeenCalledWith(
+        '/projects/demo',
+        expect.objectContaining({
+          type: 'create',
+          mpc: expect.objectContaining({ resource_id: 'mpc:mpc-frame' }),
+          rtlImport: { verilog: ['/projects/demo/rtl/gcd.v'] },
+        }),
+      )
     })
 
     function selectDialogRtl(

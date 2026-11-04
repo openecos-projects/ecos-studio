@@ -735,7 +735,7 @@
           <p v-else-if="projectMpcSpecError" class="modal-error">
             {{ projectMpcSpecError }}
           </p>
-          <template v-else-if="selectedProjectMpcCandidate && selectedProjectMpcDesign">
+          <template v-if="selectedProjectMpcCandidate && selectedProjectMpcDesign">
             <label v-if="projectMpcDesigns.length > 1" class="form-field">
               <span>MPC Design</span>
               <select v-model="selectedProjectMpcDesignIndex">
@@ -750,22 +750,21 @@
             </label>
             <MpcTemplatePreview :design="selectedProjectMpcDesign" />
           </template>
-          <template v-else>
-            <div class="form-field project-rtl-import">
-              <span>Import RTL</span>
-              <RtlImportStep
-                :verilog="projectRtlSelection.verilog"
-                :filelist="projectRtlSelection.filelist"
-                show-manual-path
-                manual-input-name="project-rtl-source"
-                @update:selection="projectRtlSelection = $event"
-              />
-              <p class="modal-help">
-                Required: the selected RTL files or filelist are copied into the project's
-                rtl/ folder by <code>ecc rtl import</code> at creation.
-              </p>
-            </div>
-          </template>
+          <div class="form-field project-rtl-import">
+            <span>Import RTL</span>
+            <RtlImportStep
+              :verilog="projectRtlSelection.verilog"
+              :filelist="projectRtlSelection.filelist"
+              show-manual-path
+              manual-input-name="project-rtl-source"
+              @update:selection="projectRtlSelection = $event"
+            />
+            <p class="modal-help">
+              Required: the selected RTL files or filelist are copied into the project's
+              rtl/ folder by <code>ecc rtl import</code> at creation. A managed MPC wraps
+              this design in its frame template.
+            </p>
+          </div>
         </template>
 
         <p class="modal-help">Project manifest: {{ projectManifestPreview }}</p>
@@ -1265,8 +1264,8 @@ const projectRootDraft = ref({
 })
 /** RTL sources imported into the new backend project's rtl/ folder
  * (`ecc rtl import` runs right after `ecc init`). Exclusive: either a
- * filelist or Verilog files. MPC-backed projects take their design from the
- * MPC template and skip the import. */
+ * filelist or Verilog files. MPC projects still need user RTL; the MPC supplies
+ * the surrounding frame template rather than replacing the design source. */
 const projectRtlSelection = ref<{ verilog: string[]; filelist: string }>({
   verilog: [],
   filelist: '',
@@ -2868,9 +2867,7 @@ async function createProjectFolderDraft() {
     return
   }
 
-  const mpcProject =
-    projectRootDraft.value.projectType === 'backend' && Boolean(selectedProjectMpc.value)
-  if (projectRootDraft.value.projectType === 'backend' && !mpcProject) {
+  if (projectRootDraft.value.projectType === 'backend') {
     if (
       !exclusiveDesignFilesReady(
         projectRtlSelection.value.verilog,
@@ -2886,7 +2883,7 @@ async function createProjectFolderDraft() {
   const name = projectRootDraft.value.name.trim() || basenamePath(directory) || 'project'
   const designName = projectRootDraft.value.designName.trim() || name
   const rtlImport =
-    projectRootDraft.value.projectType === 'backend' && !mpcProject
+    projectRootDraft.value.projectType === 'backend'
       ? projectRtlSelection.value.filelist
         ? { filelist: projectRtlSelection.value.filelist }
         : { verilog: [...projectRtlSelection.value.verilog] }
