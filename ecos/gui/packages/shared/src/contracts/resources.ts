@@ -1,5 +1,35 @@
 export type ResourceType = 'tool' | 'pdk' | 'mpc'
 
+/**
+ * Download mirror preference for registry resources, persisted in the desktop
+ * settings store under DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY:
+ * - `auto`: try GitHub first and fall back to the CNB mirror (default).
+ * - `github`: never use the CNB mirror.
+ * - `cnb`: prefer the CNB mirror and fall back to GitHub; assets without a
+ *   `cnb_url` in the registry still download from GitHub.
+ */
+export type DesktopDownloadSource = 'auto' | 'github' | 'cnb'
+
+export const DESKTOP_DOWNLOAD_SOURCE_SETTING_KEY = 'download_source'
+
+export const DESKTOP_DOWNLOAD_SOURCE_OPTIONS: readonly DesktopDownloadSource[] = [
+  'auto',
+  'github',
+  'cnb',
+]
+
+export const DEFAULT_DESKTOP_DOWNLOAD_SOURCE: DesktopDownloadSource = 'auto'
+
+/** Normalize an untrusted persisted value; null when it is not a valid source. */
+export function normalizeDesktopDownloadSource(
+  value: unknown,
+): DesktopDownloadSource | null {
+  return typeof value === 'string' &&
+    (DESKTOP_DOWNLOAD_SOURCE_OPTIONS as readonly string[]).includes(value)
+    ? (value as DesktopDownloadSource)
+    : null
+}
+
 export type ResourceStatus =
   | 'available'
   | 'installing'
