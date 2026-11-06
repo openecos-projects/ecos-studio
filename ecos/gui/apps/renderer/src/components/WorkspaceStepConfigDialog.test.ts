@@ -46,6 +46,7 @@ describe('WorkspaceStepConfigDialog', () => {
           { id: 'flow.run_analysis', appliesTo: 'all' },
           { id: 'floorplan.core_util', appliesTo: 'floorplan' },
           { id: 'floorplan.aspect_ratio', appliesTo: 'floorplan' },
+          { id: 'macro.manual_placement', appliesTo: 'floorplan' },
           { id: 'place.target_density', appliesTo: 'placement' },
           { id: 'cts.max_fanout', appliesTo: 'cts' },
           { id: 'route.top_layer', appliesTo: 'routing' },
@@ -73,7 +74,7 @@ describe('WorkspaceStepConfigDialog', () => {
       wrapper.findAll('.workspace-step-config-list button').map((item) => item.text()),
     ).toEqual([
       'SynthesisYosys · 2 params',
-      'FloorplanECC · 2 params',
+      'FloorplanECC · 3 params',
       'PlaceDreamPlace · 1 param',
       'CTSECC · 1 param',
       'RouteECC · 1 param',

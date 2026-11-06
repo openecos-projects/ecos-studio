@@ -1015,6 +1015,10 @@ When data exists, tabs appear at the top:
 Open **Edit → Config → Floorplan** to inspect `config/macro_location.tcl`.
 **Update** imports a prepared Tcl placement file. ECC's `macro` commands also
 manage manual placements; use `ecc macro --help` for the available operations.
+Enable **Manual macro placement** on the **Macro Placement** card when creating
+or reconfiguring a workspace to make that step stop until hand-placed macros
+have been saved. The Floorplan step configuration exposes the same setting as
+`macro.manual_placement` after creation.
 After changing placements, rerun the affected floorplan stages and their
 dependents to regenerate results. Opening the **macroPlacement** thumbnail
 offers view and edit choices; other thumbnails and `ecc chipview` open a

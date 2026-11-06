@@ -1652,6 +1652,38 @@ describe('NewProjectWizard behavior', () => {
     wrapper.unmount()
   })
 
+  it('keeps the manual macro placement setting inside the Macro Placement card', async () => {
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { standaloneWorkspace: true } },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    await flushPromises()
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      config: { parameters: { manual_macro_placement: boolean } }
+    }
+    wizard.currentStep = 4
+    await flushPromises()
+
+    const macroCard = wrapper.get('[data-flow-step-card="macroPlacement"]')
+    const manualPlacement = macroCard.get('#manual-macro-placement')
+    expect(macroCard.text()).toContain('Manual macro placement')
+    expect((manualPlacement.element as HTMLInputElement).checked).toBe(false)
+    await manualPlacement.setValue(true)
+    expect(wizard.config.parameters.manual_macro_placement).toBe(true)
+
+    await wrapper.get('[data-flow-step-card="preFloorplan"] button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#manual-macro-placement').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('starts the flow range at a discovered start step and disables earlier cards', async () => {
     const model = wizardMocks.defaultWorkspaceCreationModel()
     model.discovery.flowDefinitions[0]!.stepIds = [

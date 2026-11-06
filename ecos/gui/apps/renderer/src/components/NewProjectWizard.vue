@@ -650,6 +650,33 @@
                         </button>
 
                         <div
+                          v-if="
+                            step.name === 'macroPlacement' &&
+                            isFlowStepRunnable(step.name)
+                          "
+                          class="mt-4 border-t border-(--border-color)/70 pt-3"
+                          @click.stop
+                        >
+                          <label
+                            for="manual-macro-placement"
+                            class="flex cursor-pointer items-center gap-2.5"
+                          >
+                            <input
+                              id="manual-macro-placement"
+                              v-model="config.parameters.manual_macro_placement"
+                              type="checkbox"
+                              class="h-4 w-4 shrink-0 accent-(--accent-color)"
+                            />
+                            <span class="text-xs font-semibold text-(--text-primary)"
+                              >Manual macro placement</span
+                            >
+                          </label>
+                          <p class="mt-1.5 text-[11px] leading-4 text-(--text-secondary)">
+                            Macro Placement stops until hand-placed macros are saved.
+                          </p>
+                        </div>
+
+                        <div
                           v-if="step.name === 'CTS' && isFlowStepRunnable(step.name)"
                           class="mt-4 border-t border-(--border-color)/70 pt-3"
                           @click.stop
@@ -2225,6 +2252,7 @@ function createInitialConfig(
       frequency_max: 50,
       max_fanout: 32,
       clock_tree: false,
+      manual_macro_placement: false,
       sta_max_parallel_corners: 1,
       die_area_mode: dieAreaMode.value,
       die_width: 100,
@@ -3239,6 +3267,13 @@ function applyProjectParameterDefaults(
     firstBoolean(
       parameters.clock_tree,
       isRecord(parameters.geometry) ? parameters.geometry.clock_tree : undefined,
+    ),
+  )
+  setBooleanParameterDefault(
+    'manual_macro_placement',
+    firstBoolean(
+      parameters.manual_macro_placement,
+      isRecord(parameters.macro) ? parameters.macro.manual_placement : undefined,
     ),
   )
   setNumberParameterDefault(

@@ -95,6 +95,8 @@ export function backendWorkspaceOptions(
     return mapped && mapped.trim() ? mapped : fallback
   }
   const clockTreeSpecKey = parameterDisplayIndex?.clock_tree?.trim() ?? ''
+  const manualMacroPlacementSpecKey =
+    parameterDisplayIndex?.manual_macro_placement?.trim() ?? ''
   const inputs: Array<{ inputId: string; role: string }> = []
   const inputBindings: Record<string, string> = {}
   const addInput = (inputId: string, role: string, path: string) => {
@@ -317,6 +319,11 @@ export function backendWorkspaceOptions(
                       numberValue(parameters.margin, 0),
                     ],
                   }),
+            }
+          : {}),
+        ...(floorplanApplies && manualMacroPlacementSpecKey
+          ? {
+              [manualMacroPlacementSpecKey]: parameters.manual_macro_placement === true,
             }
           : {}),
         ...(ctsApplies
