@@ -6,18 +6,19 @@ use chip_view_db::clock_tree::ClockGraphIndex;
 pub(super) const NODE_WIDTH: f32 = 160.0;
 pub(super) const NODE_HEIGHT: f32 = 34.0;
 pub(super) const LEVEL_SPACING: f32 = 80.0;
-pub(super) const LEAF_WIDTH: f32 = 14.0;
-pub(super) const LEAF_HEIGHT: f32 = 14.0;
-pub(super) const LEAF_ROW_SPACING: f32 = 20.0;
+pub(super) const LEAF_WIDTH: f32 = 12.0;
+pub(super) const LEAF_HEIGHT: f32 = 12.0;
+pub(super) const LEAF_ROW_SPACING: f32 = 16.0;
 
-const LEAF_COLUMN_SPACING: f32 = 20.0;
-const LEAF_FAN_MAX_WIDTH: f32 = 360.0;
-const LEAF_FAN_MIN_SPACING: f32 = 0.02;
-const LEAF_DELAY_VERTICAL_SPAN: f32 = 180.0;
+const LEAF_COLUMN_SPACING: f32 = 12.0;
+const LEAF_FAN_MAX_WIDTH: f32 = 180.0;
+const LEAF_FAN_MIN_SPACING: f32 = 0.01;
+const DELAY_NS_HEIGHT: f32 = 2_400.0;
+const MIN_DELAY_AXIS_HEIGHT: f32 = 360.0;
 const MAX_LEAF_FAN_COLUMNS: usize = 32;
 const LEAF_FAN_THRESHOLD: usize = 8;
-const SUBTREE_GAP: f32 = 16.0;
-const ROOT_GAP: f32 = 48.0;
+const SUBTREE_GAP: f32 = 12.0;
+const ROOT_GAP: f32 = 40.0;
 
 #[derive(Clone, Debug)]
 pub(super) struct TreeRow {
@@ -307,8 +308,12 @@ fn layout_rows(
         top_y: 0.0,
         bottom_y: f64::from(maximum_depth as f32 * LEVEL_SPACING),
     };
-    let delay_axis_bottom =
-        f64::from(maximum_depth as f32 * LEVEL_SPACING + LEAF_DELAY_VERTICAL_SPAN);
+    let delay_axis_height = delay_bounds.map_or(0.0, |(_, maximum_ns)| {
+        (maximum_ns as f32 * DELAY_NS_HEIGHT)
+            .max(MIN_DELAY_AXIS_HEIGHT)
+            .max(maximum_depth as f32 * LEVEL_SPACING + LEVEL_SPACING)
+    });
+    let delay_axis_bottom = delay_axis_top + f64::from(delay_axis_height);
 
     let mut subtree_width = vec![0.0_f32; node_count];
     for row_index in (0..node_count).rev() {
@@ -694,6 +699,29 @@ mod tests {
             );
             assert!(row.delay_positioned);
         }
+    }
+
+    #[test]
+    fn real_delay_axis_scales_with_insertion_delay() {
+        let mut index = test_index(vec![vec![1], vec![]]);
+        index.nodes[0].arrival_ns = Some(0.0);
+        index.nodes[1].arrival_ns = Some(0.50);
+        index.timed_node_count = 2;
+
+        let layout = visible_rows(
+            &index,
+            &HashSet::new(),
+            "",
+            false,
+            TreeLayoutMode::RealDelay,
+        );
+        let axis = layout.axis.expect("delay axis");
+
+        assert!(
+            axis.bottom_y - axis.top_y >= f64::from(0.50 * DELAY_NS_HEIGHT),
+            "delay axis height: {}",
+            axis.bottom_y - axis.top_y
+        );
     }
 
     #[test]
