@@ -13,8 +13,8 @@ pub(super) const LEAF_ROW_SPACING: f32 = 16.0;
 const LEAF_COLUMN_SPACING: f32 = 12.0;
 const LEAF_FAN_MAX_WIDTH: f32 = 180.0;
 const LEAF_FAN_MIN_SPACING: f32 = 0.01;
-const DELAY_NS_HEIGHT: f32 = 2_400.0;
-const MIN_DELAY_AXIS_HEIGHT: f32 = 360.0;
+const DELAY_NS_HEIGHT: f32 = 24_000.0;
+const MIN_DELAY_AXIS_HEIGHT: f32 = 3_600.0;
 const MAX_LEAF_FAN_COLUMNS: usize = 32;
 const LEAF_FAN_THRESHOLD: usize = 8;
 const SUBTREE_GAP: f32 = 12.0;
@@ -718,7 +718,7 @@ mod tests {
         let axis = layout.axis.expect("delay axis");
 
         assert!(
-            axis.bottom_y - axis.top_y >= f64::from(0.50 * DELAY_NS_HEIGHT),
+            (axis.bottom_y - axis.top_y - f64::from(0.50 * DELAY_NS_HEIGHT)).abs() < 1e-6,
             "delay axis height: {}",
             axis.bottom_y - axis.top_y
         );

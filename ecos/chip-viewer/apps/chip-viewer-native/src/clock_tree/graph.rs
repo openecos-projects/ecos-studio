@@ -747,7 +747,7 @@ impl ClockTreePanel {
                             egui::pos2(point.x, point.y + child_size.y * 0.5 + 2.0),
                             egui::Align2::CENTER_TOP,
                             label,
-                            egui::FontId::proportional((10.0 * zoom).clamp(7.0, 13.0)),
+                            egui::FontId::proportional((8.0 * zoom).clamp(6.0, 8.0)),
                             egui::Color32::from_gray(205),
                         ));
                     }
