@@ -261,6 +261,18 @@ export interface EccWorkspaceResetFlowResult {
   workspaceRevision?: number
 }
 
+export interface EccWorkspaceDefViewRequest {
+  defPath: string
+  workspaceHandle: string
+}
+
+export interface EccWorkspaceDefViewResult {
+  defPath: string
+  directory: string
+  geometryManifestPath: string
+  workspaceHandle: string
+}
+
 export interface EccWorkspaceExportSignoffResult {
   outputPath: string
 }

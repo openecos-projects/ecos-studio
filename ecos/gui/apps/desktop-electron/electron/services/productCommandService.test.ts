@@ -2,6 +2,28 @@ import { describe, expect, it, vi } from 'vitest'
 import { executeProductCommand } from './productCommandService'
 
 describe('executeProductCommand Workspace creation', () => {
+  it('routes DEF View through the owned Workspace runtime', async () => {
+    const defView = vi.fn().mockResolvedValue({
+      defPath: '/defs/gcd.def',
+      directory: '/projects/demo/ws_1/defview',
+      geometryManifestPath:
+        '/projects/demo/ws_1/defview/output/geometry/geometry.manifest',
+      workspaceHandle: 'handle-1',
+    })
+    const payload = { defPath: '/defs/gcd.def', workspaceHandle: 'handle-1' }
+
+    await expect(
+      executeProductCommand({ command: 'workspace.defView', payload }, {
+        ownsWorkspaceHandle: (handle: string) => handle === 'handle-1',
+        runtime: { defView } as never,
+      } as never),
+    ).resolves.toMatchObject({
+      geometryManifestPath:
+        '/projects/demo/ws_1/defview/output/geometry/geometry.manifest',
+    })
+    expect(defView).toHaveBeenCalledWith(payload)
+  })
+
   it('validates and routes explicit Optimization Parent Adoption', async () => {
     const adoptOptimizationCandidate = vi.fn().mockResolvedValue({
       adopted: true,

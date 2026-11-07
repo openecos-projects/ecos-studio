@@ -45,6 +45,7 @@ const BUILD_HINT =
   'Build them with: cd ecos/chip-viewer && cargo build --release -p chip-viewer-native; then build the ECC CLI package.'
 const GEOMETRY_SCHEMA_VERSION = 1
 const VIEWER_STARTUP_HEALTH_CHECK_MS = 800
+const DEF_VIEW_STEP = 'defview'
 /** R-notation orientations accepted by the ECC place_instance operation. */
 const R_ORIENTATIONS = new Set(['R0', 'R90', 'R180', 'R270', 'MX', 'MY', 'MX90', 'MY90'])
 /** Placement status vocabulary accepted by the ECC place_instance operation. */
@@ -579,6 +580,10 @@ function isLvsWorkspaceStep(
   })
 }
 
+function isDefViewStep(step: unknown): boolean {
+  return typeof step === 'string' && step.trim().toLowerCase() === DEF_VIEW_STEP
+}
+
 function normalizeChipViewerMode(mode: unknown): ChipViewerMode {
   if (mode === undefined || mode === 'view') {
     return 'view'
@@ -707,7 +712,13 @@ export class ChipViewerService {
   async open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult> {
     const projectPath = normalizeLocalPath(request.projectPath)
     const mode = normalizeChipViewerMode(request.mode)
-    const snapshotInputs = await this.resolveSnapshotInputs(projectPath, request.step)
+    const defView = isDefViewStep(request.step)
+    if (defView && mode === 'edit') {
+      throw new Error('DEF View is read-only and cannot be opened in edit mode.')
+    }
+    const snapshotInputs = defView
+      ? this.resolveDefViewSnapshotInputs(projectPath)
+      : await this.resolveSnapshotInputs(projectPath, request.step)
     await this.requireSavedGeometry(snapshotInputs, request.step)
     const binaries = this.resolveBinaries()
 
@@ -935,6 +946,22 @@ export class ChipViewerService {
       lvsDataPath: isLvsStep && this.fileExists(lvsDataPath) ? lvsDataPath : undefined,
       manifestPath: join(geometryDir, 'geometry.manifest'),
       mapRootPath: this.fileExists(mapRootPath) ? mapRootPath : undefined,
+      workspaceStepDirectory,
+    }
+  }
+
+  private resolveDefViewSnapshotInputs(projectPath: string): SnapshotInputs {
+    const workspaceStepDirectory = join(projectPath, DEF_VIEW_STEP)
+    const outputDirectory = join(workspaceStepDirectory, 'output')
+    const editDirectory = join(workspaceStepDirectory, '.chip-viewer', 'layout-edit')
+    return {
+      dbPath: join(outputDirectory, 'defview_db'),
+      defPath: join(outputDirectory, 'defview.def'),
+      editCommandDirectory: join(editDirectory, 'commands'),
+      editResultDirectory: join(editDirectory, 'results'),
+      gdsPath: join(outputDirectory, 'defview.gds'),
+      imagePath: join(outputDirectory, 'defview.png'),
+      manifestPath: join(outputDirectory, 'geometry', 'geometry.manifest'),
       workspaceStepDirectory,
     }
   }

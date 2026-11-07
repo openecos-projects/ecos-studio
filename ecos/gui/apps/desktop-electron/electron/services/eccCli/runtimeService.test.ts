@@ -13,6 +13,7 @@ import {
   projectSettingsArgs,
   rtlImportArgs,
   workspaceCreateCommands,
+  workspaceDefViewArgs,
   workspaceParameterValue,
   workspaceRefreshArgs,
   operationFlowMatches,
@@ -368,6 +369,25 @@ describe('ECC CLI workspace command planning', () => {
     ])
   })
 
+  it('maps DEF View to the Workspace-scoped CLI command', () => {
+    expect(
+      workspaceDefViewArgs({
+        defPath: '/inputs/gcd.def.gz',
+        projectRoot: '/projects/demo',
+        workspaceId: 'ws_1',
+      }),
+    ).toEqual([
+      'defview',
+      '--project',
+      '/projects/demo',
+      '--workspace',
+      'ws_1',
+      '--def',
+      '/inputs/gcd.def.gz',
+      '--plain',
+    ])
+  })
+
   it('maps Project Management MPC creation to the public init options', () => {
     expect(
       projectManifestCreateArgs('/projects/demo', {
@@ -637,6 +657,69 @@ describe('ECC CLI Workspace configuration boundary', () => {
         workspaceHandle: 'handle-1',
       }),
     ).resolves.toMatchObject({ workspaceId: 'ws_1', workspaceRevision: 4 })
+    expect(run).not.toHaveBeenCalled()
+  })
+})
+
+describe('ECC CLI DEF View', () => {
+  it('reuses the open Workspace and returns its geometry manifest', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ecc-defview-'))
+    temporaryDirectories.push(projectRoot)
+    const workspaceDirectory = join(projectRoot, 'ws_1')
+    const defPath = join(projectRoot, 'selected.def.gz')
+    const geometryManifestPath = join(
+      workspaceDirectory,
+      'defview',
+      'output',
+      'geometry',
+      'geometry.manifest',
+    )
+    await writeFile(defPath, 'VERSION 5.8 ;\n')
+    const commands: string[][] = []
+    vi.spyOn(EccCliProcess.prototype, 'run').mockImplementation(async (args) => {
+      commands.push([...args])
+      await mkdir(join(workspaceDirectory, 'defview', 'output', 'geometry'), {
+        recursive: true,
+      })
+      await writeFile(geometryManifestPath, 'schema_version=1\n')
+      return { exitCode: 0, stderr: '', stdout: '' }
+    })
+    const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
+    ;(service as any).sessions.set('handle-1', {
+      directory: workspaceDirectory,
+      handle: 'handle-1',
+      projectRoot,
+      workspaceId: 'ws_1',
+      workspaceRevision: 4,
+    })
+
+    await expect(
+      service.defView({ defPath, workspaceHandle: 'handle-1' }),
+    ).resolves.toEqual({
+      defPath,
+      directory: join(workspaceDirectory, 'defview'),
+      geometryManifestPath,
+      workspaceHandle: 'handle-1',
+    })
+    expect(commands).toEqual([
+      workspaceDefViewArgs({ defPath, projectRoot, workspaceId: 'ws_1' }),
+    ])
+  })
+
+  it('rejects non-DEF inputs before invoking the CLI', async () => {
+    const run = vi.spyOn(EccCliProcess.prototype, 'run')
+    const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
+    ;(service as any).sessions.set('handle-1', {
+      directory: '/projects/demo/ws_1',
+      handle: 'handle-1',
+      projectRoot: '/projects/demo',
+      workspaceId: 'ws_1',
+      workspaceRevision: 4,
+    })
+
+    await expect(
+      service.defView({ defPath: '/inputs/design.txt', workspaceHandle: 'handle-1' }),
+    ).rejects.toThrow('DEF View requires a .def or .def.gz input.')
     expect(run).not.toHaveBeenCalled()
   })
 })

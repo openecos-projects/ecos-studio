@@ -24,6 +24,8 @@ import type {
   EccWorkspaceCreateResult,
   EccWorkspaceDeriveRequest,
   EccWorkspaceDeriveResult,
+  EccWorkspaceDefViewRequest,
+  EccWorkspaceDefViewResult,
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceExportSignoffResult,
   EccWorkspaceHandleRequest,
@@ -784,6 +786,53 @@ export class EccCliRuntimeService {
       '--no-wait',
     ])
     return { directory: session.directory, workspaceRevision: session.workspaceRevision }
+  }
+
+  async defView(request: EccWorkspaceDefViewRequest): Promise<EccWorkspaceDefViewResult> {
+    const session = this.requireSession(request.workspaceHandle)
+    this.assertProjectWritable(session.projectRoot)
+    if (this.isWorkspaceRuntimeActive(session.directory)) {
+      throw codedError('Workspace already has an active ECC run.', 'WORKSPACE_BUSY')
+    }
+    const defPath = resolve(request.defPath)
+    if (!/\.def(?:\.gz)?$/i.test(defPath)) {
+      throw new Error('DEF View requires a .def or .def.gz input.')
+    }
+    const input = await stat(defPath).catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error(`DEF input does not exist: ${defPath}`)
+      }
+      throw error
+    })
+    if (!input.isFile()) throw new Error(`DEF input is not a file: ${defPath}`)
+
+    await this.cli.run(
+      workspaceDefViewArgs({
+        defPath,
+        projectRoot: session.projectRoot,
+        workspaceId: session.workspaceId,
+      }),
+      { cwd: session.projectRoot },
+    )
+    const directory = join(session.directory, 'defview')
+    const geometryManifestPath = join(
+      directory,
+      'output',
+      'geometry',
+      'geometry.manifest',
+    )
+    const manifest = await stat(geometryManifestPath).catch(() => null)
+    if (!manifest?.isFile()) {
+      throw new Error(
+        `DEF View did not generate a geometry manifest: ${geometryManifestPath}`,
+      )
+    }
+    return {
+      defPath,
+      directory,
+      geometryManifestPath,
+      workspaceHandle: request.workspaceHandle,
+    }
   }
 
   async exportSignoff(
@@ -2104,6 +2153,23 @@ export function workspaceRefreshArgs(options: {
     '--no-wait',
     ...(options.force ? ['--force'] : []),
     ...(options.keepBackup ? ['--keep-backup'] : []),
+  ]
+}
+
+export function workspaceDefViewArgs(options: {
+  defPath: string
+  projectRoot: string
+  workspaceId: string
+}): string[] {
+  return [
+    'defview',
+    '--project',
+    options.projectRoot,
+    '--workspace',
+    options.workspaceId,
+    '--def',
+    resolve(options.defPath),
+    '--plain',
   ]
 }
 

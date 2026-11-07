@@ -183,6 +183,7 @@ function isShutdownBlockedProductCommand(value: unknown): boolean {
     'workspace.updateConfiguration',
     'workspace.updateStepConfiguration',
     'workspace.reset',
+    'workspace.defView',
     'workspace.exportSignoff',
     'workspace.continueCreation',
     'workspace.abandonCreation',
