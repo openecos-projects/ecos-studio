@@ -380,8 +380,10 @@ export interface EccRuntimeOperation {
   error: { code: string; message: string } | null
   flow?: { steps: EccRuntimeStepSnapshot[] }
   /**
-   * Set when the run stopped before a required step because a checklist gate
-   * blocked it. The operation itself completed, but the flow did not succeed.
+   * Set when the flow did not succeed because a step's checklist gate blocked
+   * it (for example a required step failed its gate, or the flow stopped with
+   * a blocked gate such as pending manual macro placement). Absent for
+   * cancelled runs and runs without a blocked gate step.
    */
   flowBlock?: {
     failedItems: string[]

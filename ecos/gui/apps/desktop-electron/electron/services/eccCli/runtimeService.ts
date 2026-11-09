@@ -66,7 +66,7 @@ import {
   type EccCliProcessOptions,
 } from './cliProcess'
 import { parseEccLineRecords, parseJsonLiteral } from './lineRecords'
-import { blockedFlowStep, terminalState } from './operationOutcome'
+import { flowBlockOutcome, terminalState } from './operationOutcome'
 import {
   discoverProject,
   readProjectManifest,
@@ -1399,10 +1399,7 @@ export class EccCliRuntimeService {
     }
     if (tracked.registrationPending) return
     const terminal = terminalState(flow, tracked.requestedCancel)
-    const flowBlock =
-      terminal === 'succeeded' && tracked.operation.kind === 'flow'
-        ? blockedFlowStep(flow)
-        : null
+    const flowBlock = flowBlockOutcome(flow, tracked.operation.kind, terminal)
     tracked.operation = {
       ...tracked.operation,
       error:
