@@ -22,6 +22,12 @@ pub(crate) enum LayoutTarget {
     Net(String),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ClockTreeSelection {
+    pub(crate) clock: usize,
+    pub(crate) node: Option<usize>,
+}
+
 fn layout_target_for_node(index: &ClockGraphIndex, node_index: usize) -> LayoutTarget {
     let edges = index
         .edges_for_node
@@ -165,6 +171,13 @@ impl ClockTreePanel {
 
     pub(crate) fn is_open(&self) -> bool {
         self.open
+    }
+
+    pub(crate) fn selection_key(&self) -> ClockTreeSelection {
+        ClockTreeSelection {
+            clock: self.clock,
+            node: self.selected,
+        }
     }
 
     fn poll(&mut self, ctx: &egui::Context) {

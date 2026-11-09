@@ -222,7 +222,7 @@ struct LoadedViewer {
     shape_id_text: String,
     last_query_status: Option<String>,
     highlighted: BTreeSet<ShapeId>,
-    clock_tree_highlight: Option<clock_tree::ClockTreeHighlight>,
+    clock_tree_overlay: clock_tree::ClockTreeOverlay,
     selected: Option<ShapeId>,
     pending_focus: Option<PendingFocus>,
     macro_interaction: Option<MacroCanvasInteraction>,
@@ -2307,7 +2307,7 @@ impl LoadedViewer {
             shape_id_text: String::new(),
             last_query_status: None,
             highlighted: BTreeSet::new(),
-            clock_tree_highlight: None,
+            clock_tree_overlay: clock_tree::ClockTreeOverlay::default(),
             selected: None,
             pending_focus: None,
             macro_interaction: None,
@@ -3507,6 +3507,7 @@ impl LoadedViewer {
                                         self.focus_highlighted_shapes();
                                     }
                                     if ui.small_button("Clear").clicked() {
+                                        self.clock_tree_overlay.clear();
                                         clear_search_state(
                                             &mut self.search_text,
                                             &mut self.highlighted,
@@ -4604,8 +4605,8 @@ impl LoadedViewer {
             }
             let geometry = self.db.shape_geometry(shape);
             if let Some(role) = self
-                .clock_tree_highlight
-                .as_ref()
+                .clock_tree_overlay
+                .highlight()
                 .and_then(|highlight| highlight.role_for(*shape_id))
             {
                 paint_clock_tree_highlight_overlay(
@@ -4640,7 +4641,7 @@ impl LoadedViewer {
             }
         }
 
-        if let Some(highlight) = &self.clock_tree_highlight {
+        if let Some(highlight) = self.clock_tree_overlay.highlight() {
             paint_clock_tree_node_markers(
                 &painter,
                 &highlight.markers,
@@ -5266,7 +5267,7 @@ impl LoadedViewer {
             for id in &self.highlighted {
                 id.hash(&mut hasher);
             }
-            if let Some(highlight) = &self.clock_tree_highlight {
+            if let Some(highlight) = self.clock_tree_overlay.highlight() {
                 for id in &highlight.parent_shapes {
                     1u8.hash(&mut hasher);
                     id.hash(&mut hasher);
@@ -5833,7 +5834,7 @@ impl LoadedViewer {
                 {
                     self.selected = None;
                     self.highlighted.clear();
-                    self.clock_tree_highlight = None;
+                    self.clock_tree_overlay.clear();
                     self.selected_drc = None;
                     self.selected_antenna = None;
                     self.selected_lvs_group = None;
@@ -6243,8 +6244,8 @@ impl LoadedViewer {
                 style.fill_alpha = 230;
                 extra_flags |= crate::canvas_gpu3d::FLAG_SELECTED;
             } else if let Some(role) = self
-                .clock_tree_highlight
-                .as_ref()
+                .clock_tree_overlay
+                .highlight()
                 .and_then(|highlight| highlight.role_for(shape_id))
             {
                 style.rgba = match role {
@@ -7934,7 +7935,7 @@ impl LoadedViewer {
     fn refresh_highlight(&mut self) {
         let query = self.search_text.trim();
         self.last_query_status = None;
-        self.clock_tree_highlight = None;
+        self.clock_tree_overlay.clear();
         self.highlighted = if query.is_empty() {
             BTreeSet::new()
         } else {
