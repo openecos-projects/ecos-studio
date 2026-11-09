@@ -260,7 +260,7 @@ import { useWorkspace } from '@/composables/useWorkspace'
 import { useFlowRunner } from '@/composables/useFlowRunner'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
-import { launchDefView } from '@/composables/useDefViewLaunch'
+import { defViewWorkspaceIssue, launchDefView } from '@/composables/useDefViewLaunch'
 import {
   hasCanonicalDieDimensions,
   losslessNumberList,
@@ -2017,11 +2017,16 @@ function useDefViewMenuAction() {
   const handleViewDef = async () => {
     const workspacePath = currentProject.value?.path
     const workspace = workspaceSession.value
-    if (!workspacePath || workspace.state !== 'active') {
+    const issue = defViewWorkspaceIssue({
+      path: workspacePath,
+      state: workspace.state,
+      designTool: currentProject.value?.designTool,
+    })
+    if (issue) {
       showToast({
         severity: 'warn',
         summary: 'DEF View',
-        detail: 'Open a Workspace before viewing a DEF layout.',
+        detail: issue,
       })
       return
     }
@@ -2032,8 +2037,8 @@ function useDefViewMenuAction() {
     })
     if (!picked?.length) return
     await launchDefView(picked[0]!, {
-      workspaceHandle: workspace.workspaceId,
-      workspacePath,
+      workspaceHandle: workspace.workspaceId!,
+      workspacePath: workspacePath!,
       showToast,
     })
   }

@@ -11,6 +11,20 @@ export interface DefViewLaunchDeps {
   }): void
 }
 
+export function defViewWorkspaceIssue(input: {
+  path?: string
+  state?: string
+  designTool?: string
+}): string | null {
+  if (!input.path || input.state !== 'active') {
+    return 'Open a Workspace before viewing a DEF layout.'
+  }
+  if ((input.designTool ?? 'backend') !== 'backend') {
+    return 'DEF Layout is only available for backend Workspaces.'
+  }
+  return null
+}
+
 /**
  * Generate a layout snapshot from a DEF in the active Workspace, then open it
  * in the native Chip Viewer. The Workspace's existing PDK and parameters are

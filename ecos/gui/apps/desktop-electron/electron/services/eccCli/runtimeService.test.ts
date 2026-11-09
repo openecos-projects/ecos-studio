@@ -738,6 +738,58 @@ describe('ECC CLI DEF View', () => {
     ).rejects.toThrow('DEF View requires a .def or .def.gz input.')
     expect(run).not.toHaveBeenCalled()
   })
+
+  it('rejects a concurrent DEF View in the same Workspace', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ecc-defview-concurrent-'))
+    temporaryDirectories.push(projectRoot)
+    const workspaceDirectory = join(projectRoot, 'ws_1')
+    const defPath = join(projectRoot, 'selected.def.gz')
+    const geometryManifestPath = join(
+      workspaceDirectory,
+      'defview',
+      'output',
+      'geometry',
+      'geometry.manifest',
+    )
+    await writeFile(defPath, 'VERSION 5.8 ;\n')
+    let releaseFirst!: () => void
+    const firstRunGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    let firstRunStarted!: () => void
+    const firstRunStartedPromise = new Promise<void>((resolve) => {
+      firstRunStarted = resolve
+    })
+    const run = vi
+      .spyOn(EccCliProcess.prototype, 'run')
+      .mockImplementationOnce(async () => {
+        firstRunStarted()
+        await firstRunGate
+        await mkdir(join(workspaceDirectory, 'defview', 'output', 'geometry'), {
+          recursive: true,
+        })
+        await writeFile(geometryManifestPath, 'schema_version=1\n')
+        return { exitCode: 0, stderr: '', stdout: '' }
+      })
+    const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
+    ;(service as any).sessions.set('handle-1', {
+      directory: workspaceDirectory,
+      handle: 'handle-1',
+      projectRoot,
+      workspaceId: 'ws_1',
+      workspaceRevision: 4,
+    })
+
+    const first = service.defView({ defPath, workspaceHandle: 'handle-1' })
+    await firstRunStartedPromise
+    await expect(
+      service.defView({ defPath, workspaceHandle: 'handle-1' }),
+    ).rejects.toMatchObject({ code: 'WORKSPACE_BUSY' })
+    expect(run).toHaveBeenCalledTimes(1)
+
+    releaseFirst()
+    await expect(first).resolves.toMatchObject({ geometryManifestPath })
+  })
 })
 
 describe('ECC CLI Workspace update transaction', () => {

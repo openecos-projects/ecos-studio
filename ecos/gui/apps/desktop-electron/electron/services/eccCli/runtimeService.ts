@@ -116,6 +116,7 @@ export class EccCliRuntimeService {
   private readonly projectMigrations = new Map<string, Promise<void>>()
   private readonly legacyReadOnlyRoots = new Set<string>()
   private readonly operations = new Map<string, TrackedOperation>()
+  private readonly defViewsInFlight = new Set<string>()
   private readonly outcomes: EccRuntimeOperation[] = []
   private readonly eventListeners = new Set<(event: EccRuntimeEvent) => void>()
   private readonly projectionListeners = new Set<(generation: number) => void>()
@@ -791,6 +792,13 @@ export class EccCliRuntimeService {
   async defView(request: EccWorkspaceDefViewRequest): Promise<EccWorkspaceDefViewResult> {
     const session = this.requireSession(request.workspaceHandle)
     this.assertProjectWritable(session.projectRoot)
+    const workspaceKey = normalizeWorkspacePath(session.directory)
+    if (this.defViewsInFlight.has(workspaceKey)) {
+      throw codedError(
+        'DEF View is already running for this Workspace.',
+        'WORKSPACE_BUSY',
+      )
+    }
     if (this.isWorkspaceRuntimeActive(session.directory)) {
       throw codedError('Workspace already has an active ECC run.', 'WORKSPACE_BUSY')
     }
@@ -798,40 +806,45 @@ export class EccCliRuntimeService {
     if (!/\.def(?:\.gz)?$/i.test(defPath)) {
       throw new Error('DEF View requires a .def or .def.gz input.')
     }
-    const input = await stat(defPath).catch((error) => {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        throw new Error(`DEF input does not exist: ${defPath}`)
-      }
-      throw error
-    })
-    if (!input.isFile()) throw new Error(`DEF input is not a file: ${defPath}`)
+    this.defViewsInFlight.add(workspaceKey)
+    try {
+      const input = await stat(defPath).catch((error) => {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          throw new Error(`DEF input does not exist: ${defPath}`)
+        }
+        throw error
+      })
+      if (!input.isFile()) throw new Error(`DEF input is not a file: ${defPath}`)
 
-    await this.cli.run(
-      workspaceDefViewArgs({
-        defPath,
-        projectRoot: session.projectRoot,
-        workspaceId: session.workspaceId,
-      }),
-      { cwd: session.projectRoot },
-    )
-    const directory = join(session.directory, 'defview')
-    const geometryManifestPath = join(
-      directory,
-      'output',
-      'geometry',
-      'geometry.manifest',
-    )
-    const manifest = await stat(geometryManifestPath).catch(() => null)
-    if (!manifest?.isFile()) {
-      throw new Error(
-        `DEF View did not generate a geometry manifest: ${geometryManifestPath}`,
+      await this.cli.run(
+        workspaceDefViewArgs({
+          defPath,
+          projectRoot: session.projectRoot,
+          workspaceId: session.workspaceId,
+        }),
+        { cwd: session.projectRoot },
       )
-    }
-    return {
-      defPath,
-      directory,
-      geometryManifestPath,
-      workspaceHandle: request.workspaceHandle,
+      const directory = join(session.directory, 'defview')
+      const geometryManifestPath = join(
+        directory,
+        'output',
+        'geometry',
+        'geometry.manifest',
+      )
+      const manifest = await stat(geometryManifestPath).catch(() => null)
+      if (!manifest?.isFile()) {
+        throw new Error(
+          `DEF View did not generate a geometry manifest: ${geometryManifestPath}`,
+        )
+      }
+      return {
+        defPath,
+        directory,
+        geometryManifestPath,
+        workspaceHandle: request.workspaceHandle,
+      }
+    } finally {
+      this.defViewsInFlight.delete(workspaceKey)
     }
   }
 
@@ -1080,10 +1093,13 @@ export class EccCliRuntimeService {
 
   isWorkspaceRuntimeActive(directory: string): boolean {
     const normalized = normalizeWorkspacePath(directory)
-    return [...this.operations.values()].some(
-      (tracked) =>
-        normalizeWorkspacePath(tracked.session.directory) === normalized &&
-        !isTerminal(tracked.operation.state),
+    return (
+      this.defViewsInFlight.has(normalized) ||
+      [...this.operations.values()].some(
+        (tracked) =>
+          normalizeWorkspacePath(tracked.session.directory) === normalized &&
+          !isTerminal(tracked.operation.state),
+      )
     )
   }
 

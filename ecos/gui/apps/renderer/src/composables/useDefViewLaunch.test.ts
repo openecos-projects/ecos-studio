@@ -9,7 +9,7 @@ vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => desktopApi,
 }))
 
-import { launchDefView } from './useDefViewLaunch'
+import { defViewWorkspaceIssue, launchDefView } from './useDefViewLaunch'
 
 function deps(overrides: Partial<Parameters<typeof launchDefView>[1]> = {}) {
   return {
@@ -84,5 +84,46 @@ describe('launchDefView', () => {
         summary: 'DEF View Error',
       }),
     )
+  })
+})
+
+describe('defViewWorkspaceIssue', () => {
+  it('requires an active Workspace', () => {
+    expect(
+      defViewWorkspaceIssue({ path: '', state: 'active', designTool: 'backend' }),
+    ).toBe('Open a Workspace before viewing a DEF layout.')
+    expect(
+      defViewWorkspaceIssue({
+        path: '/projects/demo/ws_1',
+        state: 'loading',
+        designTool: 'backend',
+      }),
+    ).toBe('Open a Workspace before viewing a DEF layout.')
+  })
+
+  it('rejects frontend Workspaces before the file picker opens', () => {
+    expect(
+      defViewWorkspaceIssue({
+        path: '/projects/demo/ws_1',
+        state: 'active',
+        designTool: 'frontend',
+      }),
+    ).toBe('DEF Layout is only available for backend Workspaces.')
+  })
+
+  it('accepts an active backend Workspace', () => {
+    expect(
+      defViewWorkspaceIssue({
+        path: '/projects/demo/ws_1',
+        state: 'active',
+        designTool: 'backend',
+      }),
+    ).toBeNull()
+    expect(
+      defViewWorkspaceIssue({
+        path: '/projects/demo/ws_1',
+        state: 'active',
+      }),
+    ).toBeNull()
   })
 })
