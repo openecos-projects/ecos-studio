@@ -4,7 +4,7 @@
   "designs_sha": "18ec0f4e196080432ccc96ec2116f4c81b191928",
   "ecc_sha": "af1aab359cedaab2b2933391e2dbe624593bffd0",
   "ecc_run_id": "42564294873",
-  "ecc_job_id": 128989229448,
+  "ecc_job_id": 128989229432,
   "artifacts": {
     "ecc-cli-linux-x86_64": {
       "id": 13650841738,

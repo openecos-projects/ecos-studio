@@ -21,66 +21,44 @@ def api(path, *, raw=False):
     return result.stdout if raw else json.loads(result.stdout)
 
 
-def unique_match(patterns, logs, label):
-    values = set()
-    for pattern in patterns:
-        values.update(re.findall(pattern, logs, re.MULTILINE))
+def unique_match(pattern, logs, label):
+    values = set(re.findall(pattern, logs, re.MULTILINE))
     if len(values) != 1:
         raise ValueError(f"Expected one {label} in ECC job logs, found {len(values)}")
     return values.pop()
 
 
 def parse_toolchain(logs):
-    version = unique_match(
-        (
-            r"(?:^|\s)oss_cad_suite_version=(\d{4}-\d{2}-\d{2})(?:\s|$)",
-            r"(?:^|\s)version=(\d{4}-\d{2}-\d{2})(?:\s|$)",
-            r"https://github\.com/YosysHQ/oss-cad-suite-build/releases/download/"
-            r"(\d{4}-\d{2}-\d{2})/oss-cad-suite-linux-x64-\d+\.tgz",
-        ),
-        logs,
-        "OSS CAD Suite release",
-    )
-    kepler_run = unique_match(
-        (
-            r"(?:^|\s)kepler_formal_run_id=(\d+)(?:\s|$)",
-            r"https://github\.com/openecos-projects/kepler-formal/actions/runs/(\d+)\s*$",
-            r"Downloading kepler-formal-linux-x64 from "
-            r"openecos-projects/kepler-formal CI run (\d+)\s*$",
-        ),
-        logs,
-        "Kepler CI run",
-    )
-    designs = set(re.findall(
-        r"(?:^|\s)e2e_designs_git_commit=([0-9a-f]{40})(?:\s|$)", logs, re.MULTILINE
-    ))
-    if not designs:
-        checkout = logs.split("Syncing repository: openecos-projects/ecc-ci-designs", 1)
-        if len(checkout) != 2:
-            raise ValueError("ECC job logs do not contain the design checkout")
-        commit = re.search(
-            r"\[command\][^\n]*git log -1 --format=%H\r?\n"
-            r"(?:\S+Z\s+)?([0-9a-f]{40})\s*$",
-            checkout[1],
-            re.MULTILINE,
-        )
-        if not commit:
-            raise ValueError("ECC job logs do not contain the design commit")
-        designs.add(commit.group(1))
-    if len(designs) != 1:
-        raise ValueError(
-            f"Expected one ECC design-suite commit in ECC job logs, found {len(designs)}"
-        )
     return {
-        "oss_cad_suite_version": version,
-        "kepler_run_id": kepler_run,
-        "designs_sha": designs.pop(),
+        "oss_cad_suite_version": unique_match(
+            r"(?:^|\s)oss_cad_suite_version=(\d{4}-\d{2}-\d{2})(?:\s|$)",
+            logs,
+            "OSS CAD Suite release",
+        ),
+        "kepler_run_id": unique_match(
+            r"(?:^|\s)kepler_formal_run_id=(\d+)(?:\s|$)",
+            logs,
+            "Kepler CI run",
+        ),
+        "designs_sha": unique_match(
+            r"(?:^|\s)e2e_designs_git_commit=([0-9a-f]{40})(?:\s|$)",
+            logs,
+            "ECC design-suite commit",
+        ),
     }
 
 
 def is_packaged_design_job(job):
-    """Match current and legacy E2E job display names."""
-    return bool(re.fullmatch(r"E2E(?: Packaged Flow)? \(.+\)", job.get("name", "")))
+    """Match the current ECC packaged design job display name."""
+    return bool(re.fullmatch(r"E2E \(.+\)", job.get("name", "")))
+
+
+def select_packaged_design_job(jobs):
+    successful = [
+        job for job in jobs
+        if is_packaged_design_job(job) and job["conclusion"] == "success"
+    ]
+    return min(successful, key=lambda job: job["name"], default=None)
 
 
 def artifact_records(payload, names):
@@ -106,9 +84,9 @@ def resolve(run_id, sha, timeout):
     while True:
         jobs = api(f"repos/{ECC_REPO}/actions/runs/{run_id}/jobs?per_page=100")["jobs"]
         designs = [job for job in jobs if is_packaged_design_job(job)]
-        successful = [job for job in designs if job["conclusion"] == "success"]
-        if successful:
-            job = successful[0]
+        selected = select_packaged_design_job(jobs)
+        if selected:
+            job = selected
             break
         if not designs or all(job["status"] == "completed" for job in designs):
             raise ValueError("ECC run has no successful packaged design job to establish tool provenance")
@@ -116,21 +94,15 @@ def resolve(run_id, sha, timeout):
             raise ValueError("Timed out waiting for a successful ECC packaged design job")
         print("Waiting for ECC design validation to establish tool provenance", flush=True)
         time.sleep(min(30, max(0, deadline - time.monotonic())))
-    provenance_jobs = [
-        item for item in jobs
-        if item["name"] in ("List dependency versions", "Smoke test staged E2E dependencies")
-    ]
-    if len(provenance_jobs) == 2:
-        if any(item["conclusion"] != "success" for item in provenance_jobs):
-            raise ValueError("ECC provenance jobs did not complete successfully")
-        log_jobs = provenance_jobs
-    else:
-        log_jobs = [job]
-    logs = "\n".join(
-        api(f"repos/{ECC_REPO}/actions/jobs/{item['id']}/logs", raw=True)
-        for item in log_jobs
+    provenance_jobs = [item for item in jobs if item["name"] == "List dependency versions"]
+    if len(provenance_jobs) != 1:
+        raise ValueError("Expected one ECC dependency manifest job")
+    provenance_job = provenance_jobs[0]
+    if provenance_job["conclusion"] != "success":
+        raise ValueError("ECC dependency manifest job did not complete successfully")
+    manifest = parse_toolchain(
+        api(f"repos/{ECC_REPO}/actions/jobs/{provenance_job['id']}/logs", raw=True)
     )
-    manifest = parse_toolchain(logs)
     manifest.update({"ecc_sha": sha, "ecc_run_id": str(run_id), "ecc_job_id": job["id"]})
     manifest["artifacts"] = artifact_records(
         api(f"repos/{ECC_REPO}/actions/runs/{run_id}/artifacts?per_page=100"),
