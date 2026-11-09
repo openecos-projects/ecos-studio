@@ -11,6 +11,11 @@ toolchain = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(toolchain)
 SHA = "a" * 40
 DESIGNS_SHA = "b" * 40
+CURRENT_LOGS = f"""
+e2e_designs_git_commit={DESIGNS_SHA}
+kepler_formal_run_id=123
+oss_cad_suite_version=2026-10-14
+"""
 LOGS = f"""2026-10-18T07:51:46Z Syncing repository: openecos-projects/ecc
 [command]/usr/bin/git log -1 --format=%H
 {SHA}
@@ -39,6 +44,13 @@ class ToolchainTests(unittest.TestCase):
             "designs_sha": DESIGNS_SHA,
         })
 
+    def test_dependency_manifest_provenance(self):
+        self.assertEqual(toolchain.parse_toolchain(CURRENT_LOGS), {
+            "oss_cad_suite_version": "2026-10-14",
+            "kepler_run_id": "123",
+            "designs_sha": DESIGNS_SHA,
+        })
+
     def test_missing_or_ambiguous_provenance(self):
         for logs in (LOGS.replace("Syncing repository: openecos-projects/ecc-ci-designs", "missing"),
                      LOGS.replace(DESIGNS_SHA, "missing"),
@@ -46,6 +58,14 @@ class ToolchainTests(unittest.TestCase):
                      LOGS + "\nDownloading kepler-formal-linux-x64 from openecos-projects/kepler-formal CI run 456\n"):
             with self.subTest(logs=logs), self.assertRaises(ValueError):
                 toolchain.parse_toolchain(logs)
+
+    def test_packaged_design_job_names(self):
+        for name in ("E2E Packaged Flow (gcd)", "E2E (gcd)"):
+            with self.subTest(name=name):
+                self.assertTrue(toolchain.is_packaged_design_job({"name": name}))
+        for name in ("E2E", "E2E helper (gcd)", "Build E2E (gcd)"):
+            with self.subTest(name=name):
+                self.assertFalse(toolchain.is_packaged_design_job({"name": name}))
 
     def test_artifact_validation(self):
         payload = artifacts("pdk")
@@ -83,9 +103,16 @@ class ToolchainTests(unittest.TestCase):
     def test_exact_run_artifacts_and_kepler_are_recorded(self, api):
         api.side_effect = [
             {"head_sha": SHA},
-            {"jobs": [{"name": "E2E Packaged Flow (gcd)", "id": 9,
-                       "status": "completed", "conclusion": "success"}]},
-            LOGS,
+            {"jobs": [
+                {"name": "E2E (gcd)", "id": 9,
+                 "status": "completed", "conclusion": "success"},
+                {"name": "List dependency versions", "id": 10,
+                 "status": "completed", "conclusion": "success"},
+                {"name": "Smoke test staged E2E dependencies", "id": 11,
+                 "status": "completed", "conclusion": "success"},
+            ]},
+            CURRENT_LOGS,
+            CURRENT_LOGS,
             artifacts("ecc-cli-linux-x86_64", "icsprout55-pdk", "ecc-sizer"),
             {"head_sha": "c" * 40, "conclusion": "success"},
             artifacts("kepler-formal-linux-x64"),
@@ -142,7 +169,7 @@ class ToolchainTests(unittest.TestCase):
         manifest = self.locked_manifest()
         api.side_effect = [
             {"head_sha": SHA},
-            {"jobs": [{"id": 9, "name": "E2E Packaged Flow (gcd)", "conclusion": "success"}]},
+            {"jobs": [{"id": 9, "name": "E2E (gcd)", "conclusion": "success"}]},
             artifacts("ecc-cli-linux-x86_64", "icsprout55-pdk", "ecc-sizer"),
             {"head_sha": "c" * 40, "conclusion": "success"},
             artifacts("kepler-formal-linux-x64"),
