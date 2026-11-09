@@ -1,10 +1,14 @@
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import type { FlowStepState } from '@ecos-studio/shared'
 import { getStepMetadata, STEP_METADATA } from '@/api/type'
 import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
 import { useWorkspace } from './useWorkspace'
 import { projectBackendFlowSteps, projectRuntimeFlowSteps } from './backendFlowProjection'
+import {
+  backendOptimisticRunValue,
+  setBackendOptimisticRun,
+} from './backendFlowOptimisticRun'
 import { formatRuntime } from '@/components/workbench/flowStatus'
 
 export interface BackendFlowStage {
@@ -30,13 +34,6 @@ const setupStages: BackendFlowStage[] = Object.values(STEP_METADATA)
     runtime: '',
     'peak memory (mb)': 0,
   }))
-
-const optimisticRun = ref<{
-  projectPath: string
-  resetAll: boolean
-  runtimeEventCursor: unknown
-  stepPath: string
-} | null>(null)
 
 function normalizedPath(path: string): string {
   return path.trim().replace(/\\/g, '/').replace(/\/$/, '')
@@ -96,7 +93,7 @@ export function useBackendFlowStages() {
         if (operation.currentTool) activeStep.toolId = operation.currentTool
       }
     }
-    const request = optimisticRun.value
+    const request = backendOptimisticRunValue()
     if (
       !request ||
       request.projectPath !== normalizedPath(currentProject.value?.path ?? '')
@@ -156,28 +153,28 @@ export function useBackendFlowStages() {
   )
 
   function setFirstRunStepOngoing(options: { resetAll?: boolean } = {}): void {
-    optimisticRun.value = {
+    setBackendOptimisticRun({
       projectPath: normalizedPath(currentProject.value?.path ?? ''),
       resetAll: Boolean(options.resetAll),
       runtimeEventCursor:
         backendRuntimeEvents.value[backendRuntimeEvents.value.length - 1] ?? null,
       stepPath: '',
-    }
+    })
   }
 
   function setRunStepOngoingByPath(stepPath: string): void {
-    optimisticRun.value = {
+    setBackendOptimisticRun({
       projectPath: normalizedPath(currentProject.value?.path ?? ''),
       resetAll: false,
       runtimeEventCursor:
         backendRuntimeEvents.value[backendRuntimeEvents.value.length - 1] ?? null,
       stepPath,
-    }
+    })
   }
 
   async function refreshFlowStages(): Promise<void> {
     await session.refresh()
-    optimisticRun.value = null
+    setBackendOptimisticRun(null)
   }
 
   return {
