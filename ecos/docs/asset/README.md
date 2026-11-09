@@ -26,6 +26,8 @@ execution and checklist states have not been changed for the images.
 - `chip-viewer.png`: the real native Viewer in fullscreen at 2560 × 1600,
   displaying the GCD route geometry with physical layers and drawing data
   enabled. This virtual-machine capture uses 2D software rendering.
+- `macro-toolbox.png`: the native Macro Toolbox with one placed macro selected,
+  showing the selection summary, workflow status, feedback, and Move controls.
 
 To refresh screenshots, build the desktop app with `pnpm run desktop:build`
 from `ecos/gui`, launch with a separate application profile, and navigate the
