@@ -120,6 +120,13 @@ pub struct GeometryEditResult {
     pub new_version: ShapeVersion,
     pub status: GeometryEditStatus,
     pub committed_bbox: Rect32,
+    /// Source geometry version used by this command. This can remain unchanged
+    /// while an edit is only staged locally.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_version: Option<ShapeVersion>,
+    /// Monotonic revision of uncommitted local staging commands in one session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub staging_revision: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     /// A session-scoped snapshot exported by ECC after an accepted edit. The

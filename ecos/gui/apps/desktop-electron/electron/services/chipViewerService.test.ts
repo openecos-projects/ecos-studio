@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { WorkspaceStepInfoResult } from '@ecos-studio/shared'
 import { ChipViewerService, type ChipViewerServiceOptions } from './chipViewerService'
@@ -84,6 +84,19 @@ function devChipViewerPaths() {
   }
 }
 
+function macroEditCommand(commandId: number, expectedVersion: number, lx: number) {
+  return JSON.stringify({
+    command_id: commandId,
+    expected_version: expectedVersion,
+    instance_name: 'u_sram01',
+    op: 'move_shape',
+    orient: 'R0',
+    placement_status: 'fixed',
+    requested_bbox: { hx: lx + 40000, hy: 33000, lx, ly: 3000 },
+    shape_id: 41,
+  })
+}
+
 function createSpawnedViewerProcess() {
   const child = new EventEmitter() as EventEmitter & {
     pid: number
@@ -96,6 +109,7 @@ function createSpawnedViewerProcess() {
 
 function createService(options: {
   appPath?: string
+  bridgeIdFactory?: (sequence: number) => string
   closeLogFile?: (fd: number) => void
   cwd?: string
   env?: NodeJS.ProcessEnv
@@ -113,6 +127,7 @@ function createService(options: {
   resourcesPath?: string
   spawnProcess?: ChipViewerServiceOptions['spawnProcess']
   stepInfoResult?: WorkspaceStepInfoResult
+  useDefaultBridgeIdFactory?: boolean
   viewerLogDirectory?: string
   viewerStartupCheckMs?: number
 }) {
@@ -221,6 +236,12 @@ function createService(options: {
   }
   const service = new ChipViewerService({
     appPath: options.appPath ?? join(REPO_ROOT, 'ecos/gui/apps/desktop-electron'),
+    ...(options.useDefaultBridgeIdFactory
+      ? {}
+      : {
+          bridgeIdFactory:
+            options.bridgeIdFactory ?? ((sequence) => `bridge-${sequence}`),
+        }),
     closeLogFile,
     cwd: options.cwd ?? join(REPO_ROOT, 'ecos/gui/apps/desktop-electron'),
     env: options.env ?? { DISPLAY: ':99' },
@@ -1254,6 +1275,31 @@ describe('ChipViewerService', () => {
     ])
   })
 
+  it('uses a process-unique bridge namespace for repeated saves', async () => {
+    const devBinaries = devChipViewerPaths()
+    const openEditSession = async () => {
+      const { service } = createService({
+        existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
+        useDefaultBridgeIdFactory: true,
+      })
+      return service.open({
+        mode: 'edit',
+        projectPath: PROJECT_ROOT,
+        step: STEP_NAME,
+      })
+    }
+
+    const first = await openEditSession()
+    const second = await openEditSession()
+
+    expect(first.editCommandDirectory).toBeDefined()
+    expect(second.editCommandDirectory).toBeDefined()
+    expect(first.editCommandDirectory).not.toBe(second.editCommandDirectory)
+    expect(basename(first.editCommandDirectory!)).toMatch(
+      /^bridge-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-1$/,
+    )
+  })
+
   it('rejects resize commands before calling the placement RPC', async () => {
     const devBinaries = devChipViewerPaths()
     const commandPath = join(EDIT_SESSION_COMMAND_DIR, 'command-42.json')
@@ -1486,6 +1532,572 @@ describe('ChipViewerService', () => {
       expect(result.macroStaging).toEqual({ enabled: true })
     },
   )
+
+  it('restores saved macro locations when reopening a macro placement session', async () => {
+    const devBinaries = devChipViewerPaths()
+    const geometryMasters = join(GEOMETRY_EPOCH_DIR, 'geometry.masters.txt')
+    const macroLocationPath = join(PROJECT_ROOT, 'config', 'macro_location.tcl')
+    const { service, writeTextFile } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.viewer,
+        ...DEFAULT_MANIFEST_FILE_PATHS,
+      ],
+      files: {
+        [GEOMETRY_MANIFEST]: geometryManifest({
+          masters: 'epochs/1/geometry.masters.txt',
+        }),
+        [geometryMasters]: [
+          'name\ttype\tsite\tsymmetry\torigin_x\torigin_y\twidth\theight\tterm_count\tobs_count',
+          'SRAM_64x32\tBLOCK\tsite9\tX,Y\t0\t0\t40000\t30000\t120\t0',
+        ].join('\n'),
+        [DEF_PATH]: [
+          'VERSION 5.8 ;',
+          'DESIGN gcd ;',
+          'UNITS DISTANCE MICRONS 1000 ;',
+          'DIEAREA ( 0 0 ) ( 52000 53000 ) ;',
+          'COMPONENTS 1 ;',
+          '    - u_sram01 SRAM_64x32 ;',
+          'END COMPONENTS',
+          'END DESIGN',
+        ].join('\n'),
+        [macroLocationPath]: [
+          'placeInstance u_sram01 10.5 20.25 R90',
+          'setInstancePlacementStatus -status fixed -name u_sram01',
+          '',
+        ].join('\n'),
+      },
+      layoutEditRuntime: {
+        openWorkspace: vi.fn(async () => ({
+          directory: PROJECT_ROOT,
+          workspaceHandle: 'workspace-handle-1',
+          workspaceRevision: 1,
+        })),
+      },
+    })
+
+    await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: 'macroPlacement',
+    })
+
+    const stagingWrite = writeTextFile.mock.calls.find(([path]) =>
+      path.endsWith('macro-staging.json.tmp'),
+    )
+    expect(JSON.parse(stagingWrite?.[1] ?? '{}').macros).toEqual([
+      {
+        name: 'u_sram01',
+        master: 'SRAM_64x32',
+        widthDbu: 40000,
+        heightDbu: 30000,
+        orient: 'R90',
+        placed: false,
+        savedPlacement: { xDbu: 10500, yDbu: 20250 },
+      },
+    ])
+  })
+
+  it.each([
+    { isPackaged: false, label: 'development' },
+    { isPackaged: true, label: 'packaged' },
+  ])(
+    'accepts repeated local macro moves without changing the source snapshot version in $label mode',
+    async ({ isPackaged }) => {
+      const devBinaries = devChipViewerPaths()
+      const resourcesPath = '/opt/ECOS Studio/resources'
+      const binaryDir = join(resourcesPath, 'binaries')
+      const packagedEcc = join(binaryDir, 'ecc')
+      const packagedViewer = join(binaryDir, 'chip-viewer-native')
+      const packagedEccToolsPackageDir = join(binaryDir, '_internal', 'ecc_tools_bin')
+      const packagedEccToolsLibDir = join(packagedEccToolsPackageDir, 'lib')
+      const geometryMasters = join(GEOMETRY_EPOCH_DIR, 'geometry.masters.txt')
+      const commandDir = join(EDIT_COMMAND_DIR, EDIT_BRIDGE_ID, EDIT_BRIDGE_ID)
+      const resultDir = join(EDIT_RESULT_DIR, EDIT_BRIDGE_ID, EDIT_BRIDGE_ID)
+      const command1Path = join(commandDir, 'command-1.json')
+      const command2Path = join(commandDir, 'command-2.json')
+      const { service, watchDirectory, writeTextFile } = createService({
+        existingPaths: [
+          ...(isPackaged
+            ? [
+                packagedEcc,
+                packagedViewer,
+                packagedEccToolsPackageDir,
+                packagedEccToolsLibDir,
+              ]
+            : [devBinaries.cargoManifest, devBinaries.viewer]),
+          ...DEFAULT_MANIFEST_FILE_PATHS,
+        ],
+        files: {
+          [GEOMETRY_MANIFEST]: geometryManifest({
+            masters: 'epochs/1/geometry.masters.txt',
+          }),
+          [geometryMasters]: [
+            'name\ttype\tsite\tsymmetry\torigin_x\torigin_y\twidth\theight\tterm_count\tobs_count',
+            'SRAM_64x32\tBLOCK\tsite9\tX,Y\t0\t0\t40000\t30000\t120\t0',
+          ].join('\n'),
+          [DEF_PATH]: [
+            'VERSION 5.8 ;',
+            'DESIGN gcd ;',
+            'UNITS DISTANCE MICRONS 1000 ;',
+            'DIEAREA ( 0 0 ) ( 52000 53000 ) ;',
+            'COMPONENTS 1 ;',
+            '    - u_sram01 SRAM_64x32 + FIXED ( 1000 2000 ) N ;',
+            'END COMPONENTS',
+            'END DESIGN',
+          ].join('\n'),
+          [command1Path]: macroEditCommand(1, 1, 5000),
+          [command2Path]: macroEditCommand(2, 1, 8000),
+        },
+        layoutEditRuntime: {
+          openWorkspace: vi.fn(async () => ({
+            directory: PROJECT_ROOT,
+            workspaceHandle: 'workspace-handle-1',
+            workspaceRevision: 1,
+          })),
+          updateWorkspaceStepConfiguration: vi.fn(async () => ({
+            directory: PROJECT_ROOT,
+            workspaceId: 'workspace-handle-1',
+            workspaceRevision: 2,
+          })),
+        },
+        isPackaged,
+        resourcesPath: isPackaged ? resourcesPath : undefined,
+      })
+
+      await service.open({
+        mode: 'edit',
+        projectPath: PROJECT_ROOT,
+        step: 'macroPlacement',
+      })
+      const editListener = watchDirectory.mock.calls[0]?.[1]
+      const readResult = async (commandId: number) => {
+        const resultPath = join(resultDir, `result-${commandId}.json.tmp`)
+        await vi.waitFor(() => {
+          expect(writeTextFile).toHaveBeenCalledWith(resultPath, expect.any(String))
+        })
+        const content = writeTextFile.mock.calls.find(
+          ([path]) => path === resultPath,
+        )?.[1]
+        return JSON.parse(content ?? '{}') as Record<string, unknown>
+      }
+
+      editListener?.('command-1.json')
+      expect(await readResult(1)).toMatchObject({
+        new_version: 1,
+        source_version: 1,
+        staging_revision: 1,
+        status: 'accepted',
+      })
+
+      editListener?.('command-2.json')
+      expect(await readResult(2)).toMatchObject({
+        committed_bbox: { hx: 48000, hy: 33000, lx: 8000, ly: 3000 },
+        new_version: 1,
+        source_version: 1,
+        staging_revision: 2,
+        status: 'accepted',
+      })
+    },
+  )
+
+  it('rejects stale and changed source versions without poisoning the accepted version', async () => {
+    const devBinaries = devChipViewerPaths()
+    const geometryMasters = join(GEOMETRY_EPOCH_DIR, 'geometry.masters.txt')
+    const commandDir = join(EDIT_COMMAND_DIR, EDIT_BRIDGE_ID, EDIT_BRIDGE_ID)
+    const resultDir = join(EDIT_RESULT_DIR, EDIT_BRIDGE_ID, EDIT_BRIDGE_ID)
+    const commands = [
+      [1, 1, 5000],
+      [2, 0, 8000],
+      [3, 2, 9000],
+      [4, 1, 10000],
+    ] as const
+    const { service, watchDirectory, writeTextFile } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.viewer,
+        ...DEFAULT_MANIFEST_FILE_PATHS,
+      ],
+      files: {
+        [GEOMETRY_MANIFEST]: geometryManifest({
+          masters: 'epochs/1/geometry.masters.txt',
+        }),
+        [geometryMasters]: [
+          'name\ttype\tsite\tsymmetry\torigin_x\torigin_y\twidth\theight\tterm_count\tobs_count',
+          'SRAM_64x32\tBLOCK\tsite9\tX,Y\t0\t0\t40000\t30000\t120\t0',
+        ].join('\n'),
+        [DEF_PATH]: [
+          'VERSION 5.8 ;',
+          'DESIGN gcd ;',
+          'UNITS DISTANCE MICRONS 1000 ;',
+          'DIEAREA ( 0 0 ) ( 52000 53000 ) ;',
+          'COMPONENTS 1 ;',
+          '    - u_sram01 SRAM_64x32 + FIXED ( 1000 2000 ) N ;',
+          'END COMPONENTS',
+          'END DESIGN',
+        ].join('\n'),
+        ...Object.fromEntries(
+          commands.map(([commandId, expectedVersion, lx]) => [
+            join(commandDir, `command-${commandId}.json`),
+            macroEditCommand(commandId, expectedVersion, lx),
+          ]),
+        ),
+      },
+      layoutEditRuntime: {
+        openWorkspace: vi.fn(async () => ({
+          directory: PROJECT_ROOT,
+          workspaceHandle: 'workspace-handle-1',
+          workspaceRevision: 1,
+        })),
+        updateWorkspaceStepConfiguration: vi.fn(async () => ({
+          directory: PROJECT_ROOT,
+          workspaceId: 'workspace-handle-1',
+          workspaceRevision: 2,
+        })),
+      },
+    })
+
+    await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: 'macroPlacement',
+    })
+    const editListener = watchDirectory.mock.calls[0]?.[1]
+    const readResult = async (commandId: number) => {
+      const resultPath = join(resultDir, `result-${commandId}.json.tmp`)
+      await vi.waitFor(() => {
+        expect(writeTextFile).toHaveBeenCalledWith(resultPath, expect.any(String))
+      })
+      const content = writeTextFile.mock.calls.find(([path]) => path === resultPath)?.[1]
+      return JSON.parse(content ?? '{}') as Record<string, unknown>
+    }
+
+    editListener?.('command-1.json')
+    expect(await readResult(1)).toMatchObject({
+      source_version: 1,
+      staging_revision: 1,
+      status: 'accepted',
+    })
+
+    editListener?.('command-2.json')
+    expect(await readResult(2)).toMatchObject({
+      message: expect.stringContaining('stale shape version: expected 1, received 0'),
+      status: 'rejected',
+    })
+
+    editListener?.('command-3.json')
+    expect(await readResult(3)).toMatchObject({
+      message: expect.stringContaining(
+        'shape source version changed while editing: expected 1, received 2',
+      ),
+      status: 'rejected',
+    })
+
+    editListener?.('command-4.json')
+    expect(await readResult(4)).toMatchObject({
+      committed_bbox: { hx: 50000, hy: 33000, lx: 10000, ly: 3000 },
+      new_version: 1,
+      source_version: 1,
+      staging_revision: 2,
+      status: 'accepted',
+    })
+  })
+
+  it('rejects shape versions outside the unsigned 32-bit range', async () => {
+    const devBinaries = devChipViewerPaths()
+    const geometryMasters = join(GEOMETRY_EPOCH_DIR, 'geometry.masters.txt')
+    const commandDir = join(EDIT_COMMAND_DIR, EDIT_BRIDGE_ID, EDIT_BRIDGE_ID)
+    const resultDir = join(EDIT_RESULT_DIR, EDIT_BRIDGE_ID, EDIT_BRIDGE_ID)
+    const { service, watchDirectory, writeTextFile } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.viewer,
+        ...DEFAULT_MANIFEST_FILE_PATHS,
+      ],
+      files: {
+        [GEOMETRY_MANIFEST]: geometryManifest({
+          masters: 'epochs/1/geometry.masters.txt',
+        }),
+        [geometryMasters]: [
+          'name\ttype\tsite\tsymmetry\torigin_x\torigin_y\twidth\theight\tterm_count\tobs_count',
+          'SRAM_64x32\tBLOCK\tsite9\tX,Y\t0\t0\t40000\t30000\t120\t0',
+        ].join('\n'),
+        [DEF_PATH]: [
+          'VERSION 5.8 ;',
+          'DESIGN gcd ;',
+          'UNITS DISTANCE MICRONS 1000 ;',
+          'DIEAREA ( 0 0 ) ( 52000 53000 ) ;',
+          'COMPONENTS 1 ;',
+          '    - u_sram01 SRAM_64x32 + FIXED ( 1000 2000 ) N ;',
+          'END COMPONENTS',
+          'END DESIGN',
+        ].join('\n'),
+        [join(commandDir, 'command-1.json')]: macroEditCommand(1, -1, 5000),
+        [join(commandDir, 'command-2.json')]: macroEditCommand(2, 0x1_0000_0000, 8000),
+        [join(commandDir, 'command-3.json')]: macroEditCommand(3, 1, 10000),
+      },
+      layoutEditRuntime: {
+        openWorkspace: vi.fn(async () => ({
+          directory: PROJECT_ROOT,
+          workspaceHandle: 'workspace-handle-1',
+          workspaceRevision: 1,
+        })),
+        updateWorkspaceStepConfiguration: vi.fn(async () => ({
+          directory: PROJECT_ROOT,
+          workspaceId: 'workspace-handle-1',
+          workspaceRevision: 2,
+        })),
+      },
+    })
+
+    await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: 'macroPlacement',
+    })
+    const editListener = watchDirectory.mock.calls[0]?.[1]
+    const readResult = async (commandId: number) => {
+      const resultPath = join(resultDir, `result-${commandId}.json.tmp`)
+      await vi.waitFor(() => {
+        expect(writeTextFile).toHaveBeenCalledWith(resultPath, expect.any(String))
+      })
+      const content = writeTextFile.mock.calls.find(([path]) => path === resultPath)?.[1]
+      return JSON.parse(content ?? '{}') as Record<string, unknown>
+    }
+
+    editListener?.('command-1.json')
+    expect(await readResult(1)).toMatchObject({
+      message: expect.stringContaining('must be an unsigned 32-bit integer'),
+      status: 'rejected',
+    })
+    editListener?.('command-2.json')
+    expect(await readResult(2)).toMatchObject({
+      message: expect.stringContaining('must be an unsigned 32-bit integer'),
+      status: 'rejected',
+    })
+    editListener?.('command-3.json')
+    expect(await readResult(3)).toMatchObject({
+      source_version: 1,
+      staging_revision: 1,
+      status: 'accepted',
+    })
+  })
+
+  it('saves local macro staging with the expected workspace revision', async () => {
+    const devBinaries = devChipViewerPaths()
+    const geometryMasters = join(GEOMETRY_EPOCH_DIR, 'geometry.masters.txt')
+    const commandDir = join(EDIT_COMMAND_DIR, EDIT_BRIDGE_ID, EDIT_BRIDGE_ID)
+    const resultDir = join(EDIT_RESULT_DIR, EDIT_BRIDGE_ID, EDIT_BRIDGE_ID)
+    let savedWorkspaceRevision = 1
+    const importMacroPlacements = vi.fn(async (_request: { tcl: string }) => {
+      savedWorkspaceRevision += 1
+      return {
+        directory: PROJECT_ROOT,
+        workspaceId: 'workspace-handle-1',
+        workspaceRevision: savedWorkspaceRevision,
+      }
+    })
+    const onWorkspaceRevisionChanged = vi.fn()
+    const { service, watchDirectory, writeTextFile } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.viewer,
+        ...DEFAULT_MANIFEST_FILE_PATHS,
+      ],
+      files: {
+        [GEOMETRY_MANIFEST]: geometryManifest({
+          masters: 'epochs/1/geometry.masters.txt',
+        }),
+        [geometryMasters]: [
+          'name\ttype\tsite\tsymmetry\torigin_x\torigin_y\twidth\theight\tterm_count\tobs_count',
+          'SRAM_64x32\tBLOCK\tsite9\tX,Y\t0\t0\t40000\t30000\t120\t0',
+        ].join('\n'),
+        [DEF_PATH]: [
+          'VERSION 5.8 ;',
+          'DESIGN gcd ;',
+          'UNITS DISTANCE MICRONS 1000 ;',
+          'DIEAREA ( 0 0 ) ( 52000 53000 ) ;',
+          'COMPONENTS 1 ;',
+          '    - u_sram01 SRAM_64x32 + FIXED ( 1000 2000 ) N ;',
+          'END COMPONENTS',
+          'END DESIGN',
+        ].join('\n'),
+        [join(commandDir, 'command-1.json')]: macroEditCommand(1, 1, 5000),
+        [join(commandDir, 'control-save-2.json')]: JSON.stringify({
+          action: 'save',
+          command_id: 2,
+        }),
+        [join(commandDir, 'command-3.json')]: macroEditCommand(3, 2, 9000),
+        [join(commandDir, 'control-save-4.json')]: JSON.stringify({
+          action: 'save',
+          command_id: 4,
+        }),
+      },
+      layoutEditRuntime: {
+        importMacroPlacements,
+        openWorkspace: vi.fn(async () => ({
+          directory: PROJECT_ROOT,
+          workspaceHandle: 'workspace-handle-1',
+          workspaceRevision: 1,
+        })),
+        updateWorkspaceStepConfiguration: vi.fn(),
+      },
+      onWorkspaceRevisionChanged,
+    })
+
+    await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: 'macroPlacement',
+    })
+    const editListener = watchDirectory.mock.calls[0]?.[1]
+    editListener?.('command-1.json')
+    await vi.waitFor(() => {
+      expect(writeTextFile).toHaveBeenCalledWith(
+        join(resultDir, 'result-1.json.tmp'),
+        expect.stringContaining('"status": "accepted"'),
+      )
+    })
+
+    editListener?.('control-save-2.json')
+    await vi.waitFor(() => {
+      expect(importMacroPlacements).toHaveBeenCalledWith({
+        commandId: `${EDIT_BRIDGE_ID}:2`,
+        expectedWorkspaceRevision: 1,
+        tcl: expect.stringContaining('placeInstance u_sram01 5 3 R0'),
+        workspaceHandle: 'workspace-handle-1',
+      })
+      expect(writeTextFile).toHaveBeenCalledWith(
+        join(resultDir, 'control-result-save-2.json.tmp'),
+        expect.stringContaining('"accepted": true'),
+      )
+    })
+    expect(onWorkspaceRevisionChanged).toHaveBeenCalledWith({
+      projectPath: PROJECT_ROOT,
+      workspaceHandle: 'workspace-handle-1',
+      workspaceRevision: 2,
+    })
+    const exportedTcl = importMacroPlacements.mock.calls[0]?.[0]?.tcl
+    expect(exportedTcl).toContain(
+      'setInstancePlacementStatus -status fixed -name u_sram01',
+    )
+
+    editListener?.('command-3.json')
+    const nextResultPath = join(resultDir, 'result-3.json.tmp')
+    await vi.waitFor(() => {
+      expect(writeTextFile).toHaveBeenCalledWith(
+        nextResultPath,
+        expect.stringContaining('"status": "accepted"'),
+      )
+    })
+    const nextResult = writeTextFile.mock.calls.find(
+      ([path]) => path === nextResultPath,
+    )?.[1]
+    expect(JSON.parse(nextResult ?? '{}')).toMatchObject({
+      source_version: 2,
+      staging_revision: 1,
+      status: 'accepted',
+    })
+
+    editListener?.('control-save-4.json')
+    await vi.waitFor(() => {
+      expect(importMacroPlacements).toHaveBeenNthCalledWith(2, {
+        commandId: `${EDIT_BRIDGE_ID}:4`,
+        expectedWorkspaceRevision: 2,
+        tcl: expect.stringContaining('placeInstance u_sram01 9 3 R0'),
+        workspaceHandle: 'workspace-handle-1',
+      })
+      expect(writeTextFile).toHaveBeenCalledWith(
+        join(resultDir, 'control-result-save-4.json.tmp'),
+        expect.stringContaining('"accepted": true'),
+      )
+    })
+    expect(onWorkspaceRevisionChanged).toHaveBeenCalledTimes(2)
+    expect(onWorkspaceRevisionChanged).toHaveBeenLastCalledWith({
+      projectPath: PROJECT_ROOT,
+      workspaceHandle: 'workspace-handle-1',
+      workspaceRevision: 3,
+    })
+  })
+
+  it('rejects a stale local macro save at the workspace revision boundary', async () => {
+    const devBinaries = devChipViewerPaths()
+    const geometryMasters = join(GEOMETRY_EPOCH_DIR, 'geometry.masters.txt')
+    const commandDir = join(EDIT_COMMAND_DIR, EDIT_BRIDGE_ID, EDIT_BRIDGE_ID)
+    const resultDir = join(EDIT_RESULT_DIR, EDIT_BRIDGE_ID, EDIT_BRIDGE_ID)
+    const importMacroPlacements = vi.fn(async () => {
+      throw new Error('revision_conflict: expected 1, current 2')
+    })
+    const onWorkspaceRevisionChanged = vi.fn()
+    const { service, watchDirectory, writeTextFile } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.viewer,
+        ...DEFAULT_MANIFEST_FILE_PATHS,
+      ],
+      files: {
+        [GEOMETRY_MANIFEST]: geometryManifest({
+          masters: 'epochs/1/geometry.masters.txt',
+        }),
+        [geometryMasters]: [
+          'name\ttype\tsite\tsymmetry\torigin_x\torigin_y\twidth\theight\tterm_count\tobs_count',
+          'SRAM_64x32\tBLOCK\tsite9\tX,Y\t0\t0\t40000\t30000\t120\t0',
+        ].join('\n'),
+        [DEF_PATH]: [
+          'VERSION 5.8 ;',
+          'DESIGN gcd ;',
+          'UNITS DISTANCE MICRONS 1000 ;',
+          'DIEAREA ( 0 0 ) ( 52000 53000 ) ;',
+          'COMPONENTS 1 ;',
+          '    - u_sram01 SRAM_64x32 + FIXED ( 1000 2000 ) N ;',
+          'END COMPONENTS',
+          'END DESIGN',
+        ].join('\n'),
+        [join(commandDir, 'command-1.json')]: macroEditCommand(1, 1, 5000),
+        [join(commandDir, 'control-save-2.json')]: JSON.stringify({
+          action: 'save',
+          command_id: 2,
+        }),
+      },
+      layoutEditRuntime: {
+        importMacroPlacements,
+        openWorkspace: vi.fn(async () => ({
+          directory: PROJECT_ROOT,
+          workspaceHandle: 'workspace-handle-1',
+          workspaceRevision: 1,
+        })),
+        updateWorkspaceStepConfiguration: vi.fn(),
+      },
+      onWorkspaceRevisionChanged,
+    })
+
+    await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: 'macroPlacement',
+    })
+    const editListener = watchDirectory.mock.calls[0]?.[1]
+    editListener?.('command-1.json')
+    await vi.waitFor(() => {
+      expect(writeTextFile).toHaveBeenCalledWith(
+        join(resultDir, 'result-1.json.tmp'),
+        expect.stringContaining('"status": "accepted"'),
+      )
+    })
+
+    editListener?.('control-save-2.json')
+    await vi.waitFor(() => {
+      expect(writeTextFile).toHaveBeenCalledWith(
+        join(resultDir, 'control-result-save-2.json.tmp'),
+        expect.stringContaining('"accepted": false'),
+      )
+    })
+    const saveResult = writeTextFile.mock.calls.find(
+      ([path]) => path === join(resultDir, 'control-result-save-2.json.tmp'),
+    )?.[1]
+    expect(saveResult).toContain('revision_conflict: expected 1, current 2')
+    expect(onWorkspaceRevisionChanged).not.toHaveBeenCalled()
+  })
 
   it('still opens the viewer without macro staging when the DEF is malformed', async () => {
     const devBinaries = devChipViewerPaths()
@@ -1843,6 +2455,7 @@ describe('ChipViewerService', () => {
     })
     expect(layoutEditRuntime.updateWorkspaceStepConfiguration).toHaveBeenCalledWith({
       commandId: `${EDIT_BRIDGE_ID}:13:macro-params`,
+      commitStepOutput: true,
       expectedWorkspaceRevision: 4,
       parameters: {
         'macro.placements': [{ instance: 'u_sram01', orientation: 'R0', x: 10, y: 20.5 }],

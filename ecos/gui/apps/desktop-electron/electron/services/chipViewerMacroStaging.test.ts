@@ -312,6 +312,68 @@ describe('buildMacroStagingManifest', () => {
     expect(manifest.stdcellStaging).toEqual({ count: 1, areaDbu: 0 })
   })
 
+  it('restores saved macro placements while leaving the DEF macro staged', () => {
+    const manifest = buildMacroStagingManifest({
+      defComponents: parseDefComponents(
+        defWithComponents(
+          [
+            '    - u_rom01 ROM_16x8 ;',
+            '    - u_sram01 SRAM_64x32 + FIXED ( 5000 6000 ) FS ;',
+          ].join('\n'),
+        ),
+      ),
+      mastersText: MASTERS_TSV,
+      savedPlacements: [
+        { instance: 'u_rom01', orientation: 'R90', x: 10.5, y: 20.25 },
+        { instance: 'u_sram01', orientation: 'R0', x: 1, y: 2 },
+      ],
+    })
+
+    expect(manifest.macros).toEqual([
+      {
+        name: 'u_rom01',
+        master: 'ROM_16x8',
+        widthDbu: 12000,
+        heightDbu: 8000,
+        orient: 'R90',
+        placed: false,
+        savedPlacement: { xDbu: 10500, yDbu: 20250 },
+      },
+      {
+        name: 'u_sram01',
+        master: 'SRAM_64x32',
+        widthDbu: 40000,
+        heightDbu: 30000,
+        orient: 'MX',
+        placed: true,
+      },
+    ])
+  })
+
+  it.each([null, -1000])(
+    'leaves saved placements unstaged when the DEF has no usable DBU scale (%s)',
+    (dbuPerMicron) => {
+      const defComponents = parseDefComponents(
+        'COMPONENTS 1 ;\n    - u_rom01 ROM_16x8 ;\nEND COMPONENTS\n',
+      )
+      defComponents.dbuPerMicron = dbuPerMicron
+      const manifest = buildMacroStagingManifest({
+        defComponents,
+        mastersText: MASTERS_TSV,
+        savedPlacements: [{ instance: 'u_rom01', orientation: 'R90', x: 10, y: 20 }],
+      })
+
+      expect(manifest.macros[0]).toEqual({
+        name: 'u_rom01',
+        master: 'ROM_16x8',
+        widthDbu: 12000,
+        heightDbu: 8000,
+        orient: 'R0',
+        placed: false,
+      })
+    },
+  )
+
   it('aggregates unplaced non-block components into stdcellStaging', () => {
     const manifest = buildMacroStagingManifest({
       defComponents: parseDefComponents(

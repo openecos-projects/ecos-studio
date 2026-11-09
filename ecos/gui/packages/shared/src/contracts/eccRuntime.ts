@@ -94,6 +94,11 @@ export interface EccWorkspaceConfigurationUpdateRequest extends EccWorkspaceMuta
 
 export interface EccWorkspaceStepConfigurationUpdateRequest extends EccWorkspaceMutationRequest {
   commandId: string
+  /**
+   * The caller published the current output of `stepId`; keep that step
+   * successful and invalidate only its downstream suffix.
+   */
+  commitStepOutput?: boolean
   parameters: Record<string, unknown>
   stepId: string
 }

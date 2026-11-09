@@ -23,7 +23,8 @@ use crate::macro_interaction::{
     apply_selection, MacroCanvasInteraction, MacroGroupDrag, MacroMarquee, SelectionMode,
 };
 use crate::macro_ops::{
-    plan_macro_op, planned_move_overlap, MacroOp, MacroOpBounds, PlannedMacroMove,
+    plan_macro_op_with_snap, planned_move_overlap, AlignAxis, AlignEdge, GridSnap, MacroOp,
+    MacroOpBounds, MacroTransform, PlacementStatus, PlannedMacroMove, ShiftDirection,
 };
 use crate::macro_orient::MacroOrientation;
 use crate::macro_staging::{
@@ -37,6 +38,7 @@ mod gpu_overview;
 mod gpu_tile_worker;
 mod label_layout;
 mod lvs;
+mod session_close;
 mod snapshot_reload;
 use gpu_tile_worker::GpuTileWorker;
 use label_layout::{
@@ -46,6 +48,7 @@ use label_layout::{
 use snapshot_reload::{PendingReload, ReloadCompletion};
 
 const SNAPSHOT_REFRESH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
+const SESSION_ACTION_QUEUE_TIMEOUT: Duration = Duration::from_secs(15);
 const FOCUS_VIEWPORT_FILL: f32 = 0.45;
 const MIN_SHAPE_SCREEN_SIZE: f32 = 2.0;
 const LAYOUT_GEOMETRY_LAYER: LayerId = 0;
@@ -214,6 +217,7 @@ struct LoadedViewer {
     edit_command_dir: Option<PathBuf>,
     edit_result_dir: Option<PathBuf>,
     macro_staging: Option<MacroStagingState>,
+    macro_toolbox_preferences: crate::macro_toolbar::MacroToolboxPreferences,
     query_input_mode: QueryInputMode,
     search_text: String,
     search_mode: SearchMode,
@@ -232,6 +236,10 @@ struct LoadedViewer {
     session_dirty: bool,
     close_confirmation_visible: bool,
     close_after_session_action: bool,
+    /// Set after the user explicitly chooses to close without Save/Discard.
+    /// This bypasses the unsaved-edit interception on the following close
+    /// event, so an unavailable host cannot trap the native window.
+    close_without_session_action: bool,
     snapshot_signature: SnapshotFileSignature,
     next_snapshot_refresh_check: Instant,
     render_cache: RenderPlanCache,
@@ -603,6 +611,17 @@ struct EditDraft {
 
 struct PendingEdit {
     result_path: PathBuf,
+    /// Set for a manual drag from the unplaced macro staging row. These
+    /// instances have no snapshot shape (shape_id 0), so the accepted result
+    /// must update the local staging rectangle explicitly.
+    staged_macro: Option<StagedMacroCommit>,
+}
+
+#[derive(Clone)]
+struct StagedMacroCommit {
+    name: String,
+    orient: MacroOrientation,
+    placement_status: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -723,6 +742,7 @@ impl SessionActionProgress {
 struct PendingSessionAction {
     action: SessionActionKind,
     command_id: u64,
+    queued_at: Instant,
     progress_path: PathBuf,
     result_path: PathBuf,
 }
@@ -2298,6 +2318,8 @@ impl LoadedViewer {
             edit_command_dir,
             edit_result_dir,
             macro_staging,
+            macro_toolbox_preferences:
+                crate::macro_toolbar::MacroToolboxPreferences::load_persisted(),
             query_input_mode: QueryInputMode::Search,
             search_text: String::new(),
             search_mode: SearchMode::All,
@@ -2316,6 +2338,7 @@ impl LoadedViewer {
             session_dirty: initial_session_dirty,
             close_confirmation_visible: false,
             close_after_session_action: false,
+            close_without_session_action: false,
             snapshot_signature,
             next_snapshot_refresh_check: Instant::now() + SNAPSHOT_REFRESH_CHECK_INTERVAL,
             render_cache: RenderPlanCache::default(),
@@ -5774,6 +5797,93 @@ impl LoadedViewer {
         }
     }
 
+    fn handle_macro_placement_keyboard_shortcuts(&mut self, ui: &egui::Ui) {
+        let Some(staging) = self.macro_staging.as_ref() else {
+            return;
+        };
+        if staging.queue.is_busy() || staging.selection.is_empty() {
+            return;
+        }
+        let multiple = staging.selected_placed_count() >= 2;
+        let dbu_per_micron = self
+            .db
+            .snapshot()
+            .manifest()
+            .dbu_per_micron
+            .unwrap_or(1000)
+            .max(1);
+        let preferences = self.macro_toolbox_preferences.clone();
+        let shift_held = ui.input(|input| input.modifiers.shift);
+        let command = egui::Modifiers::COMMAND;
+        let command_shift = command | egui::Modifiers::SHIFT;
+
+        // Check the more specific Cmd/Ctrl+Shift shortcuts before plain
+        // Cmd/Ctrl+Arrow, because egui matches shortcuts logically and would
+        // otherwise let the nudge mapping consume the alignment chord.
+        if shift_held && multiple {
+            for (key, axis, edge) in [
+                (egui::Key::ArrowLeft, AlignAxis::X, AlignEdge::Min),
+                (egui::Key::ArrowRight, AlignAxis::X, AlignEdge::Max),
+                (egui::Key::ArrowUp, AlignAxis::Y, AlignEdge::Max),
+                (egui::Key::ArrowDown, AlignAxis::Y, AlignEdge::Min),
+            ] {
+                if ui.input_mut(|input| input.consume_key(command_shift, key)) {
+                    self.run_macro_op(&MacroOp::Align {
+                        axis,
+                        edge,
+                        reference: preferences.align_reference,
+                    });
+                }
+            }
+            if ui.input_mut(|input| input.consume_key(command_shift, egui::Key::C)) {
+                self.run_macro_op(&MacroOp::Align {
+                    axis: AlignAxis::X,
+                    edge: AlignEdge::Center,
+                    reference: preferences.align_reference,
+                });
+            }
+            if ui.input_mut(|input| input.consume_key(command_shift, egui::Key::M)) {
+                self.run_macro_op(&MacroOp::Align {
+                    axis: AlignAxis::Y,
+                    edge: AlignEdge::Center,
+                    reference: preferences.align_reference,
+                });
+            }
+        }
+
+        if shift_held {
+            return;
+        }
+
+        let distance = crate::macro_toolbar::microns_to_dbu(preferences.shift_um, dbu_per_micron);
+        for (key, direction) in [
+            (egui::Key::ArrowLeft, ShiftDirection::Left),
+            (egui::Key::ArrowRight, ShiftDirection::Right),
+            (egui::Key::ArrowUp, ShiftDirection::Up),
+            (egui::Key::ArrowDown, ShiftDirection::Down),
+        ] {
+            if ui.input_mut(|input| input.consume_key(command, key)) {
+                self.run_macro_op(&MacroOp::Shift {
+                    direction,
+                    distance_dbu: distance,
+                    per_item: preferences.one_by_one,
+                });
+            }
+        }
+        if ui.input_mut(|input| input.consume_key(command, egui::Key::OpenBracket)) {
+            self.run_macro_op(&MacroOp::Transform {
+                transform: MacroTransform::RotateCounterClockwise,
+                keep_relative: preferences.keep_relative,
+            });
+        }
+        if ui.input_mut(|input| input.consume_key(command, egui::Key::CloseBracket)) {
+            self.run_macro_op(&MacroOp::Transform {
+                transform: MacroTransform::RotateClockwise,
+                keep_relative: preferences.keep_relative,
+            });
+        }
+    }
+
     fn handle_canvas_keyboard_shortcuts(
         &mut self,
         ui: &mut egui::Ui,
@@ -5781,6 +5891,7 @@ impl LoadedViewer {
         canvas: egui::Rect,
     ) {
         if !ui.ctx().wants_keyboard_input() {
+            self.handle_macro_placement_keyboard_shortcuts(ui);
             if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
                 if self.shortcuts_overlay_visible {
                     self.shortcuts_overlay_visible = false;
@@ -5918,38 +6029,39 @@ impl LoadedViewer {
                     }
                 }
             }
-            if ui.input(|input| input.key_pressed(egui::Key::OpenBracket)) {
+            let command_held = ui.input(|input| input.modifiers.command);
+            if !command_held && ui.input(|input| input.key_pressed(egui::Key::OpenBracket)) {
                 if let Some(heatmap) = self.active_heatmap.as_mut() {
                     heatmap.opacity = (heatmap.opacity - 0.05).max(0.05);
                 }
             }
-            if ui.input(|input| input.key_pressed(egui::Key::CloseBracket)) {
+            if !command_held && ui.input(|input| input.key_pressed(egui::Key::CloseBracket)) {
                 if let Some(heatmap) = self.active_heatmap.as_mut() {
                     heatmap.opacity = (heatmap.opacity + 0.05).min(1.0);
                 }
             }
-            if ui.input(|input| input.key_pressed(egui::Key::ArrowLeft)) {
+            if !command_held && ui.input(|input| input.key_pressed(egui::Key::ArrowLeft)) {
                 if self.view_mode == ViewMode::ThreeD {
                     self.camera_ctrl_3d.move_pivot(-1.0, 0.0);
                 } else {
                     self.pan.x += canvas.width() * 0.10;
                 }
             }
-            if ui.input(|input| input.key_pressed(egui::Key::ArrowRight)) {
+            if !command_held && ui.input(|input| input.key_pressed(egui::Key::ArrowRight)) {
                 if self.view_mode == ViewMode::ThreeD {
                     self.camera_ctrl_3d.move_pivot(1.0, 0.0);
                 } else {
                     self.pan.x -= canvas.width() * 0.10;
                 }
             }
-            if ui.input(|input| input.key_pressed(egui::Key::ArrowUp)) {
+            if !command_held && ui.input(|input| input.key_pressed(egui::Key::ArrowUp)) {
                 if self.view_mode == ViewMode::ThreeD {
                     self.camera_ctrl_3d.move_pivot(0.0, 1.0);
                 } else {
                     self.pan.y += canvas.height() * 0.10;
                 }
             }
-            if ui.input(|input| input.key_pressed(egui::Key::ArrowDown)) {
+            if !command_held && ui.input(|input| input.key_pressed(egui::Key::ArrowDown)) {
                 if self.view_mode == ViewMode::ThreeD {
                     self.camera_ctrl_3d.move_pivot(0.0, -1.0);
                 } else {
@@ -6573,9 +6685,10 @@ impl LoadedViewer {
                     .is_some_and(|staging| staging.is_macro_instance(&self.db, name))
             })
             .map(|name| {
+                let staging = self.macro_staging.as_ref().unwrap();
                 (
-                    Some(self.macro_staging.as_ref().unwrap().orient_of(name)),
-                    Some("fixed".to_string()),
+                    Some(staging.orient_of(name)),
+                    Some(staging.status_of(name).as_str().to_string()),
                 )
             })
             .unwrap_or((None, None));
@@ -6611,18 +6724,24 @@ impl LoadedViewer {
     }
 
     fn update_edit_drag(&mut self, screen_delta: egui::Vec2, world: Rect32, canvas: egui::Rect) {
+        let snap = self.macro_grid_snap();
+        let core = self
+            .macro_staging
+            .as_ref()
+            .and_then(|staging| staging.core_rect);
         let Some(draft) = self.draft.as_mut() else {
             return;
         };
         let (dx, dy) = screen_to_world_delta(screen_delta, world, canvas, self.zoom);
         let mut requested = translate_rect(draft.original_bbox, dx, dy);
+        if draft.instance_name.is_some() {
+            if let Some(snap) = snap {
+                requested = snap.snap_rect(requested);
+            }
+        }
         // Macro placements are confined to the core area once the draft
         // enters it; the staging row itself stays unconstrained.
-        if let Some(core) = self
-            .macro_staging
-            .as_ref()
-            .and_then(|staging| staging.core_rect)
-        {
+        if let Some(core) = core {
             if requested.intersects(core) {
                 requested = clamp_rect_into(requested, core);
             }
@@ -6665,7 +6784,23 @@ impl LoadedViewer {
             draft.placement_status.as_deref(),
         ) {
             Ok(()) => {
-                self.pending_edit = Some(PendingEdit { result_path });
+                let staged_macro = if draft.shape_id == 0 {
+                    draft
+                        .instance_name
+                        .clone()
+                        .zip(draft.orient)
+                        .map(|(name, orient)| StagedMacroCommit {
+                            name,
+                            orient,
+                            placement_status: draft.placement_status.clone(),
+                        })
+                } else {
+                    None
+                };
+                self.pending_edit = Some(PendingEdit {
+                    result_path,
+                    staged_macro,
+                });
                 self.last_edit_result = Some(format!("command {} pending", command.command_id));
             }
             Err(err) => {
@@ -6696,11 +6831,21 @@ impl LoadedViewer {
         if !self.edit_enabled {
             return None;
         }
-        let (name, rect, orient) = {
+        let (name, rect, orient, placement_status) = {
             let staging = self.macro_staging.as_ref()?;
             let index = staging.staged_index_at(point, tolerance_dbu)?;
             let staged = &staging.staged[index];
-            (staged.name.clone(), staged.rect, staged.orient)
+            let status = staging.status_of(&staged.name);
+            (
+                staged.name.clone(),
+                staged.rect,
+                staged.orient,
+                if status == PlacementStatus::Unplaced {
+                    PlacementStatus::Placed
+                } else {
+                    status
+                },
+            )
         };
         Some(EditDraft {
             command_id: self.allocate_command_id(),
@@ -6710,7 +6855,7 @@ impl LoadedViewer {
             original_bbox: rect,
             requested_bbox: rect,
             orient: Some(orient),
-            placement_status: Some("fixed".to_string()),
+            placement_status: Some(placement_status.as_str().to_string()),
         })
     }
 
@@ -6898,8 +7043,9 @@ impl LoadedViewer {
             .macro_staging
             .as_ref()
             .and_then(|staging| staging.core_rect);
+        let snap = self.macro_grid_snap();
         if let Some(MacroCanvasInteraction::GroupDrag(drag)) = self.macro_interaction.as_mut() {
-            drag.update(dx, dy, core);
+            drag.update_with_snap(dx, dy, core, snap);
         }
     }
 
@@ -6934,32 +7080,81 @@ impl LoadedViewer {
         self.apply_macro_moves(drag.planned_moves(), None);
     }
 
+    fn macro_grid_snap(&self) -> Option<GridSnap> {
+        let preferences = &self.macro_toolbox_preferences;
+        if !preferences.snap_enabled {
+            return None;
+        }
+        let dbu_per_micron = self
+            .db
+            .snapshot()
+            .manifest()
+            .dbu_per_micron
+            .unwrap_or(1)
+            .max(1);
+        let origin = self
+            .macro_staging
+            .as_ref()
+            .and_then(|staging| staging.core_rect)
+            .map_or((0, 0), |core| (core.lx, core.ly));
+        Some(GridSnap {
+            origin_x: origin.0,
+            origin_y: origin.1,
+            step_x: crate::macro_toolbar::microns_to_dbu(preferences.snap_x_um, dbu_per_micron),
+            step_y: crate::macro_toolbar::microns_to_dbu(preferences.snap_y_um, dbu_per_micron),
+        })
+    }
+
     fn macro_toolbar(&mut self, ui: &mut egui::Ui) {
         let Some(staging) = self.macro_staging.as_ref() else {
             return;
         };
         let views = staging.selected_placement_views(&self.db);
+        let feedback = staging
+            .message
+            .clone()
+            .or_else(|| self.last_edit_result.clone());
+        let feedback_warning = feedback.as_deref().is_some_and(macro_feedback_is_warning)
+            || staging.queue.failure.is_some();
         let state = crate::macro_toolbar::MacroToolbarState {
-            unplaced_count: staging.staged.len(),
+            unplaced_count: staging.unplaced_staged_count(),
             selected_count: views.len(),
             placed_selected_count: staging.selected_placed_count(),
             unplaced_stdcell_count: staging.stdcell_blob.as_ref().map_or(0, |blob| blob.count),
-            rotation_allowed: views
-                .iter()
-                .all(|view| view.symmetry.rotate_90_allowed(view.orient)),
-            mirror_horizontal_allowed: views
-                .iter()
-                .all(|view| view.symmetry.mirror_horizontal_allowed(view.orient)),
-            mirror_vertical_allowed: views
-                .iter()
-                .all(|view| view.symmetry.mirror_vertical_allowed(view.orient)),
+            first_selected_name: staging
+                .selection
+                .first()
+                .map(|target| target.name().to_owned()),
+            common_selected_status: staging.common_selected_status(),
             die_available: staging.die_rect.is_some(),
+            die_target_available: staging.die_rect.is_some()
+                && staging.die_rect == staging.core_rect,
             core_available: staging.core_rect.is_some(),
+            dbu_per_micron: self
+                .db
+                .snapshot()
+                .manifest()
+                .dbu_per_micron
+                .unwrap_or(1)
+                .max(1),
             queue_busy: staging.queue.is_busy(),
             queue_status: staging.queue.status(),
+            feedback,
+            feedback_warning,
         };
         let mut requested: Vec<MacroOp> = Vec::new();
-        crate::macro_toolbar::show_macro_toolbar(ui, &state, |op| requested.push(op));
+        let preferences_before = self.macro_toolbox_preferences.clone();
+        crate::macro_toolbar::show_macro_toolbar(
+            ui,
+            &state,
+            &mut self.macro_toolbox_preferences,
+            |op| requested.push(op),
+        );
+        if self.macro_toolbox_preferences != preferences_before {
+            if let Err(error) = self.macro_toolbox_preferences.persist() {
+                self.last_edit_result = Some(error);
+            }
+        }
         for op in &requested {
             self.run_macro_op(op);
         }
@@ -6974,6 +7169,7 @@ impl LoadedViewer {
                 die: staging.die_rect,
             })
             .unwrap_or_default();
+        let snap = self.macro_grid_snap();
         let Some(staging) = self.macro_staging.as_mut() else {
             return;
         };
@@ -6981,7 +7177,7 @@ impl LoadedViewer {
             return;
         }
         let views = staging.selected_placement_views(&self.db);
-        let plan = plan_macro_op(op, &views, bounds);
+        let plan = plan_macro_op_with_snap(op, &views, bounds, snap);
         let skipped_summary = plan
             .skipped
             .iter()
@@ -6989,13 +7185,19 @@ impl LoadedViewer {
             .collect::<Vec<_>>()
             .join("; ");
         if plan.moves.is_empty() {
-            staging.message = (!skipped_summary.is_empty()).then_some(skipped_summary);
+            staging.message = Some(if skipped_summary.is_empty() {
+                format!("{} is unavailable for the current selection", op.label())
+            } else {
+                skipped_summary
+            });
             return;
         }
-        self.apply_macro_moves(
-            plan.moves,
-            (!skipped_summary.is_empty()).then_some(skipped_summary),
-        );
+        let message = if skipped_summary.is_empty() {
+            Some(format!("queued {}", op.label()))
+        } else {
+            Some(format!("queued {}; {skipped_summary}", op.label()))
+        };
+        self.apply_macro_moves(plan.moves, message);
     }
 
     fn apply_macro_moves(&mut self, moves: Vec<PlannedMacroMove>, message: Option<String>) {
@@ -7035,6 +7237,11 @@ impl LoadedViewer {
             .map(|item| item.name.clone())
             .collect::<BTreeSet<_>>();
         for item in moves.iter().filter(|item| !item.staged) {
+            // A status-only operation does not move the instance and must not
+            // be rejected merely because a staged macro is still in its row.
+            if item.placement_status.is_some() {
+                continue;
+            }
             let Some(core) = core else {
                 return Some("operation rejected: core area is unknown".to_string());
             };
@@ -7049,6 +7256,17 @@ impl LoadedViewer {
             {
                 return Some(format!(
                     "operation rejected: {} overlaps {collider}",
+                    item.name
+                ));
+            }
+            if let Some(collider) = self.macro_staging.as_ref().and_then(|staging| {
+                staging
+                    .staged_names_intersecting_except(item.rect, &moving_names)
+                    .first()
+                    .cloned()
+            }) {
+                return Some(format!(
+                    "operation rejected: {} overlaps staged macro {collider}",
                     item.name
                 ));
             }
@@ -7085,23 +7303,59 @@ impl LoadedViewer {
                 Some(shape) => (shape.id, shape.version),
                 None => (0, 0),
             };
+        let (current_status, inside_core) = self
+            .macro_staging
+            .as_ref()
+            .map(|staging| {
+                (
+                    staging.status_of(&head.name),
+                    staging
+                        .core_rect
+                        .is_some_and(|core| rect_fits_inside(head.rect, core)),
+                )
+            })
+            .unwrap_or((PlacementStatus::Fixed, false));
+        let placement_status = head.placement_status.unwrap_or_else(|| {
+            if current_status == PlacementStatus::Unplaced && inside_core {
+                PlacementStatus::Placed
+            } else {
+                current_status
+            }
+        });
+        let staged_macro = (shape_id == 0).then(|| StagedMacroCommit {
+            name: head.name.clone(),
+            orient: head.orient,
+            placement_status: Some(placement_status.as_str().to_string()),
+        });
         let Some(staging) = self.macro_staging.as_mut() else {
             return;
         };
-        if let Some(core) = staging.core_rect {
-            if !rect_fits_inside(head.rect, core) {
-                staging
-                    .queue
-                    .abort(format!("{} would leave the core area", head.name));
+        let status_only = head.placement_status.is_some();
+        if !status_only {
+            if let Some(core) = staging.core_rect {
+                if !rect_fits_inside(head.rect, core) {
+                    let reason = format!("{} would leave the core area", head.name);
+                    staging.queue.abort(reason.clone());
+                    staging.message = Some(reason);
+                    return;
+                }
+            }
+            let colliders = instance_names_intersecting_except(&self.db, head.rect, &moving_names);
+            if let Some(first) = colliders.first() {
+                let reason = format!("{} overlaps {first}", head.name);
+                staging.queue.abort(reason.clone());
+                staging.message = Some(reason);
                 return;
             }
-        }
-        let colliders = instance_names_intersecting_except(&self.db, head.rect, &moving_names);
-        if let Some(first) = colliders.first() {
-            staging
-                .queue
-                .abort(format!("{} overlaps {first}", head.name));
-            return;
+            if let Some(first) = staging
+                .staged_names_intersecting_except(head.rect, &moving_names)
+                .first()
+            {
+                let reason = format!("{} overlaps staged macro {first}", head.name);
+                staging.queue.abort(reason.clone());
+                staging.message = Some(reason);
+                return;
+            }
         }
         staging.queue.pending.pop_front();
         let command_id = self.allocate_command_id();
@@ -7127,25 +7381,31 @@ impl LoadedViewer {
             &command,
             Some(head.name.as_str()),
             Some(head.orient.as_str()),
-            Some("fixed"),
+            Some(placement_status.as_str()),
         ) {
             Ok(()) => {
                 if let Some(staging) = self.macro_staging.as_mut() {
+                    staging.message = None;
                     staging.queue.active = Some(crate::macro_ops::ActiveMacroCommand {
                         command_id,
                         name: head.name.clone(),
                         orient: head.orient,
+                        placement_status: Some(placement_status),
                     });
                 }
-                self.pending_edit = Some(PendingEdit { result_path });
+                self.pending_edit = Some(PendingEdit {
+                    result_path,
+                    staged_macro,
+                });
                 self.last_edit_result = Some(format!("command {command_id} pending"));
             }
             Err(err) => {
+                let message = format!("failed to write edit command: {err}");
                 if let Some(staging) = self.macro_staging.as_mut() {
-                    staging
-                        .queue
-                        .abort(format!("failed to write edit command: {err}"));
+                    staging.queue.abort(message.clone());
+                    staging.message = Some(message.clone());
                 }
+                self.last_edit_result = Some(message);
             }
         }
     }
@@ -7157,12 +7417,19 @@ impl LoadedViewer {
             result.status,
             GeometryEditStatus::Accepted | GeometryEditStatus::AdjustedAccepted
         );
+        let staged_macro = self
+            .pending_edit
+            .as_ref()
+            .and_then(|pending| pending.staged_macro.clone());
         let Some(staging) = self.macro_staging.as_mut() else {
             return;
         };
         if let Some(active) = staging.queue.active.take() {
             if active.command_id == result.command_id {
                 if accepted {
+                    if let Some(status) = active.placement_status {
+                        staging.set_status(&active.name, status);
+                    }
                     staging.orient_by_name.insert(active.name, active.orient);
                 } else {
                     staging.queue.abort(format!(
@@ -7172,6 +7439,22 @@ impl LoadedViewer {
                 }
             } else {
                 staging.queue.active = Some(active);
+            }
+        }
+        if accepted {
+            if let Some(staged_macro) = staged_macro {
+                staging.commit_staged_move(
+                    &staged_macro.name,
+                    staged_macro.orient,
+                    result.committed_bbox,
+                );
+                if let Some(status) = staged_macro
+                    .placement_status
+                    .as_deref()
+                    .and_then(PlacementStatus::parse)
+                {
+                    staging.set_status(&staged_macro.name, status);
+                }
             }
         }
         staging.reconcile(&self.db);
@@ -7437,6 +7720,7 @@ impl LoadedViewer {
                 self.pending_session_action = Some(PendingSessionAction {
                     action,
                     command_id: command.command_id,
+                    queued_at: Instant::now(),
                     progress_path,
                     result_path,
                 });
@@ -7445,7 +7729,10 @@ impl LoadedViewer {
                     command.command_id,
                     SessionActionProgressPhase::Queued,
                     0,
-                    format!("{} request queued", action.label()),
+                    format!(
+                        "Waiting for ECOS Studio to accept the {} request",
+                        action.label()
+                    ),
                 ));
                 self.close_after_session_action = close_after;
                 self.last_edit_result = Some(format!("{} pending", action.label()));
@@ -7470,18 +7757,33 @@ impl LoadedViewer {
         };
         let expected_action = pending.action;
         let expected_command_id = pending.command_id;
-        let progress_path = pending.progress_path.clone();
-        let progress = fs::read_to_string(progress_path)
-            .ok()
-            .and_then(|content| serde_json::from_str::<SessionActionProgress>(&content).ok());
-        let Some(progress) = progress else {
-            return;
-        };
-        if progress.action == expected_action
-            && progress.command_id == expected_command_id
-            && progress.percent <= 100
-        {
-            self.session_action_progress = Some(progress);
+        let poll = read_session_action_progress(
+            expected_action,
+            expected_command_id,
+            &pending.progress_path,
+            pending.queued_at.elapsed(),
+        );
+        match poll {
+            SessionActionProgressPoll::Waiting => {}
+            SessionActionProgressPoll::Updated(progress) => {
+                self.session_action_progress = Some(progress);
+            }
+            SessionActionProgressPoll::TimedOut => {
+                let message = format!(
+                    "Timed out waiting for ECOS Studio to accept the {} request. Keep ECOS Studio running and reopen layout editing before retrying. If ECOS Studio is closed, close this window without saving.",
+                    expected_action.label()
+                );
+                self.last_edit_result = Some(message.clone());
+                self.session_action_progress = Some(SessionActionProgress::new(
+                    expected_action,
+                    expected_command_id,
+                    SessionActionProgressPhase::Failed,
+                    100,
+                    message,
+                ));
+                self.pending_session_action = None;
+                self.close_after_session_action = false;
+            }
         }
     }
 
@@ -7586,77 +7888,6 @@ impl LoadedViewer {
                 ));
                 false
             }
-        }
-    }
-
-    fn show_close_confirmation(&mut self, ctx: &egui::Context) {
-        if !self.close_confirmation_visible || self.pending_session_action.is_some() {
-            return;
-        }
-
-        egui::Window::new("Unsaved layout edits")
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .show(ctx, |ui| {
-                ui.set_min_width(310.0);
-                ui.label("Save or discard the pending layout edits before closing.");
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if ui.button("Keep editing").clicked() {
-                        self.close_confirmation_visible = false;
-                    }
-                    if ui.button("Discard").clicked() {
-                        self.request_session_action(SessionActionKind::Discard, true);
-                    }
-                    if ui.button("Save").clicked() {
-                        self.request_session_action(SessionActionKind::Save, true);
-                    }
-                });
-            });
-    }
-
-    fn show_session_action_progress(&mut self, ctx: &egui::Context) {
-        let Some(progress) = self.session_action_progress.clone() else {
-            return;
-        };
-        let title = match progress.action {
-            SessionActionKind::Save => "Saving layout",
-            SessionActionKind::Discard => "Discarding layout edits",
-        };
-        let mut dismiss = false;
-        egui::Window::new(title)
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .show(ctx, |ui| {
-                ui.set_min_width(360.0);
-                ui.label(egui::RichText::new(progress.phase.label()).strong());
-                ui.add_space(8.0);
-                ui.add(
-                    egui::ProgressBar::new(progress.fraction())
-                        .show_percentage()
-                        .animate(!progress.phase.is_terminal()),
-                );
-                ui.add_space(6.0);
-                ui.label(&progress.message);
-                if !progress.phase.is_terminal() {
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label("This window updates until the operation finishes.");
-                    });
-                } else {
-                    ui.add_space(8.0);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("×").on_hover_text("Close status").clicked() {
-                            dismiss = true;
-                        }
-                    });
-                }
-            });
-        if dismiss {
-            self.session_action_progress = None;
         }
     }
 
@@ -8353,6 +8584,77 @@ impl LoadedViewer {
     }
 }
 
+fn macro_feedback_is_warning(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    [
+        "rejected",
+        "failed",
+        "error",
+        "unplaced",
+        "cancelled",
+        "stale",
+        "changed",
+        "unknown",
+        "not configured",
+        "missing",
+        "unsupported",
+        "forbids",
+        "requires",
+        "overlap",
+        "wait for",
+        "unavailable",
+        "outside",
+    ]
+    .iter()
+    .any(|needle| message.contains(needle))
+}
+
+enum SessionActionProgressPoll {
+    Waiting,
+    Updated(SessionActionProgress),
+    TimedOut,
+}
+
+fn read_session_action_progress(
+    action: SessionActionKind,
+    command_id: u64,
+    progress_path: &Path,
+    elapsed: Duration,
+) -> SessionActionProgressPoll {
+    let progress = fs::read_to_string(progress_path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<SessionActionProgress>(&content).ok());
+    if let Some(progress) = progress {
+        if progress.action == action && progress.command_id == command_id && progress.percent <= 100
+        {
+            return SessionActionProgressPoll::Updated(progress);
+        }
+    }
+    if session_action_queue_timed_out(elapsed) {
+        SessionActionProgressPoll::TimedOut
+    } else {
+        SessionActionProgressPoll::Waiting
+    }
+}
+
+fn session_action_queue_timed_out(elapsed: Duration) -> bool {
+    elapsed >= SESSION_ACTION_QUEUE_TIMEOUT
+}
+
+fn session_action_progress_title(
+    action: SessionActionKind,
+    phase: SessionActionProgressPhase,
+) -> &'static str {
+    match (action, phase) {
+        (SessionActionKind::Save, SessionActionProgressPhase::Completed) => "Layout saved",
+        (SessionActionKind::Discard, SessionActionProgressPhase::Completed) => "Edits discarded",
+        (SessionActionKind::Save, SessionActionProgressPhase::Failed) => "Save failed",
+        (SessionActionKind::Discard, SessionActionProgressPhase::Failed) => "Discard failed",
+        (SessionActionKind::Save, _) => "Saving layout",
+        (SessionActionKind::Discard, _) => "Discarding layout edits",
+    }
+}
+
 impl eframe::App for ChipViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if !self.theme_initialized {
@@ -8374,7 +8676,7 @@ impl eframe::App for ChipViewerApp {
                 close_after_session_action = true;
             }
             loaded.poll_external_snapshot_refresh();
-            if close_requested && loaded.session_dirty {
+            if close_requested && loaded.should_intercept_unsaved_close() {
                 loaded.close_confirmation_visible = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             }
@@ -8393,13 +8695,14 @@ impl eframe::App for ChipViewerApp {
         if let ViewerState::Loaded(loaded) = &mut self.state {
             if loaded.macro_staging.is_some() {
                 egui::SidePanel::left("chip_viewer_macro_tools")
-                    .resizable(false)
-                    .min_width(190.0)
-                    .max_width(220.0)
-                    .default_width(220.0)
+                    .resizable(true)
+                    .min_width(268.0)
+                    .max_width(520.0)
+                    .default_width(292.0)
+                    .frame(egui::Frame::side_top_panel(&ctx.style()).fill(ecos_panel()))
                     .show(ctx, |ui| loaded.macro_toolbar(ui));
             }
-            if loaded.has_analysis_panel() {
+            if loaded.macro_staging.is_none() && loaded.has_analysis_panel() {
                 egui::SidePanel::left("chip_viewer_analysis")
                     .resizable(true)
                     .min_width(240.0)
@@ -8427,6 +8730,10 @@ impl eframe::App for ChipViewerApp {
         }
         if close_after_session_action {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        } else if let ViewerState::Loaded(loaded) = &self.state {
+            if loaded.close_without_session_action {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
         }
     }
 }
@@ -8486,7 +8793,7 @@ pub(crate) fn ecos_accent() -> egui::Color32 {
     egui::Color32::from_rgb(0, 191, 165)
 }
 
-fn ecos_warning() -> egui::Color32 {
+pub(crate) fn ecos_warning() -> egui::Color32 {
     egui::Color32::from_rgb(251, 191, 36)
 }
 
@@ -11421,25 +11728,26 @@ fn snapshot_file_signature_changed(
 
 fn edit_result_action(result: &GeometryEditResult) -> EditResultAction {
     let (reload_snapshot, message) = match result.status {
-        GeometryEditStatus::Accepted => (
-            true,
-            format!(
-                "edit accepted: shape {} version {}",
-                result.shape_id, result.new_version
-            ),
-        ),
-        GeometryEditStatus::AdjustedAccepted => (
-            true,
-            format!(
-                "edit adjusted: shape {} version {} bbox {} {} {} {}",
-                result.shape_id,
-                result.new_version,
-                result.committed_bbox.lx,
-                result.committed_bbox.ly,
-                result.committed_bbox.hx,
-                result.committed_bbox.hy
-            ),
-        ),
+        GeometryEditStatus::Accepted => (true, accepted_edit_result_message(result)),
+        GeometryEditStatus::AdjustedAccepted => {
+            let staging_revision = result
+                .staging_revision
+                .map(|revision| format!(" staging revision {revision}"))
+                .unwrap_or_default();
+            (
+                true,
+                format!(
+                    "edit adjusted: shape {} version {} bbox {} {} {} {}{}",
+                    result.shape_id,
+                    result.new_version,
+                    result.committed_bbox.lx,
+                    result.committed_bbox.ly,
+                    result.committed_bbox.hx,
+                    result.committed_bbox.hy,
+                    staging_revision
+                ),
+            )
+        }
         GeometryEditStatus::Rejected => (
             false,
             format!(
@@ -11460,6 +11768,29 @@ fn edit_result_action(result: &GeometryEditResult) -> EditResultAction {
         reload_snapshot,
         selected_shape_id: Some(result.shape_id),
         message: append_edit_diagnostic(message, result),
+    }
+}
+
+fn accepted_edit_result_message(result: &GeometryEditResult) -> String {
+    let source_version = result.source_version.unwrap_or(result.new_version);
+    if result.shape_id == 0 {
+        return match result.staging_revision {
+            Some(staging_revision) => format!(
+                "edit accepted: staged macro source version {} staging revision {}",
+                source_version, staging_revision
+            ),
+            None => format!("edit accepted: staged macro version {source_version}"),
+        };
+    }
+    match result.staging_revision {
+        Some(staging_revision) => format!(
+            "edit accepted: shape {} source version {} staging revision {}",
+            result.shape_id, source_version, staging_revision
+        ),
+        None => format!(
+            "edit accepted: shape {} version {}",
+            result.shape_id, result.new_version
+        ),
     }
 }
 
@@ -12408,14 +12739,23 @@ fn session_action_result_message(result: &SessionActionResult) -> String {
 /// entirely. A save with macros still staged in the unplaced column would
 /// strand them unplaced, so it is rejected until each one has a placement.
 fn macro_save_blocker(staging: Option<&crate::macro_staging::MacroStagingState>) -> Option<String> {
-    let staged = staging?.staged.len();
-    (staged > 0)
-        .then(|| format!("{staged} macro(s) are still unplaced; place every macro before saving"))
+    let staging = staging?;
+    let unplaced = staging.unplaced_staged_names();
+    (!unplaced.is_empty()).then(|| {
+        format!(
+            "{} macro(s) are still unplaced; place every macro before saving: {}",
+            unplaced.len(),
+            unplaced.join(", ")
+        )
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::session_close::{
+        session_action_recovery_actions, SessionActionRecoveryActions,
+    };
     use crate::instance_visibility::is_filler_instance;
     use std::io::Write;
 
@@ -15499,6 +15839,108 @@ mod tests {
     }
 
     #[test]
+    fn stopping_a_session_action_wait_restores_the_close_dialog() {
+        let (dir, mut loaded) = close_test_loaded_viewer("stop-session-action-wait");
+        loaded.pending_session_action = Some(PendingSessionAction {
+            action: SessionActionKind::Discard,
+            command_id: 41,
+            queued_at: Instant::now(),
+            progress_path: dir.join("control-progress-discard-41.json"),
+            result_path: dir.join("control-result-discard-41.json"),
+        });
+        loaded.session_action_progress = Some(SessionActionProgress::new(
+            SessionActionKind::Discard,
+            41,
+            SessionActionProgressPhase::Queued,
+            0,
+            "Waiting for ECOS Studio",
+        ));
+        loaded.close_confirmation_visible = true;
+        loaded.close_after_session_action = true;
+
+        loaded.stop_waiting_for_session_action();
+
+        assert!(loaded.pending_session_action.is_none());
+        assert!(loaded.session_action_progress.is_none());
+        assert!(loaded.close_confirmation_visible);
+        assert!(!loaded.close_after_session_action);
+        assert!(!loaded.close_without_session_action);
+        assert!(loaded.session_dirty);
+        assert!(loaded.should_intercept_unsaved_close());
+        assert!(loaded
+            .last_edit_result
+            .as_deref()
+            .is_some_and(|message| message.contains("Stopped waiting")));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn closing_without_session_action_bypasses_an_unavailable_host() {
+        let (dir, mut loaded) = close_test_loaded_viewer("close-without-session-action");
+        loaded.pending_session_action = Some(PendingSessionAction {
+            action: SessionActionKind::Discard,
+            command_id: 42,
+            queued_at: Instant::now(),
+            progress_path: dir.join("control-progress-discard-42.json"),
+            result_path: dir.join("control-result-discard-42.json"),
+        });
+        loaded.session_action_progress = Some(SessionActionProgress::new(
+            SessionActionKind::Discard,
+            42,
+            SessionActionProgressPhase::Failed,
+            100,
+            "ECOS Studio did not respond",
+        ));
+        loaded.close_confirmation_visible = true;
+        loaded.close_after_session_action = true;
+
+        loaded.prepare_close_without_session_action();
+
+        assert!(loaded.pending_session_action.is_none());
+        assert!(loaded.session_action_progress.is_none());
+        assert!(!loaded.close_confirmation_visible);
+        assert!(!loaded.close_after_session_action);
+        assert!(loaded.close_without_session_action);
+        assert!(loaded.session_dirty);
+        assert!(!loaded.should_intercept_unsaved_close());
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn session_action_recovery_actions_match_wait_and_failure_states() {
+        assert_eq!(
+            session_action_recovery_actions(SessionActionProgressPhase::Queued, true),
+            SessionActionRecoveryActions {
+                can_stop_waiting: true,
+                can_close_without_saving: false,
+            }
+        );
+        assert_eq!(
+            session_action_recovery_actions(SessionActionProgressPhase::Failed, true),
+            SessionActionRecoveryActions {
+                can_stop_waiting: false,
+                can_close_without_saving: true,
+            }
+        );
+        assert_eq!(
+            session_action_recovery_actions(SessionActionProgressPhase::Completed, true),
+            SessionActionRecoveryActions {
+                can_stop_waiting: false,
+                can_close_without_saving: false,
+            }
+        );
+        assert_eq!(
+            session_action_recovery_actions(SessionActionProgressPhase::Failed, false),
+            SessionActionRecoveryActions {
+                can_stop_waiting: false,
+                can_close_without_saving: false,
+            }
+        );
+    }
+
+    #[test]
     fn loaded_viewer_falls_back_to_cpu_when_wgpu_unavailable() {
         let dir = temp_snapshot_dir("cpu-fallback-test");
         write_empty_snapshot(&dir, false);
@@ -15744,6 +16186,60 @@ mod tests {
         assert!(rejected.message.contains("apply-edit failed"));
     }
 
+    #[test]
+    fn edit_result_action_distinguishes_source_version_from_staging_revision() {
+        let mut result = edit_result(GeometryEditStatus::Accepted);
+        result.source_version = Some(2);
+        result.staging_revision = Some(9);
+
+        let accepted = edit_result_action(&result);
+
+        assert_eq!(
+            accepted.message,
+            "edit accepted: shape 7 source version 2 staging revision 9"
+        );
+
+        result.shape_id = 0;
+        let staged = edit_result_action(&result);
+        assert_eq!(
+            staged.message,
+            "edit accepted: staged macro source version 2 staging revision 9"
+        );
+    }
+
+    #[test]
+    fn geometry_edit_result_deserializes_staging_metadata() {
+        let result: GeometryEditResult = serde_json::from_str(
+            r#"{
+                "command_id": 11,
+                "shape_id": 7,
+                "new_version": 3,
+                "source_version": 3,
+                "staging_revision": 5,
+                "status": "accepted",
+                "committed_bbox": {"lx": 0, "ly": 0, "hx": 10, "hy": 10}
+            }"#,
+        )
+        .expect("geometry edit result with staging metadata");
+
+        assert_eq!(result.source_version, Some(3));
+        assert_eq!(result.staging_revision, Some(5));
+
+        let legacy: GeometryEditResult = serde_json::from_str(
+            r#"{
+                "command_id": 11,
+                "shape_id": 7,
+                "new_version": 3,
+                "status": "accepted",
+                "committed_bbox": {"lx": 0, "ly": 0, "hx": 10, "hy": 10}
+            }"#,
+        )
+        .expect("geometry edit result without staging metadata");
+
+        assert_eq!(legacy.source_version, None);
+        assert_eq!(legacy.staging_revision, None);
+    }
+
     fn edit_result(status: GeometryEditStatus) -> GeometryEditResult {
         GeometryEditResult {
             command_id: 1,
@@ -15756,6 +16252,8 @@ mod tests {
                 hx: 10,
                 hy: 10,
             },
+            source_version: None,
+            staging_revision: None,
             message: None,
             geometry_manifest_path: None,
         }
@@ -15895,6 +16393,30 @@ mod tests {
             );
         }
         write_manifest(path, include_delta);
+    }
+
+    fn close_test_loaded_viewer(test_name: &str) -> (PathBuf, LoadedViewer) {
+        let dir = temp_snapshot_dir(test_name);
+        write_empty_snapshot(&dir, false);
+        let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
+        let loaded = LoadedViewer::new(
+            chip_display::ColorTheme::Vivid,
+            db,
+            true,
+            true,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            wgpu::TextureFormat::Bgra8Unorm,
+            crate::RenderMode::EguiOnly,
+        );
+        (dir, loaded)
     }
 
     fn write_manifest(path: &Path, include_delta: bool) {
@@ -16170,6 +16692,117 @@ mod tests {
     }
 
     #[test]
+    fn accepted_staged_macro_edit_updates_local_staging_rect() {
+        let dir = temp_snapshot_dir("accepted-staged-macro-move");
+        write_empty_snapshot(&dir, true);
+        fs::write(
+            dir.join("geometry.masters.txt"),
+            "name\ttype\tsite\tsymmetry\torigin_x\torigin_y\twidth\theight\tterm_count\tobs_count\n\
+             SRAM_64x32\tBLOCK\tsite9\tX,Y\t0\t0\t40000\t30000\t120\t0\n",
+        )
+        .unwrap();
+        let staging_path = dir.join("macro-staging.json");
+        fs::write(
+            &staging_path,
+            r#"{
+                "schema": 1,
+                "dbuPerMicron": 1000,
+                "dieArea": {"lx": 0, "ly": 0, "hx": 52000, "hy": 53000},
+                "macros": [
+                    {"name": "u_sram01", "master": "SRAM_64x32", "widthDbu": 40000,
+                     "heightDbu": 30000, "orient": "R0", "placed": false}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
+        let command_dir = dir.join("commands");
+        let result_dir = dir.join("results");
+        fs::create_dir_all(&command_dir).unwrap();
+        fs::create_dir_all(&result_dir).unwrap();
+        let mut loaded = LoadedViewer::new(
+            chip_display::ColorTheme::Vivid,
+            db,
+            true,
+            false,
+            Some(command_dir.clone()),
+            Some(result_dir),
+            Some(staging_path),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            wgpu::TextureFormat::Bgra8Unorm,
+            crate::RenderMode::Gpu,
+        );
+        let moved = Rect32 {
+            lx: 15_000,
+            ly: 20_000,
+            hx: 50_000,
+            hy: 50_000,
+        };
+        assert_eq!(
+            loaded
+                .macro_staging
+                .as_ref()
+                .map(|staging| staging.staged.len()),
+            Some(1)
+        );
+        loaded.apply_macro_moves(
+            vec![PlannedMacroMove {
+                name: "u_sram01".to_string(),
+                orient: MacroOrientation::R90,
+                rect: moved,
+                staged: false,
+                placement_status: None,
+            }],
+            Some("queued rotate clockwise".to_string()),
+        );
+        assert!(loaded
+            .macro_staging
+            .as_ref()
+            .is_some_and(|staging| staging.message.is_none()));
+        assert_eq!(
+            loaded
+                .pending_edit
+                .as_ref()
+                .and_then(|pending| pending.staged_macro.as_ref())
+                .map(|pending| pending.name.as_str()),
+            Some("u_sram01")
+        );
+        let command_json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(command_dir.join("command-1.json")).unwrap())
+                .unwrap();
+        let command: GeometryEditCommand = serde_json::from_value(command_json.clone()).unwrap();
+        assert_eq!(command.shape_id, 0);
+        assert_eq!(command.requested_bbox, moved);
+        assert_eq!(command_json["placement_status"], "placed");
+
+        loaded.finish_macro_edit_result(&GeometryEditResult {
+            command_id: 1,
+            shape_id: 0,
+            new_version: 0,
+            source_version: Some(0),
+            staging_revision: Some(1),
+            status: GeometryEditStatus::Accepted,
+            committed_bbox: moved,
+            message: None,
+            geometry_manifest_path: None,
+        });
+
+        let staging = loaded.macro_staging.as_ref().expect("macro staging");
+        let staged = &staging.staged[0];
+        assert_eq!(staged.rect, moved);
+        assert_eq!(staged.orient, MacroOrientation::R90);
+        assert_eq!(staging.status_of(&staged.name), PlacementStatus::Placed);
+        assert!(!staging.queue.is_busy());
+        assert!(staging.message.is_none());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn session_action_result_message_includes_status_and_diagnostic() {
         let result = SessionActionResult {
             action: SessionActionKind::Discard,
@@ -16186,12 +16819,13 @@ mod tests {
     }
 
     #[test]
-    fn macro_save_blocker_rejects_saves_while_macros_remain_staged() {
+    fn macro_save_blocker_rejects_only_macros_still_outside_the_core() {
         assert!(macro_save_blocker(None).is_none());
         let mut state = crate::macro_staging::MacroStagingState {
             staged: Vec::new(),
-            selection: BTreeSet::new(),
+            selection: crate::macro_staging::MacroSelection::default(),
             orient_by_name: BTreeMap::new(),
+            status_by_name: BTreeMap::new(),
             die_rect: None,
             core_rect: None,
             queue: Default::default(),
@@ -16210,8 +16844,22 @@ mod tests {
         });
         assert_eq!(
             macro_save_blocker(Some(&state)).as_deref(),
-            Some("1 macro(s) are still unplaced; place every macro before saving")
+            Some("1 macro(s) are still unplaced; place every macro before saving: u_sram01")
         );
+
+        state.core_rect = Some(Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 52_000,
+            hy: 53_000,
+        });
+        state.staged[0].rect = Rect32 {
+            lx: 1_000,
+            ly: 2_000,
+            hx: 41_000,
+            hy: 32_000,
+        };
+        assert!(macro_save_blocker(Some(&state)).is_none());
     }
 
     #[test]
@@ -16258,6 +16906,115 @@ mod tests {
         assert_eq!(progress.percent, 50);
         assert_eq!(progress.fraction(), 0.5);
         assert!(!progress.phase.is_terminal());
+    }
+
+    #[test]
+    fn missing_session_action_progress_times_out_instead_of_waiting_forever() {
+        let directory = temp_snapshot_dir("session-action-progress-timeout");
+        let progress_path = directory.join("control-progress-save-57.json");
+
+        assert!(matches!(
+            read_session_action_progress(
+                SessionActionKind::Save,
+                57,
+                &progress_path,
+                Duration::from_secs(14),
+            ),
+            SessionActionProgressPoll::Waiting
+        ));
+        assert!(matches!(
+            read_session_action_progress(
+                SessionActionKind::Save,
+                57,
+                &progress_path,
+                Duration::from_secs(15),
+            ),
+            SessionActionProgressPoll::TimedOut
+        ));
+    }
+
+    #[test]
+    fn matching_session_action_progress_is_polled_before_the_timeout() {
+        let directory = temp_snapshot_dir("session-action-progress-update");
+        let progress_path = directory.join("control-progress-save-57.json");
+        fs::write(
+            &progress_path,
+            r#"{
+                "action": "save",
+                "command_id": 57,
+                "phase": "saving",
+                "percent": 15,
+                "message": "Saving layout edits in ECC"
+            }"#,
+        )
+        .unwrap();
+
+        let poll = read_session_action_progress(
+            SessionActionKind::Save,
+            57,
+            &progress_path,
+            Duration::from_secs(30),
+        );
+        let SessionActionProgressPoll::Updated(progress) = poll else {
+            panic!("expected progress update");
+        };
+        assert_eq!(progress.phase, SessionActionProgressPhase::Saving);
+        assert_eq!(progress.percent, 15);
+    }
+
+    #[test]
+    fn session_action_progress_title_reflects_terminal_outcome() {
+        assert_eq!(
+            session_action_progress_title(
+                SessionActionKind::Save,
+                SessionActionProgressPhase::Saving,
+            ),
+            "Saving layout"
+        );
+        assert_eq!(
+            session_action_progress_title(
+                SessionActionKind::Save,
+                SessionActionProgressPhase::Completed,
+            ),
+            "Layout saved"
+        );
+        assert_eq!(
+            session_action_progress_title(
+                SessionActionKind::Discard,
+                SessionActionProgressPhase::Completed,
+            ),
+            "Edits discarded"
+        );
+        assert_eq!(
+            session_action_progress_title(
+                SessionActionKind::Save,
+                SessionActionProgressPhase::Failed,
+            ),
+            "Save failed"
+        );
+    }
+
+    #[test]
+    fn macro_feedback_warning_recognizes_actionable_failures() {
+        assert!(macro_feedback_is_warning(
+            "macro move rejected: overlaps u_macro"
+        ));
+        assert!(macro_feedback_is_warning(
+            "1 macro(s) are still unplaced; place every macro before saving: u_macro"
+        ));
+        assert!(macro_feedback_is_warning(
+            "edit command directory is missing"
+        ));
+        assert!(!macro_feedback_is_warning(
+            "save completed: macro placements saved (1 macros)"
+        ));
+        assert!(!macro_feedback_is_warning(
+            "edit accepted: shape 0 source version 0 staging revision 1"
+        ));
+        assert!(!macro_feedback_is_warning("queued rotate clockwise"));
+        assert!(macro_feedback_is_warning(
+            "rotate clockwise is unavailable for the current selection"
+        ));
     }
 
     fn layer_visibility(layers: &[LayerUiState]) -> Vec<bool> {

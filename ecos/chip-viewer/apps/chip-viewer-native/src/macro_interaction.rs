@@ -4,8 +4,8 @@ use std::collections::BTreeSet;
 
 use chipgeom_format::{Point32, Rect32};
 
-use crate::macro_ops::PlannedMacroMove;
-use crate::macro_staging::{rect_fits_inside, MacroPlacementView, MacroTarget};
+use crate::macro_ops::{GridSnap, PlannedMacroMove};
+use crate::macro_staging::{rect_fits_inside, MacroPlacementView, MacroSelection, MacroTarget};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SelectionMode {
@@ -35,19 +35,17 @@ impl SelectionMode {
 }
 
 pub(crate) fn apply_selection(
-    selection: &mut BTreeSet<MacroTarget>,
+    selection: &mut MacroSelection,
     hits: impl IntoIterator<Item = MacroTarget>,
     mode: SelectionMode,
 ) {
     let hits = hits.into_iter().collect::<BTreeSet<_>>();
     match mode {
-        SelectionMode::Replace => *selection = hits,
+        SelectionMode::Replace => selection.replace(hits),
         SelectionMode::Add => selection.extend(hits),
         SelectionMode::Toggle => {
             for target in hits {
-                if !selection.insert(target.clone()) {
-                    selection.remove(&target);
-                }
+                selection.toggle(target);
             }
         }
     }
@@ -100,6 +98,7 @@ impl MacroGroupDrag {
                 orient: view.orient,
                 rect: view.bbox,
                 staged: false,
+                placement_status: None,
             })
             .collect();
         Self {
@@ -109,6 +108,25 @@ impl MacroGroupDrag {
             valid: false,
             error: None,
         }
+    }
+
+    pub(crate) fn update_with_snap(
+        &mut self,
+        dx: i32,
+        dy: i32,
+        core: Option<Rect32>,
+        snap: Option<GridSnap>,
+    ) {
+        let mut dx = i64::from(dx);
+        let mut dy = i64::from(dy);
+        if let (Some(snap), Some(bounds)) = (snap, placement_bounds(&self.originals)) {
+            if let Some(translated) = translate_rect(bounds, dx, dy) {
+                let snapped = snap.snap_rect(translated);
+                dx += i64::from(snapped.lx) - i64::from(translated.lx);
+                dy += i64::from(snapped.ly) - i64::from(translated.ly);
+            }
+        }
+        self.update(dx as i32, dy as i32, core);
     }
 
     pub(crate) fn update(&mut self, dx: i32, dy: i32, core: Option<Rect32>) {
@@ -137,6 +155,7 @@ impl MacroGroupDrag {
                     orient: view.orient,
                     rect,
                     staged: false,
+                    placement_status: None,
                 })
             })
             .collect::<Option<Vec<_>>>();
@@ -229,15 +248,25 @@ mod tests {
 
     #[test]
     fn selection_modes_replace_add_and_toggle() {
-        let mut selection = BTreeSet::from([target("a")]);
+        let mut selection = MacroSelection::default();
         apply_selection(&mut selection, [target("b")], SelectionMode::Add);
-        assert_eq!(selection, BTreeSet::from([target("a"), target("b")]));
+        apply_selection(&mut selection, [target("a")], SelectionMode::Add);
+        assert_eq!(
+            selection.iter().cloned().collect::<Vec<_>>(),
+            vec![target("b"), target("a")]
+        );
 
-        apply_selection(&mut selection, [target("a")], SelectionMode::Toggle);
-        assert_eq!(selection, BTreeSet::from([target("b")]));
+        apply_selection(&mut selection, [target("b")], SelectionMode::Toggle);
+        assert_eq!(
+            selection.iter().cloned().collect::<Vec<_>>(),
+            vec![target("a")]
+        );
 
         apply_selection(&mut selection, [target("c")], SelectionMode::Replace);
-        assert_eq!(selection, BTreeSet::from([target("c")]));
+        assert_eq!(
+            selection.iter().cloned().collect::<Vec<_>>(),
+            vec![target("c")]
+        );
     }
 
     #[test]
@@ -258,6 +287,28 @@ mod tests {
         assert!(drag.valid());
         assert_eq!(drag.preview()[0].rect, rect(70, 80, 80, 90));
         assert_eq!(drag.preview()[1].rect, rect(90, 90, 100, 100));
+    }
+
+    #[test]
+    fn group_drag_grid_snap_preserves_relative_offsets() {
+        let mut drag = MacroGroupDrag::new(vec![
+            view("a", rect(3, 4, 13, 14), false),
+            view("b", rect(23, 4, 33, 14), false),
+        ]);
+        drag.update_with_snap(
+            17,
+            6,
+            Some(rect(0, 0, 100, 100)),
+            Some(GridSnap {
+                origin_x: 0,
+                origin_y: 0,
+                step_x: 10,
+                step_y: 10,
+            }),
+        );
+        assert!(drag.valid());
+        assert_eq!(drag.preview()[0].rect, rect(20, 10, 30, 20));
+        assert_eq!(drag.preview()[1].rect, rect(40, 10, 50, 20));
     }
 
     #[test]

@@ -16,7 +16,7 @@ use chip_view_db::ChipViewDb;
 use chipgeom_format::{OwnerRef, OwnerType, Point32, Rect32, ShapeRecord};
 use serde::Deserialize;
 
-use crate::macro_ops::{MacroOpQueue, PlannedMacroMove};
+use crate::macro_ops::{MacroOpQueue, PlacementStatus, PlannedMacroMove};
 use crate::macro_orient::{MacroOrientation, MasterSymmetry};
 
 /// Layout geometry lives on layer 0; see `LAYOUT_GEOMETRY_LAYER` in app.rs.
@@ -63,6 +63,15 @@ struct MacroStagingEntryFile {
     orient: Option<String>,
     #[serde(default)]
     placed: bool,
+    #[serde(default)]
+    saved_placement: Option<SavedMacroPlacementFile>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedMacroPlacementFile {
+    x_dbu: i32,
+    y_dbu: i32,
 }
 
 /// A selected or manipulated macro: either a placed snapshot shape or an
@@ -78,6 +87,81 @@ impl MacroTarget {
         match self {
             Self::Placed(name) | Self::Staged(name) => name,
         }
+    }
+}
+
+/// Ordered macro selection. A set alone cannot represent "first selected",
+/// which is part of the alignment and spacing contract.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct MacroSelection {
+    order: Vec<MacroTarget>,
+    members: BTreeSet<MacroTarget>,
+}
+
+impl MacroSelection {
+    pub(crate) fn clear(&mut self) {
+        self.order.clear();
+        self.members.clear();
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.order.is_empty()
+    }
+
+    pub(crate) fn contains(&self, target: &MacroTarget) -> bool {
+        self.members.contains(target)
+    }
+
+    pub(crate) fn insert(&mut self, target: MacroTarget) -> bool {
+        if self.members.insert(target.clone()) {
+            self.order.push(target);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn remove(&mut self, target: &MacroTarget) -> bool {
+        if self.members.remove(target) {
+            self.order.retain(|existing| existing != target);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn toggle(&mut self, target: MacroTarget) {
+        if !self.remove(&target) {
+            self.insert(target);
+        }
+    }
+
+    pub(crate) fn extend(&mut self, targets: impl IntoIterator<Item = MacroTarget>) {
+        for target in targets {
+            self.insert(target);
+        }
+    }
+
+    pub(crate) fn replace(&mut self, targets: impl IntoIterator<Item = MacroTarget>) {
+        self.clear();
+        self.extend(targets);
+    }
+
+    pub(crate) fn first(&self) -> Option<&MacroTarget> {
+        self.order.first()
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &MacroTarget> {
+        self.order.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a MacroSelection {
+    type Item = &'a MacroTarget;
+    type IntoIter = std::slice::Iter<'a, MacroTarget>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.order.iter()
     }
 }
 
@@ -106,10 +190,14 @@ pub(crate) struct MacroPlacementView {
 
 pub(crate) struct MacroStagingState {
     pub staged: Vec<StagedMacro>,
-    pub selection: BTreeSet<MacroTarget>,
+    pub selection: MacroSelection,
     /// Orientations of macros that already have a placed shape; the snapshot
     /// does not encode instance orientation.
     pub orient_by_name: BTreeMap<String, MacroOrientation>,
+    /// Session-local placement status. The staging manifest does not yet
+    /// carry the DEF placement status, so this starts from conservative
+    /// defaults and is updated as the user applies status changes.
+    pub status_by_name: BTreeMap<String, PlacementStatus>,
     pub die_rect: Option<Rect32>,
     pub core_rect: Option<Rect32>,
     pub queue: MacroOpQueue,
@@ -142,14 +230,16 @@ impl MacroStagingState {
         let die_rect = die_rect(db).or(manifest.die_area);
         let mut state = MacroStagingState {
             staged: Vec::new(),
-            selection: BTreeSet::new(),
+            selection: MacroSelection::default(),
             orient_by_name: BTreeMap::new(),
+            status_by_name: BTreeMap::new(),
             die_rect,
             core_rect: resolve_core_rect(db).or(die_rect),
             queue: MacroOpQueue::default(),
             message: None,
             stdcell_blob: None,
         };
+        let mut saved_positions = BTreeMap::new();
         for entry in manifest.macros {
             let orient = entry
                 .orient
@@ -158,7 +248,22 @@ impl MacroStagingState {
                 .unwrap_or(MacroOrientation::R0);
             if entry.placed {
                 state.orient_by_name.insert(entry.name.clone(), orient);
+                state
+                    .status_by_name
+                    .insert(entry.name.clone(), PlacementStatus::Fixed);
                 continue;
+            }
+            state
+                .status_by_name
+                .insert(entry.name.clone(), PlacementStatus::Unplaced);
+            if let Some(saved) = entry.saved_placement {
+                saved_positions.insert(
+                    entry.name.clone(),
+                    Point32 {
+                        x: saved.x_dbu,
+                        y: saved.y_dbu,
+                    },
+                );
             }
             state.staged.push(StagedMacro {
                 name: entry.name,
@@ -173,6 +278,21 @@ impl MacroStagingState {
             state.layout_staged(die);
             if let Some(stdcell) = manifest.stdcell_staging {
                 state.layout_stdcell_blob(die, stdcell.count, stdcell.area_dbu);
+            }
+        }
+        for staged in &mut state.staged {
+            let Some(position) = saved_positions.get(&staged.name).copied() else {
+                continue;
+            };
+            let (width, height) = staged.orient.bbox_size(staged.width, staged.height);
+            staged.rect = saved_macro_rect(position, width, height)?;
+            if state
+                .core_rect
+                .is_some_and(|core| rect_fits_inside(staged.rect, core))
+            {
+                state
+                    .status_by_name
+                    .insert(staged.name.clone(), PlacementStatus::Placed);
             }
         }
         state.reconcile(db);
@@ -270,6 +390,26 @@ impl MacroStagingState {
             .map(|macro_entry| MacroTarget::Staged(macro_entry.name.clone()))
     }
 
+    /// A staged macro is considered placed once its accepted rectangle fits
+    /// inside the core. It remains in this list until a later snapshot emits
+    /// a real placed shape, but it no longer blocks Save.
+    pub(crate) fn unplaced_staged_names(&self) -> Vec<&str> {
+        self.staged
+            .iter()
+            .filter(|macro_entry| {
+                self.status_of(&macro_entry.name) == PlacementStatus::Unplaced
+                    || self
+                        .core_rect
+                        .is_none_or(|core| !rect_fits_inside(macro_entry.rect, core))
+            })
+            .map(|macro_entry| macro_entry.name.as_str())
+            .collect()
+    }
+
+    pub(crate) fn unplaced_staged_count(&self) -> usize {
+        self.unplaced_staged_names().len()
+    }
+
     /// True when the instance name belongs to a block macro: staged here,
     /// placed with a tracked orientation, or backed by a block master.
     pub(crate) fn is_macro_instance(&self, db: &ChipViewDb, name: &str) -> bool {
@@ -295,17 +435,46 @@ impl MacroStagingState {
             .unwrap_or(MacroOrientation::R0)
     }
 
+    pub(crate) fn status_of(&self, name: &str) -> PlacementStatus {
+        if let Some(status) = self.status_by_name.get(name) {
+            return *status;
+        }
+        if let Some(staged) = self.staged.iter().find(|entry| entry.name == name) {
+            if self
+                .core_rect
+                .is_some_and(|core| rect_fits_inside(staged.rect, core))
+            {
+                return PlacementStatus::Placed;
+            }
+            return PlacementStatus::Unplaced;
+        }
+        PlacementStatus::Fixed
+    }
+
+    pub(crate) fn set_status(&mut self, name: &str, status: PlacementStatus) {
+        self.status_by_name.insert(name.to_owned(), status);
+    }
+
+    pub(crate) fn common_selected_status(&self) -> Option<PlacementStatus> {
+        let mut statuses = self
+            .selection
+            .iter()
+            .map(|target| self.status_of(target.name()));
+        let first = statuses.next()?;
+        statuses.all(|status| status == first).then_some(first)
+    }
+
     /// Drops staged macros that now have a placed shape and prunes selection
     /// entries whose shapes disappeared. Called after every snapshot reload.
     pub(crate) fn reconcile(&mut self, db: &ChipViewDb) {
-        let selected_names: BTreeSet<String> = self
+        let selected_names: Vec<String> = self
             .selection
             .iter()
             .map(|target| target.name().to_owned())
             .collect();
         self.staged
             .retain(|macro_entry| instance_shape(db, &macro_entry.name).is_none());
-        self.selection = selected_names
+        let reconciled = selected_names
             .into_iter()
             .filter_map(|name| {
                 if instance_shape(db, &name).is_some() {
@@ -320,7 +489,8 @@ impl MacroStagingState {
                     None
                 }
             })
-            .collect();
+            .collect::<Vec<_>>();
+        self.selection.replace(reconciled);
         self.die_rect = die_rect(db).or(self.die_rect);
         self.core_rect = resolve_core_rect(db).or(self.die_rect);
     }
@@ -366,8 +536,31 @@ impl MacroStagingState {
     pub(crate) fn selected_placed_count(&self) -> usize {
         self.selection
             .iter()
-            .filter(|target| matches!(target, MacroTarget::Placed(_)))
+            .filter(|target| match target {
+                MacroTarget::Placed(_) => true,
+                MacroTarget::Staged(name) => self
+                    .staged
+                    .iter()
+                    .find(|entry| entry.name == *name)
+                    .is_some_and(|entry| {
+                        self.core_rect
+                            .is_none_or(|core| rect_fits_inside(entry.rect, core))
+                    }),
+            })
             .count()
+    }
+
+    pub(crate) fn staged_names_intersecting_except(
+        &self,
+        rect: Rect32,
+        skipped_names: &BTreeSet<String>,
+    ) -> Vec<String> {
+        self.staged
+            .iter()
+            .filter(|entry| !skipped_names.contains(&entry.name))
+            .filter(|entry| rects_overlap(entry.rect, rect))
+            .map(|entry| entry.name.clone())
+            .collect()
     }
 
     pub(crate) fn targets_intersecting(
@@ -412,6 +605,41 @@ impl MacroStagingState {
         }
         committed
     }
+
+    /// Applies an accepted manual drag from the unplaced staging row. Staged
+    /// macros have no snapshot shape, so their preview rectangle is the only
+    /// source of truth until Save publishes macro locations.
+    pub(crate) fn commit_staged_move(
+        &mut self,
+        name: &str,
+        orient: MacroOrientation,
+        rect: Rect32,
+    ) -> bool {
+        let Some(macro_entry) = self
+            .staged
+            .iter_mut()
+            .find(|macro_entry| macro_entry.name == name)
+        else {
+            return false;
+        };
+        macro_entry.orient = orient;
+        macro_entry.rect = rect;
+        true
+    }
+}
+
+fn saved_macro_rect(position: Point32, width: i64, height: i64) -> Option<Rect32> {
+    if width <= 0 || height <= 0 {
+        return None;
+    }
+    let hx = i64::from(position.x).checked_add(width)?;
+    let hy = i64::from(position.y).checked_add(height)?;
+    Some(Rect32 {
+        lx: position.x,
+        ly: position.y,
+        hx: i32::try_from(hx).ok()?,
+        hy: i32::try_from(hy).ok()?,
+    })
 }
 
 pub(crate) fn is_block_master(master: &chip_view_db::MasterMetadata) -> bool {
@@ -666,7 +894,8 @@ mod tests {
                         "widthDbu": 12000,
                         "heightDbu": 8000,
                         "orient": "R0",
-                        "placed": false
+                        "placed": false,
+                        "savedPlacement": { "xDbu": 12000, "yDbu": 16000 }
                     }
                 ],
                 "stdcellStaging": { "count": 42, "areaDbu": 900 }
@@ -689,6 +918,13 @@ mod tests {
         assert_eq!(entry.width_dbu, 12000);
         assert_eq!(entry.height_dbu, 8000);
         assert!(!entry.placed);
+        assert_eq!(
+            entry
+                .saved_placement
+                .as_ref()
+                .map(|saved| (saved.x_dbu, saved.y_dbu)),
+            Some((12000, 16000))
+        );
         let stdcell = manifest.stdcell_staging.expect("stdcell staging");
         assert_eq!(stdcell.count, 42);
         assert_eq!(stdcell.area_dbu, 900);
@@ -700,6 +936,36 @@ mod tests {
             serde_json::from_str(r#"{ "schema": 1, "macros": [] }"#)
                 .expect("legacy manifest parses");
         assert!(manifest.stdcell_staging.is_none());
+    }
+
+    #[test]
+    fn saved_macro_rect_uses_oriented_dimensions() {
+        let (width, height) = MacroOrientation::R0.bbox_size(400, 300);
+        assert_eq!(
+            saved_macro_rect(Point32 { x: 100, y: 200 }, width, height),
+            Some(Rect32 {
+                lx: 100,
+                ly: 200,
+                hx: 500,
+                hy: 500,
+            })
+        );
+        let (width, height) = MacroOrientation::R90.bbox_size(400, 300);
+        assert_eq!(
+            saved_macro_rect(Point32 { x: 100, y: 200 }, width, height),
+            Some(Rect32 {
+                lx: 100,
+                ly: 200,
+                hx: 400,
+                hy: 600,
+            })
+        );
+    }
+
+    #[test]
+    fn saved_macro_rect_rejects_invalid_sizes_and_overflow() {
+        assert_eq!(saved_macro_rect(Point32 { x: 0, y: 0 }, 0, 10), None);
+        assert_eq!(saved_macro_rect(Point32 { x: i32::MAX, y: 0 }, 1, 10), None);
     }
 
     #[test]
@@ -740,8 +1006,9 @@ mod tests {
                     rect: Rect32::default(),
                 })
                 .collect(),
-            selection: BTreeSet::new(),
+            selection: MacroSelection::default(),
             orient_by_name: BTreeMap::new(),
+            status_by_name: BTreeMap::new(),
             die_rect: None,
             core_rect: None,
             queue: MacroOpQueue::default(),
@@ -780,6 +1047,27 @@ mod tests {
                 hy: 600,
             },
         );
+    }
+
+    #[test]
+    fn explicit_unplaced_status_blocks_save_even_inside_core() {
+        let mut state = staged_state(&[(400, 300)]);
+        state.core_rect = Some(Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 1000,
+            hy: 1000,
+        });
+        state.staged[0].rect = Rect32 {
+            lx: 100,
+            ly: 100,
+            hx: 500,
+            hy: 400,
+        };
+        assert!(state.unplaced_staged_names().is_empty());
+
+        state.set_status("u_macro0", PlacementStatus::Unplaced);
+        assert_eq!(state.unplaced_staged_names(), vec!["u_macro0"]);
     }
 
     #[test]
@@ -844,6 +1132,7 @@ mod tests {
                 hy: 350,
             },
             staged: true,
+            placement_status: None,
         };
         let placed_move = PlannedMacroMove {
             name: "u_placed".to_string(),
@@ -855,6 +1144,7 @@ mod tests {
                 hy: 500,
             },
             staged: false,
+            placement_status: None,
         };
 
         let committed = state.apply_staged_moves(vec![staged_move.clone(), placed_move.clone()]);
@@ -885,11 +1175,58 @@ mod tests {
                 hy: 320,
             },
             staged: true,
+            placement_status: None,
         }]);
 
         assert!(committed.is_empty());
         assert_eq!(state.staged[0].name, original_name);
         assert_eq!(state.staged[0].orient, original_orient);
         assert_eq!(state.staged[0].rect, original_rect);
+    }
+
+    #[test]
+    fn commit_staged_move_updates_rect_and_orientation() {
+        let mut state = staged_state(&[(400, 300)]);
+        let name = state.staged[0].name.clone();
+        let rect = Rect32 {
+            lx: 100,
+            ly: 200,
+            hx: 500,
+            hy: 500,
+        };
+
+        assert!(state.commit_staged_move(&name, MacroOrientation::R90, rect));
+        assert_eq!(state.staged[0].rect, rect);
+        assert_eq!(state.staged[0].orient, MacroOrientation::R90);
+        assert!(!state.commit_staged_move("missing", MacroOrientation::R0, rect));
+    }
+
+    #[test]
+    fn staged_macros_are_unplaced_until_their_rect_is_inside_the_core() {
+        let mut state = staged_state(&[(400, 300)]);
+        state.core_rect = Some(Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 1_000,
+            hy: 1_000,
+        });
+        state.staged[0].rect = Rect32 {
+            lx: -400,
+            ly: 0,
+            hx: 0,
+            hy: 300,
+        };
+
+        assert_eq!(state.unplaced_staged_count(), 1);
+
+        state.staged[0].rect = Rect32 {
+            lx: 100,
+            ly: 100,
+            hx: 500,
+            hy: 400,
+        };
+
+        assert_eq!(state.unplaced_staged_count(), 0);
+        assert!(state.unplaced_staged_names().is_empty());
     }
 }
