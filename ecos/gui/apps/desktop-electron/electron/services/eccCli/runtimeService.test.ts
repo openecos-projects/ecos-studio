@@ -197,6 +197,22 @@ describe('ECC CLI workspace command planning', () => {
     ])
   })
 
+  it('forwards manual macro placement through CLI for fresh and derived workspaces', () => {
+    const input = request()
+    input.workspaceSpec.parameters = { 'macro.manual_placement': true }
+
+    const freshCommand = workspaceCreateCommands(input, '/projects/demo')[1]!
+    expect(freshCommand[freshCommand.indexOf('--set') + 1]).toBe(
+      'macro.manual_placement=true',
+    )
+
+    input.deriveFrom = { sourceStep: 'macroPlacement', workspaceId: 'ws_source' }
+    const derivedCommand = workspaceCreateCommands(input, '/projects/demo')[1]!
+    expect(derivedCommand[derivedCommand.indexOf('--set') + 1]).toBe(
+      'macro.manual_placement=true',
+    )
+  })
+
   it('initializes an MPC Project before its Project and Workspace transactions', () => {
     const input = request({
       eccPdkConfig: {
