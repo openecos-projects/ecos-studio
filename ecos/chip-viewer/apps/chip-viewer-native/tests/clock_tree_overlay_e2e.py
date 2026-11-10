@@ -20,8 +20,10 @@ from pathlib import Path
 WINDOW_TITLE = b"Chip Viewer"
 WIN_WIDTH = 1400
 WIN_HEIGHT = 900
-CYAN_BASELINE_LIMIT = 100
-CYAN_OVERLAY_MINIMUM = 300
+CLOCK_TREE_GREEN = (74, 222, 128)
+CLOCK_TREE_ORANGE = (255, 166, 64)
+CLOCK_TREE_OVERLAY_LIMIT = 100
+CLOCK_TREE_OVERLAY_MINIMUM = 300
 
 
 class Window:
@@ -250,16 +252,15 @@ def screenshot(window_id: int, output: Path) -> None:
     )
 
 
-def cyan_pixels(path: Path) -> int:
+def clock_tree_color_pixels(path: Path, target: tuple[int, int, int]) -> int:
     data = path.read_bytes()
     header = struct.unpack(">25I", data[:100])
-    header_size = header[0]
     width = header[4]
     height = header[5]
     byte_order = header[7]
     bytes_per_line = header[12]
     ncolors = header[19]
-    offset = header_size + ncolors * 12
+    offset = header[0] + ncolors * 12
     pixels = data[offset:]
     count = 0
     for y in range(min(height, 440)):
@@ -271,9 +272,27 @@ def cyan_pixels(path: Path) -> int:
                 blue, red = first, third
             else:
                 red, blue = first, third
-            if red < 100 and green > 120 and blue > 120:
+            if (red, green, blue) == target:
                 count += 1
     return count
+
+
+def scroll_up(
+    x11: ctypes.CDLL,
+    xtst: ctypes.CDLL,
+    display: ctypes.c_void_p,
+    x: int,
+    y: int,
+    steps: int,
+) -> None:
+    xtst.XTestFakeMotionEvent(display, -1, x, y, 0)
+    x11.XFlush(display)
+    time.sleep(0.2)
+    for _ in range(steps):
+        xtst.XTestFakeButtonEvent(display, 4, 1, 0)
+        xtst.XTestFakeButtonEvent(display, 4, 0, 0)
+        x11.XFlush(display)
+        time.sleep(0.1)
 
 
 def run(args: argparse.Namespace) -> None:
@@ -322,49 +341,97 @@ def run(args: argparse.Namespace) -> None:
 
         before = out_dir / "clock-tree-before.xwd"
         screenshot(window.id, before)
-        before_cyan = cyan_pixels(before)
-        if before_cyan > CYAN_BASELINE_LIMIT:
+        before_green = clock_tree_color_pixels(before, CLOCK_TREE_GREEN)
+        before_orange = clock_tree_color_pixels(before, CLOCK_TREE_ORANGE)
+        if before_green > CLOCK_TREE_OVERLAY_LIMIT or before_orange > CLOCK_TREE_OVERLAY_LIMIT:
             raise AssertionError(
-                f"unexpected clock-tree overlay before selection: {before_cyan} cyan pixels"
+                "unexpected clock-tree overlay before selection: "
+                f"{before_green} green, {before_orange} orange pixels"
             )
 
         click(x11, xtst, display, origin_x + 76, origin_y + 259)
         time.sleep(0.8)
-        click(x11, xtst, display, origin_x + 682, origin_y + 594)
+        # Unit-delay mode separates topology levels, making the first buffer's
+        # input node selectable even though its arrival is close to the root.
+        click(x11, xtst, display, origin_x + 740, origin_y + 493)
+        time.sleep(0.8)
+        scroll_up(x11, xtst, display, origin_x + 682, origin_y + 600, 12)
+        time.sleep(0.8)
+        # Fixture node: cts_flow_clk_0_clk_regular_root_buf/A. This node has
+        # real parent clock-net geometry in the layout snapshot.
+        click(x11, xtst, display, origin_x + 670, origin_y + 589)
 
         highlighted = out_dir / "clock-tree-highlighted.xwd"
-        overlay_cyan = -1
+        overlay_green = -1
         deadline = time.monotonic() + 15.0
         while time.monotonic() < deadline:
             screenshot(window.id, highlighted)
-            overlay_cyan = cyan_pixels(highlighted)
-            if overlay_cyan >= CYAN_OVERLAY_MINIMUM:
+            overlay_green = clock_tree_color_pixels(highlighted, CLOCK_TREE_GREEN)
+            if overlay_green >= CLOCK_TREE_OVERLAY_MINIMUM:
                 break
             time.sleep(0.3)
-        if overlay_cyan < CYAN_OVERLAY_MINIMUM:
-            raise AssertionError(f"clock-tree overlay did not render: {overlay_cyan} cyan pixels")
+        if overlay_green < CLOCK_TREE_OVERLAY_MINIMUM:
+            raise AssertionError(
+                f"clock-tree parent overlay did not render: {overlay_green} green pixels"
+            )
+
+        # Search refresh owns the generic highlight set as well as the role
+        # overlay. It must clear both rather than leaving a fallback highlight.
+        click(x11, xtst, display, origin_x + 1355, origin_y + 870)
+
+        refreshed = out_dir / "clock-tree-refreshed.xwd"
+        refreshed_green = -1
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline:
+            screenshot(window.id, refreshed)
+            refreshed_green = clock_tree_color_pixels(refreshed, CLOCK_TREE_GREEN)
+            if refreshed_green <= CLOCK_TREE_OVERLAY_LIMIT:
+                break
+            time.sleep(0.3)
+        if refreshed_green > CLOCK_TREE_OVERLAY_LIMIT:
+            raise AssertionError(
+                f"clock-tree overlay was not cleared by search refresh: {refreshed_green} green pixels"
+            )
+
+        click(x11, xtst, display, origin_x + 670, origin_y + 589)
+        rehighlighted = out_dir / "clock-tree-rehighlighted.xwd"
+        rehighlighted_green = -1
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline:
+            screenshot(window.id, rehighlighted)
+            rehighlighted_green = clock_tree_color_pixels(rehighlighted, CLOCK_TREE_GREEN)
+            if rehighlighted_green >= CLOCK_TREE_OVERLAY_MINIMUM:
+                break
+            time.sleep(0.3)
+        if rehighlighted_green < CLOCK_TREE_OVERLAY_MINIMUM:
+            raise AssertionError(
+                "clock-tree parent overlay did not return after reselection: "
+                f"{rehighlighted_green} green pixels"
+            )
 
         x11.XSetInputFocus(display, window.id, 2, 0)
         x11.XRaiseWindow(display, window.id)
         x11.XFlush(display)
         press_escape(x11, xtst, display)
 
-        cleared = out_dir / "clock-tree-cleared.xwd"
-        cleared_cyan = -1
+        escaped = out_dir / "clock-tree-escaped.xwd"
+        escaped_green = -1
         deadline = time.monotonic() + 15.0
         while time.monotonic() < deadline:
-            screenshot(window.id, cleared)
-            cleared_cyan = cyan_pixels(cleared)
-            if cleared_cyan <= CYAN_BASELINE_LIMIT:
+            screenshot(window.id, escaped)
+            escaped_green = clock_tree_color_pixels(escaped, CLOCK_TREE_GREEN)
+            if escaped_green <= CLOCK_TREE_OVERLAY_LIMIT:
                 break
             time.sleep(0.3)
-        if cleared_cyan > CYAN_BASELINE_LIMIT:
-            raise AssertionError(f"clock-tree overlay was not cleared: {cleared_cyan} cyan pixels")
+        if escaped_green > CLOCK_TREE_OVERLAY_LIMIT:
+            raise AssertionError(
+                f"clock-tree overlay was not cleared by Escape: {escaped_green} green pixels"
+            )
 
         print(
             "clock-tree overlay E2E passed: "
-            f"baseline={before_cyan}, highlighted={overlay_cyan}, cleared={cleared_cyan}, "
-            f"artifacts={out_dir}"
+            f"baseline={before_green}, highlighted={overlay_green}, "
+            f"refreshed={refreshed_green}, escaped={escaped_green}, artifacts={out_dir}"
         )
     finally:
         if process.poll() is None:
