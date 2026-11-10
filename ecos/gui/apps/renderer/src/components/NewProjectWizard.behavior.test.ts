@@ -1316,6 +1316,77 @@ describe('NewProjectWizard behavior', () => {
     wrapper.unmount()
   })
 
+  it('uses the manifest top module for an MPC project without user HDL', async () => {
+    wizardMocks.readProjectManagementManifest.mockResolvedValueOnce({
+      schema_version: 1,
+      project_type: 'backend',
+      project_id: 'proj_gcd',
+      name: 'gcd',
+      design_name: 'gcd',
+      description: '',
+      root_path: '/projects/gcd',
+      created_at: '2026-09-01T00:00:00.000Z',
+      updated_at: '2026-09-01T00:00:00.000Z',
+      base_design: {
+        rtl_list: ['rtl/gcd.v'],
+        top_module: 'gcd',
+        clock: 'clk',
+      },
+      objectives: { primary: 'timing', directions: {} },
+      workspaces: [],
+      mpc: {
+        resource_id: 'mpc:mpc-frame',
+        display_name: 'MPC Frame',
+        design: { design_name: 'mpc-frame-template' },
+      } as never,
+      best_workspace: null,
+      qor_baseline: null,
+    })
+    wizardMocks.pathExists.mockResolvedValueOnce(false)
+    const wrapper = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          directory: '/projects/gcd/ws_0001',
+          project_context: {
+            mode: 'select',
+            project_id: 'proj_gcd',
+            project_name: 'gcd',
+            project_root: '/projects/gcd',
+            project_json_path: '/projects/gcd/project.json',
+          },
+        },
+      },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    await flushPromises()
+    wizardMocks.discoverHdlModules.mockClear()
+    const wizard = wrapper.vm as unknown as {
+      canProceed: boolean
+      currentStep: number
+      refreshTopModuleDiscovery(): Promise<void>
+      topModuleDiscovery: { status: string; candidates: string[]; suggested: string }
+    }
+    wizard.currentStep = 7
+    await wizard.refreshTopModuleDiscovery()
+    await flushPromises()
+
+    expect(wizardMocks.discoverHdlModules).not.toHaveBeenCalled()
+    expect(wizard.topModuleDiscovery).toMatchObject({
+      status: 'complete',
+      candidates: ['gcd'],
+      suggested: 'gcd',
+    })
+    expect(wizard.canProceed).toBe(true)
+    expect(wrapper.text()).not.toContain('Return to Import RTL')
+    wrapper.unmount()
+  })
+
   it('blocks create when discovery finds no modules', async () => {
     const wrapper = mount(NewProjectWizard, {
       props: {
@@ -1578,6 +1649,48 @@ describe('NewProjectWizard behavior', () => {
     wizard.currentStep = 7
     await flushPromises()
     expect(wrapper.text()).not.toContain('Clock-tree visualization')
+    wrapper.unmount()
+  })
+
+  it('keeps manual macro placement inside the MacroPlacement flow card', async () => {
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { standaloneWorkspace: true } },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    await flushPromises()
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      config: { parameters: { manual_macro_placement: boolean } }
+    }
+    wizard.currentStep = 4
+    await flushPromises()
+
+    const macroCard = wrapper.get('[data-flow-step-card="macroPlacement"]')
+    const manualPlacement = macroCard.get('#macro-manual-placement')
+    expect(macroCard.text()).toContain('Manual macro placement')
+    expect((manualPlacement.element as HTMLInputElement).checked).toBe(false)
+
+    await manualPlacement.setValue(true)
+    expect(wizard.config.parameters.manual_macro_placement).toBe(true)
+
+    await wrapper.get('[data-flow-step-card="preFloorplan"] button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#macro-manual-placement').exists()).toBe(false)
+
+    await wrapper.get('[data-flow-step-card="macroPlacement"] button').trigger('click')
+    await flushPromises()
+    expect(
+      (
+        wrapper.get('[data-flow-step-card="macroPlacement"] #macro-manual-placement')
+          .element as HTMLInputElement
+      ).checked,
+    ).toBe(true)
     wrapper.unmount()
   })
 

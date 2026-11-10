@@ -71,6 +71,7 @@ vi.mock('./useWorkspace', () => ({
 }))
 
 import { useBackendFlowStages } from './useBackendFlowStages'
+import { clearBackendOptimisticRun } from './backendFlowOptimisticRun'
 
 function runtimeEvent(
   sourceType: string,
@@ -98,6 +99,7 @@ describe('useBackendFlowStages runtime projection', () => {
     state.currentProject = ref({ path: '/project/ws-a' })
     state.backendRuntimeEvents = ref([])
     state.operation = null
+    clearBackendOptimisticRun()
   })
 
   it('lets a real step-start event replace the optimistic first step', () => {
@@ -132,6 +134,28 @@ describe('useBackendFlowStages runtime projection', () => {
       state: 'Incomplete',
     })
     expect(flow.hasOngoingRunStage.value).toBe(false)
+  })
+
+  it('does not resurrect a running step after the runtime event connection resets', () => {
+    const flow = useBackendFlowStages()
+    flow.setFirstRunStepOngoing()
+    state.backendRuntimeEvents!.value.push(
+      runtimeEvent('step.started', { state: 'running', step: 'Synthesis' }),
+      runtimeEvent('operation.failed', { step: 'Synthesis' }),
+    )
+    expect(flow.hasOngoingRunStage.value).toBe(false)
+
+    // An in-place workspace update reconnects runtime events: the event
+    // buffer is dropped and disconnectRuntimeEvents clears the optimistic
+    // run request whose cursor pointed into it.
+    state.backendRuntimeEvents!.value = []
+    clearBackendOptimisticRun()
+
+    expect(flow.hasOngoingRunStage.value).toBe(false)
+    expect(flow.dynamicFlowStages.value[0]).toMatchObject({
+      label: 'Synthesis',
+      state: 'Unstart',
+    })
   })
 
   it('uses the global Operation projection when route-local events are absent', () => {

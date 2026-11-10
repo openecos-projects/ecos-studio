@@ -11,11 +11,12 @@ toolchain = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(toolchain)
 SHA = "a" * 40
 DESIGNS_SHA = "b" * 40
-DEPENDENCY_LOGS = f"""
-e2e_designs_git_commit={DESIGNS_SHA}
-kepler_formal_run_id=123
-oss_cad_suite_version=2026-10-14
+LOGS = f"""2026-11-09T09:28:16.2032090Z e2e_designs_git_commit={DESIGNS_SHA}
+2026-11-09T09:28:16.2037712Z kepler_formal_run_id=123
+2026-11-09T09:28:16.2041014Z oss_cad_suite_version=2026-10-14
 """
+VERSIONS_JOB = {"name": "List dependency versions", "id": 7,
+                "status": "completed", "conclusion": "success"}
 
 
 def artifacts(*names):
@@ -27,36 +28,29 @@ def artifacts(*names):
 
 
 class ToolchainTests(unittest.TestCase):
-    def test_dependency_manifest_provenance(self):
-        self.assertEqual(toolchain.parse_toolchain(DEPENDENCY_LOGS), {
+    def test_packaged_design_job_names(self):
+        for name in ("E2E Packaged Flow (gcd)", "E2E (gcd)"):
+            with self.subTest(name=name):
+                self.assertTrue(toolchain.is_packaged_design_job(name))
+        for name in ("List e2e designs", "E2E"):
+            with self.subTest(name=name):
+                self.assertFalse(toolchain.is_packaged_design_job(name))
+
+    def test_version_manifest(self):
+        self.assertEqual(toolchain.parse_toolchain(LOGS), {
             "oss_cad_suite_version": "2026-10-14",
             "kepler_run_id": "123",
             "designs_sha": DESIGNS_SHA,
         })
 
     def test_missing_or_ambiguous_provenance(self):
-        for logs in (
-            DEPENDENCY_LOGS.replace("oss_cad_suite_version=2026-10-14", "missing"),
-            DEPENDENCY_LOGS.replace("kepler_formal_run_id=123", "missing"),
-            DEPENDENCY_LOGS.replace(f"e2e_designs_git_commit={DESIGNS_SHA}", "missing"),
-            DEPENDENCY_LOGS + "\nkepler_formal_run_id=456\n",
-        ):
+        for logs in (LOGS.replace("e2e_designs_git_commit=", "missing="),
+                     LOGS.replace(DESIGNS_SHA, "missing"),
+                     LOGS.replace("kepler_formal_run_id=123", "kepler_formal_run_id=${run_id}"),
+                     LOGS.replace("oss_cad_suite_version=2026-10-14", "oss_cad_suite_version=latest"),
+                     LOGS + "\nkepler_formal_run_id=456\n"):
             with self.subTest(logs=logs), self.assertRaises(ValueError):
                 toolchain.parse_toolchain(logs)
-
-    def test_packaged_design_job_name(self):
-        self.assertTrue(toolchain.is_packaged_design_job({"name": "E2E (gcd)"}))
-        for name in ("E2E Packaged Flow (gcd)", "E2E", "E2E helper (gcd)", "Build E2E (gcd)"):
-            with self.subTest(name=name):
-                self.assertFalse(toolchain.is_packaged_design_job({"name": name}))
-
-    def test_successful_design_selection_is_deterministic(self):
-        jobs = [
-            {"id": 2, "name": "E2E (z-design)", "conclusion": "success"},
-            {"id": 3, "name": "E2E (b-design)", "conclusion": "failure"},
-            {"id": 1, "name": "E2E (a-design)", "conclusion": "success"},
-        ]
-        self.assertEqual(toolchain.select_packaged_design_job(jobs)["id"], 1)
 
     def test_artifact_validation(self):
         payload = artifacts("pdk")
@@ -90,17 +84,35 @@ class ToolchainTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Timed out"):
             toolchain.resolve(1, SHA, 0)
 
+    @patch.object(toolchain.time, "sleep")
+    @patch.object(toolchain, "api")
+    def test_waits_for_design_matrix_to_start(self, api, sleep):
+        api.side_effect = [
+            {"head_sha": SHA}, {"jobs": []}, {"status": "in_progress"},
+            {"jobs": [{"name": "E2E (gcd)", "id": 9,
+                       "status": "completed", "conclusion": "success"}, VERSIONS_JOB]},
+            LOGS, artifacts("ecc-cli-linux-x86_64", "icsprout55-pdk", "ecc-sizer"),
+            {"head_sha": "c" * 40, "conclusion": "success"},
+            artifacts("kepler-formal-linux-x64"),
+        ]
+        self.assertEqual(toolchain.resolve(1, SHA, 60)["ecc_job_id"], 9)
+        sleep.assert_called_once()
+
+    @patch.object(toolchain, "api")
+    def test_completed_run_without_design_jobs_is_rejected(self, api):
+        api.side_effect = [
+            {"head_sha": SHA}, {"jobs": []}, {"status": "completed"},
+        ]
+        with self.assertRaisesRegex(ValueError, "no successful"):
+            toolchain.resolve(1, SHA, 60)
+
     @patch.object(toolchain, "api")
     def test_exact_run_artifacts_and_kepler_are_recorded(self, api):
         api.side_effect = [
             {"head_sha": SHA},
-            {"jobs": [
-                {"name": "E2E (gcd)", "id": 9,
-                 "status": "completed", "conclusion": "success"},
-                {"name": "List dependency versions", "id": 10,
-                 "status": "completed", "conclusion": "success"},
-            ]},
-            DEPENDENCY_LOGS,
+            {"jobs": [{"name": "E2E (gcd)", "id": 9,
+                       "status": "completed", "conclusion": "success"}, VERSIONS_JOB]},
+            LOGS,
             artifacts("ecc-cli-linux-x86_64", "icsprout55-pdk", "ecc-sizer"),
             {"head_sha": "c" * 40, "conclusion": "success"},
             artifacts("kepler-formal-linux-x64"),
@@ -121,9 +133,8 @@ class ToolchainTests(unittest.TestCase):
             {"head_sha": SHA}, {"jobs": [pending]},
             {"jobs": [dict(pending, status="completed", conclusion="success"),
                       dict(pending, name="E2E (other)", conclusion="failure"),
-                      {"name": "List dependency versions", "id": 10,
-                       "status": "completed", "conclusion": "success"}]},
-            DEPENDENCY_LOGS, artifacts("ecc-cli-linux-x86_64", "icsprout55-pdk", "ecc-sizer"),
+                      VERSIONS_JOB]},
+            LOGS, artifacts("ecc-cli-linux-x86_64", "icsprout55-pdk", "ecc-sizer"),
             {"head_sha": "c" * 40, "conclusion": "success"},
             artifacts("kepler-formal-linux-x64"),
         ]
@@ -135,10 +146,8 @@ class ToolchainTests(unittest.TestCase):
         api.side_effect = [
             {"head_sha": SHA},
             {"jobs": [{"name": "E2E (gcd)", "id": 9,
-                       "status": "completed", "conclusion": "success"},
-                      {"name": "List dependency versions", "id": 10,
-                       "status": "completed", "conclusion": "success"}]},
-            DEPENDENCY_LOGS, artifacts("ecc-cli-linux-x86_64", "icsprout55-pdk", "ecc-sizer"),
+                       "status": "completed", "conclusion": "success"}, VERSIONS_JOB]},
+            LOGS, artifacts("ecc-cli-linux-x86_64", "icsprout55-pdk", "ecc-sizer"),
             {"head_sha": "c" * 40, "conclusion": "failure"},
         ]
         with self.assertRaisesRegex(ValueError, "Kepler run"):

@@ -50,6 +50,12 @@ const DEFAULT_MANIFEST_FILE_PATHS = [
   GEOMETRY_SIDMAP,
   GEOMETRY_VIEW,
 ]
+const DEF_VIEW_STEP_DIRECTORY = join(PROJECT_ROOT, 'defview')
+const DEF_VIEW_GEOMETRY_DIR = join(DEF_VIEW_STEP_DIRECTORY, 'output', 'geometry')
+const DEF_VIEW_MANIFEST = join(DEF_VIEW_GEOMETRY_DIR, 'geometry.manifest')
+const DEF_VIEW_MANIFEST_FILE_PATHS = DEFAULT_MANIFEST_FILE_PATHS.map((path) =>
+  join(DEF_VIEW_GEOMETRY_DIR, 'epochs', '1', basename(path)),
+)
 
 function geometryManifest(overrides: Record<string, string> = {}) {
   const entries = [
@@ -843,6 +849,48 @@ describe('ChipViewerService', () => {
       ['--manifest', GEOMETRY_MANIFEST, '--mode', 'view'],
       expect.any(Object),
     )
+  })
+
+  it('opens a Workspace DEF snapshot read-only from its geometry manifest', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { execFile, service, spawnProcess } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.viewer,
+        DEF_VIEW_MANIFEST,
+        ...DEF_VIEW_MANIFEST_FILE_PATHS,
+      ],
+      files: { [DEF_VIEW_MANIFEST]: geometryManifest() },
+    })
+
+    await service.open({
+      mode: 'view',
+      projectPath: PROJECT_ROOT,
+      step: 'defview',
+    })
+
+    expect(execFile).not.toHaveBeenCalled()
+    expect(spawnProcess).toHaveBeenCalledWith(
+      devBinaries.viewer,
+      ['--manifest', DEF_VIEW_MANIFEST, '--mode', 'view'],
+      expect.any(Object),
+    )
+  })
+
+  it('rejects edit mode for a Workspace DEF snapshot', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { service, spawnProcess } = createService({
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer],
+    })
+
+    await expect(
+      service.open({
+        mode: 'edit',
+        projectPath: PROJECT_ROOT,
+        step: 'defview',
+      }),
+    ).rejects.toThrow('DEF View is read-only and cannot be opened in edit mode.')
+    expect(spawnProcess).not.toHaveBeenCalled()
   })
 
   it('rejects a saved geometry manifest with an unsupported schema', async () => {

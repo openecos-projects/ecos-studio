@@ -16,6 +16,8 @@ import type {
   EccWorkspaceExportSignoffResult,
   EccWorkspaceDeriveRequest,
   EccWorkspaceDeriveResult,
+  EccWorkspaceDefViewRequest,
+  EccWorkspaceDefViewResult,
   EccWorkspaceMutationRequest,
   EccWorkspaceResetFlowResult,
   EccWorkspaceUpdateResult,
@@ -72,6 +74,7 @@ export type ProductCommandRequest =
       payload: { creationId: string; issue: string }
     }
   | { command: 'workspace.reset'; payload: EccWorkspaceMutationRequest }
+  | { command: 'workspace.defView'; payload: EccWorkspaceDefViewRequest }
   | { command: 'workspace.exportSignoff'; payload: EccWorkspaceExportSignoffRequest }
   | { command: 'workspace.open'; payload: EccWorkspaceOpenRequest }
   | {
@@ -112,6 +115,7 @@ export type ProductCommandResult =
   | EccWorkspaceDeriveResult
   | EccWorkspaceUpdateResult
   | EccWorkspaceResetFlowResult
+  | EccWorkspaceDefViewResult
   | EccWorkspaceExportSignoffResult
   | EccRuntimeOperation
   | EccCandidateCapabilitiesResult

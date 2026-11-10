@@ -333,10 +333,19 @@ Names must not contain spaces or Chinese characters.
 **Step 2 — Import RTL.** Select RTL files or a filelist. ECC copies the selected
 sources into the project's `rtl/` directory and records the design inputs at
 creation. You can reuse an existing project's imported sources; selecting new
-sources replaces that selection. A managed MPC can supply the project design
-source. Complete this phase before choosing the remaining workspace settings.
+sources replaces that selection. A managed MPC wraps the imported design in its
+frame template; it does not replace the design source. Complete this phase
+before choosing the remaining workspace settings.
 
 ![Import RTL reuses project sources or selects replacement sources](asset/wizard-02-rtl.png)
+
+When you create another workspace from the same project, the project's imported
+RTL or filelist remains selected and Spec Setting keeps the project's top module
+instead of requiring another HDL discovery pass. See the
+[RTL-backed example](asset/workspace-reuse-rtl.png) and
+[filelist-backed example](asset/workspace-reuse-filelist.png).
+
+![Repeated workspace setup retains the project RTL and top module](asset/workspace-reuse-rtl.png)
 
 **Step 3 — Basic Info.**
 
@@ -533,12 +542,18 @@ The **New project** dialog asks for:
   selected project type.
 - **Project Storage Location** — read-only field; click it or **Browse** to
   choose a directory.
-- **Managed MPC** — optionally bind an installed MPC template (_No MPC_ or a
-  template from the dropdown). Templates with multiple designs show an **MPC
-  Design** selector and a preview card. This field applies to backend projects.
-- **Import RTL** — required for a backend project without a managed MPC.
-  Select RTL files or a filelist; `ecc rtl import` copies them into the
-  project's `rtl/` directory.
+- **Managed MPC** — click the selector to open **Select Managed MPC**. The dialog
+  lists installed templates, shows the selected template's design, geometry,
+  resources, and I/O pins, and provides an **MPC Design** selector when the
+  template contains multiple designs. Choose **Use template** to bind it, or
+  **Clear** beside the selector to return to **No MPC selected**. This field
+  applies to backend projects.
+- **Import RTL** — required for every backend project, including projects with
+  a managed MPC. Select RTL files or a filelist; `ecc rtl import` copies them
+  into the project's `rtl/` directory, and the MPC wraps that design in its
+  frame template.
+
+![Select Managed MPC previews the template design, resources, and I/O pins](asset/managed-mpc-dialog.png)
 
 The dialog previews the manifest path (`<location>/project.json`) and validates
 the inputs inline (missing directory, unloaded MPC spec, …). **Create** writes
@@ -546,7 +561,7 @@ the backend project's `ecc.toml` and `project.json`, imports its RTL, and
 registers the project. Creating a project does not run its flow; use the
 project row's **New** action to create a workspace next.
 
-![New Project selects Backend or Frontend and imports backend RTL](asset/new-project.png)
+![New Project selects Backend or Frontend and imports backend RTL](asset/new-project-dialog.png)
 
 ### Importing Projects and Workspaces
 
@@ -617,9 +632,11 @@ main place to run steps and inspect their results.
 
 ### Navigation Sidebar
 
-The left rail contains **Dashboard**, **Step Trends**, **DB Trends**,
-**Congestion**, **DRC**, and **Timing**. The analysis entries open dialogs over
-the dashboard. Select individual flow steps through the diagram's cards.
+The left rail contains **Dashboard**, **Metrics**, **Step Trends**, **DB
+Trends**, **DRC**, **Timing**, **Power**, **LVS**, and **Antenna**. **Metrics**
+opens a dialog with **Chip Basic Info** and **Key Metrics**. The remaining
+analysis entries open dialogs over the Flow dashboard. Select individual flow
+steps through the diagram's cards.
 
 ### Workbench Layout
 
@@ -637,10 +654,14 @@ right panel. If Agent is enabled but its panel is not visible, check that
 - **Flow diagram** — each card shows the step's execution state, elapsed
   runtime, peak memory, checklist state, and layout thumbnail when available.
   The status icon opens a step-run dialog; **Details**, **Reports**, and
-  **Log** open that step's results. The diagram groups post-route checks into
-  branches. Use the zoom slider, wheel, or drag to navigate, and the expand
-  button to view the diagram full screen. Branches describe the displayed
-  dependencies; they do not promise that the checks execute in parallel.
+  **Log** open that step's results. The mainline is `Synthesis → Pre Floorplan
+  → Macro Placement → Post Floorplan → preplace → Place → diff_sizing → CTS →
+  Legalization → Sizer → Route → Filler`. After Filler, `LVS`, `DRC`,
+  `Antenna Check`, `Post-Route LEC`, `RCX → STA`, and `Power Analysis → EMIR`
+  appear as dependency branches that converge on Harden. Use the zoom slider,
+  wheel, or drag to navigate, and the expand button to view the diagram full
+  screen. Branches describe the displayed dependencies; they do not promise
+  that the checks execute in parallel.
 - **Quality of Results** — the current QoR v3 score out of 100, or **NR** when
   the design is not rated. **QoR details** opens the full assessment and any
   available baseline comparison.
@@ -649,18 +670,17 @@ right panel. If Agent is enabled but its panel is not visible, check that
 - **Signoff card** — after Harden, **Review & export** becomes available when
   mandatory verification steps and their checklists pass. Review the package
   before exporting; a completed runtime step alone does not certify signoff.
-- **Chip Basic Info** — project, SoC template, workspace, PDK, design, top
-  module, die area, frequency, clock, and applicable constraints.
-- **Key Metrics** — area, instances, timing, and other available results.
 - **Stale-result notice** — identifies results from an earlier configuration.
   They remain available for inspection but do not count as current signoff
   evidence.
 
 Use the sidebar analysis dialogs for runtime and peak-memory trends, database
-metrics across steps, congestion maps, DRC statistics, and timing details.
-Missing results show their availability instead of a fabricated zero.
+metrics across steps, DRC statistics, timing details, power summaries, LVS
+connectivity, and Antenna Check coverage. Open **Metrics** for chip
+configuration, die and cell counts, and available timing metrics. Missing
+results show their availability instead of a fabricated zero.
 
-![Workspace dashboard with the Flow diagram, checklist, and chip metrics](asset/overview-light.png)
+![Workspace Flow dashboard with mainline and post-route branches, QoR, and Signoff Checklist](asset/overview-light.png)
 
 In this example, Harden succeeded while EMIR remains incomplete because no
 process technology file was configured. The warning remains visible in the
@@ -708,8 +728,10 @@ results by corner and path group.
 ## Running the RTL-to-GDS Flow
 
 The workspace's stored flow determines its step list and order. New default
-flows include the post-route sequence `route → filler → lvs → drc →
+flows contain the post-route order `route → filler → lvs → drc →
 antennaCheck → postRouteLec → RCX → sta → powerAnalysis → emir → Harden`.
+The dashboard renders independent post-route checks as branches that converge
+on Harden; persisted order is not a promise that they execute serially.
 Existing workspaces retain their stored sequence.
 
 ### Starting and Re-running
@@ -1020,9 +1042,10 @@ default width of 280 px, which you can resize by dragging its left edge.
 - **Stop** (■) interrupts a running agent.
 - While the agent is working you can queue another message; a queue bar with
   **× Cancel queued message** appears.
-- Workspace suggestions include **Rerun a completed stage**, **Continue
-  unfinished flow**, and, when a project is bound, **Create another workspace
-  in this project**. You can also describe parameter changes in chat.
+- Workspace suggestions include **Rerun a specified stage**, **Continue
+  unfinished flow**, **Create another workspace in this project**, and **Start
+  a bounded optimization episode**. **Other...** accepts a custom request, and
+  you can also describe parameter changes in chat.
 - Replies render Markdown. **Choices** collect answers, **Tool progress**
   shows execution details, and optimization cards show the active episode.
   Inspect layout and report artifacts through the dashboard's step cards.
@@ -1042,11 +1065,15 @@ workspace and starts no flow.
 
 The Home Agent's **Get started** conversation also offers **Quick Start** for
 the built-in GCD example. It requires ready GCD, ICS55 PDK, and MPC resources;
-missing resources are reported before creation. The walkthrough opens Project
-Management, creates a project and workspace, and starts the full flow. Its
-final success or failure message follows the actual flow result. **Stop Quick
-Start** stops setup or requests cancellation of the flow after it has started;
-you can also use **Background Tasks → Cancel Flow**.
+missing resources are reported before creation. A selected MPC that cannot be
+downloaded or resolved is marked **Needs attention**, and confirmation fails
+without creating the workspace. The walkthrough opens Project Management,
+creates a project and workspace, and starts the full flow. Its final success or
+failure message follows the actual flow result. **Stop Quick Start** stops setup
+or requests cancellation of the flow after it has started; you can also use
+**Background Tasks → Cancel Flow**.
+
+![Quick Start stopped before the ECC flow phase](asset/agent-quick-start.png)
 
 ### Proposals and Confirmation
 
@@ -1058,17 +1085,28 @@ that you can expand (**Details / Hide details**).
 
 - **Parameter changes** save the agreed values without automatically running
   the flow.
-- **Rerun a completed stage** creates and opens an isolated target workspace,
+- **Rerun a specified stage** creates and opens an isolated target workspace,
   preserving the source workspace and its earlier results. Choose either the
   selected stage alone or continuation from that stage through Harden.
 - **Continue unfinished flow** resumes in the current workspace.
+- If a selected resource is no longer available, the contract shows
+  **Needs attention** and keeps the explicit selection visible. **Confirm and
+  start** then fails closed; it does not silently create the workspace without
+  the selected resource.
+
+![An unavailable selected MPC leaves the Agent contract in Needs attention](asset/agent-workspace-mpc-unavailable.png)
 
 ### Optimizing a Completed Design
 
 On Home, choose **Optimize a completed design**, select a baseline workspace
 completed through Harden, and describe the goal. You can also request
 optimization from a workspace chat. Review the proposed primary metric,
-metrics to preserve, and signoff gates before confirming the optimization.
+metrics to preserve, signoff gates, geometry mode, enabled parameter layers,
+and frozen objective hash before confirming the optimization. **Cancel** after
+authorization closes the proposal without creating a candidate workspace or
+running ECC.
+
+![Optimize authorization is cancellable before any candidate workspace or ECC run](asset/agent-optimize-authorization.png)
 
 Candidates execute in isolated workspaces. A baseline without noise
 calibration first runs three replays. Optimization has automatic execution,

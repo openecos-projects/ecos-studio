@@ -5,7 +5,7 @@ mod panel;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{mpsc, Arc};
 
-use chip_view_db::clock_tree::{ClockGraphIndex, ClockNode, ClockTreeView};
+use chip_view_db::clock_tree::{ClockEdge, ClockGraphIndex, ClockNode, ClockTreeView};
 use chip_view_db::ChipViewDb;
 use chipgeom_format::{ClockTreeAnalysisSource, ClockTreeStage, ClockTreeStatus};
 
@@ -14,28 +14,75 @@ use layout::TreeRow;
 pub(crate) enum LayoutTarget {
     Node {
         node: ClockNode,
-        net_names: Vec<String>,
+        parent_net_names: Vec<String>,
+        child_net_names: Vec<String>,
+        parent_nodes: Vec<ClockNode>,
+        child_nodes: Vec<ClockNode>,
     },
     Net(String),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ClockTreeSelection {
+    pub(crate) clock: usize,
+    pub(crate) node: Option<usize>,
+}
+
 fn layout_target_for_node(index: &ClockGraphIndex, node_index: usize) -> LayoutTarget {
-    let net_names = index
+    let edges = index
         .edges_for_node
         .get(node_index)
         .into_iter()
         .flatten()
-        .filter_map(|&edge_index| index.edges.get(edge_index))
-        .map(|edge| edge.net_name.as_str())
-        .filter(|name| !name.is_empty())
+        .filter_map(|&edge_index| index.edges.get(edge_index));
+    let (parent_net_names, child_net_names) = directed_net_names(edges, node_index);
+    let parent_nodes = index
+        .parents
+        .get(node_index)
+        .into_iter()
+        .flatten()
+        .copied()
         .collect::<BTreeSet<_>>()
         .into_iter()
-        .map(str::to_string)
+        .filter_map(|node_index| index.nodes.get(node_index).cloned())
+        .collect();
+    let child_nodes = index
+        .children
+        .get(node_index)
+        .into_iter()
+        .flatten()
+        .copied()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter_map(|node_index| index.nodes.get(node_index).cloned())
         .collect();
     LayoutTarget::Node {
         node: index.nodes[node_index].clone(),
-        net_names,
+        parent_net_names: parent_net_names.into_iter().map(str::to_string).collect(),
+        child_net_names: child_net_names.into_iter().map(str::to_string).collect(),
+        parent_nodes,
+        child_nodes,
     }
+}
+
+fn directed_net_names<'a>(
+    edges: impl IntoIterator<Item = &'a ClockEdge>,
+    node_index: usize,
+) -> (BTreeSet<&'a str>, BTreeSet<&'a str>) {
+    let mut parent_net_names = BTreeSet::new();
+    let mut child_net_names = BTreeSet::new();
+    for edge in edges {
+        if edge.net_name.is_empty() {
+            continue;
+        }
+        if edge.to == node_index {
+            parent_net_names.insert(edge.net_name.as_str());
+        }
+        if edge.from == node_index {
+            child_net_names.insert(edge.net_name.as_str());
+        }
+    }
+    (parent_net_names, child_net_names)
 }
 
 struct ClockData {
@@ -124,6 +171,13 @@ impl ClockTreePanel {
 
     pub(crate) fn is_open(&self) -> bool {
         self.open
+    }
+
+    pub(crate) fn selection_key(&self) -> ClockTreeSelection {
+        ClockTreeSelection {
+            clock: self.clock,
+            node: self.selected,
+        }
     }
 
     fn poll(&mut self, ctx: &egui::Context) {
@@ -353,6 +407,18 @@ fn analysis_label(source: Option<ClockTreeAnalysisSource>) -> &'static str {
 mod tests {
     use super::*;
 
+    fn edge(from: usize, to: usize, net_name: &str) -> ClockEdge {
+        ClockEdge {
+            from,
+            to,
+            kind: Default::default(),
+            polarity: Default::default(),
+            net_name: net_name.to_string(),
+            cell_name: String::new(),
+            object_ref: 0,
+        }
+    }
+
     fn lookup(entries: &[(&str, &[usize])]) -> HashMap<String, Vec<usize>> {
         entries
             .iter()
@@ -395,5 +461,20 @@ mod tests {
             layout_candidates_for_clock(&empty, &empty, &empty, &["missing".to_string()])
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn directed_net_names_split_parent_and_child_edges() {
+        let edges = [
+            edge(0, 1, "parent_net_a"),
+            edge(3, 1, "parent_net_b"),
+            edge(1, 2, "child_net"),
+            edge(1, 4, ""),
+        ];
+
+        let (parents, children) = directed_net_names(edges.iter(), 1);
+
+        assert_eq!(parents, BTreeSet::from(["parent_net_a", "parent_net_b"]));
+        assert_eq!(children, BTreeSet::from(["child_net"]));
     }
 }

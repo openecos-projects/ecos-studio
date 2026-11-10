@@ -695,6 +695,30 @@
                             </option>
                           </select>
                         </div>
+
+                        <div
+                          v-if="
+                            step.name === 'macroPlacement' &&
+                            isFlowStepRunnable(step.name)
+                          "
+                          class="mt-4 border-t border-(--border-color)/70 pt-3"
+                          @click.stop
+                        >
+                          <label
+                            for="macro-manual-placement"
+                            class="flex cursor-pointer items-center gap-2.5"
+                          >
+                            <input
+                              id="macro-manual-placement"
+                              v-model="config.parameters.manual_macro_placement"
+                              type="checkbox"
+                              class="h-4 w-4 shrink-0 accent-(--accent-color)"
+                            />
+                            <span class="text-xs font-semibold text-(--text-primary)"
+                              >Manual macro placement</span
+                            >
+                          </label>
+                        </div>
                       </div>
                       <span
                         v-if="index < flowStepOptions.length - 1 && (index + 1) % 4 !== 0"
@@ -2225,6 +2249,7 @@ function createInitialConfig(
       frequency_max: 50,
       max_fanout: 32,
       clock_tree: false,
+      manual_macro_placement: false,
       sta_max_parallel_corners: 1,
       die_area_mode: dieAreaMode.value,
       die_width: 100,
@@ -2423,6 +2448,13 @@ function normalizeInitialParameters(parameters: Record<string, unknown>) {
     parameters.utilization = parameters.utilitization
   }
   delete parameters.utilitization
+  if (parameters.manual_macro_placement === undefined) {
+    parameters.manual_macro_placement =
+      firstBoolean(
+        parameters['macro.manual_placement'],
+        isRecord(parameters.macro) ? parameters.macro.manual_placement : undefined,
+      ) ?? false
+  }
   if (parameters.die_area_mode !== undefined) {
     parameters.die_area_mode = normalizeDieAreaMode(parameters.die_area_mode)
   }
@@ -3239,6 +3271,14 @@ function applyProjectParameterDefaults(
     firstBoolean(
       parameters.clock_tree,
       isRecord(parameters.geometry) ? parameters.geometry.clock_tree : undefined,
+    ),
+  )
+  setBooleanParameterDefault(
+    'manual_macro_placement',
+    firstBoolean(
+      parameters.manual_macro_placement,
+      parameters['macro.manual_placement'],
+      isRecord(parameters.macro) ? parameters.macro.manual_placement : undefined,
     ),
   )
   setNumberParameterDefault(
@@ -4204,6 +4244,23 @@ async function refreshTopModuleDiscovery() {
       suggested: committedTopModule,
     }
     config.value.parameters.top_module = committedTopModule
+    return
+  }
+  // MPC-backed projects do not expose user HDL to the wizard until the flow
+  // generates the core from the selected template. The project manifest still
+  // records the authoritative top module, so use it instead of blocking the
+  // Spec step on an empty HDL discovery result.
+  const mpcTopModule = mpcDesignProject.value
+    ? projectManifestTopModule.value ||
+      String(config.value.parameters.top_module || '').trim()
+    : ''
+  if (mpcTopModule) {
+    topModuleDiscovery.value = {
+      candidates: [mpcTopModule],
+      status: 'complete',
+      suggested: mpcTopModule,
+    }
+    config.value.parameters.top_module = mpcTopModule
     return
   }
   const fingerprint = currentDesignInputFingerprint()

@@ -13,6 +13,7 @@ import {
   projectSettingsArgs,
   rtlImportArgs,
   workspaceCreateCommands,
+  workspaceDefViewArgs,
   workspaceParameterValue,
   workspaceRefreshArgs,
   operationFlowMatches,
@@ -196,6 +197,22 @@ describe('ECC CLI workspace command planning', () => {
     ])
   })
 
+  it('forwards manual macro placement through CLI for fresh and derived workspaces', () => {
+    const input = request()
+    input.workspaceSpec.parameters = { 'macro.manual_placement': true }
+
+    const freshCommand = workspaceCreateCommands(input, '/projects/demo')[1]!
+    expect(freshCommand[freshCommand.indexOf('--set') + 1]).toBe(
+      'macro.manual_placement=true',
+    )
+
+    input.deriveFrom = { sourceStep: 'macroPlacement', workspaceId: 'ws_source' }
+    const derivedCommand = workspaceCreateCommands(input, '/projects/demo')[1]!
+    expect(derivedCommand[derivedCommand.indexOf('--set') + 1]).toBe(
+      'macro.manual_placement=true',
+    )
+  })
+
   it('initializes an MPC Project before its Project and Workspace transactions', () => {
     const input = request({
       eccPdkConfig: {
@@ -365,6 +382,25 @@ describe('ECC CLI workspace command planning', () => {
       '--no-wait',
       '--force',
       '--keep-backup',
+    ])
+  })
+
+  it('maps DEF View to the Workspace-scoped CLI command', () => {
+    expect(
+      workspaceDefViewArgs({
+        defPath: '/inputs/gcd.def.gz',
+        projectRoot: '/projects/demo',
+        workspaceId: 'ws_1',
+      }),
+    ).toEqual([
+      'defview',
+      '--project',
+      '/projects/demo',
+      '--workspace',
+      'ws_1',
+      '--def',
+      '/inputs/gcd.def.gz',
+      '--plain',
     ])
   })
 
@@ -704,6 +740,121 @@ describe('ECC CLI Workspace configuration boundary', () => {
         stdin: 'placeInstance u_ram0 10 20 R0\n',
       },
     )
+  })
+})
+
+describe('ECC CLI DEF View', () => {
+  it('reuses the open Workspace and returns its geometry manifest', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ecc-defview-'))
+    temporaryDirectories.push(projectRoot)
+    const workspaceDirectory = join(projectRoot, 'ws_1')
+    const defPath = join(projectRoot, 'selected.def.gz')
+    const geometryManifestPath = join(
+      workspaceDirectory,
+      'defview',
+      'output',
+      'geometry',
+      'geometry.manifest',
+    )
+    await writeFile(defPath, 'VERSION 5.8 ;\n')
+    const commands: string[][] = []
+    vi.spyOn(EccCliProcess.prototype, 'run').mockImplementation(async (args) => {
+      commands.push([...args])
+      await mkdir(join(workspaceDirectory, 'defview', 'output', 'geometry'), {
+        recursive: true,
+      })
+      await writeFile(geometryManifestPath, 'schema_version=1\n')
+      return { exitCode: 0, stderr: '', stdout: '' }
+    })
+    const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
+    ;(service as any).sessions.set('handle-1', {
+      directory: workspaceDirectory,
+      handle: 'handle-1',
+      projectRoot,
+      workspaceId: 'ws_1',
+      workspaceRevision: 4,
+    })
+
+    await expect(
+      service.defView({ defPath, workspaceHandle: 'handle-1' }),
+    ).resolves.toEqual({
+      defPath,
+      directory: join(workspaceDirectory, 'defview'),
+      geometryManifestPath,
+      workspaceHandle: 'handle-1',
+    })
+    expect(commands).toEqual([
+      workspaceDefViewArgs({ defPath, projectRoot, workspaceId: 'ws_1' }),
+    ])
+  })
+
+  it('rejects non-DEF inputs before invoking the CLI', async () => {
+    const run = vi.spyOn(EccCliProcess.prototype, 'run')
+    const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
+    ;(service as any).sessions.set('handle-1', {
+      directory: '/projects/demo/ws_1',
+      handle: 'handle-1',
+      projectRoot: '/projects/demo',
+      workspaceId: 'ws_1',
+      workspaceRevision: 4,
+    })
+
+    await expect(
+      service.defView({ defPath: '/inputs/design.txt', workspaceHandle: 'handle-1' }),
+    ).rejects.toThrow('DEF View requires a .def or .def.gz input.')
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  it('rejects a concurrent DEF View in the same Workspace', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ecc-defview-concurrent-'))
+    temporaryDirectories.push(projectRoot)
+    const workspaceDirectory = join(projectRoot, 'ws_1')
+    const defPath = join(projectRoot, 'selected.def.gz')
+    const geometryManifestPath = join(
+      workspaceDirectory,
+      'defview',
+      'output',
+      'geometry',
+      'geometry.manifest',
+    )
+    await writeFile(defPath, 'VERSION 5.8 ;\n')
+    let releaseFirst!: () => void
+    const firstRunGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    let firstRunStarted!: () => void
+    const firstRunStartedPromise = new Promise<void>((resolve) => {
+      firstRunStarted = resolve
+    })
+    const run = vi
+      .spyOn(EccCliProcess.prototype, 'run')
+      .mockImplementationOnce(async () => {
+        firstRunStarted()
+        await firstRunGate
+        await mkdir(join(workspaceDirectory, 'defview', 'output', 'geometry'), {
+          recursive: true,
+        })
+        await writeFile(geometryManifestPath, 'schema_version=1\n')
+        return { exitCode: 0, stderr: '', stdout: '' }
+      })
+    const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
+    ;(service as any).sessions.set('handle-1', {
+      directory: workspaceDirectory,
+      handle: 'handle-1',
+      projectRoot,
+      workspaceId: 'ws_1',
+      workspaceRevision: 4,
+    })
+
+    const first = service.defView({ defPath, workspaceHandle: 'handle-1' })
+    await firstRunStartedPromise
+    await expect(
+      service.defView({ defPath, workspaceHandle: 'handle-1' }),
+    ).rejects.toMatchObject({ code: 'WORKSPACE_BUSY' })
+    expect(run).toHaveBeenCalledTimes(1)
+
+    releaseFirst()
+    await expect(first).resolves.toMatchObject({ geometryManifestPath })
   })
 })
 

@@ -150,7 +150,7 @@ describe('AIChatPanel profile management', () => {
     const menu = wrapper.findComponent({ name: 'AgentModelSettingsMenu' })
     expect(menu.exists()).toBe(true)
     await menu.get('.model-settings__trigger').trigger('click')
-    await menu.get('.model-settings__configure').trigger('click')
+    document.querySelector<HTMLButtonElement>('.model-settings__configure')!.click()
     await flushPromises()
 
     const dialog = wrapper.findComponent(AgentProfileManagerDialog)

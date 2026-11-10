@@ -13,6 +13,7 @@ import type {
   ProjectManifest,
 } from '@ecos-studio/shared'
 import { projectManagementFrontendWorkspaceSummaryPaths } from '@ecos-studio/shared'
+import { hasLegacyRunsLayout } from './eccCli/legacyMigration'
 import { isPathWithinRoot } from './pathScope'
 
 const PROJECT_MANIFEST_MAX_BYTES = 512 * 1024
@@ -199,8 +200,10 @@ export class ProjectManagementReadService {
       PROJECT_MANIFEST_MAX_BYTES,
     )
     if (!content) {
-      // A legacy project may not have a manifest yet. Let the ECC runtime run
-      // its idempotent migration once; virgin folders still resolve to null.
+      // Only legacy runs/ layouts need the ECC runtime's migration path. Calling
+      // load() for a virgin directory creates .manifest.lock and makes the
+      // directory ineligible for the subsequent project-init operation.
+      if (!(await hasLegacyRunsLayout(root))) return null
       try {
         return await this.projectManifestReader.load(root)
       } catch {

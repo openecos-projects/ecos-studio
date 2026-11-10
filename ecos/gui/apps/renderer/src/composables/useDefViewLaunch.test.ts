@@ -1,10 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { WorkspaceConfig } from '@/types'
 
 const desktopApi = {
-  workspace: { pathExists: vi.fn() },
-  pdkInventory: { list: vi.fn() },
-  workspaceResources: { readFlow: vi.fn() },
+  productCommands: { execute: vi.fn() },
   chipViewer: { open: vi.fn() },
 }
 
@@ -12,20 +9,13 @@ vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => desktopApi,
 }))
 
-const startFlowOperationApi = vi.fn()
-
-vi.mock('@/api/flow', () => ({
-  startFlowOperationApi: (...args: unknown[]) => startFlowOperationApi(...args),
-}))
-
-import { launchDefView } from './useDefViewLaunch'
+import { defViewWorkspaceIssue, launchDefView } from './useDefViewLaunch'
 
 function deps(overrides: Partial<Parameters<typeof launchDefView>[1]> = {}) {
   return {
-    createProject: vi.fn().mockResolvedValue(true),
-    workspaceHandle: vi.fn().mockReturnValue('ws-handle'),
-    workspaceRevision: vi.fn().mockReturnValue(3),
     showToast: vi.fn(),
+    workspaceHandle: 'workspace-handle-1',
+    workspacePath: '/projects/demo/ws_1',
     ...overrides,
   }
 }
@@ -33,59 +23,107 @@ function deps(overrides: Partial<Parameters<typeof launchDefView>[1]> = {}) {
 describe('launchDefView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    desktopApi.workspace.pathExists.mockResolvedValue(false)
-    desktopApi.pdkInventory.list.mockResolvedValue([
-      { id: 'pdk-1', familyId: 'ics55', version: 'v1', root: '/pdk', readiness: 'ready' },
-    ])
-    desktopApi.workspaceResources.readFlow.mockResolvedValue({
-      steps: [{ name: 'defview', state: 'Success' }],
+    desktopApi.productCommands.execute.mockResolvedValue({
+      defPath: '/data/gcd.def.gz',
+      directory: '/projects/demo/ws_1/defview',
+      geometryManifestPath:
+        '/projects/demo/ws_1/defview/output/geometry/geometry.manifest',
+      workspaceHandle: 'workspace-handle-1',
     })
     desktopApi.chipViewer.open.mockResolvedValue({ spawned: true })
-    startFlowOperationApi.mockResolvedValue({ operationId: 'op' })
   })
 
-  it('creates a defview workspace, runs the step, and opens Chip Viewer', async () => {
-    const createProject = vi.fn().mockResolvedValue(true)
-    const dep = deps({ createProject })
-    await launchDefView('/data/gcd.def.gz', dep)
+  it('generates geometry in the active Workspace and opens Chip Viewer', async () => {
+    const dependency = deps()
 
-    expect(createProject).toHaveBeenCalledTimes(1)
-    const config: WorkspaceConfig = createProject.mock.calls[0]![0]
-    expect(config).toMatchObject({
-      directory: '/data/gcd-defview',
-      origin_def: '/data/gcd.def.gz',
-      design_input_mode: 'def',
-      flow_config: { start_step: 'defview', end_step: 'defview', steps: ['defview'] },
+    await launchDefView('/data/gcd.def.gz', dependency)
+
+    expect(desktopApi.productCommands.execute).toHaveBeenCalledWith({
+      command: 'workspace.defView',
+      payload: {
+        defPath: '/data/gcd.def.gz',
+        workspaceHandle: 'workspace-handle-1',
+      },
     })
-    expect(startFlowOperationApi).toHaveBeenCalledWith(
-      expect.objectContaining({ rerun: false, workspaceHandle: 'ws-handle' }),
-    )
     expect(desktopApi.chipViewer.open).toHaveBeenCalledWith({
-      projectPath: '/data/gcd-defview',
+      projectPath: '/projects/demo/ws_1',
       step: 'defview',
       mode: 'view',
     })
-    expect(dep.showToast).not.toHaveBeenCalled()
+    expect(dependency.showToast).not.toHaveBeenCalled()
   })
 
-  it('reports an error and skips the viewer when creation fails', async () => {
-    const dep = deps({ createProject: vi.fn().mockResolvedValue(false) })
-    await launchDefView('/data/gcd.def', dep)
-
-    expect(startFlowOperationApi).not.toHaveBeenCalled()
-    expect(desktopApi.chipViewer.open).not.toHaveBeenCalled()
-  })
-
-  it('reports an error when the defview step ends unsuccessfully', async () => {
-    desktopApi.workspaceResources.readFlow.mockResolvedValue({
-      steps: [{ name: 'defview', state: 'Incomplete' }],
-    })
-    const dep = deps()
-    await launchDefView('/data/gcd.def', dep)
-
-    expect(desktopApi.chipViewer.open).not.toHaveBeenCalled()
-    expect(dep.showToast).toHaveBeenCalledWith(
-      expect.objectContaining({ severity: 'error', summary: 'DEF View Error' }),
+  it('reports generation errors without opening Chip Viewer', async () => {
+    desktopApi.productCommands.execute.mockRejectedValue(
+      new Error('ECC could not read the selected DEF'),
     )
+    const dependency = deps()
+
+    await launchDefView('/data/gcd.def', dependency)
+
+    expect(desktopApi.chipViewer.open).not.toHaveBeenCalled()
+    expect(dependency.showToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detail: 'ECC could not read the selected DEF',
+        severity: 'error',
+        summary: 'DEF View Error',
+      }),
+    )
+  })
+
+  it('reports Chip Viewer launch errors', async () => {
+    desktopApi.chipViewer.open.mockRejectedValue(new Error('No display environment'))
+    const dependency = deps()
+
+    await launchDefView('/data/gcd.def', dependency)
+
+    expect(dependency.showToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detail: 'No display environment',
+        severity: 'error',
+        summary: 'DEF View Error',
+      }),
+    )
+  })
+})
+
+describe('defViewWorkspaceIssue', () => {
+  it('requires an active Workspace', () => {
+    expect(
+      defViewWorkspaceIssue({ path: '', state: 'active', designTool: 'backend' }),
+    ).toBe('Open a Workspace before viewing a DEF layout.')
+    expect(
+      defViewWorkspaceIssue({
+        path: '/projects/demo/ws_1',
+        state: 'loading',
+        designTool: 'backend',
+      }),
+    ).toBe('Open a Workspace before viewing a DEF layout.')
+  })
+
+  it('rejects frontend Workspaces before the file picker opens', () => {
+    expect(
+      defViewWorkspaceIssue({
+        path: '/projects/demo/ws_1',
+        state: 'active',
+        designTool: 'frontend',
+      }),
+    ).toBe('DEF Layout is only available for backend Workspaces.')
+  })
+
+  it('accepts an active backend Workspace', () => {
+    expect(
+      defViewWorkspaceIssue({
+        path: '/projects/demo/ws_1',
+        state: 'active',
+        designTool: 'backend',
+      }),
+    ).toBeNull()
+    expect(
+      defViewWorkspaceIssue({
+        path: '/projects/demo/ws_1',
+        state: 'active',
+      }),
+    ).toBeNull()
   })
 })

@@ -45,16 +45,42 @@ describe('AgentModelSettingsMenu', () => {
     await wrapper.get('.model-settings__trigger').trigger('click')
     expect(wrapper.find('.model-settings__flyout').exists()).toBe(false)
 
-    await wrapper.findAll('.model-settings__entry')[0]!.trigger('pointerenter')
+    document
+      .querySelectorAll<HTMLElement>('.model-settings__entry')[0]!
+      .dispatchEvent(new PointerEvent('pointerenter'))
+    await nextTick()
     document.querySelectorAll<HTMLButtonElement>('.model-settings__option')[1]!.click()
     await nextTick()
     expect(wrapper.emitted('update')?.[0]).toEqual([{ model: 'gpt-5.6-terra' }])
 
     await wrapper.get('.model-settings__trigger').trigger('click')
-    await wrapper.findAll('.model-settings__entry')[1]!.trigger('pointerenter')
+    document
+      .querySelectorAll<HTMLElement>('.model-settings__entry')[1]!
+      .dispatchEvent(new PointerEvent('pointerenter'))
+    await nextTick()
     document.querySelectorAll<HTMLButtonElement>('.model-settings__option')[0]!.click()
     await nextTick()
     expect(wrapper.emitted('update')?.[1]).toEqual([{ reasoningEffort: 'low' }])
+  })
+
+  it('teleports the popover outside clipped Agent panel containers', async () => {
+    const wrapper = mount(AgentModelSettingsMenu, {
+      props: { settings },
+      attachTo: document.body,
+    })
+    await wrapper.get('.model-settings__trigger').trigger('click')
+    await nextTick()
+
+    const popover = document.querySelector<HTMLElement>('.model-settings__popover')
+    expect(popover).not.toBeNull()
+    expect(popover?.parentElement).toBe(document.body)
+    expect(popover?.closest('.agent-chat')).toBeNull()
+
+    popover!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await nextTick()
+    expect(document.querySelector('.model-settings__popover')).toBeNull()
+
+    wrapper.unmount()
   })
 
   it('shows the profile switch and a manage entry when provided', async () => {
@@ -85,15 +111,19 @@ describe('AgentModelSettingsMenu', () => {
     })
     await wrapper.get('.model-settings__trigger').trigger('click')
 
-    const sourceButtons = wrapper.findAll('.model-settings__source-option')
+    const sourceButtons = document.querySelectorAll<HTMLButtonElement>(
+      '.model-settings__source-option',
+    )
     expect(sourceButtons).toHaveLength(2)
-    expect(sourceButtons[1]!.classes()).toContain('model-settings__source-option--active')
+    expect(sourceButtons[1]!.classList).toContain('model-settings__source-option--active')
 
-    await sourceButtons[0]!.trigger('click')
+    sourceButtons[0]!.click()
+    await nextTick()
     expect(wrapper.emitted('select-profile')).toEqual([['codex']])
 
     await wrapper.get('.model-settings__trigger').trigger('click')
-    await wrapper.get('.model-settings__configure').trigger('click')
+    document.querySelector<HTMLButtonElement>('.model-settings__configure')!.click()
+    await nextTick()
     expect(wrapper.emitted('configure')).toHaveLength(1)
   })
 })

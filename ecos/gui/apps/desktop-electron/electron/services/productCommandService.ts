@@ -8,6 +8,7 @@ import type {
   EccWorkspaceConfigurationUpdateRequest,
   EccWorkspaceCreateRequest,
   EccWorkspaceDeriveRequest,
+  EccWorkspaceDefViewRequest,
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceHandleRequest,
   EccWorkspaceOpenRequest,
@@ -24,6 +25,7 @@ interface ProductCommandRuntime {
   deriveWorkspace(
     request: EccWorkspaceDeriveRequest & { workspaceHandle: string },
   ): Promise<unknown>
+  defView?(request: EccWorkspaceDefViewRequest): Promise<unknown>
   retryFinalSnapshot(request: EccWorkspaceHandleRequest): Promise<boolean>
   createWorkspace(request: EccWorkspaceCreateRequest): Promise<unknown>
   exportSignoff(request: EccWorkspaceExportSignoffRequest): Promise<unknown>
@@ -217,6 +219,11 @@ export async function executeProductCommand(
       }
     case 'workspace.reset':
       return await context.runtime.resetFlow(request.payload)
+    case 'workspace.defView':
+      if (!context.runtime.defView) {
+        throw new Error('DEF View requires the ECC CLI runtime.')
+      }
+      return await context.runtime.defView(request.payload)
     case 'workspace.derive':
       return await context.runtime.deriveWorkspace(request.payload)
     case 'workspace.exportSignoff':
@@ -243,6 +250,7 @@ export async function executeProductCommand(
 const GUARDED_PARENT_COMMANDS = new Set<ProductCommandRequest['command']>([
   'workspace.run',
   'workspace.runStep',
+  'workspace.defView',
   'workspace.update',
   'workspace.updateConfiguration',
   'workspace.updateStepConfiguration',
@@ -254,6 +262,12 @@ function readProductCommandRequest(value: unknown): ProductCommandRequest {
     throw new Error('Invalid Product Command')
   }
   const payload = value.payload
+  if (
+    value.command === 'workspace.defView' &&
+    (typeof payload.defPath !== 'string' || !payload.defPath.trim())
+  ) {
+    throw new Error('DEF View requires a DEF input path')
+  }
   if (
     (value.command === 'workspace.run' || value.command === 'workspace.runStep') &&
     payload.allowStaleResources !== undefined &&
@@ -330,6 +344,9 @@ function readProductCommandRequest(value: unknown): ProductCommandRequest {
     case 'workspace.reset':
       requireString(payload, 'workspaceHandle')
       validateRevision(payload.expectedWorkspaceRevision)
+      break
+    case 'workspace.defView':
+      requireString(payload, 'workspaceHandle')
       break
     case 'workspace.exportSignoff':
       requireString(payload, 'workspaceHandle')

@@ -110,7 +110,7 @@ jobs:
   build-macos:
     name: Build macOS App
     needs: check-version
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - name: Checkout

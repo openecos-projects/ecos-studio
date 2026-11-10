@@ -323,6 +323,46 @@ export async function waitFlowTerminal(
   }
 }
 
+export async function runWorkspaceStep(
+  page: Page,
+  ws: WorkspaceJourney,
+  step: string,
+  timeoutMs: number,
+): Promise<EccRuntimeOperation> {
+  const snapshot = (await page.evaluate(
+    (workspaceHandle) => window.ecosDesktop.ecc.runtime.snapshot({ workspaceHandle }),
+    ws.workspaceHandle,
+  )) as { engineeringSnapshot?: { workspaceRevision?: number } }
+  const workspaceRevision = snapshot.engineeringSnapshot?.workspaceRevision
+  if (typeof workspaceRevision !== 'number') {
+    throw new Error(`Workspace revision is unavailable before running ${step}`)
+  }
+  const operation = (await page.evaluate(
+    (request) => window.ecosDesktop.productCommands.execute(request),
+    {
+      command: 'workspace.runStep',
+      payload: {
+        workspaceHandle: ws.workspaceHandle,
+        expectedWorkspaceRevision: workspaceRevision,
+        idempotencyKey: randomUUID(),
+        step,
+      },
+    },
+  )) as EccRuntimeOperation
+  if (!operation.operationId) {
+    throw new Error(`workspace.runStep returned no operationId for ${step}`)
+  }
+  const terminal = await waitFlowTerminal(page, ws, operation.operationId, timeoutMs)
+  const updated = (await page.evaluate(
+    (workspaceHandle) => window.ecosDesktop.ecc.runtime.snapshot({ workspaceHandle }),
+    ws.workspaceHandle,
+  )) as { engineeringSnapshot?: { workspaceRevision?: number } }
+  if (typeof updated.engineeringSnapshot?.workspaceRevision === 'number') {
+    ws.workspaceRevision = updated.engineeringSnapshot.workspaceRevision
+  }
+  return terminal
+}
+
 export async function cancelFlow(
   page: Page,
   ws: WorkspaceJourney,
