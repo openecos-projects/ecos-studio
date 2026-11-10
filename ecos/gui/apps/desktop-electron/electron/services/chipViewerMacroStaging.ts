@@ -58,9 +58,27 @@ export interface MacroStagingEntry {
   master: string
   widthDbu: number
   heightDbu: number
-  /** R-notation orientation; R0 for unplaced macros. */
+  /** DEF orientation for placed macros, or the saved orientation when restored. */
   orient: string
   placed: boolean
+  /**
+   * Persisted manual placement from `macro_location.tcl` when the step DEF
+   * still leaves the macro unplaced. The viewer uses this to restore a saved
+   * editing session without requiring a postFloorplan snapshot.
+   */
+  savedPlacement?: SavedMacroPlacement
+}
+
+export interface SavedMacroPlacement {
+  xDbu: number
+  yDbu: number
+}
+
+export interface SavedMacroPlacementEntry {
+  instance: string
+  orientation: string
+  x: number
+  y: number
 }
 
 export interface MacroStagingManifest {
@@ -391,25 +409,48 @@ export function parseMasterSizes(
 export function buildMacroStagingManifest(input: {
   defComponents: DefComponents
   mastersText: string
+  savedPlacements?: readonly SavedMacroPlacementEntry[]
 }): MacroStagingManifest {
   const parsed = input.defComponents
   const blockMasters = parseBlockMasters(input.mastersText)
   const masterSizes = parseMasterSizes(input.mastersText)
+  const savedPlacements = new Map(
+    (input.savedPlacements ?? []).map((placement) => [placement.instance, placement]),
+  )
+  const canRestoreSavedPlacements =
+    typeof parsed.dbuPerMicron === 'number' &&
+    Number.isFinite(parsed.dbuPerMicron) &&
+    parsed.dbuPerMicron > 0
   const macros: MacroStagingEntry[] = []
   let stdcellCount = 0
   let stdcellAreaDbu = 0
   for (const component of parsed.components) {
     const master = blockMasters.get(component.master)
     if (master) {
-      const orient = component.placed ? DEF_TO_R_ORIENT[component.orient] : 'R0'
-      macros.push({
+      const saved = savedPlacements.get(component.name)
+      const entry: MacroStagingEntry = {
         name: component.name,
         master: component.master,
         widthDbu: master.widthDbu,
         heightDbu: master.heightDbu,
-        orient,
+        orient: component.placed
+          ? DEF_TO_R_ORIENT[component.orient]
+          : canRestoreSavedPlacements
+            ? (saved?.orientation ?? 'R0')
+            : 'R0',
         placed: component.placed,
-      })
+      }
+      if (!component.placed && saved && canRestoreSavedPlacements) {
+        const dbuPerMicron = parsed.dbuPerMicron
+        if (dbuPerMicron === null) {
+          throw new Error('macro staging: saved placements require a DBU scale')
+        }
+        entry.savedPlacement = {
+          xDbu: macroCoordinateToDbu(saved.x, dbuPerMicron, component.name, 'x'),
+          yDbu: macroCoordinateToDbu(saved.y, dbuPerMicron, component.name, 'y'),
+        }
+      }
+      macros.push(entry)
       continue
     }
     if (component.placed) {
@@ -429,6 +470,25 @@ export function buildMacroStagingManifest(input: {
     stdcellStaging:
       stdcellCount > 0 ? { count: stdcellCount, areaDbu: stdcellAreaDbu } : undefined,
   }
+}
+
+function macroCoordinateToDbu(
+  value: number,
+  dbuPerMicron: number,
+  instance: string,
+  axis: 'x' | 'y',
+): number {
+  const scaled = Math.round(value * dbuPerMicron)
+  if (
+    !Number.isSafeInteger(scaled) ||
+    scaled < -2_147_483_648 ||
+    scaled > 2_147_483_647
+  ) {
+    throw new Error(
+      `macro staging: saved ${axis} coordinate for ${instance} is outside the supported range`,
+    )
+  }
+  return scaled
 }
 
 export function serializeMacroStagingManifest(manifest: MacroStagingManifest): string {

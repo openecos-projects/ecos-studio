@@ -675,6 +675,72 @@ describe('ECC CLI Workspace configuration boundary', () => {
     ).resolves.toMatchObject({ workspaceId: 'ws_1', workspaceRevision: 4 })
     expect(run).not.toHaveBeenCalled()
   })
+
+  it('forwards committed step output semantics to param apply', async () => {
+    const service = serviceWithSession()
+    const runWorkspaceMutation = vi
+      .spyOn(service as any, 'runWorkspaceMutation')
+      .mockResolvedValue(undefined)
+
+    await service.updateWorkspaceStepConfiguration({
+      commandId: 'macro-save-1',
+      commitStepOutput: true,
+      expectedWorkspaceRevision: 4,
+      parameters: { 'macro.placements': [] },
+      stepId: 'macroPlacement',
+      workspaceHandle: 'handle-1',
+    })
+
+    expect(runWorkspaceMutation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.arrayContaining([
+        '--step',
+        'macroPlacement',
+        '--commit-step-output',
+        '--set',
+        'macro.placements=[]',
+      ]),
+    )
+  })
+
+  it('commits published macro placement output during viewer Tcl import', async () => {
+    const service = serviceWithSession()
+    const run = vi.spyOn(EccCliProcess.prototype, 'run').mockResolvedValue({
+      exitCode: 0,
+      stderr: '',
+      stdout: '',
+    })
+    vi.spyOn(service as any, 'refreshSessionRevision').mockResolvedValue(undefined)
+
+    await service.importMacroPlacements({
+      commandId: 'viewer-save-1',
+      expectedWorkspaceRevision: 4,
+      tcl: 'placeInstance u_ram0 10 20 R0\n',
+      workspaceHandle: 'handle-1',
+    })
+
+    expect(run).toHaveBeenCalledWith(
+      [
+        'macro',
+        'import',
+        '-',
+        '--project',
+        '/projects/demo',
+        '--workspace',
+        'ws_1',
+        '--expected-revision',
+        '4',
+        '--command-id',
+        'viewer-save-1',
+        '--no-wait',
+        '--commit-step-output',
+      ],
+      {
+        cwd: '/projects/demo',
+        stdin: 'placeInstance u_ram0 10 20 R0\n',
+      },
+    )
+  })
 })
 
 describe('ECC CLI DEF View', () => {

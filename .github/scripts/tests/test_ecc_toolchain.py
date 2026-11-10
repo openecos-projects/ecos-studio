@@ -28,11 +28,9 @@ def artifacts(*names):
 
 
 class ToolchainTests(unittest.TestCase):
-    def test_packaged_design_job_names(self):
-        for name in ("E2E Packaged Flow (gcd)", "E2E (gcd)"):
-            with self.subTest(name=name):
-                self.assertTrue(toolchain.is_packaged_design_job(name))
-        for name in ("List e2e designs", "E2E"):
+    def test_packaged_design_job_name(self):
+        self.assertTrue(toolchain.is_packaged_design_job("E2E (gcd)"))
+        for name in ("E2E Packaged Flow (gcd)", "E2E", "E2E helper (gcd)", "Build E2E (gcd)"):
             with self.subTest(name=name):
                 self.assertFalse(toolchain.is_packaged_design_job(name))
 

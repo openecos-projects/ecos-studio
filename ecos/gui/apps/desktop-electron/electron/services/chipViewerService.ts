@@ -2,6 +2,7 @@ import {
   execFile as execFileCallback,
   spawn as spawnProcessCallback,
 } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import {
   closeSync,
   existsSync,
@@ -9,7 +10,7 @@ import {
   type FSWatcher,
   watch as watchFsDirectoryCallback,
 } from 'node:fs'
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 import {
   normalizeLocalPath,
@@ -153,9 +154,12 @@ interface LayoutEditRuntime {
   ): Promise<EccWorkspaceUpdateResult>
 }
 
+type LocalMacroPlacementStatus = 'placed' | 'fixed' | 'unplaced'
+
 interface LocalMacroPlacement {
   orient: string
   placed: boolean
+  placementStatus: LocalMacroPlacementStatus
   xDbu: number
   yDbu: number
 }
@@ -169,7 +173,9 @@ interface LayoutEditContext {
   initialPlacements: Map<string, LocalMacroPlacement>
   placements: Map<string, LocalMacroPlacement>
   projectPath: string
-  shapeVersions: Map<number, number>
+  sourceShapeVersions: Map<number, number>
+  /** Monotonic revision for uncommitted local staging commands in this session. */
+  stagingRevision: number
   step: string
   workspaceHandle: string
   workspaceRevision: number
@@ -214,6 +220,12 @@ interface PackagedBinaryResolution {
 
 export interface ChipViewerServiceOptions {
   appPath: string
+  /**
+   * Gives each edit bridge a process-unique idempotency namespace. ECC keeps
+   * command-id records across Viewer restarts, so numeric process-local ids
+   * alone can collide with a later save.
+   */
+  bridgeIdFactory?: (sequence: number) => string
   cwd: string
   env?: NodeJS.ProcessEnv
   execFile?: ExecFileRunner
@@ -360,6 +372,16 @@ function requireInteger(value: unknown, field: string): number {
   return value
 }
 
+function requireShapeVersion(value: unknown, field: string): number {
+  const version = requireInteger(value, field)
+  if (version < 0 || version > 0xffff_ffff) {
+    throw new Error(
+      `invalid native edit command field: ${field} must be an unsigned 32-bit integer`,
+    )
+  }
+  return version
+}
+
 function parseNativeGeometryEditCommand(raw: string): NativeGeometryEditCommand {
   let parsed: unknown
   try {
@@ -397,7 +419,7 @@ function parseNativeGeometryEditCommand(raw: string): NativeGeometryEditCommand 
   }
   return {
     command_id: requireInteger(parsed.command_id, 'command_id'),
-    expected_version: requireInteger(parsed.expected_version, 'expected_version'),
+    expected_version: requireShapeVersion(parsed.expected_version, 'expected_version'),
     ...(instanceName?.trim() ? { instance_name: instanceName.trim() } : {}),
     ...(orient ? { orient } : {}),
     ...(placementStatus ? { placement_status: placementStatus } : {}),
@@ -467,6 +489,7 @@ function serializeMacroLocationTcl(layoutEdit: LayoutEditContext): string {
       `placeInstance ${name} ${placement.xDbu / dbuPerMicron} ${
         placement.yDbu / dbuPerMicron
       } ${placement.orient}`,
+      `setInstancePlacementStatus -status ${placement.placementStatus} -name ${name}`,
     )
   }
   return `${lines.join('\n')}\n`
@@ -650,6 +673,7 @@ export class ChipViewerService {
   private readonly savingWorkspaceHandles = new Map<string, number>()
   private readonly savingProjectPaths = new Map<string, number>()
   private readonly appPath: string
+  private readonly bridgeIdFactory: (sequence: number) => string
   private readonly cwd: string
   private readonly env: NodeJS.ProcessEnv
   private readonly closeLogFile: CloseLogFile
@@ -680,6 +704,8 @@ export class ChipViewerService {
 
   constructor(options: ChipViewerServiceOptions) {
     this.appPath = options.appPath
+    this.bridgeIdFactory =
+      options.bridgeIdFactory ?? ((sequence) => `bridge-${randomUUID()}-${sequence}`)
     this.cwd = options.cwd
     this.env = options.env ?? process.env
     this.closeLogFile = options.closeLogFile ?? closeSync
@@ -749,6 +775,13 @@ export class ChipViewerService {
           layoutEdit.bridgeId,
         ),
       }
+      // Bridge directories can survive crashes or reuse deterministic ids in
+      // tests, so remove stale commands/results before starting the watcher.
+      await rm(viewerSnapshotInputs.editCommandDirectory, {
+        force: true,
+        recursive: true,
+      })
+      await rm(viewerSnapshotInputs.editResultDirectory, { force: true, recursive: true })
       await this.ensureDirectory(viewerSnapshotInputs.editCommandDirectory)
       await this.ensureDirectory(viewerSnapshotInputs.editResultDirectory)
       editCommandDirectory = viewerSnapshotInputs.editCommandDirectory
@@ -1120,7 +1153,7 @@ export class ChipViewerService {
         throw new Error('ECC layout edit session did not return a Workspace revision')
       }
       return {
-        bridgeId: `bridge-${this.nextEditBridgeId++}`,
+        bridgeId: this.bridgeIdFactory(this.nextEditBridgeId++),
         dirty: editSession.dirty,
         editSessionId: editSession.editSessionId,
         geometryManifestPath: editSession.geometryManifestPath,
@@ -1128,7 +1161,8 @@ export class ChipViewerService {
         initialPlacements: new Map(),
         placements: new Map(),
         projectPath,
-        shapeVersions: new Map(),
+        sourceShapeVersions: new Map(),
+        stagingRevision: 0,
         step,
         workspaceHandle: workspace.workspaceHandle,
         workspaceRevision: workspace.workspaceRevision!,
@@ -1143,7 +1177,7 @@ export class ChipViewerService {
     if (!isMacroPlacementStep(step)) {
       throw new Error('CLI-backed layout editing is available for macro placement only')
     }
-    const bridgeId = `bridge-${this.nextEditBridgeId++}`
+    const bridgeId = this.bridgeIdFactory(this.nextEditBridgeId++)
     return {
       bridgeId,
       dirty: false,
@@ -1153,7 +1187,8 @@ export class ChipViewerService {
       initialPlacements: new Map(),
       placements: new Map(),
       projectPath,
-      shapeVersions: new Map(),
+      sourceShapeVersions: new Map(),
+      stagingRevision: 0,
       step,
       workspaceHandle: workspace.workspaceHandle,
       workspaceRevision: workspace.workspaceRevision!,
@@ -1196,9 +1231,18 @@ export class ChipViewerService {
         snapshotInputs.defPath,
         this.readBinaryFile,
       )
+      const macroLocationPath = join(
+        layoutEdit.projectPath,
+        'config',
+        'macro_location.tcl',
+      )
+      const savedPlacements = this.fileExists(macroLocationPath)
+        ? parseMacroLocationTcl(await this.readTextFile(macroLocationPath))
+        : []
       const manifest = buildMacroStagingManifest({
         defComponents,
         mastersText: await this.readTextFile(mastersPath),
+        savedPlacements,
       })
       const stagingPath = join(snapshotInputs.editCommandDirectory, 'macro-staging.json')
       const temporaryPath = `${stagingPath}.tmp`
@@ -1226,11 +1270,14 @@ export class ChipViewerService {
     const placements = new Map<string, LocalMacroPlacement>()
     for (const macro of manifest.macros) {
       const component = components.get(macro.name)
+      const savedPlacement = macro.savedPlacement
+      const placed = Boolean(component?.placed) || savedPlacement !== undefined
       placements.set(macro.name, {
         orient: macro.orient,
-        placed: Boolean(component?.placed),
-        xDbu: component?.x ?? 0,
-        yDbu: component?.y ?? 0,
+        placed,
+        placementStatus: placed ? 'fixed' : 'unplaced',
+        xDbu: savedPlacement?.xDbu ?? component?.x ?? 0,
+        yDbu: savedPlacement?.yDbu ?? component?.y ?? 0,
       })
     }
     layoutEdit.dbuPerMicron = manifest.dbuPerMicron
@@ -1373,6 +1420,11 @@ export class ChipViewerService {
           },
           workspaceHandle: layoutEdit.workspaceHandle,
         })
+        const newVersion = geometryDeltaShapeVersion(
+          applied.geometryDelta,
+          command.shape_id,
+          command.expected_version,
+        )
         layoutEdit.revision = applied.revision
         layoutEdit.geometryManifestPath = applied.geometryManifestPath
         await this.writeTextFile(
@@ -1383,11 +1435,8 @@ export class ChipViewerService {
               committed_bbox: command.requested_bbox,
               geometry_manifest_path: applied.geometryManifestPath,
               message: geometryDeltaMessage(applied.geometryDelta),
-              new_version: geometryDeltaShapeVersion(
-                applied.geometryDelta,
-                command.shape_id,
-                command.expected_version,
-              ),
+              new_version: newVersion,
+              source_version: newVersion,
               shape_id: command.shape_id,
               status: 'accepted',
             },
@@ -1403,12 +1452,21 @@ export class ChipViewerService {
           `selected instance is not a staged hard macro: ${command.instance_name}`,
         )
       }
-      const knownVersion = layoutEdit.shapeVersions.get(command.shape_id)
-      if (knownVersion !== undefined && knownVersion !== command.expected_version) {
+      const sourceVersion = layoutEdit.sourceShapeVersions.get(command.shape_id)
+      // Local staging does not mutate geometry. Anchor the source version on
+      // the first command and accept repeats against that immutable snapshot;
+      // a different version means the source advanced and requires a fresh
+      // edit session rather than silently rebasing uncommitted placements.
+      if (sourceVersion !== undefined && command.expected_version !== sourceVersion) {
+        const reason =
+          command.expected_version < sourceVersion
+            ? 'stale shape version'
+            : 'shape source version changed while editing'
         throw new Error(
-          `stale shape version: expected ${knownVersion}, received ${command.expected_version}`,
+          `${reason}: expected ${sourceVersion}, received ${command.expected_version}; discard and reopen the edit session`,
         )
       }
+      const acceptedSourceVersion = sourceVersion ?? command.expected_version
       const orient = command.orient?.trim() || current.orient
       if (!R_ORIENTATIONS.has(orient)) {
         throw new Error(`unsupported macro orientation: ${orient}`)
@@ -1417,11 +1475,16 @@ export class ChipViewerService {
       if (!PLACEMENT_STATUSES.has(placementStatus)) {
         throw new Error(`unsupported placement status: ${placementStatus}`)
       }
-      const nextVersion = command.expected_version + 1
-      layoutEdit.shapeVersions.set(command.shape_id, nextVersion)
+      const resolvedPlacementStatus: LocalMacroPlacementStatus =
+        placementStatus === 'preserve'
+          ? current.placementStatus
+          : (placementStatus as LocalMacroPlacementStatus)
+      layoutEdit.sourceShapeVersions.set(command.shape_id, acceptedSourceVersion)
+      layoutEdit.stagingRevision += 1
       layoutEdit.placements.set(command.instance_name, {
         orient,
-        placed: placementStatus !== 'unplaced',
+        placed: resolvedPlacementStatus !== 'unplaced',
+        placementStatus: resolvedPlacementStatus,
         xDbu: command.requested_bbox.lx,
         yDbu: command.requested_bbox.ly,
       })
@@ -1434,7 +1497,9 @@ export class ChipViewerService {
             committed_bbox: command.requested_bbox,
             geometry_manifest_path: layoutEdit.geometryManifestPath,
             message: 'macro placement staged locally',
-            new_version: nextVersion,
+            new_version: acceptedSourceVersion,
+            source_version: acceptedSourceVersion,
+            staging_revision: layoutEdit.stagingRevision,
             shape_id: command.shape_id,
             status: 'accepted',
           },
@@ -1458,6 +1523,7 @@ export class ChipViewerService {
       if (!update) throw new Error('Workspace parameter update is unavailable')
       const updated = await update({
         commandId,
+        commitStepOutput: true,
         expectedWorkspaceRevision: layoutEdit.workspaceRevision,
         parameters: { 'macro.placements': entries },
         stepId: 'macroPlacement',
@@ -1635,6 +1701,8 @@ export class ChipViewerService {
           }
           layoutEdit.workspaceRevision = updated.workspaceRevision
           layoutEdit.initialPlacements = cloneMacroPlacements(layoutEdit.placements)
+          layoutEdit.sourceShapeVersions.clear()
+          layoutEdit.stagingRevision = 0
           layoutEdit.dirty = false
           this.notifyWorkspaceRevisionChanged(layoutEdit)
           message = `macro placements saved (${layoutEdit.placements.size} macros)`
@@ -1667,7 +1735,8 @@ export class ChipViewerService {
           message = 'layout edit discarded'
         } else {
           layoutEdit.placements = cloneMacroPlacements(layoutEdit.initialPlacements)
-          layoutEdit.shapeVersions.clear()
+          layoutEdit.sourceShapeVersions.clear()
+          layoutEdit.stagingRevision = 0
           layoutEdit.dirty = false
           message = 'local macro placement edits discarded'
         }

@@ -12,11 +12,10 @@ import time
 
 ECC_REPO = "openecos-projects/ecc"
 KEPLER_REPO = "openecos-projects/kepler-formal"
-PACKAGED_DESIGN_JOB_PREFIXES = ("E2E Packaged Flow (", "E2E (")
 
 
 def is_packaged_design_job(name):
-    return name.startswith(PACKAGED_DESIGN_JOB_PREFIXES)
+    return bool(re.fullmatch(r"E2E \(.+\)", name))
 
 
 def api(path, *, raw=False):

@@ -602,6 +602,7 @@ export class EccCliRuntimeService {
       request.expectedWorkspaceRevision,
       request.commandId,
       request.stepId,
+      request.commitStepOutput === true,
     )
     return updateResult(session)
   }
@@ -628,6 +629,7 @@ export class EccCliRuntimeService {
         '--command-id',
         request.commandId,
         '--no-wait',
+        '--commit-step-output',
       ],
       { cwd: session.projectRoot, stdin: request.tcl },
     )
@@ -1487,6 +1489,7 @@ export class EccCliRuntimeService {
     expectedRevision: number,
     commandId: string,
     step?: string,
+    commitStepOutput = false,
   ): Promise<void> {
     const args = [
       'param',
@@ -1501,6 +1504,7 @@ export class EccCliRuntimeService {
       commandId,
       '--no-wait',
       ...(step ? ['--step', step] : []),
+      ...(commitStepOutput ? ['--commit-step-output'] : []),
       ...Object.entries(parameters).flatMap(([key, value]) => [
         '--set',
         `${key}=${encodeCliValue(value)}`,
