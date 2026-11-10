@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blockedFlowStep, terminalState } from './operationOutcome'
+import { blockedFlowStep, flowBlockOutcome, terminalState } from './operationOutcome'
 import type { PersistedFlow, PersistedFlowStep } from './persistedState'
 
 function step(
@@ -64,5 +64,24 @@ describe('ECC operation outcome', () => {
       failedItems: ['prerequisite:sta'],
       step: 'Harden',
     })
+  })
+  it('reports the manual macro placement gate blocking an interrupted flow', () => {
+    const flow: PersistedFlow = {
+      steps: [
+        step('macroPlacement', 'Incomplete', {
+          checklistBlocked: true,
+          checklistFailedItems: ['manual.macro.placement.required'],
+        }),
+        step('Harden', 'Unstart'),
+      ],
+    }
+
+    expect(terminalState(flow, false)).toBe('interrupted')
+    expect(flowBlockOutcome(flow, 'flow', 'interrupted')).toEqual({
+      failedItems: ['manual.macro.placement.required'],
+      step: 'macroPlacement',
+    })
+    expect(flowBlockOutcome(flow, 'flow', 'cancelled')).toBeNull()
+    expect(flowBlockOutcome(flow, 'step', 'interrupted')).toBeNull()
   })
 })

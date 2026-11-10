@@ -17,6 +17,7 @@ describe('workspaceReconfigureInitialConfig', () => {
             parameters: {
               'design.frequency_mhz': 250,
               'floorplan.core_margin': [3, 4],
+              'macro.manual_placement': true,
             },
             pdk: {
               familyId: 'ics55',
@@ -80,6 +81,7 @@ describe('workspaceReconfigureInitialConfig', () => {
         top_module: 'gcd_top',
         frequency_max: 250,
         margin: 3,
+        manual_macro_placement: true,
       },
       flow_config: { steps: ['Synthesis', 'STA'] },
       pdk_config: {

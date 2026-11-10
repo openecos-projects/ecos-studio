@@ -38,6 +38,7 @@ import {
   clearFlowExecutionActiveForWorkspace,
   isFlowExecutionActiveForWorkspace,
 } from './flowExecutionState'
+import { clearBackendOptimisticRun } from './backendFlowOptimisticRun'
 import { finishRuntimeStepRender } from './runtimeStepRenderSync'
 import { setDesktopWindowTitle } from './windowTitle'
 import { useAgentShellStore } from '@/stores/agentShellStore'
@@ -1933,6 +1934,10 @@ export function useWorkspace() {
     }
     runtimeEvents.value = []
     backendRuntimeEvents.value = []
+    // The optimistic run cursor points into the event buffer above; without
+    // the buffer it must not resurrect a running step after a reconnect
+    // (for example after an in-place workspace update).
+    clearBackendOptimisticRun()
     handledRefreshRuntimeEvents.clear()
     handledRuntimeProtocolEvents.clear()
   }

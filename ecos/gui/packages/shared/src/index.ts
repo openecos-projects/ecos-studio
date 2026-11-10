@@ -291,6 +291,8 @@ export type {
   EccWorkspaceConfigurationUpdateRequest,
   EccWorkspaceDeriveRequest,
   EccWorkspaceDeriveResult,
+  EccWorkspaceDefViewRequest,
+  EccWorkspaceDefViewResult,
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceExportSignoffResult,
   SignoffAdditionalFile,

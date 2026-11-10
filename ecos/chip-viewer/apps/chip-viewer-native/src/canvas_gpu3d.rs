@@ -270,6 +270,8 @@ pub const FLAG_SELECTED: u32 = 8;
 pub const FLAG_HIGHLIGHTED: u32 = 16;
 pub const FLAG_FLAT: u32 = 32;
 pub const FLAG_OVERVIEW_TILE: u32 = 64;
+pub const FLAG_CLOCK_TREE_PARENT: u32 = 128;
+pub const FLAG_CLOCK_TREE_CHILD: u32 = 256;
 
 pub fn ground_grid_instance(world: chipgeom_format::Rect32) -> GpuShapeInstance3d {
     let diag = die_diagonal(world);
@@ -640,6 +642,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if ((inst.flags & 16u) != 0u) {
         // Highlighted: Amber/Gold accent
         color = mix(color, vec3<f32>(1.00, 0.85, 0.20), 0.55);
+    }
+    if ((inst.flags & 128u) != 0u) {
+        // Clock-tree parent/upstream: Green accent
+        color = mix(color, vec3<f32>(0.29, 0.87, 0.50), 0.55);
+    }
+    if ((inst.flags & 256u) != 0u) {
+        // Clock-tree child/downstream: Orange accent
+        color = mix(color, vec3<f32>(1.00, 0.65, 0.25), 0.55);
     }
 
     color = clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));

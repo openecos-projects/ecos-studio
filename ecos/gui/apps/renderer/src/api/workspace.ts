@@ -95,6 +95,8 @@ export function backendWorkspaceOptions(
     return mapped && mapped.trim() ? mapped : fallback
   }
   const clockTreeSpecKey = parameterDisplayIndex?.clock_tree?.trim() ?? ''
+  const manualMacroPlacementSpecKey =
+    parameterDisplayIndex?.manual_macro_placement?.trim() ?? ''
   const inputs: Array<{ inputId: string; role: string }> = []
   const inputBindings: Record<string, string> = {}
   const addInput = (inputId: string, role: string, path: string) => {
@@ -194,6 +196,7 @@ export function backendWorkspaceOptions(
   ])
   const ctsApplies = parameterApplies(['cts'])
   const placementApplies = parameterApplies(['placement', 'place', 'macroplacement'])
+  const macroPlacementApplies = parameterApplies(['macroplacement'])
   const mpc = config.mpc as ProjectManifestMpc | null | undefined
   const projectContext = config.project_context
 
@@ -342,6 +345,11 @@ export function backendWorkspaceOptions(
         ...(ctsApplies && clockTreeSpecKey
           ? {
               [clockTreeSpecKey]: parameters.clock_tree === true,
+            }
+          : {}),
+        ...(macroPlacementApplies && manualMacroPlacementSpecKey
+          ? {
+              [manualMacroPlacementSpecKey]: parameters.manual_macro_placement === true,
             }
           : {}),
       },

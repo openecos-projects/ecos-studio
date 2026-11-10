@@ -89,6 +89,7 @@ export function workspaceReconfigureInitialConfig(
       max_fanout: number(parameters['cts.max_fanout']),
       target_density: number(parameters['place.target_density']),
       target_overflow: number(parameters['place.target_overflow']),
+      manual_macro_placement: parameters['macro.manual_placement'] === true,
     } as WorkspaceConfig['parameters'],
     origin_def: pathForInputRole('def'),
     origin_verilog: pathForInputRole('netlist'),

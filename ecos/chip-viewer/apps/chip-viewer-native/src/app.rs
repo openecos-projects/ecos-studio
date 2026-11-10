@@ -63,6 +63,8 @@ const EDIT_PICK_TOLERANCE_PX: f32 = 6.0;
 const MAX_PARAMETERIZED_GRID_LINES_PER_GRID: usize = 4096;
 const MAX_JAVASCRIPT_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const SIDEBAR_SECTION_RESERVE_HEIGHT: f32 = 34.0;
+const CLOCK_TREE_NODE_MARKER_RADIUS_PX: f32 = 7.0;
+const CLOCK_TREE_SELECTED_MARKER_RADIUS_PX: f32 = 10.0;
 const MAP_HEATMAP_WIDTH_FRACTION: f32 = 0.46;
 const MAP_HEATMAP_MAX_WIDTH: f32 = 380.0;
 const MAP_HEATMAP_MIN_WIDTH: f32 = 270.0;
@@ -220,6 +222,7 @@ struct LoadedViewer {
     shape_id_text: String,
     last_query_status: Option<String>,
     highlighted: BTreeSet<ShapeId>,
+    clock_tree_overlay: clock_tree::ClockTreeOverlay,
     selected: Option<ShapeId>,
     pending_focus: Option<PendingFocus>,
     macro_interaction: Option<MacroCanvasInteraction>,
@@ -2304,6 +2307,7 @@ impl LoadedViewer {
             shape_id_text: String::new(),
             last_query_status: None,
             highlighted: BTreeSet::new(),
+            clock_tree_overlay: clock_tree::ClockTreeOverlay::default(),
             selected: None,
             pending_focus: None,
             macro_interaction: None,
@@ -3503,6 +3507,7 @@ impl LoadedViewer {
                                         self.focus_highlighted_shapes();
                                     }
                                     if ui.small_button("Clear").clicked() {
+                                        self.clock_tree_overlay.clear();
                                         clear_search_state(
                                             &mut self.search_text,
                                             &mut self.highlighted,
@@ -4599,7 +4604,15 @@ impl LoadedViewer {
                 continue;
             }
             let geometry = self.db.shape_geometry(shape);
-            if self.highlighted.contains(shape_id) {
+            if let Some(role) = self
+                .clock_tree_overlay
+                .highlight()
+                .and_then(|highlight| highlight.role_for(*shape_id))
+            {
+                paint_clock_tree_highlight_overlay(
+                    &painter, geometry, world, canvas, self.zoom, self.pan, role,
+                );
+            } else if self.highlighted.contains(shape_id) {
                 paint_search_highlight_overlay(
                     &painter, geometry, world, canvas, self.zoom, self.pan,
                 );
@@ -4626,6 +4639,17 @@ impl LoadedViewer {
                     label_paint_duration += start.elapsed();
                 }
             }
+        }
+
+        if let Some(highlight) = self.clock_tree_overlay.highlight() {
+            paint_clock_tree_node_markers(
+                &painter,
+                &highlight.markers,
+                world,
+                canvas,
+                self.zoom,
+                self.pan,
+            );
         }
 
         if let Some(draft) = &self.draft {
@@ -5243,6 +5267,16 @@ impl LoadedViewer {
             for id in &self.highlighted {
                 id.hash(&mut hasher);
             }
+            if let Some(highlight) = self.clock_tree_overlay.highlight() {
+                for id in &highlight.parent_shapes {
+                    1u8.hash(&mut hasher);
+                    id.hash(&mut hasher);
+                }
+                for id in &highlight.child_shapes {
+                    2u8.hash(&mut hasher);
+                    id.hash(&mut hasher);
+                }
+            }
             hasher.finish()
         };
 
@@ -5800,6 +5834,7 @@ impl LoadedViewer {
                 {
                     self.selected = None;
                     self.highlighted.clear();
+                    self.clock_tree_overlay.clear();
                     self.selected_drc = None;
                     self.selected_antenna = None;
                     self.selected_lvs_group = None;
@@ -6208,6 +6243,24 @@ impl LoadedViewer {
                 style.rgba = [76, 196, 255, 230];
                 style.fill_alpha = 230;
                 extra_flags |= crate::canvas_gpu3d::FLAG_SELECTED;
+            } else if let Some(role) = self
+                .clock_tree_overlay
+                .highlight()
+                .and_then(|highlight| highlight.role_for(shape_id))
+            {
+                style.rgba = match role {
+                    clock_tree::ClockTreeHighlightRole::Parent => [74, 222, 128, 220],
+                    clock_tree::ClockTreeHighlightRole::Child => [255, 166, 64, 220],
+                };
+                style.fill_alpha = 220;
+                extra_flags |= match role {
+                    clock_tree::ClockTreeHighlightRole::Parent => {
+                        crate::canvas_gpu3d::FLAG_CLOCK_TREE_PARENT
+                    }
+                    clock_tree::ClockTreeHighlightRole::Child => {
+                        crate::canvas_gpu3d::FLAG_CLOCK_TREE_CHILD
+                    }
+                };
             } else if self.highlighted.contains(&shape_id) {
                 style.rgba = [255, 214, 90, 210];
                 style.fill_alpha = 210;
@@ -7882,6 +7935,7 @@ impl LoadedViewer {
     fn refresh_highlight(&mut self) {
         let query = self.search_text.trim();
         self.last_query_status = None;
+        self.clock_tree_overlay.clear();
         self.highlighted = if query.is_empty() {
             BTreeSet::new()
         } else {
@@ -9799,6 +9853,94 @@ fn search_highlight_outer_stroke() -> egui::Stroke {
 
 fn search_highlight_inner_stroke() -> egui::Stroke {
     egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(255, 248, 210))
+}
+
+fn clock_tree_highlight_strokes(
+    role: clock_tree::ClockTreeHighlightRole,
+) -> (egui::Stroke, egui::Stroke) {
+    match role {
+        clock_tree::ClockTreeHighlightRole::Parent => (
+            egui::Stroke::new(4.0_f32, egui::Color32::from_rgb(74, 222, 128)),
+            egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(226, 255, 238)),
+        ),
+        clock_tree::ClockTreeHighlightRole::Child => (
+            egui::Stroke::new(4.0_f32, egui::Color32::from_rgb(255, 166, 64)),
+            egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(255, 244, 220)),
+        ),
+    }
+}
+
+fn clock_tree_node_marker_vertices(
+    center: egui::Pos2,
+    radius: f32,
+    apex_up: bool,
+) -> [egui::Pos2; 3] {
+    if apex_up {
+        [
+            egui::pos2(center.x, center.y - radius),
+            egui::pos2(center.x + radius, center.y + radius),
+            egui::pos2(center.x - radius, center.y + radius),
+        ]
+    } else {
+        [
+            egui::pos2(center.x - radius, center.y - radius),
+            egui::pos2(center.x + radius, center.y - radius),
+            egui::pos2(center.x, center.y + radius),
+        ]
+    }
+}
+
+fn paint_clock_tree_node_markers(
+    painter: &egui::Painter,
+    markers: &[clock_tree::ClockTreeNodeMarker],
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+) {
+    let outline = egui::Color32::from_rgb(8, 12, 18);
+    for marker in markers {
+        let (radius, fill, stroke) = match marker.kind {
+            clock_tree::ClockTreeNodeMarkerKind::Parent => (
+                CLOCK_TREE_NODE_MARKER_RADIUS_PX,
+                egui::Color32::from_rgb(74, 222, 128),
+                egui::Stroke::new(1.25, outline),
+            ),
+            clock_tree::ClockTreeNodeMarkerKind::Child => (
+                CLOCK_TREE_NODE_MARKER_RADIUS_PX,
+                egui::Color32::from_rgb(255, 166, 64),
+                egui::Stroke::new(1.25, outline),
+            ),
+            clock_tree::ClockTreeNodeMarkerKind::Selected => (
+                CLOCK_TREE_SELECTED_MARKER_RADIUS_PX,
+                egui::Color32::WHITE,
+                egui::Stroke::new(2.5, outline),
+            ),
+        };
+        let center = world_to_screen_point(marker.position, world, canvas, zoom, pan);
+        if !canvas.expand(radius + 2.0).contains(center) {
+            continue;
+        }
+        painter.add(egui::Shape::convex_polygon(
+            clock_tree_node_marker_vertices(center, radius, marker.apex_up).to_vec(),
+            fill,
+            stroke,
+        ));
+    }
+}
+
+fn paint_clock_tree_highlight_overlay(
+    painter: &egui::Painter,
+    geometry: ShapeGeometry,
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+    role: clock_tree::ClockTreeHighlightRole,
+) -> bool {
+    let (outer, inner) = clock_tree_highlight_strokes(role);
+    paint_shape_overlay(painter, geometry, world, canvas, zoom, pan, outer)
+        | paint_shape_overlay(painter, geometry, world, canvas, zoom, pan, inner)
 }
 
 fn paint_search_highlight_overlay(
@@ -13293,6 +13435,33 @@ mod tests {
         assert_eq!(inner.color, egui::Color32::from_rgb(255, 248, 210));
         assert_ne!(outer.color, ecos_warning());
         assert_ne!(outer.color, ecos_accent());
+    }
+
+    #[test]
+    fn clock_tree_highlights_use_distinct_parent_and_child_colors() {
+        let (parent_outer, parent_inner) =
+            clock_tree_highlight_strokes(clock_tree::ClockTreeHighlightRole::Parent);
+        let (child_outer, child_inner) =
+            clock_tree_highlight_strokes(clock_tree::ClockTreeHighlightRole::Child);
+
+        assert_ne!(parent_outer.color, child_outer.color);
+        assert_ne!(parent_inner.color, child_inner.color);
+        assert_ne!(parent_outer.color, search_highlight_outer_stroke().color);
+        assert_ne!(child_outer.color, search_highlight_outer_stroke().color);
+    }
+
+    #[test]
+    fn clock_tree_markers_point_toward_parent_and_child_semantics() {
+        let center = egui::pos2(100.0, 100.0);
+        let upward = clock_tree_node_marker_vertices(center, 8.0, true);
+        let downward = clock_tree_node_marker_vertices(center, 8.0, false);
+
+        assert!(upward[0].y < center.y);
+        assert!(upward[1].y > center.y);
+        assert!(upward[2].y > center.y);
+        assert!(downward[0].y < center.y);
+        assert!(downward[1].y < center.y);
+        assert!(downward[2].y > center.y);
     }
 
     #[test]

@@ -55,6 +55,7 @@ export interface WorkspaceParameters {
   utilization?: number
   utilitization?: number
   margin?: number
+  manual_macro_placement?: boolean
 }
 
 export interface WorkspaceConfig {

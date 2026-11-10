@@ -11,13 +11,14 @@ const MIN_ZOOM: f32 = 0.002;
 const MAX_ZOOM: f32 = 4.0;
 const MIN_INTERNAL_LABEL_ZOOM: f32 = 0.55;
 const LEAF_LABEL_ZOOM: f32 = 1.25;
-const LEAF_TRIANGLE_MIN_PIXELS: f32 = 4.4;
+const LEAF_TRIANGLE_MIN_PIXELS: f32 = 3.0;
 const MIN_NODE_HIT_SIZE: f32 = 8.0;
 const MAX_EDGE_INTERACTIONS: usize = 1200;
 const MIN_EDGE_INTERACTION_ZOOM: f32 = 0.4;
 const FANOUT_RAIL_OFFSET: f32 = 14.0;
 const TREE_AXIS_WIDTH: f32 = 72.0;
-const TREE_AXIS_TICK_TARGET_PX: f32 = 30.0;
+const TREE_AXIS_TICK_TARGET_PX: f32 = 24.0;
+const TREE_AXIS_TICK_LIMIT: usize = 256;
 
 fn delay_tick_decimals(step: f64) -> usize {
     if step >= 0.01 {
@@ -42,12 +43,12 @@ fn is_leaf(index: &ClockGraphIndex, row: &TreeRow) -> bool {
 }
 
 fn leaf_visual_size(zoom: f32) -> egui::Vec2 {
-    let detail = smoothstep(0.24, 0.7, zoom);
+    let detail = smoothstep(0.38, 0.95, zoom);
     let normal = egui::vec2(
-        (LEAF_WIDTH * zoom).clamp(4.0, 18.0),
-        (LEAF_HEIGHT * zoom).clamp(4.0, 16.0),
+        (LEAF_WIDTH * zoom).clamp(3.0, 14.0),
+        (LEAF_HEIGHT * zoom).clamp(3.0, 14.0),
     );
-    egui::vec2(2.2, 2.2) * (1.0 - detail) + normal * detail
+    egui::vec2(1.2, 1.2) * (1.0 - detail) + normal * detail
 }
 
 fn leaf_is_dot(size: egui::Vec2) -> bool {
@@ -71,12 +72,70 @@ fn triangle_vertices(point: egui::Pos2, size: egui::Vec2, apex_up: bool) -> [egu
     }
 }
 
-fn fanout_rail_y(start_y: f32, end_y: f32) -> f32 {
-    if end_y <= start_y {
-        (start_y + end_y) * 0.5
-    } else {
-        (start_y + FANOUT_RAIL_OFFSET).min(start_y + (end_y - start_y) * 0.55)
+fn clock_tree_edge_points(start: egui::Pos2, end: egui::Pos2, zoom: f32) -> Vec<egui::Pos2> {
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    if dy <= 1.0 || dx.abs() <= 0.5 {
+        return vec![start, end];
     }
+
+    let stub_y = start.y + (FANOUT_RAIL_OFFSET * zoom).clamp(6.0, 18.0).min(dy * 0.35);
+    let diagonal_dx = (18.0 * zoom).clamp(5.0, 28.0).min(dx.abs() * 0.5);
+    let diagonal_dy = (12.0 * zoom).clamp(4.0, 20.0).min((end.y - stub_y) * 0.55);
+    let horizontal_end_x = end.x - dx.signum() * diagonal_dx;
+    let diagonal_end_y = stub_y + diagonal_dy;
+
+    vec![
+        start,
+        egui::pos2(start.x, stub_y),
+        egui::pos2(horizontal_end_x, stub_y),
+        egui::pos2(end.x, diagonal_end_y),
+        end,
+    ]
+}
+
+fn nice_tick_step(raw_step: f64) -> f64 {
+    if !raw_step.is_finite() || raw_step <= 0.0 {
+        return 1.0;
+    }
+    let magnitude = 10.0_f64.powf(raw_step.log10().floor());
+    let normalized = raw_step / magnitude;
+    let rounded = if normalized <= 1.0 {
+        1.0
+    } else if normalized <= 2.0 {
+        2.0
+    } else if normalized <= 2.5 {
+        2.5
+    } else if normalized <= 5.0 {
+        5.0
+    } else {
+        10.0
+    };
+    rounded * magnitude
+}
+
+fn delay_tick_values(minimum: f64, maximum: f64, height: f32) -> Vec<f64> {
+    if !minimum.is_finite()
+        || !maximum.is_finite()
+        || maximum <= minimum
+        || !height.is_finite()
+        || height <= 0.0
+    {
+        return Vec::new();
+    }
+    let maximum_intervals =
+        ((height / TREE_AXIS_TICK_TARGET_PX).floor() as usize).clamp(1, TREE_AXIS_TICK_LIMIT);
+    let step = nice_tick_step((maximum - minimum) / maximum_intervals as f64);
+    let first = (minimum / step).ceil() * step;
+    let mut values = Vec::with_capacity(maximum_intervals + 2);
+    let mut value = first;
+    while value < maximum - step * 1e-6 && values.len() < TREE_AXIS_TICK_LIMIT {
+        if value >= minimum - step * 1e-6 {
+            values.push(value);
+        }
+        value += step;
+    }
+    values
 }
 
 fn internal_visual_size(zoom: f32) -> egui::Vec2 {
@@ -260,7 +319,7 @@ impl ClockTreePanel {
         );
 
         let axis_x = rect.left() + TREE_AXIS_WIDTH - 10.0;
-        let line_top = top_y.max(rect.top() + 2.0);
+        let line_top = top_y.max(rect.top() + 28.0);
         let line_bottom = bottom_y.min(rect.bottom() - 8.0);
         if line_bottom <= line_top {
             return;
@@ -301,34 +360,67 @@ impl ClockTreePanel {
             );
         };
 
+        let pixel_span = (bottom_y - top_y).max(f32::EPSILON);
+        let axis_range = axis.maximum - axis.minimum;
+        let visible_minimum =
+            axis.minimum + axis_range * f64::from((line_top - top_y) / pixel_span);
+        let visible_maximum =
+            axis.minimum + axis_range * f64::from((line_bottom - top_y) / pixel_span);
+        let maximum_intervals = (((line_bottom - line_top) / TREE_AXIS_TICK_TARGET_PX).floor()
+            as usize)
+            .clamp(1, TREE_AXIS_TICK_LIMIT);
+        let mut ticks = Vec::with_capacity(maximum_intervals + 2);
+        let mut push_tick = |value: f64, y: f32| {
+            if ticks
+                .iter()
+                .all(|(_, existing_y): &(f64, f32)| (existing_y - y).abs() >= 8.0)
+            {
+                ticks.push((value, y));
+            }
+        };
         match axis.kind {
             TreeAxisKind::Level => {
-                let maximum_level = axis.maximum.round().max(0.0) as usize;
-                let maximum_ticks =
-                    (((line_bottom - line_top) / TREE_AXIS_TICK_TARGET_PX).floor() as usize).max(1);
-                let step = (maximum_level as f32 / maximum_ticks as f32)
+                let step = ((visible_maximum - visible_minimum) / maximum_intervals as f64)
                     .ceil()
-                    .max(1.0) as usize;
-                for level in (0..=maximum_level).step_by(step) {
-                    let fraction = level as f32 / maximum_level.max(1) as f32;
-                    paint_tick(top_y + (bottom_y - top_y) * fraction, level.to_string());
+                    .max(1.0);
+                let mut level = (visible_minimum / step).ceil() * step;
+                while level <= visible_maximum + step * 1e-6 {
+                    let fraction = ((level - axis.minimum) / axis_range.max(f64::EPSILON)) as f32;
+                    push_tick(level, top_y + (bottom_y - top_y) * fraction);
+                    level += step;
+                }
+                if top_y >= line_top - 0.5 {
+                    push_tick(axis.minimum, top_y);
+                }
+                if bottom_y <= line_bottom + 0.5 {
+                    push_tick(axis.maximum, bottom_y);
                 }
             }
             TreeAxisKind::DelayNs => {
-                let intervals = ((line_bottom - line_top) / TREE_AXIS_TICK_TARGET_PX)
-                    .round()
-                    .clamp(2.0, 8.0) as usize;
-                let range = axis.maximum - axis.minimum;
-                let decimals = delay_tick_decimals(range / intervals as f64);
-                for interval in 0..=intervals {
-                    let fraction = interval as f32 / intervals as f32;
-                    let delay = axis.minimum + range * f64::from(fraction);
-                    paint_tick(
-                        top_y + (bottom_y - top_y) * fraction,
-                        format!("{delay:.decimals$}"),
-                    );
+                let step =
+                    nice_tick_step((visible_maximum - visible_minimum) / maximum_intervals as f64);
+                for value in
+                    delay_tick_values(visible_minimum, visible_maximum, line_bottom - line_top)
+                {
+                    let fraction = ((value - axis.minimum) / axis_range.max(f64::EPSILON)) as f32;
+                    push_tick(value, top_y + (bottom_y - top_y) * fraction);
                 }
+                if top_y >= line_top - 0.5 {
+                    push_tick(axis.minimum, top_y);
+                }
+                if bottom_y <= line_bottom + 0.5 {
+                    push_tick(axis.maximum, bottom_y);
+                }
+                ticks.sort_by(|left, right| left.1.total_cmp(&right.1));
+                let decimals = delay_tick_decimals(step);
+                for (value, y) in ticks {
+                    paint_tick(y, format!("{value:.decimals$}"));
+                }
+                return;
             }
+        }
+        for (value, y) in ticks {
+            paint_tick(y, format!("{value:.0}"));
         }
     }
 
@@ -559,13 +651,13 @@ impl ClockTreePanel {
                     let parent_size = node_visual_size(index, parent_row, zoom);
                     let start = egui::pos2(parent_point.x, parent_point.y + parent_size.y * 0.5);
                     let end = egui::pos2(point.x, point.y - child_size.y * 0.5);
-                    let rail_y = fanout_rail_y(start.y, end.y);
-                    let points = vec![
-                        start,
-                        egui::pos2(start.x, rail_y),
-                        egui::pos2(end.x, rail_y),
-                        end,
-                    ];
+                    let points = clock_tree_edge_points(start, end, zoom);
+                    let route_anchor = points
+                        .get(points.len().saturating_sub(2))
+                        .zip(points.last())
+                        .map_or(end, |(from, to)| {
+                            egui::pos2((from.x + to.x) * 0.5, (from.y + to.y) * 0.5)
+                        });
                     edge_shapes.push(egui::Shape::line(points, edge_stroke));
                     if interact_with_edges {
                         if let Some(edge_index) = index
@@ -574,11 +666,10 @@ impl ClockTreePanel {
                             .copied()
                         {
                             if let Some(edge) = index.edges.get(edge_index) {
-                                let anchor = egui::pos2(end.x, (rail_y + end.y) * 0.5);
                                 let hit = ui
                                     .interact(
                                         egui::Rect::from_center_size(
-                                            anchor,
+                                            route_anchor,
                                             egui::vec2(18.0, 18.0),
                                         ),
                                         egui::Id::new(("clock_tree_edge", ordinal)),
@@ -656,7 +747,7 @@ impl ClockTreePanel {
                             egui::pos2(point.x, point.y + child_size.y * 0.5 + 2.0),
                             egui::Align2::CENTER_TOP,
                             label,
-                            egui::FontId::proportional((10.0 * zoom).clamp(7.0, 13.0)),
+                            egui::FontId::proportional((8.0 * zoom).clamp(6.0, 8.0)),
                             egui::Color32::from_gray(205),
                         ));
                     }
@@ -833,9 +924,46 @@ mod tests {
     }
 
     #[test]
-    fn fanout_rail_stays_near_the_parent() {
-        assert_eq!(fanout_rail_y(100.0, 400.0), 100.0 + FANOUT_RAIL_OFFSET);
-        assert_eq!(fanout_rail_y(100.0, 108.0), 104.4);
-        assert_eq!(fanout_rail_y(100.0, 90.0), 95.0);
+    fn edge_route_uses_vertical_horizontal_diagonal_and_vertical_segments() {
+        let start = egui::pos2(100.0, 100.0);
+        let end = egui::pos2(180.0, 260.0);
+        let points = clock_tree_edge_points(start, end, 1.0);
+
+        assert_eq!(points.len(), 5);
+        assert_eq!(points[0], start);
+        assert_eq!(points[1].x, start.x);
+        assert!(points[1].y > start.y && points[1].y < end.y);
+        assert_eq!(points[2].y, points[1].y);
+        assert!(points[2].x > start.x && points[2].x < end.x);
+        assert_eq!(points[3].x, end.x);
+        assert!(points[3].y > points[2].y && points[3].y < end.y);
+        assert_eq!(points[4], end);
+    }
+
+    #[test]
+    fn edge_route_stays_vertical_when_nodes_are_aligned() {
+        let start = egui::pos2(100.0, 100.0);
+        let end = egui::pos2(100.0, 260.0);
+
+        assert_eq!(clock_tree_edge_points(start, end, 1.0), vec![start, end]);
+    }
+
+    #[test]
+    fn delay_ticks_get_denser_as_the_visible_range_shrinks() {
+        let overview = delay_tick_values(0.0, 0.60, 180.0);
+        let zoomed = delay_tick_values(0.20, 0.30, 180.0);
+
+        assert!(overview.len() >= 6);
+        assert!(zoomed.len() >= 5);
+        assert!(overview.windows(2).all(|pair| pair[1] > pair[0]));
+        assert!(overview.windows(2).all(|pair| pair[1] - pair[0] >= 0.05));
+        assert!(zoomed.windows(2).all(|pair| pair[1] - pair[0] <= 0.05));
+    }
+
+    #[test]
+    fn delay_ticks_use_nice_steps() {
+        assert_eq!(nice_tick_step(0.083), 0.1);
+        assert_eq!(nice_tick_step(0.021), 0.025);
+        assert_eq!(nice_tick_step(0.007), 0.01);
     }
 }

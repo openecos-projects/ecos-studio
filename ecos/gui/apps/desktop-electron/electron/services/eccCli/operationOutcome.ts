@@ -45,3 +45,12 @@ export function blockedFlowStep(flow: PersistedFlow): BlockedFlowStep | null {
   }
   return null
 }
+
+export function flowBlockOutcome(
+  flow: PersistedFlow,
+  kind: string | undefined,
+  terminal: EccRuntimeOperation['state'],
+): BlockedFlowStep | null {
+  if (kind !== 'flow' || terminal === 'cancelled') return null
+  return blockedFlowStep(flow)
+}

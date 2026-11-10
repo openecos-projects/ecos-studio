@@ -45,6 +45,14 @@ export interface E2EBridge {
     get(key: string): Promise<unknown>
     set(key: string, value: unknown): Promise<void>
   }
+  runtime: {
+    workspace: {
+      create(request: {
+        designTool: 'frontend'
+        payload: Record<string, unknown> & { directory: string }
+      }): Promise<{ directory: string; workspaceHandle: string }>
+    }
+  }
   resources: Pick<DesktopApi['resources'], 'list' | 'install'>
   workspace: {
     registerProjectRoot(path: string): Promise<string>
@@ -56,6 +64,7 @@ export interface E2EBridge {
   ecc: {
     runtime: {
       operationProjection(): Promise<EccBackgroundOperationProjection>
+      snapshot(request: { workspaceHandle: string }): Promise<unknown>
       waitForOperation(request: {
         workspaceHandle: string
         operationId: string

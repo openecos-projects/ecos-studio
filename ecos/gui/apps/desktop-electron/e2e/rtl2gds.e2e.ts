@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { launchE2EApp, repoRoot, resolveOutDir, type E2EApp } from './support/launch'
 import { prepareDesign, type E2EDesign } from './support/design'
@@ -17,6 +17,7 @@ import {
   readOperationLog,
   readOverviewStepStates,
   registerWorkspaceRoot,
+  runWorkspaceStep,
   waitFlowTerminal,
   waitToolchainReady,
   type WorkspaceJourney,
@@ -25,6 +26,22 @@ import {
 const ADVISORY_STEPS = new Set(['antennaCheck', 'emir'])
 const FLOW_TIMEOUT_MS = 75 * 60_000
 const PDK_ROOT = process.env.ECOS_E2E_PDK_ROOT ?? join(repoRoot, 'pdk/icsprout55-pdk')
+
+async function findFirstDef(root: string): Promise<string> {
+  const pending = [root]
+  while (pending.length > 0) {
+    const directory = pending.pop()!
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) {
+        pending.push(path)
+      } else if (/\.def(?:\.gz)?$/i.test(entry.name)) {
+        return path
+      }
+    }
+  }
+  throw new Error(`No DEF output found under ${root}`)
+}
 
 async function expectedEccVersion(): Promise<string> {
   const pyproject = await readFile(join(repoRoot, 'ecc/pyproject.toml'), 'utf8')
@@ -132,6 +149,64 @@ describe('product e2e: backend rtl2gds journey', () => {
     }
     await shot('workspace-created', '#/projects')
   }, 180_000)
+
+  it(
+    'generates a real DEF View snapshot and rejects concurrent requests in the same Workspace',
+    async () => {
+      const page = launched!.page
+      for (const step of ['Synthesis', 'preFloorplan']) {
+        const terminal = await runWorkspaceStep(page, workspace!, step, 20 * 60_000)
+        expect(terminal.state, `${step} terminal state`).toBe('succeeded')
+      }
+      const defPath = await findFirstDef(workspace!.workspaceDir)
+      expect(defPath).toMatch(/preFloorplan.*\.def(?:\.gz)?$/i)
+      const results = await page.evaluate(
+        async ({ workspaceHandle, defPath }) => {
+          const request = () =>
+            window.ecosDesktop.productCommands.execute({
+              command: 'workspace.defView',
+              payload: { workspaceHandle, defPath },
+            })
+          const settled = await Promise.allSettled([request(), request()])
+          return settled.map((result) => {
+            if (result.status === 'fulfilled') {
+              return { status: result.status, value: result.value }
+            }
+            const error = result.reason as Error & { code?: string }
+            return {
+              status: result.status,
+              code: error.code ?? null,
+              message: error.message ?? String(result.reason),
+            }
+          })
+        },
+        { workspaceHandle: workspace!.workspaceHandle, defPath },
+      )
+      const fulfilled = results.filter((result) => result.status === 'fulfilled')
+      const rejected = results.filter((result) => result.status === 'rejected')
+      expect(fulfilled).toHaveLength(1)
+      expect(rejected).toHaveLength(1)
+      expect((rejected[0] as { message: string }).message).toContain(
+        'DEF View is already running for this Workspace.',
+      )
+      const manifestPath = (fulfilled[0]!.value as { geometryManifestPath: string })
+        .geometryManifestPath
+      expect(existsSync(manifestPath)).toBe(true)
+
+      const retry = await page.evaluate(
+        ({ workspaceHandle, defPath }) =>
+          window.ecosDesktop.productCommands.execute({
+            command: 'workspace.defView',
+            payload: { workspaceHandle, defPath },
+          }),
+        { workspaceHandle: workspace!.workspaceHandle, defPath },
+      )
+      expect(retry).toMatchObject({ geometryManifestPath: manifestPath })
+      expect(existsSync(manifestPath)).toBe(true)
+      await shot('def-view-real-snapshot', '#/workspace/home')
+    },
+    45 * 60_000,
+  )
 
   it(
     'keeps Workspace Flow cards and the run control synchronized during the rtl2gds flow',
