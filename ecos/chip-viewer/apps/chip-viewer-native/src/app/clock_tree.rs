@@ -90,6 +90,18 @@ impl ClockTreeOverlay {
     }
 }
 
+fn clear_stale_clock_tree_highlights(
+    overlay: &mut ClockTreeOverlay,
+    highlighted: &mut BTreeSet<ShapeId>,
+    current: ClockTreeSelection,
+) -> bool {
+    let Some(stale_shapes) = overlay.clear_if_stale(current) else {
+        return false;
+    };
+    highlighted.retain(|shape_id| !stale_shapes.contains(shape_id));
+    true
+}
+
 fn marker_for_node(
     node: &ClockNode,
     kind: ClockTreeNodeMarkerKind,
@@ -134,10 +146,11 @@ impl LoadedViewer {
             panel.sync_layout_selection(self.selected, &names);
             (action, panel.selection_key())
         };
-        if let Some(stale_shapes) = self.clock_tree_overlay.clear_if_stale(selection) {
-            self.highlighted
-                .retain(|shape_id| !stale_shapes.contains(shape_id));
-        }
+        clear_stale_clock_tree_highlights(
+            &mut self.clock_tree_overlay,
+            &mut self.highlighted,
+            selection,
+        );
         if let Some(target) = action {
             self.focus_clock_target(target, selection);
         }
@@ -382,6 +395,30 @@ mod tests {
         overlay.set(clock_zero, None, &net_shapes);
 
         assert_eq!(overlay.clear_if_stale(clock_one), Some(net_shapes));
+        assert!(overlay.highlight().is_none());
+    }
+
+    #[test]
+    fn stale_clock_tree_selection_removes_only_owned_generic_highlights() {
+        let clock_zero = crate::clock_tree::ClockTreeSelection {
+            clock: 0,
+            node: Some(3),
+        };
+        let clock_one = crate::clock_tree::ClockTreeSelection {
+            clock: 1,
+            node: Some(4),
+        };
+        let owned = BTreeSet::from([10, 20]);
+        let mut overlay = ClockTreeOverlay::default();
+        overlay.set(clock_zero, None, &owned);
+        let mut highlighted = BTreeSet::from([10, 20, 99]);
+
+        assert!(clear_stale_clock_tree_highlights(
+            &mut overlay,
+            &mut highlighted,
+            clock_one
+        ));
+        assert_eq!(highlighted, BTreeSet::from([99]));
         assert!(overlay.highlight().is_none());
     }
 }

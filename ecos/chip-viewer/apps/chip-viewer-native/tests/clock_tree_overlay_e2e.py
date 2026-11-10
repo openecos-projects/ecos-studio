@@ -22,6 +22,7 @@ WIN_WIDTH = 1400
 WIN_HEIGHT = 900
 CLOCK_TREE_GREEN = (74, 222, 128)
 CLOCK_TREE_ORANGE = (255, 166, 64)
+CLOCK_TREE_GENERIC_HIGHLIGHT = (255, 64, 192)
 CLOCK_TREE_OVERLAY_LIMIT = 100
 CLOCK_TREE_OVERLAY_MINIMUM = 300
 
@@ -343,10 +344,16 @@ def run(args: argparse.Namespace) -> None:
         screenshot(window.id, before)
         before_green = clock_tree_color_pixels(before, CLOCK_TREE_GREEN)
         before_orange = clock_tree_color_pixels(before, CLOCK_TREE_ORANGE)
-        if before_green > CLOCK_TREE_OVERLAY_LIMIT or before_orange > CLOCK_TREE_OVERLAY_LIMIT:
+        before_generic = clock_tree_color_pixels(before, CLOCK_TREE_GENERIC_HIGHLIGHT)
+        if (
+            before_green > CLOCK_TREE_OVERLAY_LIMIT
+            or before_orange > CLOCK_TREE_OVERLAY_LIMIT
+            or before_generic > CLOCK_TREE_OVERLAY_LIMIT
+        ):
             raise AssertionError(
                 "unexpected clock-tree overlay before selection: "
-                f"{before_green} green, {before_orange} orange pixels"
+                f"{before_green} green, {before_orange} orange, "
+                f"{before_generic} generic-highlight pixels"
             )
 
         click(x11, xtst, display, origin_x + 76, origin_y + 259)
@@ -377,20 +384,31 @@ def run(args: argparse.Namespace) -> None:
 
         # Search refresh owns the generic highlight set as well as the role
         # overlay. It must clear both rather than leaving a fallback highlight.
-        click(x11, xtst, display, origin_x + 1355, origin_y + 870)
+        click(x11, xtst, display, origin_x + 1355, origin_y + 882)
 
         refreshed = out_dir / "clock-tree-refreshed.xwd"
         refreshed_green = -1
+        refreshed_generic = -1
         deadline = time.monotonic() + 15.0
         while time.monotonic() < deadline:
             screenshot(window.id, refreshed)
             refreshed_green = clock_tree_color_pixels(refreshed, CLOCK_TREE_GREEN)
-            if refreshed_green <= CLOCK_TREE_OVERLAY_LIMIT:
+            refreshed_generic = clock_tree_color_pixels(
+                refreshed, CLOCK_TREE_GENERIC_HIGHLIGHT
+            )
+            if (
+                refreshed_green <= CLOCK_TREE_OVERLAY_LIMIT
+                and refreshed_generic <= CLOCK_TREE_OVERLAY_LIMIT
+            ):
                 break
             time.sleep(0.3)
-        if refreshed_green > CLOCK_TREE_OVERLAY_LIMIT:
+        if (
+            refreshed_green > CLOCK_TREE_OVERLAY_LIMIT
+            or refreshed_generic > CLOCK_TREE_OVERLAY_LIMIT
+        ):
             raise AssertionError(
-                f"clock-tree overlay was not cleared by search refresh: {refreshed_green} green pixels"
+                "clock-tree visuals were not cleared by search refresh: "
+                f"{refreshed_green} green, {refreshed_generic} generic-highlight pixels"
             )
 
         click(x11, xtst, display, origin_x + 670, origin_y + 589)
@@ -416,22 +434,34 @@ def run(args: argparse.Namespace) -> None:
 
         escaped = out_dir / "clock-tree-escaped.xwd"
         escaped_green = -1
+        escaped_generic = -1
         deadline = time.monotonic() + 15.0
         while time.monotonic() < deadline:
             screenshot(window.id, escaped)
             escaped_green = clock_tree_color_pixels(escaped, CLOCK_TREE_GREEN)
-            if escaped_green <= CLOCK_TREE_OVERLAY_LIMIT:
+            escaped_generic = clock_tree_color_pixels(
+                escaped, CLOCK_TREE_GENERIC_HIGHLIGHT
+            )
+            if (
+                escaped_green <= CLOCK_TREE_OVERLAY_LIMIT
+                and escaped_generic <= CLOCK_TREE_OVERLAY_LIMIT
+            ):
                 break
             time.sleep(0.3)
-        if escaped_green > CLOCK_TREE_OVERLAY_LIMIT:
+        if (
+            escaped_green > CLOCK_TREE_OVERLAY_LIMIT
+            or escaped_generic > CLOCK_TREE_OVERLAY_LIMIT
+        ):
             raise AssertionError(
-                f"clock-tree overlay was not cleared by Escape: {escaped_green} green pixels"
+                "clock-tree visuals were not cleared by Escape: "
+                f"{escaped_green} green, {escaped_generic} generic-highlight pixels"
             )
 
         print(
             "clock-tree overlay E2E passed: "
             f"baseline={before_green}, highlighted={overlay_green}, "
-            f"refreshed={refreshed_green}, escaped={escaped_green}, artifacts={out_dir}"
+            f"refreshed={refreshed_green}/{refreshed_generic}, "
+            f"escaped={escaped_green}/{escaped_generic}, artifacts={out_dir}"
         )
     finally:
         if process.poll() is None:
