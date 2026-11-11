@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import type { ResourceItem } from '@/api/plugin'
 import PluginToolsView from './PluginToolsView.vue'
@@ -7,9 +7,13 @@ import PluginToolsView from './PluginToolsView.vue'
 const viewMocks = vi.hoisted(() => ({
   push: vi.fn(),
   importPdk: vi.fn(async () => ({ id: 'pdk-installation:ics55' })),
+  settingsGet: vi.fn(async (): Promise<unknown> => null),
+  settingsSet: vi.fn(async () => undefined),
+  getOptionalDesktopApi: vi.fn((): unknown => null),
   getDesktopApi: vi.fn(() => ({
     dialog: { pickDirectory: vi.fn() },
     system: { openExternal: vi.fn() },
+    settings: { get: viewMocks.settingsGet, set: viewMocks.settingsSet },
   })),
   store: {
     resources: [] as ResourceItem[],
@@ -37,6 +41,7 @@ vi.mock('@/composables/usePdkManager', () => ({
 }))
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: viewMocks.getDesktopApi,
+  getOptionalDesktopApi: viewMocks.getOptionalDesktopApi,
 }))
 vi.mock('@/api/cliInstaller', () => ({
   fetchCliInstallerStatus: vi.fn(async () => null),
@@ -139,6 +144,219 @@ describe('PluginToolsView PDK behavior', () => {
     await wrapper.get('button.danger').trigger('click')
 
     expect(viewMocks.store.installResource).toHaveBeenCalledWith('pdk:ics55')
+    wrapper.unmount()
+  })
+})
+
+describe('PluginToolsView download source', () => {
+  it('restores the persisted download source on mount', async () => {
+    viewMocks.store.resources = []
+    viewMocks.settingsGet.mockResolvedValueOnce('cnb')
+    viewMocks.getOptionalDesktopApi.mockReturnValueOnce({
+      settings: { get: viewMocks.settingsGet, set: viewMocks.settingsSet },
+    })
+    const wrapper = mount(PluginToolsView)
+    await flushPromises()
+
+    expect(viewMocks.settingsGet).toHaveBeenCalledWith('download_source')
+    const buttons = wrapper.findAll('.download-source button')
+    expect(buttons.map((button) => button.text())).toEqual([
+      'Auto',
+      'GitHub',
+      'CNB Mirror',
+    ])
+    expect(buttons[2].classes()).toContain('active')
+    wrapper.unmount()
+  })
+
+  it('persists the selection when the user switches the download source', async () => {
+    viewMocks.store.resources = []
+    viewMocks.settingsSet.mockClear()
+    const wrapper = mount(PluginToolsView)
+    await flushPromises()
+
+    const buttons = wrapper.findAll('.download-source button')
+    expect(buttons[0].classes()).toContain('active')
+    await buttons[2].trigger('click')
+
+    expect(viewMocks.settingsSet).toHaveBeenCalledWith('download_source', 'cnb')
+    expect(buttons[2].classes()).toContain('active')
+    wrapper.unmount()
+  })
+
+  it('reverts the selection when persisting the download source fails', async () => {
+    viewMocks.store.resources = []
+    viewMocks.settingsSet.mockRejectedValueOnce(new Error('store unavailable'))
+    const wrapper = mount(PluginToolsView)
+    await flushPromises()
+
+    const buttons = wrapper.findAll('.download-source button')
+    await buttons[2].trigger('click')
+    await flushPromises()
+
+    // The switch reflects the setting that actually took effect (auto).
+    expect(buttons[0].classes()).toContain('active')
+    expect(buttons[2].classes()).not.toContain('active')
+    wrapper.unmount()
+  })
+
+  it('keeps a user selection made while the persisted value is still loading', async () => {
+    viewMocks.store.resources = []
+    let resolveGet: (value: unknown) => void = () => undefined
+    viewMocks.settingsGet.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveGet = resolve
+        }),
+    )
+    viewMocks.getOptionalDesktopApi.mockReturnValueOnce({
+      settings: { get: viewMocks.settingsGet, set: viewMocks.settingsSet },
+    })
+    const wrapper = mount(PluginToolsView)
+    const buttons = wrapper.findAll('.download-source button')
+
+    // The user switches to CNB before the persisted value arrives.
+    await buttons[2].trigger('click')
+    resolveGet('github')
+    await flushPromises()
+
+    expect(buttons[2].classes()).toContain('active')
+    wrapper.unmount()
+  })
+
+  it('does not roll back a newer selection when an older persist fails', async () => {
+    viewMocks.store.resources = []
+    let rejectFirst: (error: unknown) => void = () => undefined
+    viewMocks.settingsSet
+      .mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            rejectFirst = reject
+          }),
+      )
+      .mockResolvedValueOnce(undefined)
+    const wrapper = mount(PluginToolsView)
+    await flushPromises()
+    const buttons = wrapper.findAll('.download-source button')
+
+    await buttons[2].trigger('click') // CNB, still pending
+    await buttons[1].trigger('click') // GitHub, persists successfully
+    rejectFirst(new Error('offline')) // the older CNB write fails last
+    await flushPromises()
+
+    expect(buttons[1].classes()).toContain('active')
+    expect(buttons[2].classes()).not.toContain('active')
+    wrapper.unmount()
+  })
+
+  it('follows a download source committed from another window', async () => {
+    viewMocks.store.resources = []
+    let sourceListener: ((source: string) => void) | undefined
+    viewMocks.getOptionalDesktopApi.mockReturnValueOnce({
+      settings: {
+        get: viewMocks.settingsGet,
+        set: viewMocks.settingsSet,
+        onDownloadSourceChanged: (listener: (source: string) => void) => {
+          sourceListener = listener
+          return () => undefined
+        },
+      },
+    })
+    const wrapper = mount(PluginToolsView)
+    await flushPromises()
+    const buttons = wrapper.findAll('.download-source button')
+
+    sourceListener?.('cnb')
+    await flushPromises()
+
+    expect(buttons[2].classes()).toContain('active')
+    wrapper.unmount()
+  })
+
+  it('keeps following broadcast changes after a local selection settles', async () => {
+    viewMocks.store.resources = []
+    let sourceListener: ((source: string) => void) | undefined
+    viewMocks.getOptionalDesktopApi.mockReturnValueOnce({
+      settings: {
+        get: viewMocks.settingsGet,
+        set: viewMocks.settingsSet,
+        onDownloadSourceChanged: (listener: (source: string) => void) => {
+          sourceListener = listener
+          return () => undefined
+        },
+      },
+    })
+    const wrapper = mount(PluginToolsView)
+    await flushPromises()
+    const buttons = wrapper.findAll('.download-source button')
+
+    // The local selection settles, then another window commits a change.
+    await buttons[2].trigger('click')
+    await flushPromises()
+    expect(buttons[2].classes()).toContain('active')
+    sourceListener?.('github')
+    await flushPromises()
+
+    expect(buttons[1].classes()).toContain('active')
+    expect(buttons[2].classes()).not.toContain('active')
+    wrapper.unmount()
+  })
+
+  it('does not let a late restore overwrite a broadcast value', async () => {
+    viewMocks.store.resources = []
+    let sourceListener: ((source: string) => void) | undefined
+    let resolveGet: (value: unknown) => void = () => undefined
+    viewMocks.settingsGet.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveGet = resolve
+        }),
+    )
+    viewMocks.getOptionalDesktopApi.mockReturnValueOnce({
+      settings: {
+        get: viewMocks.settingsGet,
+        set: viewMocks.settingsSet,
+        onDownloadSourceChanged: (listener: (source: string) => void) => {
+          sourceListener = listener
+          return () => undefined
+        },
+      },
+    })
+    const wrapper = mount(PluginToolsView)
+    const buttons = wrapper.findAll('.download-source button')
+
+    // Another window commits cnb while this window's restore read is pending;
+    // the read then resolves with the stale pre-commit value.
+    sourceListener?.('cnb')
+    resolveGet('github')
+    await flushPromises()
+
+    expect(buttons[2].classes()).toContain('active')
+    wrapper.unmount()
+  })
+
+  it('follows the value committed last when another window wins the write race', async () => {
+    viewMocks.store.resources = []
+    let resolveSet: () => void = () => undefined
+    viewMocks.settingsSet.mockImplementationOnce(() =>
+      new Promise<void>((resolve) => {
+        resolveSet = resolve
+      }).then(() => undefined),
+    )
+    // The post-commit re-read sees the newer value another window wrote
+    // while our write was in flight.
+    viewMocks.settingsGet.mockResolvedValueOnce('github')
+    const wrapper = mount(PluginToolsView)
+    await flushPromises()
+    const buttons = wrapper.findAll('.download-source button')
+
+    await buttons[2].trigger('click') // we pick cnb; the write stays pending
+    resolveSet()
+    await flushPromises()
+
+    // The store's last committed value wins over our own request.
+    expect(buttons[1].classes()).toContain('active')
+    expect(buttons[2].classes()).not.toContain('active')
     wrapper.unmount()
   })
 })

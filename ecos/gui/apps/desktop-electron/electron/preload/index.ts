@@ -17,6 +17,7 @@ import type {
   ResourceInstallRequest,
   ResourceUpdatesDetectedEvent,
   DesktopSettingsValue,
+  DesktopDownloadSource,
   DesktopShellDataEvent,
   DesktopShellExitEvent,
   DesktopShellSessionOptions,
@@ -158,6 +159,13 @@ const desktopApi: DesktopApi = {
       invokeDesktop<T | null>(desktopApiIpcChannels.settingsGet, key),
     set: (key, value) => invokeDesktop(desktopApiIpcChannels.settingsSet, key, value),
     delete: (key) => invokeDesktop(desktopApiIpcChannels.settingsDelete, key),
+    onDownloadSourceChanged: (listener) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.settingsDownloadSourceChanged,
+        (_event, payload: unknown) => {
+          listener(payload as DesktopDownloadSource)
+        },
+      ),
   },
   projectManifest: {
     mutate: (request: ProjectManifestMutationRequest) =>
