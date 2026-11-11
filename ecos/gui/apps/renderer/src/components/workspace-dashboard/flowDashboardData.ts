@@ -2,6 +2,7 @@ import type { ChecklistFinding, FlowStepSummary } from '@ecos-studio/shared'
 import { getStepMetadata, sameFlowStepName } from '@/api/type'
 import type { HomeLayoutThumbnail } from '@/composables/useHomeSnapshots'
 import { checklistStatusSummary } from '@/components/home/dashboardData'
+import { macroPlacementSourceThumbnail } from './layoutThumbnail'
 import {
   flowNodeStatus,
   formatRuntime,
@@ -15,6 +16,7 @@ export interface DashboardFlowStep extends FlowStatusNode {
   checklist: ChecklistFinding[]
   checkState: StepCheckState
   thumbnail: HomeLayoutThumbnail | null
+  macroPlacementSource: HomeLayoutThumbnail | null
 }
 
 export function stepCheckState(findings: ChecklistFinding[]): StepCheckState {
@@ -62,6 +64,7 @@ export function dashboardFlowSteps(
         thumbnail:
           thumbnails.find((thumbnail) => sameFlowStepName(thumbnail.step, step.stepId)) ??
           null,
+        macroPlacementSource: macroPlacementSourceThumbnail(step.stepId, thumbnails),
       }
     })
 }
