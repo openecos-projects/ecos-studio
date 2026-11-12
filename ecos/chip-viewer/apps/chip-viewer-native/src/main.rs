@@ -382,6 +382,7 @@ pub fn create_native_options(
     render_mode: RenderMode,
     wgpu_backends: wgpu::Backends,
 ) -> eframe::NativeOptions {
+    let perf_fullscreen = env_flag_requested(std::env::var("ECOS_PERF_FULLSCREEN").ok().as_deref());
     match render_mode {
         RenderMode::Gpu => {
             let adapter_selector: egui_wgpu::NativeAdapterSelectorMethod = std::sync::Arc::new(
@@ -395,6 +396,7 @@ pub fn create_native_options(
                 viewport: eframe::egui::ViewportBuilder::default()
                     .with_inner_size([1280.0, 860.0])
                     .with_min_inner_size([960.0, 640.0])
+                    .with_fullscreen(perf_fullscreen)
                     .with_active(true),
                 centered: true,
                 wgpu_options: egui_wgpu::WgpuConfiguration {
@@ -432,10 +434,18 @@ pub fn create_native_options(
             viewport: eframe::egui::ViewportBuilder::default()
                 .with_inner_size(eframe::egui::vec2(1280.0, 860.0))
                 .with_min_inner_size(eframe::egui::vec2(1000.0, 680.0))
+                .with_fullscreen(perf_fullscreen)
                 .with_resizable(true),
             ..Default::default()
         },
     }
+}
+
+fn env_flag_requested(value: Option<&str>) -> bool {
+    matches!(
+        value.map(str::trim).map(str::to_ascii_lowercase).as_deref(),
+        Some("1" | "true" | "yes" | "on")
+    )
 }
 
 fn main() -> Result<()> {
@@ -448,6 +458,11 @@ fn main() -> Result<()> {
         .ok()
         .map(|v| canvas_gpu::env_flag_requested(Some(&v)))
         .unwrap_or(false);
+    let allow_software_gpu = env_flag_requested(
+        std::env::var("ECOS_PERF_ALLOW_SOFTWARE_GPU")
+            .ok()
+            .as_deref(),
+    );
 
     let env_mode = std::env::var("ECOS_RENDER_MODE").ok().and_then(|v| {
         match v.to_ascii_lowercase().as_str() {
@@ -518,7 +533,7 @@ fn main() -> Result<()> {
                         let limits = rs.device.limits();
                         let info = rs.adapter.get_info();
                         limits.max_storage_buffers_per_shader_stage >= 1
-                            && is_hardware_adapter(&info)
+                            && (is_hardware_adapter(&info) || allow_software_gpu)
                     });
                     if has_wgpu {
                         RenderMode::Gpu

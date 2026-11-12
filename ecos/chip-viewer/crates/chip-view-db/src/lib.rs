@@ -475,19 +475,34 @@ impl LayerShapeIndex {
         bbox: Rect32,
     ) -> Vec<ShapeId> {
         let viewport_envelope = rect_envelope(bbox);
-        let layers_in_view: std::collections::HashSet<u16> = self
+        let layers_in_view: HashMap<_, _> = self
             .layer_bboxes
             .locate_in_envelope_intersecting(viewport_envelope)
-            .map(|entry| entry.layer_id)
+            .map(|entry| (entry.layer_id, entry.envelope))
             .collect();
 
         let mut hits = Vec::new();
         for layer_id in layer_ids {
             // Skip layers whose entire extent lies outside the viewport.
-            if !layers_in_view.contains(layer_id) {
+            let Some(envelope) = layers_in_view.get(layer_id) else {
                 continue;
-            }
-            let mut layer_hits = self.query_layer_intersect(shapes, *layer_id, bbox);
+            };
+            let mut layer_hits: Vec<_> = if bbox.lx <= bbox.hx
+                && bbox.ly <= bbox.hy
+                && bbox.lx <= envelope.lower()[0]
+                && bbox.ly <= envelope.lower()[1]
+                && bbox.hx >= envelope.upper()[0]
+                && bbox.hy >= envelope.upper()[1]
+            {
+                self.by_layer
+                    .get(layer_id)
+                    .into_iter()
+                    .flatten()
+                    .map(|index| shapes[*index].id)
+                    .collect()
+            } else {
+                self.query_layer_intersect(shapes, *layer_id, bbox)
+            };
             layer_hits.sort_unstable();
             hits.extend(layer_hits);
         }
@@ -2250,6 +2265,10 @@ impl ChipViewDb {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "layer_query_tests.rs"]
+mod layer_query_tests;
 
 #[cfg(test)]
 mod tests {

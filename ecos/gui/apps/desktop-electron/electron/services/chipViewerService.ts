@@ -262,6 +262,7 @@ export interface ChipViewerServiceOptions {
 }
 
 interface SnapshotInputs {
+  antennaDataPath?: string
   dbPath: string
   defPath: string
   drcStatisPath?: string
@@ -798,6 +799,9 @@ export class ChipViewerService {
     if (snapshotInputs.drcStatisPath) {
       viewerArgs.push('--drc-statis', snapshotInputs.drcStatisPath)
     }
+    if (snapshotInputs.antennaDataPath) {
+      viewerArgs.push('--antenna-data', snapshotInputs.antennaDataPath)
+    }
     if (snapshotInputs.mapRootPath) {
       viewerArgs.push('--map-root', snapshotInputs.mapRootPath)
     }
@@ -957,17 +961,25 @@ export class ChipViewerService {
 
     const outputDirectory = dirname(defPath)
     const workspaceStepDirectory = dirname(outputDirectory)
+    const workspaceDirectory = dirname(workspaceStepDirectory)
     const geometryDir = join(outputDirectory, 'geometry')
     // Geometry is atomically replaced by ECC flow step runs. Keep the live
     // command/result transport outside that published artifact tree.
     const editDirectory = join(workspaceStepDirectory, '.chip-viewer', 'layout-edit')
     const drcStatisPath = join(workspaceStepDirectory, 'analysis', 'drc_statis.csv')
+    const antennaDataPath = join(
+      workspaceDirectory,
+      'antennaCheck_ecc',
+      'feature',
+      'antennaCheck.step.json',
+    )
     const mapRootPath = join(workspaceStepDirectory, 'feature')
     const isDrcStep = isDrcWorkspaceStep(step, stepLabel, workspaceStepDirectory)
     const lvsDataPath = join(workspaceStepDirectory, 'feature', 'lvs.step.json')
     const isLvsStep = isLvsWorkspaceStep(step, stepLabel, workspaceStepDirectory)
 
     return {
+      antennaDataPath: this.fileExists(antennaDataPath) ? antennaDataPath : undefined,
       dbPath,
       defPath,
       drcStatisPath:

@@ -33,6 +33,12 @@ const DRC_DATA_PATH = join(STEP_DIRECTORY, 'feature', 'drc.step.json')
 const DRC_STATIS_PATH = join(STEP_DIRECTORY, 'analysis', 'drc_statis.csv')
 const LVS_DATA_PATH = join(STEP_DIRECTORY, 'feature', 'lvs.step.json')
 const MAP_ROOT_PATH = join(STEP_DIRECTORY, 'feature')
+const ANTENNA_DATA_PATH = join(
+  PROJECT_ROOT,
+  'antennaCheck_ecc',
+  'feature',
+  'antennaCheck.step.json',
+)
 const EDIT_ROOT_DIR = join(STEP_DIRECTORY, '.chip-viewer', 'layout-edit')
 const EDIT_COMMAND_DIR = join(EDIT_ROOT_DIR, 'commands')
 const EDIT_RESULT_DIR = join(EDIT_ROOT_DIR, 'results')
@@ -541,6 +547,39 @@ describe('ChipViewerService', () => {
         'view',
         '--drc-statis',
         DRC_STATIS_PATH,
+      ],
+      expect.objectContaining({
+        detached: true,
+        stdio: ['ignore', expect.any(Number), expect.any(Number)],
+      }),
+    )
+  })
+
+  it('passes the workspace Antenna report to the native viewer', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { service, spawnProcess } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+        ANTENNA_DATA_PATH,
+      ],
+    })
+
+    await service.open({
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
+    })
+
+    expect(spawnProcess).toHaveBeenCalledWith(
+      devBinaries.viewer,
+      [
+        '--manifest',
+        GEOMETRY_MANIFEST,
+        '--mode',
+        'view',
+        '--antenna-data',
+        ANTENNA_DATA_PATH,
       ],
       expect.objectContaining({
         detached: true,

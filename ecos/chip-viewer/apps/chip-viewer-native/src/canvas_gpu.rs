@@ -3,6 +3,10 @@
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 
+#[cfg(test)]
+#[path = "canvas_gpu_tests.rs"]
+mod rendering_tests;
+
 pub const GPU_CANVAS_ENV: &str = "ECOS_GPU_CANVAS";
 pub const GPU_CANVAS_DEBUG_ENV: &str = "ECOS_GPU_CANVAS_DEBUG";
 
@@ -318,10 +322,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     var is_filled = false;
 
-    if u_canvas.is_interacting > 0.5 && pattern_id > 1u {
-        is_filled = true;
-    } else {
-        switch pattern_id {
+    switch pattern_id {
             case 1u: {
                 is_filled = true;
             }
@@ -388,7 +389,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 }
             }
             default: {}
-        }
     }
 
     let fill_a = fill_color.a;

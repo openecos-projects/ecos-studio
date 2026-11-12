@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::{LineWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -34,12 +36,15 @@ use crate::macro_staging::{
 use crate::map_data::{ColormapMode, HeatmapData, MapCatalog, MapItem};
 
 mod clock_tree;
+mod cpu_raster;
+mod cpu_scene;
 mod gpu_overview;
 mod gpu_tile_worker;
 mod label_layout;
 mod lvs;
 mod session_close;
 mod snapshot_reload;
+mod wheel_camera;
 use gpu_tile_worker::GpuTileWorker;
 use label_layout::{
     ResolvedLabels, ShapeLabelCandidate, ShapeLabelCollector, ShapeLabelKey, ShapeLabelKind,
@@ -55,7 +60,9 @@ const LAYOUT_GEOMETRY_LAYER: LayerId = 0;
 const LAYOUT_GEOMETRY_RGB: [u8; 3] = [148, 148, 148];
 const LAYOUT_GEOMETRY_MAX_FILL_ALPHA: u8 = 48;
 const LAYOUT_GEOMETRY_MAX_FRAME_ALPHA: u8 = 128;
+#[cfg(test)]
 const PATTERN_MIN_SIZE_PX: f32 = 20.0;
+#[cfg(test)]
 const MAX_PATTERN_OPS_PER_SHAPE: usize = 96;
 const MAX_SELECTION_ENDPOINT_LINES: usize = 6;
 const HOVER_NEAREST_RADIUS_PX: f32 = 8.0;
@@ -79,14 +86,26 @@ const COORDINATE_RULER_TARGET_TICK_PX: f32 = 80.0;
 const RULER_EDGE_SNAP_RADIUS_PX: f32 = 10.0;
 const REDUCED_MOTION_ENV: &str = "ECOS_REDUCED_MOTION";
 const RENDER_STATS_ENV: &str = "ECOS_RENDER_STATS";
+const RENDER_STATS_LOG_ENV: &str = "ECOS_RENDER_STATS_LOG";
+const PERF_ALL_VISIBLE_ENV: &str = "ECOS_PERF_ALL_VISIBLE";
+const PERF_BENCHMARK_ENV: &str = "ECOS_PERF_BENCHMARK";
+const PERF_BENCHMARK_MS_ENV: &str = "ECOS_PERF_BENCHMARK_MS";
+const PERF_INITIAL_ZOOM_ENV: &str = "ECOS_PERF_INITIAL_ZOOM";
 
-#[derive(Clone, Debug, Default)]
+static RENDER_STATS_LOGGER: OnceLock<Option<Mutex<LineWriter<std::fs::File>>>> = OnceLock::new();
+static LAST_RENDER_STATS_AT: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct CanvasRenderStats {
     pub frame_time_ms: f32,
+    pub frame_interval_ms: f32,
+    pub previous_native_cpu_ms: f32,
+    pub previous_ui_update_ms: f32,
     pub query_time_ms: f32,
     pub filter_time_ms: f32,
     pub paint_time_ms: f32,
     pub label_paint_time_ms: f32,
+    pub label_resolve_time_ms: f32,
     pub drawn_shapes: usize,
     pub estimated_primitives: usize,
     pub label_count: usize,
@@ -96,6 +115,22 @@ pub struct CanvasRenderStats {
     pub visible_drc_count: usize,
     pub visible_antenna_count: usize,
     pub is_gpu: bool,
+    pub cpu_scene_pending: bool,
+    pub cpu_scene_visible: bool,
+    pub cpu_scene_preview: bool,
+    pub cpu_scene_held: bool,
+    pub cpu_scene_partial: bool,
+    pub cpu_history_bytes: usize,
+    pub cpu_scene_cache_hit: bool,
+    pub cpu_labels_pending: bool,
+    pub cpu_scene_build_ms: f32,
+    pub cpu_scene_pipeline_ms: f32,
+    pub cpu_rasterizations: usize,
+    pub scene_pending: bool,
+    pub geometry_drawn_shapes: usize,
+    pub cpu_scene_raster_ms: f32,
+    pub cpu_label_resolve_ms: f32,
+    pub previous_raster_present_ms: f32,
 }
 
 struct GpuCachedLabel {
@@ -144,6 +179,7 @@ pub struct ChipViewerApp {
     state: ViewerState,
     theme_initialized: bool,
     startup_focus_requested: bool,
+    benchmark_started_at: Instant,
 }
 
 struct LoadingViewer {
@@ -246,6 +282,11 @@ struct LoadedViewer {
     snapshot_signature: SnapshotFileSignature,
     next_snapshot_refresh_check: Instant,
     render_cache: RenderPlanCache,
+    cpu_scene_cache: cpu_scene::CpuSceneCache,
+    glow_rendering: bool,
+    glow_renderer: Option<String>,
+    previous_native_cpu_ms: f32,
+    previous_ui_update_ms: f32,
     view_tile_cache: ViewTilePlaneCache,
     view_tiles_latch: gpu_overview::ViewTileOverviewLatch,
     next_command_counter: u32,
@@ -270,6 +311,7 @@ struct LoadedViewer {
     zoom: f32,
     pan: egui::Vec2,
     pan_drag: PanDragState,
+    wheel_camera: wheel_camera::WheelCamera,
     ruler_tool: OrthogonalRuler,
     object_visibility: ObjectVisibility,
     coordinate_unit: CoordinateUnit,
@@ -335,6 +377,7 @@ impl Default for Perf3dState {
     }
 }
 
+#[derive(Clone)]
 struct LayerUiState {
     layer_id: LayerId,
     shape_count: usize,
@@ -1610,6 +1653,7 @@ impl ChipViewerApp {
             }),
             theme_initialized: false,
             startup_focus_requested: false,
+            benchmark_started_at: Instant::now(),
         }
     }
 
@@ -2047,44 +2091,64 @@ fn parse_antenna_json_text(
     text: &str,
 ) -> Result<(Vec<AntennaViolation>, BTreeMap<String, AntennaTypeCounts>), String> {
     let root: serde_json::Value = serde_json::from_str(text).map_err(|err| err.to_string())?;
-    let Some(distribution) = root
+    let mut violations = Vec::new();
+    let mut counts = BTreeMap::new();
+
+    if let Some(distribution) = root
         .get("antenna")
         .and_then(|node| node.get("distribution"))
         .and_then(|node| node.as_object())
-    else {
-        return Ok((Vec::new(), BTreeMap::new()));
-    };
-
-    let mut violations = Vec::new();
-    let mut counts = BTreeMap::new();
-    for (antenna_type, type_node) in distribution {
-        let mut type_counts = AntennaTypeCounts {
-            total_count: json_usize(type_node.get("number")).unwrap_or(0),
-            layer_counts: BTreeMap::new(),
-        };
-        if let Some(layers) = type_node.get("layers").and_then(|node| node.as_object()) {
-            for (layer, layer_node) in layers {
-                let layer_count = json_usize(layer_node.get("number")).unwrap_or(0);
-                if layer_count > 0 {
-                    type_counts.layer_counts.insert(layer.clone(), layer_count);
-                }
-                if let Some(list) = layer_node.get("list").and_then(|node| node.as_array()) {
-                    for item in list {
-                        if let Some(violation) =
-                            parse_antenna_violation(item, violations.len(), antenna_type, layer)
-                        {
-                            violations.push(violation);
+    {
+        for (antenna_type, type_node) in distribution {
+            let mut type_counts = AntennaTypeCounts {
+                total_count: json_usize(type_node.get("number")).unwrap_or(0),
+                layer_counts: BTreeMap::new(),
+            };
+            if let Some(layers) = type_node.get("layers").and_then(|node| node.as_object()) {
+                for (layer, layer_node) in layers {
+                    let layer_count = json_usize(layer_node.get("number")).unwrap_or(0);
+                    if layer_count > 0 {
+                        type_counts.layer_counts.insert(layer.clone(), layer_count);
+                    }
+                    if let Some(list) = layer_node.get("list").and_then(|node| node.as_array()) {
+                        for item in list {
+                            if let Some(violation) =
+                                parse_antenna_violation(item, violations.len(), antenna_type, layer)
+                            {
+                                violations.push(violation);
+                            }
                         }
                     }
                 }
             }
+            if type_counts.total_count == 0 {
+                type_counts.total_count = type_counts.layer_counts.values().sum();
+            }
+            counts.insert(antenna_type.clone(), type_counts);
         }
-        if type_counts.total_count == 0 {
-            type_counts.total_count = type_counts.layer_counts.values().sum();
-        }
-        counts.insert(antenna_type.clone(), type_counts);
     }
 
+    if let Some(items) = root.get("violations").and_then(|node| node.as_array()) {
+        for item in items {
+            let antenna_type = item
+                .get("type")
+                .and_then(|value| value.as_str())
+                .unwrap_or("Unknown")
+                .to_string();
+            let layer = item
+                .get("layer")
+                .and_then(|value| value.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            if let Some(violation) =
+                parse_antenna_violation(item, violations.len(), &antenna_type, &layer)
+            {
+                violations.push(violation);
+            }
+        }
+    }
+
+    merge_antenna_counts(&mut counts, antenna_counts_from_violations(&violations));
     Ok((violations, counts))
 }
 
@@ -2094,10 +2158,11 @@ fn parse_antenna_violation(
     antenna_type: &str,
     layer: &str,
 ) -> Option<AntennaViolation> {
-    let llx = json_i32(node.get("llx"))?;
-    let lly = json_i32(node.get("lly"))?;
-    let urx = json_i32(node.get("urx"))?;
-    let ury = json_i32(node.get("ury"))?;
+    let location = node.get("location").unwrap_or(node);
+    let llx = json_i32(location.get("lx").or_else(|| node.get("llx")))?;
+    let lly = json_i32(location.get("ly").or_else(|| node.get("lly")))?;
+    let urx = json_i32(location.get("hx").or_else(|| node.get("urx")))?;
+    let ury = json_i32(location.get("hy").or_else(|| node.get("ury")))?;
     Some(AntennaViolation {
         id,
         antenna_type: antenna_type.to_string(),
@@ -2109,8 +2174,8 @@ fn parse_antenna_violation(
             hy: lly.max(ury),
         },
         required_size: json_i64(node.get("required_size")),
-        nets: json_string_vec(node.get("net")),
-        insts: json_string_vec(node.get("inst")),
+        nets: json_string_vec_or_single(node.get("net")),
+        insts: json_string_vec_or_single(node.get("inst").or_else(|| node.get("instance"))),
     })
 }
 
@@ -2231,6 +2296,13 @@ fn json_string_vec(value: Option<&serde_json::Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn json_string_vec_or_single(value: Option<&serde_json::Value>) -> Vec<String> {
+    if let Some(text) = value.and_then(|value| value.as_str()) {
+        return vec![text.to_string()];
+    }
+    json_string_vec(value)
+}
+
 impl LoadedViewer {
     fn new(
         color_theme: chip_display::ColorTheme,
@@ -2258,7 +2330,20 @@ impl LoadedViewer {
             layer_catalog,
         } = db.into();
         let gpu_tile_worker = GpuTileWorker::new(std::sync::Arc::clone(&db));
-        let layers = layer_ui_states_from_summaries(layer_catalog, &BTreeMap::new(), color_theme);
+        let all_visible = env_flag_requested(std::env::var(PERF_ALL_VISIBLE_ENV).ok().as_deref());
+        let initial_zoom = std::env::var(PERF_INITIAL_ZOOM_ENV)
+            .ok()
+            .and_then(|value| value.parse::<f32>().ok())
+            .filter(|zoom| zoom.is_finite() && *zoom > 0.0)
+            .unwrap_or(1.0)
+            .clamp(0.05, 50_000.0);
+        let mut layers =
+            layer_ui_states_from_summaries(layer_catalog, &BTreeMap::new(), color_theme);
+        let mut object_visibility = ObjectVisibility::default();
+        if all_visible {
+            set_layer_visibility(&mut layers, true);
+            object_visibility.set_all_visible(true);
+        }
         let drc_data_path = db.snapshot().manifest().drc.clone().or(drc_data_path);
         let drc_overlay = DrcOverlay::load(drc_data_path, drc_statis_path);
         let antenna_overlay = AntennaOverlay::load(antenna_data_path, antenna_statis_path);
@@ -2346,6 +2431,11 @@ impl LoadedViewer {
             snapshot_signature,
             next_snapshot_refresh_check: Instant::now() + SNAPSHOT_REFRESH_CHECK_INTERVAL,
             render_cache: RenderPlanCache::default(),
+            cpu_scene_cache: cpu_scene::CpuSceneCache::default(),
+            glow_rendering: false,
+            glow_renderer: None,
+            previous_native_cpu_ms: 0.0,
+            previous_ui_update_ms: 0.0,
             view_tile_cache: ViewTilePlaneCache::default(),
             view_tiles_latch: gpu_overview::ViewTileOverviewLatch::default(),
             next_command_counter: 1,
@@ -2367,11 +2457,12 @@ impl LoadedViewer {
             map_item_error: None,
             selected_map_bbox: None,
             focus_animation: None,
-            zoom: 1.0,
+            zoom: initial_zoom,
             pan: egui::Vec2::ZERO,
             pan_drag: PanDragState::default(),
+            wheel_camera: wheel_camera::WheelCamera::default(),
             ruler_tool: OrthogonalRuler::default(),
-            object_visibility: ObjectVisibility::default(),
+            object_visibility,
             coordinate_unit: CoordinateUnit::Dbu,
             view_mode: ViewMode::TwoD,
             camera_ctrl_3d: crate::nav3d::CameraController3d::default(),
@@ -2576,7 +2667,7 @@ impl LoadedViewer {
             }
             if ui.small_button("None").clicked() {
                 overlay.set_all_visible(false);
-                self.selected_drc = None;
+                self.selected_antenna = None;
             }
             ui.label(
                 egui::RichText::new(format!(
@@ -3848,6 +3939,10 @@ impl LoadedViewer {
         let mut estimated_primitives = 0usize;
         let mut visible_drc_count = 0usize;
         let mut visible_antenna_count = 0usize;
+        let mut cpu_scene = None;
+        let mut cpu_scene_pending = false;
+        let mut cpu_scene_visible = false;
+        let mut gpu_scene_pending = false;
         let available = ui.available_size();
         let (response, frame_painter) =
             ui.allocate_painter(available, egui::Sense::click_and_drag());
@@ -3927,8 +4022,14 @@ impl LoadedViewer {
                     .ctx()
                     .input(|input| input.pointer.hover_pos())
                     .unwrap_or(canvas.center());
-                (self.zoom, self.pan) =
-                    zoom_at_screen_pos(world, canvas, self.zoom, self.pan, zoom_factor, cursor);
+                let logarithm = if raw_scroll_delta_y.abs() > 0.0 {
+                    wheel_camera::scroll_logarithm(raw_scroll_delta_y)
+                } else {
+                    f64::from(zoom_factor).ln()
+                };
+                (self.zoom, self.pan) = self
+                    .wheel_camera
+                    .update(canvas, self.zoom, self.pan, cursor, logarithm);
                 self.pan_drag.reset();
                 ui.ctx().request_repaint();
             }
@@ -3938,7 +4039,8 @@ impl LoadedViewer {
 
         self.gpu_frame_counter = self.gpu_frame_counter.wrapping_add(1);
 
-        let collect_stats = env_flag_requested(std::env::var(RENDER_STATS_ENV).ok().as_deref());
+        let collect_stats = env_flag_requested(std::env::var(RENDER_STATS_ENV).ok().as_deref())
+            || std::env::var_os(RENDER_STATS_LOG_ENV).is_some();
 
         let visible_layers: BTreeMap<LayerId, LayerStyle> = self
             .layers
@@ -3949,6 +4051,9 @@ impl LoadedViewer {
         let query_layer_ids = render_query_layer_ids(&self.layers, self.object_visibility);
         let viewport = screen_to_world_rect(canvas, world, canvas, self.zoom, self.pan);
         let use_view_tiles = self.should_use_view_tiles(viewport, world, canvas);
+        let cache_cpu_overlays = !self.is_gpu_active()
+            && !use_view_tiles
+            && (self.analysis_tab != AnalysisTab::Map || self.active_heatmap.is_none());
         let hover_world_point = ui
             .ctx()
             .input(|input| input.pointer.hover_pos())
@@ -4056,15 +4161,23 @@ impl LoadedViewer {
                 self.ruler_tool.start(point);
             }
         }
-        let drc_double_clicked =
+        let analysis_double_clicked =
             !self.ruler_tool.enabled && response.double_clicked_by(egui::PointerButton::Primary);
-        if drc_double_clicked && pointer_over_layout {
-            self.selected_drc = response
-                .interact_pointer_pos()
-                .and_then(|pos| self.pick_drc_violation_at(pos, world, canvas, viewport));
+        if analysis_double_clicked && pointer_over_layout {
+            if self.analysis_tab == AnalysisTab::Antenna {
+                self.selected_antenna = response
+                    .interact_pointer_pos()
+                    .and_then(|pos| self.pick_antenna_violation_at(pos, world, canvas, viewport));
+                self.selected_drc = None;
+            } else if self.analysis_tab == AnalysisTab::Drc {
+                self.selected_drc = response
+                    .interact_pointer_pos()
+                    .and_then(|pos| self.pick_drc_violation_at(pos, world, canvas, viewport));
+                self.selected_antenna = None;
+            }
         }
         if response.clicked_by(egui::PointerButton::Primary)
-            && !drc_double_clicked
+            && !analysis_double_clicked
             && pointer_over_layout
         {
             if self.ruler_tool.enabled {
@@ -4179,22 +4292,8 @@ impl LoadedViewer {
                     zoom_rules: ZoomVisibilityRules::new(&self.db),
                 };
             }
-            let layer_index = &self.visibility_rules_cache.layer_index;
-            let zoom_rules = &self.visibility_rules_cache.zoom_rules;
-            let visible_ids: std::sync::Arc<[ShapeId]> = if !self.is_gpu_active() {
-                let query_start = Instant::now();
-                let ids = self.render_cache.visible_shape_ids_for_layers(
-                    &self.db,
-                    &query_layer_ids,
-                    viewport,
-                );
-                query_duration += query_start.elapsed();
-                ids
-            } else {
-                std::sync::Arc::from(Vec::new())
-            };
-
             if self.is_gpu_active() {
+                let layer_index = &self.visibility_rules_cache.layer_index;
                 let gpu_start = Instant::now();
 
                 self.gpu_tile_worker.set_view_state(
@@ -4279,29 +4378,22 @@ impl LoadedViewer {
                         hx: (tx + 1) * crate::canvas_gpu::GPU_TILE_SIZE_DBU,
                         hy: (ty + 1) * crate::canvas_gpu::GPU_TILE_SIZE_DBU,
                     };
-                    // Labels are only painted on non-interacting frames, so
-                    // the worker skips the owner-name/label allocations
-                    // while interacting. The tier keeps label-less and
-                    // label-carrying buffers from sharing a cache key; the
-                    // 16ms repaint catch-up rebuilds labels when a pan or
-                    // zoom ends.
-                    let build_labels = !is_interacting;
                     let buffer_key = crate::canvas_gpu::GpuBufferKey {
                         geometry_epoch: self.geometry_epoch,
                         tile_x: tx,
                         tile_y: ty,
-                        zoom_tier: u8::from(build_labels),
+                        zoom_tier: 0,
                         layer_visibility_hash: self.visibility_rules_cache.layer_visibility_hash,
                         object_visibility_bits: 0,
                     };
 
                     let Some(tile_instances) = self.gpu_tile_instances.get(&buffer_key) else {
+                        gpu_scene_pending = true;
                         if let Err(err) = self.gpu_tile_worker.request(
                             buffer_key,
                             tile_bbox,
                             &query_layer_ids,
                             layer_index,
-                            build_labels,
                         ) {
                             log::error!("{err}");
                             if let Some(gpu_canvas) = self.gpu_canvas.as_mut() {
@@ -4360,89 +4452,65 @@ impl LoadedViewer {
 
                 paint_duration += gpu_start.elapsed();
             } else {
-                for shape_id in visible_ids.iter().copied() {
-                    let filter_start = collect_stats.then(Instant::now);
-                    let Some(shape) = self.db.find_shape(shape_id) else {
-                        if let Some(start) = filter_start {
-                            filter_duration += start.elapsed();
-                        }
-                        continue;
-                    };
-                    if !is_renderable_shape(shape) {
-                        if let Some(start) = filter_start {
-                            filter_duration += start.elapsed();
-                        }
-                        continue;
-                    }
-
-                    let owner = self.db.owner_for_shape(shape);
-                    let owner_type = owner.and_then(|owner| OwnerType::from_raw(owner.owner_type));
-
-                    if !zoom_rules.is_drawn_at_zoom(owner_type, self.zoom) {
-                        if let Some(start) = filter_start {
-                            filter_duration += start.elapsed();
-                        }
-                        continue;
-                    }
-
-                    let owner_category = owner.and_then(|owner| {
-                        self.owner_category_cache
-                            .get(self.geometry_epoch, &self.db, owner)
-                    });
-                    if !shape_is_visible_fast(
-                        shape,
-                        owner_type,
-                        owner_category,
-                        &layer_index,
-                        &self.object_visibility,
-                    ) {
-                        if let Some(start) = filter_start {
-                            filter_duration += start.elapsed();
-                        }
-                        continue;
-                    }
-
-                    let Some(style) =
-                        visible_style_for_shape_fast(shape, owner, owner_type, &layer_index)
-                    else {
-                        if let Some(start) = filter_start {
-                            filter_duration += start.elapsed();
-                        }
-                        continue;
-                    };
-                    let geometry = self.db.shape_geometry(shape);
-                    if let Some(start) = filter_start {
-                        filter_duration += start.elapsed();
-                    }
-
-                    let paint_start = Instant::now();
-                    let prim_count = paint_styled_shape_geometry(
-                        &painter, geometry, world, canvas, self.zoom, self.pan, &style,
-                    );
-                    paint_duration += paint_start.elapsed();
-
-                    if prim_count > 0 {
-                        drawn += 1;
-                        estimated_primitives += prim_count;
-                        if !is_interacting {
-                            if let Some(label) = shape_label_candidate(
-                                geometry,
-                                owner,
-                                owner.and_then(|owner| self.db.owner_name(owner)),
-                                self.selected == Some(shape.id),
-                                self.highlighted.contains(&shape.id),
-                                world,
-                                canvas,
-                                self.zoom,
-                                self.pan,
-                            ) {
-                                self.label_collector.insert(label);
-                            }
-                        }
-                    }
+                let paint_started = Instant::now();
+                let request = self.cpu_scene_request(
+                    ui.ctx(),
+                    world,
+                    viewport,
+                    canvas,
+                    query_layer_ids.clone(),
+                    bg_color,
+                );
+                cpu_scene = self.cpu_scene_cache.get_or_request(request);
+                if self.glow_rendering {
+                    self.cpu_scene_cache
+                        .paint_glow(cpu_scene.as_ref(), &painter, bg_color);
+                    cpu_scene_visible = self.cpu_scene_cache.raster_visible();
                 }
+                if let Some(scene) = &cpu_scene {
+                    if self.glow_rendering {
+                        cpu_scene_pending = !self.cpu_scene_cache.raster_ready(scene);
+                    } else {
+                        scene.paint(&painter);
+                        cpu_scene_visible = true;
+                    }
+                    if !cpu_scene_pending {
+                        drawn = scene.drawn + scene.overlay_drawn;
+                        estimated_primitives = scene.primitives;
+                    }
+                    cpu_scene_pending |= !scene.labels_ready();
+                    query_duration = scene.query_duration;
+                    filter_duration = scene.filter_duration;
+                } else {
+                    cpu_scene_pending = true;
+                }
+                if cpu_scene_pending {
+                    painter.text(
+                        if cpu_scene_visible {
+                            canvas.right_top() + egui::vec2(-10.0, 10.0)
+                        } else {
+                            canvas.center()
+                        },
+                        if cpu_scene_visible {
+                            egui::Align2::RIGHT_TOP
+                        } else {
+                            egui::Align2::CENTER_CENTER
+                        },
+                        if cpu_scene_visible {
+                            "Refining exact geometry…"
+                        } else {
+                            "Preparing exact geometry…"
+                        },
+                        egui::FontId::proportional(14.0),
+                        ecos_text_secondary(),
+                    );
+                    ui.ctx().request_repaint_after(Duration::from_millis(16));
+                }
+                paint_duration += paint_started.elapsed();
             }
         }
+        let geometry_drawn_shapes =
+            drawn.saturating_sub(cpu_scene.as_ref().map_or(0, |scene| scene.overlay_drawn));
         if !is_interacting {
             self.queue_selected_pin_label(world, canvas);
         }
@@ -4453,34 +4521,37 @@ impl LoadedViewer {
         // fit-to-die zoom where they matter most.
         self.paint_gpu_heatmap_overlay(ui, canvas, world);
 
-        drawn += paint_parameterized_grid_overlay(
-            &painter,
-            self.db.grid_metadata(),
-            &self.layers,
-            self.object_visibility,
-            viewport,
-            self.grid_bounds.unwrap_or(world),
-            world,
-            canvas,
-            self.zoom,
-            self.pan,
-        );
-        drawn += paint_unrouted_net_guides(
-            &painter,
-            self.db.unrouted_net_guides(),
-            self.object_visibility,
-            viewport,
-            world,
-            canvas,
-            self.zoom,
-            self.pan,
-        );
+        if !cache_cpu_overlays {
+            drawn += paint_parameterized_grid_overlay(
+                &painter,
+                self.db.grid_metadata(),
+                &self.layers,
+                self.object_visibility,
+                viewport,
+                self.grid_bounds.unwrap_or(world),
+                world,
+                canvas,
+                self.zoom,
+                self.pan,
+            );
+            drawn += paint_unrouted_net_guides(
+                &painter,
+                self.db.unrouted_net_guides(),
+                self.object_visibility,
+                viewport,
+                world,
+                canvas,
+                self.zoom,
+                self.pan,
+            );
+        }
 
-        let resolved_labels = if is_interacting {
-            ResolvedLabels::default()
+        let label_resolve_started = collect_stats.then(Instant::now);
+        let resolved_labels = if is_interacting || cpu_scene_pending {
+            Arc::new(ResolvedLabels::default())
         } else {
             let ctx = ui.ctx().clone();
-            self.label_collector.resolve(canvas, move |text, size| {
+            let measure = move |text: &str, size| {
                 ctx.fonts(|fonts| {
                     fonts
                         .layout_no_wrap(
@@ -4490,8 +4561,15 @@ impl LoadedViewer {
                         )
                         .size()
                 })
-            })
+            };
+            if let Some(scene) = &cpu_scene {
+                scene.resolved_labels()
+            } else {
+                Arc::new(self.label_collector.resolve(canvas, measure))
+            }
         };
+        let label_resolve_duration =
+            label_resolve_started.map_or(Duration::ZERO, |start| start.elapsed());
         let mut label_paint_duration = Duration::ZERO;
         if !is_interacting {
             let label_paint_start = collect_stats.then(Instant::now);
@@ -4566,7 +4644,7 @@ impl LoadedViewer {
         if let Some(overlay) = &self.antenna_overlay {
             for node in overlay.rtree.locate_in_envelope_intersecting(viewport_aabb) {
                 let violation = &overlay.violations[node.index];
-                if !hidden_drc_layer_names.contains(&violation.layer)
+                if antenna_layer_is_visible(&self.layers, &violation.layer)
                     && visible_antenna_types.contains(violation.antenna_type.as_str())
                 {
                     visible_antenna_count += 1;
@@ -4737,13 +4815,18 @@ impl LoadedViewer {
         );
         self.paint_reload_indicator(ui, &painter, canvas);
 
-        if env_flag_requested(std::env::var(RENDER_STATS_ENV).ok().as_deref()) {
+        if collect_stats {
+            let cpu_scene_held = self.glow_rendering && self.cpu_scene_cache.raster_held();
             let stats = CanvasRenderStats {
                 frame_time_ms: canvas_start.elapsed().as_secs_f32() * 1000.0,
+                frame_interval_ms: 0.0,
+                previous_native_cpu_ms: self.previous_native_cpu_ms,
+                previous_ui_update_ms: self.previous_ui_update_ms,
                 query_time_ms: query_duration.as_secs_f32() * 1000.0,
                 filter_time_ms: filter_duration.as_secs_f32() * 1000.0,
                 paint_time_ms: paint_duration.as_secs_f32() * 1000.0,
                 label_paint_time_ms: label_paint_duration.as_secs_f32() * 1000.0,
+                label_resolve_time_ms: label_resolve_duration.as_secs_f32() * 1000.0,
                 drawn_shapes: drawn,
                 estimated_primitives,
                 label_count: resolved_labels.labels.len(),
@@ -4753,8 +4836,43 @@ impl LoadedViewer {
                 visible_drc_count,
                 visible_antenna_count,
                 is_gpu: self.is_gpu_active(),
+                cpu_scene_pending,
+                cpu_scene_visible,
+                cpu_scene_preview: self.glow_rendering
+                    && cpu_scene_visible
+                    && !cpu_scene_held
+                    && !self.cpu_scene_cache.raster_partial()
+                    && cpu_scene
+                        .as_ref()
+                        .is_none_or(|scene| !self.cpu_scene_cache.raster_ready(scene)),
+                cpu_scene_held,
+                cpu_scene_partial: self.cpu_scene_cache.raster_partial(),
+                cpu_history_bytes: self.cpu_scene_cache.history_bytes(),
+                cpu_scene_cache_hit: self.cpu_scene_cache.restored(),
+                cpu_labels_pending: cpu_scene
+                    .as_ref()
+                    .is_some_and(|scene| !scene.labels_ready()),
+                cpu_scene_build_ms: cpu_scene
+                    .as_ref()
+                    .map_or(0.0, |scene| scene.build_duration.as_secs_f32() * 1000.0),
+                cpu_scene_pipeline_ms: cpu_scene
+                    .as_ref()
+                    .map_or(0.0, |scene| scene.pipeline_duration.as_secs_f32() * 1000.0),
+                cpu_rasterizations: self.cpu_scene_cache.rasterizations(),
+                scene_pending: cpu_scene_pending || gpu_scene_pending,
+                geometry_drawn_shapes,
+                cpu_scene_raster_ms: cpu_scene
+                    .as_ref()
+                    .map_or(0.0, |scene| scene.raster_duration.as_secs_f32() * 1000.0),
+                cpu_label_resolve_ms: cpu_scene
+                    .as_ref()
+                    .map_or(0.0, |scene| scene.label_duration().as_secs_f32() * 1000.0),
+                previous_raster_present_ms: self.cpu_scene_cache.paint_ms(),
             };
-            paint_render_stats_overlay(&painter, canvas, &stats);
+            record_render_stats(&stats);
+            if env_flag_requested(std::env::var(RENDER_STATS_ENV).ok().as_deref()) {
+                paint_render_stats_overlay(&painter, canvas, &stats);
+            }
         }
 
         if let Some(point) = hover_world_point {
@@ -8226,28 +8344,26 @@ impl LoadedViewer {
     }
 
     fn queue_selected_pin_label(&mut self, world: Rect32, canvas: egui::Rect) {
-        let Some(shape_id) = self.selected else {
-            return;
-        };
-        let Some(shape) = self.db.find_shape(shape_id) else {
-            return;
-        };
-        if !self.shape_is_visible(shape) || !self.shape_is_drawn_at_current_zoom(shape) {
-            return;
+        if let Some(candidate) = self.selected_pin_label(world, canvas) {
+            self.label_collector.insert(candidate);
         }
-        let Some(owner) = self.db.owner_for_shape(shape) else {
-            return;
-        };
-        let Some(owner_type) = OwnerType::from_raw(owner.owner_type) else {
-            return;
-        };
+    }
+
+    fn selected_pin_label(&self, world: Rect32, canvas: egui::Rect) -> Option<ShapeLabelCandidate> {
+        let shape_id = self.selected?;
+        let shape = self.db.find_shape(shape_id)?;
+        if !self.shape_is_visible(shape) || !self.shape_is_drawn_at_current_zoom(shape) {
+            return None;
+        }
+        let owner = self.db.owner_for_shape(shape)?;
+        let owner_type = OwnerType::from_raw(owner.owner_type)?;
         if !matches!(
             owner_type,
             OwnerType::PinPortShape | OwnerType::InstancePinPortShape | OwnerType::IoPinPortShape
         ) {
-            return;
+            return None;
         }
-        if let Some(candidate) = shape_label_candidate(
+        shape_label_candidate(
             self.db.shape_geometry(shape),
             Some(owner),
             self.db.owner_name(owner),
@@ -8257,9 +8373,7 @@ impl LoadedViewer {
             canvas,
             self.zoom,
             self.pan,
-        ) {
-            self.label_collector.insert(candidate);
-        }
+        )
     }
 
     fn shape_is_visible(&self, shape: &ShapeRecord) -> bool {
@@ -8320,12 +8434,6 @@ impl LoadedViewer {
         let Some(overlay) = &self.antenna_overlay else {
             return 0;
         };
-        let hidden_layers: std::collections::HashSet<&str> = self
-            .layers
-            .iter()
-            .filter(|l| !l.visible)
-            .map(|l| l.name.as_str())
-            .collect();
         let visible_types: std::collections::HashSet<&str> = overlay
             .type_states
             .iter()
@@ -8334,7 +8442,7 @@ impl LoadedViewer {
             .collect();
 
         let is_visible = |v: &AntennaViolation| {
-            !hidden_layers.contains(v.layer.as_str())
+            antenna_layer_is_visible(&self.layers, &v.layer)
                 && visible_types.contains(v.antenna_type.as_str())
         };
 
@@ -8491,6 +8599,43 @@ impl LoadedViewer {
         best_match
     }
 
+    fn pick_antenna_violation_at(
+        &self,
+        pos: egui::Pos2,
+        world: Rect32,
+        canvas: egui::Rect,
+        viewport: Rect32,
+    ) -> Option<usize> {
+        let overlay = self.antenna_overlay.as_ref()?;
+
+        let visible_types: std::collections::HashSet<&str> = overlay
+            .type_states
+            .iter()
+            .filter(|state| state.visible)
+            .map(|state| state.name.as_str())
+            .collect();
+        let viewport_aabb =
+            rstar::AABB::from_corners([viewport.lx, viewport.ly], [viewport.hx, viewport.hy]);
+
+        let mut best_match = None;
+        for node in overlay.rtree.locate_in_envelope_intersecting(viewport_aabb) {
+            let violation = &overlay.violations[node.index];
+            if !antenna_layer_is_visible(&self.layers, &violation.layer)
+                || !visible_types.contains(violation.antenna_type.as_str())
+            {
+                continue;
+            }
+            let screen =
+                antenna_violation_screen_rect(violation, world, canvas, self.zoom, self.pan);
+            if screen.expand(5.0).contains(pos)
+                && best_match.is_none_or(|current| violation.id > current)
+            {
+                best_match = Some(violation.id);
+            }
+        }
+        best_match
+    }
+
     fn drc_detail_overlay(&mut self, ui: &mut egui::Ui, canvas: egui::Rect) {
         let Some(selected_id) = self.selected_drc else {
             return;
@@ -8565,7 +8710,7 @@ impl LoadedViewer {
     }
 
     fn antenna_detail_overlay(&mut self, ui: &mut egui::Ui, canvas: egui::Rect) {
-        let Some(selected_id) = self.selected_drc else {
+        let Some(selected_id) = self.selected_antenna else {
             return;
         };
         let Some(violation) = self.antenna_overlay.as_ref().and_then(|overlay| {
@@ -8574,7 +8719,7 @@ impl LoadedViewer {
                 .iter()
                 .find(|item| item.id == selected_id)
         }) else {
-            self.selected_drc = None;
+            self.selected_antenna = None;
             return;
         };
         let title = format!("{} / {}", violation.antenna_type, violation.layer);
@@ -8619,7 +8764,7 @@ impl LoadedViewer {
                                         .on_hover_text("Hide Antenna detail")
                                         .clicked()
                                     {
-                                        self.selected_drc = None;
+                                        self.selected_antenna = None;
                                     }
                                 },
                             );
@@ -8710,7 +8855,14 @@ fn session_action_progress_title(
 }
 
 impl eframe::App for ChipViewerApp {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if let ViewerState::Loaded(loaded) = &self.state {
+            loaded.cpu_scene_cache.destroy_glow();
+        }
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let update_started = Instant::now();
         if !self.theme_initialized {
             apply_ecos_theme(ctx);
             self.theme_initialized = true;
@@ -8723,6 +8875,14 @@ impl eframe::App for ChipViewerApp {
         let close_requested = ctx.input(|input| input.viewport().close_requested());
         let mut close_after_session_action = false;
         if let ViewerState::Loaded(loaded) = &mut self.state {
+            loaded.glow_rendering = _frame.gl().is_some();
+            if loaded.glow_renderer.is_none() {
+                loaded.glow_renderer = _frame.gl().map(|gl| unsafe {
+                    use eframe::glow::HasContext;
+                    gl.get_parameter_string(eframe::glow::RENDERER)
+                });
+            }
+            loaded.previous_native_cpu_ms = _frame.info().cpu_usage.unwrap_or_default() * 1000.0;
             loaded.poll_edit_result();
             loaded.poll_session_action_progress();
             close_after_session_action = loaded.poll_session_action_result();
@@ -8734,7 +8894,9 @@ impl eframe::App for ChipViewerApp {
                 loaded.close_confirmation_visible = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             }
-            if let Some(interval) = edit_poll_repaint_interval(
+            if env_flag_requested(std::env::var(PERF_BENCHMARK_ENV).ok().as_deref()) {
+                ctx.request_repaint_after(Duration::from_millis(16));
+            } else if let Some(interval) = edit_poll_repaint_interval(
                 loaded.pending_edit.is_some()
                     || loaded.pending_session_action.is_some()
                     || loaded.pending_reload.is_some(),
@@ -8745,6 +8907,15 @@ impl eframe::App for ChipViewerApp {
             }
         } else if matches!(self.state, ViewerState::Loading(_)) {
             ctx.request_repaint_after(Duration::from_millis(50));
+        }
+        if let Some(duration_ms) = std::env::var(PERF_BENCHMARK_MS_ENV)
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(Duration::from_millis)
+        {
+            if self.benchmark_started_at.elapsed() >= duration_ms {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
         }
         if let ViewerState::Loaded(loaded) = &mut self.state {
             if loaded.macro_staging.is_some() {
@@ -8788,6 +8959,9 @@ impl eframe::App for ChipViewerApp {
             if loaded.close_without_session_action {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
+        }
+        if let ViewerState::Loaded(loaded) = &mut self.state {
+            loaded.previous_ui_update_ms = update_started.elapsed().as_secs_f32() * 1000.0;
         }
     }
 }
@@ -9622,6 +9796,7 @@ enum ScreenShapePrimitive {
     },
 }
 
+#[cfg(test)]
 fn paint_styled_shape_geometry(
     painter: &egui::Painter,
     geometry: ShapeGeometry,
@@ -9655,6 +9830,7 @@ fn paint_styled_shape_geometry(
     }
 }
 
+#[cfg(test)]
 fn paint_styled_rect(
     painter: &egui::Painter,
     rect: egui::Rect,
@@ -9728,6 +9904,7 @@ fn paint_styled_rect(
     primitives
 }
 
+#[cfg(test)]
 fn draw_pattern_dots(
     painter: &egui::Painter,
     rect: egui::Rect,
@@ -9748,6 +9925,7 @@ fn draw_pattern_dots(
     count
 }
 
+#[cfg(test)]
 fn draw_hatch(
     painter: &egui::Painter,
     rect: egui::Rect,
@@ -9761,12 +9939,14 @@ fn draw_hatch(
     count
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HatchAxis {
     Horizontal,
     Vertical,
 }
 
+#[cfg(test)]
 fn draw_axis_hatch(
     painter: &egui::Painter,
     rect: egui::Rect,
@@ -9803,6 +9983,7 @@ fn draw_axis_hatch(
     count
 }
 
+#[cfg(test)]
 fn draw_x_mark(
     painter: &egui::Painter,
     rect: egui::Rect,
@@ -9883,6 +10064,37 @@ fn paint_render_stats_overlay(
             text_color,
         );
         y += 18.0;
+    }
+}
+
+fn record_render_stats(stats: &CanvasRenderStats) {
+    let now = Instant::now();
+    let last_at = LAST_RENDER_STATS_AT.get_or_init(|| Mutex::new(None));
+    let mut sample = stats.clone();
+    if let Ok(mut last_at) = last_at.lock() {
+        sample.frame_interval_ms = last_at
+            .replace(now)
+            .map(|last| last.elapsed().as_secs_f32() * 1000.0)
+            .unwrap_or_default();
+    }
+    let logger = RENDER_STATS_LOGGER.get_or_init(|| {
+        let path = std::env::var_os(RENDER_STATS_LOG_ENV)?;
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(path)
+            .ok()?;
+        Some(Mutex::new(LineWriter::new(file)))
+    });
+    let Some(logger) = logger else {
+        return;
+    };
+    let Ok(mut logger) = logger.lock() else {
+        return;
+    };
+    if serde_json::to_writer(&mut *logger, &sample).is_ok() {
+        let _ = logger.write_all(b"\n");
     }
 }
 
@@ -10058,6 +10270,7 @@ fn paint_shape_label_overlay(
     true
 }
 
+#[cfg(test)]
 fn draw_hatch_direction(
     painter: &egui::Painter,
     rect: egui::Rect,
@@ -12963,7 +13176,6 @@ mod tests {
                 },
                 &[],
                 &LayerRenderIndex::default(),
-                true,
             )
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -13118,6 +13330,54 @@ mod tests {
         assert_eq!(counts["Spacing"].total_count, 1);
         assert_eq!(counts["Spacing"].layer_counts["VIA1"], 1);
         assert!(!counts.contains_key("total"));
+    }
+
+    #[test]
+    fn antenna_json_parser_accepts_ecc_step_json() {
+        let json = r#"
+        {
+          "schema_version": 1,
+          "step": "antennaCheck",
+          "antenna_check": {
+            "violation_count": 2
+          },
+          "violations": [
+            {
+              "net": "clk",
+              "layer": "MET1",
+              "type": "GateAntenna",
+              "instance": "u0",
+              "location": {"lx": 10, "ly": 20, "hx": 30, "hy": 40}
+            },
+            {
+              "net": "rst",
+              "layer": "MET2",
+              "type": "MetalAntenna",
+              "location": {"lx": 50, "ly": 60, "hx": 70, "hy": 80}
+            }
+          ]
+        }
+        "#;
+
+        let (violations, counts) = parse_antenna_json_text(json).unwrap();
+
+        assert_eq!(violations.len(), 2);
+        assert_eq!(violations[0].antenna_type, "GateAntenna");
+        assert_eq!(violations[0].layer, "met1");
+        assert_eq!(
+            violations[0].bbox,
+            Rect32 {
+                lx: 10,
+                ly: 20,
+                hx: 30,
+                hy: 40,
+            }
+        );
+        assert_eq!(violations[0].nets, vec!["clk"]);
+        assert_eq!(violations[0].insts, vec!["u0"]);
+        assert_eq!(counts["GateAntenna"].total_count, 1);
+        assert_eq!(counts["GateAntenna"].layer_counts["met1"], 1);
+        assert_eq!(counts["MetalAntenna"].total_count, 1);
     }
 
     #[test]
@@ -16428,7 +16688,7 @@ mod tests {
         }
     }
 
-    fn layer_state(layer_id: LayerId, visible: bool) -> LayerUiState {
+    pub(super) fn layer_state(layer_id: LayerId, visible: bool) -> LayerUiState {
         LayerUiState {
             layer_id,
             shape_count: 1,
@@ -16452,7 +16712,7 @@ mod tests {
         }
     }
 
-    fn temp_snapshot_dir(test_name: &str) -> PathBuf {
+    pub(super) fn temp_snapshot_dir(test_name: &str) -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
@@ -16465,7 +16725,7 @@ mod tests {
         path
     }
 
-    fn write_empty_snapshot(path: &Path, include_delta: bool) {
+    pub(super) fn write_empty_snapshot(path: &Path, include_delta: bool) {
         let meta = chipgeom_format::GeometryMetaRecord {
             next_shape_id: 1,
             ..chipgeom_format::GeometryMetaRecord::default()
@@ -16622,7 +16882,7 @@ mod tests {
         .unwrap();
     }
 
-    fn write_empty_geometry_file(
+    pub(super) fn write_empty_geometry_file(
         path: &Path,
         file_kind: chipgeom_format::GeometryFileKind,
         record_size: u32,

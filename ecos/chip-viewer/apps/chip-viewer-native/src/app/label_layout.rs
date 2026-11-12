@@ -2,6 +2,9 @@ use std::collections::HashMap;
 
 use eframe::egui;
 
+#[path = "label_preparation.rs"]
+mod preparation;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(super) enum ShapeLabelKind {
     IoPin,
@@ -34,7 +37,7 @@ pub(super) struct ShapeLabelCandidate {
     pub(super) highlighted: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct ShapeLabelOverlay {
     pub(super) anchor_rect: egui::Rect,
     pub(super) rect: egui::Rect,
@@ -46,7 +49,7 @@ pub(super) struct ShapeLabelOverlay {
     pub(super) selected: bool,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct ResolvedLabels {
     pub(super) labels: Vec<ShapeLabelOverlay>,
     pub(super) candidate_count: usize,
@@ -59,6 +62,10 @@ pub(super) struct ShapeLabelCollector {
 }
 
 impl ShapeLabelCollector {
+    pub(super) fn is_empty(&self) -> bool {
+        self.candidates.is_empty()
+    }
+
     pub(super) fn insert(&mut self, candidate: ShapeLabelCandidate) {
         self.candidates
             .entry(candidate.key.clone())
@@ -74,10 +81,50 @@ impl ShapeLabelCollector {
         self.candidates.clear();
     }
 
+    pub(super) fn append(&mut self, other: Self) {
+        for candidate in other.candidates.into_values() {
+            self.insert(candidate);
+        }
+    }
+
+    pub(super) fn resolve_with<F>(
+        &self,
+        extra: &Self,
+        canvas: egui::Rect,
+        measure: F,
+    ) -> ResolvedLabels
+    where
+        F: Fn(&str, f32) -> egui::Vec2,
+    {
+        if extra.candidates.is_empty() {
+            return self.resolve(canvas, measure);
+        }
+        let mut combined = self.clone();
+        for candidate in extra.candidates.values() {
+            combined.insert(candidate.clone());
+        }
+        combined.resolve(canvas, measure)
+    }
+
     pub(super) fn resolve<F>(&self, canvas: egui::Rect, measure: F) -> ResolvedLabels
     where
         F: Fn(&str, f32) -> egui::Vec2,
     {
+        self.resolve_cancellable(canvas, measure, || true).unwrap()
+    }
+
+    pub(super) fn resolve_cancellable<F>(
+        &self,
+        canvas: egui::Rect,
+        measure: F,
+        is_current: impl Fn() -> bool,
+    ) -> Option<ResolvedLabels>
+    where
+        F: Fn(&str, f32) -> egui::Vec2,
+    {
+        if !is_current() {
+            return None;
+        }
         let mut candidates: Vec<_> = self
             .candidates
             .values()
@@ -97,6 +144,9 @@ impl ShapeLabelCollector {
         let mut accepted_rects = LabelCollisionIndex::default();
         let mut collision_suppressed = 0usize;
         for candidate in candidates {
+            if !is_current() {
+                return None;
+            }
             let placements = candidate_placements(candidate, canvas, &measure);
             if placements.is_empty() {
                 continue;
@@ -128,11 +178,11 @@ impl ShapeLabelCollector {
                 collision_suppressed += 1;
             }
         }
-        ResolvedLabels {
+        is_current().then_some(ResolvedLabels {
             candidate_count: self.candidates.len(),
             labels,
             collision_suppressed,
-        }
+        })
     }
 }
 
@@ -404,6 +454,47 @@ mod tests {
             selected: false,
             highlighted: false,
         }
+    }
+
+    #[test]
+    fn retained_candidates_merge_selected_overlay_with_original_priority() {
+        let canvas = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 400.0));
+        let anchor = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(200.0, 80.0));
+        let mut retained = ShapeLabelCollector::default();
+        retained.insert(candidate(ShapeLabelKind::Pin, anchor, "normal"));
+        let mut selected = candidate(ShapeLabelKind::Pin, anchor, "selected");
+        selected.selected = true;
+        let mut overlay = ShapeLabelCollector::default();
+        overlay.insert(selected.clone());
+        let actual = retained.resolve_with(&overlay, canvas, measure);
+        let mut combined = retained.clone();
+        combined.insert(selected);
+        let expected = combined.resolve(canvas, measure);
+        assert_eq!(actual.candidate_count, expected.candidate_count);
+        assert_eq!(actual.collision_suppressed, expected.collision_suppressed);
+        let labels = |resolved: ResolvedLabels| {
+            resolved
+                .labels
+                .into_iter()
+                .map(|label| {
+                    (
+                        label.anchor_rect,
+                        label.rect,
+                        label.text,
+                        label.text_size,
+                        label.kind,
+                        label.font_size,
+                        label.vertical,
+                        label.selected,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(labels(actual), labels(expected));
+        assert_eq!(
+            labels(retained.resolve_with(&ShapeLabelCollector::default(), canvas, measure)),
+            labels(retained.resolve(canvas, measure))
+        );
     }
 
     #[test]

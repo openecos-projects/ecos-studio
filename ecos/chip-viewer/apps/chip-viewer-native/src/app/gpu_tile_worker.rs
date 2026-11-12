@@ -9,7 +9,6 @@ struct TileRequest {
     bbox: Rect32,
     layer_ids: Vec<LayerId>,
     layers: LayerRenderIndex,
-    build_labels: bool,
 }
 
 type TileResponse = (crate::canvas_gpu::GpuBufferKey, Arc<GpuTileData>);
@@ -87,17 +86,15 @@ impl GpuTileWorker {
                     );
                     let context_only = owner_type
                         .is_some_and(|owner_type| is_context_owner_type(owner_type as u8));
-                    if request.build_labels {
-                        if let Some(mut label) = shape_label_info(
-                            &geometry,
-                            owner,
-                            owner.and_then(|owner| db.owner_name(owner)),
-                            shape.id,
-                        ) {
-                            label.category = category;
-                            label.context_only = context_only;
-                            labels.push(label);
-                        }
+                    if let Some(mut label) = shape_label_info(
+                        &geometry,
+                        owner,
+                        owner.and_then(|owner| db.owner_name(owner)),
+                        shape.id,
+                    ) {
+                        label.category = category;
+                        label.context_only = context_only;
+                        labels.push(label);
                     }
                     counts[usize::from(context_only)][usize::from(category)] += 1;
                     shapes.push((geometry, style, category, context_only));
@@ -148,7 +145,6 @@ impl GpuTileWorker {
         bbox: Rect32,
         layer_ids: &[LayerId],
         layers: &LayerRenderIndex,
-        build_labels: bool,
     ) -> Result<(), &'static str> {
         if self.pending.contains(&key) {
             return Ok(());
@@ -158,7 +154,6 @@ impl GpuTileWorker {
             bbox,
             layer_ids: layer_ids.to_vec(),
             layers: layers.clone(),
-            build_labels,
         };
         match self.requests.try_send(request) {
             Ok(()) => {
