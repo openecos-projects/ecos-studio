@@ -272,6 +272,7 @@ interface SnapshotInputs {
   lvsDataPath?: string
   manifestPath: string
   mapRootPath?: string
+  staFeatureDirPath?: string
   workspaceStepDirectory: string
 }
 
@@ -603,6 +604,20 @@ function isLvsWorkspaceStep(
   })
 }
 
+function isStaWorkspaceStep(
+  step: string,
+  stepLabel: string,
+  stepDirectory: string,
+): boolean {
+  const candidates = [step, stepLabel, basename(stepDirectory)]
+  return candidates.some((candidate) => {
+    const normalized = candidate.toLowerCase()
+    return (
+      normalized === 'sta' || normalized === 'sta_ecc' || normalized.startsWith('sta_')
+    )
+  })
+}
+
 function isDefViewStep(step: unknown): boolean {
   return typeof step === 'string' && step.trim().toLowerCase() === DEF_VIEW_STEP
 }
@@ -801,6 +816,9 @@ export class ChipViewerService {
     if (snapshotInputs.mapRootPath) {
       viewerArgs.push('--map-root', snapshotInputs.mapRootPath)
     }
+    if (snapshotInputs.staFeatureDirPath) {
+      viewerArgs.push('--sta-feature-dir', snapshotInputs.staFeatureDirPath)
+    }
     if (snapshotInputs.lvsDataPath) {
       viewerArgs.push('--lvs-data', snapshotInputs.lvsDataPath)
     }
@@ -966,6 +984,8 @@ export class ChipViewerService {
     const isDrcStep = isDrcWorkspaceStep(step, stepLabel, workspaceStepDirectory)
     const lvsDataPath = join(workspaceStepDirectory, 'feature', 'lvs.step.json')
     const isLvsStep = isLvsWorkspaceStep(step, stepLabel, workspaceStepDirectory)
+    const staFeatureDirPath = join(workspaceStepDirectory, 'feature')
+    const isStaStep = isStaWorkspaceStep(step, stepLabel, workspaceStepDirectory)
 
     return {
       dbPath,
@@ -979,6 +999,8 @@ export class ChipViewerService {
       lvsDataPath: isLvsStep && this.fileExists(lvsDataPath) ? lvsDataPath : undefined,
       manifestPath: join(geometryDir, 'geometry.manifest'),
       mapRootPath: this.fileExists(mapRootPath) ? mapRootPath : undefined,
+      staFeatureDirPath:
+        isStaStep && this.fileExists(staFeatureDirPath) ? staFeatureDirPath : undefined,
       workspaceStepDirectory,
     }
   }

@@ -103,6 +103,16 @@ pub struct NearestShape {
     pub distance_squared: u64,
 }
 
+/// Geometry available for one requested timing endpoint.
+///
+/// `pin_bbox` is the preferred timing-path anchor. `instance_bbox` is the
+/// fallback when a pin-port shape is absent from the geometry snapshot.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EndpointPinGeometry {
+    pub instance_bbox: Option<Rect32>,
+    pub pin_bbox: Option<Rect32>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LayerSummary {
     pub layer_id: u16,
@@ -1489,6 +1499,159 @@ fn query_pin_shape_ids_from_endpoint_refs(
     shape_ids.into_iter().collect()
 }
 
+/// Resolves a batch of timing endpoints with one pass for instance extents and
+/// one pass for pin-port shapes. Timing paths contain tens of stages, so this
+/// avoids repeating the full shape scan performed by single-endpoint queries.
+fn resolve_endpoint_pins_from_parts(
+    shapes: &[ShapeRecord],
+    owners: &[OwnerRef],
+    shape_index: &ShapeIdIndex,
+    name_index: &OwnerNameIndex,
+    requests: &[(&str, &str)],
+) -> Vec<EndpointPinGeometry> {
+    let mut resolved = vec![EndpointPinGeometry::default(); requests.len()];
+    if requests.is_empty() {
+        return resolved;
+    }
+
+    let mut requests_by_instance = HashMap::<&str, Vec<usize>>::new();
+    let mut io_requests_by_pin = HashMap::<&str, Vec<usize>>::new();
+    for (index, (instance_name, pin_name)) in requests.iter().enumerate() {
+        let instance_name = instance_name.trim();
+        let pin_name = pin_name.trim();
+        if instance_name.is_empty() {
+            if !pin_name.is_empty() {
+                io_requests_by_pin.entry(pin_name).or_default().push(index);
+            }
+        } else {
+            requests_by_instance
+                .entry(instance_name)
+                .or_default()
+                .push(index);
+        }
+    }
+
+    let mut requests_by_path = HashMap::<u32, Vec<usize>>::new();
+    for (instance_name, request_indexes) in requests_by_instance {
+        for shape_id in name_index.query(instance_name) {
+            let Some(shape) = shape_index.find(shapes, shape_id) else {
+                continue;
+            };
+            if shape.state != ShapeState::Alive as u8 {
+                continue;
+            }
+            let Some(owner) = owners.get(shape.owner_index as usize) else {
+                continue;
+            };
+            if !matches!(
+                OwnerType::from_raw(owner.owner_type),
+                Some(OwnerType::InstanceBBox | OwnerType::InstanceHalo)
+            ) {
+                continue;
+            }
+            for &request_index in &request_indexes {
+                requests_by_path
+                    .entry(owner.path0)
+                    .or_default()
+                    .push(request_index);
+                let instance_bbox = resolved[request_index]
+                    .instance_bbox
+                    .map_or(shape.bbox, |bbox| union_rect(bbox, shape.bbox));
+                resolved[request_index].instance_bbox = Some(instance_bbox);
+            }
+        }
+    }
+    for request_indexes in requests_by_path.values_mut() {
+        request_indexes.sort_unstable();
+        request_indexes.dedup();
+    }
+
+    for shape in shapes {
+        if shape.state != ShapeState::Alive as u8 {
+            continue;
+        }
+        let Some(owner) = owners.get(shape.owner_index as usize) else {
+            continue;
+        };
+        let Some(owner_type) = OwnerType::from_raw(owner.owner_type) else {
+            continue;
+        };
+        let Some(owner_name) = name_index.name_for_owner(owner.owner_type, owner.owner_id) else {
+            continue;
+        };
+        let owner_name = owner_name.trim();
+
+        match owner_type {
+            OwnerType::InstancePinPortShape => {
+                let Some(request_indexes) = requests_by_path.get(&owner.path0) else {
+                    continue;
+                };
+                for request_index in request_indexes {
+                    let (_, pin_name) = requests[*request_index];
+                    if !pin_name_matches(pin_name, owner_name) {
+                        continue;
+                    }
+                    let pin_bbox = resolved[*request_index]
+                        .pin_bbox
+                        .map_or(shape.bbox, |bbox| union_rect(bbox, shape.bbox));
+                    resolved[*request_index].pin_bbox = Some(pin_bbox);
+                }
+            }
+            OwnerType::IoPinPortShape | OwnerType::PinPortShape if owner.path0 == 0 => {
+                let Some(request_indexes) = io_requests_by_pin.get(owner_name) else {
+                    continue;
+                };
+                for request_index in request_indexes {
+                    let (_, pin_name) = requests[*request_index];
+                    if !pin_name_matches(pin_name, owner_name) {
+                        continue;
+                    }
+                    let pin_bbox = resolved[*request_index]
+                        .pin_bbox
+                        .map_or(shape.bbox, |bbox| union_rect(bbox, shape.bbox));
+                    resolved[*request_index].pin_bbox = Some(pin_bbox);
+                }
+            }
+            OwnerType::None
+            | OwnerType::Die
+            | OwnerType::Core
+            | OwnerType::Row
+            | OwnerType::InstanceBBox
+            | OwnerType::InstanceHalo
+            | OwnerType::NetWireSegment
+            | OwnerType::SpecialWireSegment
+            | OwnerType::Via
+            | OwnerType::IoPinPortShape
+            | OwnerType::PinPortShape
+            | OwnerType::Blockage
+            | OwnerType::Fill
+            | OwnerType::Region
+            | OwnerType::Slot
+            | OwnerType::TrackGrid
+            | OwnerType::GCellGrid
+            | OwnerType::Obs => {}
+        }
+    }
+
+    resolved
+}
+
+fn pin_name_matches(requested: &str, owner_name: &str) -> bool {
+    let requested = lookup_name_variants(requested);
+    let owner_name = lookup_name_variants(owner_name);
+    requested.iter().any(|requested_name| {
+        owner_name.iter().any(|owner_name| {
+            requested_name.eq_ignore_ascii_case(owner_name)
+                || requested_name
+                    .split_once('[')
+                    .is_some_and(|(base, _)| base.eq_ignore_ascii_case(owner_name))
+                || owner_name
+                    .split_once('[')
+                    .is_some_and(|(base, _)| base.eq_ignore_ascii_case(requested_name))
+        })
+    })
+}
+
 fn query_endpoint_pin_shape_ids_from_parts(
     shapes: &[ShapeRecord],
     owners: &[OwnerRef],
@@ -2032,6 +2195,19 @@ impl ChipViewDb {
             &self.name_index,
             instance_name,
             pin_name,
+        )
+    }
+
+    /// Resolves instance and pin bounding boxes for a batch of timing
+    /// endpoints. The lookup scans shapes twice per batch instead of once per
+    /// endpoint, which keeps timing-path overlay resolution bounded.
+    pub fn resolve_endpoint_pins(&self, requests: &[(&str, &str)]) -> Vec<EndpointPinGeometry> {
+        resolve_endpoint_pins_from_parts(
+            self.snapshot.shapes(),
+            self.snapshot.owners(),
+            &self.shape_index,
+            &self.name_index,
+            requests,
         )
     }
 
@@ -3532,6 +3708,143 @@ mod tests {
             "A"
         )
         .is_empty());
+    }
+
+    #[test]
+    fn batch_endpoint_resolution_merges_instance_and_pin_geometry() {
+        let owners = [
+            OwnerRef {
+                owner_type: OwnerType::InstanceBBox as u8,
+                owner_id: 20,
+                path0: 3,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::InstanceHalo as u8,
+                owner_id: 40,
+                path0: 3,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::InstancePinPortShape as u8,
+                owner_id: 21,
+                path0: 3,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::InstancePinPortShape as u8,
+                owner_id: 22,
+                path0: 3,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::IoPinPortShape as u8,
+                owner_id: 30,
+                ..OwnerRef::default()
+            },
+        ];
+        let shapes = [
+            ShapeRecord {
+                owner_index: 0,
+                bbox: Rect32 {
+                    lx: 0,
+                    ly: 0,
+                    hx: 10,
+                    hy: 10,
+                },
+                ..shape(1, 1)
+            },
+            ShapeRecord {
+                owner_index: 1,
+                bbox: Rect32 {
+                    lx: 20,
+                    ly: 20,
+                    hx: 30,
+                    hy: 30,
+                },
+                ..shape(2, 1)
+            },
+            ShapeRecord {
+                owner_index: 2,
+                bbox: Rect32 {
+                    lx: 40,
+                    ly: 40,
+                    hx: 50,
+                    hy: 50,
+                },
+                ..shape(3, 2)
+            },
+            ShapeRecord {
+                owner_index: 3,
+                bbox: Rect32 {
+                    lx: 45,
+                    ly: 45,
+                    hx: 60,
+                    hy: 60,
+                },
+                ..shape(4, 2)
+            },
+            ShapeRecord {
+                owner_index: 4,
+                bbox: Rect32 {
+                    lx: 70,
+                    ly: 70,
+                    hx: 80,
+                    hy: 80,
+                },
+                ..shape(5, 3)
+            },
+        ];
+        let name_index = OwnerNameIndex::from_shapes_and_names(
+            &shapes,
+            &owners,
+            [
+                (OwnerType::InstanceBBox as u8, 20, "u0".to_string()),
+                (OwnerType::InstanceHalo as u8, 40, "u0".to_string()),
+                (OwnerType::InstancePinPortShape as u8, 21, "A".to_string()),
+                (OwnerType::InstancePinPortShape as u8, 22, "A".to_string()),
+                (OwnerType::IoPinPortShape as u8, 30, "CLK".to_string()),
+            ],
+        );
+        let shape_index = ShapeIdIndex::from_shapes(&shapes);
+
+        let resolved = resolve_endpoint_pins_from_parts(
+            &shapes,
+            &owners,
+            &shape_index,
+            &name_index,
+            &[("u0", "A"), ("", "CLK"), ("missing", "A")],
+        );
+
+        assert_eq!(
+            resolved[0].instance_bbox,
+            Some(Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 30,
+                hy: 30,
+            })
+        );
+        assert_eq!(
+            resolved[0].pin_bbox,
+            Some(Rect32 {
+                lx: 40,
+                ly: 40,
+                hx: 60,
+                hy: 60,
+            })
+        );
+        assert_eq!(resolved[1].instance_bbox, None);
+        assert_eq!(
+            resolved[1].pin_bbox,
+            Some(Rect32 {
+                lx: 70,
+                ly: 70,
+                hx: 80,
+                hy: 80,
+            })
+        );
+        assert_eq!(resolved[2], EndpointPinGeometry::default());
     }
 
     #[test]

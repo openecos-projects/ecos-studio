@@ -40,6 +40,7 @@ mod label_layout;
 mod lvs;
 mod session_close;
 mod snapshot_reload;
+mod timing;
 use gpu_tile_worker::GpuTileWorker;
 use label_layout::{
     ResolvedLabels, ShapeLabelCandidate, ShapeLabelCollector, ShapeLabelKey, ShapeLabelKind,
@@ -161,6 +162,7 @@ struct LoadingViewer {
     antenna_statis_path: Option<PathBuf>,
     lvs_data_path: Option<PathBuf>,
     map_root_path: Option<PathBuf>,
+    sta_feature_dir: Option<PathBuf>,
     pub target_format: wgpu::TextureFormat,
     pub render_mode: crate::RenderMode,
 }
@@ -256,6 +258,7 @@ struct LoadedViewer {
     lvs_analysis: Option<lvs::LvsAnalysis>,
     selected_lvs_group: Option<usize>,
     show_all_lvs: bool,
+    timing: Option<timing::TimingPanelState>,
     clock_tree: Option<crate::clock_tree::ClockTreePanel>,
     map_catalog: Option<MapCatalog>,
     map_catalog_error: Option<String>,
@@ -390,6 +393,7 @@ enum AnalysisTab {
     Drc,
     Lvs,
     Map,
+    Timing,
 }
 
 struct ActiveHeatmap {
@@ -1576,6 +1580,7 @@ impl ChipViewerApp {
         antenna_statis_path: Option<PathBuf>,
         lvs_data_path: Option<PathBuf>,
         map_root_path: Option<PathBuf>,
+        sta_feature_dir: Option<PathBuf>,
         target_format: wgpu::TextureFormat,
         render_mode: crate::RenderMode,
     ) -> Self {
@@ -1605,6 +1610,7 @@ impl ChipViewerApp {
                 antenna_statis_path,
                 lvs_data_path,
                 map_root_path,
+                sta_feature_dir,
                 target_format,
                 render_mode,
             }),
@@ -1669,23 +1675,27 @@ impl ChipViewerApp {
     fn poll_loading(&mut self) {
         let next_state = match &mut self.state {
             ViewerState::Loading(loading) => match loading.receiver.try_recv() {
-                Ok(Ok(db)) => Some(ViewerState::Loaded(LoadedViewer::new(
-                    chip_display::ColorTheme::Vivid,
-                    db,
-                    loading.edit_enabled,
-                    loading.initial_session_dirty,
-                    loading.edit_command_dir.clone(),
-                    loading.edit_result_dir.clone(),
-                    loading.macro_staging_path.clone(),
-                    loading.drc_data_path.clone(),
-                    loading.drc_statis_path.clone(),
-                    loading.antenna_data_path.clone(),
-                    loading.antenna_statis_path.clone(),
-                    loading.lvs_data_path.clone(),
-                    loading.map_root_path.clone(),
-                    loading.target_format,
-                    loading.render_mode,
-                ))),
+                Ok(Ok(db)) => {
+                    let mut loaded = LoadedViewer::new(
+                        chip_display::ColorTheme::Vivid,
+                        db,
+                        loading.edit_enabled,
+                        loading.initial_session_dirty,
+                        loading.edit_command_dir.clone(),
+                        loading.edit_result_dir.clone(),
+                        loading.macro_staging_path.clone(),
+                        loading.drc_data_path.clone(),
+                        loading.drc_statis_path.clone(),
+                        loading.antenna_data_path.clone(),
+                        loading.antenna_statis_path.clone(),
+                        loading.lvs_data_path.clone(),
+                        loading.map_root_path.clone(),
+                        loading.target_format,
+                        loading.render_mode,
+                    );
+                    loaded.attach_timing_feature_dir(loading.sta_feature_dir.clone());
+                    Some(ViewerState::Loaded(loaded))
+                }
                 Ok(Err(err)) => Some(ViewerState::Error(err)),
                 Err(mpsc::TryRecvError::Disconnected) => Some(ViewerState::Error(
                     "geometry loader stopped before returning a result".to_string(),
@@ -2356,6 +2366,7 @@ impl LoadedViewer {
             lvs_analysis,
             selected_lvs_group: None,
             show_all_lvs: false,
+            timing: None,
             clock_tree,
             map_catalog,
             map_catalog_error,
@@ -2412,6 +2423,7 @@ impl LoadedViewer {
             || self.map_catalog.is_some()
             || self.map_catalog_error.is_some()
             || self.clock_tree.is_some()
+            || self.timing.is_some()
     }
 
     fn analysis_sidebar(&mut self, ui: &mut egui::Ui) {
@@ -2420,9 +2432,15 @@ impl LoadedViewer {
         let has_lvs = self.lvs_analysis.is_some();
         let has_maps = self.map_catalog.is_some() || self.map_catalog_error.is_some();
         let has_clock_tree = self.clock_tree.is_some();
+        let has_timing = self.timing.is_some();
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
+            if has_timing
+                && analysis_tab_button(ui, "TIMING", self.analysis_tab == AnalysisTab::Timing)
+            {
+                self.analysis_tab = AnalysisTab::Timing;
+            }
             if has_drc && analysis_tab_button(ui, "DRC", self.analysis_tab == AnalysisTab::Drc) {
                 self.analysis_tab = AnalysisTab::Drc;
             }
@@ -2455,8 +2473,11 @@ impl LoadedViewer {
         let show_lvs = self.analysis_tab == AnalysisTab::Lvs && has_lvs;
         let show_map = self.analysis_tab == AnalysisTab::Map && has_maps;
         let show_clock_tree = self.analysis_tab == AnalysisTab::ClockTree && has_clock_tree;
+        let show_timing = self.analysis_tab == AnalysisTab::Timing && has_timing;
 
-        if show_drc {
+        if show_timing {
+            self.timing_sidebar(ui);
+        } else if show_drc {
             self.drc_sidebar(ui);
         } else if show_antenna {
             self.antenna_sidebar(ui);
@@ -2476,6 +2497,8 @@ impl LoadedViewer {
             self.map_sidebar(ui);
         } else if has_clock_tree {
             self.clock_tree_controls(ui);
+        } else if has_timing {
+            self.timing_sidebar(ui);
         }
     }
 
@@ -4604,6 +4627,14 @@ impl LoadedViewer {
                         }
                     }
                 }
+            }
+        }
+
+        if self.analysis_tab == AnalysisTab::Timing {
+            if let Some(timing) = &self.timing {
+                drawn += timing.paint(
+                    &self.db, &painter, world, viewport, canvas, self.zoom, self.pan,
+                );
             }
         }
 
@@ -8772,6 +8803,15 @@ impl eframe::App for ChipViewerApp {
             .default_width(320.0)
             .show(ctx, |ui| self.sidebar(ui));
         if let ViewerState::Loaded(loaded) = &mut self.state {
+            if loaded.analysis_tab == AnalysisTab::Timing && loaded.has_selected_timing_path() {
+                egui::TopBottomPanel::bottom("chip_viewer_timing_timeline")
+                    .resizable(true)
+                    .min_height(170.0)
+                    .max_height(420.0)
+                    .default_height(260.0)
+                    .frame(egui::Frame::side_top_panel(&ctx.style()).fill(ecos_panel()))
+                    .show(ctx, |ui| loaded.timing_timeline(ui));
+            }
             loaded.show_clock_tree_graph(ctx);
         }
         egui::CentralPanel::default().show(ctx, |ui| {
