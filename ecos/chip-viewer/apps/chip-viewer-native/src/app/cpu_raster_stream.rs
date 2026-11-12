@@ -8,6 +8,8 @@ pub(super) struct RasterStream<'a> {
     compact: &'a mut compact::CompactPainter,
     targets: &'a mut RasterTargetPool,
     target: Option<RasterTarget>,
+    font: font::RasterFont,
+    request: &'a SceneRequest,
     key: SceneKey,
     sequence: usize,
     next_snapshot: Option<Instant>,
@@ -18,6 +20,41 @@ pub(super) struct RasterStream<'a> {
 }
 
 impl OffscreenRenderer {
+    #[cfg(test)]
+    pub(in crate::app::cpu_scene) fn rasterize_stream_primitives(
+        &mut self,
+        request: &SceneRequest,
+        meshes: &[egui::ClippedPrimitive],
+        is_current: impl Fn() -> bool,
+        mut publish: impl FnMut(Vec<u8>, usize),
+    ) -> Result<Option<(Vec<u8>, Duration)>, String> {
+        if !is_current() {
+            return Ok(None);
+        }
+        let Some(mut raster) = RasterStream::begin(
+            &mut self.painter,
+            &mut self.compact,
+            &mut self.targets,
+            request,
+            Some([Duration::ZERO; 2]),
+        )?
+        else {
+            return Ok(None);
+        };
+        for primitive in meshes {
+            let batch = std::slice::from_ref(primitive);
+            if !raster.push(
+                batch,
+                &geometry::pack_meshes(batch),
+                &is_current,
+                &mut publish,
+            )? {
+                return Ok(None);
+            }
+        }
+        raster.finish(&is_current)
+    }
+
     #[cfg(test)]
     pub(in crate::app::cpu_scene) fn build_streaming_scene(
         &mut self,
@@ -141,17 +178,16 @@ impl<'a> RasterStream<'a> {
         painter: &'a mut eframe::egui_glow::Painter,
         compact: &'a mut compact::CompactPainter,
         targets: &'a mut RasterTargetPool,
-        request: &SceneRequest,
+        request: &'a SceneRequest,
         intervals: Option<[Duration; 2]>,
     ) -> Result<Option<Self>, String> {
         let started = Instant::now();
         let key = &request.key;
         let mut trace = trace::RasterTrace::enabled(key);
-        let font_image = request.repaint.fonts(egui::epaint::Fonts::image);
-        if let Some(trace) = &mut trace {
-            trace.font_copy_ms = trace::milliseconds(started.elapsed());
-        }
-        if font_image.size != key.font_texture_size {
+        let atlas_size = request
+            .repaint
+            .fonts(|fonts| fonts.texture_atlas().lock().size());
+        if atlas_size != key.font_texture_size {
             return Ok(None);
         }
         let phase = Instant::now();
@@ -160,10 +196,7 @@ impl<'a> RasterStream<'a> {
             trace.framebuffer_ms = trace::milliseconds(phase.elapsed());
         }
         let phase = Instant::now();
-        painter.set_texture(
-            egui::TextureId::default(),
-            &egui::epaint::ImageDelta::full(font_image, egui::TextureOptions::LINEAR),
-        );
+        let font = font::RasterFont::new(painter);
         if let Some(trace) = &mut trace {
             trace.font_upload_ms = trace::milliseconds(phase.elapsed());
         }
@@ -177,6 +210,8 @@ impl<'a> RasterStream<'a> {
             compact,
             targets,
             target: Some(target),
+            font,
+            request,
             key: key.clone(),
             sequence: 0,
             next_snapshot: intervals.map(|intervals| started + intervals[0]),
@@ -208,6 +243,15 @@ impl<'a> RasterStream<'a> {
             let (prepared, remaining_packed) = packed.split_at(batch.len());
             meshes = remaining;
             packed = remaining_packed;
+            if !self.font.prepare(
+                self.painter,
+                self.request,
+                batch,
+                prepared,
+                self.trace.as_mut(),
+            ) {
+                return Ok(false);
+            }
             let uploaded_bytes = self.compact.paint(self.painter, &self.key, batch, prepared);
             self.sequence += batch.len();
             self.raster_duration += started.elapsed();

@@ -1,4 +1,4 @@
-//! Retain exact completed frames while a newer camera is prepared separately.
+//! Reuse same-scale geometry while the current camera is prepared separately.
 
 use super::cpu_scene::progress::ProgressFrame;
 use super::cpu_scene::{CpuScene, SceneKey};
@@ -6,6 +6,10 @@ use super::*;
 use eframe::glow::{self, HasContext};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "cpu_presentation_test_support.rs"]
+pub(super) mod test_support;
 
 #[path = "cpu_raster_target.rs"]
 pub(super) mod target;
@@ -18,6 +22,9 @@ use targets::PresentationTargets;
 #[path = "cpu_present_trace.rs"]
 mod trace;
 use trace::PresentTrace;
+
+#[path = "cpu_pan_presentation.rs"]
+mod pan;
 
 #[derive(Default)]
 pub(super) struct CpuRasterCache {
@@ -104,7 +111,7 @@ impl CpuRasterCache {
                 .is_some_and(|resources| {
                     resources
                         .frames()
-                        .any(|frame| frame.scene.key() == scene.key())
+                        .any(|frame| frame.scene.key().same_geometry(scene.key()))
                 })
     }
 
@@ -117,31 +124,28 @@ impl CpuRasterCache {
                 resources
                     .frames()
                     .find(|frame| frame.scene.key() == key)
+                    .or_else(|| {
+                        resources
+                            .frames()
+                            .find(|frame| frame.scene.key().same_geometry(key))
+                    })
                     .map(|frame| Arc::clone(&frame.scene))
             })
     }
 
     pub(super) fn is_visible(&self, key: &SceneKey) -> bool {
-        if self.is_partial(key) {
-            return true;
-        }
         self.resources
             .lock()
             .unwrap()
             .as_ref()
             .is_some_and(|resources| {
-                resources.source(key).is_some_and(|frame| {
-                    key.raster_camera(frame.scene.key())
-                        .destination(frame.scene.key())
-                        .intersects(key.canvas())
-                })
+                resources
+                    .presentation_source(key)
+                    .is_some_and(|source| key.destination(source.key()).intersects(key.canvas()))
             })
     }
 
-    pub(super) fn is_held(&self, key: &SceneKey) -> bool {
-        if self.is_partial(key) {
-            return false;
-        }
+    pub(super) fn is_preview(&self, key: &SceneKey) -> bool {
         if self.failed.load(Ordering::Relaxed) {
             return false;
         }
@@ -150,9 +154,10 @@ impl CpuRasterCache {
             .unwrap()
             .as_ref()
             .is_some_and(|resources| {
-                resources
-                    .source(key)
-                    .is_some_and(|frame| !key.same_raster_scale(frame.scene.key()))
+                resources.presentation_source(key).is_some_and(|source| {
+                    !source.key().same_geometry(key)
+                        && key.destination(source.key()).intersects(key.canvas())
+                })
             })
     }
 
@@ -162,11 +167,7 @@ impl CpuRasterCache {
             .unwrap()
             .as_ref()
             .is_some_and(|resources| {
-                !resources.frames().any(|frame| frame.scene.key() == key)
-                    && resources
-                        .progress
-                        .as_ref()
-                        .is_some_and(|frame| frame.frame.key == *key)
+                matches!(resources.presentation_source(key), Some(RasterSource::Partial(frame)) if frame.frame.key == *key)
             })
     }
 
@@ -212,6 +213,27 @@ struct ProgressTarget {
     frame: Arc<ProgressFrame>,
 }
 
+enum RasterSource<'a> {
+    Complete(&'a RasterFrame),
+    Partial(&'a ProgressTarget),
+}
+
+impl RasterSource<'_> {
+    fn key(&self) -> &SceneKey {
+        match self {
+            Self::Complete(frame) => frame.scene.key(),
+            Self::Partial(frame) => &frame.frame.key,
+        }
+    }
+
+    fn target(&self) -> &RasterTarget {
+        match self {
+            Self::Complete(frame) => &frame.target,
+            Self::Partial(frame) => &frame.target,
+        }
+    }
+}
+
 impl RasterResources {
     fn new(gl: Arc<glow::Context>) -> Result<Self, String> {
         if gl.version().major < 3 || unsafe { gl.get_parameter_i32(glow::SAMPLES) } > 1 {
@@ -237,12 +259,13 @@ impl RasterResources {
 
     fn source(&self, key: &SceneKey) -> Option<&RasterFrame> {
         self.frames()
-            .find(|frame| frame.scene.key() == key)
+            .find(|frame| frame.scene.key().same_geometry(key))
             .or_else(|| {
                 self.frames()
                     .filter(|frame| {
                         frame.scene.key().compatible(key)
                             && key.same_raster_scale(frame.scene.key())
+                            && key.destination(frame.scene.key()).intersects(key.canvas())
                     })
                     .max_by(|first, second| {
                         let coverage = |frame: &RasterFrame| {
@@ -254,10 +277,21 @@ impl RasterResources {
                         coverage(first).total_cmp(&coverage(second))
                     })
             })
-            .or_else(|| {
-                self.frames()
-                    .find(|frame| frame.scene.key().compatible(key))
-            })
+    }
+
+    fn presentation_source(&self, key: &SceneKey) -> Option<RasterSource<'_>> {
+        let completed = self.source(key);
+        if let Some(frame) = completed {
+            return Some(RasterSource::Complete(frame));
+        }
+        let progress = self
+            .progress
+            .as_ref()
+            .filter(|frame| key.raster_destination(&frame.frame.key).is_some());
+        if let Some(frame) = progress.filter(|frame| frame.frame.key == *key) {
+            return Some(RasterSource::Partial(frame));
+        }
+        progress.map(RasterSource::Partial)
     }
 
     fn paint(
@@ -301,20 +335,22 @@ impl RasterResources {
         }
         trace.mark("compatibility_cleanup");
         self.targets.observe(key);
-        let already_ready = self
-            .frames()
-            .any(|frame| frame.scene.key() == key && frame.target.size == info.screen_size_px);
+        let already_ready = self.frames().any(|frame| {
+            frame.scene.key().same_geometry(key) && frame.target.size == info.screen_size_px
+        });
         let mut completed = false;
         if !already_ready {
             if let Some(scene) = scene {
                 completed = self.advance(info, scene, ctx, background, trace)?;
             }
         }
-        let exact = self.frames().any(|frame| frame.scene.key() == key);
+        let exact = self
+            .frames()
+            .any(|frame| frame.scene.key().same_geometry(key));
         if exact
             || self.progress.as_ref().is_some_and(|target| {
-                target.frame.key != *key
-                    || progress.is_none_or(|frame| frame.generation != target.frame.generation)
+                target.target.size != info.screen_size_px
+                    || key.raster_destination(&target.frame.key).is_none()
             })
         {
             if let Some(previous) = self.progress.take() {
@@ -344,17 +380,7 @@ impl RasterResources {
             }
         }
         trace.mark("progress_upload");
-        if let Some(progress) = &self.progress {
-            progress.target.blit(&gl, info, draw, key, key);
-        } else if let Some(source) = self.source(key) {
-            source.target.blit(
-                &gl,
-                info,
-                draw,
-                key.raster_camera(source.scene.key()),
-                source.scene.key(),
-            );
-        }
+        self.present(&gl, info, draw, key);
         if already_ready && self.targets.warm_when_idle(&gl, info.screen_size_px)? {
             trace.mark("idle_target_allocation");
         }

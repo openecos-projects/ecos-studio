@@ -34,7 +34,6 @@ pub(super) struct LabelResolver {
 }
 
 impl LabelResolver {
-    #[cfg(test)]
     pub(super) fn resolve(
         &mut self,
         request: &SceneRequest,

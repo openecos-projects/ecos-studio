@@ -71,20 +71,17 @@ fn preview_accepts_camera_changes_but_rejects_hidden_or_changed_geometry() {
 }
 
 #[test]
-fn zoom_transition_never_magnifies_or_shrinks_completed_pixels() {
+fn zoom_transition_rejects_completed_pixels_from_a_different_scale() {
     let fixture = Fixture::new();
     for source_zoom in [1.0, 2.6125715, 46.587826, 317.98645] {
         let source = fixture.request(source_zoom, 1.0).key;
         for zoom in [1.0, 2.6125715, 6.825528, 17.832176, 46.587826, 121.714] {
             let mut requested = fixture.request(zoom, 1.0).key;
             requested.pan = egui::vec2(37.0, -19.0);
-            if zoom != source_zoom {
-                let camera = requested.raster_camera(&source);
-                assert_eq!(camera.destination(&source), source.canvas);
-                assert_eq!(camera, &source);
-            } else {
-                assert_eq!(requested.raster_camera(&source), &requested);
-            }
+            assert_eq!(
+                requested.raster_destination(&source),
+                (zoom == source_zoom).then(|| requested.destination(&source))
+            );
         }
     }
 }
@@ -96,12 +93,12 @@ fn same_scale_pan_still_translates_the_completed_frame() {
     let mut requested = source.clone();
     requested.pan = egui::vec2(37.0, -19.0);
     assert_eq!(
-        requested.raster_camera(&source).destination(&source),
-        source.canvas.translate(requested.pan)
+        requested.raster_destination(&source),
+        Some(source.canvas.translate(requested.pan))
     );
     requested.canvas.max.x += 250.0;
     requested.canvas.max.y += 200.0;
-    assert_eq!(requested.raster_camera(&source), &source);
+    assert_eq!(requested.raster_destination(&source), None);
 }
 
 #[test]

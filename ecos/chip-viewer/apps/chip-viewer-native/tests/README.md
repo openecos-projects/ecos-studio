@@ -1,5 +1,37 @@
 # Native rendering checks
 
+## Selection and pan refresh, November 12
+
+`../../../docs/render-interaction-refresh.md` documents selection-only geometry
+reuse, post-drag viewport calculation and progressive pan composition.
+`interaction_render_e2e.py --scenario selection` sends actual clicks and requires
+multiple selected shapes, zero new geometry rasterizations and zero preview
+substitutions. It also applies the normal latency and visibility checks. The
+EGL `interaction_tests` cover exact framebuffer pixels and the scene coordinator.
+
+## Camera presentation, November 12
+
+`../../../docs/render-interaction-presentation.md` records the removal of the
+old-camera zoom hold and retention of same-scale partial results during pan.
+The upstream investigation is in
+`../../../docs/klayout-interaction-rendering-research.md`: KLayout shifts
+coverage on pan and invalidates it on zoom; it does not scale an old RGBA frame.
+ECOS still uses temporary RGBA pan previews, not KLayout's coverage/damage path.
+
+Run the new pixel regressions with EGL required, so unavailable graphics cannot
+silently skip the interaction checks:
+
+```bash
+ECOS_REQUIRE_INTERACTION_EGL=1 cargo test -p chip-viewer-native interaction_tests -- --nocapture
+```
+
+These exercise the actual presentation framebuffer, current-camera adoption,
+exact history restoration, consecutive partial-frame pans and late results.
+Static fit/dense references remain byte-identical in layout pixels. The strict
+real-design interaction/zoom latency gates still fail; removing the held image
+exposes background while the first new-scale snapshot is prepared. This change
+does not establish that the complete KLayout interaction/performance goal is met.
+
 ## Ordered coverage oracle and live feedback, November 12
 
 `../../../docs/render-ordered-coverage-validation.md` records the new test-only
@@ -974,8 +1006,10 @@ persistent evidence paths and the remaining strict failures.
 CPU rectangle / original-GL repair path, disjoint repair scissors, exact ordered
 grid-overlay tail, fallback budgets and rejected experiments. It records the
 final fullscreen all-visible pixel checks, interleaved drag measurements and
-the still-failing live-feedback / full-zoom gates. Drag `settle_seconds` is
-geometry readiness, not label completion. The default 20-uncached-sample zoom
+the still-failing live-feedback / full-zoom gates. Drag `settle_seconds` waits
+for two non-pending samples; the current native `scene_pending` includes label
+completion. Use the separate geometry and label timestamps in the zoom harness
+to distinguish those phases. The default 20-uncached-sample zoom
 gate remains required; the small investigative A/B does not satisfy it.
 
 Force the certified oracle rather than accidentally testing another EGL device:
@@ -988,3 +1022,19 @@ ECOS_REQUIRE_COVERAGE_EGL=1 ECOS_COVERAGE_GL_RENDERER='llvmpipe (LLVM 20.1.2, 25
 diagnosis. Debug builds and unknown renderer/version/DPR/options already retain
 that path automatically. Do not use Debug scalar timings to promise Release
 performance or describe held old-camera images as current geometry.
+
+### Deferred font atlas upload
+
+`docs/render-interaction-first-snapshot.md` records the 1×1 white texture path,
+the full-atlas fallback for any non-white default UV (including prepared discs),
+actual EGL prefix comparisons, and the remaining strict latency failures.
+This preserves the existing shader and does not cache atlas content by size.
+
+```sh
+ECOS_REQUIRE_INTERACTION_EGL=1 cargo test -p chip-viewer-native raster_font_tests -- --nocapture
+```
+
+`interaction_render_e2e.py --raster-trace` now enables the same raster diagnostic
+as the static and zoom harnesses. It explicitly marks the report diagnostic;
+its extra `gl.finish()` calls make it unsuitable for acceptance timing. The
+untraced harness keeps all existing feedback, recovery, and stall limits.

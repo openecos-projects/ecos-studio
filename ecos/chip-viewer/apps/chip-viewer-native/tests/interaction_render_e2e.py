@@ -222,6 +222,12 @@ def run_scenario(name, action, process, window, stats_path, output, timeout):
         "min_active_zoom": min(sample["zoom"] for sample in active),
         "max_active_zoom": max(sample["zoom"] for sample in active),
         "final_drawn_shapes": after[-1]["drawn_shapes"],
+        "selected_shape_ids": sorted({
+            sample["selected_shape_id"] for sample in after[len(before):]
+            if sample.get("selected_shape_id") is not None
+        }),
+        "rasterizations_during": after[-1].get("cpu_rasterizations", 0)
+        - before[-1].get("cpu_rasterizations", 0),
         "no_overview_substitution": all(not sample["use_view_tiles"] for sample in after[len(before):]),
         **interaction_readiness(active),
     }, image
@@ -242,6 +248,10 @@ def run(args):
         trace_path = args.output / "presentation.jsonl"
         trace_path.unlink(missing_ok=True)
         environment["ECOS_RENDER_PRESENT_TRACE"] = str(trace_path.resolve())
+    if args.raster_trace:
+        trace_path = args.output / "raster.jsonl"
+        trace_path.unlink(missing_ok=True)
+        environment["ECOS_RENDER_RASTER_TRACE"] = str(trace_path.resolve())
     scenarios = []
     with (args.output / "viewer.log").open("w") as log:
         process = subprocess.Popen(
@@ -292,6 +302,15 @@ def run(args):
                     if index == len(directions) // 2:
                         during()
 
+            def select_shapes(during):
+                for index, offset in enumerate([(-80, -50), (40, 30), (100, -80), (-40, 70)]):
+                    pointer.move((center[0] + offset[0], center[1] + offset[1]))
+                    pointer.button(1, True)
+                    pointer.button(1, False)
+                    time.sleep(0.15)
+                    if index == 1:
+                        during()
+
             actions = [
                 ("left-drag", lambda during: drag(1, during)),
                 ("middle-drag", lambda during: drag(2, during)),
@@ -300,6 +319,7 @@ def run(args):
                 ("zoom-out", lambda during: zoom([-1] * 6, during)),
                 ("alternating-zoom", lambda during: zoom([1, -1] * 12, during)),
                 ("fit-to-view", lambda during: pointer.home(window)),
+                ("selection", select_shapes),
             ]
             for name, action in actions:
                 if args.scenario and name != args.scenario:
@@ -321,6 +341,7 @@ def run(args):
             samples = read_samples(stats_path)
             report = {
                 "presentation_trace_diagnostic": args.presentation_trace,
+                "raster_trace_diagnostic": args.raster_trace,
                 "initial_geometry_ready_seconds": initial_ready,
                 "display_size": list(initial.size),
                 "is_gpu": samples[-1]["is_gpu"],
@@ -353,6 +374,13 @@ def run(args):
                     failures.append(f"{name}: screenshot lost the visible layout")
                 if name == "fit-to-view" and scenario["returned_layout_pixels"] != 0:
                     failures.append(f"{name}: settled layout pixels differ from initial exact scene")
+                if name == "selection":
+                    if len(scenario["selected_shape_ids"]) < 2:
+                        failures.append("selection: clicks did not select different shapes")
+                    if scenario["rasterizations_during"] != 0:
+                        failures.append("selection: selecting shapes rerasterized the layout")
+                    if scenario["preview_fraction"] != 0:
+                        failures.append("selection: complete geometry was replaced by a preview")
             if any(scenario["name"] == "zoom-in" and scenario["final_zoom"] <= 1.1 for scenario in scenarios):
                 failures.append("wheel input did not zoom in")
             if any(scenario["name"] == "zoom-out" and abs(scenario["final_zoom"] - 1) > 0.00001 for scenario in scenarios):
@@ -378,9 +406,11 @@ def main():
     parser.add_argument("--max-proxy-run-ms", type=float)
     parser.add_argument("--skip-during-screenshots", action="store_true")
     parser.add_argument("--presentation-trace", action="store_true")
+    parser.add_argument("--raster-trace", action="store_true")
     parser.add_argument("--scenario", choices=[
         "left-drag", "middle-drag", "right-drag", "zoom-in", "zoom-out",
         "alternating-zoom", "fit-to-view",
+        "selection",
     ])
     args = parser.parse_args()
     if args.max_proxy_run_ms is not None and (

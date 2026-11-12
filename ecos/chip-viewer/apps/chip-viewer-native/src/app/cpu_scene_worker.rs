@@ -7,6 +7,7 @@ pub(super) fn spawn(
 ) {
     thread::spawn(move || {
         let label_worker = labels::LabelWorker::new(Arc::clone(&worker_inbox));
+        let mut selection_labels = labels::LabelResolver::default();
         let evidence_directory =
             std::env::var_os("ECOS_RENDER_PROGRESS_EVIDENCE").map(PathBuf::from);
         #[cfg(target_os = "linux")]
@@ -27,7 +28,20 @@ pub(super) fn spawn(
                     && worker_inbox.generation.load(Ordering::Relaxed) == generation
             };
             let scene = if let Some(scene) = retained {
-                scene
+                if scene.key == request.key {
+                    scene
+                } else {
+                    let Some(mut scene) = builder::refresh_labels(
+                        &request,
+                        &scene,
+                        &mut selection_labels,
+                        &is_current,
+                    ) else {
+                        continue;
+                    };
+                    scene.generation = generation;
+                    Arc::new(scene)
+                }
             } else if let Some(mut scene) = {
                 #[cfg(target_os = "linux")]
                 {

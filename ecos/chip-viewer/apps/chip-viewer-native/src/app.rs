@@ -109,6 +109,7 @@ pub struct CanvasRenderStats {
     pub drawn_shapes: usize,
     pub estimated_primitives: usize,
     pub label_count: usize,
+    pub selected_shape_id: Option<ShapeId>,
     pub use_view_tiles: bool,
     pub zoom: f32,
     pub lod: u8,
@@ -4049,17 +4050,6 @@ impl LoadedViewer {
             .map(|layer| (layer.layer_id, layer.style))
             .collect();
         let query_layer_ids = render_query_layer_ids(&self.layers, self.object_visibility);
-        let viewport = screen_to_world_rect(canvas, world, canvas, self.zoom, self.pan);
-        let use_view_tiles = self.should_use_view_tiles(viewport, world, canvas);
-        let cache_cpu_overlays = !self.is_gpu_active()
-            && !use_view_tiles
-            && (self.analysis_tab != AnalysisTab::Map || self.active_heatmap.is_none());
-        let hover_world_point = ui
-            .ctx()
-            .input(|input| input.pointer.hover_pos())
-            .filter(|_| pointer_over_layout)
-            .map(|pos| screen_to_world_point(pos, world, canvas, self.zoom, self.pan));
-
         if response.drag_started() && drag_started_in_canvas && !pointer_over_heatmap {
             self.focus_animation = None;
             self.pan_drag.reset();
@@ -4143,6 +4133,16 @@ impl LoadedViewer {
             self.pan_drag.reset();
         }
 
+        let viewport = screen_to_world_rect(canvas, world, canvas, self.zoom, self.pan);
+        let use_view_tiles = self.should_use_view_tiles(viewport, world, canvas);
+        let cache_cpu_overlays = !self.is_gpu_active()
+            && !use_view_tiles
+            && (self.analysis_tab != AnalysisTab::Map || self.active_heatmap.is_none());
+        let hover_world_point = ui
+            .ctx()
+            .input(|input| input.pointer.hover_pos())
+            .filter(|_| pointer_over_layout)
+            .map(|pos| screen_to_world_point(pos, world, canvas, self.zoom, self.pan));
         let interaction_point = response
             .interact_pointer_pos()
             .filter(|pos| canvas.contains(*pos) && !pointer_over_heatmap)
@@ -4467,6 +4467,7 @@ impl LoadedViewer {
                         .paint_glow(cpu_scene.as_ref(), &painter, bg_color);
                     cpu_scene_visible = self.cpu_scene_cache.raster_visible();
                 }
+                let geometry_pending;
                 if let Some(scene) = &cpu_scene {
                     if self.glow_rendering {
                         cpu_scene_pending = !self.cpu_scene_cache.raster_ready(scene);
@@ -4478,13 +4479,15 @@ impl LoadedViewer {
                         drawn = scene.drawn + scene.overlay_drawn;
                         estimated_primitives = scene.primitives;
                     }
-                    cpu_scene_pending |= !scene.labels_ready();
+                    geometry_pending = cpu_scene_pending;
+                    cpu_scene_pending |= !self.cpu_scene_cache.labels_ready(scene);
                     query_duration = scene.query_duration;
                     filter_duration = scene.filter_duration;
                 } else {
                     cpu_scene_pending = true;
+                    geometry_pending = true;
                 }
-                if cpu_scene_pending {
+                if geometry_pending {
                     painter.text(
                         if cpu_scene_visible {
                             canvas.right_top() + egui::vec2(-10.0, 10.0)
@@ -4504,6 +4507,8 @@ impl LoadedViewer {
                         egui::FontId::proportional(14.0),
                         ecos_text_secondary(),
                     );
+                }
+                if cpu_scene_pending {
                     ui.ctx().request_repaint_after(Duration::from_millis(16));
                 }
                 paint_duration += paint_started.elapsed();
@@ -4547,7 +4552,7 @@ impl LoadedViewer {
         }
 
         let label_resolve_started = collect_stats.then(Instant::now);
-        let resolved_labels = if is_interacting || cpu_scene_pending {
+        let resolved_labels = if is_interacting || (cpu_scene_pending && cpu_scene.is_none()) {
             Arc::new(ResolvedLabels::default())
         } else {
             let ctx = ui.ctx().clone();
@@ -4816,7 +4821,6 @@ impl LoadedViewer {
         self.paint_reload_indicator(ui, &painter, canvas);
 
         if collect_stats {
-            let cpu_scene_held = self.glow_rendering && self.cpu_scene_cache.raster_held();
             let stats = CanvasRenderStats {
                 frame_time_ms: canvas_start.elapsed().as_secs_f32() * 1000.0,
                 frame_interval_ms: 0.0,
@@ -4830,6 +4834,7 @@ impl LoadedViewer {
                 drawn_shapes: drawn,
                 estimated_primitives,
                 label_count: resolved_labels.labels.len(),
+                selected_shape_id: self.selected,
                 use_view_tiles,
                 zoom: self.zoom,
                 lod: view_lod,
@@ -4838,20 +4843,14 @@ impl LoadedViewer {
                 is_gpu: self.is_gpu_active(),
                 cpu_scene_pending,
                 cpu_scene_visible,
-                cpu_scene_preview: self.glow_rendering
-                    && cpu_scene_visible
-                    && !cpu_scene_held
-                    && !self.cpu_scene_cache.raster_partial()
-                    && cpu_scene
-                        .as_ref()
-                        .is_none_or(|scene| !self.cpu_scene_cache.raster_ready(scene)),
-                cpu_scene_held,
+                cpu_scene_preview: self.glow_rendering && self.cpu_scene_cache.raster_preview(),
+                cpu_scene_held: false,
                 cpu_scene_partial: self.cpu_scene_cache.raster_partial(),
                 cpu_history_bytes: self.cpu_scene_cache.history_bytes(),
                 cpu_scene_cache_hit: self.cpu_scene_cache.restored(),
                 cpu_labels_pending: cpu_scene
                     .as_ref()
-                    .is_some_and(|scene| !scene.labels_ready()),
+                    .is_some_and(|scene| !self.cpu_scene_cache.labels_ready(scene)),
                 cpu_scene_build_ms: cpu_scene
                     .as_ref()
                     .map_or(0.0, |scene| scene.build_duration.as_secs_f32() * 1000.0),

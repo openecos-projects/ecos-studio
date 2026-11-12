@@ -129,7 +129,9 @@ impl RasterTarget {
         source: &SceneKey,
     ) {
         let clip = info.clip_rect_in_pixels();
-        let destination = current.destination(source);
+        let Some(destination) = current.raster_destination(source) else {
+            return;
+        };
         let visible = destination.intersect(info.clip_rect);
         if !visible.is_positive() {
             return;

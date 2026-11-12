@@ -7,6 +7,14 @@ use chipgeom_format::{GeometryFileKind, GeometryMetaRecord, LinePayload, PointPa
 #[path = "cpu_camera_tests.rs"]
 mod camera_tests;
 
+#[cfg(target_os = "linux")]
+#[path = "cpu_interaction_tests.rs"]
+mod interaction_tests;
+
+#[cfg(target_os = "linux")]
+#[path = "cpu_raster_font_tests.rs"]
+mod raster_font_tests;
+
 #[path = "cpu_overlay_tests.rs"]
 mod overlay_tests;
 

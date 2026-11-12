@@ -3,6 +3,10 @@ use super::*;
 #[path = "cpu_scene_stream.rs"]
 mod stream;
 
+#[path = "cpu_selection_refresh.rs"]
+mod selection;
+pub(super) use selection::refresh_labels;
+
 pub(super) use stream::build_raster_stream;
 #[cfg(test)]
 pub(super) use stream::build_streaming;

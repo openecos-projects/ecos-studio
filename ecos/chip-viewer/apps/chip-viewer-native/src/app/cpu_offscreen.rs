@@ -17,6 +17,9 @@ mod trace;
 #[path = "cpu_compact_mesh.rs"]
 mod compact;
 
+#[path = "cpu_raster_font.rs"]
+mod font;
+
 pub(super) struct OffscreenRenderer {
     painter: eframe::egui_glow::Painter,
     compact: compact::CompactPainter,
@@ -28,9 +31,27 @@ pub(super) struct OffscreenRenderer {
 
 impl OffscreenRenderer {
     #[cfg(test)]
+    pub(super) fn font_texture_pixels(&self, buffer_len: usize) -> Vec<u8> {
+        let gl = self.painter.gl();
+        let texture = self.painter.texture(egui::TextureId::default()).unwrap();
+        let mut pixels = vec![13; buffer_len];
+        unsafe {
+            gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+            gl.get_tex_image(
+                glow::TEXTURE_2D,
+                0,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                glow::PixelPackData::Slice(Some(&mut pixels)),
+            );
+        }
+        pixels
+    }
+
+    #[cfg(test)]
     pub(super) fn with_context<Output>(
         &self,
-        check: impl FnOnce(&glow::Context) -> Output,
+        check: impl FnOnce(&Arc<glow::Context>) -> Output,
     ) -> Output {
         check(self.painter.gl())
     }

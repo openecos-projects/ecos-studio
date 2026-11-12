@@ -171,6 +171,11 @@ impl CpuSceneCache {
             self.key = None;
         }
         if self.key.as_ref() != Some(&request.key) {
+            let retained = self
+                .ready
+                .as_ref()
+                .filter(|scene| scene.key.same_geometry(&request.key))
+                .map(Arc::clone);
             let invalidates_history = self.key.as_ref().is_some_and(|key| {
                 !key.compatible(&request.key)
                     || key.canvas != request.key.canvas
@@ -193,9 +198,9 @@ impl CpuSceneCache {
             }
             self.ready = (!self.raster.failed())
                 .then(|| {
-                    self.raster
-                        .scene_for(&request.key)
-                        .or_else(|| self.history.get(&request.key))
+                    self.history
+                        .get(&request.key)
+                        .or_else(|| self.raster.scene_for(&request.key))
                 })
                 .flatten()
                 .or_else(|| {
@@ -203,7 +208,8 @@ impl CpuSceneCache {
                         .as_ref()
                         .filter(|scene| scene.key == request.key)
                         .map(Arc::clone)
-                });
+                })
+                .or(retained);
             self.restored = self.ready.is_some();
             self.inbox.generation.fetch_add(1, Ordering::Relaxed);
             self.progress.clear();
@@ -211,7 +217,7 @@ impl CpuSceneCache {
             self.pending = self
                 .ready
                 .as_ref()
-                .is_none_or(|scene| !scene.labels_ready())
+                .is_none_or(|scene| scene.key != request.key || !scene.labels_ready())
                 .then_some(request);
         }
         if self.pending.is_some() {
@@ -255,6 +261,10 @@ impl CpuSceneCache {
         self.raster.is_ready(scene)
     }
 
+    pub(super) fn labels_ready(&self, scene: &CpuScene) -> bool {
+        self.key.as_ref() == Some(&scene.key) && scene.labels_ready()
+    }
+
     pub(super) fn rasterizations(&self) -> usize {
         self.raster.rasterizations()
     }
@@ -280,10 +290,10 @@ impl CpuSceneCache {
             .is_some_and(|key| self.raster.is_visible(key))
     }
 
-    pub(super) fn raster_held(&self) -> bool {
+    pub(super) fn raster_preview(&self) -> bool {
         self.key
             .as_ref()
-            .is_some_and(|key| self.raster.is_held(key))
+            .is_some_and(|key| self.raster.is_preview(key))
     }
 
     pub(super) fn raster_partial(&self) -> bool {
@@ -310,6 +320,16 @@ impl SceneKey {
             && self.cache_overlays == other.cache_overlays
     }
 
+    pub(super) fn same_geometry(&self, other: &Self) -> bool {
+        self.compatible(other)
+            && self.viewport == other.viewport
+            && self.canvas == other.canvas
+            && self.zoom == other.zoom
+            && self.pan == other.pan
+            && self.font_texture_size == other.font_texture_size
+            && self.screen_size == other.screen_size
+    }
+
     pub(super) fn destination(&self, source: &Self) -> egui::Rect {
         let ratio = world_to_screen_scale(self.world, self.canvas, self.zoom)
             / world_to_screen_scale(source.world, source.canvas, source.zoom);
@@ -327,12 +347,9 @@ impl SceneKey {
         (scale / previous - 1.0).abs() < 0.00001
     }
 
-    pub(super) fn raster_camera<'a>(&'a self, source: &'a Self) -> &'a Self {
-        if self.same_raster_scale(source) {
-            self
-        } else {
-            source
-        }
+    pub(super) fn raster_destination(&self, source: &Self) -> Option<egui::Rect> {
+        (self.compatible(source) && self.same_raster_scale(source))
+            .then(|| self.destination(source))
     }
 
     pub(super) fn canvas(&self) -> egui::Rect {
