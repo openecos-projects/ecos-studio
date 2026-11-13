@@ -195,6 +195,102 @@ fn retained_regions_match_fresh_gl_at_every_declared_pixel_after_interrupted_pan
 }
 
 #[test]
+fn retained_rectangles_and_patterns_recompose_without_using_old_rgba() {
+    let mut renderer = coverage_blend_tests::renderer();
+    let fixture = Fixture::new();
+    let all_records = records();
+    let mut records = all_records
+        .iter()
+        .copied()
+        .filter(|(bbox, _, style)| {
+            (bbox.lx >= 50
+                && bbox.ly >= 50
+                && bbox.hx <= 950
+                && bbox.hy <= 950
+                && bbox.hx - bbox.lx >= 30
+                && bbox.hy - bbox.ly >= 30)
+                || (bbox.lx == -60 && style.fill_pattern != FillPattern::XMark)
+        })
+        .take(32)
+        .collect::<Vec<_>>();
+    records.extend(
+        all_records
+            .into_iter()
+            .filter(|(bbox, _, style)| bbox.lx == -60 && style.fill_pattern != FillPattern::XMark),
+    );
+    let mut request = fixture.request(1.0, 1.0);
+    request.pattern_textures = Arc::new(PatternTextureSet::new(&fixture.ctx));
+    request.key.screen_size = [512, 512];
+    request.key.canvas =
+        egui::Rect::from_min_max(egui::pos2(11.25, 15.5), egui::pos2(499.5, 501.25));
+    request.key.pan = egui::vec2(0.0, 0.0);
+    let mut model = retained_regions::RegionModel::new(&request).unwrap();
+    let source_pass = GeometryPass::new(
+        request.key.world,
+        request.key.canvas,
+        request.key.zoom,
+        request.key.pan,
+    );
+    let mut commands = Commands::default();
+    for (bbox, geometry, style) in &records {
+        commands.0.clear();
+        source_pass.draw(*geometry, style, &mut commands);
+        assert!(model.push(*bbox, *geometry, *style, &commands.0));
+    }
+    assert!(model.is_recomposable());
+
+    let mut current = fixture.request(1.0, 1.0);
+    current.key = request.key.clone();
+    current.pattern_textures = Arc::clone(&request.pattern_textures);
+    current.key.pan = egui::vec2(4.0, 3.0);
+    current.key.viewport = screen_to_world_rect(
+        current.key.canvas,
+        current.key.world,
+        current.key.canvas,
+        current.key.zoom,
+        current.key.pan,
+    );
+    let regions = model.validate(&current.key, 2).unwrap();
+    let target_commands = project(&records, &current.key);
+    let target = renderer.as_mut().map(|renderer| {
+        pixels(
+            renderer,
+            &current,
+            meshes(
+                &fixture,
+                &current,
+                &target_commands,
+                geometry::GeometryOutput::ExactRaster,
+            ),
+        )
+    });
+    let sentinel =
+        vec![0x5a; current.key.screen_size[0] as usize * current.key.screen_size[1] as usize * 4];
+    let composed = model.compose(&current.key, &regions, &sentinel).unwrap();
+    let mut compared = 0;
+    for clip in regions.clips() {
+        for row in clip.top() as usize..clip.bottom() as usize {
+            for column in clip.left() as usize..clip.right() as usize {
+                let offset = ((current.key.screen_size[1] as usize - 1 - row)
+                    * current.key.screen_size[0] as usize
+                    + column)
+                    * 4;
+                assert_ne!(&composed[offset..offset + 4], &[0x5a; 4]);
+                if let Some(target) = target.as_ref() {
+                    assert_eq!(
+                        &composed[offset..offset + 4],
+                        &target[offset..offset + 4],
+                        "destination coverage mismatch at {column},{row}"
+                    );
+                }
+                compared += 1;
+            }
+        }
+    }
+    assert!(compared >= 10_000, "vacuous valid region: {compared}");
+}
+
+#[test]
 fn retained_regions_reject_unproven_camera_and_style_changes() {
     let fixture = Fixture::new();
     let request = fixture.request(1.0, 1.0);

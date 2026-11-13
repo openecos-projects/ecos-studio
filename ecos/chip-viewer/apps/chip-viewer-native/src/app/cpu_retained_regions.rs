@@ -16,12 +16,13 @@ struct Record {
     geometry: ShapeGeometry,
     style: LayerStyle,
     commands: Range<usize>,
+    recomposable: bool,
+    coverage: bool,
 }
 
 pub(in crate::app) struct RegionModel {
     key: SceneKey,
     pattern_textures: Arc<PatternTextureSet>,
-    tessellator: egui::epaint::Tessellator,
     records: Vec<Record>,
     commands: Vec<PaintCommand>,
 }
@@ -76,7 +77,6 @@ impl RegionModel {
         Some(Self {
             key: key.clone(),
             pattern_textures: Arc::clone(&request.pattern_textures),
-            tessellator: request.tessellator.clone(),
             records: Vec::new(),
             commands: Vec::new(),
         })
@@ -89,6 +89,16 @@ impl RegionModel {
         style: LayerStyle,
         commands: &[PaintCommand],
     ) -> bool {
+        let supported = commands
+            .iter()
+            .copied()
+            .all(|command| self.supported_command(command));
+        let coverage = commands
+            .iter()
+            .copied()
+            .all(|command| self.coverage_command(command));
+        let recomposable = matches!(geometry, ShapeGeometry::Rect(_)) && supported;
+        let coverage = matches!(geometry, ShapeGeometry::Rect(_)) && coverage;
         let start = self.commands.len();
         self.commands.extend_from_slice(commands);
         self.records.push(Record {
@@ -96,6 +106,8 @@ impl RegionModel {
             geometry,
             style,
             commands: start..self.commands.len(),
+            recomposable,
+            coverage,
         });
         self.byte_len() <= MAX_BYTES
     }
@@ -103,6 +115,31 @@ impl RegionModel {
     pub(in crate::app) fn byte_len(&self) -> usize {
         self.records.capacity() * size_of::<Record>()
             + self.commands.capacity() * size_of::<PaintCommand>()
+    }
+
+    #[cfg(test)]
+    pub(in crate::app::cpu_scene) fn is_recomposable(&self) -> bool {
+        self.records.iter().all(|record| record.recomposable)
+    }
+
+    fn supported_command(&self, command: PaintCommand) -> bool {
+        match command {
+            PaintCommand::FillRect { .. } | PaintCommand::FrameRect { .. } => {
+                geometry::PixelRectRasterizer::new(self.key.pixels_per_point, self.key.tessellation)
+                    .is_some_and(|raster| raster.rectangles(command).is_some())
+            }
+            PaintCommand::PatternRect { pattern, .. } => {
+                self.pattern_textures.spec(pattern).is_some()
+            }
+            PaintCommand::Line { .. } | PaintCommand::Disc { .. } => false,
+        }
+    }
+
+    fn coverage_command(&self, command: PaintCommand) -> bool {
+        matches!(
+            command,
+            PaintCommand::FillRect { .. } | PaintCommand::FrameRect { .. }
+        ) && self.supported_command(command)
     }
 
     pub(in crate::app) fn compose(
@@ -124,6 +161,18 @@ impl RegionModel {
         }
         let pan = (key.pan - self.key.pan) * key.pixels_per_point;
         let mut pixels = key.background.to_array().repeat(count);
+        if !self.records.is_empty() && self.records.iter().all(|record| record.coverage) {
+            if let Some(candidate) = self.shifted_coverage(key) {
+                copy_valid_tiles(&mut pixels, &candidate, regions);
+                return Some(pixels);
+            }
+        }
+        if !self.records.is_empty() && self.records.iter().all(|record| record.recomposable) {
+            if let Some(candidate) = self.recompose(key) {
+                copy_valid_tiles(&mut pixels, &candidate, regions);
+                return Some(pixels);
+            }
+        }
         for (tile_row, invalid) in regions.invalid.chunks(regions.columns).enumerate() {
             let mut column = 0;
             while column < invalid.len() {
@@ -153,7 +202,68 @@ impl RegionModel {
         Some(pixels)
     }
 
-    pub(in crate::app) fn validate(&self, key: &SceneKey, workers: usize) -> Option<Regions> {
+    /// Moves geometry-only commands by the integral physical-pixel pan. The
+    /// command colors are applied only after the move, so the retained source
+    /// is geometry coverage rather than a translated final RGBA image.
+    fn shifted_coverage(&self, key: &SceneKey) -> Option<Vec<u8>> {
+        let raster = geometry::PixelRectRasterizer::new(key.pixels_per_point, key.tessellation)?;
+        let delta = key.pan - self.key.pan;
+        let mut pixels = key
+            .background
+            .to_array()
+            .repeat(key.screen_size[0] as usize * key.screen_size[1] as usize);
+        for record in &self.records {
+            if !record.coverage {
+                continue;
+            }
+            for &command in &self.commands[record.commands.clone()] {
+                let command = translate_coverage_command(command, delta)?;
+                paint_recomposed_command(
+                    command,
+                    raster,
+                    key,
+                    &self.pattern_textures,
+                    &mut pixels,
+                )?;
+            }
+        }
+        Some(pixels)
+    }
+
+    /// Rebuilds destination style from retained geometry commands. The result
+    /// is only copied into tiles proven valid by `validate`; uncovered tiles
+    /// are intentionally left for the current-camera damage render.
+    fn recompose(&self, key: &SceneKey) -> Option<Vec<u8>> {
+        let raster = geometry::PixelRectRasterizer::new(key.pixels_per_point, key.tessellation)?;
+        let size = key.screen_size;
+        let mut pixels = key
+            .background
+            .to_array()
+            .repeat(size[0] as usize * size[1] as usize);
+        let pass = GeometryPass::new(key.world, key.canvas, key.zoom, key.pan);
+        let mut commands = Commands::default();
+        for record in &self.records {
+            if !record.recomposable {
+                continue;
+            }
+            commands.0.clear();
+            if record.bbox.intersects(key.viewport) {
+                pass.draw(record.geometry, &record.style, &mut commands);
+            }
+            for &command in &commands.0 {
+                paint_recomposed_command(
+                    command,
+                    raster,
+                    key,
+                    &self.pattern_textures,
+                    &mut pixels,
+                )?;
+            }
+        }
+        Some(pixels)
+    }
+
+    pub(in crate::app) fn validate(&self, key: &SceneKey, _workers: usize) -> Option<Regions> {
         let source = &self.key;
         let pan = (key.pan - source.pan) * key.pixels_per_point;
         if !source.compatible(key)
@@ -172,85 +282,29 @@ impl RegionModel {
         if !overlap.is_positive() {
             return None;
         }
-        let pass = GeometryPass::new(key.world, key.canvas, key.zoom, key.pan);
         let mut result = Regions::new(key);
         for index in 0..result.invalid.len() {
             let tile = result.tile(index);
             result.invalid[index] = !overlap.contains_rect(tile);
         }
-        let partials = thread::scope(|scope| {
-            self.records
-                .chunks(self.records.len().div_ceil(workers.max(1)).max(1))
-                .map(|records| {
-                    let pass = &pass;
-                    scope.spawn(move || {
-                        let mut invalid = Regions::new(key);
-                        let mut current = Commands::default();
-                        let mut old = Footprints::new(
-                            source,
-                            &self.tessellator,
-                            Arc::clone(&self.pattern_textures),
-                        );
-                        let mut new = Footprints::new(
-                            key,
-                            &self.tessellator,
-                            Arc::clone(&self.pattern_textures),
-                        );
-                        for record in records {
-                            current.0.clear();
-                            if record.bbox.intersects(key.viewport) {
-                                pass.draw(record.geometry, &record.style, &mut current);
-                            }
-                            old.reset();
-                            new.reset();
-                            for command in &self.commands[record.commands.clone()] {
-                                old.paint(*command);
-                            }
-                            for command in &current.0 {
-                                new.paint(*command);
-                            }
-                            for rect in &old.repairs {
-                                invalid.exclude(rect.translate(pan));
-                            }
-                            for rect in &new.repairs {
-                                invalid.exclude(*rect);
-                            }
-                            let mut previous = old.rectangles.iter().filter_map(|(rect, color)| {
-                                let rect = rect.translate(pan).intersect(overlap);
-                                rect.is_positive().then_some((rect, *color))
-                            });
-                            let mut current = new.rectangles.iter().filter_map(|(rect, color)| {
-                                let rect = rect.intersect(overlap);
-                                rect.is_positive().then_some((rect, *color))
-                            });
-                            loop {
-                                match (previous.next(), current.next()) {
-                                    (None, None) => break,
-                                    (Some((previous, before)), Some((current, after)))
-                                        if before == after =>
-                                    {
-                                        invalid.exclude_difference(previous, current)
-                                    }
-                                    (previous, current) => {
-                                        for (rect, _) in previous.into_iter().chain(current) {
-                                            invalid.exclude(rect);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        invalid
-                    })
-                })
-                .collect::<Vec<_>>()
-                .into_iter()
-                .map(|task| task.join().expect("retained region worker panicked"))
-                .collect::<Vec<_>>()
-        });
-        for partial in partials {
-            for (invalid, other) in result.invalid.iter_mut().zip(partial.invalid) {
-                *invalid |= other;
+        if !self.records.is_empty() {
+            if self.records.iter().any(|record| !record.recomposable) {
+                let source_pass =
+                    GeometryPass::new(source.world, source.canvas, source.zoom, source.pan);
+                let current_pass = GeometryPass::new(key.world, key.canvas, key.zoom, key.pan);
+                for record in &self.records {
+                    if record.coverage {
+                        continue;
+                    }
+                    result.exclude(footprint(&source_pass, source, record.geometry).translate(pan));
+                    result.exclude(footprint(&current_pass, key, record.geometry));
+                }
             }
+            result.proof = Some(CameraProof {
+                source: source.clone(),
+                current: key.clone(),
+            });
+            return Some(result);
         }
         result.proof = Some(CameraProof {
             source: source.clone(),
@@ -258,6 +312,170 @@ impl RegionModel {
         });
         Some(result)
     }
+}
+
+fn copy_valid_tiles(destination: &mut [u8], source: &[u8], regions: &Regions) {
+    let width = regions.size[0] as usize;
+    let height = regions.size[1] as usize;
+    for (tile_row, invalid) in regions.invalid.chunks(regions.columns).enumerate() {
+        let top = tile_row * TILE;
+        let bottom = (top + TILE).min(height);
+        let mut column = 0;
+        while column < invalid.len() {
+            if invalid[column] {
+                column += 1;
+                continue;
+            }
+            let left = column * TILE;
+            while column < invalid.len() && !invalid[column] {
+                column += 1;
+            }
+            let right = (column * TILE).min(width);
+            for row in top..bottom {
+                let offset = (height - 1 - row) * width * 4 + left * 4;
+                let length = (right - left) * 4;
+                destination[offset..offset + length]
+                    .copy_from_slice(&source[offset..offset + length]);
+            }
+        }
+    }
+}
+
+fn footprint(pass: &GeometryPass, key: &SceneKey, geometry: ShapeGeometry) -> egui::Rect {
+    let bounds = pass.project(geometry).bounds();
+    egui::Rect::from_min_max(
+        bounds.min * key.pixels_per_point,
+        bounds.max * key.pixels_per_point,
+    )
+    .expand(2.0)
+    .intersect(physical_clip(key))
+}
+
+fn translate_coverage_command(command: PaintCommand, delta: egui::Vec2) -> Option<PaintCommand> {
+    Some(match command {
+        PaintCommand::FillRect { rect, rgba } => PaintCommand::FillRect {
+            rect: rect.translate(delta),
+            rgba,
+        },
+        PaintCommand::FrameRect { rect, width, rgba } => PaintCommand::FrameRect {
+            rect: rect.translate(delta),
+            width,
+            rgba,
+        },
+        PaintCommand::PatternRect { .. }
+        | PaintCommand::Line { .. }
+        | PaintCommand::Disc { .. } => return None,
+    })
+}
+
+fn paint_recomposed_command(
+    command: PaintCommand,
+    raster: geometry::PixelRectRasterizer,
+    key: &SceneKey,
+    pattern_textures: &PatternTextureSet,
+    pixels: &mut [u8],
+) -> Option<()> {
+    match command {
+        PaintCommand::FillRect { rgba, .. } | PaintCommand::FrameRect { rgba, .. } => {
+            for rect in raster.rectangles(command)? {
+                let Some([left, top, right, bottom]) = physical_bounds(rect, key) else {
+                    continue;
+                };
+                for row in top..bottom {
+                    let offset = ((key.screen_size[1] as usize - 1 - row)
+                        * key.screen_size[0] as usize
+                        + left)
+                        * 4;
+                    for pixel in pixels[offset..offset + (right - left) * 4].chunks_exact_mut(4) {
+                        blend_recomposed_pixel(pixel, rgba);
+                    }
+                }
+            }
+        }
+        PaintCommand::PatternRect {
+            rect,
+            pattern,
+            rgba,
+        } => {
+            let [left, top, right, bottom] = physical_bounds(rect, key)?;
+            let tile = pattern_textures.spec(pattern)?.1;
+            let scale = key.pixels_per_point;
+            for row in top..bottom {
+                for column in left..right {
+                    let point =
+                        egui::pos2((column as f32 + 0.5) / scale, (row as f32 + 0.5) / scale);
+                    if point.x <= rect.left()
+                        || point.x >= rect.right()
+                        || point.y <= rect.top()
+                        || point.y >= rect.bottom()
+                    {
+                        continue;
+                    }
+                    let mask = pattern_textures.sample(
+                        pattern,
+                        [
+                            (point.x - rect.left()) / tile[0],
+                            (point.y - rect.top()) / tile[1],
+                        ],
+                    )?;
+                    if mask[0] == 0 && mask[3] == 0 {
+                        continue;
+                    }
+                    let mut source = rgba;
+                    for channel in 0..4 {
+                        source[channel] = multiply_recomposed(source[channel], mask[channel]);
+                    }
+                    let offset = ((key.screen_size[1] as usize - 1 - row)
+                        * key.screen_size[0] as usize
+                        + column)
+                        * 4;
+                    blend_recomposed_pixel(&mut pixels[offset..offset + 4], source);
+                }
+            }
+        }
+        PaintCommand::Line { .. } | PaintCommand::Disc { .. } => return None,
+    }
+    Some(())
+}
+
+fn physical_bounds(rect: egui::Rect, key: &SceneKey) -> Option<[usize; 4]> {
+    let scale = key.pixels_per_point;
+    let clip = physical_clip(key);
+    let left = (rect.left() * scale)
+        .floor()
+        .max(clip.left())
+        .min(clip.right()) as usize;
+    let top = (rect.top() * scale)
+        .floor()
+        .max(clip.top())
+        .min(clip.bottom()) as usize;
+    let right = (rect.right() * scale)
+        .ceil()
+        .max(clip.left())
+        .min(clip.right()) as usize;
+    let bottom = (rect.bottom() * scale)
+        .ceil()
+        .max(clip.top())
+        .min(clip.bottom()) as usize;
+    (left < right && top < bottom).then_some([left, top, right, bottom])
+}
+
+fn blend_recomposed_pixel(destination: &mut [u8], source: [u8; 4]) {
+    if source[3] == 255 {
+        destination.copy_from_slice(&source);
+        return;
+    }
+    let alpha = destination[3];
+    for channel in 0..3 {
+        destination[channel] = source[channel]
+            .saturating_add(multiply_recomposed(destination[channel], 255 - source[3]));
+    }
+    destination[3] = alpha.saturating_add(multiply_recomposed(source[3], 255 - alpha));
+}
+
+fn multiply_recomposed(left: u8, right: u8) -> u8 {
+    let product = u32::from(left) * u32::from(right);
+    ((product + (product >> 8) + 128) >> 8) as u8
 }
 
 impl Regions {
@@ -311,34 +529,6 @@ impl Regions {
         }
     }
 
-    fn exclude_difference(&mut self, previous: egui::Rect, current: egui::Rect) {
-        if previous == current {
-            return;
-        }
-        let common = previous.intersect(current);
-        if !common.is_positive() {
-            self.exclude(previous);
-            self.exclude(current);
-            return;
-        }
-        for rect in [previous, current] {
-            for difference in [
-                egui::Rect::from_min_max(rect.min, egui::pos2(rect.right(), common.top())),
-                egui::Rect::from_min_max(egui::pos2(rect.left(), common.bottom()), rect.max),
-                egui::Rect::from_min_max(
-                    egui::pos2(rect.left(), common.top()),
-                    egui::pos2(common.left(), common.bottom()),
-                ),
-                egui::Rect::from_min_max(
-                    egui::pos2(common.right(), common.top()),
-                    egui::pos2(rect.right(), common.bottom()),
-                ),
-            ] {
-                self.exclude(difference);
-            }
-        }
-    }
-
     #[cfg(test)]
     pub(in crate::app) fn clips(&self) -> Vec<egui::Rect> {
         let mut output = Vec::new();
@@ -372,85 +562,6 @@ struct Commands(Vec<PaintCommand>);
 impl PaintSink for Commands {
     fn paint(&mut self, command: PaintCommand) {
         self.0.push(command);
-    }
-}
-
-struct Footprints<'a> {
-    raster: geometry::PixelRectRasterizer,
-    key: &'a SceneKey,
-    tessellator: &'a egui::epaint::Tessellator,
-    pattern_textures: Arc<PatternTextureSet>,
-    rectangles: Vec<(egui::Rect, [u8; 4])>,
-    repairs: Vec<egui::Rect>,
-}
-
-impl<'a> Footprints<'a> {
-    fn new(
-        key: &'a SceneKey,
-        tessellator: &'a egui::epaint::Tessellator,
-        pattern_textures: Arc<PatternTextureSet>,
-    ) -> Self {
-        Self {
-            raster: geometry::PixelRectRasterizer::new(key.pixels_per_point, key.tessellation)
-                .unwrap(),
-            key,
-            tessellator,
-            pattern_textures,
-            rectangles: Vec::new(),
-            repairs: Vec::new(),
-        }
-    }
-
-    fn reset(&mut self) {
-        self.rectangles.clear();
-        self.repairs.clear();
-    }
-}
-
-impl PaintSink for Footprints<'_> {
-    fn paint(&mut self, command: PaintCommand) {
-        let scale = self.key.pixels_per_point;
-        let clip = physical_clip(self.key);
-        if let Some(rectangles) = self.raster.rectangles(command) {
-            let rgba = match command {
-                PaintCommand::FillRect { rgba, .. } | PaintCommand::FrameRect { rgba, .. } => rgba,
-                _ => unreachable!(),
-            };
-            for rect in rectangles {
-                let rect =
-                    egui::Rect::from_min_max(rect.min * scale, rect.max * scale).intersect(clip);
-                if rect.is_positive() {
-                    self.rectangles.push((rect, rgba));
-                }
-            }
-        } else {
-            let mut sink = geometry::GeometryMeshSink::new_with_patterns(
-                self.tessellator.clone(),
-                self.key.canvas,
-                self.key.tessellation,
-                Arc::clone(&self.pattern_textures),
-            );
-            sink.paint(command);
-            for primitive in sink.finish() {
-                let egui::epaint::Primitive::Mesh(mesh) = primitive.primitive else {
-                    unreachable!()
-                };
-                let bounds = mesh
-                    .vertices
-                    .iter()
-                    .fold(egui::Rect::NOTHING, |bounds, vertex| {
-                        bounds.union(egui::Rect::from_min_max(vertex.pos, vertex.pos))
-                    });
-                let bounds = bounds.expand(1.0).intersect(primitive.clip_rect);
-                let rect = egui::Rect::from_min_max(
-                    (bounds.min * scale).floor().max(clip.min),
-                    (bounds.max * scale).ceil().min(clip.max),
-                );
-                if rect.is_positive() {
-                    self.repairs.push(rect);
-                }
-            }
-        }
     }
 }
 
