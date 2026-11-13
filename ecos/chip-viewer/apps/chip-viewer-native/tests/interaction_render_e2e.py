@@ -340,6 +340,9 @@ def run(args):
                 print(json.dumps(result), flush=True)
             samples = read_samples(stats_path)
             report = {
+                "stats_phases": {stage: sum(bool(sample.get("cpu_stats_after_paint", False)) == after_paint
+                    for sample in samples) for stage, after_paint in
+                    (("gl_after_paint", True), ("ui_before_paint", False))},
                 "presentation_trace_diagnostic": args.presentation_trace,
                 "raster_trace_diagnostic": args.raster_trace,
                 "initial_geometry_ready_seconds": initial_ready,

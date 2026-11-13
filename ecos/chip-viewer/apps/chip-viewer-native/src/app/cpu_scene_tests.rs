@@ -12,6 +12,10 @@ mod camera_tests;
 mod interaction_tests;
 
 #[cfg(target_os = "linux")]
+#[path = "cpu_canvas_background_tests.rs"]
+mod canvas_background_tests;
+
+#[cfg(target_os = "linux")]
 #[path = "cpu_raster_font_tests.rs"]
 mod raster_font_tests;
 
@@ -38,18 +42,22 @@ mod present_targets_tests;
 #[path = "cpu_labels_parallel_tests.rs"]
 mod labels_parallel_tests;
 
+#[cfg(target_os = "linux")]
+#[path = "cpu_label_cost_tests.rs"]
+mod label_cost_tests;
+
 #[path = "cpu_label_worker_tests.rs"]
 mod label_worker_tests;
 
-struct Fixture {
-    path: PathBuf,
+pub(in crate::app::cpu_scene) struct Fixture {
+    pub(in crate::app::cpu_scene) path: PathBuf,
     db: Arc<ChipViewDb>,
     ctx: egui::Context,
     layers: LayerRenderIndex,
 }
 
 impl Fixture {
-    fn new() -> Self {
+    pub(in crate::app::cpu_scene) fn new() -> Self {
         let path = temp_snapshot_dir("cpu-exact-scene");
         write_empty_snapshot(&path, false);
         let owners: Vec<_> = [
@@ -197,7 +205,11 @@ impl Fixture {
         }
     }
 
-    fn request(&self, zoom: f32, pixels_per_point: f32) -> SceneRequest {
+    pub(in crate::app::cpu_scene) fn request(
+        &self,
+        zoom: f32,
+        pixels_per_point: f32,
+    ) -> SceneRequest {
         let mut visibility = ObjectVisibility::default();
         visibility.set_all_visible(true);
         let world = Rect32 {
@@ -221,6 +233,7 @@ impl Fixture {
             )
         });
         SceneRequest {
+            data_bounds: self.db.stats().bbox,
             key: SceneKey {
                 epoch: 1,
                 layers: 1,

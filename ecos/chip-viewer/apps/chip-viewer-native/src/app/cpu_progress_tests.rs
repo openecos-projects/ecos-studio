@@ -1,17 +1,108 @@
 use super::*;
 
+#[cfg(target_os = "linux")]
+#[test]
+fn initial_evidence_for_superseded_cameras_is_flushed_before_the_latest_scene_arrives() {
+    let fixture = Fixture::new();
+    let directory = fixture.path.join("queued-camera-evidence");
+    let evidence = progress::InitialEvidence::new(Some(directory.clone()));
+    let payload = [13, 29, 51, 255].repeat(640 * 480);
+    for generation in [4, 5] {
+        evidence
+            .enqueue(Arc::new(progress::ProgressFrame::new(
+                fixture.request(generation as f32, 1.0).key,
+                generation,
+                64,
+                payload.clone(),
+            )))
+            .unwrap();
+    }
+    let mut request = fixture.request(5.0, 1.0);
+    request.glow = false;
+    let inbox = Arc::new(WorkerInbox {
+        request: Mutex::new(Some((5, request, None))),
+        wake: Condvar::new(),
+        generation: AtomicU64::new(5),
+        stopped: AtomicBool::new(false),
+        initial_evidence: evidence,
+    });
+    let (outgoing, incoming) = mpsc::channel();
+    worker::spawn(Arc::clone(&inbox), Arc::default(), outgoing);
+    let (generation, _) = incoming.recv_timeout(Duration::from_secs(5)).unwrap();
+    inbox.stopped.store(true, Ordering::Relaxed);
+    inbox.wake.notify_one();
+    assert_eq!(generation, 5);
+    for generation in [4, 5] {
+        assert_eq!(
+            fs::read(directory.join(format!("{generation}-64.rgba"))).unwrap(),
+            payload
+        );
+        assert!(directory.join(format!("{generation}-64.json")).exists());
+    }
+}
+
+#[test]
+fn publishing_progress_keeps_the_original_pixel_allocation() {
+    let fixture = Fixture::new();
+    let key = fixture.request(1.0, 1.0).key;
+    let mut pixels = Vec::with_capacity(4096);
+    pixels.extend([13, 29, 51, 83].repeat(256));
+    let original = pixels.as_ptr();
+    let frame = progress::ProgressFrame::new(key.clone(), 4, 32, pixels);
+    let mailbox = progress::ProgressMailbox::default();
+    let frame = mailbox.publish(frame);
+    assert_eq!(frame.pixels.as_ptr(), original);
+    let current = mailbox.current(&key, 4).unwrap();
+    assert!(Arc::ptr_eq(&current, &frame));
+    assert_eq!(
+        current.pixels.as_ref(),
+        [13, 29, 51, 83].repeat(256).as_slice()
+    );
+}
+
+#[test]
+fn repeated_prefix_requires_every_pixel_and_all_publication_identity_fields_to_match() {
+    let fixture = Fixture::new();
+    let key = fixture.request(1.0, 1.0).key;
+    let mailbox = progress::ProgressMailbox::default();
+    let pixels = [13, 29, 51, 83].repeat(256);
+    assert!(!mailbox.contains(&key, 4, 64, &pixels));
+    mailbox.publish(progress::ProgressFrame::new(
+        key.clone(),
+        4,
+        64,
+        pixels.clone(),
+    ));
+    assert!(mailbox.contains(&key, 4, 64, &pixels));
+    assert!(!mailbox.contains(&key, 5, 64, &pixels));
+    assert!(!mailbox.contains(&key, 4, 65, &pixels));
+    assert!(!mailbox.contains(&fixture.request(2.0, 1.0).key, 4, 64, &pixels));
+    assert!(!mailbox.contains(&key, 4, 64, &pixels[..pixels.len() - 1]));
+    let mut changed = pixels.clone();
+    *changed.last_mut().unwrap() ^= 1;
+    assert!(!mailbox.contains(&key, 4, 64, &changed));
+}
+
 #[test]
 fn progress_mailbox_rejects_stale_camera_and_generation() {
     let fixture = Fixture::new();
     let key = fixture.request(1.0, 1.0).key;
     let mailbox = progress::ProgressMailbox::default();
     for sequence in [16, 32] {
-        mailbox.publish(progress::ProgressFrame {
+        let published = mailbox.publish(progress::ProgressFrame {
             key: key.clone(),
             generation: 4,
             sequence,
-            pixels: vec![sequence as u8; 4].into(),
+            pixels: Arc::new(vec![sequence as u8; 4]),
         });
+        assert!(Arc::ptr_eq(&published, &mailbox.current(&key, 4).unwrap()));
+        let evidence = fixture.path.join("progress-evidence");
+        published.record_evidence(&evidence).unwrap();
+        assert_eq!(
+            fs::read(evidence.join(format!("4-{sequence}.rgba"))).unwrap(),
+            published.pixels.as_slice(),
+        );
+        assert!(Arc::ptr_eq(&published, &mailbox.current(&key, 4).unwrap()));
     }
     assert_eq!(mailbox.current(&key, 4).unwrap().sequence, 32);
     assert!(mailbox.current(&key, 3).is_none());

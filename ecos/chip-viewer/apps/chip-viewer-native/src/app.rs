@@ -118,9 +118,12 @@ pub struct CanvasRenderStats {
     pub is_gpu: bool,
     pub cpu_scene_pending: bool,
     pub cpu_scene_visible: bool,
+    pub cpu_stats_after_paint: bool,
     pub cpu_scene_preview: bool,
     pub cpu_scene_held: bool,
     pub cpu_scene_partial: bool,
+    pub cpu_retained_valid_pixels: usize,
+    pub cpu_retained_validation_ms: f32,
     pub cpu_history_bytes: usize,
     pub cpu_scene_cache_hit: bool,
     pub cpu_labels_pending: bool,
@@ -3955,7 +3958,13 @@ impl LoadedViewer {
             (bg_rgba[2] * 255.0).round() as u8,
             255,
         );
-        frame_painter.rect_filled(frame, 0.0, bg_color);
+        if !self.glow_rendering
+            || !self
+                .cpu_scene_cache
+                .paint_background(&frame_painter, frame, bg_color)
+        {
+            frame_painter.rect_filled(frame, 0.0, bg_color);
+        }
         let canvas = layout_canvas_rect(frame);
         let ruler_painter = frame_painter.clone();
         let painter = frame_painter.with_clip_rect(canvas);
@@ -4821,6 +4830,8 @@ impl LoadedViewer {
         self.paint_reload_indicator(ui, &painter, canvas);
 
         if collect_stats {
+            let (cpu_retained_valid_pixels, cpu_retained_validation_ms) =
+                self.cpu_scene_cache.retained_stats();
             let stats = CanvasRenderStats {
                 frame_time_ms: canvas_start.elapsed().as_secs_f32() * 1000.0,
                 frame_interval_ms: 0.0,
@@ -4843,9 +4854,12 @@ impl LoadedViewer {
                 is_gpu: self.is_gpu_active(),
                 cpu_scene_pending,
                 cpu_scene_visible,
+                cpu_stats_after_paint: false,
                 cpu_scene_preview: self.glow_rendering && self.cpu_scene_cache.raster_preview(),
                 cpu_scene_held: false,
                 cpu_scene_partial: self.cpu_scene_cache.raster_partial(),
+                cpu_retained_valid_pixels,
+                cpu_retained_validation_ms,
                 cpu_history_bytes: self.cpu_scene_cache.history_bytes(),
                 cpu_scene_cache_hit: self.cpu_scene_cache.restored(),
                 cpu_labels_pending: cpu_scene
@@ -4868,7 +4882,12 @@ impl LoadedViewer {
                     .map_or(0.0, |scene| scene.label_duration().as_secs_f32() * 1000.0),
                 previous_raster_present_ms: self.cpu_scene_cache.paint_ms(),
             };
-            record_render_stats(&stats);
+            if !(self.glow_rendering
+                && !stats.is_gpu
+                && self.cpu_scene_cache.record_glow_stats(&painter, &stats))
+            {
+                record_render_stats(&stats);
+            }
             if env_flag_requested(std::env::var(RENDER_STATS_ENV).ok().as_deref()) {
                 paint_render_stats_overlay(&painter, canvas, &stats);
             }
@@ -8944,7 +8963,13 @@ impl eframe::App for ChipViewerApp {
         if let ViewerState::Loaded(loaded) = &mut self.state {
             loaded.show_clock_tree_graph(ctx);
         }
-        egui::CentralPanel::default().show(ctx, |ui| {
+        let central_panel = match &self.state {
+            ViewerState::Loaded(loaded) if loaded.glow_rendering => {
+                egui::CentralPanel::default().frame(loaded.cpu_scene_cache.central_frame(ctx))
+            }
+            _ => egui::CentralPanel::default(),
+        };
+        central_panel.show(ctx, |ui| {
             self.canvas(ui);
         });
         if let ViewerState::Loaded(loaded) = &mut self.state {

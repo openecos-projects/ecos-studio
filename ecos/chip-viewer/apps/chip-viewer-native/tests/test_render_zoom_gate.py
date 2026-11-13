@@ -61,11 +61,21 @@ class ZoomGateTests(unittest.TestCase):
 
     def test_diagnostics_wrong_dimensions_fidelity_and_renderer_changes_fail(self):
         for field, value in [("raster_trace_diagnostic", True), ("display_size", [1280, 860]),
-                             ("continuous_unrecognized_colored_pixel_fraction", .1), ("is_gpu", True)]:
+                             ("continuous_unrecognized_colored_pixel_fraction", .1), ("is_gpu", True),
+                             ("environment_diagnostic", True), ("acceptance_evidence", False),
+                             ("progress_evidence_complete", False),
+                             ("capture_backend", "XGetImage")]:
             with self.subTest(field=field):
                 after = report()
                 after[field] = value
                 self.assertEqual(self.evaluate(after)["status"], "fail")
+
+    def test_matching_direct_capture_is_allowed_and_unknown_backends_fail(self):
+        before, after = report(), report()
+        before["capture_backend"] = after["capture_backend"] = "XGetImage"
+        self.assertEqual(self.evaluate(after, before)["status"], "pass")
+        before["capture_backend"] = after["capture_backend"] = "lossy"
+        self.assertEqual(self.evaluate(after, before)["status"], "fail")
 
     def test_small_samples_and_single_long_tail_do_not_pass_on_medians(self):
         self.assertEqual(self.evaluate(report(), samples=3)["status"], "fail")

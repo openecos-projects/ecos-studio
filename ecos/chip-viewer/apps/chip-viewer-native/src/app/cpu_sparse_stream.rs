@@ -89,9 +89,11 @@ impl OffscreenRenderer {
                             }
                         }
                     }
-                    builder::PaintPacket::Overlays(meshes) => {
+                    builder::PaintPacket::Overlays { meshes, shapes } => {
                         sequence += meshes.len();
-                        if !mesh_mode && !meshes.is_empty() {
+                        let exact = !mesh_mode
+                            && kernel.append_axis_overlays(&shapes, request, &is_current);
+                        if !exact && !mesh_mode && !meshes.is_empty() {
                             if !raster.resolve_sparse(
                                 &mut kernel,
                                 &mut pixels,
@@ -117,9 +119,32 @@ impl OffscreenRenderer {
                             if !raster.push(&meshes, &packed, &is_current, &mut |_, _| {})? {
                                 return Ok(false);
                             }
-                        } else {
+                        } else if !exact {
                             kernel.append_meshes(meshes);
                         }
+                    }
+                }
+                let early_partial = !mesh_mode
+                    && kernel.has_holes()
+                    && next_snapshot.is_some_and(|at| Instant::now() >= at);
+                if early_partial {
+                    let paint_at = Instant::now();
+                    if !kernel.render_since(start, &mut pixels, &is_current) {
+                        return Ok(false);
+                    }
+                    if let Some(trace) = &mut raster.trace {
+                        trace.rectangle_paint_ms += trace::milliseconds(paint_at.elapsed());
+                    }
+                    if kernel
+                        .prepare_partial(&mut pixels, request.key.background, &is_current)
+                        .is_some()
+                    {
+                        publish(std::mem::take(&mut pixels), sequence);
+                        pixels = kernel.blank(request.key.background);
+                        if !kernel.render_since(0, &mut pixels, &is_current) {
+                            return Ok(false);
+                        }
+                        next_snapshot = intervals.map(|intervals| Instant::now() + intervals[1]);
                     }
                 }
                 if !mesh_mode && kernel.prefers_meshes() {
@@ -128,7 +153,7 @@ impl OffscreenRenderer {
                         return Ok(false);
                     }
                     pixels = Vec::new();
-                } else if !mesh_mode {
+                } else if !mesh_mode && !early_partial {
                     let paint_at = Instant::now();
                     if !kernel.render_since(start, &mut pixels, &is_current) {
                         return Ok(false);
@@ -149,12 +174,18 @@ impl OffscreenRenderer {
                     let snapshot = if mesh_mode {
                         raster.readback(trace::ReadbackKind::Progressive)?
                     } else {
-                        pixels.clone()
+                        std::mem::take(&mut pixels)
                     };
                     if !is_current() {
                         return Ok(false);
                     }
                     publish(snapshot, sequence);
+                    if !mesh_mode {
+                        pixels = kernel.blank(request.key.background);
+                        if !kernel.render_since(0, &mut pixels, &is_current) {
+                            return Ok(false);
+                        }
+                    }
                     next_snapshot = intervals.map(|intervals| Instant::now() + intervals[1]);
                 }
                 Ok(is_current())
@@ -195,6 +226,9 @@ impl OffscreenRenderer {
         scene.raster_duration = duration + finished.elapsed();
         scene.pipeline_duration = started.elapsed();
         scene.bitmap = Some(pixels.into());
+        if mesh_mode {
+            scene.retained = None;
+        }
         Ok(Some(scene))
     }
 }

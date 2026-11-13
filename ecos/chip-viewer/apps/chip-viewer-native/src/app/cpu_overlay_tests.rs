@@ -1,5 +1,84 @@
 use super::*;
 
+#[cfg(target_os = "linux")]
+#[test]
+fn compact_grid_shader_matches_original_full_rgba_at_fractional_cameras() {
+    let fixture = Fixture::new();
+    let mut renderer = match offscreen::OffscreenRenderer::new("") {
+        Ok(renderer) => renderer,
+        Err(error) => {
+            assert!(
+                std::env::var_os("ECOS_REQUIRE_COVERAGE_EGL").is_none(),
+                "{error}"
+            );
+            return;
+        }
+    };
+    for scale in [1.0, 1.25, 2.0, 4.0] {
+        let mut request = fixture.request(2.6125708, scale);
+        request.key.screen_size = [509, 503];
+        request.key.canvas = egui::Rect::from_min_max(
+            egui::pos2(11.25, 15.5) / scale,
+            egui::pos2(499.5, 501.25) / scale,
+        );
+        request.key.background = egui::Color32::from_rgba_premultiplied(13, 29, 51, 83);
+        let output = fixture.ctx.run(egui::RawInput::default(), |ctx| {
+            let painter = ctx.layer_painter(egui::LayerId::background());
+            for index in 0..300 {
+                let position = (index as f32 * 1.73 - 3.25) / scale;
+                let stroke = egui::Stroke::new(
+                    [0.5, 1.0, 2.0, 3.25][index % 4],
+                    egui::Color32::from_rgba_premultiplied(
+                        (index * 37) as u8,
+                        (index * 71) as u8,
+                        (index * 137) as u8,
+                        [31, 82, 104, 255][index % 4],
+                    ),
+                );
+                painter.line_segment(
+                    [
+                        egui::pos2(position, -3.25 / scale),
+                        egui::pos2(position, 509.75 / scale),
+                    ],
+                    stroke,
+                );
+                painter.line_segment(
+                    [
+                        egui::pos2(-4.5 / scale, position),
+                        egui::pos2(513.5 / scale, position),
+                    ],
+                    stroke,
+                );
+            }
+        });
+        let mut scene = builder::build_with_workers(&request, &|| true, 1).unwrap();
+        scene.meshes =
+            builder::prepare_meshes(request.tessellator.clone().tessellate_shapes(output.shapes));
+        for primitive in &mut scene.meshes {
+            primitive.clip_rect = request.key.canvas;
+        }
+        let reference = renderer
+            .rasterize_updates(&scene, &request, || true, |_, _| {}, None)
+            .unwrap()
+            .unwrap()
+            .0;
+        let actual = renderer.rasterize_compact(&scene, &request).unwrap();
+        renderer.with_context(|gl| {
+            if sparse_rects::certified_profile(gl) {
+                assert!(renderer.solid_shader_active());
+            }
+        });
+        let differences = actual
+            .iter()
+            .zip(&reference)
+            .enumerate()
+            .filter(|(_, (actual, expected))| actual != expected)
+            .take(16)
+            .collect::<Vec<_>>();
+        assert!(differences.is_empty(), "DPR {scale}: {differences:?}");
+    }
+}
+
 #[test]
 fn overlay_only_bitmap_rebuilds_for_mesh_fallback_after_presentation_failure() {
     let mut fixture = Fixture::new();

@@ -1,7 +1,22 @@
 use super::*;
 use chip_render::geometry2d::{PaintCommand, PaintSink};
+use eframe::glow::{self, HasContext};
+
+#[path = "cpu_sparse_coverage.rs"]
+mod coverage;
+
+#[path = "cpu_sparse_grid.rs"]
+mod grid;
 
 const TILE: i32 = 32;
+
+pub(in crate::app) fn certified_profile(gl: &glow::Context) -> bool {
+    unsafe {
+        gl.get_parameter_string(glow::RENDERER) == "llvmpipe (LLVM 20.1.2, 256 bits)"
+            && gl.get_parameter_string(glow::VERSION)
+                == "4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2"
+    }
+}
 
 enum Operation {
     Rect([u16; 4], egui::Color32),
@@ -124,30 +139,6 @@ impl SparseRects {
             }
         }
         is_current().then_some(start)
-    }
-
-    pub(super) fn append_meshes(&mut self, meshes: Vec<egui::ClippedPrimitive>) {
-        for primitive in &meshes {
-            let egui::epaint::Primitive::Mesh(mesh) = &primitive.primitive else {
-                unreachable!("CPU geometry contains no callbacks")
-            };
-            let bounds = mesh
-                .vertices
-                .iter()
-                .fold(egui::Rect::NOTHING, |bounds, vertex| {
-                    bounds.union(egui::Rect::from_min_max(vertex.pos, vertex.pos))
-                });
-            let bounds = self.bounds(bounds.expand(1.0).intersect(primitive.clip_rect));
-            for tile in self.tiles(bounds) {
-                self.holes[tile / 64] |= 1 << (tile % 64);
-            }
-        }
-        if !meshes.is_empty() {
-            self.residual_count += 1;
-            self.operations
-                .push(Operation::Residual(self.residuals.len()));
-            self.residuals.push(meshes);
-        }
     }
 
     pub(super) fn len(&self) -> usize {
@@ -344,11 +335,16 @@ impl SparseRects {
     }
 
     pub(super) fn blank(&self, background: egui::Color32) -> Vec<u8> {
-        let mut pixels = vec![0; self.size[0] as usize * self.size[1] as usize * 4];
+        let mut pixels = Vec::new();
+        self.reset_pixels(&mut pixels, background);
+        pixels
+    }
+
+    pub(super) fn reset_pixels(&self, pixels: &mut Vec<u8>, background: egui::Color32) {
+        pixels.resize(self.size[0] as usize * self.size[1] as usize * 4, 0);
         for pixel in pixels.chunks_exact_mut(4) {
             pixel.copy_from_slice(&background.to_array());
         }
-        pixels
     }
 
     pub(super) fn render_since(

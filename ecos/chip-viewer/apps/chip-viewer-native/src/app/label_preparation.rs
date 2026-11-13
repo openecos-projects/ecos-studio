@@ -54,6 +54,22 @@ impl<'a> LabelPlan<'a> {
         measure: impl Fn(usize, &str, f32) -> egui::Vec2 + Sync,
         is_current: impl Fn() -> bool + Sync,
     ) -> Option<ResolvedLabels> {
+        self.resolve_measured(
+            workers,
+            |worker| {
+                let measure = &measure;
+                move |text: &str, size| measure(worker, text, size)
+            },
+            is_current,
+        )
+    }
+
+    pub(in crate::app) fn resolve_measured<Measurement: LabelMeasurement>(
+        self,
+        workers: usize,
+        measurement: impl Fn(usize) -> Measurement + Sync,
+        is_current: impl Fn() -> bool + Sync,
+    ) -> Option<ResolvedLabels> {
         if !is_current() {
             return None;
         }
@@ -73,15 +89,14 @@ impl<'a> LabelPlan<'a> {
             groups[worker].push((order, candidate));
         }
         let prepare = |worker, group: Vec<(usize, &'a ShapeLabelCandidate)>| {
+            let measure = measurement(worker);
             group
                 .into_iter()
                 .map(|(order, candidate)| {
                     if !is_current() {
                         return None;
                     }
-                    let placements = candidate_placements(candidate, self.canvas, &|text, size| {
-                        measure(worker, text, size)
-                    });
+                    let placements = candidate_placements(candidate, self.canvas, &measure);
                     Some(PreparedCandidate {
                         order,
                         candidate,

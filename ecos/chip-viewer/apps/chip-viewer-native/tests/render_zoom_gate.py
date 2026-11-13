@@ -22,6 +22,10 @@ def collect(reports, label, failures, observations):
             failures.append(f"{context}: missing or wrong fullscreen dimensions")
         if report.get("raster_trace_diagnostic") is not False:
             failures.append(f"{context}: diagnostic timings are not acceptance evidence")
+        if report.get("environment_diagnostic") or report.get("acceptance_evidence") is False:
+            failures.append(f"{context}: environment diagnostic is not acceptance evidence")
+        if report.get("progress_evidence_complete") is False:
+            failures.append(f"{context}: progressive evidence is incomplete")
         if type(report.get("is_gpu")) is not bool:
             failures.append(f"{context}: missing renderer route")
         else:
@@ -93,6 +97,12 @@ def evaluate(baseline_reports, candidate_reports, minimum_samples=20):
     candidate, candidate_routes = collect(candidate_reports, "candidate", failures, failures)
     if baseline_routes != candidate_routes:
         failures.append("baseline and candidate renderer routes differ")
+    capture_backends = {
+        report.get("capture_backend", "xwd")
+        for report in [*baseline_reports, *candidate_reports]
+    }
+    if len(capture_backends) != 1 or not capture_backends <= {"xwd", "XGetImage"}:
+        failures.append("capture backend changed or is unsupported")
     if baseline.keys() != candidate.keys():
         failures.append("baseline and candidate camera sets differ")
     cameras = []

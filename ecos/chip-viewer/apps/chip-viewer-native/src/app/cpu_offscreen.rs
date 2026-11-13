@@ -31,6 +31,11 @@ pub(super) struct OffscreenRenderer {
 
 impl OffscreenRenderer {
     #[cfg(test)]
+    pub(super) fn solid_shader_active(&self) -> bool {
+        self.compact.solid_shader_active()
+    }
+
+    #[cfg(test)]
     pub(super) fn font_texture_pixels(&self, buffer_len: usize) -> Vec<u8> {
         let gl = self.painter.gl();
         let texture = self.painter.texture(egui::TextureId::default()).unwrap();
@@ -57,6 +62,14 @@ impl OffscreenRenderer {
     }
 
     pub(super) fn new(expected_renderer: &str) -> Result<Self, String> {
+        #[cfg(test)]
+        let configured_renderer = std::env::var("ECOS_COVERAGE_GL_RENDERER").ok();
+        #[cfg(test)]
+        let expected_renderer = if expected_renderer.is_empty() {
+            configured_renderer.as_deref().unwrap_or(expected_renderer)
+        } else {
+            expected_renderer
+        };
         let mut errors = Vec::new();
         for device in Device::query_devices().map_err(|error| error.to_string())? {
             match Self::for_device(&device, expected_renderer) {
@@ -97,9 +110,7 @@ impl OffscreenRenderer {
             })
         };
         let renderer = unsafe { gl.get_parameter_string(glow::RENDERER) };
-        let version = unsafe { gl.get_parameter_string(glow::VERSION) };
-        let sparse_profile = renderer == "llvmpipe (LLVM 20.1.2, 256 bits)"
-            && version == "4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2";
+        let sparse_profile = sparse_rects::certified_profile(&gl);
         if renderer != expected_renderer && (!cfg!(test) || !expected_renderer.is_empty()) {
             return Err(format!(
                 "offscreen renderer {renderer} differs from {expected_renderer}"

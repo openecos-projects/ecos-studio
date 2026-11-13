@@ -4,6 +4,17 @@ pub(super) fn build(
     request: &SceneRequest,
     is_current: impl Fn() -> bool,
 ) -> Option<(Vec<egui::ClippedPrimitive>, usize)> {
+    build_with_shapes(request, is_current).map(|(meshes, drawn, _)| (meshes, drawn))
+}
+
+pub(super) fn build_with_shapes(
+    request: &SceneRequest,
+    is_current: impl Fn() -> bool,
+) -> Option<(
+    Vec<egui::ClippedPrimitive>,
+    usize,
+    Vec<egui::epaint::ClippedShape>,
+)> {
     if !is_current() {
         return None;
     }
@@ -47,7 +58,11 @@ pub(super) fn build(
     if !is_current() {
         return None;
     }
-    let meshes =
-        builder::prepare_meshes(request.tessellator.clone().tessellate_shapes(output.shapes));
-    is_current().then_some((meshes, drawn))
+    let meshes = builder::prepare_meshes(
+        request
+            .tessellator
+            .clone()
+            .tessellate_shapes(output.shapes.clone()),
+    );
+    is_current().then_some((meshes, drawn, output.shapes))
 }

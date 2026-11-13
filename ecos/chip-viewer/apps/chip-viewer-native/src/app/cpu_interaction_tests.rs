@@ -39,6 +39,103 @@ fn image(key: &SceneKey) -> Arc<[u8]> {
 }
 
 #[test]
+fn presentation_uses_progress_published_after_ui_preparation_in_the_same_paint() {
+    let fixture = Fixture::new();
+    let key = fixture.request(1.0, 1.0).key;
+    let Some(renderer) = renderer() else { return };
+    renderer.with_context(|gl| {
+        let presentation = Presentation::new(Arc::clone(gl), &key, fixture.ctx.clone());
+        let mut cache = CpuSceneCache::default();
+        cache.raster = Arc::clone(&presentation.cache);
+        cache.key = Some(key.clone());
+        cache.inbox.generation.store(4, Ordering::Relaxed);
+        let expected = image(&key);
+        let recorded = Arc::new(Mutex::new(None));
+        let actual = presentation.paint_queued(
+            |painter| {
+                cache.paint_glow(None, painter, egui::Color32::BLACK);
+                assert!(!cache.raster_visible());
+                let recorded = Arc::clone(&recorded);
+                cache.raster.queue_stats(
+                    painter,
+                    &key,
+                    CanvasRenderStats {
+                        geometry_drawn_shapes: 12,
+                        ..Default::default()
+                    },
+                    move |stats| *recorded.lock().unwrap() = Some(stats.clone()),
+                );
+            },
+            || {
+                assert!(recorded.lock().unwrap().is_none());
+                cache.progress.publish(progress::ProgressFrame::new(
+                    key.clone(),
+                    4,
+                    64,
+                    expected.to_vec(),
+                ));
+            },
+        );
+        assert_pixels(&actual, &expected);
+        assert!(presentation.cache.is_partial(&key));
+        assert!(!presentation.cache.is_preview(&key));
+        assert!(presentation.cache.scene_for(&key).is_none());
+        let stats = recorded.lock().unwrap().take().unwrap();
+        assert!(stats.cpu_stats_after_paint);
+        assert!(stats.cpu_scene_visible);
+        assert!(stats.cpu_scene_partial);
+        assert!(!stats.cpu_scene_preview);
+        assert!(stats.scene_pending);
+        assert_eq!(stats.geometry_drawn_shapes, 0);
+    });
+}
+
+#[test]
+fn queued_presentation_rejects_late_progress_for_a_different_camera_or_generation() {
+    let fixture = Fixture::new();
+    let key = fixture.request(1.0, 1.0).key;
+    let Some(renderer) = renderer() else { return };
+    renderer.with_context(|gl| {
+        for (generation, zoom) in [(3, 1.0), (4, 2.0)] {
+            let presentation = Presentation::new(Arc::clone(gl), &key, fixture.ctx.clone());
+            let mut cache = CpuSceneCache::default();
+            cache.raster = Arc::clone(&presentation.cache);
+            cache.key = Some(key.clone());
+            cache.inbox.generation.store(4, Ordering::Relaxed);
+            let recorded = Arc::new(Mutex::new(None));
+            let published_key = fixture.request(zoom, 1.0).key;
+            let actual = presentation.paint_queued(
+                |painter| {
+                    cache.paint_glow(None, painter, egui::Color32::BLACK);
+                    let recorded = Arc::clone(&recorded);
+                    cache.raster.queue_stats(
+                        painter,
+                        &key,
+                        CanvasRenderStats::default(),
+                        move |stats| *recorded.lock().unwrap() = Some(stats.clone()),
+                    );
+                },
+                || {
+                    cache.progress.publish(progress::ProgressFrame::new(
+                        published_key.clone(),
+                        generation,
+                        64,
+                        image(&published_key).to_vec(),
+                    ));
+                },
+            );
+            let stats = recorded.lock().unwrap().take().unwrap();
+            assert!(stats.cpu_stats_after_paint);
+            assert!(!stats.cpu_scene_visible);
+            assert!(!stats.cpu_scene_partial);
+            assert!(stats.scene_pending);
+            assert_pixels(&actual, &[0, 0, 0, 255].repeat(640 * 480));
+            assert!(!presentation.cache.is_partial(&key));
+        }
+    });
+}
+
+#[test]
 fn selection_keeps_complete_geometry_instead_of_replacing_it_with_a_partial_prefix() {
     let fixture = Fixture::new();
     let request = fixture.request(1.0, 1.0);
@@ -56,7 +153,7 @@ fn selection_keeps_complete_geometry_instead_of_replacing_it_with_a_partial_pref
             key: selected.clone(),
             generation: 2,
             sequence: 1,
-            pixels: [0, 0, 0, 255].repeat(640 * 480).into(),
+            pixels: Arc::new([0, 0, 0, 255].repeat(640 * 480)),
         });
         assert_pixels(
             &presentation.paint(None, &selected, Some(&partial)),
@@ -175,7 +272,7 @@ fn pan_preserves_complete_overlap_and_fills_only_exposed_pixels_from_a_new_prefi
         {
             let mut current = request.key.clone();
             current.pan = egui::vec2(horizontal as f32, vertical as f32);
-            let prefix: Arc<[u8]> = [5, 103, 71, 255].repeat(640 * 480).into();
+            let prefix = Arc::new([5, 103, 71, 255].repeat(640 * 480));
             let partial = Arc::new(progress::ProgressFrame {
                 key: current.clone(),
                 generation: generation as u64 + 2,
@@ -259,7 +356,7 @@ fn presentation_keeps_partial_geometry_moving_across_consecutive_pans() {
         key: source.clone(),
         generation: 4,
         sequence: 1,
-        pixels: image(&source),
+        pixels: Arc::new(image(&source).to_vec()),
     });
     let Some(renderer) = renderer() else { return };
     renderer.with_context(|gl| {
@@ -290,7 +387,7 @@ fn presentation_adopts_current_progress_and_rejects_late_camera_results() {
         key: source.clone(),
         generation: 4,
         sequence: 1,
-        pixels: image(&source),
+        pixels: Arc::new(image(&source).to_vec()),
     });
     let Some(renderer) = renderer() else { return };
     renderer.with_context(|gl| {
@@ -302,7 +399,7 @@ fn presentation_adopts_current_progress_and_rejects_late_camera_results() {
             key: current.clone(),
             generation: 5,
             sequence: 2,
-            pixels: shifted(&previous.pixels, source.screen_size, [37, -19]).into(),
+            pixels: Arc::new(shifted(&previous.pixels, source.screen_size, [37, -19])),
         });
         assert_pixels(
             &presentation.paint(None, &current, Some(&progress)),
@@ -340,7 +437,7 @@ fn presentation_resizes_retained_partial_storage_before_current_upload() {
         key: source.clone(),
         generation: 4,
         sequence: 1,
-        pixels: image(&source),
+        pixels: Arc::new(image(&source).to_vec()),
     });
     let Some(renderer) = renderer() else { return };
     renderer.with_context(|gl| {
@@ -354,7 +451,7 @@ fn presentation_resizes_retained_partial_storage_before_current_upload() {
             key: current.clone(),
             generation: 5,
             sequence: 2,
-            pixels: image(&current),
+            pixels: Arc::new(image(&current).to_vec()),
         });
         assert_pixels(
             &presentation.paint(None, &current, Some(&progress)),

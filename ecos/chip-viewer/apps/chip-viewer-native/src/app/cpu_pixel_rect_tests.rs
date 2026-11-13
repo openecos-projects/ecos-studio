@@ -1,4 +1,7 @@
 use super::*;
+
+#[path = "cpu_axis_grid_tests.rs"]
+mod axis_grid_tests;
 use chip_render::geometry2d::{PaintCommand, PaintSink};
 
 #[path = "cpu_coverage_blend_tests.rs"]
@@ -13,8 +16,20 @@ mod ordered_coverage_tests;
 #[path = "cpu_coverage_corpus_tests.rs"]
 mod coverage_corpus_tests;
 
+#[path = "cpu_retained_cost_tests.rs"]
+mod retained_cost_tests;
+
+#[path = "cpu_retained_regions_tests.rs"]
+mod retained_regions_tests;
+
 #[path = "cpu_sparse_rects_tests.rs"]
 mod sparse_rects_tests;
+
+#[path = "cpu_sparse_coverage_tests.rs"]
+mod sparse_coverage_tests;
+
+#[path = "cpu_initial_progress_tests.rs"]
+mod initial_progress_tests;
 
 fn meshes(
     fixture: &Fixture,
@@ -62,9 +77,18 @@ fn pixels(
         .unwrap()
         .unwrap()
         .0;
-    assert_eq!(
-        renderer.rasterize_compact(&scene, request).unwrap(),
-        expected
+    let compact = renderer.rasterize_compact(&scene, request).unwrap();
+    assert_eq!(compact.len(), expected.len());
+    let differences = compact
+        .iter()
+        .zip(&expected)
+        .enumerate()
+        .filter(|(_, (actual, expected))| actual != expected)
+        .take(16)
+        .collect::<Vec<_>>();
+    assert!(
+        differences.is_empty(),
+        "compact RGBA differences: {differences:?}"
     );
     expected
 }

@@ -1,6 +1,6 @@
 //! Reuse same-scale geometry while the current camera is prepared separately.
 
-use super::cpu_scene::progress::ProgressFrame;
+use super::cpu_scene::progress::{ProgressFrame, ProgressMailbox};
 use super::cpu_scene::{CpuScene, SceneKey};
 use super::*;
 use eframe::glow::{self, HasContext};
@@ -26,20 +26,43 @@ use trace::PresentTrace;
 #[path = "cpu_pan_presentation.rs"]
 mod pan;
 
+#[path = "cpu_presentation_stats.rs"]
+mod stats;
+
+#[path = "cpu_canvas_background.rs"]
+pub(super) mod background;
+
 #[derive(Default)]
 pub(super) struct CpuRasterCache {
     resources: Mutex<Option<RasterResources>>,
     failed: AtomicBool,
     rasterizations: AtomicUsize,
     paint_micros: AtomicUsize,
+    #[cfg(target_os = "linux")]
+    sparse_prefix: AtomicBool,
 }
 
 impl CpuRasterCache {
+    pub(super) fn paint_background(
+        &self,
+        painter: &egui::Painter,
+        frame: egui::Rect,
+        color: egui::Color32,
+    ) -> bool {
+        #[cfg(target_os = "linux")]
+        if !self.failed.load(Ordering::Relaxed) && self.sparse_prefix.load(Ordering::Relaxed) {
+            return background::queue(painter, frame, color);
+        }
+        let _ = (painter, frame, color);
+        false
+    }
+
     pub(super) fn paint(
         self: &Arc<Self>,
         scene: Option<&Arc<CpuScene>>,
         key: &SceneKey,
-        progress: Option<Arc<ProgressFrame>>,
+        progress: Arc<ProgressMailbox>,
+        generation: u64,
         painter: &egui::Painter,
         background: egui::Color32,
     ) {
@@ -48,6 +71,9 @@ impl CpuRasterCache {
                 scene.paint(painter);
             }
             return;
+        }
+        if let Some(resources) = self.resources.lock().unwrap().as_mut() {
+            resources.prepare_retained(key);
         }
         let cache = Arc::clone(self);
         let scene = scene.map(Arc::clone);
@@ -63,8 +89,14 @@ impl CpuRasterCache {
                 let result = (|| {
                     if resources.is_none() {
                         *resources = Some(RasterResources::new(Arc::clone(parent.gl()))?);
+                        #[cfg(target_os = "linux")]
+                        cache.sparse_prefix.store(
+                            super::cpu_scene::sparse_rects::certified_profile(parent.gl()),
+                            Ordering::Relaxed,
+                        );
                     }
                     trace.mark("resources_setup");
+                    let progress = progress.current(&key, generation);
                     resources.as_mut().unwrap().paint(
                         &info,
                         scene.as_ref(),
@@ -99,6 +131,25 @@ impl CpuRasterCache {
         if let Some(mut resources) = self.resources.lock().unwrap().take() {
             resources.destroy();
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn supports_initial_progress(&self, key: &SceneKey) -> bool {
+        !self.failed.load(Ordering::Relaxed)
+            && self.sparse_prefix.load(Ordering::Relaxed)
+            && self
+                .resources
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|resources| {
+                    !resources.frames().any(|frame| {
+                        frame.scene.retained.is_some()
+                            && key
+                                .raster_destination(frame.scene.key())
+                                .is_some_and(|destination| destination.intersects(key.canvas()))
+                    })
+                })
     }
 
     pub(super) fn is_ready(&self, scene: &CpuScene) -> bool {
@@ -156,6 +207,7 @@ impl CpuRasterCache {
             .is_some_and(|resources| {
                 resources.presentation_source(key).is_some_and(|source| {
                     !source.key().same_geometry(key)
+                        && resources.retained_for(key, source.key()).is_none()
                         && key.destination(source.key()).intersects(key.canvas())
                 })
             })
@@ -167,7 +219,10 @@ impl CpuRasterCache {
             .unwrap()
             .as_ref()
             .is_some_and(|resources| {
-                matches!(resources.presentation_source(key), Some(RasterSource::Partial(frame)) if frame.frame.key == *key)
+                resources.presentation_source(key).is_some_and(|source| {
+                    resources.retained_for(key, source.key()).is_some()
+                        || matches!(source, RasterSource::Partial(frame) if frame.frame.key == *key)
+                })
             })
     }
 
@@ -185,6 +240,14 @@ impl CpuRasterCache {
 
     pub(super) fn paint_ms(&self) -> f32 {
         self.paint_micros.load(Ordering::Relaxed) as f32 / 1000.0
+    }
+
+    pub(super) fn retained_stats(&self, key: &SceneKey) -> (usize, f32) {
+        self.resources
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map_or((0, 0.0), |resources| resources.retained_stats(key))
     }
 }
 
@@ -206,6 +269,8 @@ struct RasterResources {
     front: Option<RasterFrame>,
     building: Option<RasterBuild>,
     progress: Option<ProgressTarget>,
+    retained_pan: Option<pan::RetainedPan>,
+    retained_target: Option<pan::RetainedTarget>,
 }
 
 struct ProgressTarget {
@@ -250,6 +315,8 @@ impl RasterResources {
             front: None,
             building: None,
             progress: None,
+            retained_pan: None,
+            retained_target: None,
         })
     }
 
@@ -280,6 +347,17 @@ impl RasterResources {
     }
 
     fn presentation_source(&self, key: &SceneKey) -> Option<RasterSource<'_>> {
+        if !self
+            .frames()
+            .any(|frame| frame.scene.key().same_geometry(key))
+        {
+            if let Some(frame) = self
+                .frames()
+                .find(|frame| self.retained_for(key, frame.scene.key()).is_some())
+            {
+                return Some(RasterSource::Complete(frame));
+            }
+        }
         let completed = self.source(key);
         if let Some(frame) = completed {
             return Some(RasterSource::Complete(frame));
@@ -380,6 +458,8 @@ impl RasterResources {
             }
         }
         trace.mark("progress_upload");
+        self.upload_retained(key)?;
+        trace.mark("retained_upload");
         self.present(&gl, info, draw, key);
         if already_ready && self.targets.warm_when_idle(&gl, info.screen_size_px)? {
             trace.mark("idle_target_allocation");
@@ -484,6 +564,10 @@ impl RasterResources {
 
     fn clear_frames(&mut self) {
         let gl = self.painter.gl();
+        self.retained_pan = None;
+        if let Some(target) = self.retained_target.take() {
+            target.target.destroy(gl);
+        }
         for frame in self.anchor.take().into_iter().chain(self.front.take()) {
             frame.target.destroy(gl);
         }

@@ -8,8 +8,6 @@ pub(super) fn spawn(
     thread::spawn(move || {
         let label_worker = labels::LabelWorker::new(Arc::clone(&worker_inbox));
         let mut selection_labels = labels::LabelResolver::default();
-        let evidence_directory =
-            std::env::var_os("ECOS_RENDER_PROGRESS_EVIDENCE").map(PathBuf::from);
         #[cfg(target_os = "linux")]
         let mut renderer = None;
         loop {
@@ -23,6 +21,10 @@ pub(super) fn spawn(
                 }
                 pending.take().unwrap()
             };
+            let worker_started = Instant::now();
+            #[cfg(target_os = "linux")]
+            let mut evidence_write =
+                progress::InitialEvidenceWrite::start(Arc::clone(&worker_inbox));
             let is_current = || {
                 !worker_inbox.stopped.load(Ordering::Relaxed)
                     && worker_inbox.generation.load(Ordering::Relaxed) == generation
@@ -50,20 +52,25 @@ pub(super) fn spawn(
                         &mut renderer,
                         is_current,
                         |pixels, sequence| {
-                            if is_current() {
-                                let frame = progress::ProgressFrame {
-                                    key: request.key.clone(),
+                            if is_current()
+                                && !worker_progress.contains(
+                                    &request.key,
                                     generation,
                                     sequence,
-                                    pixels: pixels.into(),
-                                };
-                                if let Some(directory) = &evidence_directory {
-                                    if let Err(error) = frame.record_evidence(directory) {
-                                        eprintln!("Progress evidence unavailable: {error}");
-                                    }
-                                }
-                                worker_progress.publish(frame);
+                                    &pixels,
+                                )
+                            {
+                                let frame = progress::ProgressFrame::new(
+                                    request.key.clone(),
+                                    generation,
+                                    sequence,
+                                    pixels,
+                                );
+                                let frame = worker_progress.publish(frame);
                                 request.repaint.request_repaint();
+                                if let Err(error) = worker_inbox.initial_evidence.enqueue(frame) {
+                                    eprintln!("Progress evidence unavailable: {error}");
+                                }
                             }
                         },
                         |scene| label_worker.submit(&request, generation, scene),
@@ -86,6 +93,21 @@ pub(super) fn spawn(
             } else {
                 continue;
             };
+            #[cfg(target_os = "linux")]
+            let initial_evidence_duration = evidence_write.finish().unwrap_or_else(|error| {
+                eprintln!("Initial progress evidence unavailable: {error}");
+                Duration::ZERO
+            });
+            #[cfg(not(target_os = "linux"))]
+            let initial_evidence_duration = Duration::ZERO;
+            if std::env::var_os("ECOS_RENDER_RASTER_TRACE").is_some() {
+                eprintln!(
+                    "Scene worker generation {generation}: initial evidence {:.3} ms, before handoff {:.3} ms, raster pipeline {:.3} ms",
+                    initial_evidence_duration.as_secs_f64() * 1000.0,
+                    worker_started.elapsed().as_secs_f64() * 1000.0,
+                    scene.pipeline_duration.as_secs_f64() * 1000.0,
+                );
+            }
             if outgoing.send((generation, Arc::clone(&scene))).is_err() {
                 break;
             }

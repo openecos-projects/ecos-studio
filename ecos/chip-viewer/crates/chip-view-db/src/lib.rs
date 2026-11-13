@@ -21,6 +21,9 @@ use rstar::{RTree, RTreeObject, AABB};
 mod view_tiles;
 pub use view_tiles::ViewTileIndex;
 
+mod query_prefix;
+pub use query_prefix::QueryPrefixLimits;
+
 pub mod clock_tree;
 
 pub struct ChipViewDb {

@@ -162,4 +162,25 @@ fn check_sparse(commands: &[PaintCommand], world: Rect32, canvas: egui::Rect, zo
         differences.is_empty(),
         "sparse full-byte oracle zoom {zoom}: {differences:?}"
     );
+    if let Some(iterations) = std::env::var_os("ECOS_RECT_BLEND_BENCH_ITERATIONS") {
+        let iterations: usize = iterations.to_str().unwrap().parse().unwrap();
+        assert!(iterations > 0);
+        let mut durations = Vec::with_capacity(iterations);
+        for _ in 0..iterations {
+            let mut pixels = prepared.blank(request.key.background);
+            let started = Instant::now();
+            assert!(prepared.render_since(0, &mut pixels, &|| true));
+            durations.push(started.elapsed().as_secs_f64() * 1000.0);
+            std::hint::black_box(pixels);
+        }
+        durations.sort_unstable_by(f64::total_cmp);
+        eprintln!(
+            "RECT_BLEND {}",
+            serde_json::json!({
+                "diagnostic_only": true, "zoom": zoom, "iterations": iterations,
+                "p50_ms": durations[(iterations - 1) / 2],
+                "p95_ms": durations[(iterations * 95).div_ceil(100) - 1],
+            })
+        );
+    }
 }

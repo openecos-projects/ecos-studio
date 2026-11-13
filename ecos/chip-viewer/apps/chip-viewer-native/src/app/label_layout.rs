@@ -5,6 +5,10 @@ use eframe::egui;
 #[path = "label_preparation.rs"]
 mod preparation;
 
+#[path = "label_measurement.rs"]
+mod measurement;
+pub(in crate::app) use measurement::{FontMeasurement, LabelMeasurement};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(super) enum ShapeLabelKind {
     IoPin,
@@ -220,7 +224,7 @@ fn candidate_placements<F>(
     measure: &F,
 ) -> Vec<LabelPlacement>
 where
-    F: Fn(&str, f32) -> egui::Vec2,
+    F: LabelMeasurement,
 {
     let mut placements = Vec::new();
     let placement = if candidate.kind.is_pin() {
@@ -257,7 +261,7 @@ where
 
 fn fixed_pin_placement<F>(candidate: &ShapeLabelCandidate, measure: &F) -> LabelPlacement
 where
-    F: Fn(&str, f32) -> egui::Vec2,
+    F: LabelMeasurement,
 {
     let horizontal = fixed_pin_placement_with_orientation(candidate, measure, false);
     let vertical = fixed_pin_placement_with_orientation(candidate, measure, true);
@@ -274,7 +278,7 @@ fn fixed_pin_placement_with_orientation<F>(
     vertical: bool,
 ) -> LabelPlacement
 where
-    F: Fn(&str, f32) -> egui::Vec2,
+    F: LabelMeasurement,
 {
     let font_size = 11.0;
     let available_length = if vertical {
@@ -283,7 +287,7 @@ where
         (candidate.anchor_rect.width() - 2.0).max(0.0)
     };
     let text = ellipsize_to_width(&candidate.text, available_length, font_size, measure);
-    let text_size = measure(&text, font_size);
+    let text_size = measure.measure(&text, font_size);
     let bounding_size = if vertical {
         egui::vec2(text_size.y + 1.0, text_size.x + 2.0)
     } else {
@@ -300,9 +304,9 @@ where
 
 fn ellipsize_to_width<F>(text: &str, max_width: f32, font_size: f32, measure: &F) -> String
 where
-    F: Fn(&str, f32) -> egui::Vec2,
+    F: LabelMeasurement,
 {
-    if measure(text, font_size).x <= max_width {
+    if measure.measure(text, font_size).x <= max_width {
         return text.to_string();
     }
 
@@ -312,7 +316,7 @@ where
         let mut candidate = fitted.clone();
         candidate.push(character);
         candidate.push(ellipsis);
-        if measure(&candidate, font_size).x > max_width {
+        if measure.measure(&candidate, font_size).x > max_width {
             break;
         }
         fitted.push(character);
@@ -415,7 +419,7 @@ fn fit_inside<F>(
     measure: &F,
 ) -> Option<(f32, egui::Vec2)>
 where
-    F: Fn(&str, f32) -> egui::Vec2,
+    F: LabelMeasurement,
 {
     let (min_size, max_size) = font_range(kind);
     let available = (anchor.size() - egui::vec2(2.0, 1.0)).max(egui::Vec2::ZERO);
@@ -424,14 +428,17 @@ where
     }
     let mut size = max_size;
     while size >= min_size {
-        let measured = measure(text, size);
-        if measured.x <= available.x && measured.y <= available.y {
+        if let Some(measured) = measure.fit(text, size, available) {
             return Some((size, measured));
         }
         size -= 0.5;
     }
     None
 }
+
+#[cfg(test)]
+#[path = "label_fit_tests.rs"]
+mod fit_tests;
 
 #[cfg(test)]
 mod tests {

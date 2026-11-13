@@ -1,5 +1,37 @@
 # Native rendering checks
 
+The current combined `initial-pool` revision passes the native 2D gates on
+all-visible minirv2 with the certified llvmpipe driver. See
+`../../../docs/render-acceptance-2026-11-13.md` for exact source identity,
+commands and scope: zero changed static layout pixels, the complete strict
+interaction journey, and 20 passing candidate journeys in the fixed-binary
+20-pair zoom distribution. Every non-fit camera has 20 uncached samples per
+group, with no complete-recovery p95 regression. All earlier failures below
+remain historical evidence.
+
+`../../../docs/render-white-texture.md` records the restricted scalar white
+shader, rejected constant-color variants, coalesced retained copies and the
+actual GL presentation statistics. Window reports include `stats_phases`;
+historical before-paint samples are not silently described as after-paint
+measurements. The complete strict interaction journey passes for the frozen
+`actual-stats` revision. The completed `streamed-final` repeated zoom series
+fails; its observations remain recorded. The earlier background-fill experiment
+and its separate failed uncached journey are in
+`../../../docs/render-canvas-background.md`. Its completed fixed-binary 20-pair
+series also fails: 16 candidate journeys pass, with three frame-p95 failures,
+one feedback failure and a per-camera full-recovery-p95 regression.
+`../../../docs/render-label-measurement.md` records the next exact row-height
+preflight and stronger test-device selection. Its completed 20-pair series has
+17 passing candidate journeys, two frame-p95 failures, one feedback failure
+and a per-camera full-recovery-p95 regression. Those intermediate revisions
+did not meet the strict goal.
+
+`../../../docs/render-initial-prefix.md` describes the bounded initial-packet
+experiment and its independent GL oracle. `render_zoom_gate.py` keeps the
+20-uncached-observation minimum and rejects environment diagnostics or a mixture
+of `xwd` and `XGetImage` capture backends. Inner CPU timing loops are not window
+acceptance observations.
+
 ## Selection and pan refresh, November 12
 
 `../../../docs/render-interaction-refresh.md` documents selection-only geometry
@@ -655,6 +687,21 @@ Outputs include every transition XWD/PNG, `comparison.png`, `stats.jsonl`,
 about every display refresh or every backend. The full timing interaction harness
 remains necessary, and the settled static reference remains the exact pixel gate.
 
+## Explicit uncached zoom sampling
+
+Add `--uncached-steps --max-feedback-seconds 0.05 --max-full-response-seconds 0.25`
+to `zoom_fidelity_e2e.py` to prepare a distinct high-camera pan before stepping
+down through the five non-fit cameras. The harness asserts a new rasterization
+for preparation and rejects any restored-history completion in those five
+steps. Home restores the original fit anchor; continuous zoom uses the same
+camera offset. Renderer route, visibility, dimensions and fidelity gates remain
+unchanged. The aggregate `render_zoom_gate.py` still requires 20 uncached
+observations per non-fit camera for both baseline and candidate.
+
+Implementation, exact-value oracles, failed experiments and window evidence:
+[label measurement](../../../docs/render-label-measurement.md) and
+[sparse residual coverage](../../../docs/render-sparse-coverage.md).
+
 ## Measured static regression
 
 The `minirv2/ws_0001/drc_ecc` design was checked at fullscreen 2D with every
@@ -982,6 +1029,13 @@ fallback performance were not rerun. The user's existing viewer and KLayout
 processes remain untouched; an already running binary does not hot-reload a build.
 ## Repeated strict zoom evidence
 
+`docs/render-retained-validity.md` records the restricted integer-pan validity
+path, its pixel oracles, bounded retained inputs, failed presentation prototype,
+and the remaining zoom/whole-product failures. A validated region frame is
+partial; it cannot satisfy complete geometry/label recovery. The additional
+`cpu_retained_valid_pixels` and `cpu_retained_validation_ms` fields expose the
+amount and cost of reuse without changing this harness's timing thresholds.
+
 `render_zoom_gate.py` aggregates multiple `zoom_fidelity_e2e.py` reports without
 mixing cached and uncached completion. It requires 20 uncached samples per
 non-fit camera by default, checks feedback/geometry/labels separately, rejects
@@ -1038,3 +1092,21 @@ ECOS_REQUIRE_INTERACTION_EGL=1 cargo test -p chip-viewer-native raster_font_test
 as the static and zoom harnesses. It explicitly marks the report diagnostic;
 its extra `gl.finish()` calls make it unsuitable for acceptance timing. The
 untraced harness keeps all existing feedback, recovery, and stall limits.
+
+### Rectangle composition diagnostics
+
+`docs/render-byte-blend.md` records a rejected SSE2 trial: byte-identical static
+pixels and faster row composition did not prevent real zoom-recovery regressions.
+Production retains the original raster kernel. A small regression locks down
+alpha operand order at integer-rounding boundaries; it requires no EGL context.
+
+```sh
+cargo test -p chip-viewer-native sparse_alpha_preserves_operand_order
+cargo run --release -p chip-view-db --example layer_query_bench -- /path/to/geometry.manifest 30
+ECOS_REQUIRE_COVERAGE_EGL=1 ECOS_COVERAGE_GL_RENDERER='llvmpipe (LLVM 20.1.2, 256 bits)' ECOS_COVERAGE_MANIFEST=/path/to/geometry.manifest ECOS_COVERAGE_SPARSE_CHECK=1 ECOS_RECT_BLEND_BENCH_ITERATIONS=30 cargo test --release -p chip-viewer-native coverage_real_design_command_domain_profile -- --ignored --nocapture
+```
+
+The query example checks complete ordered results against the single-layer API;
+the optional rectangle diagnostic times the actual prepared operation stream
+outside background initialization. Neither replaces the unchanged full-window
+interaction, static-pixel, fidelity or repeated uncached-zoom gates.

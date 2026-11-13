@@ -2,6 +2,9 @@ use super::*;
 
 use geometry::{PackedMesh, PackedVertex};
 
+#[path = "cpu_compact_solid.rs"]
+mod solid;
+
 #[derive(Default)]
 enum Backend {
     #[default]
@@ -20,9 +23,15 @@ struct Buffers {
     vertices: glow::Buffer,
     indices: glow::Buffer,
     texture_coordinate: u32,
+    solid: Option<solid::SolidProgram>,
 }
 
 impl CompactPainter {
+    #[cfg(test)]
+    pub(super) fn solid_shader_active(&self) -> bool {
+        matches!(&self.backend, Backend::Ready(buffers) if buffers.solid.is_some())
+    }
+
     pub(super) fn paint(
         &mut self,
         painter: &mut eframe::egui_glow::Painter,
@@ -55,7 +64,7 @@ impl CompactPainter {
                     if let Backend::Ready(buffers) = &self.backend {
                         if let Some(texture) = painter.texture(mesh.texture_id) {
                             if !bound {
-                                buffers.bind(&gl);
+                                buffers.bind(&gl, key);
                                 bound = true;
                             }
                             let [left, top, right, bottom] = [
@@ -154,6 +163,17 @@ impl Buffers {
                 return Err(error);
             }
         };
+        let solid = if sparse_rects::certified_profile(gl) {
+            match solid::SolidProgram::new(gl, position, color, texture_coordinate) {
+                Ok(program) => Some(program),
+                Err(error) => {
+                    eprintln!("Solid mesh shader unavailable; using original shader: {error}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
         unsafe {
             gl.bind_vertex_array(Some(array));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertices));
@@ -184,10 +204,14 @@ impl Buffers {
             vertices,
             indices,
             texture_coordinate,
+            solid,
         })
     }
 
-    fn bind(&self, gl: &glow::Context) {
+    fn bind(&self, gl: &glow::Context, key: &SceneKey) {
+        if let Some(solid) = &self.solid {
+            solid.bind(gl, key);
+        }
         unsafe {
             gl.enable(glow::SCISSOR_TEST);
             gl.bind_vertex_array(Some(self.array));
@@ -202,6 +226,9 @@ impl Buffers {
     }
 
     fn destroy(self, gl: &glow::Context) {
+        if let Some(solid) = self.solid {
+            solid.destroy(gl);
+        }
         unsafe {
             gl.delete_vertex_array(self.array);
             gl.delete_buffer(self.vertices);

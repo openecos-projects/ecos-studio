@@ -22,11 +22,18 @@ mod labels;
 #[path = "cpu_overlays.rs"]
 mod overlays;
 
+#[path = "cpu_axis_grid.rs"]
+mod axis_grid;
+
 #[path = "cpu_progress.rs"]
 pub(super) mod progress;
 
 #[path = "cpu_history.rs"]
 mod history;
+
+#[cfg(target_os = "linux")]
+#[path = "cpu_initial_pixels.rs"]
+mod initial_pixels;
 
 #[path = "cpu_scene_worker.rs"]
 mod worker;
@@ -37,7 +44,10 @@ mod offscreen;
 
 #[cfg(target_os = "linux")]
 #[path = "cpu_sparse_rects.rs"]
-mod sparse_rects;
+pub(super) mod sparse_rects;
+
+#[path = "cpu_retained_regions.rs"]
+pub(super) mod retained_regions;
 
 #[cfg(test)]
 #[path = "cpu_scene_tests.rs"]
@@ -67,6 +77,7 @@ pub(super) struct SceneKey {
 pub(super) struct SceneRequest {
     key: SceneKey,
     db: Arc<ChipViewDb>,
+    data_bounds: Option<Rect32>,
     layer_ids: Vec<LayerId>,
     layers: LayerRenderIndex,
     zoom_rules: ZoomVisibilityRules,
@@ -96,6 +107,7 @@ pub(super) struct CpuScene {
     pub(super) query_duration: Duration,
     pub(super) filter_duration: Duration,
     pub(super) bitmap: Option<Arc<[u8]>>,
+    pub(super) retained: Option<Arc<retained_regions::RegionModel>>,
     pub(super) raster_duration: Duration,
     completed_labels: Arc<LabelCompletion>,
     pub(super) overlay_drawn: usize,
@@ -106,11 +118,15 @@ struct WorkerInbox {
     wake: Condvar,
     generation: AtomicU64,
     stopped: AtomicBool,
+    #[cfg(target_os = "linux")]
+    initial_evidence: progress::InitialEvidence,
 }
 
 pub(super) struct CpuSceneCache {
     raster: Arc<super::cpu_raster::CpuRasterCache>,
     progress: Arc<progress::ProgressMailbox>,
+    #[cfg(target_os = "linux")]
+    initial_pixels: initial_pixels::Pool,
     history: history::CpuSceneHistory,
     inbox: Arc<WorkerInbox>,
     responses: Receiver<(u64, Arc<CpuScene>)>,
@@ -128,6 +144,10 @@ impl Default for CpuSceneCache {
             wake: Condvar::new(),
             generation: AtomicU64::new(0),
             stopped: AtomicBool::new(false),
+            #[cfg(target_os = "linux")]
+            initial_evidence: progress::InitialEvidence::new(
+                std::env::var_os("ECOS_RENDER_PROGRESS_EVIDENCE").map(PathBuf::from),
+            ),
         });
         let progress = Arc::new(progress::ProgressMailbox::default());
         let (outgoing, responses) = mpsc::channel();
@@ -135,6 +155,8 @@ impl Default for CpuSceneCache {
         Self {
             raster: Arc::default(),
             progress,
+            #[cfg(target_os = "linux")]
+            initial_pixels: Default::default(),
             history: history::CpuSceneHistory::default(),
             inbox,
             responses,
@@ -222,6 +244,32 @@ impl CpuSceneCache {
         }
         if self.pending.is_some() {
             let generation = self.inbox.generation.load(Ordering::Relaxed);
+            #[cfg(target_os = "linux")]
+            if self.ready.is_none() {
+                if let Some(request) = self.pending.as_ref().filter(|request| {
+                    request.glow && self.raster.supports_initial_progress(&request.key)
+                }) {
+                    let mut pixels = self.initial_pixels.take(
+                        request.key.screen_size[0] as usize
+                            * request.key.screen_size[1] as usize
+                            * 4,
+                    );
+                    if let Some(sequence) = builder::build_initial_progress(request, &mut pixels) {
+                        let frame = self.progress.publish(progress::ProgressFrame::new(
+                            request.key.clone(),
+                            generation,
+                            sequence,
+                            pixels,
+                        ));
+                        self.initial_pixels.keep(Arc::clone(&frame.pixels));
+                        if let Err(error) = self.inbox.initial_evidence.enqueue(frame) {
+                            eprintln!("Initial progress evidence unavailable: {error}");
+                        }
+                    } else {
+                        self.initial_pixels.keep(Arc::new(pixels));
+                    }
+                }
+            }
             *self.inbox.request.lock().unwrap() = self
                 .pending
                 .take()
@@ -239,6 +287,19 @@ impl CpuSceneCache {
         self.ready.as_ref().map(Arc::clone)
     }
 
+    pub(super) fn paint_background(
+        &self,
+        painter: &egui::Painter,
+        frame: egui::Rect,
+        color: egui::Color32,
+    ) -> bool {
+        self.raster.paint_background(painter, frame, color)
+    }
+
+    pub(super) fn central_frame(&self, context: &egui::Context) -> egui::Frame {
+        self.raster.central_frame(context)
+    }
+
     pub(super) fn paint_glow(
         &self,
         scene: Option<&Arc<CpuScene>>,
@@ -246,10 +307,14 @@ impl CpuSceneCache {
         background: egui::Color32,
     ) {
         if let Some(key) = &self.key {
-            let progress = self
-                .progress
-                .current(key, self.inbox.generation.load(Ordering::Relaxed));
-            self.raster.paint(scene, key, progress, painter, background);
+            self.raster.paint(
+                scene,
+                key,
+                Arc::clone(&self.progress),
+                self.inbox.generation.load(Ordering::Relaxed),
+                painter,
+                background,
+            );
         }
     }
 
@@ -290,6 +355,22 @@ impl CpuSceneCache {
             .is_some_and(|key| self.raster.is_visible(key))
     }
 
+    pub(super) fn record_glow_stats(
+        &self,
+        painter: &egui::Painter,
+        stats: &CanvasRenderStats,
+    ) -> bool {
+        if self.raster.failed() {
+            return false;
+        }
+        if let Some(key) = &self.key {
+            self.raster
+                .queue_stats(painter, key, stats.clone(), record_render_stats);
+            return true;
+        }
+        false
+    }
+
     pub(super) fn raster_preview(&self) -> bool {
         self.key
             .as_ref()
@@ -300,6 +381,12 @@ impl CpuSceneCache {
         self.key
             .as_ref()
             .is_some_and(|key| self.raster.is_partial(key))
+    }
+
+    pub(super) fn retained_stats(&self) -> (usize, f32) {
+        self.key
+            .as_ref()
+            .map_or((0, 0.0), |key| self.raster.retained_stats(key))
     }
 }
 
@@ -437,6 +524,7 @@ impl LoadedViewer {
             overlay_labels.insert(candidate);
         }
         SceneRequest {
+            data_bounds: self.stats.bbox,
             key: SceneKey {
                 epoch: self.geometry_epoch,
                 layers: self.visibility_rules_cache.layer_visibility_hash,

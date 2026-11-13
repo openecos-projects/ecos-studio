@@ -29,6 +29,7 @@ impl CpuSceneHistory {
                 query_duration: scene.query_duration,
                 filter_duration: scene.filter_duration,
                 bitmap: scene.bitmap.as_ref().map(Arc::clone),
+                retained: scene.retained.as_ref().map(Arc::clone),
                 raster_duration: scene.raster_duration,
                 completed_labels: Arc::clone(&scene.completed_labels),
                 overlay_drawn: scene.overlay_drawn,
@@ -36,7 +37,8 @@ impl CpuSceneHistory {
         } else {
             scene
         };
-        let bytes = retained_bytes(&scene.meshes, scene.bitmap.as_ref());
+        let bytes = retained_bytes(&scene.meshes, scene.bitmap.as_ref())
+            .saturating_add(scene.retained.as_ref().map_or(0, |model| model.byte_len()));
         self.history.insert(scene.key().clone(), scene, bytes);
     }
 

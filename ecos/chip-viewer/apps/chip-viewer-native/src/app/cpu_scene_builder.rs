@@ -7,11 +7,33 @@ mod stream;
 mod selection;
 pub(super) use selection::refresh_labels;
 
+#[cfg(target_os = "linux")]
+#[path = "cpu_initial_progress.rs"]
+mod initial;
+#[cfg(target_os = "linux")]
+pub(super) use initial::build_initial_progress;
+
 pub(super) use stream::build_raster_stream;
 #[cfg(test)]
 pub(super) use stream::build_streaming;
 #[cfg(target_os = "linux")]
 pub(super) use stream::{build_command_stream, PaintPacket};
+
+/// Receives shape boundaries around the ordered paint commands from one record.
+/// Sinks that retain inputs must also retain records producing no commands.
+trait SceneSink: chip_render::geometry2d::PaintSink {
+    fn begin_shape(
+        &mut self,
+        _bbox: Rect32,
+        _geometry: chip_view_db::ShapeGeometry,
+        _style: chip_display::LayerStyle,
+    ) {
+    }
+
+    fn end_shape(&mut self) {}
+}
+
+impl SceneSink for geometry::GeometryMeshSink {}
 
 pub(super) fn build_scene(
     request: &SceneRequest,
@@ -97,6 +119,7 @@ fn empty_scene(key: &SceneKey) -> CpuScene {
         query_duration: Duration::ZERO,
         filter_duration: Duration::ZERO,
         bitmap: None,
+        retained: None,
         raster_duration: Duration::ZERO,
         completed_labels: Arc::default(),
         overlay_drawn: 0,
@@ -128,7 +151,7 @@ fn build_chunk(
     is_current().then_some(scene)
 }
 
-fn build_chunk_sink<Sink: chip_render::geometry2d::PaintSink>(
+fn build_chunk_sink<Sink: SceneSink>(
     request: &SceneRequest,
     ids: &[ShapeId],
     is_current: &(impl Fn() -> bool + Sync),
@@ -176,7 +199,9 @@ fn build_chunk_sink<Sink: chip_render::geometry2d::PaintSink>(
         if index % 1024 == 0 && !is_current() {
             return None;
         }
+        sink.begin_shape(shape.bbox, *geometry, *style);
         let primitives = pass.draw(*geometry, style, &mut sink);
+        sink.end_shape();
         if primitives == 0 {
             continue;
         }

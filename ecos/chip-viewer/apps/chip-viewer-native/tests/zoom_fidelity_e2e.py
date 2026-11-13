@@ -16,6 +16,7 @@ from interaction_render_e2e import (
 )
 from static_render_e2e import read_samples, screenshot, viewer_window
 from render_latency import camera_latencies
+from x11_capture import WindowCapture
 
 
 def layout(image):
@@ -40,11 +41,12 @@ def colored_difference(first, second):
     return mask.histogram()[255]
 
 
-def capture_frame(window, output, name, stats):
+def capture_frame(window, output, name, stats, direct=None):
     before = len(read_samples(stats))
     directory = output / name
     directory.mkdir(exist_ok=True)
-    image = screenshot(window, directory, compress_level=None)
+    image = (direct.capture(window) if direct else
+             screenshot(window, directory, compress_level=None))
     return image, before, len(read_samples(stats))
 
 
@@ -93,6 +95,32 @@ def comparison_sheet(output, records):
     sheet.save(output / "comparison.png")
 
 
+def prepare_uncached_camera(pointer, center, process, stats, timeout):
+    samples = read_samples(stats)
+    before_pan = len(samples)
+    rasterizations_before_pan = samples[-1]["cpu_rasterizations"]
+    pointer.move(center)
+    pointer.button(2, True)
+    try:
+        time.sleep(0.05)
+        pointer.move((center[0] + 17, center[1] + 11))
+        started = time.monotonic()
+        while True:
+            assert process.poll() is None, "viewer exited during uncached preparation"
+            samples = read_samples(stats)
+            if samples and samples[-1]["cpu_rasterizations"] > rasterizations_before_pan:
+                break
+            if time.monotonic() - started > timeout:
+                raise TimeoutError("uncached preparation did not rasterize the changed high camera")
+            time.sleep(0.01)
+    finally:
+        pointer.button(2, False)
+    wait_ready(process, stats, timeout, before_pan)
+    assert read_samples(stats)[-1]["cpu_rasterizations"] > rasterizations_before_pan, \
+        "uncached preparation did not rasterize the changed high camera"
+    pointer.move(center)
+
+
 def run(args):
     stats = args.output / "stats.jsonl"
     stats.unlink(missing_ok=True)
@@ -115,6 +143,7 @@ def run(args):
             env=environment, stdout=log, stderr=log,
         )
         pointer = Pointer()
+        direct = WindowCapture() if args.direct_capture else None
         try:
             window = None
             started = time.monotonic()
@@ -138,6 +167,13 @@ def run(args):
             previous_geometry = geometry_reference(
                 pointer, center, process, window, stats, args.output, "high-geometry", args.timeout,
             )
+            if args.uncached_steps:
+                prepare_uncached_camera(pointer, center, process, stats, args.timeout)
+                previous = capture(window, args.output, "uncached-high")
+                previous_geometry = geometry_reference(
+                    pointer, center, process, window, stats, args.output,
+                    "uncached-high-geometry", args.timeout,
+                )
             references = [previous, previous_geometry]
             assert read_samples(stats)[-1]["zoom"] > 100, "high zoom was not established"
             records = []
@@ -145,10 +181,13 @@ def run(args):
             for step in range(6):
                 before = len(read_samples(stats))
                 started = time.monotonic()
-                pointer.wheel(-1)
+                if args.uncached_steps and step == 5:
+                    pointer.home(window)
+                else:
+                    pointer.wheel(-1)
                 time.sleep(0.02)
                 early, first, last = capture_frame(
-                    window, args.output, f"out-{step:02}-early", stats,
+                    window, args.output, f"out-{step:02}-early", stats, direct,
                 )
                 captured_at = time.monotonic() - started
                 frames = [early]
@@ -162,7 +201,7 @@ def run(args):
                         break
                     assert time.monotonic() - started < args.timeout, "zoom did not settle"
                     frames.append(capture_frame(
-                        window, args.output, f"out-{step:02}-frame-{len(frames):03}", stats,
+                        window, args.output, f"out-{step:02}-frame-{len(frames):03}", stats, direct,
                     )[0])
                 wait_ready(process, stats, args.timeout, before)
                 time.sleep(0.05)
@@ -201,6 +240,8 @@ def run(args):
                     "frame_p95_ms": percentile([item["frame_interval_ms"] for item in active], 0.95),
                     "max_frame_ms": max(item["frame_interval_ms"] for item in active),
                 }
+                if args.uncached_steps and step < 5 and record["full_response_cache_hit"] is not False:
+                    failures.append(f"step {step}: uncached camera unexpectedly restored history")
                 records.append(record)
                 print(json.dumps(record), flush=True)
                 if unknown_fraction > 0.025:
@@ -230,6 +271,8 @@ def run(args):
                 pointer.wheel(1)
                 time.sleep(0.08)
             wait_ready(process, stats, args.timeout, len(read_samples(stats)))
+            if args.uncached_steps:
+                prepare_uncached_camera(pointer, center, process, stats, args.timeout)
             continuous = []
             before = len(read_samples(stats))
             for step in range(6):
@@ -237,7 +280,7 @@ def run(args):
                 pointer.wheel(-1)
                 time.sleep(0.02)
                 continuous.append(capture_frame(
-                    window, args.output, f"continuous-{step:02}", stats,
+                    window, args.output, f"continuous-{step:02}", stats, direct,
                 )[0])
                 remaining = 0.08 - (time.monotonic() - started)
                 if remaining > 0:
@@ -253,13 +296,25 @@ def run(args):
             if continuous_unknown > 0.025:
                 failures.append("continuous zoom: frame does not match any completed camera")
             comparison_sheet(args.output, records)
+            evidence_complete = "evidence unavailable:" not in (args.output / "viewer.log").read_text().lower()
+            if not evidence_complete:
+                failures.append("progress evidence could not be persisted")
+            final_samples = read_samples(stats)
             report = {"steps": records, "failures": failures,
+                      "stats_phases": {stage: sum(bool(sample.get("cpu_stats_after_paint", False)) == after_paint
+                           for sample in final_samples) for stage, after_paint in
+                           (("gl_after_paint", True), ("ui_before_paint", False))},
+                      "progress_evidence_complete": evidence_complete,
                       "raster_trace_diagnostic": args.raster_trace,
+                      "uncached_steps": args.uncached_steps,
+                      "capture_backend": "XGetImage" if args.direct_capture else "xwd",
                       "continuous_unrecognized_colored_pixel_fraction": continuous_unknown,
                       "display_size": list(initial.size), "is_gpu": samples[-1]["is_gpu"]}
             (args.output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
             assert not failures, "\n".join(failures)
         finally:
+            if direct:
+                direct.close()
             pointer.close()
             stop(process)
 
@@ -277,6 +332,10 @@ if __name__ == "__main__":
     parser.add_argument("--max-p95-ms", type=float, default=33.3)
     parser.add_argument("--max-stall-ms", type=float, default=250)
     parser.add_argument("--raster-trace", action="store_true")
+    parser.add_argument("--uncached-steps", action="store_true",
+                        help="pan the high view before stepping, then restore fit with Home")
+    parser.add_argument("--direct-capture", action="store_true",
+                        help="capture the same window pixels directly and save PNGs after settling")
     args = parser.parse_args()
     for name in ("max_feedback_seconds", "max_full_response_seconds", "max_response_seconds",
                  "max_p95_ms", "max_stall_ms"):

@@ -6,6 +6,8 @@ fn geometry_inbox(generation: u64) -> Arc<WorkerInbox> {
         wake: Condvar::new(),
         generation: AtomicU64::new(generation),
         stopped: AtomicBool::new(false),
+        #[cfg(target_os = "linux")]
+        initial_evidence: progress::InitialEvidence::new(None),
     })
 }
 

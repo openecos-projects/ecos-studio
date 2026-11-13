@@ -1,6 +1,40 @@
 use super::*;
 
 #[test]
+fn sparse_alpha_preserves_operand_order_at_integer_rounding_boundaries() {
+    let fixture = Fixture::new();
+    let mut request = fixture.request(1.0, 1.0);
+    request.key.screen_size = [16, 16];
+    request.key.canvas = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(16.0, 16.0));
+    for (source_alpha, destination_alpha, expected_alpha) in
+        [(2, 191, 192), (4, 223, 224), (8, 239, 240), (191, 2, 191)]
+    {
+        request.key.background = egui::Color32::from_rgba_premultiplied(0, 0, 0, destination_alpha);
+        let commands = [PaintCommand::FillRect {
+            rect: egui::Rect::from_min_max(egui::pos2(3.0, 2.0), egui::pos2(12.0, 9.0)),
+            rgba: [0, 0, 0, source_alpha],
+        }];
+        let prepared = sparse_rects::SparseRects::prepare(&commands, &request).unwrap();
+        let actual = prepared.render(request.key.background);
+        let mut expected = vec![0; 16 * 16 * 4];
+        for row in 0..16 {
+            for column in 0..16 {
+                expected[((15 - row) * 16 + column) * 4 + 3] =
+                    if (3..12).contains(&column) && (2..9).contains(&row) {
+                        expected_alpha
+                    } else {
+                        destination_alpha
+                    };
+            }
+        }
+        assert_eq!(
+            actual, expected,
+            "alpha {source_alpha} over {destination_alpha}"
+        );
+    }
+}
+
+#[test]
 fn sparse_rectangles_preserve_full_rgba_with_ordered_gl_repair() {
     let Some(mut renderer) = coverage_blend_tests::renderer() else {
         return;
@@ -81,17 +115,19 @@ fn sparse_stream_preserves_each_command_prefix_labels_overlays_and_cancellation(
         "type\tindex\tdirection\tstart\tstep\tcount\twidth\tlayers\ntrack\t0\tx\t0\t20\t51\t1\t\ngcell\t1\ty\t0\t100\t11\t2\t\n",
     ).unwrap();
     fixture.db = Arc::new(ChipViewDb::open(fixture.path.join("geometry.manifest")).unwrap());
-    for (zoom, scale) in [(1.0, 1.0), (2.612572, 2.0), (16.0, 4.0)] {
+    for (zoom, scale) in [(1.0, 1.0), (2.612572, 1.0), (2.612572, 2.0), (16.0, 4.0)] {
         let mut request = fixture.request(zoom, scale);
         request.key.cache_overlays = true;
         request.key.background = egui::Color32::from_rgba_premultiplied(13, 29, 51, 83);
         request.key.pan = egui::vec2(-0.25, 0.375);
         let mut prefix_meshes = Vec::new();
+        let mut prefix_kernel = sparse_rects::SparseRects::new(&request).unwrap();
         let mut prefixes = Vec::new();
         let mut sequence = 0;
         let expected = builder::build_command_stream(&request, &|| true, |packet| {
             match packet {
                 builder::PaintPacket::Commands(commands) => {
+                    prefix_kernel.append(&commands, &request, &|| true).unwrap();
                     sequence += commands.len();
                     prefix_meshes.extend(meshes(
                         &fixture,
@@ -100,7 +136,8 @@ fn sparse_stream_preserves_each_command_prefix_labels_overlays_and_cancellation(
                         geometry::GeometryOutput::ExactRaster,
                     ));
                 }
-                builder::PaintPacket::Overlays(meshes) => {
+                builder::PaintPacket::Overlays { meshes, .. } => {
+                    prefix_kernel.append_meshes(meshes.clone());
                     sequence += meshes.len();
                     prefix_meshes.extend(meshes);
                 }
@@ -109,6 +146,11 @@ fn sparse_stream_preserves_each_command_prefix_labels_overlays_and_cancellation(
                 prefixes.push((
                     sequence,
                     pixels(&mut renderer, &request, prefix_meshes.clone()),
+                    prefix_kernel.partial_pixels(
+                        &prefix_kernel.render(request.key.background),
+                        request.key.background,
+                        &|| true,
+                    ),
                 ));
             }
             true
@@ -126,18 +168,17 @@ fn sparse_stream_preserves_each_command_prefix_labels_overlays_and_cancellation(
             )
             .unwrap()
             .unwrap();
-        assert_eq!(updates.len(), prefixes.len());
-        for ((actual_sequence, actual), (expected_sequence, expected)) in
-            updates.iter().zip(&prefixes)
-        {
-            assert_eq!(actual_sequence, expected_sequence);
-            assert_eq!(
-                actual
-                    .iter()
-                    .zip(expected)
-                    .filter(|(left, right)| left != right)
-                    .count(),
-                0,
+        for (sequence, _, _) in &prefixes {
+            assert!(updates.iter().any(|(actual, _)| actual == sequence));
+        }
+        assert!(updates.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+        for (actual_sequence, actual) in &updates {
+            let (_, expected, partial) = prefixes
+                .iter()
+                .find(|(sequence, _, _)| sequence == actual_sequence)
+                .unwrap();
+            assert!(
+                actual == expected || partial.as_ref() == Some(actual),
                 "zoom {zoom}, DPR {scale}, prefix {actual_sequence}"
             );
         }

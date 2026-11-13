@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::label_layout::FontMeasurement;
 
 #[path = "cpu_label_candidates.rs"]
 mod candidates;
@@ -83,17 +84,9 @@ impl LabelResolver {
             }
             fonts.begin_pass(input.pixels_per_point, input.texture_side);
         }
-        plan.resolve(
+        plan.resolve_measured(
             workers,
-            |worker, text, size| {
-                self.fonts[worker]
-                    .layout_no_wrap(
-                        text.to_owned(),
-                        egui::FontId::proportional(size),
-                        egui::Color32::WHITE,
-                    )
-                    .size()
-            },
+            |worker| FontMeasurement(&self.fonts[worker]),
             is_current,
         )
     }
