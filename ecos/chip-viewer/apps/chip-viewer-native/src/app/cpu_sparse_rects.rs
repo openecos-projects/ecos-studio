@@ -20,7 +20,15 @@ pub(in crate::app) fn certified_profile(gl: &glow::Context) -> bool {
 
 enum Operation {
     Rect([u16; 4], egui::Color32),
+    Pattern(PatternOperation),
     Residual(usize),
+}
+
+#[derive(Clone, Copy)]
+struct PatternOperation {
+    rect: egui::Rect,
+    pattern: chip_display::FillPattern,
+    color: egui::Color32,
 }
 
 pub(super) struct SparseRects {
@@ -33,6 +41,7 @@ pub(super) struct SparseRects {
     pixels_per_point: f32,
     residual_count: usize,
     colors: [([u8; 4], egui::Color32); 2],
+    pattern_textures: Arc<PatternTextureSet>,
 }
 
 impl SparseRects {
@@ -70,6 +79,7 @@ impl SparseRects {
             pixels_per_point: key.pixels_per_point,
             residual_count: 0,
             colors: [([0; 4], egui::Color32::TRANSPARENT); 2],
+            pattern_textures: Arc::clone(&request.pattern_textures),
         };
         result.clip[0] = result.clip[0].clamp(0, result.size[0] as i32);
         result.clip[1] = result.clip[1].clamp(0, result.size[1] as i32);
@@ -90,6 +100,21 @@ impl SparseRects {
         for (index, &command) in commands.iter().enumerate() {
             if index % 256 == 0 && !is_current() {
                 return None;
+            }
+            if let PaintCommand::PatternRect {
+                rect,
+                pattern,
+                rgba,
+            } = command
+            {
+                if self.pattern_textures.spec(pattern).is_some() {
+                    self.operations.push(Operation::Pattern(PatternOperation {
+                        rect,
+                        pattern,
+                        color: color32(rgba),
+                    }));
+                    continue;
+                }
             }
             if let Some(rectangles) = raster.rectangles(command) {
                 let rgba = match command {
@@ -128,10 +153,11 @@ impl SparseRects {
                     }
                 }
             } else {
-                let mut sink = geometry::GeometryMeshSink::new(
+                let mut sink = geometry::GeometryMeshSink::new_with_patterns(
                     request.tessellator.clone(),
                     key.canvas,
                     key.tessellation,
+                    Arc::clone(&request.pattern_textures),
                 );
                 sink.paint(command);
                 let meshes = sink.finish();
@@ -235,6 +261,35 @@ impl SparseRects {
                         }
                     }
                 }
+                Operation::Pattern(operation) => {
+                    let primitive = pattern_primitive(*operation, &self.pattern_textures, canvas);
+                    let egui::epaint::Primitive::Mesh(mesh) = &primitive.primitive else {
+                        unreachable!()
+                    };
+                    let bounds =
+                        mesh.vertices
+                            .iter()
+                            .fold(egui::Rect::NOTHING, |bounds, vertex| {
+                                bounds.union(egui::Rect::from_min_max(vertex.pos, vertex.pos))
+                            });
+                    stamp += 1;
+                    for tile in self.tiles(self.bounds(bounds)) {
+                        let region = regions[tile];
+                        if region != usize::MAX && seen[region] != stamp {
+                            seen[region] = stamp;
+                            let bucket = &mut buckets[region];
+                            bytes += mesh.vertices.len() * size_of::<egui::epaint::Vertex>()
+                                + mesh.indices.len() * size_of::<u32>()
+                                + size_of::<egui::ClippedPrimitive>();
+                            if bytes > budget {
+                                return None;
+                            }
+                            let mut primitive = primitive.clone();
+                            primitive.clip_rect = bucket.canvas.intersect(primitive.clip_rect);
+                            bucket.append(primitive);
+                        }
+                    }
+                }
                 Operation::Residual(residual) => {
                     for primitive in &self.residuals[*residual] {
                         stamp += 1;
@@ -247,7 +302,12 @@ impl SparseRects {
                                 .fold(egui::Rect::NOTHING, |bounds, vertex| {
                                     bounds.union(egui::Rect::from_min_max(vertex.pos, vertex.pos))
                                 });
-                        for tile in self.tiles(self.bounds(bounds.expand(1.0))) {
+                        let edge_padding = if self.pattern_textures.contains(mesh.texture_id) {
+                            0.0
+                        } else {
+                            1.0
+                        };
+                        for tile in self.tiles(self.bounds(bounds.expand(edge_padding))) {
                             let region = regions[tile];
                             if region != usize::MAX && seen[region] != stamp {
                                 seen[region] = stamp;
@@ -357,33 +417,83 @@ impl SparseRects {
             if index % 256 == 0 && !is_current() {
                 return false;
             }
-            if let Operation::Rect(bounds, color) = operation {
-                let [left, top, right, bottom] = bounds.map(i32::from);
-                let source = color.to_array();
-                for row in top..bottom {
-                    if row % 64 == 0 && !is_current() {
-                        return false;
-                    }
-                    let start = ((self.size[1] as i32 - 1 - row) as usize * self.size[0] as usize
-                        + left as usize)
-                        * 4;
-                    let end = start + (right - left) as usize * 4;
-                    for pixel in pixels[start..end].chunks_exact_mut(4) {
-                        if source[3] == 255 {
-                            pixel.copy_from_slice(&source);
-                            continue;
-                        }
-                        let alpha = pixel[3];
-                        for channel in 0..3 {
-                            pixel[channel] = source[channel]
-                                .saturating_add(multiply(pixel[channel], 255 - source[3]));
-                        }
-                        pixel[3] = alpha.saturating_add(multiply(source[3], 255 - alpha));
-                    }
+            match operation {
+                Operation::Rect(bounds, color) => {
+                    self.paint_rect(*bounds, *color, pixels, is_current);
                 }
+                Operation::Pattern(operation) => {
+                    self.paint_pattern(*operation, pixels, is_current);
+                }
+                Operation::Residual(_) => {}
             }
         }
         is_current()
+    }
+
+    fn paint_rect(
+        &self,
+        bounds: [u16; 4],
+        color: egui::Color32,
+        pixels: &mut [u8],
+        is_current: &impl Fn() -> bool,
+    ) {
+        let [left, top, right, bottom] = bounds.map(i32::from);
+        paint_pixels(
+            self.size,
+            left..right,
+            top..bottom,
+            color.to_array(),
+            pixels,
+            is_current,
+        );
+    }
+
+    fn paint_pattern(
+        &self,
+        operation: PatternOperation,
+        pixels: &mut [u8],
+        is_current: &impl Fn() -> bool,
+    ) {
+        let [left, top, right, bottom] = self.bounds(operation.rect);
+        let tile = self
+            .pattern_textures
+            .spec(operation.pattern)
+            .map(|(_, tile)| tile)
+            .unwrap();
+        for row in top..bottom {
+            if row % 64 == 0 && !is_current() {
+                return;
+            }
+            for column in left..right {
+                let point = egui::pos2(
+                    (column as f32 + 0.5) / self.pixels_per_point,
+                    (row as f32 + 0.5) / self.pixels_per_point,
+                );
+                if point.x <= operation.rect.left()
+                    || point.x >= operation.rect.right()
+                    || point.y <= operation.rect.top()
+                    || point.y >= operation.rect.bottom()
+                {
+                    continue;
+                }
+                let uv = [
+                    (point.x - operation.rect.left()) / tile[0],
+                    (point.y - operation.rect.top()) / tile[1],
+                ];
+                let mask = self.pattern_textures.sample(operation.pattern, uv).unwrap();
+                if mask[0] == 0 && mask[3] == 0 {
+                    continue;
+                }
+                let mut source = operation.color.to_array();
+                for channel in 0..4 {
+                    source[channel] = multiply(source[channel], mask[channel]);
+                }
+                let offset = ((self.size[1] as i32 - 1 - row) as usize * self.size[0] as usize
+                    + column as usize)
+                    * 4;
+                blend_pixel(&mut pixels[offset..offset + 4], source);
+            }
+        }
     }
 
     pub(super) fn drain_meshes(
@@ -407,6 +517,9 @@ impl SparseRects {
                     if bucket.mesh.indices.len() >= geometry::MAX_MESH_INDICES {
                         bucket.flush();
                     }
+                }
+                Operation::Pattern(operation) => {
+                    bucket.append(pattern_primitive(operation, &self.pattern_textures, canvas));
                 }
                 Operation::Residual(residual) => {
                     for primitive in std::mem::take(&mut residuals[residual]) {
@@ -443,6 +556,65 @@ impl SparseRects {
             }
         }
     }
+}
+
+fn pattern_primitive(
+    operation: PatternOperation,
+    textures: &PatternTextureSet,
+    canvas: egui::Rect,
+) -> egui::ClippedPrimitive {
+    let (texture_id, [tile_width, tile_height]) = textures.spec(operation.pattern).unwrap();
+    let mut mesh = egui::Mesh::default();
+    mesh.texture_id = texture_id;
+    mesh.add_rect_with_uv(
+        operation.rect,
+        egui::Rect::from_min_max(
+            egui::Pos2::ZERO,
+            egui::pos2(
+                operation.rect.width() / tile_width,
+                operation.rect.height() / tile_height,
+            ),
+        ),
+        operation.color,
+    );
+    egui::ClippedPrimitive {
+        clip_rect: canvas,
+        primitive: egui::epaint::Primitive::Mesh(mesh),
+    }
+}
+
+fn paint_pixels(
+    size: [u32; 2],
+    columns: std::ops::Range<i32>,
+    rows: std::ops::Range<i32>,
+    source: [u8; 4],
+    pixels: &mut [u8],
+    is_current: &impl Fn() -> bool,
+) {
+    for row in rows {
+        if row % 64 == 0 && !is_current() {
+            return;
+        }
+        let start =
+            ((size[1] as i32 - 1 - row) as usize * size[0] as usize + columns.start as usize) * 4;
+        let end = start + columns.len() * 4;
+        for pixel in pixels[start..end].chunks_exact_mut(4) {
+            blend_pixel(pixel, source);
+        }
+    }
+}
+
+fn blend_pixel(destination: &mut [u8], source: [u8; 4]) {
+    if source[3] == 255 {
+        destination.copy_from_slice(&source);
+        return;
+    }
+    let alpha = destination[3];
+    for channel in 0..3 {
+        destination[channel] =
+            source[channel].saturating_add(multiply(destination[channel], 255 - source[3]));
+    }
+    destination[3] = alpha.saturating_add(multiply(source[3], 255 - alpha));
 }
 
 struct RepairBucket {

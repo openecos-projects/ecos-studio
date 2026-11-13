@@ -54,7 +54,7 @@ pub(in crate::app::cpu_scene) fn build_command_stream(
 ) -> Option<CpuScene> {
     let started = Instant::now();
     let workers = worker_count();
-    let mut scene = empty_scene(&request.key);
+    let mut scene = empty_scene(&request.key, Arc::clone(&request.pattern_textures));
     let mut retained = retained_regions::RegionModel::new(request);
     let capture = retained.is_some();
     let mut consumer_duration = Duration::ZERO;

@@ -37,7 +37,7 @@ pub(in crate::app::cpu_scene) fn refresh_labels(
         candidates.append(chunk.labels);
     }
     let resolved = resolver.resolve(request, &candidates.snapshot(), is_current)?;
-    let mut scene = empty_scene(&request.key);
+    let mut scene = empty_scene(&request.key, Arc::clone(&request.pattern_textures));
     scene.meshes = previous.meshes.clone();
     scene.fallback_meshes = previous.fallback_meshes.clone();
     scene.bitmap = previous.bitmap.as_ref().map(Arc::clone);

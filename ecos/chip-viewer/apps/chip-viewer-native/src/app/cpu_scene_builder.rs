@@ -83,7 +83,7 @@ pub(super) fn build_with_workers(
             .map(|task| task.join().expect("exact geometry worker panicked"))
             .collect::<Option<Vec<_>>>()
     })?;
-    let mut scene = empty_scene(&request.key);
+    let mut scene = empty_scene(&request.key, Arc::clone(&request.pattern_textures));
     for chunk in chunks {
         scene.meshes.extend(chunk.meshes);
         scene.labels.append(chunk.labels);
@@ -105,9 +105,10 @@ pub(super) fn build_with_workers(
     is_current().then_some(scene)
 }
 
-fn empty_scene(key: &SceneKey) -> CpuScene {
+fn empty_scene(key: &SceneKey, pattern_textures: Arc<PatternTextureSet>) -> CpuScene {
     CpuScene {
         key: key.clone(),
+        pattern_textures,
         generation: 0,
         meshes: Vec::new(),
         fallback_meshes: OnceLock::new(),
@@ -134,17 +135,21 @@ fn build_chunk(
 ) -> Option<CpuScene> {
     let key = &request.key;
     let sink = match output {
-        geometry::GeometryOutput::Reference => geometry::GeometryMeshSink::new(
+        geometry::GeometryOutput::Reference => geometry::GeometryMeshSink::new_with_patterns(
             request.tessellator.clone(),
             key.canvas,
             key.tessellation,
+            Arc::clone(&request.pattern_textures),
         ),
-        geometry::GeometryOutput::ExactRaster => geometry::GeometryMeshSink::for_raster(
-            request.tessellator.clone(),
-            key.canvas,
-            key.tessellation,
-            key.pixels_per_point,
-        ),
+        geometry::GeometryOutput::ExactRaster => {
+            geometry::GeometryMeshSink::for_raster_with_patterns(
+                request.tessellator.clone(),
+                key.canvas,
+                key.tessellation,
+                key.pixels_per_point,
+                Arc::clone(&request.pattern_textures),
+            )
+        }
     };
     let (mut scene, sink) = build_chunk_sink(request, ids, is_current, sink)?;
     scene.meshes = prepare_meshes(sink.finish());
@@ -192,7 +197,7 @@ fn build_chunk_sink<Sink: SceneSink>(
         };
         shapes.push((shape, owner, request.db.shape_geometry(shape), style));
     }
-    let mut scene = empty_scene(key);
+    let mut scene = empty_scene(key, Arc::clone(&request.pattern_textures));
     scene.filter_duration = filter_started.elapsed();
     let pass = chip_render::geometry2d::GeometryPass::new(key.world, key.canvas, key.zoom, key.pan);
     for (index, (shape, owner, geometry, style)) in shapes.iter().enumerate() {

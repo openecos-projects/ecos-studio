@@ -20,6 +20,7 @@ struct Record {
 
 pub(in crate::app) struct RegionModel {
     key: SceneKey,
+    pattern_textures: Arc<PatternTextureSet>,
     tessellator: egui::epaint::Tessellator,
     records: Vec<Record>,
     commands: Vec<PaintCommand>,
@@ -74,6 +75,7 @@ impl RegionModel {
         geometry::PixelRectRasterizer::new(key.pixels_per_point, key.tessellation)?;
         Some(Self {
             key: key.clone(),
+            pattern_textures: Arc::clone(&request.pattern_textures),
             tessellator: request.tessellator.clone(),
             records: Vec::new(),
             commands: Vec::new(),
@@ -184,8 +186,16 @@ impl RegionModel {
                     scope.spawn(move || {
                         let mut invalid = Regions::new(key);
                         let mut current = Commands::default();
-                        let mut old = Footprints::new(source, &self.tessellator);
-                        let mut new = Footprints::new(key, &self.tessellator);
+                        let mut old = Footprints::new(
+                            source,
+                            &self.tessellator,
+                            Arc::clone(&self.pattern_textures),
+                        );
+                        let mut new = Footprints::new(
+                            key,
+                            &self.tessellator,
+                            Arc::clone(&self.pattern_textures),
+                        );
                         for record in records {
                             current.0.clear();
                             if record.bbox.intersects(key.viewport) {
@@ -369,17 +379,23 @@ struct Footprints<'a> {
     raster: geometry::PixelRectRasterizer,
     key: &'a SceneKey,
     tessellator: &'a egui::epaint::Tessellator,
+    pattern_textures: Arc<PatternTextureSet>,
     rectangles: Vec<(egui::Rect, [u8; 4])>,
     repairs: Vec<egui::Rect>,
 }
 
 impl<'a> Footprints<'a> {
-    fn new(key: &'a SceneKey, tessellator: &'a egui::epaint::Tessellator) -> Self {
+    fn new(
+        key: &'a SceneKey,
+        tessellator: &'a egui::epaint::Tessellator,
+        pattern_textures: Arc<PatternTextureSet>,
+    ) -> Self {
         Self {
             raster: geometry::PixelRectRasterizer::new(key.pixels_per_point, key.tessellation)
                 .unwrap(),
             key,
             tessellator,
+            pattern_textures,
             rectangles: Vec::new(),
             repairs: Vec::new(),
         }
@@ -408,10 +424,11 @@ impl PaintSink for Footprints<'_> {
                 }
             }
         } else {
-            let mut sink = geometry::GeometryMeshSink::new(
+            let mut sink = geometry::GeometryMeshSink::new_with_patterns(
                 self.tessellator.clone(),
                 self.key.canvas,
                 self.key.tessellation,
+                Arc::clone(&self.pattern_textures),
             );
             sink.paint(command);
             for primitive in sink.finish() {

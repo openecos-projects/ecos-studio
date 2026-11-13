@@ -60,11 +60,12 @@ impl OffscreenRenderer {
                     builder::PaintPacket::Commands(commands) => {
                         sequence += commands.len();
                         if mesh_mode {
-                            let mut sink = geometry::GeometryMeshSink::for_raster(
+                            let mut sink = geometry::GeometryMeshSink::for_raster_with_patterns(
                                 request.tessellator.clone(),
                                 request.key.canvas,
                                 request.key.tessellation,
                                 request.key.pixels_per_point,
+                                Arc::clone(&request.pattern_textures),
                             );
                             for (index, command) in commands.into_iter().enumerate() {
                                 if index % 256 == 0 && !is_current() {

@@ -61,7 +61,9 @@ const LAYOUT_GEOMETRY_RGB: [u8; 3] = [148, 148, 148];
 const LAYOUT_GEOMETRY_MAX_FILL_ALPHA: u8 = 48;
 const LAYOUT_GEOMETRY_MAX_FRAME_ALPHA: u8 = 128;
 #[cfg(test)]
-const PATTERN_MIN_SIZE_PX: f32 = 20.0;
+const PATTERN_MIN_SIZE_PX: f32 = chip_render::geometry2d::PATTERN_MIN_SIZE_PX;
+#[cfg(test)]
+const PATTERN_FRAME_FADE_SIZE_PX: f32 = chip_render::geometry2d::PATTERN_FRAME_FADE_SIZE_PX;
 #[cfg(test)]
 const MAX_PATTERN_OPS_PER_SHAPE: usize = 96;
 const MAX_SELECTION_ENDPOINT_LINES: usize = 6;
@@ -287,6 +289,7 @@ struct LoadedViewer {
     next_snapshot_refresh_check: Instant,
     render_cache: RenderPlanCache,
     cpu_scene_cache: cpu_scene::CpuSceneCache,
+    pattern_textures: OnceLock<Arc<cpu_scene::PatternTextureSet>>,
     glow_rendering: bool,
     glow_renderer: Option<String>,
     previous_native_cpu_ms: f32,
@@ -2436,6 +2439,7 @@ impl LoadedViewer {
             next_snapshot_refresh_check: Instant::now() + SNAPSHOT_REFRESH_CHECK_INTERVAL,
             render_cache: RenderPlanCache::default(),
             cpu_scene_cache: cpu_scene::CpuSceneCache::default(),
+            pattern_textures: OnceLock::new(),
             glow_rendering: false,
             glow_renderer: None,
             previous_native_cpu_ms: 0.0,
@@ -3903,7 +3907,8 @@ impl LoadedViewer {
             global_alpha: heatmap.opacity,
             visibility_mask: u32::MAX,
             show_context: 1,
-            reserved: [0; 2],
+            pattern_frame_fade_size_px: crate::canvas_gpu::PATTERN_FRAME_FADE_SIZE_PX,
+            reserved: 0,
         };
 
         // Dedicated cache key so the instance buffer is uploaded once per heatmap edit.
@@ -4476,7 +4481,6 @@ impl LoadedViewer {
                         .paint_glow(cpu_scene.as_ref(), &painter, bg_color);
                     cpu_scene_visible = self.cpu_scene_cache.raster_visible();
                 }
-                let geometry_pending;
                 if let Some(scene) = &cpu_scene {
                     if self.glow_rendering {
                         cpu_scene_pending = !self.cpu_scene_cache.raster_ready(scene);
@@ -4488,34 +4492,11 @@ impl LoadedViewer {
                         drawn = scene.drawn + scene.overlay_drawn;
                         estimated_primitives = scene.primitives;
                     }
-                    geometry_pending = cpu_scene_pending;
                     cpu_scene_pending |= !self.cpu_scene_cache.labels_ready(scene);
                     query_duration = scene.query_duration;
                     filter_duration = scene.filter_duration;
                 } else {
                     cpu_scene_pending = true;
-                    geometry_pending = true;
-                }
-                if geometry_pending {
-                    painter.text(
-                        if cpu_scene_visible {
-                            canvas.right_top() + egui::vec2(-10.0, 10.0)
-                        } else {
-                            canvas.center()
-                        },
-                        if cpu_scene_visible {
-                            egui::Align2::RIGHT_TOP
-                        } else {
-                            egui::Align2::CENTER_CENTER
-                        },
-                        if cpu_scene_visible {
-                            "Refining exact geometry…"
-                        } else {
-                            "Preparing exact geometry…"
-                        },
-                        egui::FontId::proportional(14.0),
-                        ecos_text_secondary(),
-                    );
                 }
                 if cpu_scene_pending {
                     ui.ctx().request_repaint_after(Duration::from_millis(16));
@@ -9888,14 +9869,39 @@ fn paint_styled_rect(
             primitives += draw_hatch(painter, visible_rect, fill_color, true);
         }
         FillPattern::HorizontalHatch if can_pattern => {
-            primitives += draw_axis_hatch(painter, visible_rect, fill_color, HatchAxis::Horizontal);
+            primitives += draw_axis_hatch(
+                painter,
+                visible_rect,
+                fill_color,
+                HatchAxis::Horizontal,
+                MAX_PATTERN_OPS_PER_SHAPE,
+            );
         }
         FillPattern::VerticalHatch if can_pattern => {
-            primitives += draw_axis_hatch(painter, visible_rect, fill_color, HatchAxis::Vertical);
+            primitives += draw_axis_hatch(
+                painter,
+                visible_rect,
+                fill_color,
+                HatchAxis::Vertical,
+                MAX_PATTERN_OPS_PER_SHAPE,
+            );
         }
         FillPattern::Grid if can_pattern => {
-            primitives += draw_axis_hatch(painter, visible_rect, fill_color, HatchAxis::Horizontal);
-            primitives += draw_axis_hatch(painter, visible_rect, fill_color, HatchAxis::Vertical);
+            let first = draw_axis_hatch(
+                painter,
+                visible_rect,
+                fill_color,
+                HatchAxis::Horizontal,
+                MAX_PATTERN_OPS_PER_SHAPE / 2,
+            );
+            primitives += first
+                + draw_axis_hatch(
+                    painter,
+                    visible_rect,
+                    fill_color,
+                    HatchAxis::Vertical,
+                    MAX_PATTERN_OPS_PER_SHAPE - first.min(MAX_PATTERN_OPS_PER_SHAPE / 2),
+                );
         }
         FillPattern::XMark => {
             painter.rect_filled(visible_rect, 0.0, fill_color);
@@ -9914,7 +9920,7 @@ fn paint_styled_rect(
 
     if rect.width() >= MIN_SHAPE_SCREEN_SIZE || rect.height() >= MIN_SHAPE_SCREEN_SIZE {
         let mut frame_rgba = style.frame_rgba;
-        if rect.width() < PATTERN_MIN_SIZE_PX || rect.height() < PATTERN_MIN_SIZE_PX {
+        if rect.width() < PATTERN_FRAME_FADE_SIZE_PX || rect.height() < PATTERN_FRAME_FADE_SIZE_PX {
             frame_rgba[3] = frame_rgba[3].min(112);
         }
         painter.rect_stroke(
@@ -9935,16 +9941,30 @@ fn draw_pattern_dots(
     color: egui::Color32,
     spacing: f32,
 ) -> usize {
+    let x_start = rect.left() + 2.0;
+    let x_end = rect.right() - 2.0;
+    let y_start = rect.top() + 2.0;
+    let y_end = rect.bottom() - 2.0;
+    let x_source_count = pattern_sample_count(x_start, x_end, spacing);
+    let y_source_count = pattern_sample_count(y_start, y_end, spacing);
+    let (x_samples, y_samples) =
+        pattern_capped_grid(x_source_count, y_source_count, MAX_PATTERN_OPS_PER_SHAPE);
     let mut count = 0usize;
-    let mut y = rect.top() + 2.0;
-    while y < rect.bottom() && count < MAX_PATTERN_OPS_PER_SHAPE {
-        let mut x = rect.left() + 2.0;
-        while x < rect.right() && count < MAX_PATTERN_OPS_PER_SHAPE {
+    for y_index in 0..y_samples {
+        let y =
+            pattern_sample_position(y_start, y_end, spacing, y_source_count, y_samples, y_index);
+        for x_index in 0..x_samples {
+            let x = pattern_sample_position(
+                x_start,
+                x_end,
+                spacing,
+                x_source_count,
+                x_samples,
+                x_index,
+            );
             painter.circle_filled(egui::pos2(x, y), 0.8, color);
             count += 1;
-            x += spacing;
         }
-        y += spacing;
     }
     count
 }
@@ -9956,9 +9976,20 @@ fn draw_hatch(
     color: egui::Color32,
     cross: bool,
 ) -> usize {
-    let mut count = draw_hatch_direction(painter, rect, color, false);
-    if cross && count < MAX_PATTERN_OPS_PER_SHAPE {
-        count += draw_hatch_direction(painter, rect, color, true);
+    let first_limit = if cross {
+        MAX_PATTERN_OPS_PER_SHAPE / 2
+    } else {
+        MAX_PATTERN_OPS_PER_SHAPE
+    };
+    let mut count = draw_hatch_direction(painter, rect, color, false, first_limit);
+    if cross {
+        count += draw_hatch_direction(
+            painter,
+            rect,
+            color,
+            true,
+            MAX_PATTERN_OPS_PER_SHAPE - count.min(MAX_PATTERN_OPS_PER_SHAPE / 2),
+        );
     }
     count
 }
@@ -9976,10 +10007,17 @@ fn draw_axis_hatch(
     rect: egui::Rect,
     color: egui::Color32,
     axis: HatchAxis,
+    max_ops: usize,
 ) -> usize {
+    let extent = match axis {
+        HatchAxis::Horizontal => rect.height(),
+        HatchAxis::Vertical => rect.width(),
+    };
+    let source_count = pattern_sample_count(4.0, extent, 10.0);
+    let sample_count = source_count.min(max_ops);
     let mut count = 0usize;
-    let mut offset = 4.0;
-    while offset <= rect.width().max(rect.height()) && count < MAX_PATTERN_OPS_PER_SHAPE {
+    for index in 0..sample_count {
+        let offset = pattern_sample_position(4.0, extent, 10.0, source_count, sample_count, index);
         match axis {
             HatchAxis::Horizontal => {
                 let y = rect.top() + offset;
@@ -10002,7 +10040,6 @@ fn draw_axis_hatch(
                 }
             }
         }
-        offset += 10.0;
     }
     count
 }
@@ -10300,21 +10337,33 @@ fn draw_hatch_direction(
     rect: egui::Rect,
     color: egui::Color32,
     reverse: bool,
+    max_ops: usize,
 ) -> usize {
-    let width = rect.width().floor() as i32;
-    let height = rect.height().floor() as i32;
+    let width = rect.width().floor();
+    let height = rect.height().floor();
+    let offset_start = -height;
+    let offset_end = (width - 3.0).max(offset_start);
+    let source_count = pattern_sample_count(offset_start, offset_end, 8.0);
+    let sample_count = source_count.min(max_ops);
     let mut count = 0usize;
-    let mut offset = -height;
-    while offset <= width && count < MAX_PATTERN_OPS_PER_SHAPE {
-        let begin = (-offset).max(0).min(height);
+    for index in 0..sample_count {
+        let offset = pattern_sample_position(
+            offset_start,
+            offset_end,
+            8.0,
+            source_count,
+            sample_count,
+            index,
+        );
+        let begin = (-offset).max(0.0).min(height);
         let end = (width - offset).min(height);
-        if end - begin >= 3 {
-            let x0 = rect.left() + (offset + begin) as f32;
-            let x1 = rect.left() + (offset + end) as f32;
+        if end - begin >= 3.0 {
+            let x0 = rect.left() + offset + begin;
+            let x1 = rect.left() + offset + end;
             let (y0, y1) = if reverse {
-                (rect.bottom() - begin as f32, rect.bottom() - end as f32)
+                (rect.bottom() - begin, rect.bottom() - end)
             } else {
-                (rect.top() + begin as f32, rect.top() + end as f32)
+                (rect.top() + begin, rect.top() + end)
             };
             painter.line_segment(
                 [egui::pos2(x0, y0), egui::pos2(x1, y1)],
@@ -10322,9 +10371,58 @@ fn draw_hatch_direction(
             );
             count += 1;
         }
-        offset += 8;
     }
     count
+}
+
+#[cfg(test)]
+fn pattern_sample_count(start: f32, end: f32, spacing: f32) -> usize {
+    if !start.is_finite() || !end.is_finite() || !spacing.is_finite() || spacing <= 0.0 {
+        return 0;
+    }
+    if end < start {
+        return 0;
+    }
+    ((end - start) / spacing).floor() as usize + 1
+}
+
+#[cfg(test)]
+fn pattern_sample_position(
+    start: f32,
+    end: f32,
+    spacing: f32,
+    source_count: usize,
+    samples: usize,
+    index: usize,
+) -> f32 {
+    if source_count <= samples || samples <= 1 {
+        return start + index as f32 * spacing;
+    }
+    start + (end - start) * index as f32 / (samples - 1) as f32
+}
+
+#[cfg(test)]
+fn pattern_capped_grid(horizontal: usize, vertical: usize, max_ops: usize) -> (usize, usize) {
+    if horizontal == 0 || vertical == 0 || max_ops == 0 {
+        return (0, 0);
+    }
+    if horizontal.saturating_mul(vertical) <= max_ops {
+        return (horizontal, vertical);
+    }
+
+    let aspect = horizontal as f32 / vertical as f32;
+    let mut horizontal_samples = ((max_ops as f32 * aspect).sqrt() as usize)
+        .max(1)
+        .min(horizontal);
+    let mut vertical_samples = (max_ops / horizontal_samples).max(1).min(vertical);
+    while horizontal_samples.saturating_mul(vertical_samples) > max_ops {
+        if horizontal_samples >= vertical_samples {
+            horizontal_samples = horizontal_samples.saturating_sub(1).max(1);
+        } else {
+            vertical_samples = vertical_samples.saturating_sub(1).max(1);
+        }
+    }
+    (horizontal_samples, vertical_samples)
 }
 
 fn shape_screen_primitive(

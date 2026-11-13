@@ -173,7 +173,8 @@ impl LoadedViewer {
             global_alpha: 1.0,
             visibility_mask: self.object_visibility.gpu_visibility_mask(),
             show_context: u32::from(self.zoom > 1.25),
-            reserved: [0; 2],
+            pattern_frame_fade_size_px: crate::canvas_gpu::PATTERN_FRAME_FADE_SIZE_PX,
+            reserved: 0,
         }
     }
 

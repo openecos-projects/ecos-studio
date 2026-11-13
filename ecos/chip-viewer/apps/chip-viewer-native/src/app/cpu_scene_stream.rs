@@ -49,7 +49,7 @@ fn build_output(
 ) -> Option<CpuScene> {
     let started = Instant::now();
     let workers = worker_count();
-    let mut scene = empty_scene(&request.key);
+    let mut scene = empty_scene(&request.key, Arc::clone(&request.pattern_textures));
     let mut consumer_duration = Duration::ZERO;
     let query_duration = ordered::run(
         workers,

@@ -58,7 +58,13 @@ impl SparseRects {
                     let position = mesh.vertices[*index as usize].pos;
                     bounds.union(egui::Rect::from_min_max(position, position))
                 });
-                let bounds = self.bounds(bounds.expand(1.0).intersect(primitive.clip_rect));
+                let edge_padding = if self.pattern_textures.contains(mesh.texture_id) {
+                    0.0
+                } else {
+                    1.0
+                };
+                let bounds =
+                    self.bounds(bounds.expand(edge_padding).intersect(primitive.clip_rect));
                 if bounds[2] <= bounds[0] || bounds[3] <= bounds[1] {
                     continue;
                 }

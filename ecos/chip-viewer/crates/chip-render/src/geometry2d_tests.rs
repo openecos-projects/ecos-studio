@@ -25,6 +25,20 @@ fn pass() -> GeometryPass {
     )
 }
 
+fn large_pass() -> GeometryPass {
+    GeometryPass::new(
+        Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 1200,
+            hy: 1200,
+        },
+        Rect::from_min_max(pos2(0.0, 0.0), pos2(1200.0, 1200.0)),
+        1.0,
+        Vec2::ZERO,
+    )
+}
+
 fn style(pattern: FillPattern) -> LayerStyle {
     LayerStyle {
         fill_pattern: pattern,
@@ -92,9 +106,9 @@ fn pattern_phase_comes_from_clipped_visible_bounds() {
     pass().draw(geometry, &style(FillPattern::SparseDots), &mut sink);
     assert_eq!(
         sink.0[0],
-        PaintCommand::Disc {
-            center: pos2(12.0, 22.0),
-            radius: 0.8,
+        PaintCommand::PatternRect {
+            rect: Rect::from_min_max(pos2(10.0, 20.0), pos2(90.0, 110.0)),
+            pattern: FillPattern::SparseDots,
             rgba: style(FillPattern::SparseDots).rgba,
         }
     );
@@ -111,7 +125,122 @@ fn pattern_phase_comes_from_clipped_visible_bounds() {
     );
     let mut shifted_sink = RecordingSink::default();
     shifted.draw(geometry, &style(FillPattern::SparseDots), &mut shifted_sink);
-    assert_eq!(sink.0[0], shifted_sink.0[0]);
+    assert!(matches!(
+        (sink.0[0], shifted_sink.0[0]),
+        (
+            PaintCommand::PatternRect {
+                pattern: FillPattern::SparseDots,
+                rgba: left,
+                ..
+            },
+            PaintCommand::PatternRect {
+                pattern: FillPattern::SparseDots,
+                rgba: right,
+                ..
+            }
+        ) if left == right
+    ));
+}
+
+#[test]
+fn small_patterned_rectangles_emit_texture_commands_without_changing_frame_fade() {
+    let mut sink = RecordingSink::default();
+    let style = style(FillPattern::Grid);
+    let geometry = ShapeGeometry::Rect(Rect32 {
+        lx: 20,
+        ly: 42,
+        hx: 28,
+        hy: 50,
+    });
+
+    assert_eq!(pass().draw(geometry, &style, &mut sink), 2);
+    assert_eq!(
+        sink.0,
+        vec![
+            PaintCommand::PatternRect {
+                rect: Rect::from_min_max(pos2(30.0, 70.0), pos2(38.0, 78.0)),
+                pattern: FillPattern::Grid,
+                rgba: style.rgba,
+            },
+            PaintCommand::FrameRect {
+                rect: Rect::from_min_max(pos2(30.0, 70.0), pos2(38.0, 78.0)),
+                width: style.line_width_px.max(1) as f32,
+                rgba: [200, 40, 50, 112],
+            },
+        ]
+    );
+}
+
+#[test]
+fn large_grid_covers_the_entire_visible_rectangle() {
+    let mut sink = RecordingSink::default();
+    large_pass().draw(
+        ShapeGeometry::Rect(Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 1200,
+            hy: 1200,
+        }),
+        &style(FillPattern::Grid),
+        &mut sink,
+    );
+
+    assert_eq!(
+        sink.0[0],
+        PaintCommand::PatternRect {
+            rect: Rect::from_min_max(pos2(0.0, 0.0), pos2(1200.0, 1200.0)),
+            pattern: FillPattern::Grid,
+            rgba: style(FillPattern::Grid).rgba,
+        }
+    );
+}
+
+#[test]
+fn large_cross_hatch_covers_the_far_diagonal_edges() {
+    let mut sink = RecordingSink::default();
+    large_pass().draw(
+        ShapeGeometry::Rect(Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 1200,
+            hy: 1200,
+        }),
+        &style(FillPattern::CrossHatch),
+        &mut sink,
+    );
+
+    assert_eq!(
+        sink.0[0],
+        PaintCommand::PatternRect {
+            rect: Rect::from_min_max(pos2(0.0, 0.0), pos2(1200.0, 1200.0)),
+            pattern: FillPattern::CrossHatch,
+            rgba: style(FillPattern::CrossHatch).rgba,
+        }
+    );
+}
+
+#[test]
+fn large_dot_pattern_samples_the_far_visible_area() {
+    let mut sink = RecordingSink::default();
+    large_pass().draw(
+        ShapeGeometry::Rect(Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 1200,
+            hy: 1200,
+        }),
+        &style(FillPattern::SparseDots),
+        &mut sink,
+    );
+
+    assert_eq!(
+        sink.0[0],
+        PaintCommand::PatternRect {
+            rect: Rect::from_min_max(pos2(0.0, 0.0), pos2(1200.0, 1200.0)),
+            pattern: FillPattern::SparseDots,
+            rgba: style(FillPattern::SparseDots).rgba,
+        }
+    );
 }
 
 #[test]

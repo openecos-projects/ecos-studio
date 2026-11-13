@@ -141,6 +141,9 @@ impl OffscreenRenderer {
         }
         let gl = Arc::clone(self.painter.gl());
         let target = RasterTarget::new(&gl, key.screen_size)?;
+        scene
+            .pattern_textures
+            .upload_for(&mut self.painter, &scene.meshes);
         self.painter.set_texture(
             egui::TextureId::default(),
             &egui::epaint::ImageDelta::full(image, egui::TextureOptions::LINEAR),
@@ -194,6 +197,9 @@ impl OffscreenRenderer {
         let gl = Arc::clone(self.painter.gl());
         let target = RasterTarget::new(&gl, key.screen_size)?;
         let result = (|| {
+            scene
+                .pattern_textures
+                .upload_for(&mut self.painter, &scene.meshes);
             self.painter.set_texture(
                 egui::TextureId::default(),
                 &egui::epaint::ImageDelta::full(font_image, egui::TextureOptions::LINEAR),

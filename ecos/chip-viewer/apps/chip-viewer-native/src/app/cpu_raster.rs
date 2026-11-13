@@ -525,6 +525,9 @@ impl RasterResources {
                     egui::TextureOptions::LINEAR,
                 ),
             );
+            scene
+                .pattern_textures
+                .upload_for(&mut self.painter, &scene.meshes);
             target.clear(&gl, background);
             self.building = Some(RasterBuild {
                 frame: RasterFrame {

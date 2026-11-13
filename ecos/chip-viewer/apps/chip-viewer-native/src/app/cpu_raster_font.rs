@@ -29,6 +29,7 @@ impl RasterFont {
         packed: &[Option<geometry::PackedMesh>],
         mut trace: Option<&mut trace::RasterTrace>,
     ) -> bool {
+        request.pattern_textures.upload_for(painter, meshes);
         if self.atlas_loaded
             || !meshes.iter().zip(packed).any(|(primitive, packed)| {
                 packed.is_none()

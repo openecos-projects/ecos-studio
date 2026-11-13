@@ -169,3 +169,54 @@ fn white_and_textured_streams_reject_an_obsolete_atlas_size() {
         .unwrap()
         .is_none());
 }
+
+#[test]
+fn offscreen_raster_uploads_context_managed_pattern_textures() {
+    let fixture = Fixture::new();
+    let Some(mut renderer) = renderer() else {
+        return;
+    };
+    let patterns = Arc::new(PatternTextureSet::new(&fixture.ctx));
+    let mut request = fixture.request(1.0, 1.0);
+    request.pattern_textures = Arc::clone(&patterns);
+    let mut scene = builder::build_with_workers(&request, &|| true, 1).unwrap();
+    let (texture_id, [tile_width, tile_height]) =
+        patterns.spec(chip_display::FillPattern::Grid).unwrap();
+    let mut mesh = egui::Mesh::default();
+    mesh.texture_id = texture_id;
+    mesh.add_rect_with_uv(
+        egui::Rect::from_min_max(egui::pos2(40.0, 40.0), egui::pos2(120.0, 120.0)),
+        egui::Rect::from_min_max(
+            egui::Pos2::ZERO,
+            egui::pos2(80.0 / tile_width, 80.0 / tile_height),
+        ),
+        egui::Color32::from_rgb(255, 0, 0),
+    );
+    scene.meshes = vec![egui::ClippedPrimitive {
+        clip_rect: request.key.canvas,
+        primitive: egui::epaint::Primitive::Mesh(mesh),
+    }];
+
+    let pixels = renderer
+        .rasterize_stream_primitives(&request, &scene.meshes, || true, |_, _| {})
+        .unwrap()
+        .unwrap()
+        .0;
+    let pixel = |x: usize, y: usize| {
+        let offset = (y * request.key.screen_size[0] as usize + x) * 4;
+        &pixels[offset..offset + 4]
+    };
+    let pattern_ink = (40..120).any(|y| {
+        (40..120).any(|x| {
+            let sample = pixel(x, request.key.screen_size[1] as usize - y - 1);
+            sample[0] > 32 && sample[1] < 8 && sample[2] < 8
+        })
+    });
+    assert!(
+        pattern_ink,
+        "context-managed pattern texture was not rasterized"
+    );
+
+    let empty_cell = pixel(42, request.key.screen_size[1] as usize - 42 - 1);
+    assert_eq!(empty_cell, &[0, 0, 0, 255]);
+}

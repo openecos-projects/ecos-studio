@@ -14,7 +14,7 @@ fn interaction_preserves_every_fill_pattern_pixel() {
         pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))
             .unwrap();
     let resources = CanvasGpuResources::new(&device, wgpu::TextureFormat::Rgba8Unorm).unwrap();
-    let shapes: Vec<_> = (0..10)
+    let mut shapes: Vec<_> = (0..10)
         .map(|pattern| GpuShapeInstance {
             rect_dbu: [8 + pattern * 64, 8, 56 + pattern * 64, 56],
             fill_rgba: pack_rgba_u32([40, 160, 230, 180]),
@@ -23,6 +23,13 @@ fn interaction_preserves_every_fill_pattern_pixel() {
             line_width_px: 1.0,
         })
         .collect();
+    shapes.push(GpuShapeInstance {
+        rect_dbu: [600, 8, 608, 16],
+        fill_rgba: pack_rgba_u32([40, 160, 230, 180]),
+        frame_rgba: pack_rgba_u32([230, 170, 30, 220]),
+        pattern_bits: 8 | (31 << 18),
+        line_width_px: 1.0,
+    });
     let instances = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("pattern fixture"),
         contents: bytemuck::cast_slice(&shapes),
@@ -55,7 +62,8 @@ fn interaction_preserves_every_fill_pattern_pixel() {
             global_alpha: 1.0,
             visibility_mask: u32::MAX,
             show_context: 1,
-            reserved: [0; 2],
+            pattern_frame_fade_size_px: PATTERN_FRAME_FADE_SIZE_PX,
+            reserved: 0,
         };
         queue.write_buffer(&resources.uniform_buffer, 0, bytemuck::bytes_of(&uniform));
         let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -126,6 +134,8 @@ fn interaction_preserves_every_fill_pattern_pixel() {
     let stationary = render(0.0);
     let interacting = render(1.0);
     assert!(stationary.iter().any(|byte| *byte != 0));
+    let small_grid_pixel = (52 * 640 + 604) * 4;
+    assert!(stationary[small_grid_pixel + 3] > 0);
     let changed = stationary
         .chunks_exact(4)
         .zip(interacting.chunks_exact(4))

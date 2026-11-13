@@ -5,6 +5,12 @@ struct CommandProfile {
     counts: BTreeMap<String, usize>,
     rectangles: usize,
     commands: usize,
+    pattern_style_shapes: usize,
+    pattern_size_eligible_shapes: usize,
+    pattern_rect_commands: usize,
+    pattern_eligible_by_threshold: BTreeMap<String, usize>,
+    pattern_style_by_kind: BTreeMap<String, usize>,
+    pattern_eligible_by_kind_threshold: BTreeMap<String, usize>,
     rectangle_area: f64,
     fallback_examples: Vec<(usize, String)>,
     paint: Vec<PaintCommand>,
@@ -13,6 +19,9 @@ struct CommandProfile {
 impl PaintSink for CommandProfile {
     fn paint(&mut self, command: PaintCommand) {
         self.paint.push(command);
+        if matches!(command, PaintCommand::PatternRect { .. }) {
+            self.pattern_rect_commands += 1;
+        }
         let options = egui::epaint::TessellationOptions::default();
         let raster = geometry::PixelRectRasterizer::new(1.0, options).unwrap();
         self.commands += 1;
@@ -81,10 +90,57 @@ fn coverage_real_design_command_domain_profile() {
             else {
                 continue;
             };
+            if matches!(
+                style.fill_pattern,
+                FillPattern::SparseDots
+                    | FillPattern::DenseDots
+                    | FillPattern::DiagonalHatch
+                    | FillPattern::CrossHatch
+                    | FillPattern::HorizontalHatch
+                    | FillPattern::VerticalHatch
+                    | FillPattern::Grid
+            ) {
+                if let chip_view_db::ShapeGeometry::Rect(_) = db.shape_geometry(shape) {
+                    profile.pattern_style_shapes += 1;
+                    let pattern = format!("{:?}", style.fill_pattern);
+                    *profile
+                        .pattern_style_by_kind
+                        .entry(pattern.clone())
+                        .or_default() += 1;
+                    if let chip_render::geometry2d::ScreenPrimitive::Rect(rect) =
+                        pass.project(db.shape_geometry(shape))
+                    {
+                        let visible = rect.intersect(canvas);
+                        if visible.width() >= chip_render::geometry2d::PATTERN_MIN_SIZE_PX
+                            && visible.height() >= chip_render::geometry2d::PATTERN_MIN_SIZE_PX
+                        {
+                            profile.pattern_size_eligible_shapes += 1;
+                        }
+                        for threshold in [2.0_f32, 4.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0] {
+                            if visible.width() >= threshold && visible.height() >= threshold {
+                                *profile
+                                    .pattern_eligible_by_threshold
+                                    .entry(threshold.to_string())
+                                    .or_default() += 1;
+                                *profile
+                                    .pattern_eligible_by_kind_threshold
+                                    .entry(format!("{pattern}:{threshold}"))
+                                    .or_default() += 1;
+                            }
+                        }
+                    }
+                }
+            }
             drawn += usize::from(pass.draw(db.shape_geometry(shape), &style, &mut profile) > 0);
         }
         reports.push(serde_json::json!({
             "zoom": zoom, "drawn_shapes": drawn, "commands": profile.commands,
+            "pattern_style_shapes": profile.pattern_style_shapes,
+            "pattern_size_eligible_shapes": profile.pattern_size_eligible_shapes,
+            "pattern_rect_commands": profile.pattern_rect_commands,
+            "pattern_eligible_by_threshold": profile.pattern_eligible_by_threshold,
+            "pattern_style_by_kind": profile.pattern_style_by_kind,
+            "pattern_eligible_by_kind_threshold": profile.pattern_eligible_by_kind_threshold,
             "canonical_rectangles": profile.rectangles, "categories": profile.counts,
             "rectangle_area": profile.rectangle_area, "fallback_examples": profile.fallback_examples,
         }));

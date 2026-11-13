@@ -32,6 +32,10 @@ mod geometry_tests;
 #[path = "cpu_pixel_rect_tests.rs"]
 mod pixel_rect_tests;
 
+#[cfg(target_os = "linux")]
+#[path = "cpu_sparse_pattern_tests.rs"]
+mod sparse_pattern_tests;
+
 #[path = "cpu_pipeline_tests.rs"]
 mod pipeline_tests;
 
@@ -266,6 +270,7 @@ impl Fixture {
             overlay_labels: ShapeLabelCollector::default(),
             grid_layers: vec![layer_state(1, true), layer_state(2, true)],
             publication: progress::Publication::Progressive,
+            pattern_textures: Arc::new(PatternTextureSet::default()),
         }
     }
 }

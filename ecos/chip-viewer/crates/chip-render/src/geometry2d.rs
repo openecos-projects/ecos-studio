@@ -13,7 +13,8 @@ mod patterns;
 mod tests;
 
 pub const MIN_SHAPE_SCREEN_SIZE: f32 = 2.0;
-pub const PATTERN_MIN_SIZE_PX: f32 = 20.0;
+pub const PATTERN_MIN_SIZE_PX: f32 = 6.0;
+pub const PATTERN_FRAME_FADE_SIZE_PX: f32 = 20.0;
 pub const MAX_PATTERN_OPS_PER_SHAPE: usize = 96;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -41,6 +42,11 @@ impl ScreenPrimitive {
 pub enum PaintCommand {
     FillRect {
         rect: Rect,
+        rgba: [u8; 4],
+    },
+    PatternRect {
+        rect: Rect,
+        pattern: FillPattern,
         rgba: [u8; 4],
     },
     FrameRect {
@@ -180,42 +186,21 @@ fn draw_rect(rect: Rect, canvas: Rect, style: &LayerStyle, sink: &mut impl Paint
             });
             1
         }
-        FillPattern::SparseDots if can_pattern => patterns::dots(sink, visible, style.rgba, 9.0),
-        FillPattern::DenseDots if can_pattern => patterns::dots(sink, visible, style.rgba, 5.0),
-        FillPattern::DiagonalHatch if can_pattern => patterns::diagonal(
-            sink,
-            visible,
-            style.rgba,
-            patterns::DiagonalDirection::Forward,
-        ),
-        FillPattern::CrossHatch if can_pattern => {
-            let first = patterns::diagonal(
-                sink,
-                visible,
-                style.rgba,
-                patterns::DiagonalDirection::Forward,
-            );
-            first
-                + if first < MAX_PATTERN_OPS_PER_SHAPE {
-                    patterns::diagonal(
-                        sink,
-                        visible,
-                        style.rgba,
-                        patterns::DiagonalDirection::Reverse,
-                    )
-                } else {
-                    0
-                }
-        }
-        FillPattern::HorizontalHatch if can_pattern => {
-            patterns::axis(sink, visible, style.rgba, patterns::Axis::Horizontal)
-        }
-        FillPattern::VerticalHatch if can_pattern => {
-            patterns::axis(sink, visible, style.rgba, patterns::Axis::Vertical)
-        }
-        FillPattern::Grid if can_pattern => {
-            patterns::axis(sink, visible, style.rgba, patterns::Axis::Horizontal)
-                + patterns::axis(sink, visible, style.rgba, patterns::Axis::Vertical)
+        FillPattern::SparseDots
+        | FillPattern::DenseDots
+        | FillPattern::DiagonalHatch
+        | FillPattern::CrossHatch
+        | FillPattern::HorizontalHatch
+        | FillPattern::VerticalHatch
+        | FillPattern::Grid
+            if can_pattern =>
+        {
+            sink.paint(PaintCommand::PatternRect {
+                rect: visible,
+                pattern: style.fill_pattern,
+                rgba: style.rgba,
+            });
+            1
         }
         FillPattern::XMark => {
             sink.paint(PaintCommand::FillRect {
@@ -237,7 +222,7 @@ fn draw_rect(rect: Rect, canvas: Rect, style: &LayerStyle, sink: &mut impl Paint
     };
     if rect.width() >= MIN_SHAPE_SCREEN_SIZE || rect.height() >= MIN_SHAPE_SCREEN_SIZE {
         let mut rgba = style.frame_rgba;
-        if rect.width() < PATTERN_MIN_SIZE_PX || rect.height() < PATTERN_MIN_SIZE_PX {
+        if rect.width() < PATTERN_FRAME_FADE_SIZE_PX || rect.height() < PATTERN_FRAME_FADE_SIZE_PX {
             rgba[3] = rgba[3].min(112);
         }
         sink.paint(PaintCommand::FrameRect {
@@ -248,4 +233,75 @@ fn draw_rect(rect: Rect, canvas: Rect, style: &LayerStyle, sink: &mut impl Paint
         count += 1;
     }
     count
+}
+
+/// Expands a repeated pattern for sinks that cannot sample a managed texture.
+/// The native renderer normally uses `PatternRect`; this is intentionally kept
+/// as a compatibility path for diagnostics, tests and unsupported backends.
+pub fn paint_pattern_fallback(
+    sink: &mut impl PaintSink,
+    rect: Rect,
+    pattern: FillPattern,
+    rgba: [u8; 4],
+) -> usize {
+    match pattern {
+        FillPattern::SparseDots => patterns::dots(sink, rect, rgba, 9.0),
+        FillPattern::DenseDots => patterns::dots(sink, rect, rgba, 5.0),
+        FillPattern::DiagonalHatch => patterns::diagonal(
+            sink,
+            rect,
+            rgba,
+            patterns::DiagonalDirection::Forward,
+            MAX_PATTERN_OPS_PER_SHAPE,
+        ),
+        FillPattern::CrossHatch => {
+            let first = patterns::diagonal(
+                sink,
+                rect,
+                rgba,
+                patterns::DiagonalDirection::Forward,
+                MAX_PATTERN_OPS_PER_SHAPE / 2,
+            );
+            first
+                + patterns::diagonal(
+                    sink,
+                    rect,
+                    rgba,
+                    patterns::DiagonalDirection::Reverse,
+                    MAX_PATTERN_OPS_PER_SHAPE - first.min(MAX_PATTERN_OPS_PER_SHAPE / 2),
+                )
+        }
+        FillPattern::HorizontalHatch => patterns::axis(
+            sink,
+            rect,
+            rgba,
+            patterns::Axis::Horizontal,
+            MAX_PATTERN_OPS_PER_SHAPE,
+        ),
+        FillPattern::VerticalHatch => patterns::axis(
+            sink,
+            rect,
+            rgba,
+            patterns::Axis::Vertical,
+            MAX_PATTERN_OPS_PER_SHAPE,
+        ),
+        FillPattern::Grid => {
+            let first = patterns::axis(
+                sink,
+                rect,
+                rgba,
+                patterns::Axis::Horizontal,
+                MAX_PATTERN_OPS_PER_SHAPE / 2,
+            );
+            first
+                + patterns::axis(
+                    sink,
+                    rect,
+                    rgba,
+                    patterns::Axis::Vertical,
+                    MAX_PATTERN_OPS_PER_SHAPE - first.min(MAX_PATTERN_OPS_PER_SHAPE / 2),
+                )
+        }
+        FillPattern::Hollow | FillPattern::Solid | FillPattern::XMark => 0,
+    }
 }

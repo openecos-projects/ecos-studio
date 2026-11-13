@@ -10,7 +10,8 @@ mod rendering_tests;
 pub const GPU_CANVAS_ENV: &str = "ECOS_GPU_CANVAS";
 pub const GPU_CANVAS_DEBUG_ENV: &str = "ECOS_GPU_CANVAS_DEBUG";
 
-pub const PATTERN_MIN_SIZE_PX: f32 = 20.0;
+pub const PATTERN_MIN_SIZE_PX: f32 = chip_render::geometry2d::PATTERN_MIN_SIZE_PX;
+pub const PATTERN_FRAME_FADE_SIZE_PX: f32 = chip_render::geometry2d::PATTERN_FRAME_FADE_SIZE_PX;
 pub const MIN_SHAPE_SCREEN_SIZE: f32 = 2.0;
 
 /// Drawing-category sentinel packed for shapes without a category. The GPU
@@ -32,7 +33,8 @@ pub struct CanvasUniform {
     pub global_alpha: f32,
     pub visibility_mask: u32,
     pub show_context: u32,
-    pub reserved: [u32; 2],
+    pub pattern_frame_fade_size_px: f32,
+    pub reserved: u32,
 }
 
 #[repr(C)]
@@ -173,8 +175,8 @@ struct CanvasUniform {
     global_alpha: f32,
     visibility_mask: u32,
     show_context: u32,
-    reserved0: u32,
-    reserved1: u32,
+    pattern_frame_fade_size_px: f32,
+    reserved: u32,
 };
 
 struct GpuShapeInstance {
@@ -395,7 +397,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let fill_rgb = fill_color.rgb * fill_a;
     
     var frame_a = frame_color.a;
-    if rect_px.x < u_canvas.pattern_min_size_px || rect_px.y < u_canvas.pattern_min_size_px {
+    if rect_px.x < u_canvas.pattern_frame_fade_size_px || rect_px.y < u_canvas.pattern_frame_fade_size_px {
         frame_a = min(frame_a, 112.0 / 255.0);
     }
     let frame_rgb = frame_color.rgb * frame_a;

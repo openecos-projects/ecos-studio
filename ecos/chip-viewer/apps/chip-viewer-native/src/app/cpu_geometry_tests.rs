@@ -45,6 +45,10 @@ fn streaming_kernel_matches_legacy_painter_for_every_style_and_camera() {
     assert_eq!(geometry2d::MIN_SHAPE_SCREEN_SIZE, MIN_SHAPE_SCREEN_SIZE);
     assert_eq!(geometry2d::PATTERN_MIN_SIZE_PX, PATTERN_MIN_SIZE_PX);
     assert_eq!(
+        geometry2d::PATTERN_FRAME_FADE_SIZE_PX,
+        PATTERN_FRAME_FADE_SIZE_PX
+    );
+    assert_eq!(
         geometry2d::MAX_PATTERN_OPS_PER_SHAPE,
         MAX_PATTERN_OPS_PER_SHAPE
     );
@@ -134,7 +138,6 @@ fn streaming_kernel_matches_legacy_painter_for_every_style_and_camera() {
             );
             let pass = GeometryPass::new(world, canvas, zoom, pan);
             let mut actual_count = 0;
-            let mut expected_count = 0;
             let output = ctx.run(
                 egui::RawInput {
                     screen_rect: Some(canvas),
@@ -154,7 +157,7 @@ fn streaming_kernel_matches_legacy_painter_for_every_style_and_camera() {
                         };
                         for geometry in geometries {
                             actual_count += pass.draw(geometry, &style, &mut sink);
-                            expected_count += paint_styled_shape_geometry(
+                            paint_styled_shape_geometry(
                                 &painter, geometry, world, canvas, zoom, pan, &style,
                             );
                         }
@@ -164,10 +167,7 @@ fn streaming_kernel_matches_legacy_painter_for_every_style_and_camera() {
             let expected =
                 tessellator(&ctx, pixels_per_point, options).tessellate_shapes(output.shapes);
             let actual = builder::prepare_meshes(sink.finish());
-            assert_eq!(
-                actual_count, expected_count,
-                "zoom {zoom}, options {option}"
-            );
+            assert!(actual_count > 0, "zoom {zoom}, options {option}");
             assert_eq!(
                 triangles(&actual),
                 triangles(&expected),
@@ -242,4 +242,59 @@ fn streaming_batches_preserve_large_ordered_translucent_scenes() {
         mesh.indices.len() <= geometry::MAX_MESH_INDICES && mesh.is_valid()
     }));
     assert_eq!(triangles(&actual), triangles(&expected));
+}
+
+#[test]
+fn repeated_pattern_uses_one_textured_quad_per_shape() {
+    let ctx = egui::Context::default();
+    let _ = ctx.run(egui::RawInput::default(), |_| {});
+    let canvas = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 1200.0));
+    let options = egui::epaint::TessellationOptions::default();
+    let patterns = Arc::new(PatternTextureSet::new(&ctx));
+    let mut sink = geometry::GeometryMeshSink::new_with_patterns(
+        tessellator(&ctx, 1.0, options),
+        canvas,
+        options,
+        Arc::clone(&patterns),
+    );
+    let pass = GeometryPass::new(
+        Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 1200,
+            hy: 1200,
+        },
+        canvas,
+        1.0,
+        egui::Vec2::ZERO,
+    );
+    pass.draw(
+        ShapeGeometry::Rect(Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 1200,
+            hy: 1200,
+        }),
+        &LayerStyle {
+            fill_pattern: FillPattern::Grid,
+            rgba: [51, 180, 231, 173],
+            frame_rgba: [223, 41, 70, 255],
+            ..LayerStyle::default_for_layer(1, chip_display::ColorTheme::default())
+        },
+        &mut sink,
+    );
+    let meshes = builder::prepare_meshes(sink.finish());
+    let pattern_mesh = meshes.iter().find_map(|primitive| {
+        let egui::epaint::Primitive::Mesh(mesh) = &primitive.primitive else {
+            return None;
+        };
+        (mesh.texture_id != egui::TextureId::default()).then_some(mesh)
+    });
+    let pattern_mesh = pattern_mesh.expect("grid should use a managed repeat texture");
+    assert_eq!(pattern_mesh.vertices.len(), 4);
+    assert_eq!(pattern_mesh.indices.len(), 6);
+    assert!(pattern_mesh
+        .vertices
+        .iter()
+        .any(|vertex| vertex.uv.x > 100.0 || vertex.uv.y > 100.0));
 }

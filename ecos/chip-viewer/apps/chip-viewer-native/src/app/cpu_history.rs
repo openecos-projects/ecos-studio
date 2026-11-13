@@ -18,6 +18,7 @@ impl CpuSceneHistory {
         let scene = if scene.bitmap.is_some() && scene.labels_ready() {
             Arc::new(CpuScene {
                 key: scene.key.clone(),
+                pattern_textures: Arc::clone(&scene.pattern_textures),
                 generation: scene.generation,
                 meshes: Vec::new(),
                 fallback_meshes: std::sync::OnceLock::new(),

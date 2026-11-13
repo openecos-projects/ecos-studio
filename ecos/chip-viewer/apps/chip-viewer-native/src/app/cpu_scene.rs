@@ -10,8 +10,11 @@ use std::sync::{Arc, Condvar};
 
 #[path = "cpu_scene_builder.rs"]
 mod builder;
+#[path = "cpu_pattern_texture.rs"]
+mod pattern_texture;
 #[cfg(any(test, not(target_os = "linux")))]
 use builder::build_scene;
+pub(super) use pattern_texture::PatternTextureSet;
 
 #[path = "cpu_geometry.rs"]
 mod geometry;
@@ -90,12 +93,14 @@ pub(super) struct SceneRequest {
     overlay_labels: ShapeLabelCollector,
     grid_layers: Vec<LayerUiState>,
     publication: progress::Publication,
+    pattern_textures: Arc<PatternTextureSet>,
 }
 
 type LabelCompletion = OnceLock<(Arc<ResolvedLabels>, Duration)>;
 
 pub(super) struct CpuScene {
     key: SceneKey,
+    pub(super) pattern_textures: Arc<PatternTextureSet>,
     pub(super) meshes: Vec<egui::ClippedPrimitive>,
     fallback_meshes: OnceLock<Vec<Arc<egui::Mesh>>>,
     pub(super) generation: u64,
@@ -561,6 +566,10 @@ impl LoadedViewer {
             overlay_labels,
             grid_layers: self.layers.clone(),
             publication: progress::Publication::Progressive,
+            pattern_textures: self
+                .pattern_textures
+                .get_or_init(|| Arc::new(PatternTextureSet::new(ctx)))
+                .clone(),
         }
     }
 }

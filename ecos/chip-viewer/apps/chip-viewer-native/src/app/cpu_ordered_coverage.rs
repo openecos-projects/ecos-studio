@@ -43,7 +43,9 @@ impl OrderedCoverage {
                     }
                     (rect, rgba)
                 }
-                PaintCommand::Line { .. } | PaintCommand::Disc { .. } => {
+                PaintCommand::Line { .. }
+                | PaintCommand::Disc { .. }
+                | PaintCommand::PatternRect { .. } => {
                     return Err(Unsupported::Command);
                 }
             };

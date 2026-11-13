@@ -83,7 +83,9 @@ impl PixelRectRasterizer {
             PaintCommand::FillRect { rect, .. } => (rect, 0.0),
             PaintCommand::FrameRect { rect, width, .. } if width > 0.0 => (rect, width),
             PaintCommand::FrameRect { .. } => return None,
-            PaintCommand::Line { .. } | PaintCommand::Disc { .. } => return None,
+            PaintCommand::Line { .. }
+            | PaintCommand::Disc { .. }
+            | PaintCommand::PatternRect { .. } => return None,
         };
         let scale = self.pixels_per_point;
         if !rect.is_positive()
