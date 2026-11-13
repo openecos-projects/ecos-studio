@@ -9,33 +9,34 @@
 
 use super::*;
 
-/// Edge length of a lod-3 view tile in dbu. view.bin tiles use a
-/// `4096 << lod` dbu grid, so lod 3 tiles are 32768 dbu across.
-pub(super) const VIEW_TILE_LOD3_SIZE_DBU: f32 = 4096.0 * 8.0;
-
-/// Zoom at or below which the overview latch may engage.
-pub(super) const VIEW_TILE_OVERVIEW_ENTER_ZOOM: f32 = 0.35;
-/// Zoom above which the overview latch disengages. The gap to the enter
-/// zoom keeps a zoom resting on the boundary from flickering between the
-/// tile summary and the exact-shape path.
-pub(super) const VIEW_TILE_OVERVIEW_EXIT_ZOOM: f32 = 0.40;
-
-/// Minimum on-screen edge length of a lod-3 tile for the overview summary
-/// to be worth showing. Derivation: a 754k dbu die at lod 3 splits into a
-/// roughly 23x23 tile grid, so on a ~1000px canvas at the 0.35 enter zoom
-/// one tile is `0.35 * 32768 / 754000 * 1000 ~= 15px`. At 8px the
-/// per-tile occupancy shading still reads as texture; below that the
-/// summary flattens into blobs, and the exact path is cheap enough
-/// anyway, so the threshold sits at 8px.
-pub(super) const VIEW_TILE_MIN_SCREEN_PX: f32 = 8.0;
+/// Estimated number of exact shapes above which the overview tile summary
+/// is cheaper than streaming per-shape GPU instances at this viewport.
+pub(super) const VIEW_TILE_EXACT_SHAPE_ENTER_BUDGET: usize = 60_000;
+/// Lower threshold used while the overview latch is already active. The gap
+/// keeps a viewport hovering around the budget from flickering between the
+/// summary and exact-shape paths.
+pub(super) const VIEW_TILE_EXACT_SHAPE_EXIT_BUDGET: usize = 40_000;
 
 /// `GpuBufferKey::zoom_tier` for overview instance buffers. Exact-path
 /// tiles use tiers 0 (label-less) and 1 (label-carrying), so tier 2 keeps
 /// overview buffers from ever sharing a cache key with a shape tile.
 pub(super) const OVERVIEW_ZOOM_TIER: u8 = 2;
 
-fn lod3_tile_screen_px(zoom: f32, world: Rect32, canvas: egui::Rect) -> f32 {
-    VIEW_TILE_LOD3_SIZE_DBU * world_to_screen_scale(world, canvas, zoom)
+/// Estimates exact-shape work from the viewport's share of the layout area.
+/// This avoids scanning the spatial index just to decide which render path
+/// to use, while still letting a fitted large die select the summary even
+/// when its nominal zoom is 1.0.
+fn estimated_visible_shape_count(shape_count: usize, viewport: Rect32, world: Rect32) -> usize {
+    let world_width = (world.hx.saturating_sub(world.lx)).max(1) as f64;
+    let world_height = (world.hy.saturating_sub(world.ly)).max(1) as f64;
+    let viewport_lx = viewport.lx.max(world.lx);
+    let viewport_ly = viewport.ly.max(world.ly);
+    let viewport_hx = viewport.hx.min(world.hx);
+    let viewport_hy = viewport.hy.min(world.hy);
+    let viewport_width = (viewport_hx.saturating_sub(viewport_lx)).max(0) as f64;
+    let viewport_height = (viewport_hy.saturating_sub(viewport_ly)).max(0) as f64;
+    let ratio = ((viewport_width * viewport_height) / (world_width * world_height)).min(1.0);
+    (shape_count as f64 * ratio).ceil() as usize
 }
 
 /// Shared 2D CPU/GPU predicate for the overview tile summary. Highlights
@@ -46,39 +47,22 @@ pub(super) fn should_use_view_tiles_for_state(
     view_tile_count: usize,
     has_draft: bool,
     edit_enabled: bool,
-    zoom: f32,
     viewport: Rect32,
     world: Rect32,
-    canvas: egui::Rect,
+    shape_count: usize,
 ) -> bool {
     if view_tile_count == 0 || has_draft || edit_enabled {
         return false;
     }
-    if zoom > VIEW_TILE_OVERVIEW_ENTER_ZOOM {
-        return false;
-    }
-    // Primary signal: lod-3 tiles resolve to visible pixels on this canvas.
-    if lod3_tile_screen_px(zoom, world, canvas) >= VIEW_TILE_MIN_SCREEN_PX {
-        return true;
-    }
-    // Legacy fallback of the old area heuristic: when the die is a tiny
-    // speck the tiles drop below the pixel threshold, but painting a
-    // handful of summary rectangles still beats streaming every shape.
-    let viewport_width = (viewport.hx - viewport.lx).max(1) as i64;
-    let viewport_height = (viewport.hy - viewport.ly).max(1) as i64;
-    let world_width = (world.hx - world.lx).max(1) as i64;
-    let world_height = (world.hy - world.ly).max(1) as i64;
-    let viewport_area = viewport_width.saturating_mul(viewport_height);
-    let world_area = world_width.saturating_mul(world_height).max(1);
-    viewport_area >= world_area.saturating_mul(6)
+    estimated_visible_shape_count(shape_count, viewport, world) > VIEW_TILE_EXACT_SHAPE_ENTER_BUDGET
 }
 
 /// Hysteresis latch for the 2D overview predicate. Entering requires the
 /// full [`should_use_view_tiles_for_state`] test; once active the latch
-/// stays engaged until the zoom rises past the exit zoom or a
-/// precondition (draft/edit/tile availability) breaks, so zooming back
-/// and forth across a single boundary does not thrash the two render
-/// paths.
+/// stays engaged until the estimated exact-shape work falls below the exit
+/// budget or a precondition (draft/edit/tile availability) breaks, so
+/// zooming back and forth across a single boundary does not thrash the two
+/// render paths.
 #[derive(Default)]
 pub(super) struct ViewTileOverviewLatch {
     active: bool,
@@ -94,24 +78,23 @@ impl ViewTileOverviewLatch {
         view_tile_count: usize,
         has_draft: bool,
         edit_enabled: bool,
-        zoom: f32,
         viewport: Rect32,
         world: Rect32,
-        canvas: egui::Rect,
+        shape_count: usize,
     ) -> bool {
         if self.active {
             let preconditions = view_tile_count > 0 && !has_draft && !edit_enabled;
-            if !preconditions || zoom > VIEW_TILE_OVERVIEW_EXIT_ZOOM {
+            let estimated = estimated_visible_shape_count(shape_count, viewport, world);
+            if !preconditions || estimated < VIEW_TILE_EXACT_SHAPE_EXIT_BUDGET {
                 self.active = false;
             }
         } else if should_use_view_tiles_for_state(
             view_tile_count,
             has_draft,
             edit_enabled,
-            zoom,
             viewport,
             world,
-            canvas,
+            shape_count,
         ) {
             self.active = true;
         }
@@ -275,32 +258,26 @@ mod tests {
         }
     }
 
-    fn test_canvas() -> egui::Rect {
-        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1000.0, 800.0))
+    #[test]
+    fn fitted_large_layout_uses_view_tiles() {
+        let world = test_world();
+        let viewport = world;
+        assert!(should_use_view_tiles_for_state(
+            16, false, false, viewport, world, 23_412_289,
+        ));
     }
 
     #[test]
-    fn overview_enters_when_lod3_tiles_resolve_to_pixels() {
+    fn fitted_small_layout_keeps_exact_shapes() {
         let world = test_world();
-        let canvas = test_canvas();
-        let viewport = world;
-        // At zoom 0.35 one lod-3 tile is ~15px on a 1000px canvas.
-        assert!(should_use_view_tiles_for_state(
-            16, false, false, 0.35, viewport, world, canvas,
-        ));
-        // Fitted at zoom 1.0 the exact path must keep drawing shapes.
         assert!(!should_use_view_tiles_for_state(
-            16, false, false, 1.0, viewport, world, canvas,
+            16, false, false, world, world, 1_000,
         ));
     }
 
     #[test]
     fn overview_stays_available_when_die_is_a_speck() {
         let world = test_world();
-        let canvas = test_canvas();
-        // Zoomed far out the tiles drop below the pixel threshold, but the
-        // legacy area fallback keeps the summary instead of streaming
-        // every shape.
         let viewport = Rect32 {
             lx: -2_000_000,
             ly: -2_000_000,
@@ -308,40 +285,54 @@ mod tests {
             hy: 3_000_000,
         };
         assert!(should_use_view_tiles_for_state(
-            16, false, false, 0.05, viewport, world, canvas,
+            16, false, false, viewport, world, 23_412_289,
         ));
     }
 
     #[test]
     fn overview_rejects_missing_tiles_draft_and_edit() {
         let world = test_world();
-        let canvas = test_canvas();
         for (count, draft, edit) in [(0, false, false), (16, true, false), (16, false, true)] {
             assert!(!should_use_view_tiles_for_state(
-                count, draft, edit, 0.25, world, world, canvas,
+                count, draft, edit, world, world, 23_412_289,
             ));
         }
     }
 
     #[test]
-    fn latch_hysteresis_keeps_boundary_zoom_stable() {
-        let world = test_world();
-        let canvas = test_canvas();
+    fn latch_hysteresis_keeps_boundary_viewport_stable() {
+        let world = Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 1_000,
+            hy: 1_000,
+        };
+        let shape_count = 1_000_000;
+        let between_budgets = Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 220,
+            hy: 220,
+        };
+        let below_exit = Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 150,
+            hy: 150,
+        };
         let mut latch = ViewTileOverviewLatch::default();
 
-        // Enter at the enter zoom.
-        assert!(latch.update(16, false, false, 0.35, world, world, canvas));
-        // Stay engaged across the enter zoom up to the exit zoom.
-        assert!(latch.update(16, false, false, 0.38, world, world, canvas));
-        // Disengage past the exit zoom.
-        assert!(!latch.update(16, false, false, 0.41, world, world, canvas));
-        // And re-entering needs the full predicate again.
-        assert!(latch.update(16, false, false, 0.30, world, world, canvas));
+        assert!(latch.update(16, false, false, world, world, shape_count));
+        // Stay engaged between the exit and enter budgets.
+        assert!(latch.update(16, false, false, between_budgets, world, shape_count));
+        assert!(!latch.update(16, false, false, below_exit, world, shape_count));
+        // Re-entering needs the full predicate again.
+        assert!(latch.update(16, false, false, world, world, shape_count));
         // A draft while engaged disengages immediately.
-        assert!(!latch.update(16, true, false, 0.30, world, world, canvas));
+        assert!(!latch.update(16, true, false, world, world, shape_count));
         // Reset forces disengagement.
         latch.reset();
-        assert!(!latch.update(16, false, false, 0.38, world, world, canvas));
+        assert!(!latch.update(16, false, false, between_budgets, world, shape_count));
     }
 
     #[test]
