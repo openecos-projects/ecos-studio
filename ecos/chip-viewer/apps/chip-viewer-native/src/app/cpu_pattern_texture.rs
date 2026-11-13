@@ -198,13 +198,18 @@ mod tests {
         assert_eq!(dot_alpha(4, 4, 1.25), 0);
         assert_eq!(dot_alpha(2, 2, 1.1), 255);
     }
+
+    #[test]
+    fn hatch_masks_use_a_single_pixel_core() {
+        assert_eq!(line_alpha(0.0), 255);
+        assert_eq!(line_alpha(0.5), 255);
+        assert_eq!(line_alpha(1.0), 0);
+    }
 }
 
 fn line_alpha(distance: f32) -> u8 {
     if distance <= 0.5 {
         255
-    } else if distance <= 1.0 {
-        128
     } else {
         0
     }
