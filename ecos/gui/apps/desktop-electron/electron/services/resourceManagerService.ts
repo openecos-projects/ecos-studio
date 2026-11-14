@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { fetchResourceArchive } from './githubPrivateDownload'
 import { constants, createReadStream } from 'node:fs'
 import {
   access,
@@ -5176,7 +5177,7 @@ async function downloadAsset(
       const rangeRequested = existingBytes > 0
       let response: Response
       try {
-        response = await fetchImpl(url, {
+        response = await fetchResourceArchive(fetchImpl, url, {
           signal,
           ...(rangeRequested ? { headers: { Range: `bytes=${existingBytes}-` } } : {}),
         })

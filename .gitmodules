@@ -3,7 +3,7 @@
 	url = https://github.com/retroSoC/retroSoC.git
 [submodule "pdk/icsprout55-pdk"]
 	path = pdk/icsprout55-pdk
-	url = https://github.com/openecos-projects/icsprout55-pdk.git
+	url = https://github.com/openecos-projects/icsprout55-pdk-v2.git
 [submodule "ecc"]
 	path = ecc
 	url = https://github.com/openecos-projects/ecc.git

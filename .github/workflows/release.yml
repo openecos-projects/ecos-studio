@@ -27,6 +27,8 @@ jobs:
           ref: ${{ github.event.inputs.tag_name || github.ref }}
           fetch-depth: 0
           submodules: recursive
+          token: ${{ secrets.PDK_READ_TOKEN || github.token }}
+          persist-credentials: false
 
       - name: Check version
         id: version
@@ -46,6 +48,8 @@ jobs:
           ref: ${{ github.event.inputs.tag_name || github.ref }}
           submodules: recursive
           fetch-depth: 0
+          token: ${{ secrets.PDK_READ_TOKEN || github.token }}
+          persist-credentials: false
 
       - name: Install Linux GUI dependencies
         uses: ./.github/actions/install-gui-linux-deps

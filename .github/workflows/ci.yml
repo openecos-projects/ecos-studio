@@ -99,6 +99,8 @@ jobs:
           # The version gate compares EXPECTED_ECC_BUNDLE_VERSION against the
           # pinned ecc submodule, so its content must be present.
           submodules: recursive
+          token: ${{ secrets.PDK_READ_TOKEN || github.token }}
+          persist-credentials: false
 
       - name: Check Version
         uses: ./.github/actions/check-version
@@ -304,12 +306,13 @@ jobs:
           test -x "$RUNNER_TEMP/ecc-bundle/ecc"
           echo "ECOS_E2E_ECC_BIN_DIR=$RUNNER_TEMP/ecc-bundle" >> "$GITHUB_ENV"
 
-      - name: Extract PDK
+      - name: Fetch private PDK
+        env:
+          GH_TOKEN: ${{ secrets.PDK_READ_TOKEN }}
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/pdk/icsprout55-pdk"
-          tar -xzf "$RUNNER_TEMP/artifacts/icsprout55-pdk/icsprout55-pdk.tar.gz" \
-            -C "$RUNNER_TEMP/pdk/icsprout55-pdk"
+          bash "$RUNNER_TEMP/artifacts/icsprout55-pdk/fetch-pdk.sh" \
+            "$RUNNER_TEMP/artifacts/icsprout55-pdk/pdk-source.json" "$RUNNER_TEMP/pdk/icsprout55-pdk"
           test -s "$RUNNER_TEMP/pdk/icsprout55-pdk/techfile/icsprout55.layermap"
           echo "ECOS_E2E_PDK_ROOT=$RUNNER_TEMP/pdk/icsprout55-pdk" >> "$GITHUB_ENV"
 
@@ -431,6 +434,8 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 0
+          token: ${{ secrets.PDK_READ_TOKEN || github.token }}
+          persist-credentials: false
 
       - name: Install Linux GUI Dependencies
         uses: ./.github/actions/install-gui-linux-deps
