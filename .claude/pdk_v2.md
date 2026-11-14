@@ -73,6 +73,13 @@ nightly 完整包包含私有 PDK，只允许发布到已核验的私有
   技术 LEF SHA-256 为 `8fae4f13f733e77460cf79573df7ffbbd48ee73841d701792e4b7416c118b3ed`。
 - Studio `make build` 再次完成，包含 chip-viewer native、Agent、AppImage、deb。
   使用 `dev-studio-v2-env.sh` 指定本机验证过的 Sizer，避免取 main 的其他构建。
+- `xvfb-run -a env ECOS_ELECTRON_DISABLE_GPU=1 ECOS_ELECTRON_DISABLE_SANDBOX=1
+  pnpm run desktop:smoke` 通过。直接在无 DISPLAY 的终端启动会失败，已在
+  Xvfb 环境复验通过。
+- 实际 registry URL 检查中，私有 PDK GitHub API 入口通过；整份 registry
+  检查未通过，24 个原有 GitHub 公共下载地址在默认 5 秒 HEAD/SSL 超时。
+  这是尚未通过的网络可达性检查，不能记为全量下载成功；见
+  `logs/ics55-private-registry-urls.log`。真实私有基础包另已完整下载并校验。
 - 工作流 `actionlint` 通过（声明忽略已有的自托管 runner 名称检查）；下载脚本
   `shellcheck` 通过。远端 CI 尚未验证：需要各仓库的 `PDK_READ_TOKEN`，
   然后才能产生新 ECC CI run 并刷新产品 provenance lock。未将本地登录凭据
