@@ -472,3 +472,42 @@ DreamPlace 的 `.gitmodules` 已恢复原仓库 URL，ECC、Studio 的父仓库�
 ECC-FE、PDK 及其 PLL/DDR 子仓库没有源码修改，继续引用现有公开 commit，
 不创建空的迁移提交。Studio/ECC 的 feature branch push 不会自动触发其
 完整主 CI；本节不将上一轮本机通过结果声明为远程 CI 已通过。
+
+## 9. 同步 Studio main 后重建开发环境
+
+2026-11-14 按用户要求，先 fetch GitHub `main`，将 `e660d253`
+（STA 时序违规可视化及大版图优化）无冲突合入 `yell/ics55_v2`，合并提交为
+`e2a1168a`。ECC 继续使用已验证的 v2 分支 `b943de5f`，ECC-FE 和 PDK pin
+不变；没有切换 ECC 到其它基线。main 带来的 CI manifest 是其原有真实
+run 记录，v2 正式发行前仍须按第 6 节重新解析匹配的 run。
+
+重新执行并通过：
+
+- `make build`：Chip Viewer release、Agent、GUI、AppImage/deb 全部成功，
+  打包 Sizer 明确使用系统 `ics55-v2-local`，staged Viewer 与 release SHA256 一致。
+- `cargo build --locked -p chip-viewer-native`：额外构建开发模式实际使用的
+  `target/debug/chip-viewer-native`，避免第一次打开版图时才编译。
+- `cargo fmt --all -- --check` 和 `cargo test --workspace --locked`：435 项通过。
+- `pnpm run check`：typecheck/lint/format 通过；infra 7、shared 224、
+  renderer 1691、electron 1559 项通过，另 1 项 skipped。
+- `pnpm run desktop:smoke`：Electron 启动检查通过。
+- 在 Xvfb 中实际运行 `pnpm dev`，页面及 desktop bridge 加载成功，界面
+  返回 ECC 0.1.0a12、DreamPlace 0.1.0a7、ecc-tools 0.1.0a13，并确认选中
+  系统 `v0.1.0-alpha.12-ics55-v2-local/ecc`。本次未重跑整条 RTL-to-Harden。
+- Viewer debug 在软件渲染模式加载 `v2-final` 的 STA geometry/feature，
+  观察 20 秒无 panic 或窗口错误，随后由测试主动终止；未额外验证硬件 GPU 路径。
+
+GUI 开发启动命令：
+
+```bash
+cd /nfs/home/huangzengrong/projects/repo/ecos_studio_2/ecos/gui
+source /nfs/home/huangzengrong/projects/benchmark/ics55-v2-artifacts/dev-studio-v2-env.sh
+pnpm dev
+```
+
+该环境脚本选择系统 v2 CLI、PDK、Sizer 和原验证工具链，并设置
+`UV_NO_SYNC=1`，让 Viewer 的开发 ECC wrapper 复用已构建的 Python 环境。
+没有把本机绝对路径写入产品源码或修改用户 shell 启动配置。
+
+构建文件 SHA256 见 `ics55-v2-artifacts/studio-main-build.json`；dev 启动结果
+及截图见 `studio-main-dev/`；对应日志为 `logs/ics55-v2-studio-main-*.log`。
