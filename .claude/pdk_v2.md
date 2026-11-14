@@ -16,7 +16,7 @@ Liberty/LEF 和发布 checksum 为准；“flow 完成”与 foundry signoff 分
 | `ecc-sizer` | `eba239d` | `yell/ics55_v2`，Liberty 识别、scalar LUT、物理 pin 校验、打包 |
 | `ecos-installer` | 本机原 checkout | `yell/ics55_v2`，实际 registry/installer 的生成源 |
 | ECC-FE | `5da54e61aa4c3c49bb86bc3c5d2bb2337db644df` | 已与 Studio main gitlink 和 origin/main 对齐，无需改代码/分支 |
-| v2 PDK | `25ed1437181f293b3792342a1fc0f3d2af0398cc` | 作为只读发布输入，不修改 PDK 内容 |
+| v2 PDK | `25ed1437181f293b3792342a1fc0f3d2af0398cc` | 按后续授权，将 implant 层声明合入默认分支 `v2`，提交 `7d83e6d8b0427ae1b5e76b43a112f26fbabe4a50` |
 
 开始前 Studio 的 `ecc` gitlink，以及 ECC 的 `ecc-dreamplace` gitlink 已与
 父仓库记录不同；这些原有状态保留。Sizer 起点落后 origin/main 28 个提交，
@@ -31,10 +31,15 @@ Liberty/LEF 和发布 checksum 为准；“flow 完成”与 foundry signoff 分
 
 重要修正：`icsprout55-pdk-v2` 仓库是私有仓库，但同一个 `25ed1437...`
 commit 及 v2 release assets 已在公开的 `openecos-projects/icsprout55-pdk`
-可获取。因此保持 `.gitmodules` 的公开 URL 和产品内目录
+可获取。首次迁移因此保持 `.gitmodules` 的公开 URL 和产品内目录
 `pdk/icsprout55-pdk`，仅切换 PDK checkout/gitlink；无需引入私有仓库下载权限。
 嵌套 PLL、DDR 继续使用 PDK 固定的 commit（分别以 `6ebb1a8`、`7660f6e`
 开头），不升级到最新版本。
+
+2026-11-14 的 implant 层归属调整已合入私有 PDK v2 仓库。新提交
+`7d83e6d...` 尚未同步到上述公开镜像；公开镜像同步等待用户授权，不能
+仅把公开下载锁中的 SHA 改成私有仓库的新 SHA。后续发布还需同步基础包
+URL/hash、ECC PDK pin 和 Studio gitlink 的下载来源。
 
 ## 2. PDK 差异与采用的契约
 
@@ -103,11 +108,12 @@ LATNSNQ/LATSNQ、SN；三态 buffer 是 TBUFX、A/OE/Y。
 - CKGT/CKGTN 的 M/PM 是 Liberty `direction: internal`，并非漏掉的外部
   LEF pin；Sizer 跳过内部节点。不得把这一差异误报为 PDK 错误。
 - SVT LEF 没有未定义 layer；LVT 引用 NVT1/PVT1，HVT 引用 NVT3/PVT3，
-  这些未出现在 tech LEF 中，但原始 layermap 已分别定义 17/1、18/1、
-  21/1、22/1。ECC 增加 `ics55_v2_implants.lef`，在 cell LEF 前加载，
-  按 tech LEF 中 NP/PP 的方式声明 MASTERSLICE，保留原始 OBS 几何并
-  使用原始 GDS 编号；不改 PDK 发布文件或 checksum。PDK owner 仍应补齐
-  正式技术视图。
+  原始 layermap 已分别定义 17/1、18/1、21/1、22/1。2026-11-14 已将
+  四个 MASTERSLICE 声明并入 PDK 的 `prtech/techLEF/N551P6M_ecos.lef`，
+  经 PDK v2 PR #1 合入默认分支 `v2`（`7d83e6d8b0427ae1b5e76b43a112f26fbabe4a50`）。
+  ECC 不再携带或加载独立 implant 补充 LEF；默认 LEF 列表只含 PDK 中
+  的 SVT/LVT/HVT 单元文件。原始 OBS 几何、GDS 编号及 routing 规则保持不变。
+  使用此版 ECC 时应同步更新 PDK 技术 LEF，旧工作区的显式 LEF 覆盖需重新解析。
 
 IO LEF 为 `IP/IO/lef/IC055L_GPIO3P3V_CDG_6M.lef` 与
 `IC055L_PAD_1P6M_5IM_T4M2.lef`，Verilog 是
@@ -133,7 +139,7 @@ IO LEF 为 `IP/IO/lef/IC055L_GPIO3P3V_CDG_6M.lef` 与
 - 测试最小 PDK fixture、workspace/CLI override、Yosys 和 placement
   regression 的默认值迁移；历史 SPEF/DEF/netlist 不能只替换字符串。
 - `chipcompiler/docs/ecc-config-ref.cn.md` 更新默认说明。
-- 补充技术 LEF 解决 LVT/HVT OBS 的缺层与 GDS 空输出；`module.gds_save`
+- PDK 原生技术 LEF 补齐 LVT/HVT OBS 的缺层；`module.gds_save`
   必须传播 native false，禁止 filler 在 stream-out 失败后标记成功。
 - PyInstaller 自动收集 `chipcompiler` 时排除 vendored checkout；运行时
   依赖用独立显式 collector 收集，避免源码构建目录中的旧 `.so` 混入包。
@@ -363,10 +369,17 @@ E2E 已独立通过，打包 CLI 导出复现 smoke 也通过。并发 E2E 的 3
 | `ecc-linux-x64.tar.gz` | `e6edc4818a809437d02964010536b628aaa30b204d6bfe1ebaa8386dde7f3c86` |
 | `ecc-sizer-linux-x64.tar.gz` | `7814fc5c6047e0abf528f630fbbf5a4817c15f4c52a642da700ea8105abfded0` |
 
-CLI 已由此归档解压替换系统目录；包装脚本指定 v2 PDK 和新 Sizer。校验
+首次迁移的 CLI 已由此归档解压替换系统目录；包装脚本指定 v2 PDK 和新 Sizer。校验
 包中 native library 与最终 wheel 一致，补充 LEF 已包含，buffer table 为
 8/12/16/24，未收录 vendored checkout 的旧动态库。`ecc version` 可正常
 识别 ECC 0.1.0a12、DreamPlace 0.1.0a7、ecc-tools 0.1.0a13 及所有外部工具。
+
+PDK 原生 implant 层方案的独立回归位于
+`/nfs/home/huangzengrong/projects/benchmark/gcd-pdk-native-implants-20261114/native-pdk`，
+使用修改后的 ECC 源码和 PDK `7d83e6d...`，21/21 阶段成功。
+GDS/LEF/Liberty 分别为 957528/15872/25786 字节；产物校验值记录在
+`/nfs/home/huangzengrong/projects/benchmark/ics55-native-pdk-artifacts/gcd-result.json`。
+对应原生测试夹具由此工作区重新生成，provenance 记录技术 LEF 的 SHA256。
 
 `run-studio-v2.sh` 用新构建 AppImage 和明确的本机新 runtime 启动 Studio；
 `run-product-e2e.sh` 为可复现的三条产品测试入口。正式 registry 尚未发布，
