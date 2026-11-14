@@ -720,6 +720,64 @@ describe('ChipViewerService', () => {
     )
   })
 
+  it('passes the STA feature directory for an STA stage', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { service, spawnProcess } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+        MAP_ROOT_PATH,
+      ],
+      files: {},
+    })
+
+    await service.open({
+      projectPath: PROJECT_ROOT,
+      step: 'sta_ecc',
+    })
+
+    expect(spawnProcess).toHaveBeenCalledWith(
+      devBinaries.viewer,
+      [
+        '--manifest',
+        GEOMETRY_MANIFEST,
+        '--mode',
+        'view',
+        '--map-root',
+        MAP_ROOT_PATH,
+        '--sta-feature-dir',
+        MAP_ROOT_PATH,
+      ],
+      expect.objectContaining({
+        detached: true,
+        stdio: ['ignore', expect.any(Number), expect.any(Number)],
+      }),
+    )
+  })
+
+  it('does not pass the STA feature directory for a non-STA stage', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { service, spawnProcess } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+        MAP_ROOT_PATH,
+      ],
+      files: {},
+    })
+
+    await service.open({
+      projectPath: PROJECT_ROOT,
+      step: 'post_synthesis',
+    })
+
+    const viewerArgs = vi.mocked(spawnProcess).mock.calls[0]?.[1]
+    expect(viewerArgs).toContain('--map-root')
+    expect(viewerArgs).not.toContain('--sta-feature-dir')
+  })
+
   it('reports native viewer startup exits with the viewer log paths', async () => {
     const devBinaries = devChipViewerPaths()
     const child = createSpawnedViewerProcess()

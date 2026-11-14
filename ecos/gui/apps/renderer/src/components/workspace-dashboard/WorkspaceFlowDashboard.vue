@@ -188,6 +188,7 @@ import {
   type FlowEdge,
 } from './flowTopology'
 import { dashboardFlowSteps, type DashboardFlowStep } from './flowDashboardData'
+import { isUsableLayoutThumbnail } from './layoutThumbnail'
 import FlowStepCard from './FlowStepCard.vue'
 import StepChecklistDialog from './StepChecklistDialog.vue'
 import StepReportsDialog from './StepReportsDialog.vue'
@@ -285,7 +286,13 @@ function fitDiagram(): void {
   void fitToViewport()
 }
 function openLayout(step: DashboardFlowStep): void {
-  if (step.thumbnail) emit('layout', step.thumbnail)
+  if (isUsableLayoutThumbnail(step.thumbnail)) {
+    emit('layout', step.thumbnail)
+    return
+  }
+  if (isUsableLayoutThumbnail(step.macroPlacementSource)) {
+    emit('layout', step.macroPlacementSource)
+  }
 }
 async function setZoom(value: number, pointer?: { x: number; y: number }): Promise<void> {
   const nextZoom = Math.max(0.25, Math.min(1.5, Math.round(value * 20) / 20))
