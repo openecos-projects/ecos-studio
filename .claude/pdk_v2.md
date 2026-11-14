@@ -448,24 +448,26 @@ ics55-v2-artifacts/run-product-e2e.sh flow-concurrency
 
 按用户要求上传 `yell/ics55_v2`，不创建 PR、不合并 main、不发布 release。
 源码内容与第 5 节已验证的代码一致；上传阶段新增的是提交记录、子仓库
-gitlink、Xplace fork 地址和本节文档。提交前检查了各仓库 diff、文件范围、
+gitlink、Xplace 发布地址和本节文档。提交前检查了各仓库 diff、文件范围、
 凭据模式和工作树；底层仓库先推送成功，父仓库再提交引用。
 
 | 仓库 | GitHub 分支 | 上传 commit |
 | --- | --- | --- |
 | ECOS Studio | [ecos-studio](https://github.com/openecos-projects/ecos-studio/tree/yell/ics55_v2) | 本文所在分支，最终 SHA 另存 `github-branches.json` |
-| ECC | [ecc](https://github.com/openecos-projects/ecc/tree/yell/ics55_v2) | `a371ae93` |
+| ECC | [ecc](https://github.com/openecos-projects/ecc/tree/yell/ics55_v2) | `b943de5f` |
 | ecc-tools | [ecc-tools](https://github.com/openecos-projects/ecc-tools/tree/yell/ics55_v2) | `ac5fb46e4` |
-| ecc-dreamplace | [ecc-dreamplace](https://github.com/openecos-projects/ecc-dreamplace/tree/yell/ics55_v2) | `05777264` |
-| Xplace | [Yell-walkalone/Xplace](https://github.com/Yell-walkalone/Xplace/tree/yell/ics55_v2) | `373805a4` |
+| ecc-dreamplace | [ecc-dreamplace](https://github.com/openecos-projects/ecc-dreamplace/tree/yell/ics55_v2) | `ccb70c0a` |
+| Xplace | [zhaoxueyan1/Xplace](https://github.com/zhaoxueyan1/Xplace/tree/yell/ics55_v2) | `373805a4` |
 | ecc-sizer | [ecc-sizer](https://github.com/openecos-projects/ecc-sizer/tree/yell/ics55_v2) | `d1b76317` |
 | ecos-installer | [ecos-installer](https://github.com/openecos-projects/ecos-installer/tree/yell/ics55_v2) | `b726271b` |
 
-当前 GitHub 账户 `Yell-walkalone` 对 `zhaoxueyan1/Xplace` 没有写权限，因此
-先将 Xplace 上传到该账户的公开 fork，DreamPlace 的 `.gitmodules` 指向该
-fork 和同名分支。用户正在申请原仓库写权限；权限生效后可将同一个 Xplace
-commit 推送到原仓库，恢复 DreamPlace URL，并逐层更新父仓库 gitlink。
-该操作不改变本机安装包或已验证的算法代码。
+首次上传时 GitHub 账户 `Yell-walkalone` 对 `zhaoxueyan1/Xplace` 没有写权限，
+先使用该账户的公开 fork。2026-11-14（北京时间）接受原仓库的 write 邀请后，
+已将同一个 `373805a4` commit 推送到 `zhaoxueyan1/Xplace` 的同名分支。
+DreamPlace 的 `.gitmodules` 已恢复原仓库 URL，ECC、Studio 的父仓库引用
+逐层同步并推送。原 fork 保留，但当前依赖链使用原仓库。
+此次仅修改仓库地址、gitlink 和文档；提交检查及远程 SHA/引用核对通过，
+没有重跑完整 flow 或重编译，已验证的算法代码与本机安装包均未改变。
 
 ECC-FE、PDK 及其 PLL/DDR 子仓库没有源码修改，继续引用现有公开 commit，
 不创建空的迁移提交。Studio/ECC 的 feature branch push 不会自动触发其
