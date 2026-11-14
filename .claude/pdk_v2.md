@@ -36,10 +36,52 @@ commit 及 v2 release assets 已在公开的 `openecos-projects/icsprout55-pdk`
 嵌套 PLL、DDR 继续使用 PDK 固定的 commit（分别以 `6ebb1a8`、`7660f6e`
 开头），不升级到最新版本。
 
-2026-11-14 的 implant 层归属调整已合入私有 PDK v2 仓库。新提交
-`7d83e6d...` 尚未同步到上述公开镜像；公开镜像同步等待用户授权，不能
-仅把公开下载锁中的 SHA 改成私有仓库的新 SHA。后续发布还需同步基础包
-URL/hash、ECC PDK pin 和 Studio gitlink 的下载来源。
+2026-11-14 的 implant 层归属调整已通过私有 PDK PR #1 合入默认分支
+`v2`，提交 `7d83e6d8b0427ae1b5e76b43a112f26fbabe4a50`。用户明确要求
+仅更新私有 v2 仓库、后续下载使用授权访问。因此当前 `.gitmodules`、ECC
+CI pin、ecc-tools CI 和安装器基础包均改为私有仓库；不更新公开镜像。
+Liberty/GDS 原有发布包没有修改，继续使用原公开 release 的固定文件。
+
+ECC CI 的 `icsprout55-pdk` artifact 现只包含 `pdk-source.json` 和
+`fetch-pdk.sh`，后续 ECC/Studio job 按同一 CI run 的 manifest 授权下载，
+不再把完整 PDK 上传到公开 artifact。相关仓库需配置 `PDK_READ_TOKEN`
+（私有 PDK Contents: read；ECC 可复用已有 `GH_TOKEN`）。Studio 的递归
+submodule checkout 也使用此 token。当前公共 CI provenance lock 不能伪造为
+本地构建结果；待新 ECC CI 成功后按仓库流程刷新 `.github/ecc-ci-toolchain.json`。
+
+安装器通过 `gh api` 下载基础包，可使用 `gh auth login` 或 `GH_TOKEN`；
+GUI Resource Manager 使用启动环境的 `GH_TOKEN` / `GITHUB_TOKEN`，仅对
+固定的私有 PDK GitHub API 地址发送认证，转向 codeload 时不转发 token。
+基础包 SHA-256：`a66877ff439f13960fccea2fe45a9e41b7eab1f84ef3fd7453c452fb928642e3`，
+安装版本为 `v2-2026.10.28-7d83e6d`，避免复用已安装的同日期旧基础包。
+nightly 完整包包含私有 PDK，只允许发布到已核验的私有
+`NIGHTLY_RELEASE_REPO`；默认公开目标会明确失败，不发布私有数据。
+
+本轮验证记录：
+
+- ECC 源码全套测试：4427 passed、3 skipped、1 deselected、4 xfailed；
+  ECC Agent 272 passed；ecc-tools Python API 22 passed。
+- 系统 CLI / 新技术 LEF：GCD 21/21（含 CTS/Harden）；桌面 E2E 17 passed、
+  11 skipped。E2E 是私有下载入口调整前对本机已安装 PDK 的验证；下载入口
+  改动后没有重复约 49 分钟的完整物理流程。
+- GUI 下载改动后 `pnpm run check` 通过：infra 7、shared 224、renderer
+  1691、desktop 1564 passed；desktop 另有 1 skipped。新增授权下载测试 5 项。
+- `python3 -m unittest discover -s .github/scripts/tests -v`：19 passed。
+- installer `nix flake check` 全部通过；安装器 E2E 34 passed，包括模拟
+  `gh api` 的私有 PDK 安装、checksum 校验及不输出 token。
+- 授权获取真实 GitHub archive 后，核对生成 registry 的 hash/strip_prefix，
+  技术 LEF SHA-256 为 `8fae4f13f733e77460cf79573df7ffbbd48ee73841d701792e4b7416c118b3ed`。
+- Studio `make build` 再次完成，包含 chip-viewer native、Agent、AppImage、deb。
+  使用 `dev-studio-v2-env.sh` 指定本机验证过的 Sizer，避免取 main 的其他构建。
+- 工作流 `actionlint` 通过（声明忽略已有的自托管 runner 名称检查）；下载脚本
+  `shellcheck` 通过。远端 CI 尚未验证：需要各仓库的 `PDK_READ_TOKEN`，
+  然后才能产生新 ECC CI run 并刷新产品 provenance lock。未将本地登录凭据
+  自动上传为 GitHub secret，也未发布安装器/registry 到生产下载站点。
+
+验证日志和构建文件保存在
+`/nfs/home/huangzengrong/projects/benchmark/ics55-native-pdk-artifacts`。
+ARM9 后续检查见其中 `arm9-analysis.md`：现有工作区仍在 DR 计算，PA→GR
+接入层契约导致全量 fallback，需独立修复路由器；本轮仅检查，未中断用户运行。
 
 ## 2. PDK 差异与采用的契约
 
