@@ -2,7 +2,7 @@ use super::*;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 struct TileRequest {
     key: crate::canvas_gpu::GpuBufferKey,
@@ -20,6 +20,7 @@ pub(super) struct GpuTileWorker {
     pending: HashSet<crate::canvas_gpu::GpuBufferKey>,
     active_epoch: Arc<AtomicU64>,
     active_layers: Arc<AtomicU64>,
+    active_tiles: Arc<Mutex<HashSet<crate::canvas_gpu::GpuBufferKey>>>,
     cancelled: Arc<AtomicBool>,
 }
 
@@ -29,9 +30,11 @@ impl GpuTileWorker {
         let (outgoing, responses) = mpsc::channel();
         let active_epoch = Arc::new(AtomicU64::new(0));
         let active_layers = Arc::new(AtomicU64::new(0));
+        let active_tiles = Arc::new(Mutex::new(HashSet::new()));
         let cancelled = Arc::new(AtomicBool::new(false));
         let worker_epoch = Arc::clone(&active_epoch);
         let worker_layers = Arc::clone(&active_layers);
+        let worker_tiles = Arc::clone(&active_tiles);
         let worker_cancelled = Arc::clone(&cancelled);
         thread::spawn(move || {
             let mut owner_cache = OwnerCategoryCache::default();
@@ -42,6 +45,10 @@ impl GpuTileWorker {
                         && request.key.geometry_epoch == worker_epoch.load(Ordering::Relaxed)
                         && request.key.layer_visibility_hash
                             == worker_layers.load(Ordering::Relaxed)
+                        && worker_tiles
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .contains(&request.key)
                 };
                 if !is_current() {
                     continue;
@@ -130,6 +137,7 @@ impl GpuTileWorker {
             pending: HashSet::new(),
             active_epoch,
             active_layers,
+            active_tiles,
             cancelled,
         }
     }
@@ -140,6 +148,27 @@ impl GpuTileWorker {
         self.active_layers.store(layers, Ordering::Relaxed);
         self.pending
             .retain(|key| key.geometry_epoch == epoch && key.layer_visibility_hash == layers);
+    }
+
+    /// Publishes the tile keys required by the current viewport. Requests for
+    /// tiles that leave the viewport stop at the next cancellation check, so
+    /// panning does not spend seconds finishing an obsolete tile.
+    pub(super) fn set_active_tiles(&mut self, tiles: HashSet<crate::canvas_gpu::GpuBufferKey>) {
+        self.pending.retain(|key| tiles.contains(key));
+        *self
+            .active_tiles
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = tiles;
+    }
+
+    /// Stops any in-flight exact-shape work when another render path owns the
+    /// canvas, such as the overview summary or the 3D view.
+    pub(super) fn clear_active_tiles(&mut self) {
+        self.pending.clear();
+        self.active_tiles
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
     }
 
     pub(super) fn request(

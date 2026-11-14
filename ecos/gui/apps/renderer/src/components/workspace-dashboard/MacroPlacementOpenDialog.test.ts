@@ -16,14 +16,14 @@ function buttonByText(wrapper: ReturnType<typeof mount>, text: string) {
 }
 
 describe('MacroPlacementOpenDialog', () => {
-  it('offers view and edit choices for a macro placement layout', async () => {
+  it('offers view and edit choices for the current floorplan layout', async () => {
     const wrapper = mount(MacroPlacementOpenDialog, {
       props: { visible: true },
       global: { stubs: { Dialog: DialogStub } },
     })
 
     expect(wrapper.text()).toContain('Open Macro Placement')
-    expect(wrapper.text()).toContain('adjust macro positions')
+    expect(wrapper.text()).toContain('place and adjust macros')
 
     await buttonByText(wrapper, 'View layout')!.trigger('click')
     await buttonByText(wrapper, 'Enter edit mode')!.trigger('click')

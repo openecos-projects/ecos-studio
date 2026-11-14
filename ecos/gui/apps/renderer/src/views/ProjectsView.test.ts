@@ -545,6 +545,7 @@ describe('ProjectsView background lifecycle integration', () => {
     await flushPromises()
 
     expect(testState.pickDirectory).toHaveBeenCalledOnce()
+    expect(testState.registerProjectRoot).toHaveBeenCalledWith('/projects/demo')
     expect(knownProgressHint(wrapper)).toMatchObject({
       label: 'Completed',
       state: 'success',

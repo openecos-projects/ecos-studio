@@ -11,6 +11,7 @@ mod macro_staging;
 mod macro_toolbar;
 mod map_data;
 mod nav3d;
+mod timing;
 
 use std::path::{Path, PathBuf};
 
@@ -65,6 +66,10 @@ struct Args {
     /// LVS feature report for the current LVS workspace step.
     #[arg(long)]
     lvs_data: Option<PathBuf>,
+
+    /// STA feature directory containing per-corner timing_paths.json files.
+    #[arg(long)]
+    sta_feature_dir: Option<PathBuf>,
 
     #[arg(long)]
     map_root: Option<PathBuf>,
@@ -507,6 +512,7 @@ fn main() -> Result<()> {
     let antenna_statis = args.antenna_statis.clone();
     let lvs_data = args.lvs_data.clone();
     let map_root = args.map_root.clone();
+    let sta_feature_dir = args.sta_feature_dir.clone();
 
     let run_result = eframe::run_native(
         "Chip Viewer",
@@ -543,6 +549,7 @@ fn main() -> Result<()> {
                 antenna_statis,
                 lvs_data,
                 map_root,
+                sta_feature_dir,
                 _cc.wgpu_render_state
                     .as_ref()
                     .map(|s| s.target_format)
