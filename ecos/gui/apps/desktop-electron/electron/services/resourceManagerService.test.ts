@@ -109,33 +109,41 @@ async function createPdkArchive(
   const archive = join(root, 'ics55.tar')
   await mkdir(join(sourceDir, 'IP'), { recursive: true })
   await mkdir(join(sourceDir, 'prtech'), { recursive: true })
-  const stdcell = join(sourceDir, 'IP', 'STD_cell', 'ics55_LLSC_H7C_V1p10C100')
+  const stdcell = join(sourceDir, 'IP', 'STD_cell')
   await mkdir(join(sourceDir, 'prtech', 'techLEF'), { recursive: true })
-  await mkdir(join(stdcell, 'ics55_LLSC_H7CR', 'lef'), { recursive: true })
-  await mkdir(join(stdcell, 'ics55_LLSC_H7CL', 'lef'), { recursive: true })
-  await mkdir(join(stdcell, 'ics55_LLSC_H7CR', 'liberty'), { recursive: true })
-  await mkdir(join(stdcell, 'ics55_LLSC_H7CL', 'liberty'), { recursive: true })
+  await mkdir(join(stdcell, 'ICsprout55_SC9T_BASIC_SVT', 'lef'), { recursive: true })
+  await mkdir(join(stdcell, 'ICsprout55_SC9T_BASIC_LVT', 'lef'), { recursive: true })
+  await mkdir(join(stdcell, 'ICsprout55_SC9T_BASIC_SVT', 'liberty'), { recursive: true })
+  await mkdir(join(stdcell, 'ICsprout55_SC9T_BASIC_LVT', 'liberty'), { recursive: true })
+  for (const view of [
+    'lef/ICsprout55_9THVT_basic.lef',
+    'liberty/ICsprout55_9THVT_ss_v1p08_125c_basic_nldm.lib',
+  ]) {
+    const file = join(stdcell, 'ICsprout55_SC9T_BASIC_HVT', view)
+    await mkdir(join(file, '..'), { recursive: true })
+    await writeFile(file, '')
+  }
   await writeFile(
     join(sourceDir, 'prtech', 'techLEF', 'N551P6M_ecos.lef'),
     'VERSION 5.8 ;\n',
     'utf8',
   )
   await writeFile(
-    join(stdcell, 'ics55_LLSC_H7CR', 'lef', 'ics55_LLSC_H7CR_ecos.lef'),
+    join(stdcell, 'ICsprout55_SC9T_BASIC_SVT', 'lef', 'ICsprout55_9TSVT_basic.lef'),
     'VERSION 5.8 ;\n',
     'utf8',
   )
   await writeFile(
-    join(stdcell, 'ics55_LLSC_H7CL', 'lef', 'ics55_LLSC_H7CL_ecos.lef'),
+    join(stdcell, 'ICsprout55_SC9T_BASIC_LVT', 'lef', 'ICsprout55_9TLVT_basic.lef'),
     'VERSION 5.8 ;\n',
     'utf8',
   )
   await writeFile(
     join(
       stdcell,
-      'ics55_LLSC_H7CR',
+      'ICsprout55_SC9T_BASIC_SVT',
       'liberty',
-      'ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
+      'ICsprout55_9TSVT_ss_v1p08_125c_basic_nldm.lib',
     ),
     'library(test) {}\n',
     'utf8',
@@ -144,9 +152,9 @@ async function createPdkArchive(
     await writeFile(
       join(
         stdcell,
-        'ics55_LLSC_H7CL',
+        'ICsprout55_SC9T_BASIC_LVT',
         'liberty',
-        'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
+        'ICsprout55_9TLVT_ss_v1p08_125c_basic_nldm.lib',
       ),
       'library(test) {}\n',
       'utf8',
@@ -1277,10 +1285,10 @@ describe('ResourceManagerService', () => {
   it('recursively detects PDK LEF and Liberty files with relative directory paths', async () => {
     const root = await createTempDir('ecos-resources-')
     const pdkRoot = join(root, 'local', 'ics55')
-    await mkdir(join(pdkRoot, 'IP', 'STD_cell', 'ics55_LLSC_H7CH', 'lef'), {
+    await mkdir(join(pdkRoot, 'IP', 'STD_cell', 'ICsprout55_SC9T_BASIC_HVT', 'lef'), {
       recursive: true,
     })
-    await mkdir(join(pdkRoot, 'IP', 'STD_cell', 'ics55_LLSC_H7CH', 'liberty'), {
+    await mkdir(join(pdkRoot, 'IP', 'STD_cell', 'ICsprout55_SC9T_BASIC_HVT', 'liberty'), {
       recursive: true,
     })
     await mkdir(join(pdkRoot, 'prtech', 'techLEF'), { recursive: true })
@@ -1291,7 +1299,14 @@ describe('ResourceManagerService', () => {
       'utf8',
     )
     await writeFile(
-      join(pdkRoot, 'IP', 'STD_cell', 'ics55_LLSC_H7CH', 'lef', 'ics55_LLSC_H7CH.lef'),
+      join(
+        pdkRoot,
+        'IP',
+        'STD_cell',
+        'ICsprout55_SC9T_BASIC_HVT',
+        'lef',
+        'ICsprout55_SC9T_BASIC_HVT.lef',
+      ),
       'VERSION 5.8 ;\n',
       'utf8',
     )
@@ -1300,9 +1315,9 @@ describe('ResourceManagerService', () => {
         pdkRoot,
         'IP',
         'STD_cell',
-        'ics55_LLSC_H7CH',
+        'ICsprout55_SC9T_BASIC_HVT',
         'liberty',
-        'ics55_LLSC_H7CH_typ.lib',
+        'ICsprout55_SC9T_BASIC_HVT_typ.lib',
       ),
       'library(test) {}\n',
       'utf8',
@@ -1316,16 +1331,16 @@ describe('ResourceManagerService', () => {
 
     expect(imported.health.detected_file_groups).toMatchObject({
       files: [
-        'IP/STD_cell/ics55_LLSC_H7CH/lef/ics55_LLSC_H7CH.lef',
-        'IP/STD_cell/ics55_LLSC_H7CH/liberty/ics55_LLSC_H7CH_typ.lib',
+        'IP/STD_cell/ICsprout55_SC9T_BASIC_HVT/lef/ICsprout55_SC9T_BASIC_HVT.lef',
+        'IP/STD_cell/ICsprout55_SC9T_BASIC_HVT/liberty/ICsprout55_SC9T_BASIC_HVT_typ.lib',
         'prtech/techLEF/N551P6M.lef',
       ],
       directories: [
         'IP',
         'IP/STD_cell',
-        'IP/STD_cell/ics55_LLSC_H7CH',
-        'IP/STD_cell/ics55_LLSC_H7CH/lef',
-        'IP/STD_cell/ics55_LLSC_H7CH/liberty',
+        'IP/STD_cell/ICsprout55_SC9T_BASIC_HVT',
+        'IP/STD_cell/ICsprout55_SC9T_BASIC_HVT/lef',
+        'IP/STD_cell/ICsprout55_SC9T_BASIC_HVT/liberty',
         'prtech',
         'prtech/techLEF',
       ],
@@ -1811,29 +1826,35 @@ describe('ResourceManagerService', () => {
     await mkdir(join(duplicateRoot, 'bin'), { recursive: true })
     await mkdir(join(inactiveRoot, 'bin'), { recursive: true })
     await mkdir(ics55Root, { recursive: true })
-    const ics55StdCellRoot = join(ics55Root, 'IP', 'STD_cell', 'ics55_LLSC_H7C_V1p10C100')
+    const ics55StdCellRoot = join(ics55Root, 'IP', 'STD_cell')
     await mkdir(join(ics55Root, 'prtech', 'techLEF'), { recursive: true })
-    await mkdir(join(ics55StdCellRoot, 'ics55_LLSC_H7CR', 'lef'), { recursive: true })
-    await mkdir(join(ics55StdCellRoot, 'ics55_LLSC_H7CL', 'lef'), { recursive: true })
-    await mkdir(join(ics55StdCellRoot, 'ics55_LLSC_H7CR', 'liberty'), { recursive: true })
-    await mkdir(join(ics55StdCellRoot, 'ics55_LLSC_H7CL', 'liberty'), { recursive: true })
+    await mkdir(join(ics55StdCellRoot, 'ICsprout55_SC9T_BASIC_SVT', 'lef'), {
+      recursive: true,
+    })
+    await mkdir(join(ics55StdCellRoot, 'ICsprout55_SC9T_BASIC_LVT', 'lef'), {
+      recursive: true,
+    })
+    await mkdir(join(ics55StdCellRoot, 'ICsprout55_SC9T_BASIC_SVT', 'liberty'), {
+      recursive: true,
+    })
+    await mkdir(join(ics55StdCellRoot, 'ICsprout55_SC9T_BASIC_LVT', 'liberty'), {
+      recursive: true,
+    })
+    for (const view of [
+      'lef/ICsprout55_9THVT_basic.lef',
+      'liberty/ICsprout55_9THVT_ss_v1p08_125c_basic_nldm.lib',
+    ]) {
+      const file = join(ics55StdCellRoot, 'ICsprout55_SC9T_BASIC_HVT', view)
+      await mkdir(join(file, '..'), { recursive: true })
+      await writeFile(file, '')
+    }
     await writeFile(join(ics55Root, 'prtech', 'techLEF', 'N551P6M_ecos.lef'), '', 'utf8')
-    await writeFile(
-      join(ics55StdCellRoot, 'ics55_LLSC_H7CR', 'lef', 'ics55_LLSC_H7CR_ecos.lef'),
-      '',
-      'utf8',
-    )
-    await writeFile(
-      join(ics55StdCellRoot, 'ics55_LLSC_H7CL', 'lef', 'ics55_LLSC_H7CL_ecos.lef'),
-      '',
-      'utf8',
-    )
     await writeFile(
       join(
         ics55StdCellRoot,
-        'ics55_LLSC_H7CR',
-        'liberty',
-        'ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
+        'ICsprout55_SC9T_BASIC_SVT',
+        'lef',
+        'ICsprout55_9TSVT_basic.lef',
       ),
       '',
       'utf8',
@@ -1841,9 +1862,29 @@ describe('ResourceManagerService', () => {
     await writeFile(
       join(
         ics55StdCellRoot,
-        'ics55_LLSC_H7CL',
+        'ICsprout55_SC9T_BASIC_LVT',
+        'lef',
+        'ICsprout55_9TLVT_basic.lef',
+      ),
+      '',
+      'utf8',
+    )
+    await writeFile(
+      join(
+        ics55StdCellRoot,
+        'ICsprout55_SC9T_BASIC_SVT',
         'liberty',
-        'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
+        'ICsprout55_9TSVT_ss_v1p08_125c_basic_nldm.lib',
+      ),
+      '',
+      'utf8',
+    )
+    await writeFile(
+      join(
+        ics55StdCellRoot,
+        'ICsprout55_SC9T_BASIC_LVT',
+        'liberty',
+        'ICsprout55_9TLVT_ss_v1p08_125c_basic_nldm.lib',
       ),
       '',
       'utf8',
@@ -3449,22 +3490,29 @@ describe('ResourceManagerService', () => {
     const dirs = testResourceDirs(root)
     const registryPath = join(root, 'registry.json')
     const pdkRoot = join(dirs.pdksDir, 'ics55', '1.10.100')
-    const stdCell = join(pdkRoot, 'IP', 'STD_cell', 'ics55_LLSC_H7C_V1p10C100')
+    const stdCell = join(pdkRoot, 'IP', 'STD_cell')
     const markers = [
       join(pdkRoot, 'prtech', 'techLEF', 'N551P6M_ecos.lef'),
-      join(stdCell, 'ics55_LLSC_H7CR', 'lef', 'ics55_LLSC_H7CR_ecos.lef'),
-      join(stdCell, 'ics55_LLSC_H7CL', 'lef', 'ics55_LLSC_H7CL_ecos.lef'),
+      join(stdCell, 'ICsprout55_SC9T_BASIC_SVT', 'lef', 'ICsprout55_9TSVT_basic.lef'),
+      join(stdCell, 'ICsprout55_SC9T_BASIC_LVT', 'lef', 'ICsprout55_9TLVT_basic.lef'),
+      join(stdCell, 'ICsprout55_SC9T_BASIC_HVT', 'lef', 'ICsprout55_9THVT_basic.lef'),
       join(
         stdCell,
-        'ics55_LLSC_H7CR',
+        'ICsprout55_SC9T_BASIC_HVT',
         'liberty',
-        'ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
+        'ICsprout55_9THVT_ss_v1p08_125c_basic_nldm.lib',
       ),
       join(
         stdCell,
-        'ics55_LLSC_H7CL',
+        'ICsprout55_SC9T_BASIC_SVT',
         'liberty',
-        'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
+        'ICsprout55_9TSVT_ss_v1p08_125c_basic_nldm.lib',
+      ),
+      join(
+        stdCell,
+        'ICsprout55_SC9T_BASIC_LVT',
+        'liberty',
+        'ICsprout55_9TLVT_ss_v1p08_125c_basic_nldm.lib',
       ),
     ]
     for (const marker of markers) {
@@ -8641,15 +8689,17 @@ describe('ResourceManagerService', () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createPdkArchive(root, { valid: false })
     const packageRoot = join(root, 'package-source')
-    const packagePath = join(root, 'ics55_LLSC_H7CL_liberty.tar.bz2')
-    const libertyName = 'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib'
+    const packagePath = join(root, 'ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2')
+    const libertyName = 'ICsprout55_9TLVT_ss_v1p08_125c_basic_nldm.lib'
     await mkdir(join(packageRoot, 'liberty'), { recursive: true })
     await writeFile(join(packageRoot, 'liberty', libertyName), 'library(test) {}\n')
     await runFixtureCommand('tar', ['-cjf', packagePath, '-C', packageRoot, 'liberty'])
     const packageLock = await archiveLock(packagePath)
     const packageBytes = await readFile(packagePath)
-    const primaryUrl = 'https://example.com/ics55_LLSC_H7CL_liberty.tar.bz2'
-    const mirrorUrl = 'https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2'
+    const primaryUrl =
+      'https://example.com/ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2'
+    const mirrorUrl =
+      'https://mirror.example.com/ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2'
     const registryPath = join(root, 'registry.json')
     await writeFile(
       registryPath,
@@ -8670,12 +8720,12 @@ describe('ResourceManagerService', () => {
                     strip_prefix: 'icsprout55-pdk-1.10.100',
                     packages: [
                       {
-                        path: 'ics55_LLSC_H7CL_liberty.tar.bz2',
+                        path: 'ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2',
                         url: primaryUrl,
                         cnb_url: mirrorUrl,
                         sha256: packageLock.sha256,
                         size: packageLock.size,
-                        dest: 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL',
+                        dest: 'IP/STD_cell/ICsprout55_SC9T_BASIC_LVT',
                       },
                     ],
                   },
@@ -8708,7 +8758,7 @@ describe('ResourceManagerService', () => {
       readFile(
         join(
           root,
-          'data/pdks/ics55/1.10.100/IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/liberty',
+          'data/pdks/ics55/1.10.100/IP/STD_cell/ICsprout55_SC9T_BASIC_LVT/liberty',
           libertyName,
         ),
         'utf8',
@@ -8720,15 +8770,17 @@ describe('ResourceManagerService', () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createPdkArchive(root, { valid: false })
     const packageRoot = join(root, 'package-source')
-    const packagePath = join(root, 'ics55_LLSC_H7CL_liberty.tar.bz2')
-    const libertyName = 'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib'
+    const packagePath = join(root, 'ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2')
+    const libertyName = 'ICsprout55_9TLVT_ss_v1p08_125c_basic_nldm.lib'
     await mkdir(join(packageRoot, 'liberty'), { recursive: true })
     await writeFile(join(packageRoot, 'liberty', libertyName), 'library(test) {}\n')
     await runFixtureCommand('tar', ['-cjf', packagePath, '-C', packageRoot, 'liberty'])
     const packageLock = await archiveLock(packagePath)
     const packageBytes = await readFile(packagePath)
-    const primaryUrl = 'https://example.com/ics55_LLSC_H7CL_liberty.tar.bz2'
-    const mirrorUrl = 'https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2'
+    const primaryUrl =
+      'https://example.com/ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2'
+    const mirrorUrl =
+      'https://mirror.example.com/ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2'
     const registryPath = join(root, 'registry.json')
     await writeIcs55Registry(registryPath, {
       url: `file://${archive.path}`,
@@ -8736,12 +8788,12 @@ describe('ResourceManagerService', () => {
       size: archive.size,
       packages: [
         {
-          path: 'ics55_LLSC_H7CL_liberty.tar.bz2',
+          path: 'ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2',
           url: primaryUrl,
           cnb_url: mirrorUrl,
           sha256: packageLock.sha256,
           size: packageLock.size,
-          dest: 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL',
+          dest: 'IP/STD_cell/ICsprout55_SC9T_BASIC_LVT',
         },
       ],
     })
@@ -8786,15 +8838,17 @@ describe('ResourceManagerService', () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createPdkArchive(root, { valid: false })
     const packageRoot = join(root, 'package-source')
-    const packagePath = join(root, 'ics55_LLSC_H7CL_liberty.tar.bz2')
-    const libertyName = 'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib'
+    const packagePath = join(root, 'ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2')
+    const libertyName = 'ICsprout55_9TLVT_ss_v1p08_125c_basic_nldm.lib'
     await mkdir(join(packageRoot, 'liberty'), { recursive: true })
     await writeFile(join(packageRoot, 'liberty', libertyName), 'library(test) {}\n')
     await runFixtureCommand('tar', ['-cjf', packagePath, '-C', packageRoot, 'liberty'])
     const packageLock = await archiveLock(packagePath)
     const packageBytes = await readFile(packagePath)
-    const primaryUrl = 'https://example.com/ics55_LLSC_H7CL_liberty.tar.bz2'
-    const mirrorUrl = 'https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2'
+    const primaryUrl =
+      'https://example.com/ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2'
+    const mirrorUrl =
+      'https://mirror.example.com/ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2'
     const registryPath = join(root, 'registry.json')
     await writeIcs55Registry(registryPath, {
       url: `file://${archive.path}`,
@@ -8802,12 +8856,12 @@ describe('ResourceManagerService', () => {
       size: archive.size,
       packages: [
         {
-          path: 'ics55_LLSC_H7CL_liberty.tar.bz2',
+          path: 'ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2',
           url: primaryUrl,
           cnb_url: mirrorUrl,
           sha256: packageLock.sha256,
           size: packageLock.size,
-          dest: 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL',
+          dest: 'IP/STD_cell/ICsprout55_SC9T_BASIC_LVT',
         },
       ],
     })
@@ -8865,13 +8919,13 @@ describe('ResourceManagerService', () => {
     const archive = await createPdkArchive(root, { valid: false })
     const first = await createLibertyPackageFixture(
       root,
-      'ics55_LLSC_H7CL_liberty.tar.bz2',
-      'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
+      'ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2',
+      'ICsprout55_9TLVT_ss_v1p08_125c_basic_nldm.lib',
     )
     const second = await createLibertyPackageFixture(
       root,
-      'ics55_LLSC_H7CH_liberty.tar.bz2',
-      'ics55_LLSC_H7CH_ss_rcworst_1p08_125_nldm.lib',
+      'ICsprout55_SC9T_BASIC_HVT_liberty_nldm.tar.bz2',
+      'ICsprout55_9THVT_ss_v1p08_125c_basic_nldm.lib',
     )
     const registryPath = join(root, 'registry.json')
     await writeIcs55Registry(registryPath, {
@@ -8880,27 +8934,35 @@ describe('ResourceManagerService', () => {
       size: archive.size,
       packages: [
         {
-          path: 'ics55_LLSC_H7CL_liberty.tar.bz2',
-          url: 'https://example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
-          cnb_url: 'https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
+          path: 'ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2',
+          url: 'https://example.com/ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2',
+          cnb_url:
+            'https://mirror.example.com/ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2',
           sha256: first.sha256,
           size: first.size,
-          dest: 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL',
+          dest: 'IP/STD_cell/ICsprout55_SC9T_BASIC_LVT',
         },
         {
-          path: 'ics55_LLSC_H7CH_liberty.tar.bz2',
-          url: 'https://example.com/ics55_LLSC_H7CH_liberty.tar.bz2',
-          cnb_url: 'https://mirror.example.com/ics55_LLSC_H7CH_liberty.tar.bz2',
+          path: 'ICsprout55_SC9T_BASIC_HVT_liberty_nldm.tar.bz2',
+          url: 'https://example.com/ICsprout55_SC9T_BASIC_HVT_liberty_nldm.tar.bz2',
+          cnb_url:
+            'https://mirror.example.com/ICsprout55_SC9T_BASIC_HVT_liberty_nldm.tar.bz2',
           sha256: second.sha256,
           size: second.size,
-          dest: 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CH',
+          dest: 'IP/STD_cell/ICsprout55_SC9T_BASIC_HVT',
         },
       ],
     })
     const fetchedUrls: string[] = []
     const payloads = new Map<string, Buffer<ArrayBuffer>>([
-      ['https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2', first.bytes],
-      ['https://mirror.example.com/ics55_LLSC_H7CH_liberty.tar.bz2', second.bytes],
+      [
+        'https://mirror.example.com/ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2',
+        first.bytes,
+      ],
+      [
+        'https://mirror.example.com/ICsprout55_SC9T_BASIC_HVT_liberty_nldm.tar.bz2',
+        second.bytes,
+      ],
     ])
     const service = new ResourceManagerService({
       registryUrl: `file://${registryPath}`,
@@ -8918,9 +8980,9 @@ describe('ResourceManagerService', () => {
     await service.installResource('pdk:ics55', '1.10.100')
 
     expect(fetchedUrls).toEqual([
-      'https://example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
-      'https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
-      'https://mirror.example.com/ics55_LLSC_H7CH_liberty.tar.bz2',
+      'https://example.com/ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2',
+      'https://mirror.example.com/ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2',
+      'https://mirror.example.com/ICsprout55_SC9T_BASIC_HVT_liberty_nldm.tar.bz2',
     ])
   })
 
@@ -8929,18 +8991,18 @@ describe('ResourceManagerService', () => {
     const archive = await createPdkArchive(root, { valid: false })
     const first = await createLibertyPackageFixture(
       root,
-      'ics55_LLSC_H7CL_liberty.tar.bz2',
-      'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
+      'ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2',
+      'ICsprout55_9TLVT_ss_v1p08_125c_basic_nldm.lib',
     )
     const second = await createLibertyPackageFixture(
       root,
-      'ics55_LLSC_H7CH_liberty.tar.bz2',
-      'ics55_LLSC_H7CH_ss_rcworst_1p08_125_nldm.lib',
+      'ICsprout55_SC9T_BASIC_HVT_liberty_nldm.tar.bz2',
+      'ICsprout55_9THVT_ss_v1p08_125c_basic_nldm.lib',
     )
     const third = await createLibertyPackageFixture(
       root,
-      'ics55_LLSC_H7CR_liberty.tar.bz2',
-      'ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
+      'ICsprout55_SC9T_BASIC_SVT_liberty_nldm.tar.bz2',
+      'ICsprout55_9TSVT_ss_v1p08_125c_basic_nldm.lib',
     )
     const registryPath = join(root, 'registry.json')
     const packageEntry = (
@@ -8953,23 +9015,41 @@ describe('ResourceManagerService', () => {
       cnb_url: `https://mirror.example.com/${name}`,
       sha256: fixture.sha256,
       size: fixture.size,
-      dest: `IP/STD_cell/ics55_LLSC_H7C_V1p10C100/${corner}`,
+      dest: `IP/STD_cell/${corner}`,
     })
     await writeIcs55Registry(registryPath, {
       url: `file://${archive.path}`,
       sha256: archive.sha256,
       size: archive.size,
       packages: [
-        packageEntry('ics55_LLSC_H7CL_liberty.tar.bz2', first, 'ics55_LLSC_H7CL'),
-        packageEntry('ics55_LLSC_H7CH_liberty.tar.bz2', second, 'ics55_LLSC_H7CH'),
-        packageEntry('ics55_LLSC_H7CR_liberty.tar.bz2', third, 'ics55_LLSC_H7CR'),
+        packageEntry(
+          'ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2',
+          first,
+          'ICsprout55_SC9T_BASIC_LVT',
+        ),
+        packageEntry(
+          'ICsprout55_SC9T_BASIC_HVT_liberty_nldm.tar.bz2',
+          second,
+          'ICsprout55_SC9T_BASIC_HVT',
+        ),
+        packageEntry(
+          'ICsprout55_SC9T_BASIC_SVT_liberty_nldm.tar.bz2',
+          third,
+          'ICsprout55_SC9T_BASIC_SVT',
+        ),
       ],
     })
     const fetchedUrls: string[] = []
     const payloads = new Map<string, Buffer<ArrayBuffer>>([
-      ['https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2', first.bytes],
-      ['https://example.com/ics55_LLSC_H7CH_liberty.tar.bz2', second.bytes],
-      ['https://example.com/ics55_LLSC_H7CR_liberty.tar.bz2', third.bytes],
+      [
+        'https://mirror.example.com/ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2',
+        first.bytes,
+      ],
+      [
+        'https://example.com/ICsprout55_SC9T_BASIC_HVT_liberty_nldm.tar.bz2',
+        second.bytes,
+      ],
+      ['https://example.com/ICsprout55_SC9T_BASIC_SVT_liberty_nldm.tar.bz2', third.bytes],
     ])
     const service = new ResourceManagerService({
       registryUrl: `file://${registryPath}`,
@@ -8987,11 +9067,11 @@ describe('ResourceManagerService', () => {
     await service.installResource('pdk:ics55', '1.10.100')
 
     expect(fetchedUrls).toEqual([
-      'https://example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
-      'https://mirror.example.com/ics55_LLSC_H7CL_liberty.tar.bz2',
-      'https://mirror.example.com/ics55_LLSC_H7CH_liberty.tar.bz2',
-      'https://example.com/ics55_LLSC_H7CH_liberty.tar.bz2',
-      'https://example.com/ics55_LLSC_H7CR_liberty.tar.bz2',
+      'https://example.com/ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2',
+      'https://mirror.example.com/ICsprout55_SC9T_BASIC_LVT_liberty_nldm.tar.bz2',
+      'https://mirror.example.com/ICsprout55_SC9T_BASIC_HVT_liberty_nldm.tar.bz2',
+      'https://example.com/ICsprout55_SC9T_BASIC_HVT_liberty_nldm.tar.bz2',
+      'https://example.com/ICsprout55_SC9T_BASIC_SVT_liberty_nldm.tar.bz2',
     ])
   })
 

@@ -20,6 +20,7 @@ from pydantic import (
 )
 
 from ecos_agent.ecc_contracts import ECCStepName
+from ecos_agent.optimization.pdk_evidence import pdk_fingerprint, site_width_dbu
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization.contracts import (
     BudgetSnapshot,
@@ -560,8 +561,7 @@ def _optimization_execution_context(
         ) from exc
     try:
         pdk_root = Path(parameters["pdk_root"])
-        tech_lef = pdk_root / "prtech" / "techLEF" / "N551P6M_ecos.lef"
-        pdk_sha256 = file_sha256(tech_lef)
+        pdk_sha256 = pdk_fingerprint(pdk_root)
     except (KeyError, OSError, TypeError, ValueError, WorkspaceParametersError) as exc:
         raise OptimizationRuntimeError(
             "optimization PDK evidence is unavailable"
@@ -720,27 +720,9 @@ def _site_width_dbu(workspace: Path) -> int:
     try:
         params = _runtime_parameters(workspace)[1]
         pdk_root = Path(params["pdk_root"])
-        lef = pdk_root / "prtech" / "techLEF" / "N551P6M_ecos.lef"
-        text = lef.read_text(encoding="utf-8")
+        return site_width_dbu(pdk_root)
     except (KeyError, OSError, TypeError, ValueError, WorkspaceParametersError) as exc:
-        raise OptimizationRuntimeError("PDK technology LEF is unavailable") from exc
-    units_match = re.search(r"DATABASE\s+MICRONS\s+(\d+)", text, re.IGNORECASE)
-    site_match = re.search(
-        r"SITE\s+(?:core7|CoreSite)\b(?P<body>.*?)END\s+(?:core7|CoreSite)",
-        text,
-        re.IGNORECASE | re.DOTALL,
-    )
-    size_match = re.search(
-        r"SIZE\s+([0-9]+(?:\.[0-9]+)?)\s+BY",
-        site_match.group("body") if site_match else "",
-        re.IGNORECASE,
-    )
-    if not units_match or not size_match:
-        raise OptimizationRuntimeError("PDK site width is unavailable")
-    width = round(float(units_match.group(1)) * float(size_match.group(1)))
-    if width <= 0:
-        raise OptimizationRuntimeError("PDK site width is invalid")
-    return width
+        raise OptimizationRuntimeError("PDK site width is unavailable") from exc
 
 
 def _runtime_parameters(workspace: Path) -> tuple[str, dict[str, Any]]:

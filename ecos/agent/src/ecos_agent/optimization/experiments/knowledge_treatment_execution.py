@@ -622,23 +622,9 @@ def _wait_operation(
 
 
 def _site_width_dbu_from_pdk(pdk_root: Path) -> int:
-    text = (pdk_root / "prtech/techLEF/N551P6M_ecos.lef").read_text(
-        encoding="utf-8"
-    )
-    units = re.search(r"DATABASE\s+MICRONS\s+(\d+)", text, re.IGNORECASE)
-    site = re.search(
-        r"SITE\s+(?:core7|CoreSite)\b(?P<body>.*?)END\s+(?:core7|CoreSite)",
-        text,
-        re.IGNORECASE | re.DOTALL,
-    )
-    size = re.search(
-        r"SIZE\s+([0-9]+(?:\.[0-9]+)?)\s+BY",
-        site.group("body") if site else "",
-        re.IGNORECASE,
-    )
-    if not units or not size:
-        raise ValueError("Phase 8 PDK site width is unavailable")
-    return round(int(units.group(1)) * float(size.group(1)))
+    from ecos_agent.optimization.pdk_evidence import site_width_dbu
+
+    return site_width_dbu(pdk_root)
 
 
 def _write_json(path: Path, payload: object) -> None:
