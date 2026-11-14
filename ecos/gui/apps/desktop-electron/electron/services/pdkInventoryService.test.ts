@@ -27,12 +27,14 @@ describe('PdkInventoryService', () => {
     const pdkRoot = join(root, 'ics55')
     const tech = 'prtech/techLEF/N551P6M_ecos.lef'
     const cellLefs = [
-      'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/lef/ics55_LLSC_H7CR_ecos.lef',
-      'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/lef/ics55_LLSC_H7CL_ecos.lef',
+      'IP/STD_cell/ICsprout55_SC9T_BASIC_HVT/lef/ICsprout55_9THVT_basic.lef',
+      'IP/STD_cell/ICsprout55_SC9T_BASIC_LVT/lef/ICsprout55_9TLVT_basic.lef',
+      'IP/STD_cell/ICsprout55_SC9T_BASIC_SVT/lef/ICsprout55_9TSVT_basic.lef',
     ]
     const liberty = [
-      'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/liberty/ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
-      'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/liberty/ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
+      'IP/STD_cell/ICsprout55_SC9T_BASIC_HVT/liberty/ICsprout55_9THVT_ss_v1p08_125c_basic_nldm.lib',
+      'IP/STD_cell/ICsprout55_SC9T_BASIC_LVT/liberty/ICsprout55_9TLVT_ss_v1p08_125c_basic_nldm.lib',
+      'IP/STD_cell/ICsprout55_SC9T_BASIC_SVT/liberty/ICsprout55_9TSVT_ss_v1p08_125c_basic_nldm.lib',
     ]
     for (const file of [tech, ...cellLefs, ...liberty]) {
       await mkdir(join(pdkRoot, file, '..'), { recursive: true })

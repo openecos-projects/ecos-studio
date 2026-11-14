@@ -25,6 +25,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
+from ecos_agent.optimization.pdk_evidence import pdk_fingerprint
 from ecos_agent.optimization.host_transport import _require_host_transport
 from ecos_agent.optimization.observation_contracts import (
     TerminalObservation,
@@ -152,7 +153,7 @@ def _environment_fingerprint(workspace: Path) -> dict[str, str]:
     try:
         parameters_ref, parameters = _runtime_parameters(workspace)
         pdk_root = Path(parameters["pdk_root"])
-        pdk_sha256 = file_sha256(pdk_root / "prtech" / "techLEF" / "N551P6M_ecos.lef")
+        pdk_sha256 = pdk_fingerprint(pdk_root)
     except (KeyError, OSError, TypeError, ValueError, WorkspaceParametersError) as exc:
         raise OptimizationRuntimeError(
             "workspace parameters or PDK evidence are unavailable for replay cache validation"
