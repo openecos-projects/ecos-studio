@@ -2723,6 +2723,11 @@ export function registerIpc(
     },
   )
 
+  handle(desktopApiIpcChannels.chipViewerReplaySettings, async () => {
+    const { replaySettings } = await import('../services/replayService')
+    return replaySettings(await services.workspaceService.getProjectRoot())
+  })
+
   handle(desktopApiIpcChannels.chipViewerOpen, async (_event, request) => {
     return await services.chipViewerService.open(request as ChipViewerOpenRequest)
   })

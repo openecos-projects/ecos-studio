@@ -56,6 +56,7 @@ export interface WorkspaceParameters {
   utilitization?: number
   margin?: number
   manual_macro_placement?: boolean
+  replay_enabled?: boolean
 }
 
 export interface WorkspaceConfig {

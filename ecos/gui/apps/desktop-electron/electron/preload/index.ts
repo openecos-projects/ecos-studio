@@ -355,6 +355,7 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceRemoveDesignFile, filelistEntry),
   },
   chipViewer: {
+    replaySettings: () => invokeDesktop(desktopApiIpcChannels.chipViewerReplaySettings),
     open: (request: ChipViewerOpenRequest) =>
       invokeDesktop(desktopApiIpcChannels.chipViewerOpen, request),
     isOpen: (request: ChipViewerOpenRequest) =>

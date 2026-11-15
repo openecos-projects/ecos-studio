@@ -1606,12 +1606,18 @@ describe('NewProjectWizard behavior', () => {
       config: {
         parameters: {
           clock_tree: boolean
+          replay_enabled: boolean
           sta_max_parallel_corners: number
         }
       }
     }
     wizard.currentStep = 4
     await flushPromises()
+
+    const replay = wrapper.get('[data-testid="replay-capture-toggle"]')
+    expect((replay.element as HTMLInputElement).checked).toBe(false)
+    await replay.setValue(true)
+    expect(wizard.config.parameters.replay_enabled).toBe(true)
 
     const ctsCard = wrapper.get('[data-flow-step-card="CTS"]')
     const clockTree = ctsCard.get('#cts-clock-tree-visualization')

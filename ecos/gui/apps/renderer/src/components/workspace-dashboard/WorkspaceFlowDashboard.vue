@@ -17,6 +17,7 @@
         <output>{{ Math.round(zoom * 100) }}%</output></label
       >
       <FlowRunControl />
+      <ReplayControl />
       <button
         type="button"
         class="flow-fit"
@@ -175,6 +176,7 @@ import { computed, nextTick, ref, useId, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import { sameFlowStepName } from '@/api/type'
 import FlowRunControl from '@/components/workbench/FlowRunControl.vue'
+import ReplayControl from '@/components/workbench/ReplayControl.vue'
 import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
 import {
   useHomeSnapshots,

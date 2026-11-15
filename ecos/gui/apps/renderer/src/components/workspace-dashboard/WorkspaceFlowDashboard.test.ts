@@ -60,6 +60,7 @@ describe('workspace flow diagram', () => {
         : {},
       global: {
         stubs: {
+          ReplayControl: { template: '<button class="replay-control">Replay</button>' },
           Teleport: stubTeleport,
           FlowRunControl: {
             props: ['step', 'status'],

@@ -493,6 +493,21 @@
                   <p class="mt-2 text-sm text-(--text-secondary)">
                     Select a continuous harden flow range. Step order remains fixed.
                   </p>
+                  <label
+                    class="mt-4 flex cursor-pointer items-center gap-3 text-sm text-(--text-primary)"
+                  >
+                    <input
+                      v-model="config.parameters.replay_enabled"
+                      type="checkbox"
+                      data-testid="replay-capture-toggle"
+                    />
+                    <span
+                      >Capture Replay data
+                      <span class="text-(--text-secondary)"
+                        >— view layout changes after the run completes</span
+                      ></span
+                    >
+                  </label>
                 </header>
 
                 <div
@@ -2322,6 +2337,7 @@ function createInitialConfig(
       frequency_max: 50,
       max_fanout: 32,
       clock_tree: false,
+      replay_enabled: false,
       manual_macro_placement: false,
       sta_max_parallel_corners: 1,
       die_area_mode: dieAreaMode.value,
@@ -2517,6 +2533,13 @@ function normalizeDieAreaMode(value: unknown): DieAreaMode {
  * cycle; new payloads only carry the canonical keys.
  */
 function normalizeInitialParameters(parameters: Record<string, unknown>) {
+  if (parameters.replay_enabled === undefined) {
+    parameters.replay_enabled =
+      firstBoolean(
+        parameters['replay.enabled'],
+        isRecord(parameters.replay) ? parameters.replay.enabled : undefined,
+      ) ?? false
+  }
   if (parameters.utilization === undefined && parameters.utilitization !== undefined) {
     parameters.utilization = parameters.utilitization
   }

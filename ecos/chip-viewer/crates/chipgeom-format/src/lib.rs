@@ -7,6 +7,7 @@ pub const GEOMETRY_FILE_MAGIC: u64 = 0x4543_4745_4f4d_3031;
 pub const GEOMETRY_FILE_HEADER_SIZE: usize = core::mem::size_of::<GeometryFileHeader>();
 
 mod clock_tree;
+pub mod replay;
 pub use clock_tree::*;
 
 pub type ShapeId = u64;

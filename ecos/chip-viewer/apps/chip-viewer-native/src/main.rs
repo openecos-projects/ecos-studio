@@ -20,6 +20,11 @@ mod macro_toolbar;
 mod map_data;
 #[path = "render/nav3d.rs"]
 mod nav3d;
+mod replay;
+mod replay_data;
+mod replay_maps;
+mod replay_motion;
+mod replay_reveal;
 mod timing;
 
 use std::path::{Path, PathBuf};
@@ -43,7 +48,7 @@ struct Args {
     #[arg(long)]
     manifest: PathBuf,
 
-    #[arg(long, default_value = "view", value_parser = ["view", "edit"])]
+    #[arg(long, default_value = "view", value_parser = ["view", "edit", "replay"])]
     mode: String,
 
     #[arg(long)]
@@ -523,6 +528,16 @@ fn main() -> Result<()> {
     eprintln!("ECOS eframe: selected mode = {:?}", render_mode);
 
     let native_options = create_native_options(render_mode, wgpu_backends);
+
+    if args.mode == "replay" {
+        let replay = replay::ReplayApp::open(&args.manifest)?;
+        return eframe::run_native(
+            "Chip Viewer · Replay",
+            native_options,
+            Box::new(move |_| Ok(Box::new(replay))),
+        )
+        .map_err(|error| anyhow::anyhow!("Replay window failed: {error}"));
+    }
 
     let manifest = args.manifest.clone();
     let mode = args.mode.clone();

@@ -122,6 +122,7 @@ export function workspaceReconfigureInitialConfig(
       clock_tree: parameters['geometry.clock_tree'] === true,
       sta_max_parallel_corners: number(parameters['sta.max_parallel_corners']),
       manual_macro_placement: parameters['macro.manual_placement'] === true,
+      replay_enabled: parameters['replay.enabled'] === true,
     } as WorkspaceConfig['parameters'],
     origin_def: pathForInputRole('def'),
     origin_verilog: pathForInputRole('netlist'),
