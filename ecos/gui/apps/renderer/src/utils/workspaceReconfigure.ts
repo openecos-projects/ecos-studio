@@ -90,6 +90,7 @@ export function workspaceReconfigureInitialConfig(
       target_density: number(parameters['place.target_density']),
       target_overflow: number(parameters['place.target_overflow']),
       manual_macro_placement: parameters['macro.manual_placement'] === true,
+      replay_enabled: parameters['replay.enabled'] === true,
     } as WorkspaceConfig['parameters'],
     origin_def: pathForInputRole('def'),
     origin_verilog: pathForInputRole('netlist'),

@@ -1,4 +1,7 @@
 import { EventEmitter } from 'node:events'
+import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
@@ -3227,6 +3230,27 @@ describe('registerIpc', () => {
       }),
       ok: false,
     })
+  })
+
+  it('reads Replay settings only from the registered workspace', async () => {
+    const { handlers, services } = registerHandlers()
+    const root = await mkdtemp(join(tmpdir(), 'ecos-replay-ipc-'))
+    const actual =
+      await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    try {
+      await actual.mkdir(join(root, 'home'))
+      await writeFile(join(root, 'home/params.toml'), '[params.replay]\nenabled = true\n')
+      services.workspaceService.getProjectRoot.mockResolvedValue(root)
+      await expect(
+        handlers.get(desktopApiIpcChannels.chipViewerReplaySettings)?.(
+          { sender: {} },
+          '/untrusted/path',
+        ),
+      ).resolves.toEqual({ enabled: true })
+      expect(services.workspaceService.getProjectRoot).toHaveBeenCalled()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('delegates chip viewer launches to the chip viewer service', async () => {

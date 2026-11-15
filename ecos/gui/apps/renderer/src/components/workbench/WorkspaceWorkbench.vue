@@ -21,6 +21,7 @@
         >
           <template #actions>
             <FlowRunControl />
+            <ReplayControl />
           </template>
         </FlowStatusStrip>
         <slot
@@ -44,6 +45,7 @@ import Splitter from 'primevue/splitter'
 import SplitterPanel from 'primevue/splitterpanel'
 import ChatInspectorPanel from '@/components/ChatInspectorPanel.vue'
 import FlowRunControl from './FlowRunControl.vue'
+import ReplayControl from './ReplayControl.vue'
 import FlowStatusStrip from './FlowStatusStrip.vue'
 import {
   initialSelectedNodeId,

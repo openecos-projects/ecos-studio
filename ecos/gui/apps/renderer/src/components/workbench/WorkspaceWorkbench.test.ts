@@ -70,6 +70,7 @@ describe('WorkspaceWorkbench Agent panel', () => {
             template: '<div class="flow-status"><slot name="actions" /></div>',
           },
           FlowRunControl: { template: '<button />' },
+          ReplayControl: true,
           ChatInspectorPanel: { template: '<div class="workspace-agent" />' },
         },
       },
@@ -98,6 +99,7 @@ describe('WorkspaceWorkbench Agent panel', () => {
           SplitterPanel: { template: '<div><slot /></div>' },
           FlowStatusStrip: { template: '<div class="flow-status" />' },
           FlowRunControl: true,
+          ReplayControl: true,
           ChatInspectorPanel: {
             props: ['hideGuiArtifacts'],
             template: '<div class="workspace-agent">{{ hideGuiArtifacts }}</div>',

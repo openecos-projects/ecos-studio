@@ -41,6 +41,7 @@ import {
   serializeMacroStagingManifest,
 } from './chipViewerMacroStaging'
 import { parseMacroLocationTcl } from './chipViewerMacroLocationTcl'
+import { buildReplayCatalog } from './replayService'
 
 const BUILD_HINT =
   'Build them with: cd ecos/chip-viewer && cargo build --release -p chip-viewer-native; then build the ECC CLI package.'
@@ -626,8 +627,8 @@ function normalizeChipViewerMode(mode: unknown): ChipViewerMode {
   if (mode === undefined || mode === 'view') {
     return 'view'
   }
-  if (mode === 'edit') {
-    return 'edit'
+  if (mode === 'edit' || mode === 'replay') {
+    return mode
   }
   throw new Error(`Unsupported chip viewer mode: ${String(mode)}`)
 }
@@ -753,6 +754,36 @@ export class ChipViewerService {
   async open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult> {
     const projectPath = normalizeLocalPath(request.projectPath)
     const mode = normalizeChipViewerMode(request.mode)
+    if (mode === 'replay') {
+      const manifestPath = await buildReplayCatalog(projectPath)
+      const snapshotInputs: SnapshotInputs = {
+        manifestPath,
+        workspaceStepDirectory: projectPath,
+        defPath: '',
+        dbPath: '',
+        gdsPath: '',
+        imagePath: '',
+        editCommandDirectory: '',
+        editResultDirectory: '',
+      }
+      const release = this.trackOpenViewer(projectPath, 'replay')
+      try {
+        await this.launchViewer(
+          this.resolveBinaries().viewerPath,
+          ['--manifest', manifestPath, '--mode', 'replay'],
+          snapshotInputs,
+          release,
+        )
+      } catch (error) {
+        release()
+        throw error
+      }
+      return {
+        geometryManifestPath: manifestPath,
+        workspaceStepDirectory: projectPath,
+        spawned: true,
+      }
+    }
     const defView = isDefViewStep(request.step)
     if (defView && mode === 'edit') {
       throw new Error('DEF View is read-only and cannot be opened in edit mode.')

@@ -95,6 +95,12 @@ export function backendWorkspaceOptions(
     return mapped && mapped.trim() ? mapped : fallback
   }
   const clockTreeSpecKey = parameterDisplayIndex?.clock_tree?.trim() ?? ''
+  const replaySpecKey = parameterDisplayIndex?.replay_enabled?.trim() ?? ''
+  if (parameters.replay_enabled === true && !replaySpecKey) {
+    throw new Error(
+      'The installed ECC runtime does not support Replay capture. Update ECC first.',
+    )
+  }
   const manualMacroPlacementSpecKey =
     parameterDisplayIndex?.manual_macro_placement?.trim() ?? ''
   const inputs: Array<{ inputId: string; role: string }> = []
@@ -347,6 +353,7 @@ export function backendWorkspaceOptions(
               [clockTreeSpecKey]: parameters.clock_tree === true,
             }
           : {}),
+        ...(replaySpecKey ? { [replaySpecKey]: parameters.replay_enabled === true } : {}),
         ...(macroPlacementApplies && manualMacroPlacementSpecKey
           ? {
               [manualMacroPlacementSpecKey]: parameters.manual_macro_placement === true,

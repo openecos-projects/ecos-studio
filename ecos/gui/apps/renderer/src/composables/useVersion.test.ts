@@ -227,6 +227,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       onExit: () => () => undefined,
     },
     chipViewer: {
+      replaySettings: async () => ({ enabled: false }),
       isOpen: async () => ({ open: false }),
       open: async () => ({
         geometryManifestPath: '/tmp/geometry/geometry.manifest',

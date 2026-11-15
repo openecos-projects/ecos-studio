@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue'
 import FlowRunControl from '@/components/workbench/FlowRunControl.vue'
+import ReplayControl from '@/components/workbench/ReplayControl.vue'
 import StepDashboard from '@/components/StepDashboard.vue'
 import WorkspaceWorkbench from '@/components/workbench/WorkspaceWorkbench.vue'
 import { useSubflow } from '@/composables/useSubflow'
@@ -63,6 +64,7 @@ onUnmounted(() => {
             >Dashboard</router-link
           >
           <FlowRunControl />
+          <ReplayControl />
         </header>
         <StepDashboard />
       </section>

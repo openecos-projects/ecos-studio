@@ -177,6 +177,27 @@ function request(
 }
 
 describe('ECC CLI workspace command planning', () => {
+  it('sets Replay through ECC CLI for fresh and derived workspaces without changing flow selection', () => {
+    const input = request()
+    const flow = structuredClone(input.workspaceSpec.flow)
+    input.workspaceSpec.parameters = { 'replay.enabled': true }
+    expect(workspaceCreateCommands(input, '/projects/demo')[1]).toContain(
+      'replay.enabled=true',
+    )
+    input.deriveFrom = { sourceStep: 'placement', workspaceId: 'ws_source' }
+    expect(workspaceCreateCommands(input, '/projects/demo')[1]).toEqual([
+      'param',
+      'apply',
+      '--project',
+      '/projects/demo',
+      '--workspace',
+      'ws_1',
+      '--no-wait',
+      '--set',
+      'replay.enabled=true',
+    ])
+    expect(input.workspaceSpec.flow).toEqual(flow)
+  })
   it('persists the selected STA limit through CLI for fresh and derived workspaces', () => {
     const input = request()
     input.workspaceSpec.parameters = { 'sta.max_parallel_corners': 3 }

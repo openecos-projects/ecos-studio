@@ -261,7 +261,7 @@ export type DesktopProjectManagementWorkspaceImportResult =
 export interface ChipViewerOpenRequest {
   projectPath: string
   step: string
-  mode?: 'view' | 'edit'
+  mode?: 'view' | 'edit' | 'replay'
 }
 
 export interface ChipViewerOpenResult {
@@ -420,6 +420,7 @@ export interface DesktopApi {
     removeDesignFile(filelistEntry: string): Promise<WorkspaceDesignFileEntry | null>
   }
   chipViewer: {
+    replaySettings(): Promise<{ enabled: boolean }>
     open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult>
     isOpen(request: ChipViewerOpenRequest): Promise<ChipViewerOpenStatus>
   }

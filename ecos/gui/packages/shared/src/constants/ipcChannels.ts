@@ -133,6 +133,7 @@ export const desktopApiIpcChannels = {
   designRuntimeFlowRun: 'design-runtime:flow-run',
   designRuntimeFlowRunStep: 'design-runtime:flow-run-step',
   chipViewerOpen: 'chip-viewer:open',
+  chipViewerReplaySettings: 'chip-viewer:replay-settings',
   chipViewerIsOpen: 'chip-viewer:is-open',
   eccRuntimeEngineeringSnapshot: 'ecc:runtime-engineering-snapshot',
   eccRuntimeWaitForOperation: 'ecc:runtime-wait-operation',

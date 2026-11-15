@@ -30,6 +30,10 @@ async function loadDesktopBridge() {
     expect.any(Object),
   )
   return contextBridgeExposeInMainWorld.mock.calls.at(-1)?.[1] as {
+    chipViewer: {
+      replaySettings(): Promise<{ enabled: boolean }>
+      open(request: unknown): Promise<unknown>
+    }
     app: {
       getVersions(): Promise<unknown>
       getEnvironmentDoctor(): Promise<unknown>
@@ -125,6 +129,20 @@ async function loadDesktopBridge() {
 }
 
 describe('preload desktop bridge contract', () => {
+  it('exposes read-only Replay settings and launches through the viewer channel', async () => {
+    const bridge = await loadDesktopBridge()
+    ipcRenderer.invoke.mockResolvedValue({ enabled: true })
+    await expect(bridge.chipViewer.replaySettings()).resolves.toEqual({ enabled: true })
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.chipViewerReplaySettings,
+    )
+    const request = { projectPath: '/work/design/ws', step: 'replay', mode: 'replay' }
+    await bridge.chipViewer.open(request)
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.chipViewerOpen,
+      request,
+    )
+  })
   beforeEach(() => {
     contextBridgeExposeInMainWorld.mockReset()
     ipcRenderer.invoke.mockReset()
