@@ -54,8 +54,11 @@ impl ReplayApp {
             let color = match obj.kind.as_str() {
                 "macro" => Color32::from_rgb(124, 151, 214),
                 "pdn" => Color32::from_rgb(177, 143, 88),
+                "wire" => route_layer_color(&obj.layer),
+                "via" => Color32::from_rgb(255, 211, 112),
                 "pin" => Color32::from_rgb(112, 219, 198),
                 "row" => Color32::from_rgb(36, 64, 54),
+                "track_grid" => Color32::from_rgb(75, 89, 105),
                 "die" => Color32::from_rgb(131, 193, 234),
                 "core" => Color32::from_rgb(218, 175, 107),
                 _ => Color32::from_rgb(70, 147, 129),
@@ -107,6 +110,22 @@ impl ReplayApp {
             }
         }
     }
+}
+
+fn route_layer_color(layer: &str) -> Color32 {
+    const PALETTE: [Color32; 6] = [
+        Color32::from_rgb(73, 183, 217),
+        Color32::from_rgb(239, 126, 101),
+        Color32::from_rgb(144, 194, 104),
+        Color32::from_rgb(204, 144, 220),
+        Color32::from_rgb(232, 192, 93),
+        Color32::from_rgb(93, 145, 232),
+    ];
+    let index = layer.parse::<usize>().map_or_else(
+        |_| layer.bytes().fold(0usize, |sum, byte| sum + byte as usize),
+        |id| id,
+    ) % PALETTE.len();
+    PALETTE[index]
 }
 
 fn outline(painter: &egui::Painter, rect: Rect, stroke: Stroke, fraction: f32) {

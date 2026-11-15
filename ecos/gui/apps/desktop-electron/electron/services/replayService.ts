@@ -179,7 +179,7 @@ export async function buildReplayCatalog(workspace: string): Promise<string> {
     steps.push(entry)
   }
   if (!steps.some((step) => step.manifest))
-    throw new Error('No Replay data. Enable capture, then rerun Floorplan or Place.')
+    throw new Error('No Replay data. Enable capture, then rerun the flow.')
   const path = join(home, 'replay-view.json')
   await publish(path, { schema: 'ecos.replay.catalog.v1', workspace: root, steps })
   return path

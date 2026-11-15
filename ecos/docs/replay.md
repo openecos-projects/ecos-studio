@@ -1,4 +1,4 @@
-# Layout Replay: Floorplan and Place
+# Layout Replay: ECC Flow
 
 Layout Replay connects the workspace wizard, ECC CLI, native EDA capture and
 the native Chip Viewer. It is an offline viewer of completed step executions.
@@ -39,20 +39,30 @@ from `ecos/chip-viewer`, then build/start the desktop using the GUI scripts.
   also available only at completion.
 - **Play from step start** replays the selected captured step from its beginning,
   including very short Floorplan steps whose timeline nodes overlap.
-- Floorplan enables **Animate generation**: die/core outlines draw progressively,
+- Physical steps with captured geometry changes enable **Animate captured changes**:
+  die/core outlines draw progressively,
   rows and IO appear in batches, physical cells are grouped by master and revealed
-  left to right, and PDN grows in ascending layer order. The current group is
+  left to right, PDN grows in ascending layer order, and other captured shapes
+  are grouped by object type/layer. The current group is
   named beside the control. Each captured batch gets viewing time before the
   next sample. This is a presentation order within a batch, not a claim about
   individual objects' actual tool execution timestamps. Final native writeback
   remains an exact result, without replaying all geometry as new objects.
 - Changed/new instances retain pink outlines, painted above PDN and heatmaps.
   Reverse seek restores both the geometry and touched set of the selected frame.
-- Playback defaults to 1×, with 0.25×/0.5× available. Place enables **Smooth
-  movement** by default: adjacent optimizer samples with unchanged instance
+- Playback defaults to 1×, with 0.25×/0.5× available. Adjacent Place and
+  macro-placement optimizer samples with unchanged instance
   identity, master, orientation and dimensions use a 300 ms eased translation.
   The layout and its highlight move together. The UI identifies interpolated
   movement; these display positions are not additional EDA samples.
+- Every standard ECC RTL-to-GDS step can publish Replay when capture is enabled.
+  Physical steps use captured database snapshots and tool samples; Synthesis
+  and LEC use timestamped runner stages and completion metrics/results because
+  those steps do not have a physical database. Report-only steps are identified
+  in the viewer and do not draw an invented layout.
+- The CTS completion node opens its captured clock-tree topology in a separate
+  left-side view. The tree is hidden while playing through CTS and on every
+  other step.
   Playback holds its recorded cursor during the transition instead of skipping
   ahead. Timeline proportions and recorded durations remain unchanged, so
   viewing can take longer than execution time divided by the selected speed.

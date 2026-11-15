@@ -21,6 +21,7 @@ mod map_data;
 #[path = "render/nav3d.rs"]
 mod nav3d;
 mod replay;
+mod replay_clock_tree;
 mod replay_data;
 mod replay_maps;
 mod replay_motion;
