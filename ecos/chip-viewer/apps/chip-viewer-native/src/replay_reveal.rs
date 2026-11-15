@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 
 struct Entry {
     start: f64,
-    from: Option<[i64; 4]>,
 }
 
 #[derive(Default)]
@@ -13,6 +12,7 @@ pub struct Reveal {
     groups: Vec<(f64, String)>,
     elapsed: f64,
     duration: f64,
+    pub ghosts: Vec<Object>,
 }
 
 impl Reveal {
@@ -22,11 +22,11 @@ impl Reveal {
     pub fn active(&self) -> bool {
         self.elapsed < self.duration
     }
-    pub fn advance(&mut self, seconds: f64) {
-        self.elapsed += seconds;
-        if self.elapsed >= self.duration {
-            self.clear();
-        }
+    pub fn set_progress(&mut self, fraction: f64) {
+        self.elapsed = fraction.clamp(0.0, 1.0) * self.duration;
+    }
+    pub fn ghost_opacity(&self) -> f32 {
+        (1.0 - self.elapsed / 0.4).clamp(0.0, 1.0) as f32
     }
     pub fn label(&self) -> &str {
         self.groups
@@ -38,20 +38,22 @@ impl Reveal {
 
     pub fn begin(&mut self, before: &Scene, after: &Scene, frames: &[Frame]) {
         self.clear();
-        let (Some(a), Some(b)) = (before.revision, after.revision) else {
+        let Some(b) = after.revision else {
             return;
         };
-        if b != a + 1 || frames[b].state_domain == "native_input" {
+        if before.revision.map_or(b != 0, |a| b != a + 1)
+            || frames[b].state_domain == "native_input"
+        {
             return;
+        }
+        for (id, old) in &before.objects {
+            if after.objects.get(id) != Some(old) {
+                self.ghosts.push(old.clone());
+            }
         }
         let mut groups: BTreeMap<(u8, u32, String), Vec<(&String, &Object)>> = BTreeMap::new();
         for (id, object) in &after.objects {
-            if before.objects.get(id).is_some_and(|old| {
-                old.kind == object.kind
-                    && old.bbox == object.bbox
-                    && old.master == object.master
-                    && old.orient == object.orient
-            }) {
+            if before.objects.get(id) == Some(object) {
                 continue;
             }
             let Some(key) = group(object) else {
@@ -65,16 +67,7 @@ impl Reveal {
             let start = self.duration;
             self.groups.push((start, name));
             let count = objects.len();
-            for (i, (id, object)) in objects.into_iter().enumerate() {
-                let from = before
-                    .objects
-                    .get(id)
-                    .filter(|old| {
-                        old.kind == object.kind
-                            && old.master == object.master
-                            && old.orient == object.orient
-                    })
-                    .map(|old| old.bbox);
+            for (i, (id, _)) in objects.into_iter().enumerate() {
                 self.entries.insert(
                     id.clone(),
                     Entry {
@@ -84,11 +77,13 @@ impl Reveal {
                             } else {
                                 0.0
                             },
-                        from,
                     },
                 );
             }
             self.duration += if count > 1 { 1.1 } else { 0.6 };
+        }
+        if !self.ghosts.is_empty() {
+            self.duration = self.duration.max(0.6);
         }
     }
 
@@ -100,15 +95,10 @@ impl Reveal {
     }
 
     pub fn bounds(&self, id: &str, object: &Object) -> [i64; 4] {
-        let Some(entry) = self.entries.get(id) else {
+        if !self.entries.contains_key(id) {
             return object.bbox;
-        };
-        let t = self.fraction(id) as f64;
-        if let Some(from) = entry.from {
-            return std::array::from_fn(|i| {
-                (from[i] as f64 + (object.bbox[i] - from[i]) as f64 * t).round() as i64
-            });
         }
+        let t = self.fraction(id) as f64;
         let mut bounds = object.bbox;
         if matches!(object.kind.as_str(), "instance" | "macro") {
             for axis in 0..2 {
@@ -134,7 +124,7 @@ impl Reveal {
     }
 }
 
-fn group(object: &Object) -> Option<(u8, u32, String)> {
+pub fn group(object: &Object) -> Option<(u8, u32, String)> {
     let (rank, name) = match object.kind.as_str() {
         "die" => (0, "Die boundary".into()),
         "core" => (1, "Core boundary".into()),
@@ -210,11 +200,11 @@ mod tests {
             .collect();
         let mut reveal = Reveal::default();
         reveal.begin(&before, &after, &frames);
-        reveal.advance(0.4);
+        reveal.set_progress(0.4 / reveal.duration);
         assert_eq!(reveal.fraction("left"), 1.0);
         assert_eq!(reveal.fraction("right"), 0.0);
         assert_eq!(reveal.fraction("m2"), 0.0);
-        reveal.advance(0.9);
+        reveal.set_progress(1.3 / reveal.duration);
         assert_eq!(reveal.label(), "PDN · MET2");
         assert!(reveal.bounds("m2", &after.objects["m2"])[2] > 0);
         assert_eq!(reveal.fraction("m10"), 0.0);
@@ -254,7 +244,7 @@ mod tests {
         let mut reveal = Reveal::default();
         reveal.begin(&before, &after, &frames);
         assert_eq!(reveal.label(), "wire · 2");
-        reveal.advance(0.7);
+        reveal.set_progress(0.7 / reveal.duration);
         assert_eq!(reveal.label(), "wire · 10");
     }
 }

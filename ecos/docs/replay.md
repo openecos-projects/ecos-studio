@@ -2,8 +2,7 @@
 
 Layout Replay connects the workspace wizard, ECC CLI, native EDA capture and
 the native Chip Viewer. It is an offline viewer of completed step executions.
-The first implementation covers Floorplan and Place, preserving all steps and
-their order from the workspace's `home/flow.json`.
+It preserves all steps and their order from the workspace's `home/flow.json`.
 
 ## Use
 
@@ -28,52 +27,44 @@ from `ecos/chip-viewer`, then build/start the desktop using the GUI scripts.
 
 ## Playback
 
-- One bottom timeline, with the Play/Pause button before it and playback speed
-  after it. Step widths reflect captured execution duration; uncaptured steps
-  use the flow's precise observed duration, falling back to its runtime string.
-- Small circles locate captured subflow boundaries. Larger circles select each
-  step's final result. Dragging seeks through recorded frames. Right-clicking
-  the bar also lists exact nodes where very short or zero-duration steps overlap.
-- Playback pauses briefly on completion, then cycles available Place maps over
-  the layout before proceeding to the next flow step. Manual map selection is
-  also available only at completion.
-- **Play from step start** replays the selected captured step from its beginning,
-  including very short Floorplan steps whose timeline nodes overlap.
-- Physical steps with captured geometry changes enable **Animate captured changes**:
-  die/core outlines draw progressively,
-  rows and IO appear in batches, physical cells are grouped by master and revealed
-  left to right, PDN grows in ascending layer order, and other captured shapes
-  are grouped by object type/layer. The current group is
-  named beside the control. Each captured batch gets viewing time before the
-  next sample. This is a presentation order within a batch, not a claim about
-  individual objects' actual tool execution timestamps. Final native writeback
-  remains an exact result, without replaying all geometry as new objects.
-- Changed/new instances retain pink outlines, painted above PDN and heatmaps.
-  Reverse seek restores both the geometry and touched set of the selected frame.
-- Playback defaults to 1×, with 0.25×/0.5× available. Adjacent Place and
-  macro-placement optimizer samples with unchanged instance
-  identity, master, orientation and dimensions use a 300 ms eased translation.
-  The layout and its highlight move together. The UI identifies interpolated
-  movement; these display positions are not additional EDA samples.
-- Every standard ECC RTL-to-GDS step can publish Replay when capture is enabled.
-  Physical steps use captured database snapshots and tool samples; Synthesis
-  and LEC use timestamped runner stages and completion metrics/results because
-  those steps do not have a physical database. Report-only steps are identified
-  in the viewer and do not draw an invented layout.
-- The CTS completion node opens its captured clock-tree topology in a separate
-  left-side view. The tree is hidden while playing through CTS and on every
-  other step.
-  Playback holds its recorded cursor during the transition instead of skipping
-  ahead. Timeline proportions and recorded durations remain unchanged, so
-  viewing can take longer than execution time divided by the selected speed.
-  Pausing, seeking, disabling smoothing or reaching a completion node restores
-  exact sampled geometry. Legalization, rollback, phase boundaries, insertion,
-  deletion, resizing and master/orientation changes are not interpolated.
-- Completion shows the final committed layout and captured QoR metrics. Numeric
-  deltas compare matching metric IDs/units with the nearest earlier step that
-  provides the metric; the comparison step is named.
-- A step without capture remains in the timeline and explains the missing data.
-  There are no simulated frames in this production pipeline.
+Replay uses a **change-driven presentation timeline**. Execution timestamps stay
+in the capture and are shown separately; a slow tool operation no longer creates
+a long wait on an unchanged layout. See [presentation design](replay-presentation.md).
+
+- The viewer prepares compact clips on a worker thread, comparing the actual
+  geometry diffs. Identical checkpoints and idle intervals consume no display
+  time; metric changes and phase/subflow boundaries remain brief events.
+- One bottom timeline has Play/Pause before it and speed after it. Step widths
+  reflect display duration, including final result and map inspection. Hovering
+  completion nodes shows display duration and actual execution time.
+- Small circles inspect exact captured subflow states. Large circles inspect
+  exact final results. Overlapping nodes remain individually reachable through
+  the bar's context menu. Dragging samples the same animated state as playback.
+- Compatible consecutive optimizer samples interpolate instance positions.
+  Dense continuous movement runs share a 12-second display budget while keeping
+  all captured samples in the mapping. The viewer may cross several tiny clips
+  per draw, but restores their deltas in order. Phase boundaries, legalization,
+  rollback, replacement and committed results are not invented motion paths.
+- Generation transitions reveal die/core boundaries, rows, IO, physical cells,
+  PDN and routed geometry by object type, numeric layer and spatial order.
+  Each batch receives 0.6–6 seconds of display time. Deleted/replaced geometry
+  briefly fades at its previous position. Changed instances stay highlighted.
+- The final captured delta animates before completion. Final results receive
+  two seconds, followed by two seconds for each captured Place heatmap. The
+  CTS clock-tree view appears on the left only after its step completes.
+- Pause retains the current interpolated position. Resume continues there.
+  Playback speed applies equally to movement, generation, results and maps.
+  **Play from step start** replays the selected step. Disabling animation shows
+  exact samples but keeps the same display timeline.
+- Numeric result deltas compare matching IDs/units with the nearest earlier
+  step providing that metric; the comparison step is named. Result data and
+  manual heatmap selection remain available when paused at completion.
+- Synthesis and LEC show recorded report progress and metrics without invented
+  physical geometry. Uncaptured steps remain visible as brief unavailable steps.
+  Corrupt or stale recordings report an error rather than silently continuing.
+- Interpolation and staged batch order are display effects, not extra algorithm
+  samples or claims about per-object execution order. Existing captures work
+  without rerunning ECC. The viewer never writes presentation timing into them.
 
 ## Integration contract
 
@@ -98,13 +89,12 @@ The complete producer contract is in [ECC Replay](../../ecc/docs/replay.md).
 ## Current scope
 
 The native renderer shows recorded physical bounds for die/core, rows, IO,
-instances/macros, halos and PDN, with positional heatmaps. It is not a full
-cell-pin/polygon or routed-wire recording. Geometry changes are semantic JSON
+instances/macros, halos, PDN, signal wires and vias, with positional heatmaps.
+It is not a full cell-pin/polygon renderer. Geometry changes are semantic JSON
 diffs with periodic checkpoints; rendering currently draws the visible scene
 through egui. Chunked GPU updates, large-chip LOD/prefetch, and a retention policy
 remain future work and have not been scale-tested.
 
-This phase does not add CTS/clock-tree, routing or signoff process capture.
 GCD exercised no-op macro placement, not a real macro optimization trajectory.
 The earlier browser mockup remains design evidence; it is not the native runtime.
 

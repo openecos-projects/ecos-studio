@@ -6,6 +6,7 @@ use crate::replay_clock_tree;
 use crate::replay_data::{read, Catalog, Recording};
 use crate::replay_maps::ReplayMaps;
 use crate::replay_motion::Motion;
+use crate::replay_plan::{self, StepPlan};
 use crate::replay_reveal::Reveal;
 use anyhow::{ensure, Context, Result};
 use egui::{Color32, Pos2, Sense, Stroke};
@@ -28,7 +29,9 @@ pub struct ReplayApp {
     speed: f64,
     tick: Instant,
     zoom: f32,
-    result_hold: f64,
+    plans: Vec<StepPlan>,
+    preparation: Option<std::sync::mpsc::Receiver<Vec<StepPlan>>>,
+    active_clip: Option<usize>,
     checked: Instant,
     maps: ReplayMaps,
     smooth: bool,
@@ -41,10 +44,12 @@ impl ReplayApp {
         let flow: serde_json::Value = read(&self.catalog.workspace.join("home/flow.json"))?;
         let steps = flow["steps"].as_array().context("Missing flow steps")?;
         ensure!(
-            !steps.iter().any(|s| s["state"] == "Ongoing"),
+            !steps
+                .iter()
+                .any(|s| s["state"] == "Ongoing" || s["state"] == "Running"),
             "Flow is running. Reopen Replay after completion."
         );
-        if self.recording.is_some() {
+        if self.catalog.steps[self.step].manifest.is_some() {
             ensure!(
                 steps
                     .iter()
@@ -61,17 +66,16 @@ impl ReplayApp {
             catalog.schema == "ecos.replay.catalog.v1" && !catalog.steps.is_empty(),
             "Invalid Replay catalog"
         );
-        let mut total = 0.0;
-        let mut starts = Vec::new();
         for step in &catalog.steps {
             ensure!(
                 step.seconds.is_finite() && step.seconds >= 0.0,
                 "Invalid step duration"
             );
-            starts.push(total);
-            total += step.seconds;
         }
-        let mut app = Self {
+        let preparation = Some(replay_plan::prepare(&catalog));
+        let starts = vec![0.0; catalog.steps.len()];
+        let total = 0.0;
+        let app = Self {
             catalog,
             starts,
             total,
@@ -87,68 +91,16 @@ impl ReplayApp {
             speed: 1.0,
             tick: Instant::now(),
             zoom: 1.0,
-            result_hold: 0.0,
+            plans: Vec::new(),
+            preparation,
+            active_clip: None,
             checked: Instant::now(),
             maps: ReplayMaps::default(),
             smooth: true,
             motion: Motion::default(),
             reveal: Reveal::default(),
         };
-        app.select(0, 0.0, false);
         Ok(app)
-    }
-
-    fn select(&mut self, step: usize, seconds: f64, complete: bool) {
-        self.clear_animation();
-        if self.step != step || self.complete != complete {
-            self.result_hold = 0.0;
-        }
-        self.position = seconds.clamp(0.0, self.total);
-        self.complete = complete;
-        self.error.clear();
-        if step != self.step || self.recording.is_none() {
-            self.step = step;
-            self.recording = None;
-            self.clock_tree = None;
-            self.clock_tree_error.clear();
-            self.clock_tree_attempted = false;
-            self.maps = ReplayMaps::default();
-            if let Some(path) = &self.catalog.steps[step].manifest {
-                match Recording::open(&self.catalog.workspace, path) {
-                    Ok(recording) => {
-                        match recording.map_root() {
-                            Ok(Some(root)) => self.maps = ReplayMaps::open(&root),
-                            Err(error) => self.maps.error = error.to_string(),
-                            _ => {}
-                        }
-                        self.recording = Some(recording);
-                    }
-                    Err(error) => self.error = error.to_string(),
-                }
-            }
-        }
-        if let Some(recording) = &mut self.recording {
-            if let Err(error) = recording.seek(self.position - self.starts[step], complete) {
-                self.error = error.to_string();
-                self.recording = None;
-                self.clock_tree = None;
-                self.clock_tree_error.clear();
-                self.clock_tree_attempted = false;
-                self.playing = false;
-            }
-        }
-        if self.complete
-            && self.catalog.steps[self.step].name == "CTS"
-            && !self.clock_tree_attempted
-        {
-            self.clock_tree_attempted = true;
-            if let Some(recording) = &self.recording {
-                match recording.clock_tree() {
-                    Ok(tree) => self.clock_tree = tree,
-                    Err(error) => self.clock_tree_error = error.to_string(),
-                }
-            }
-        }
     }
 
     fn timeline(&mut self, ui: &mut egui::Ui) {
@@ -161,7 +113,6 @@ impl ReplayApp {
                     self.select(0, 0.0, false);
                 }
                 self.playing = !self.playing;
-                self.clear_animation();
                 self.tick = Instant::now();
             }
             let (rect, response) = ui.allocate_exact_size(
@@ -182,22 +133,25 @@ impl ReplayApp {
             let mut nodes = Vec::new();
             for (i, step) in self.catalog.steps.iter().enumerate() {
                 nodes.push((
-                    self.starts[i] + step.seconds,
+                    self.starts[i] + self.plans[i].seconds,
                     i,
-                    true,
-                    format!("{} · completed", step.name),
+                    None,
+                    format!(
+                        "{} · completed · display {:.1}s · execution {:.3}s",
+                        step.name, self.plans[i].seconds, step.seconds
+                    ),
                 ));
                 for node in &step.nodes {
                     nodes.push((
-                        self.starts[i] + node.seconds,
+                        self.starts[i] + self.plans[i].display_at_source(node.seconds),
                         i,
-                        false,
+                        Some(node.seconds),
                         format!("{} · {}", step.name, node.label),
                     ));
                 }
-                if x(self.starts[i] + step.seconds) - x(self.starts[i]) > 70.0 {
+                if x(self.starts[i] + self.plans[i].seconds) - x(self.starts[i]) > 70.0 {
                     ui.painter().text(
-                        Pos2::new(x(self.starts[i] + step.seconds / 2.0), y + 16.0),
+                        Pos2::new(x(self.starts[i] + self.plans[i].seconds / 2.0), y + 16.0),
                         egui::Align2::CENTER_CENTER,
                         &step.name,
                         egui::FontId::proportional(10.0),
@@ -205,11 +159,11 @@ impl ReplayApp {
                     );
                 }
             }
-            for (time, _, complete, _) in &nodes {
+            for (time, _, source, _) in &nodes {
                 let center = Pos2::new(x(*time), y);
                 ui.painter().circle_filled(
                     center,
-                    if *complete { 5.5 } else { 2.5 },
+                    if source.is_none() { 5.5 } else { 2.5 },
                     Color32::from_rgb(237, 179, 198),
                 );
             }
@@ -217,23 +171,23 @@ impl ReplayApp {
                 .circle_filled(Pos2::new(x(self.position), y), 4.0, Color32::WHITE);
             // Overlapping zero-duration nodes remain individually reachable.
             response.context_menu(|ui| {
-                for (time, step, complete, label) in &nodes {
+                for (time, step, source, label) in &nodes {
                     if ui.button(label).clicked() {
                         self.playing = false;
-                        self.select(*step, *time, *complete);
+                        self.select_node(*step, *time, *source);
                         ui.close_menu();
                     }
                 }
             });
             if response.dragged() || response.clicked() {
                 if let Some(pos) = response.interact_pointer_pos() {
-                    if let Some((time, step, complete, _)) = nodes
+                    if let Some((time, step, source, _)) = nodes
                         .iter()
                         .filter(|(t, _, _, _)| (x(*t) - pos.x).abs() <= 6.0)
                         .min_by(|a, b| (x(a.0) - pos.x).abs().total_cmp(&(x(b.0) - pos.x).abs()))
                     {
                         self.playing = false;
-                        self.select(*step, *time, *complete);
+                        self.select_node(*step, *time, *source);
                     } else {
                         let t = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0) as f64
                             * self.total;
@@ -264,7 +218,7 @@ impl ReplayApp {
                 });
         });
         ui.label(format!(
-            "{} · {}   {:.1}s / {:.1}s · Right-click the bar to locate overlapping nodes",
+            "{} · {}   Display {:.1}s / {:.1}s · Step execution {:.3}s · Right-click for nodes",
             self.catalog.steps[self.step].name,
             if self.complete {
                 "Completed result"
@@ -272,13 +226,44 @@ impl ReplayApp {
                 "Captured process"
             },
             self.position,
-            self.total
+            self.total,
+            self.catalog.steps[self.step].seconds
         ));
     }
 }
 
 impl eframe::App for ReplayApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(receiver) = &self.preparation {
+            match receiver.try_recv() {
+                Ok(plans) => {
+                    self.plans = plans;
+                    self.preparation = None;
+                    self.total = 0.0;
+                    for (i, plan) in self.plans.iter().enumerate() {
+                        self.starts[i] = self.total;
+                        self.total += plan.seconds;
+                    }
+                    self.select(0, 0.0, false);
+                    self.tick = Instant::now();
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        ui.heading("Preparing Layout Replay");
+                        ui.spinner();
+                        ui.label("Finding layout changes and arranging playback…");
+                    });
+                    ctx.request_repaint_after(std::time::Duration::from_millis(50));
+                    return;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        ui.label("Replay preparation failed. Close and reopen Replay.");
+                    });
+                    return;
+                }
+            }
+        }
         let now = Instant::now();
         let delta = (now - self.tick).as_secs_f64().min(0.2);
         self.tick = now;
@@ -287,6 +272,8 @@ impl eframe::App for ReplayApp {
             if let Err(error) = self.check_flow() {
                 self.error = error.to_string();
                 self.recording = None;
+                self.clock_tree = None;
+                self.clock_tree_attempted = false;
                 self.playing = false;
                 self.clear_animation();
             }
@@ -328,7 +315,8 @@ impl eframe::App for ReplayApp {
                         .checkbox(&mut self.smooth, "Animate captured changes")
                         .changed()
                     {
-                        self.clear_animation();
+                        self.active_clip = None;
+                        self.select(self.step, self.position, false);
                     }
                     if self.motion.active() {
                         ui.label("Interpolated movement between captured positions");
@@ -360,7 +348,7 @@ impl eframe::App for ReplayApp {
                         }
                     }
                     ui.small(format!(
-                        "Capture {:.2}s",
+                        "Execution {:.2}s",
                         r.manifest.duration_ns as f64 / 1e9
                     ));
                 }

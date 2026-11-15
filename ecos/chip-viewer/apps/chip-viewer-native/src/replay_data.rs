@@ -1,4 +1,4 @@
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{ensure, Context, Result};
 use chipgeom_format::replay::{Delta, Manifest, Scene, SCHEMA};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -53,12 +53,14 @@ pub struct Recording {
 }
 
 impl Recording {
-    pub fn next_frame_seconds(&self) -> Option<f64> {
-        let index = self.scene.revision.map_or(0, |revision| revision + 1);
-        self.manifest
-            .frames
-            .get(index)
-            .map(|frame| frame.elapsed_ns as f64 / 1e9)
+    pub fn delta(&self, index: usize) -> Result<Delta> {
+        let frame = &self.manifest.frames[index];
+        let delta: Delta = read(&within(&self.root, &self.root.join(&frame.path))?)?;
+        ensure!(
+            delta.sequence == index && delta.checkpoint == frame.checkpoint,
+            "Frame identity mismatch"
+        );
+        Ok(delta)
     }
 
     pub fn map_root(&self) -> Result<Option<PathBuf>> {
@@ -137,58 +139,38 @@ impl Recording {
         Ok(())
     }
 
-    pub fn seek(&mut self, seconds: f64, complete: bool) -> Result<Option<usize>> {
+    /// Restore by identity, including distinct samples with equal timestamps.
+    pub fn seek_frame(&mut self, target: usize) -> Result<()> {
         self.check_current()?;
-        // Adding/removing the flow offset can round a frame boundary slightly
-        // down. Compare at the recording's nanosecond precision to avoid
-        // repeatedly stopping immediately before the same next frame.
-        let elapsed_ns = (seconds * 1e9).round();
-        let target = if complete {
-            Some(self.manifest.frames.len() - 1)
-        } else {
-            self.manifest
-                .frames
-                .iter()
-                .rposition(|f| f.elapsed_ns as f64 <= elapsed_ns)
-        };
-        let Some(target) = target else {
-            self.scene = Scene::default();
-            return Ok(None);
-        };
+        ensure!(target < self.manifest.frames.len(), "Missing Replay frame");
         if self.scene.revision == Some(target) {
-            return Ok(Some(target));
+            return Ok(());
         }
-        let start = if self.scene.revision.is_some_and(|r| r < target) {
-            self.scene.revision.unwrap() + 1
+        let (start, mut next) = if self.scene.revision.is_some_and(|r| r < target) {
+            (self.scene.revision.unwrap() + 1, self.scene.clone())
         } else {
-            self.scene = Scene::default();
-            (0..=target)
+            let start = (0..=target)
                 .rev()
                 .find(|&i| self.manifest.frames[i].checkpoint)
-                .context("Missing checkpoint")?
+                .context("Missing checkpoint")?;
+            (start, Scene::default())
         };
-        let mut next = self.scene.clone();
         for i in start..=target {
-            let frame = &self.manifest.frames[i];
-            let delta: Delta = read(&within(&self.root, &self.root.join(&frame.path))?)?;
-            if delta.sequence != i || delta.checkpoint != frame.checkpoint {
-                bail!("Frame identity mismatch");
-            }
-            next.apply(delta).map_err(anyhow::Error::msg)?;
+            next.apply(self.delta(i)?).map_err(anyhow::Error::msg)?;
         }
         self.scene = next;
-        Ok(Some(target))
+        Ok(())
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use serde_json::json;
 
-    struct Fixture(PathBuf);
+    pub(crate) struct Fixture(pub PathBuf);
     impl Fixture {
-        fn new() -> Self {
+        pub(crate) fn new() -> Self {
             let root = std::env::temp_dir().join(format!(
                 "ecos-replay-{}-{}",
                 std::process::id(),
@@ -210,10 +192,10 @@ mod tests {
             }
             fixture
         }
-        fn write(&self, path: &str, value: serde_json::Value) {
+        pub(crate) fn write(&self, path: &str, value: serde_json::Value) {
             std::fs::write(self.0.join(path), serde_json::to_vec(&value).unwrap()).unwrap();
         }
-        fn open(&self) -> Recording {
+        pub(crate) fn open(&self) -> Recording {
             Recording::open(&self.0, &self.0.join("attempts/a/manifest.json")).unwrap()
         }
     }
@@ -227,48 +209,50 @@ mod tests {
     fn random_seek_restores_positions_and_cumulative_highlights() {
         let fixture = Fixture::new();
         let mut recording = fixture.open();
-        recording.seek(0.0, false).unwrap();
+        recording.seek_frame(0).unwrap();
         let first = recording.scene.clone();
-        recording.seek(2.0, true).unwrap();
+        recording.seek_frame(2).unwrap();
         assert_eq!(recording.scene.objects["inst:a"].bbox, [20, 0, 25, 5]);
-        recording.seek(1.5, false).unwrap();
+        recording.seek_frame(1).unwrap();
         assert_eq!(recording.scene.objects["inst:a"].bbox, [10, 0, 15, 5]);
         assert!(recording.scene.touched.contains("inst:a"));
-        recording.seek(0.0, false).unwrap();
+        recording.seek_frame(0).unwrap();
         assert_eq!(recording.scene, first);
-    }
-
-    #[test]
-    fn next_frame_boundary_survives_timeline_offset_rounding() {
-        let fixture = Fixture::new();
-        let mut recording = fixture.open();
-        assert_eq!(recording.next_frame_seconds(), Some(0.0));
-        recording.seek(0.0, false).unwrap();
-        assert_eq!(recording.next_frame_seconds(), Some(1.0));
-        recording.seek(1.0 - f64::EPSILON, false).unwrap();
-        assert_eq!(recording.scene.revision, Some(1));
-        assert_eq!(recording.next_frame_seconds(), Some(2.0));
-        recording.seek(3.0, true).unwrap();
-        assert_eq!(recording.next_frame_seconds(), None);
     }
 
     #[test]
     fn rerun_and_missing_delta_are_not_silently_replayed() {
         let fixture = Fixture::new();
         let mut recording = fixture.open();
-        recording.seek(0.0, false).unwrap();
+        recording.seek_frame(0).unwrap();
         let first = recording.scene.clone();
         std::fs::remove_file(fixture.0.join("attempts/a/frames/1.json")).unwrap();
-        assert!(recording.seek(2.0, true).is_err());
+        assert!(recording.seek_frame(2).is_err());
         assert_eq!(recording.scene, first);
         fixture.write(
             "manifest.json",
             json!({"status":"recording","attempt_id":"b"}),
         );
         assert!(recording
-            .seek(0.0, false)
+            .seek_frame(0)
             .unwrap_err()
             .to_string()
             .contains("invalidated"));
+    }
+
+    #[test]
+    fn frame_identity_distinguishes_samples_with_equal_timestamps() {
+        let fixture = Fixture::new();
+        let mut manifest: serde_json::Value =
+            read(&fixture.0.join("attempts/a/manifest.json")).unwrap();
+        for frame in manifest["frames"].as_array_mut().unwrap() {
+            frame["elapsed_ns"] = json!(0);
+        }
+        fixture.write("attempts/a/manifest.json", manifest);
+        let mut recording = fixture.open();
+        recording.seek_frame(1).unwrap();
+        assert_eq!(recording.scene.objects["inst:a"].bbox, [10, 0, 15, 5]);
+        recording.seek_frame(0).unwrap();
+        assert_eq!(recording.scene.objects["inst:a"].bbox, [0, 0, 5, 5]);
     }
 }
