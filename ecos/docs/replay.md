@@ -51,7 +51,14 @@ a long wait on an unchanged layout. See [presentation design](replay-presentatio
   briefly fades at its previous position. Changed instances stay highlighted.
 - The final captured delta animates before completion. Final results receive
   two seconds, followed by two seconds for each captured Place heatmap. The
-  CTS clock-tree view appears on the left only after its step completes.
+  corresponding clock-tree view appears on the right only after its step completes.
+  It reuses Native's hierarchical graph: postFloorplan defaults to level; CTS and
+  post-route filler default to delay when timing is available. Missing timing
+  falls back to level. Each step uses its own snapshot.
+- Place maps appear as a right-side list, with the displayed map highlighted.
+  Choosing a map pauses playback for inspection. The current step checklist is
+  pinned below the results, with blocked entries red and all others green; the
+  original checklist state remains visible.
 - Pause retains the current interpolated position. Resume continues there.
   Playback speed applies equally to movement, generation, results and maps.
   **Play from step start** replays the selected step. Disabling animation shows

@@ -72,12 +72,42 @@ impl Recording {
     }
 
     pub fn clock_tree(&self) -> Result<Option<chipgeom_reader::ClockTreeSnapshot>> {
-        let Some(path) = &self.manifest.clock_tree_manifest else {
+        let Some(manifest_path) = self.clock_tree_path()? else {
             return Ok(None);
         };
-        let manifest_path = within(&self.workspace, &self.workspace.join(path))?;
         let database = chipgeom_reader::GeometrySnapshot::open(manifest_path)?;
         Ok(database.clock_tree()?.cloned())
+    }
+
+    fn clock_tree_path(&self) -> Result<Option<PathBuf>> {
+        let manifest_path = if let Some(path) = &self.manifest.clock_tree_manifest {
+            within(&self.workspace, &self.workspace.join(path))?
+        } else {
+            // Older Replay manifests only linked CTS. Other native stage trees
+            // can be read from this step's own geometry snapshot if it was
+            // written during this exact capture, never from a neighboring step.
+            let Some(started) = self.manifest.started_at_unix_ns else {
+                return Ok(None);
+            };
+            let geometry = self
+                .root
+                .ancestors()
+                .nth(3)
+                .context("Missing geometry directory")?;
+            let candidate = geometry.join("geometry.manifest");
+            if !candidate.exists() {
+                return Ok(None);
+            }
+            let path = within(&self.workspace, &candidate)?;
+            let modified = path.metadata()?.modified()?;
+            let published = self.root.join("manifest.json").metadata()?.modified()?;
+            let stamp = modified.duration_since(std::time::UNIX_EPOCH)?.as_nanos();
+            if stamp < u128::from(started) || modified > published {
+                return Ok(None);
+            }
+            path
+        };
+        Ok(Some(manifest_path))
     }
 
     pub fn open(workspace: &Path, path: &Path) -> Result<Self> {
@@ -254,5 +284,59 @@ pub(crate) mod tests {
         assert_eq!(recording.scene.objects["inst:a"].bbox, [10, 0, 15, 5]);
         recording.seek_frame(0).unwrap();
         assert_eq!(recording.scene.objects["inst:a"].bbox, [0, 0, 5, 5]);
+    }
+
+    #[test]
+    fn legacy_clock_tree_reference_requires_this_attempts_fresh_snapshot() {
+        let fixture = Fixture::new();
+        let geometry = fixture.0.join("postFloorplan_ecc/output/geometry");
+        let attempt = geometry.join("replay/attempts/a");
+        std::fs::create_dir_all(&attempt).unwrap();
+        std::fs::copy(
+            fixture.0.join("manifest.json"),
+            geometry.join("replay/manifest.json"),
+        )
+        .unwrap();
+        let mut manifest: serde_json::Value =
+            read(&fixture.0.join("attempts/a/manifest.json")).unwrap();
+        manifest["started_at_unix_ns"] = json!(10_000_000_000u64);
+        let manifest_path = attempt.join("manifest.json");
+        std::fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        let snapshot = geometry.join("geometry.manifest");
+        std::fs::write(&snapshot, "geometry fixture").unwrap();
+        let set_modified =
+            |path: &Path, seconds| {
+                std::fs::File::options()
+                    .write(true)
+                    .open(path)
+                    .unwrap()
+                    .set_times(std::fs::FileTimes::new().set_modified(
+                        std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds),
+                    ))
+                    .unwrap();
+            };
+        set_modified(&manifest_path, 30);
+        let recording = Recording::open(&fixture.0, &manifest_path).unwrap();
+        set_modified(&snapshot, 20);
+        assert_eq!(
+            recording.clock_tree_path().unwrap(),
+            Some(snapshot.canonicalize().unwrap())
+        );
+        set_modified(&snapshot, 5);
+        assert_eq!(recording.clock_tree_path().unwrap(), None);
+        set_modified(&snapshot, 35);
+        assert_eq!(recording.clock_tree_path().unwrap(), None);
+        let mut recording = recording;
+        recording.manifest.started_at_unix_ns = None;
+        set_modified(&snapshot, 20);
+        assert_eq!(recording.clock_tree_path().unwrap(), None);
+        let outside = Fixture::new();
+        recording.manifest.clock_tree_manifest =
+            Some(outside.0.join("manifest.json").display().to_string());
+        assert!(recording
+            .clock_tree_path()
+            .unwrap_err()
+            .to_string()
+            .contains("escapes"));
     }
 }

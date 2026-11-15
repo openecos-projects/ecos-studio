@@ -2,7 +2,8 @@
 mod canvas;
 #[path = "replay_playback.rs"]
 mod playback;
-use crate::replay_clock_tree;
+#[path = "replay_sidebar.rs"]
+mod sidebar;
 use crate::replay_data::{read, Catalog, Recording};
 use crate::replay_maps::ReplayMaps;
 use crate::replay_motion::Motion;
@@ -21,7 +22,8 @@ pub struct ReplayApp {
     position: f64,
     complete: bool,
     recording: Option<Recording>,
-    clock_tree: Option<chipgeom_reader::ClockTreeSnapshot>,
+    clock_tree: Option<crate::clock_tree::ClockTreePanel>,
+    checklist: Option<Result<crate::replay_checklist::Checklist, String>>,
     clock_tree_error: String,
     clock_tree_attempted: bool,
     error: String,
@@ -84,6 +86,7 @@ impl ReplayApp {
             complete: false,
             recording: None,
             clock_tree: None,
+            checklist: None,
             clock_tree_error: String::new(),
             clock_tree_attempted: false,
             error: String::new(),
@@ -332,78 +335,7 @@ impl eframe::App for ReplayApp {
             });
         });
         egui::TopBottomPanel::bottom("replay_time").show(ctx, |ui| self.timeline(ui));
-        egui::SidePanel::right("replay_results")
-            .default_width(250.0)
-            .show(ctx, |ui| {
-                ui.heading(&self.catalog.steps[self.step].name);
-                if let Some(r) = &self.recording {
-                    if let Some(index) = r.scene.revision {
-                        let f = &r.manifest.frames[index];
-                        ui.label(&f.phase);
-                        ui.small(&f.state_domain);
-                        ui.label(format!("Frame {} / {}", index + 1, r.manifest.frames.len()));
-                        ui.label(format!("Touched objects: {}", r.scene.touched.len()));
-                        for (k, v) in &f.metrics {
-                            ui.label(format!("{k}: {v}"));
-                        }
-                    }
-                    ui.small(format!(
-                        "Execution {:.2}s",
-                        r.manifest.duration_ns as f64 / 1e9
-                    ));
-                }
-                ui.separator();
-                if self.complete && self.error.is_empty() {
-                    self.maps.controls(ui);
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        for metric in &self.catalog.steps[self.step].metrics {
-                            ui.label(format!(
-                                "{}: {} {}",
-                                metric["display_name"]
-                                    .as_str()
-                                    .or(metric["id"].as_str())
-                                    .unwrap_or("metric"),
-                                metric["value"],
-                                metric["unit"].as_str().unwrap_or("")
-                            ));
-                            if let Some(value) = metric["value"].as_f64() {
-                                if let Some((name, previous)) = self.catalog.steps[..self.step]
-                                    .iter()
-                                    .rev()
-                                    .find_map(|step| {
-                                        step.metrics
-                                            .iter()
-                                            .find(|m| {
-                                                m["id"] == metric["id"]
-                                                    && m["unit"] == metric["unit"]
-                                            })
-                                            .and_then(|m| m["value"].as_f64())
-                                            .map(|v| (&step.name, v))
-                                    })
-                                {
-                                    ui.small(format!("Δ {:+.3} vs {name}", value - previous));
-                                }
-                            }
-                        }
-                    });
-                } else {
-                    ui.label("Final reports become visible at the completion node.");
-                }
-            });
-        if self.complete && self.catalog.steps[self.step].name == "CTS" {
-            egui::SidePanel::left("replay_clock_tree")
-                .default_width(270.0)
-                .show(ctx, |ui| {
-                    ui.heading("Clock tree · CTS result");
-                    if let Some(tree) = &self.clock_tree {
-                        replay_clock_tree::show(ui, tree);
-                    } else if !self.clock_tree_error.is_empty() {
-                        ui.label(&self.clock_tree_error);
-                    } else {
-                        ui.label("No clock-tree analysis was captured for this CTS result.");
-                    }
-                });
-        }
+        self.result_sidebar(ctx);
         egui::CentralPanel::default().show(ctx, |ui| {
             if self.recording.as_ref().is_some_and(|recording| {
                 recording.manifest.geometry_detail.as_deref() == Some("report_only")

@@ -9,6 +9,7 @@ pub struct ReplayMaps {
     items: Vec<(String, PathBuf, PathBuf)>,
     pub selected: Option<usize>,
     active: Option<HeatmapData>,
+    listed_selection: Option<usize>,
     pub error: String,
 }
 
@@ -64,32 +65,42 @@ impl ReplayMaps {
         }
     }
 
-    pub fn controls(&mut self, ui: &mut egui::Ui) {
+    /// Returns true when a user chooses a map; callers pause automatic cycling.
+    pub fn controls(&mut self, ui: &mut egui::Ui) -> bool {
+        let mut choice = self.selected;
+        let follow = self.listed_selection != self.selected;
         if !self.items.is_empty() {
-            ui.separator();
-            ui.label("Placement analysis");
-            let mut choice = self.selected;
-            egui::ComboBox::from_id_salt("replay_map")
-                .selected_text(choice.map(|i| self.items[i].0.as_str()).unwrap_or("Layout"))
-                .show_ui(ui, |ui| {
+            ui.strong("Placement maps");
+            egui::ScrollArea::vertical()
+                .id_salt("replay_map_list")
+                .max_height(180.0)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
                     ui.selectable_value(&mut choice, None, "Layout");
                     for (i, (label, _, _)) in self.items.iter().enumerate() {
-                        ui.selectable_value(&mut choice, Some(i), label);
+                        let response = ui.selectable_value(&mut choice, Some(i), label);
+                        if follow && self.selected == Some(i) {
+                            response.scroll_to_me(Some(egui::Align::Center));
+                        }
                     }
                 });
-            if let Some(i) = choice {
-                self.select(i);
-            } else {
-                self.selected = None;
-                self.active = None;
-            }
             if let Some(data) = &self.active {
                 ui.small(format!("{:.3} — {:.3}", data.min(), data.max()));
+            }
+        }
+        self.listed_selection = self.selected;
+        let changed = choice != self.selected;
+        if changed {
+            if let Some(index) = choice {
+                self.select(index);
+            } else {
+                self.clear_selection();
             }
         }
         if !self.error.is_empty() {
             ui.small(&self.error);
         }
+        changed
     }
 
     pub fn paint(&self, painter: &Painter, project: impl Fn(i64, i64) -> Pos2) {

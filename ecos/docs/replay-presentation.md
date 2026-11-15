@@ -20,7 +20,7 @@ timestamps remain available in the inspector and tooltips.
   use display durations. Completion inspection selects the exact final result.
   Dragging uses the same clip evaluation as playback, including interpolation.
 - Results get two seconds, followed by two seconds for each Place heatmap. CTS
-  analysis remains a left auxiliary view and only appears after completion.
+  analysis appears in the right sidebar only after completion.
 - One playback clock drives clip progress, result holds and maps. Speed applies
   to all of them. Pause preserves the current display state. Capture data is
   never mutated by interpolation or presentation timing.
@@ -42,3 +42,26 @@ captures for preFloorplan, postFloorplan and Place, including paused image
 comparison, final-state selection and heatmap seeking. No EDA rerun was needed.
 Full product packaging (`make build`), full-flow E2E and large-chip performance
 testing were not run for this Native-only playback change.
+
+## Completion sidebar update
+
+Place uses a scrollable map list in the right sidebar. The active map is selected
+in that list, including during automatic playback. Clicking a map pauses playback
+so the chosen map stays visible. The current step checklist has a separate bottom
+region; only blocked items are red, all other recorded item states are green.
+Labels retain the producer state (including warning or unavailable).
+
+Completed steps with their own clock-tree snapshots embed the existing Native
+hierarchical graph in the right sidebar, with the same layout, expand/collapse,
+search, zoom and pan controls. Current producers emit postFloorplan, CTS and filler
+snapshots. postFloorplan defaults to level; CTS and post-route filler default to
+delay when timing exists, otherwise level with an unavailable-timing indication.
+No earlier or later step's tree is substituted. Older Replay captures can use the
+same step's geometry manifest only when its modification time lies between the
+capture start and Replay publication. This avoids requiring an EDA rerun merely
+to connect existing analysis data.
+
+Sidebar validation: Rust workspace tests (458 passed), formatting and release/dev
+builds passed. Native window checks covered real GCD postFloorplan/Place captures
+and a labeled UI harness using existing AES CTS/filler clock-tree snapshots.
+No new EDA execution or full product packaging was performed.
