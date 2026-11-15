@@ -46,6 +46,7 @@ pub fn within(root: &Path, path: &Path) -> Result<PathBuf> {
 
 pub struct Recording {
     pub manifest: Manifest,
+    workspace: PathBuf,
     root: PathBuf,
     pointer: PathBuf,
     pub scene: Scene,
@@ -67,6 +68,16 @@ impl Recording {
             .map(|path| within(&self.root, &self.root.join(path)))
             .transpose()
     }
+
+    pub fn clock_tree(&self) -> Result<Option<chipgeom_reader::ClockTreeSnapshot>> {
+        let Some(path) = &self.manifest.clock_tree_manifest else {
+            return Ok(None);
+        };
+        let manifest_path = within(&self.workspace, &self.workspace.join(path))?;
+        let database = chipgeom_reader::GeometrySnapshot::open(manifest_path)?;
+        Ok(database.clock_tree()?.cloned())
+    }
+
     pub fn open(workspace: &Path, path: &Path) -> Result<Self> {
         let path = within(workspace, path)?;
         let root = path
@@ -93,11 +104,13 @@ impl Recording {
         }
         ensure!(
             elapsed <= manifest.duration_ns
-                && manifest
-                    .frames
-                    .last()
-                    .is_some_and(|f| f.state_domain == "native_committed"),
-            "Missing committed result"
+                && manifest.frames.last().is_some_and(|f| {
+                    matches!(
+                        f.state_domain.as_str(),
+                        "native_committed" | "analysis_complete"
+                    )
+                }),
+            "Missing committed or analysis result"
         );
         let pointer = root
             .parent()
@@ -106,6 +119,7 @@ impl Recording {
             .join("manifest.json");
         let result = Self {
             manifest,
+            workspace: workspace.canonicalize()?,
             root,
             pointer,
             scene: Scene::default(),

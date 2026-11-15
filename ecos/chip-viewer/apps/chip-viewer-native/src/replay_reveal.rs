@@ -41,16 +41,17 @@ impl Reveal {
         let (Some(a), Some(b)) = (before.revision, after.revision) else {
             return;
         };
-        if b != a + 1 || frames[b].state_domain != "algorithm_state" {
+        if b != a + 1 || frames[b].state_domain == "native_input" {
             return;
         }
         let mut groups: BTreeMap<(u8, u32, String), Vec<(&String, &Object)>> = BTreeMap::new();
         for (id, object) in &after.objects {
-            if before
-                .objects
-                .get(id)
-                .is_some_and(|old| old.bbox == object.bbox)
-            {
+            if before.objects.get(id).is_some_and(|old| {
+                old.kind == object.kind
+                    && old.bbox == object.bbox
+                    && old.master == object.master
+                    && old.orient == object.orient
+            }) {
                 continue;
             }
             let Some(key) = group(object) else {
@@ -109,7 +110,18 @@ impl Reveal {
             });
         }
         let mut bounds = object.bbox;
-        if matches!(object.kind.as_str(), "pdn" | "row" | "track_grid") {
+        if matches!(object.kind.as_str(), "instance" | "macro") {
+            for axis in 0..2 {
+                let extent = bounds[axis + 2] - bounds[axis];
+                let visible = (extent as f64 * t).round() as i64;
+                let center = (bounds[axis] + bounds[axis + 2]) / 2;
+                bounds[axis] = center - visible / 2;
+                bounds[axis + 2] = center + (visible + 1) / 2;
+            }
+        } else if matches!(
+            object.kind.as_str(),
+            "pdn" | "wire" | "via" | "route" | "row" | "track_grid"
+        ) {
             let axis = if bounds[2] - bounds[0] >= bounds[3] - bounds[1] {
                 0
             } else {
@@ -131,28 +143,36 @@ fn group(object: &Object) -> Option<(u8, u32, String)> {
         "pin" => (4, "IO pins".into()),
         "halo" => (5, "Macro halos".into()),
         "instance" | "macro" => (6, format!("Cells · {}", object.master)),
-        "pdn" => (
+        "pdn" | "wire" | "via" | "route" => (
             7,
-            if object.layer.is_empty() {
+            if object.kind == "pdn" && object.layer.is_empty() {
                 "PDN · connections".into()
-            } else {
+            } else if object.kind == "pdn" {
                 format!("PDN · {}", object.layer)
+            } else {
+                format!("{} · {}", object.kind, object.layer)
             },
         ),
-        _ => return None,
+        _ => (8, format!("{} · {}", object.kind, object.layer)),
     };
-    let layer = if object.kind == "pdn" {
-        object
-            .layer
-            .chars()
-            .filter(char::is_ascii_digit)
-            .collect::<String>()
-            .parse()
-            .unwrap_or(u32::MAX)
+    let layer = if matches!(object.kind.as_str(), "pdn" | "wire" | "via") {
+        numeric_layer(&object.layer)
     } else {
         0
     };
     Some((rank, layer, name))
+}
+
+fn numeric_layer(layer: &str) -> u32 {
+    let suffix = layer
+        .chars()
+        .rev()
+        .take_while(|character| character.is_ascii_digit())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    suffix.parse().unwrap_or(u32::MAX)
 }
 
 #[cfg(test)]
@@ -204,5 +224,37 @@ mod tests {
             after.objects["m10"].bbox
         );
         assert_eq!(after, original);
+    }
+
+    #[test]
+    fn signal_wires_reveal_in_numeric_layer_order() {
+        let objects = serde_json::from_value(json!({
+            "wire10":{"kind":"wire","layer":"10","bbox":[0,0,100,1]},
+            "wire2":{"kind":"wire","layer":"2","bbox":[0,2,100,3]}
+        }))
+        .unwrap();
+        let before = Scene {
+            revision: Some(0),
+            ..Default::default()
+        };
+        let after = Scene {
+            objects,
+            revision: Some(1),
+            ..Default::default()
+        };
+        let frames: Vec<Frame> = (0..2)
+            .map(|i| {
+                serde_json::from_value(json!({
+                    "sequence":i,"elapsed_ns":i,"phase":"route","subflow":"run routing",
+                    "state_domain":"algorithm_state","path":"x","checkpoint":false
+                }))
+                .unwrap()
+            })
+            .collect();
+        let mut reveal = Reveal::default();
+        reveal.begin(&before, &after, &frames);
+        assert_eq!(reveal.label(), "wire · 2");
+        reveal.advance(0.7);
+        assert_eq!(reveal.label(), "wire · 10");
     }
 }

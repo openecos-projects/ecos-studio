@@ -712,6 +712,7 @@ dependencies = [
  "chip-render",
  "chip-view-db",
  "chipgeom-format",
+ "chipgeom-reader",
  "clap",
  "csv",
  "eframe",

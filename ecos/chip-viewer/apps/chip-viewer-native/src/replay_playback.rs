@@ -28,6 +28,10 @@ impl ReplayApp {
         } else {
             let mut next = (self.position + delta * self.speed).min(end);
             let mut before = None;
+            let smooth_motion = matches!(
+                self.catalog.steps[self.step].name.as_str(),
+                "place" | "macroPlacement" | "legalization"
+            );
             if self.smooth {
                 if let Some(recording) = &self.recording {
                     if let Some(time) = recording.next_frame_seconds() {
@@ -42,13 +46,10 @@ impl ReplayApp {
             self.select(self.step, next, next >= end);
             if !self.complete {
                 if let (Some(before), Some(recording)) = (before, &self.recording) {
-                    if self.catalog.steps[self.step].name == "place" {
+                    if smooth_motion {
                         self.motion
                             .begin(&before, &recording.scene, &recording.manifest.frames);
-                    } else if matches!(
-                        self.catalog.steps[self.step].name.as_str(),
-                        "preFloorplan" | "macroPlacement" | "postFloorplan"
-                    ) {
+                    } else {
                         self.reveal
                             .begin(&before, &recording.scene, &recording.manifest.frames);
                     }

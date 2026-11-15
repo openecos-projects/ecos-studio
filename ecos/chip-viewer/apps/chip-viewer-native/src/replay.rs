@@ -2,6 +2,7 @@
 mod canvas;
 #[path = "replay_playback.rs"]
 mod playback;
+use crate::replay_clock_tree;
 use crate::replay_data::{read, Catalog, Recording};
 use crate::replay_maps::ReplayMaps;
 use crate::replay_motion::Motion;
@@ -19,6 +20,9 @@ pub struct ReplayApp {
     position: f64,
     complete: bool,
     recording: Option<Recording>,
+    clock_tree: Option<chipgeom_reader::ClockTreeSnapshot>,
+    clock_tree_error: String,
+    clock_tree_attempted: bool,
     error: String,
     playing: bool,
     speed: f64,
@@ -75,6 +79,9 @@ impl ReplayApp {
             position: 0.0,
             complete: false,
             recording: None,
+            clock_tree: None,
+            clock_tree_error: String::new(),
+            clock_tree_attempted: false,
             error: String::new(),
             playing: false,
             speed: 1.0,
@@ -102,6 +109,9 @@ impl ReplayApp {
         if step != self.step || self.recording.is_none() {
             self.step = step;
             self.recording = None;
+            self.clock_tree = None;
+            self.clock_tree_error.clear();
+            self.clock_tree_attempted = false;
             self.maps = ReplayMaps::default();
             if let Some(path) = &self.catalog.steps[step].manifest {
                 match Recording::open(&self.catalog.workspace, path) {
@@ -121,7 +131,22 @@ impl ReplayApp {
             if let Err(error) = recording.seek(self.position - self.starts[step], complete) {
                 self.error = error.to_string();
                 self.recording = None;
+                self.clock_tree = None;
+                self.clock_tree_error.clear();
+                self.clock_tree_attempted = false;
                 self.playing = false;
+            }
+        }
+        if self.complete
+            && self.catalog.steps[self.step].name == "CTS"
+            && !self.clock_tree_attempted
+        {
+            self.clock_tree_attempted = true;
+            if let Some(recording) = &self.recording {
+                match recording.clock_tree() {
+                    Ok(tree) => self.clock_tree = tree,
+                    Err(error) => self.clock_tree_error = error.to_string(),
+                }
             }
         }
     }
@@ -269,6 +294,9 @@ impl eframe::App for ReplayApp {
                 if let Err(error) = recording.check_current() {
                     self.error = error.to_string();
                     self.recording = None;
+                    self.clock_tree = None;
+                    self.clock_tree_error.clear();
+                    self.clock_tree_attempted = false;
                     self.playing = false;
                     self.clear_animation();
                 }
@@ -282,21 +310,24 @@ impl eframe::App for ReplayApp {
         egui::TopBottomPanel::top("replay_title").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("Layout Replay");
-                ui.label("Recorded data · physical bounds");
+                let detail = self
+                    .recording
+                    .as_ref()
+                    .and_then(|recording| recording.manifest.geometry_detail.as_deref())
+                    .unwrap_or("physical_bounds");
+                ui.label(if detail == "report_only" {
+                    "Recorded reports · no physical geometry"
+                } else {
+                    "Recorded data · physical bounds"
+                });
                 if ui.button("Fit").clicked() {
                     self.zoom = 1.0;
                 }
-                let name = self.catalog.steps[self.step].name.as_str();
-                if matches!(
-                    name,
-                    "place" | "preFloorplan" | "macroPlacement" | "postFloorplan"
-                ) {
-                    let label = if name == "place" {
-                        "Smooth movement"
-                    } else {
-                        "Animate generation"
-                    };
-                    if ui.checkbox(&mut self.smooth, label).changed() {
+                if self.recording.is_some() {
+                    if ui
+                        .checkbox(&mut self.smooth, "Animate captured changes")
+                        .changed()
+                    {
                         self.clear_animation();
                     }
                     if self.motion.active() {
@@ -371,6 +402,32 @@ impl eframe::App for ReplayApp {
                     ui.label("Final reports become visible at the completion node.");
                 }
             });
-        egui::CentralPanel::default().show(ctx, |ui| self.canvas(ui));
+        if self.complete && self.catalog.steps[self.step].name == "CTS" {
+            egui::SidePanel::left("replay_clock_tree")
+                .default_width(270.0)
+                .show(ctx, |ui| {
+                    ui.heading("Clock tree · CTS result");
+                    if let Some(tree) = &self.clock_tree {
+                        replay_clock_tree::show(ui, tree);
+                    } else if !self.clock_tree_error.is_empty() {
+                        ui.label(&self.clock_tree_error);
+                    } else {
+                        ui.label("No clock-tree analysis was captured for this CTS result.");
+                    }
+                });
+        }
+        egui::CentralPanel::default().show(ctx, |ui| {
+            if self.recording.as_ref().is_some_and(|recording| {
+                recording.manifest.geometry_detail.as_deref() == Some("report_only")
+            }) {
+                ui.centered_and_justified(|ui| {
+                    ui.label(
+                        "This step records logical/report progress and has no physical layout.",
+                    );
+                });
+            } else {
+                self.canvas(ui);
+            }
+        });
     }
 }

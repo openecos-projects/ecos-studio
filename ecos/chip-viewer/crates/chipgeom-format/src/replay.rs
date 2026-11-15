@@ -47,6 +47,10 @@ pub struct Manifest {
     pub frames: Vec<Frame>,
     #[serde(default)]
     pub maps: Option<String>,
+    #[serde(default)]
+    pub geometry_detail: Option<String>,
+    #[serde(default)]
+    pub clock_tree_manifest: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

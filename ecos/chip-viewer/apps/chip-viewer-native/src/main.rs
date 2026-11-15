@@ -12,6 +12,7 @@ mod macro_toolbar;
 mod map_data;
 mod nav3d;
 mod replay;
+mod replay_clock_tree;
 mod replay_data;
 mod replay_maps;
 mod replay_motion;
