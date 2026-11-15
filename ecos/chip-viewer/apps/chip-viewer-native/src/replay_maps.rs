@@ -40,6 +40,11 @@ impl ReplayMaps {
         self.items.len()
     }
 
+    pub fn clear_selection(&mut self) {
+        self.selected = None;
+        self.active = None;
+    }
+
     pub fn select(&mut self, index: usize) {
         if self.selected == Some(index) {
             return;

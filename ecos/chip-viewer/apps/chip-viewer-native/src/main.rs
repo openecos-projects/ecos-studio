@@ -25,6 +25,7 @@ mod replay_clock_tree;
 mod replay_data;
 mod replay_maps;
 mod replay_motion;
+mod replay_plan;
 mod replay_reveal;
 mod timing;
 

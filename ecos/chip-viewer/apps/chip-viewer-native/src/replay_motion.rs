@@ -17,14 +17,11 @@ impl Motion {
     }
 
     pub fn active(&self) -> bool {
-        !self.starts.is_empty()
+        !self.starts.is_empty() && self.elapsed < TRANSITION_SECONDS
     }
 
-    pub fn advance(&mut self, seconds: f64) {
-        self.elapsed += seconds;
-        if self.elapsed >= TRANSITION_SECONDS {
-            self.clear();
-        }
+    pub fn set_progress(&mut self, fraction: f64) {
+        self.elapsed = fraction.clamp(0.0, 1.0) * TRANSITION_SECONDS;
     }
 
     pub fn begin(&mut self, before: &Scene, after: &Scene, frames: &[Frame]) {
@@ -38,26 +35,14 @@ impl Motion {
         let (a, b) = (&frames[a], &frames[b]);
         // Legalization, rollback, commits and phase boundaries remain exact.
         // Only adjacent optimizer samples describe the same continuous phase.
-        if a.phase != "pre_optimizer_step"
-            || b.phase != a.phase
-            || a.subflow != b.subflow
-            || a.state_domain != "algorithm_state"
-            || b.state_domain != a.state_domain
-        {
+        if !compatible_frames(a, b) {
             return;
         }
         for (id, new) in &after.objects {
             let Some(old) = before.objects.get(id) else {
                 continue;
             };
-            if matches!(new.kind.as_str(), "instance" | "macro")
-                && old.kind == new.kind
-                && old.master == new.master
-                && old.orient == new.orient
-                && old.bbox != new.bbox
-                && old.bbox[2] - old.bbox[0] == new.bbox[2] - new.bbox[0]
-                && old.bbox[3] - old.bbox[1] == new.bbox[3] - new.bbox[1]
-            {
+            if compatible_objects(old, new) && old.bbox != new.bbox {
                 self.starts.insert(id.clone(), old.bbox);
             }
         }
@@ -73,6 +58,27 @@ impl Motion {
             (start[i] as f64 + (target[i] as f64 - start[i] as f64) * t).round() as i64
         })
     }
+}
+
+pub fn compatible_frames(a: &Frame, b: &Frame) -> bool {
+    a.phase == "pre_optimizer_step"
+        && b.phase == a.phase
+        && a.subflow == b.subflow
+        && a.state_domain == "algorithm_state"
+        && b.state_domain == a.state_domain
+}
+
+pub fn compatible_objects(
+    old: &chipgeom_format::replay::Object,
+    new: &chipgeom_format::replay::Object,
+) -> bool {
+    matches!(new.kind.as_str(), "instance" | "macro")
+        && old.kind == new.kind
+        && old.master == new.master
+        && old.orient == new.orient
+        && old.layer == new.layer
+        && old.bbox[2] - old.bbox[0] == new.bbox[2] - new.bbox[0]
+        && old.bbox[3] - old.bbox[1] == new.bbox[3] - new.bbox[1]
 }
 
 #[cfg(test)]
@@ -117,9 +123,9 @@ mod tests {
             motion.bounds("inst:a", target),
             before.objects["inst:a"].bbox
         );
-        motion.advance(TRANSITION_SECONDS / 2.0);
+        motion.set_progress(0.5);
         assert_eq!(motion.bounds("inst:a", target), [50, 20, 60, 30]);
-        motion.advance(TRANSITION_SECONDS / 2.0);
+        motion.set_progress(1.0);
         assert_eq!(motion.bounds("inst:a", target), target);
         assert!(!motion.active());
         assert_eq!(after, original);

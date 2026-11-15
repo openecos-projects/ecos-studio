@@ -44,6 +44,18 @@ impl ReplayApp {
                 rect.center().y - (y as f64 - (ly as f64 + hy as f64) / 2.0) as f32 * scale,
             )
         };
+        for obj in &self.reveal.ghosts {
+            let [x1, y1, x2, y2] = obj.bbox;
+            painter.rect_stroke(
+                Rect::from_two_pos(project(x1, y1), project(x2, y2)),
+                0.0,
+                Stroke::new(
+                    1.0,
+                    Color32::from_rgb(245, 121, 101).gamma_multiply(self.reveal.ghost_opacity()),
+                ),
+                egui::StrokeKind::Inside,
+            );
+        }
         for (id, obj) in &scene.objects {
             let fraction = self.reveal.fraction(id);
             if fraction <= 0.0 {
