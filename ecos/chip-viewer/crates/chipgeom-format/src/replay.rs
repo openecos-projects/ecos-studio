@@ -51,6 +51,8 @@ pub struct Manifest {
     pub geometry_detail: Option<String>,
     #[serde(default)]
     pub clock_tree_manifest: Option<String>,
+    #[serde(default)]
+    pub started_at_unix_ns: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]

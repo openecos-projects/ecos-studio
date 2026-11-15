@@ -1,3 +1,4 @@
+mod embedded;
 mod graph;
 mod layout;
 mod panel;
@@ -103,7 +104,7 @@ enum TreeViewMode {
 }
 
 pub(crate) struct ClockTreePanel {
-    db: Arc<ChipViewDb>,
+    db: Option<Arc<ChipViewDb>>,
     receiver: Option<mpsc::Receiver<Result<ClockData, String>>>,
     data: Option<Arc<ClockData>>,
     error: Option<String>,
@@ -136,7 +137,11 @@ pub(crate) struct ClockTreePanel {
 
 impl ClockTreePanel {
     pub(crate) fn new(db: Arc<ChipViewDb>) -> Option<Self> {
-        db.has_clock_tree_manifest().then(|| Self {
+        db.has_clock_tree_manifest().then(|| Self::empty(Some(db)))
+    }
+
+    fn empty(db: Option<Arc<ChipViewDb>>) -> Self {
+        Self {
             db,
             receiver: None,
             data: None,
@@ -166,7 +171,7 @@ impl ClockTreePanel {
             pending_layout_choice: 0,
             layout_sync_status: None,
             location_status: None,
-        })
+        }
     }
 
     pub(crate) fn is_open(&self) -> bool {
@@ -182,7 +187,9 @@ impl ClockTreePanel {
 
     fn poll(&mut self, ctx: &egui::Context) {
         if !self.started {
-            let db = Arc::clone(&self.db);
+            let Some(db) = self.db.as_ref().map(Arc::clone) else {
+                return;
+            };
             let (sender, receiver) = mpsc::channel();
             self.receiver = Some(receiver);
             self.started = true;
@@ -233,7 +240,12 @@ impl ClockTreePanel {
             .as_ref()
             .and_then(|data| data.view.clocks.get(self.clock))
             .map_or(TreeViewMode::UnitDelay, |index| {
-                if index.timed_node_count > 0 {
+                if self
+                    .data
+                    .as_ref()
+                    .is_some_and(|data| data.view.stage != Some(ClockTreeStage::PostFloorplan))
+                    && index.timed_node_count > 0
+                {
                     TreeViewMode::RealDelay
                 } else {
                     TreeViewMode::UnitDelay

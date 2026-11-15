@@ -234,6 +234,12 @@ fn row_at_position(
     None
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum GraphHost {
+    Window,
+    Embedded,
+}
+
 impl ClockTreePanel {
     fn tree_bounds(&self) -> Option<egui::Rect> {
         let mut bounds: Option<egui::Rect> = None;
@@ -425,6 +431,14 @@ impl ClockTreePanel {
     }
 
     pub(crate) fn graph_ui(&mut self, ui: &mut egui::Ui) -> Option<LayoutTarget> {
+        self.draw_graph(ui, GraphHost::Window)
+    }
+
+    pub(super) fn draw_graph(
+        &mut self,
+        ui: &mut egui::Ui,
+        host: GraphHost,
+    ) -> Option<LayoutTarget> {
         if !self.open {
             return None;
         }
@@ -446,9 +460,9 @@ impl ClockTreePanel {
             self.rows_dirty = true;
         }
         let mut action = None;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             self.rows_dirty |= ui
-                .text_edit_singleline(&mut self.search)
+                .add(egui::TextEdit::singleline(&mut self.search).desired_width(130.0))
                 .on_hover_text("Search instance or qualified pin name")
                 .changed();
             self.rows_dirty |= ui
@@ -462,7 +476,7 @@ impl ClockTreePanel {
                     .selectable_value(&mut self.view_mode, TreeViewMode::RealDelay, "Real delay")
                     .changed();
             });
-            if ui.button("Close").clicked() {
+            if host == GraphHost::Window && ui.button("Close").clicked() {
                 self.open = false;
             }
         });
@@ -496,7 +510,7 @@ impl ClockTreePanel {
                 .color(egui::Color32::from_gray(170)),
             );
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.small_button("Collapse").clicked() {
                 self.collapsed.clear();
                 for (node, children) in index.children.iter().enumerate() {
@@ -533,7 +547,12 @@ impl ClockTreePanel {
                 self.fit_tree_view = true;
                 self.center_root_view = false;
             }
-            ui.label("Scroll: zoom · Drag: pan · Double-click: fold · Click: locate");
+            let interaction = if host == GraphHost::Embedded {
+                "Scroll: zoom · Drag: pan · Double-click: fold · Click: select"
+            } else {
+                "Scroll: zoom · Drag: pan · Double-click: fold · Click: locate"
+            };
+            ui.label(interaction);
         });
         if self.rows_dirty {
             let layout_mode = match self.view_mode {

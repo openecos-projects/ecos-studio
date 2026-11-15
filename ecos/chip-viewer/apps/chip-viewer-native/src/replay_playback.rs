@@ -45,6 +45,7 @@ impl ReplayApp {
             self.clock_tree = None;
             self.clock_tree_error.clear();
             self.clock_tree_attempted = false;
+            self.checklist = None;
             self.maps = ReplayMaps::default();
             self.recording = None;
             self.error.clone_from(&self.plans[step].error);
@@ -84,14 +85,26 @@ impl ReplayApp {
         if !self.error.is_empty() {
             self.playing = false;
         }
-        if self.complete && self.catalog.steps[step].name == "CTS" && !self.clock_tree_attempted {
+        if self.complete && !self.clock_tree_attempted {
             self.clock_tree_attempted = true;
             if let Some(recording) = &self.recording {
-                match recording.clock_tree() {
+                match recording.clock_tree().and_then(|tree| {
+                    tree.map(|tree| crate::clock_tree::ClockTreePanel::from_snapshot(&tree))
+                        .transpose()
+                }) {
                     Ok(tree) => self.clock_tree = tree,
                     Err(error) => self.clock_tree_error = error.to_string(),
                 }
             }
+        }
+        if self.complete && self.error.is_empty() && self.checklist.is_none() {
+            self.checklist = Some(
+                crate::replay_checklist::load(
+                    &self.catalog.workspace,
+                    &self.catalog.steps[step].name,
+                )
+                .map_err(|error| error.to_string()),
+            );
         }
         if self.complete {
             let hold = if completion_node {
