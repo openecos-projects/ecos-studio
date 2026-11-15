@@ -560,8 +560,7 @@ def _optimization_execution_context(
             "optimization filelist_sha256 input is unsafe or unavailable"
         ) from exc
     try:
-        pdk_root = Path(parameters["pdk_root"])
-        pdk_sha256 = pdk_fingerprint(pdk_root)
+        pdk_sha256 = pdk_fingerprint(workspace)
     except (KeyError, OSError, TypeError, ValueError, WorkspaceParametersError) as exc:
         raise OptimizationRuntimeError(
             "optimization PDK evidence is unavailable"
@@ -718,9 +717,7 @@ def _ledger(root: Path):
 
 def _site_width_dbu(workspace: Path) -> int:
     try:
-        params = _runtime_parameters(workspace)[1]
-        pdk_root = Path(params["pdk_root"])
-        return site_width_dbu(pdk_root)
+        return site_width_dbu(workspace)
     except (KeyError, OSError, TypeError, ValueError, WorkspaceParametersError) as exc:
         raise OptimizationRuntimeError("PDK site width is unavailable") from exc
 

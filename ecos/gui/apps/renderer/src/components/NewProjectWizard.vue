@@ -1091,6 +1091,10 @@
                           'No PDK path configured.'
                         }}
                       </p>
+                      <PdkDefaultSelection
+                        v-if="selectedPdk"
+                        :installation-id="selectedPdk.id"
+                      />
                       <p
                         v-if="projectPdkMismatch"
                         role="alert"
@@ -1168,9 +1172,9 @@
                     <div class="mb-3">
                       <h3 class="text-sm font-bold text-(--text-primary)">Config Mode</h3>
                       <p class="mt-1 text-xs text-(--text-secondary)">
-                        Both modes require a readable PDK. Default Config uses ECC's known
-                        layout; Manual Config lets you choose resource files after the PDK
-                        passes validation.
+                        The PDK description defines the project's resources. Manual
+                        selections must match this description. To change technology
+                        inputs, configure a separate PDK profile and create a new project.
                       </p>
                       <p
                         v-if="selectedPdk && !defaultConfigAvailable"
@@ -1251,7 +1255,7 @@
                             ? 'border-(--accent-color) bg-(--accent-color)/10'
                             : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'
                         "
-                        @click="pdkConfigMode = 'manual'"
+                        @click="configureSelectedPdk"
                       >
                         <span
                           class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border"
@@ -1266,11 +1270,12 @@
                         </span>
                         <span>
                           <span class="block text-sm font-bold text-(--text-primary)"
-                            >Manual Config</span
+                            >Configure PDK Profile</span
                           >
                           <span
                             class="mt-1 block text-xs leading-5 text-(--text-secondary)"
-                            >Customize Tech LEF, Cell LEF, and Liberty.</span
+                            >Edit the package configuration. Use a separate copy for a
+                            different project technology.</span
                           >
                         </span>
                       </button>
@@ -1751,9 +1756,11 @@
 </template>
 
 <script setup lang="ts">
+import PdkDefaultSelection from './PdkDefaultSelection.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Project, WorkspaceConfig } from '../types'
 import { usePdkManager } from '../composables/usePdkManager'
+import { requestPdkConfiguration } from '../composables/usePdkConfiguration'
 import { useWorkspace } from '../composables/useWorkspace'
 import { useWorkspaceCreationModel } from '../composables/useWorkspaceCreationModel'
 import { getDesktopApi } from '@/platform/desktop'
@@ -2629,7 +2636,7 @@ const defaultConfigUnavailableReason = computed(() => {
   }
   if (!isPdkEligible(selectedPdk.value)) return 'This PDK is not validated.'
   if (!selectedPdk.value.supportsEccDefaults)
-    return 'ECC defaults are only available for a known PDK layout.'
+    return 'Configure an ecc-pdk.json description with the resources required by your flow.'
   if (!selectedPdk.value.defaultResources)
     return 'Default PDK resources are unavailable; re-check the PDK.'
   return ''
@@ -2831,9 +2838,9 @@ const canProceed = computed(() => {
       )
         return false
       if (pdkConfigMode.value === 'default') {
-        return pdkWizardSteps.every(
-          (step) => effectiveDefaultPdkResources.value[step.key].length > 0,
-        )
+        // ECC validates resources for the requested stages. A synthesis-only
+        // package must not be rejected here merely because it has no LEF.
+        return selectedPdk.value?.supportsEccDefaults === true
       }
       return (
         pdkSelections.value.tech_lef.length > 0 &&
@@ -3575,6 +3582,18 @@ async function loadAndSelectPdks() {
       }
     } catch {}
   }
+  if (!requirement && !config.value.pdk_root && !config.value.pdk_installation_id) {
+    try {
+      const inventory = await getDesktopApi().pdkInventory.configure({
+        action: 'library-list',
+      })
+      const defaults = inventory.defaults as { studio?: string } | undefined
+      const preferred = importedPdks.value.find((pdk) => pdk.id === defaults?.studio)
+      if (preferred?.readiness === 'ready') selectPdk(preferred)
+    } catch (error) {
+      console.warn('Unable to read Studio PDK default', error)
+    }
+  }
 }
 
 function isFlowStepLocked(stepName: FlowStepName) {
@@ -3787,6 +3806,16 @@ function selectPdk(pdk: import('../types').ImportedPdk) {
   }
   syncWorkspaceConfig()
   void refreshWorkspaceCreationModel()
+}
+
+async function configureSelectedPdk() {
+  const pdk = selectedPdk.value
+  if (!pdk) return
+  if (await requestPdkConfiguration(pdk.path, pdk.pdkId)) {
+    await validatePdk(pdk.id)
+    await loadPdks(true)
+    pdkConfigMode.value = 'default'
+  }
 }
 
 async function handleValidatePdk(id: string): Promise<void> {

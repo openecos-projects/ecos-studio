@@ -95,6 +95,7 @@ import {
   type PdkBinding,
   type PdkBindRequest,
   type PdkImportRequest,
+  type PdkConfigureRequest,
   type PdkInstallationSnapshot,
   type PdkLocateRequest,
   type PdkResolveBindingRequest,
@@ -497,6 +498,9 @@ export interface DesktopBridgeServices {
       refreshRegistry?: boolean
     }): Promise<unknown>
     onRegistryChanged(listener: () => void): () => void
+  }
+  pdkConfigurationService?: {
+    configure(request: PdkConfigureRequest): Promise<Record<string, unknown>>
   }
   pdkInventoryService: {
     bindInstallation(request: PdkBindRequest): Promise<PdkBinding>
@@ -2865,6 +2869,14 @@ export function registerIpc(
     }
   })
 
+  handle(desktopApiIpcChannels.pdkInventoryConfigure, async (event, request) => {
+    requireBackendMutationAllowed(event)
+    if (!services.pdkConfigurationService)
+      throw new Error('PDK configuration service unavailable')
+    return await services.pdkConfigurationService.configure(
+      request as PdkConfigureRequest,
+    )
+  })
   handle(desktopApiIpcChannels.pdkInventoryList, async () => {
     return await services.pdkInventoryService.listInstallations()
   })

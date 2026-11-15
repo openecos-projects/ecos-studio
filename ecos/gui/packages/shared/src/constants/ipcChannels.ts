@@ -106,6 +106,7 @@ export const desktopApiIpcChannels = {
   resourcesImportLocalPath: 'resources:import-local-path',
   resourcesRefreshRegistry: 'resources:refresh-registry',
   resourcesCheckUpdates: 'resources:check-updates',
+  pdkInventoryConfigure: 'pdk-inventory:configure',
   pdkInventoryList: 'pdk-inventory:list',
   pdkInventoryImport: 'pdk-inventory:import',
   pdkInventoryLocate: 'pdk-inventory:locate',

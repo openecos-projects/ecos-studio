@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import type { PdkInstallationSnapshot } from '@ecos-studio/shared'
 import { getDesktopApi } from '@/platform/desktop'
 import { useWorkspace } from './useWorkspace'
+import { requestPdkConfiguration } from './usePdkConfiguration'
 import type { ImportedPdk } from '../types'
 
 const importedPdks = ref<ImportedPdk[]>([])
@@ -68,10 +69,25 @@ async function importPath(path: string): Promise<ImportedPdk> {
         .replace(/[^a-z0-9]+/g, '_')
         .replace(/^_+|_+$/g, '') || familyId
   }
+  const description = await desktopApi.pdkInventory.configure({
+    action: 'show',
+    root: path,
+  })
+  if (description.error) {
+    if (!(await requestPdkConfiguration(path, familyId))) throw pdkImportCancelled
+  }
+  const configured = await desktopApi.pdkInventory.configure({
+    action: 'show',
+    root: path,
+  })
+  if (configured.error) throw new Error(JSON.stringify(configured.error))
+  const metadata = configured.descriptor as { family_id: string; release: string }
+  familyId = metadata.family_id
   const installation = await desktopApi.pdkInventory.import({
     root: path,
     familyId,
     displayName,
+    version: metadata.release,
   })
   return installationToPdk(installation)
 }

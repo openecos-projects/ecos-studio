@@ -381,6 +381,11 @@ def _execution_context_workspace(tmp_path: Path) -> tuple[Path, Path, Path]:
         encoding="utf-8",
     )
     (tmp_path / "home" / "flow.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "home/ecc-pdk-context.json").write_text(json.dumps({
+        "schema_version": 1, "content_digest": _HASH.removeprefix("sha256:"), "resource_root": str(pdk),
+        "resources": {"tech": {"path": str(tech_lef.relative_to(pdk)), "sha256": file_sha256(tech_lef).removeprefix("sha256:")}},
+        "site_width_dbu": 400,
+    }))
     return rtl, filelist, origin
 
 

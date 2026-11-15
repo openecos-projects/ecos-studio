@@ -65,6 +65,14 @@ export async function launchE2EApp(
     await mkdir(dir, { recursive: true })
     env[key] = dir
   }
+  // A caller's CLI inventory must not leak into an isolated desktop scenario.
+  env.ECC_PDK_INVENTORY = join(
+    xdgRoot,
+    'state',
+    'ecos-studio',
+    'resources',
+    'pdk-inventory.json',
+  )
   env.ELECTRON_DISABLE_SANDBOX = '1'
   env.ECOS_ELECTRON_DISABLE_GPU = '1'
   // Keep uv's build cache shared: the isolated XDG cache would otherwise force

@@ -1,3 +1,4 @@
+import { prepareTestPdk } from './support/pdk'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { access } from 'node:fs/promises'
@@ -69,8 +70,9 @@ describe('product e2e: CLI-started rtl2gds journey', () => {
       const setupMarker = join(outDir, 'cli-setup.result')
       const runMarker = join(outDir, 'cli-run.result')
       const runLog = join(outDir, 'cli-run.log')
-      const pdkRoot =
-        process.env.ECOS_E2E_PDK_ROOT ?? join(repoRoot, 'pdk/icsprout55-pdk')
+      const pdkRoot = await prepareTestPdk(
+        process.env.ECOS_E2E_PDK_ROOT ?? join(repoRoot, 'pdk/icsprout55-pdk'),
+      )
       const setupScript = join(outDir, 'cli-setup.sh')
       const setupLog = join(outDir, 'cli-setup.log')
       const eccCommand = (...args: string[]) =>
@@ -91,6 +93,8 @@ describe('product e2e: CLI-started rtl2gds journey', () => {
             'ecc',
             'init',
             projectRoot,
+            '--pdk-root',
+            pdkRoot,
             '--project-name',
             `${design.name}-cli-e2e`,
             '--design-name',

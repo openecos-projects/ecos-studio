@@ -25,6 +25,7 @@ export interface PdkInventoryBinding {
 
 export interface PdkInventoryFile {
   schemaVersion: 1
+  defaults?: { ecc?: string; studio?: string }
   installations: PdkInstallationRecord[]
   bindings: PdkInventoryBinding[]
 }

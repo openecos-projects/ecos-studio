@@ -7,6 +7,7 @@ import type {
   EccWorkspaceCreateResult,
 } from '@ecos-studio/shared'
 import './bridge'
+import { prepareTestPdk } from './pdk'
 
 export interface WorkspaceJourney {
   projectRoot: string
@@ -45,6 +46,7 @@ export async function waitToolchainReady(
 }
 
 export async function importExternalPdk(page: Page, root: string): Promise<string> {
+  root = await prepareTestPdk(root)
   const snapshot = await page.evaluate(
     (request) => window.ecosDesktop.pdkInventory.import(request),
     { root, familyId: 'ics55', displayName: 'ICS55 (e2e)' },

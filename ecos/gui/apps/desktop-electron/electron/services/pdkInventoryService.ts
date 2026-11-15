@@ -20,7 +20,9 @@ import {
   type PdkInventoryFile,
   type PdkInventoryBinding,
 } from './pdkInventoryMigration'
+import { withPdkInventoryLock } from './pdkInventoryLock'
 import { assertManualPdkConfiguration } from './pdkManualConfiguration'
+import type { PdkConfigurationService } from './pdkConfigurationService'
 import { ResourceMetadataRestoreError } from './resourceInstallErrors'
 
 export interface PdkInventoryServiceOptions {
@@ -37,26 +39,13 @@ export interface ManagedPdkInstallationRequest extends PdkImportRequest {
   version: string
 }
 
-const ICS55_DEFAULT_RESOURCES = {
-  techLef: 'prtech/techLEF/N551P6M_ecos.lef',
-  cellLefs: [
-    'IP/STD_cell/ICsprout55_SC9T_BASIC_HVT/lef/ICsprout55_9THVT_basic.lef',
-    'IP/STD_cell/ICsprout55_SC9T_BASIC_LVT/lef/ICsprout55_9TLVT_basic.lef',
-    'IP/STD_cell/ICsprout55_SC9T_BASIC_SVT/lef/ICsprout55_9TSVT_basic.lef',
-  ],
-  liberty: [
-    'IP/STD_cell/ICsprout55_SC9T_BASIC_HVT/liberty/ICsprout55_9THVT_ss_v1p08_125c_basic_nldm.lib',
-    'IP/STD_cell/ICsprout55_SC9T_BASIC_LVT/liberty/ICsprout55_9TLVT_ss_v1p08_125c_basic_nldm.lib',
-    'IP/STD_cell/ICsprout55_SC9T_BASIC_SVT/liberty/ICsprout55_9TSVT_ss_v1p08_125c_basic_nldm.lib',
-  ],
-}
-const ICS55_MARKERS = [
-  ICS55_DEFAULT_RESOURCES.techLef,
-  ...ICS55_DEFAULT_RESOURCES.cellLefs,
-  ...ICS55_DEFAULT_RESOURCES.liberty,
-]
-
 export class PdkInventoryService {
+  private configurationService?: Pick<PdkConfigurationService, 'configure'>
+
+  setConfigurationService(service: Pick<PdkConfigurationService, 'configure'>): void {
+    this.configurationService = service
+  }
+
   private operation: Promise<void> = Promise.resolve()
   private legacyCleanupComplete = false
   private readonly options: Required<Omit<PdkInventoryServiceOptions, 'legacyCleaner'>> &
@@ -67,7 +56,9 @@ export class PdkInventoryService {
     const dataRoot = process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share')
     const resourcesRoot = join(stateRoot, 'ecos-studio', 'resources')
     const inventoryPath =
-      options.inventoryPath ?? join(resourcesRoot, 'pdk-inventory.json')
+      options.inventoryPath ??
+      process.env.ECC_PDK_INVENTORY ??
+      join(resourcesRoot, 'pdk-inventory.json')
     this.options = {
       inventoryPath,
       legacyManifestPath:
@@ -85,7 +76,14 @@ export class PdkInventoryService {
       const existing = inventory.installations.find(
         (installation) => installation.root === root,
       )
-      if (existing) return await this.snapshot(existing)
+      if (existing) {
+        const snapshot = await this.snapshot(existing)
+        if (snapshot.contentDigest && !existing.contentDigest) {
+          existing.contentDigest = snapshot.contentDigest
+          await this.writeInventory(inventory)
+        }
+        return snapshot
+      }
 
       const installation: PdkInstallationRecord = {
         id: localInstallationId(request.familyId, root),
@@ -96,9 +94,11 @@ export class PdkInventoryService {
         ownership: 'imported',
         registrySha256: null,
       }
+      const snapshot = await this.snapshot(installation)
+      if (snapshot.contentDigest) installation.contentDigest = snapshot.contentDigest
       inventory.installations.push(installation)
       await this.writeInventory(inventory)
-      return await this.snapshot(installation)
+      return snapshot
     })
   }
 
@@ -154,6 +154,11 @@ export class PdkInventoryService {
         throwIfAborted(signal)
         const result = await this.snapshot(installation)
         throwIfAborted(signal)
+        if (result.contentDigest && !installation.contentDigest) {
+          installation.contentDigest = result.contentDigest
+          await this.writeInventory(inventory)
+          throwIfAborted(signal)
+        }
         return result
       } catch (error) {
         if (!signal?.aborted) throw error
@@ -198,6 +203,9 @@ export class PdkInventoryService {
           binding.projectId === projectId && binding.projectRoot === projectRoot,
       )
       if (existing?.installationId) {
+        if (await stat(join(projectRoot, 'pdk.lock.json')).catch(() => null)) {
+          return publicBinding(existing)
+        }
         if (isDeepStrictEqual(existing.requirement, request.requirement)) {
           return publicBinding(existing)
         }
@@ -259,6 +267,19 @@ export class PdkInventoryService {
         (candidate) => candidate.id === request.installationId,
       )
       if (!installation) throw new Error('PDK Installation was not found')
+      const previous = inventory.bindings.find(
+        (binding) =>
+          binding.projectId === projectId && binding.projectRoot === projectRoot,
+      )
+      if (
+        previous?.installationId &&
+        previous.installationId !== installation.id &&
+        (await stat(join(projectRoot, 'pdk.lock.json')).catch(() => null))
+      ) {
+        throw new Error(
+          'Project PDK is immutable; copy the project to select another PDK',
+        )
+      }
       if (!installationSatisfiesRequirement(installation, request.requirement)) {
         throw new Error(
           `PDK Installation does not satisfy the Project Requirement (${describeRequirementMismatch(installation, request.requirement)})`,
@@ -333,6 +354,11 @@ export class PdkInventoryService {
         throw new Error('Only a Missing PDK Installation can be located')
       }
       const root = await canonicalDirectory(request.root)
+      if (installation.contentDigest) {
+        const relocated = await this.snapshot({ ...installation, root })
+        if (relocated.readiness !== 'ready')
+          throw new Error(relocated.reason ?? 'PDK relocation requires identical content')
+      }
       const existing = inventory.installations.find(
         (candidate) => candidate.id !== installation.id && candidate.root === root,
       )
@@ -422,6 +448,18 @@ export class PdkInventoryService {
     })
   }
 
+  async validateRoot(root: string): Promise<PdkInstallationSnapshot> {
+    return await this.snapshot({
+      id: '',
+      root,
+      familyId: '',
+      displayName: '',
+      version: null,
+      ownership: 'imported',
+      registrySha256: null,
+    })
+  }
+
   private async snapshot(
     installation: PdkInstallationRecord,
   ): Promise<PdkInstallationSnapshot> {
@@ -432,51 +470,96 @@ export class PdkInventoryService {
           ...installation,
           readiness: 'missing',
           reason: 'PDK root is unavailable',
-          supportsEccDefaults: installation.familyId === 'ics55',
-        }
-      }
-      if (installation.familyId !== 'ics55') {
-        return {
-          ...installation,
-          readiness: 'unverified',
-          reason: null,
           supportsEccDefaults: false,
         }
       }
-      const markers = await Promise.all(
-        ICS55_MARKERS.map((marker) =>
-          stat(resolve(installation.root, marker)).catch(() => null),
-        ),
-      )
-      if (markers.some((marker) => !marker?.isFile())) {
+      if (!this.configurationService) {
+        return {
+          ...installation,
+          readiness: 'unverified',
+          reason: 'ECC must validate ecc-pdk.json before this PDK can run',
+          supportsEccDefaults: false,
+        }
+      }
+      const description = await this.configurationService.configure({
+        action: 'show',
+        root: installation.root,
+      })
+      if (description.error) {
         return {
           ...installation,
           readiness: 'invalid',
-          reason: 'Required ICS55 PDK files are missing',
-          supportsEccDefaults: true,
+          reason: JSON.stringify(description.error),
+          supportsEccDefaults: false,
         }
       }
+      const result = await this.configurationService.configure({
+        action: 'validate',
+        root: installation.root,
+      })
+      if (
+        result.error ||
+        !Array.isArray(result.diagnostics) ||
+        result.diagnostics.length > 0
+      ) {
+        return {
+          ...installation,
+          readiness: 'invalid',
+          reason: JSON.stringify(result),
+          supportsEccDefaults: false,
+        }
+      }
+      const context = await this.configurationService.configure({
+        action: 'resolve',
+        root: installation.root,
+      })
+      const digest =
+        typeof context.content_digest === 'string' ? context.content_digest : undefined
+      if (
+        context.error ||
+        !digest ||
+        !/^[0-9a-f]{64}$/.test(digest) ||
+        (installation.contentDigest && installation.contentDigest !== digest)
+      ) {
+        return {
+          ...installation,
+          readiness: 'invalid',
+          reason:
+            'PDK content identity changed or could not be verified; import a separate release',
+          supportsEccDefaults: false,
+        }
+      }
+      const resources = Object.values(
+        description.resolved_resources as Record<string, { role: string; path: string }>,
+      )
+      const techLef = resources.find((item) => item.role === 'tech')?.path
+      const cellLefs = resources
+        .filter((item) => item.role === 'lef')
+        .map((item) => item.path)
+      const liberty = resources
+        .filter((item) => item.role === 'liberty')
+        .map((item) => item.path)
       return {
         ...installation,
         readiness: 'ready',
+        contentDigest: digest,
         reason: null,
-        supportsEccDefaults: true,
-        defaultResources: {
-          techLef: resolve(installation.root, ICS55_DEFAULT_RESOURCES.techLef),
-          cellLefs: ICS55_DEFAULT_RESOURCES.cellLefs.map((file) =>
-            resolve(installation.root, file),
-          ),
-          liberty: ICS55_DEFAULT_RESOURCES.liberty.map((file) =>
-            resolve(installation.root, file),
-          ),
-        },
+        supportsEccDefaults: Boolean(liberty.length),
+        ...(liberty.length
+          ? { defaultResources: { techLef: techLef ?? '', cellLefs, liberty } }
+          : {}),
       }
-    } catch {
+    } catch (error) {
+      const missing = ['ENOENT', 'ENOTDIR'].includes(
+        String((error as NodeJS.ErrnoException).code),
+      )
       return {
         ...installation,
-        readiness: 'missing',
-        reason: 'PDK root is unavailable',
-        supportsEccDefaults: installation.familyId === 'ics55',
+        readiness: missing ? 'missing' : 'unverified',
+        reason: missing
+          ? 'PDK root is unavailable'
+          : `ECC validation unavailable: ${String(error)}`,
+        supportsEccDefaults: false,
       }
     }
   }
@@ -520,7 +603,7 @@ export class PdkInventoryService {
     })
     await previous.catch(() => undefined)
     try {
-      return await operation()
+      return await withPdkInventoryLock(this.options.inventoryPath, operation)
     } finally {
       release()
     }

@@ -213,11 +213,17 @@ describe('ECC CLI workspace command planning', () => {
     )
   })
 
+  it('rejects resource overrides that bypass the immutable PDK profile', () => {
+    const input = request({ eccPdkConfig: { overrides: { lefs: ['/other.lef'] } } })
+    expect(() => projectSettingsArgs(input)).toThrow(
+      'PDK resources belong to ecc-pdk.json',
+    )
+  })
+
   it('initializes an MPC Project before its Project and Workspace transactions', () => {
     const input = request({
       eccPdkConfig: {
         externalPaths: ['/macros'],
-        overrides: { lefs: ['/macros/sram.lef'] },
       },
       projectMpc: {
         designIndex: 2,
@@ -235,6 +241,10 @@ describe('ECC CLI workspace command planning', () => {
       'Demo Project',
       '--design-name',
       'gcd',
+      '--pdk-default-client',
+      'studio',
+      '--pdk-root',
+      '/pdks/ics55',
       '--mpc-resource-id',
       'mpc:frame',
       '--mpc-display-name',
@@ -252,10 +262,7 @@ describe('ECC CLI workspace command planning', () => {
       ['workspace', 'create'],
     ])
     expect(commands[0]).toEqual(
-      expect.arrayContaining([
-        'pdk.external_paths=["/macros"]',
-        'pdk.overrides.lefs=["/macros/sram.lef"]',
-      ]),
+      expect.arrayContaining(['pdk.external_paths=["/macros"]']),
     )
     expect(commands[0]).not.toContainEqual(expect.stringMatching(/^design\.rtl=/))
     expect(commands[1]).toEqual(
@@ -425,6 +432,8 @@ describe('ECC CLI workspace command planning', () => {
       'Demo',
       '--design-name',
       'gcd',
+      '--pdk-default-client',
+      'studio',
       '--mpc-resource-id',
       'mpc:frame',
       '--mpc-display-name',
@@ -625,7 +634,16 @@ describe('ECC CLI RTL import planning', () => {
     })
 
     expect(commands).toEqual([
-      ['init', root, '--project-name', 'Demo', '--design-name', 'gcd'],
+      [
+        'init',
+        root,
+        '--project-name',
+        'Demo',
+        '--design-name',
+        'gcd',
+        '--pdk-default-client',
+        'studio',
+      ],
       ['rtl', 'import', '--project', root, '--verilog', '/inputs/design.v', '--plain'],
     ])
   })
@@ -894,7 +912,6 @@ describe('ECC CLI Workspace update transaction', () => {
       commandId: 'update-1',
       eccPdkConfig: {
         externalPaths: ['/macros/sram'],
-        overrides: { lefs: ['/macros/sram/sram.lef'] },
       },
       expectedWorkspaceRevision: 4,
       retainBackup: true,
@@ -920,8 +937,6 @@ describe('ECC CLI Workspace update transaction', () => {
         'design.top=gcd_top',
         '--set',
         'pdk.external_paths=["/macros/sram"]',
-        '--set',
-        'pdk.overrides.lefs=["/macros/sram/sram.lef"]',
       ]),
     )
     expect(commands[1]).toEqual([

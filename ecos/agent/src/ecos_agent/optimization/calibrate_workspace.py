@@ -152,8 +152,7 @@ def _environment_fingerprint(workspace: Path) -> dict[str, str]:
     ecc_revision = revision.strip()
     try:
         parameters_ref, parameters = _runtime_parameters(workspace)
-        pdk_root = Path(parameters["pdk_root"])
-        pdk_sha256 = pdk_fingerprint(pdk_root)
+        pdk_sha256 = pdk_fingerprint(workspace)
     except (KeyError, OSError, TypeError, ValueError, WorkspaceParametersError) as exc:
         raise OptimizationRuntimeError(
             "workspace parameters or PDK evidence are unavailable for replay cache validation"

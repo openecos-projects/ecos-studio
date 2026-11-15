@@ -49,9 +49,9 @@ SOURCE_PATHS = {
     "ircx.spef_writer": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iRCX/source/module/spef_writer/SPEFWriter.cpp",
     "ista.interface": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iSTA/interface/STAInterface.cpp",
     "ista.graph_builder": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iSTA/source/module/graph_builder/GraphBuilder.cpp",
-    "ista.propagator": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iSTA/source/module/timing_propagator/TimingPropagator.cpp",
-    "ista.analyzer": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iSTA/source/module/timing_analyzer/TimingAnalyzer.cpp",
-    "ista.characterizer": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iSTA/source/module/timing_characterizer/TimingCharacterizer.cpp",
+    "ista.propagator": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iSTA/source/module/timing_propagator/data/DataPropagator.cpp",
+    "ista.analyzer": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iSTA/source/module/TimingAnalyzer.cpp",
+    "ista.characterizer": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iSTA/source/module/model_extractor/ModelExtractor.cpp",
     "idb.python": "ecc/chipcompiler/thirdparty/ecc-tools/src/interface/python/py_idb/py_db.cpp",
     "idb.builder": "ecc/chipcompiler/thirdparty/ecc-tools/src/database/manager/builder/builder.cpp",
 }
@@ -370,7 +370,7 @@ ALGORITHM_DETAILS: dict[str, tuple[AlgorithmDetail, ...]] = {
         (
             "timing_model_characterization",
             ("harden timing model characterization", "ista extract lib timing characterizer"),
-            "**Input and state:** The selected Liberty, SDC, SPEF, STA configuration, design name, and output directory initialize native STA for timing-model extraction.\n\n**Algorithm:** `extractLib()` builds and propagates the timing graph, analyzes timing, then `TimingCharacterizer::characterize()` writes the derived model. The wrapper locates the generated analysis-mode LIB and copies it to the Harden output.\n\n**Failure boundary:** Missing or ambiguous generated source LIB raises an error; an empty generated model receives only the implementation's minimal fallback library shell.",
+            "**Input and state:** The selected Liberty, SDC, SPEF, STA configuration, design name, and output directory initialize native STA for timing-model extraction.\n\n**Algorithm:** `extractLib()` builds and propagates the timing graph, analyzes timing, then `ModelExtractor::extract()` constructs min/max timing models from port, check and delay arcs. The wrapper locates the generated analysis-mode LIB and copies it to the Harden output.\n\n**Failure boundary:** Missing or ambiguous generated source LIB raises an error; an empty generated model receives only the implementation's minimal fallback library shell.",
             ("ecc.module", "ista.interface", "ista.characterizer"),
         ),
         (

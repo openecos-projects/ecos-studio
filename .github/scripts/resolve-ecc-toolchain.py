@@ -20,7 +20,8 @@ def is_packaged_design_job(name):
 
 def api(path, *, raw=False):
     result = subprocess.run(
-        ["gh", "api", path], check=True, capture_output=True, text=True, timeout=120
+        ["gh", "api", *(["--allow-escape-sequences"] if raw else []), path],
+        check=True, capture_output=True, text=True, timeout=120
     )
     return result.stdout if raw else json.loads(result.stdout)
 

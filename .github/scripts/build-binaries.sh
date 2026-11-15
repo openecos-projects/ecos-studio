@@ -44,30 +44,31 @@ prepare_sizer_runtime() {
       return 1
     fi
 
-    local run_id
-    run_id="$(
-      gh api 'repos/openecos-projects/ecc-sizer/actions/workflows/ci.yml/runs?branch=main&status=success&per_page=20' \
-        --jq '[.workflow_runs[] | select(.conclusion == "success") | .id][0] // empty'
-    )"
-    if [[ -z "$run_id" ]]; then
-      printf 'No successful ecc-sizer CI artifact found on main.\n' >&2
-      return 1
-    fi
+    local sizer_repo run_id artifact archive_name archive_sha
+    read -r sizer_repo run_id artifact archive_name archive_sha < <(
+      python3 - "$REPO_ROOT/ecc/.github/revision.toml" <<'PYLOCK'
+import sys
+import tomllib
+from pathlib import Path
+lock = tomllib.loads(Path(sys.argv[1]).read_text())["sizer"]
+print(*(lock[key] for key in ("repo", "run_id", "artifact", "archive", "sha256")))
+PYLOCK
+    )
 
     rm -rf "$download_dir"
     mkdir -p "$download_dir"
-    printf 'Downloading ecc-sizer-linux-x64 from CI run %s\n' "$run_id"
+    printf 'Downloading pinned %s from CI run %s\n' "$artifact" "$run_id"
     gh run download "$run_id" \
-      --repo openecos-projects/ecc-sizer \
-      --name ecc-sizer-linux-x64 \
+      --repo "$sizer_repo" \
+      --name "$artifact" \
       --dir "$download_dir"
 
-    local archive
-    archive="$(find "$download_dir" -name 'ecc-sizer-linux-x64.tar.gz' -print -quit)"
-    if [[ -z "$archive" ]]; then
-      printf 'Downloaded ecc-sizer artifact does not contain ecc-sizer-linux-x64.tar.gz.\n' >&2
+    local archive="$download_dir/$archive_name"
+    if [[ ! -f "$archive" ]]; then
+      printf 'Downloaded Sizer artifact is missing %s.\n' "$archive_name" >&2
       return 1
     fi
+    printf '%s  %s\n' "$archive_sha" "$archive" | sha256sum --check --status
     tar -xzf "$archive" -C "$download_dir"
     source_root="$(find "$download_dir" -type f -path '*/src/sizer_os.tcl' -printf '%h\n' | sed 's#/src$##' | head -n 1)"
   fi

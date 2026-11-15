@@ -1,49 +1,43 @@
-"""PDK evidence shared by optimization and replay calibration."""
+"""Consume ECC's resolved PDK evidence; never guess process paths or sites."""
 
+import json
 import re
 from pathlib import Path
 
-from ecos_agent.hashing import artifact_fingerprint, canonical_sha256, file_sha256
+from ecos_agent.hashing import file_sha256
 
 
-def _cell_views(root: Path, suffix: str) -> list[Path]:
-    return sorted((root / "IP" / "STD_cell").rglob(f"*{suffix}"))
+def _context(workspace: Path) -> dict:
+    path = workspace / "home" / "ecc-pdk-context.json"
+    try:
+        context = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError("resolved PDK context is unavailable; recreate the workspace with ECC") from exc
+    if not isinstance(context, dict) or context.get("schema_version") != 1:
+        raise ValueError("unsupported resolved PDK context")
+    digest = context.get("content_digest")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError("invalid PDK content digest")
+    return context
 
 
-def pdk_fingerprint(root: Path) -> str:
-    """Bind calibration to technology and cells using the shared large-file policy."""
-    tech = root / "prtech/techLEF/N551P6M_ecos.lef"
-    paths = [tech, *_cell_views(root, ".lef"), *_cell_views(root, ".lib")]
-    return canonical_sha256(
-        {
-            path.relative_to(root).as_posix(): (
-                artifact_fingerprint(path) if path.suffix == ".lib" else file_sha256(path)
-            )
-            for path in paths
-        }
-    )
+def pdk_fingerprint(workspace: Path) -> str:
+    """Verify all locked resources and return ECC's complete content identity."""
+    context = _context(workspace)
+    root = Path(context["resource_root"]).resolve()
+    resources = context.get("resources")
+    if not isinstance(resources, dict) or not resources:
+        raise ValueError("PDK resource evidence is unavailable")
+    for resource in resources.values():
+        path = (root / resource["path"]).resolve()
+        if not path.is_relative_to(root) or file_sha256(path).removeprefix("sha256:") != resource["sha256"]:
+            raise ValueError("PDK content differs from the resolved workspace context")
+    return "sha256:" + context["content_digest"]
 
 
-def site_width_dbu(root: Path) -> int:
-    """Read units from technology LEF and prefer the v2 standard-cell site."""
-    tech = (root / "prtech/techLEF/N551P6M_ecos.lef").read_text(encoding="utf-8")
-    units = re.search(r"DATABASE\s+MICRONS\s+(\d+)", tech, re.IGNORECASE)
-    cell_text = "\n".join(path.read_text(encoding="utf-8") for path in _cell_views(root, ".lef"))
-    site = re.search(
-        r"SITE\s+SC9T_site\b(?P<body>.*?)END\s+SC9T_site\b",
-        cell_text,
-        re.IGNORECASE | re.DOTALL,
-    )
-    if site is None:
-        site = re.search(
-            r"SITE\s+(?P<name>core7|CoreSite)\b(?P<body>.*?)END\s+(?P=name)\b",
-            tech,
-            re.IGNORECASE | re.DOTALL,
-        )
-    size = re.search(r"SIZE\s+([0-9]+(?:\.[0-9]+)?)\s+BY", site["body"] if site else "", re.IGNORECASE)
-    if units is None or size is None:
+def site_width_dbu(workspace: Path) -> int:
+    """Use ECC's selected site and unit conversion, not a second LEF parser."""
+    width = _context(workspace).get("site_width_dbu")
+    if type(width) is not int or width <= 0:
         raise ValueError("PDK site width is unavailable")
-    width = round(int(units[1]) * float(size[1]))
-    if width <= 0:
-        raise ValueError("PDK site width is invalid")
     return width

@@ -9,13 +9,14 @@ export interface PdkInstallationRecord {
   root: string
   ownership: PdkOwnership
   registrySha256: string | null
+  contentDigest?: string
 }
 
 export interface PdkInstallationSnapshot extends PdkInstallationRecord {
   readiness: PdkReadiness
   reason: string | null
   supportsEccDefaults: boolean
-  /** Present only when ECC's built-in resource files have passed validation. */
+  /** Present only when the selected description's resource files have passed validation. */
   defaultResources?: ManualPdkConfiguration
 }
 
@@ -65,4 +66,25 @@ export interface PdkResolveBindingRequest extends PdkProjectRequest {
 
 export interface PdkWorkspaceValidationRequest extends PdkProjectRequest {
   requirement: PdkRequirement
+}
+
+export interface PdkConfigureRequest {
+  action:
+    | 'schema'
+    | 'init'
+    | 'discover'
+    | 'show'
+    | 'set'
+    | 'validate'
+    | 'resolve'
+    | 'library-list'
+    | 'library-default'
+  root?: string
+  descriptionPath?: string
+  familyId?: string
+  field?: string
+  value?: unknown
+  expectedRevision?: string
+  installationId?: string
+  client?: 'ecc' | 'studio'
 }

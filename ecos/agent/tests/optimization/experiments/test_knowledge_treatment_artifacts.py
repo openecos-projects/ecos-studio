@@ -294,6 +294,9 @@ def test_phase8_runner_rejects_workspace_input_drift(tmp_path) -> None:
         "SITE core7\n  SIZE 1 BY 1 ;\nEND core7\n",
         encoding="utf-8",
     )
+    (workspace / "home/ecc-pdk-context.json").write_text(json.dumps({
+        "schema_version": 1, "content_digest": "a" * 64, "site_width_dbu": 1,
+    }))
     (workspace / "origin/rtl/top.v").write_text(
         "module top; endmodule\n", encoding="utf-8"
     )

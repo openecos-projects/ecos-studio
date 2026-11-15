@@ -130,6 +130,7 @@ def test_phase8_runner_uses_gui_origin_for_canonical_flow(tmp_path, monkeypatch)
         def close(self) -> None:
             pass
 
+    monkeypatch.setattr(runner, "_site_width_dbu_from_pdk", lambda _root: 1)
     monkeypatch.setattr(runner, "EccContentLengthRpcClient", FakeClient)
     monkeypatch.setattr(runner, "ecc_rpc_serve_executable", lambda: tmp_path / "ecc")
     monkeypatch.setattr(runner, "_verify_workspace_binding", lambda *_args: None)

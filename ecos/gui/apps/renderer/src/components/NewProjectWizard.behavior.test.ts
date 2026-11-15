@@ -954,6 +954,58 @@ describe('NewProjectWizard behavior', () => {
     wrapper.unmount()
   })
 
+  it('allows an ECC-described Liberty-only package for synthesis', async () => {
+    wizardMocks.importedPdks.value = [
+      {
+        id: 'pdk:generic:local:synthesis',
+        name: 'Synthesis library',
+        path: '/pdks/generic',
+        description: '',
+        techNode: '',
+        pdkId: 'generic',
+        importedAt: '',
+        source: 'imported',
+        version: '1',
+        readiness: 'ready',
+        supportsEccDefaults: true,
+        defaultResources: {
+          techLef: '',
+          cellLefs: [],
+          liberty: ['/pdks/generic/cells.lib'],
+        },
+      },
+    ]
+    const wrapper = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          pdk: 'generic',
+          pdk_installation_id: 'pdk:generic:local:synthesis',
+        },
+      },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    const wizard = wrapper.vm as unknown as {
+      canProceed: boolean
+      currentStep: number
+      flowStartStep: string
+      flowEndStep: string
+      ensurePdksLoaded(): Promise<void>
+    }
+    await wizard.ensurePdksLoaded()
+    wizard.flowStartStep = 'Synthesis'
+    wizard.flowEndStep = 'Synthesis'
+    wizard.currentStep = 6
+    await flushPromises()
+    expect(wizard.canProceed).toBe(true)
+    wrapper.unmount()
+  })
+
   it('blocks Manual configuration until every resource category is selected', async () => {
     wizardMocks.importedPdks.value = [
       {

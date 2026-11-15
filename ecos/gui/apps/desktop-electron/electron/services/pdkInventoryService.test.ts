@@ -44,6 +44,26 @@ describe('PdkInventoryService', () => {
       inventoryPath: join(root, 'inventory.json'),
       managedRoot: join(root, 'managed'),
     })
+    service.setConfigurationService({
+      configure: async ({ action }) =>
+        action === 'resolve'
+          ? { content_digest: 'a'.repeat(64) }
+          : action === 'show'
+            ? {
+                resolved_resources: Object.fromEntries([
+                  [tech, { role: 'tech', path: join(pdkRoot, tech) }],
+                  ...cellLefs.map((file) => [
+                    file,
+                    { role: 'lef', path: join(pdkRoot, file) },
+                  ]),
+                  ...liberty.map((file) => [
+                    file,
+                    { role: 'liberty', path: join(pdkRoot, file) },
+                  ]),
+                ]),
+              }
+            : { diagnostics: [] },
+    })
     const installation = await service.importInstallation({
       displayName: 'ICS55',
       familyId: 'ics55',
@@ -85,7 +105,7 @@ describe('PdkInventoryService', () => {
     await expect(service.listInstallations()).resolves.toEqual([
       expect.objectContaining({
         id: imported.id,
-        readiness: 'invalid',
+        readiness: 'unverified',
         root: pdkRoot,
       }),
     ])

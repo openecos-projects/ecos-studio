@@ -518,6 +518,7 @@ export type {
   PdkBinding,
   PdkBindRequest,
   PdkImportRequest,
+  PdkConfigureRequest,
   PdkInstallationRecord,
   PdkInstallationSnapshot,
   PdkLocateRequest,

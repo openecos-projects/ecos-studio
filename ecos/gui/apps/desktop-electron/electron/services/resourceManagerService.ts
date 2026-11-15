@@ -473,7 +473,8 @@ export class ResourceManagerService {
     this.cacheDir = options.cacheDir ?? join(xdgCacheHome(), 'ecos-studio')
     this.manifestPath = join(this.resourcesDir, 'manifest.json')
     this.pdkInventoryService = new PdkInventoryService({
-      inventoryPath: join(this.resourcesDir, 'pdk-inventory.json'),
+      inventoryPath:
+        process.env.ECC_PDK_INVENTORY ?? join(this.resourcesDir, 'pdk-inventory.json'),
       legacyManifestPath: this.manifestPath,
       managedRoot: this.pdksDir,
       jsonWriter: options.pdkInventoryWriter,
@@ -1390,6 +1391,11 @@ export class ResourceManagerService {
     })
   }
 
+  private async validateScannedPdk(root: string): Promise<string> {
+    const result = await this.pdkInventoryService.validateRoot(root)
+    return result.readiness === 'ready' ? 'ok' : result.readiness
+  }
+
   async validatePdkRootForWorkspace(pdkRoot: string): Promise<void> {
     if (!pdkRoot.trim()) throw new Error('PDK path is missing')
     const canonicalRoot = await realpath(resolve(pdkRoot))
@@ -1397,14 +1403,14 @@ export class ResourceManagerService {
       (candidate) => candidate.root === canonicalRoot,
     )
     if (installation) {
-      if (installation.readiness === 'missing' || installation.readiness === 'invalid') {
+      if (installation.readiness !== 'ready') {
         throw new Error(`PDK validation failed for ${installation.familyId}`)
       }
       return
     }
 
     const scanned = await scanPdkDirectory(canonicalRoot)
-    if ((await validateScannedPdk(scanned)) !== 'ok') {
+    if ((await this.validateScannedPdk(scanned.canonicalPath)) !== 'ok') {
       throw new Error(`PDK validation failed for ${scanned.pdkId}`)
     }
   }
@@ -2112,7 +2118,7 @@ export class ResourceManagerService {
       throwIfAborted(signal)
 
       const scanned = await scanPdkDirectory(tempExtract)
-      const health = await validateScannedPdk({ ...scanned, pdkId })
+      const health = await this.validateScannedPdk(scanned.canonicalPath)
       throwIfAborted(signal)
       if (health !== 'ok') {
         throw new Error(`PDK validation failed for ${pdkId} v${version}`)
@@ -3351,7 +3357,7 @@ export class ResourceManagerService {
             ...scanned.detectedFiles.files,
           ]
           entry.detected_file_groups = scanned.detectedFiles
-          entry.health = await validateScannedPdk({ ...scanned, pdkId })
+          entry.health = await this.validateScannedPdk(scanned.canonicalPath)
         } else {
           entry.canonical_path = versionRoot
           entry.detected_files = []
@@ -3367,7 +3373,7 @@ export class ResourceManagerService {
             ...scanned.detectedFiles.files,
           ]
           entry.detected_file_groups = scanned.detectedFiles
-          entry.health = await validateScannedPdk({ ...scanned, pdkId })
+          entry.health = await this.validateScannedPdk(scanned.canonicalPath)
         } catch {
           entry.health = 'missing'
         }
@@ -3418,7 +3424,7 @@ export class ResourceManagerService {
             imported_at: utcNowIso(),
             active: false,
             managed: true,
-            health: await validateScannedPdk({ ...scanned, pdkId }),
+            health: await this.validateScannedPdk(scanned.canonicalPath),
           }
         }
       }
@@ -4924,29 +4930,6 @@ function withUpdateCheckHealth(
       stale: isUpdateCheckStale(updateCheck.checked_at, Date.now()),
     },
   }
-}
-
-function isKnownPdk(pdkId: string): boolean {
-  return pdkId === 'ics55'
-}
-
-async function validateScannedPdk(scanned: {
-  pdkId: string
-  detectedFiles: { directories: string[]; files: string[] }
-}): Promise<string> {
-  if (!isKnownPdk(scanned.pdkId)) return 'ok'
-  const required = [
-    'prtech/techLEF/N551P6M_ecos.lef',
-    'IP/STD_cell/ICsprout55_SC9T_BASIC_HVT/lef/ICsprout55_9THVT_basic.lef',
-    'IP/STD_cell/ICsprout55_SC9T_BASIC_LVT/lef/ICsprout55_9TLVT_basic.lef',
-    'IP/STD_cell/ICsprout55_SC9T_BASIC_SVT/lef/ICsprout55_9TSVT_basic.lef',
-    'IP/STD_cell/ICsprout55_SC9T_BASIC_HVT/liberty/ICsprout55_9THVT_ss_v1p08_125c_basic_nldm.lib',
-    'IP/STD_cell/ICsprout55_SC9T_BASIC_LVT/liberty/ICsprout55_9TLVT_ss_v1p08_125c_basic_nldm.lib',
-    'IP/STD_cell/ICsprout55_SC9T_BASIC_SVT/liberty/ICsprout55_9TSVT_ss_v1p08_125c_basic_nldm.lib',
-  ]
-  return required.every((file) => scanned.detectedFiles.files.includes(file))
-    ? 'ok'
-    : 'invalid'
 }
 
 function mpcHealth(entry: MpcInventoryEntry): Record<string, unknown> {

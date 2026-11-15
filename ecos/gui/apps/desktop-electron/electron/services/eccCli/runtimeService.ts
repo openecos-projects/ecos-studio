@@ -411,6 +411,8 @@ export class EccCliRuntimeService {
       throw new Error('Workspace creation requires an existing Project root.')
     }
     const requestedProjectRoot = resolve(request.projectRoot)
+    // Reject legacy technology overrides before creating any project files.
+    projectSettingsArgs(request)
     const initArgs = projectInitArgs(request, requestedProjectRoot)
     if (initArgs) await this.cli.run(initArgs)
     const projectRoot = await realpath(requestedProjectRoot)
@@ -1989,6 +1991,16 @@ export function projectSettingsArgs(
     return []
   }
   const pdkConfig = request.eccPdkConfig
+  if (
+    pdkConfig?.overrides &&
+    Object.values(pdkConfig.overrides).some((value) =>
+      Array.isArray(value) ? value.length > 0 : Boolean(value),
+    )
+  ) {
+    throw new Error(
+      'PDK resources belong to ecc-pdk.json. Configure a separate PDK profile before creating a project.',
+    )
+  }
   // design.rtl is intentionally absent: RTL sources are imported into the
   // project rtl/ directory by `ecc rtl import` (see workspaceCreateRtlImport)
   // and ECC materializes workspaces from the project's ecc.toml.
@@ -2003,9 +2015,6 @@ export function projectSettingsArgs(
     ...set('pdk.name', pdk.familyId),
     ...set('pdk.root', pdkBindings.root),
     ...set('pdk.external_paths', pdkConfig?.externalPaths),
-    ...set('pdk.overrides.tech', pdkConfig?.overrides?.tech),
-    ...set('pdk.overrides.lefs', pdkConfig?.overrides?.lefs),
-    ...set('pdk.overrides.libs', pdkConfig?.overrides?.libs),
     ...set('flow.preset', flow.flowId),
   ]
 }
@@ -2026,6 +2035,10 @@ export function projectInitArgs(
     request.projectName?.trim() || basename(requestedProjectRoot),
     '--design-name',
     requireString(design.name),
+    '--pdk-default-client',
+    'studio',
+    '--pdk-root',
+    requireString(requireRecord(request.workspaceBindings.pdk).root),
   ]
   if (request.projectMpc) {
     args.push(
@@ -2055,6 +2068,8 @@ export function projectManifestCreateArgs(
     requireString(mutation.name),
     '--design-name',
     requireString(mutation.designName),
+    '--pdk-default-client',
+    'studio',
   ]
   if (mutation.mpc === undefined || mutation.mpc === null) return args
   const mpc = requireRecord(mutation.mpc)

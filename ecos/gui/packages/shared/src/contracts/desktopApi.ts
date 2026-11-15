@@ -36,6 +36,7 @@ import type { DesktopShutdownApi } from './shutdown.ts'
 import type {
   PdkBinding,
   PdkImportRequest,
+  PdkConfigureRequest,
   PdkInstallationSnapshot,
   PdkLocateRequest,
   PdkResolveBindingRequest,
@@ -463,6 +464,7 @@ export interface DesktopApi {
     ): DesktopEventUnsubscribe
   }
   pdkInventory: {
+    configure(request: PdkConfigureRequest): Promise<Record<string, unknown>>
     list(): Promise<PdkInstallationSnapshot[]>
     import(request: PdkImportRequest): Promise<PdkInstallationSnapshot>
     locate(request: PdkLocateRequest): Promise<PdkInstallationSnapshot>

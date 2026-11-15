@@ -150,12 +150,10 @@ export async function prepareDesign(workRoot: string): Promise<E2EDesign> {
   const design = await (designDir
     ? prepareDesignProject(designDir, workRoot)
     : prepareGcdProject(workRoot))
-  if (design.parameters['emir.technology_file_path'] == null) {
-    design.parameters['emir.technology_file_path'] = join(
-      repoRoot,
-      'ecc/test/fixtures/emir/ics55_synthetic.tech',
+  if (design.parameters['emir.technology_file_path'] != null) {
+    throw new Error(
+      'Declare EM data in the test PDK descriptor instead of workspace parameters.',
     )
-    console.warn('EMIR uses synthetic process data for flow testing, not signoff.')
   }
   return design
 }

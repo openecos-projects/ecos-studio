@@ -272,6 +272,12 @@ const desktopBridge = {
     onUpdatesDetected: () => () => undefined,
   },
   pdkInventory: {
+    configure: vi.fn(async () => ({
+      descriptor: {
+        family_id: pdkInstallation.familyId,
+        release: pdkInstallation.version ?? '',
+      },
+    })),
     list: listPdkInstallations,
     import: importPdkInstallation,
     locate: async () => pdkInstallation,
@@ -409,6 +415,7 @@ describe('usePdkManager', () => {
     expect(importPdkInstallation).toHaveBeenCalledWith({
       displayName: 'ics55',
       familyId: 'ics55',
+      version: '',
       root: '/tmp/pdk',
     })
     expect(importedPdks.value).toEqual([
@@ -455,7 +462,8 @@ describe('usePdkManager', () => {
     expect(imported).not.toBeNull()
     expect(importPdkInstallation).toHaveBeenCalledWith({
       displayName: 'Vendor Demo',
-      familyId: 'vendor_demo',
+      familyId: 'ics55', // Display-name edits must not change the descriptor identity.
+      version: '',
       root: '/tmp/pdk',
     })
   })

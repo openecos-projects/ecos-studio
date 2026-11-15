@@ -93,8 +93,10 @@ repeat that matrix. The optional signoff-lit test is explicitly skipped when
 Desktop E2E uses ECC CI's `ubuntu-latest` runner and the OSS CAD Suite release
 and Kepler artifact recorded in `.github/ecc-ci-toolchain.json`. The ECC
 bundle, PDK, and Sizer all come from the same workflow run for the exact
-pinned ECC commit. Designs without an EMIR technology file use ECC's
-synthetic ICS55 fixture for flow testing; it is not foundry signoff data.
+pinned ECC commit. The E2E helper creates a separate description-backed PDK fixture when the
+source package has no EM model, explicitly declaring ECC's synthetic ICS55 EM
+resource. It does not mutate the source PDK or override a project's frozen
+configuration. This is flow testing, not foundry signoff data.
 The GUI journey also verifies reproducible CLI export against its completed
 GCD workspace. Each journey uploads `e2e-flow-workspace-gcd-<journey>`.
 The `Product E2E` summary requires all three journeys to succeed and keeps the stable check name

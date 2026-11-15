@@ -296,7 +296,9 @@ def _verify_workspace_parameters(
     cts = _workspace_json(workspace, "config/cts_ecc.json")
     floorplan = _workspace_json(workspace, "config/floorplan_ecc.json")
     baseline = manifest.baseline
-    site_width = _site_width_dbu_from_pdk(manifest.pdk_root)
+    from ecos_agent.optimization.pdk_evidence import site_width_dbu
+
+    site_width = site_width_dbu(workspace)
     expected_parameters = {
         "design": design.design_id,
         "top_module": design.top_module,
@@ -622,9 +624,16 @@ def _wait_operation(
 
 
 def _site_width_dbu_from_pdk(pdk_root: Path) -> int:
-    from ecos_agent.optimization.pdk_evidence import site_width_dbu
-
-    return site_width_dbu(pdk_root)
+    # Offline experiment runner only; product Agent execution remains host-owned.
+    result = subprocess.run(
+        [str(ecc_rpc_serve_executable()), "pdk", "configure", "resolve", "--root", str(pdk_root)],
+        check=True, capture_output=True, text=True, timeout=120,
+    )
+    context = json.loads(result.stdout)
+    width = context.get("site_width_dbu")
+    if context.get("schema_version") != 1 or type(width) is not int or width <= 0:
+        raise ValueError("resolved PDK site width is unavailable")
+    return width
 
 
 def _write_json(path: Path, payload: object) -> None:

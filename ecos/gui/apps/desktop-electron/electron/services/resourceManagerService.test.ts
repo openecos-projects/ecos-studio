@@ -19,7 +19,19 @@ import {
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { writeJsonAtomic } from './pdkInventoryMigration'
-import { ResourceManagerService } from './resourceManagerService'
+import { ResourceManagerService as ResourceManagerImplementation } from './resourceManagerService'
+import { fixturePdkConfiguration } from './pdkConfigurationFixture'
+
+class ResourceManagerService extends ResourceManagerImplementation {
+  constructor(
+    options: ConstructorParameters<typeof ResourceManagerImplementation>[0] = {},
+  ) {
+    super(options)
+    this.getPdkInventoryService().setConfigurationService({
+      configure: fixturePdkConfiguration,
+    })
+  }
+}
 
 const tempDirectories: string[] = []
 
@@ -5508,11 +5520,11 @@ describe('ResourceManagerService', () => {
     })
 
     const managed = await service.getResource('pdk:demo:managed:1.0.0')
-    expect(managed).toMatchObject({ status: 'installed', source: 'registry' })
+    expect(managed).toMatchObject({ status: 'invalid', source: 'registry' })
     expect(managed.checksum_missing).toBe(true)
 
     const imported = await service.getResource('pdk:demo:local:imported')
-    expect(imported).toMatchObject({ status: 'installed', source: 'local' })
+    expect(imported).toMatchObject({ status: 'invalid', source: 'local' })
     expect(imported.checksum_missing).toBeUndefined()
   })
 

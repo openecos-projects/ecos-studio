@@ -412,6 +412,8 @@ const desktopApi: DesktopApi = {
       ),
   },
   pdkInventory: {
+    configure: (request) =>
+      invokeDesktop(desktopApiIpcChannels.pdkInventoryConfigure, request),
     list: () => invokeDesktop(desktopApiIpcChannels.pdkInventoryList),
     import: (request) => invokeDesktop(desktopApiIpcChannels.pdkInventoryImport, request),
     locate: (request) => invokeDesktop(desktopApiIpcChannels.pdkInventoryLocate, request),

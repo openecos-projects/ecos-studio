@@ -146,6 +146,7 @@
     <WorkspaceSnapshotRecoveryDialog />
 
     <ResourceStalenessDialog />
+    <PdkConfigurationDialog />
 
     <Dialog
       :visible="pdkNameDialogVisible"
@@ -290,6 +291,7 @@ import WorkspaceWizard from '@/components/WorkspaceWizard.vue'
 import DesignFilesManageDialog from '@/components/DesignFilesManageDialog.vue'
 import WorkspaceSnapshotRecoveryDialog from '@/components/WorkspaceSnapshotRecoveryDialog.vue'
 import ResourceStalenessDialog from '@/components/ResourceStalenessDialog.vue'
+import PdkConfigurationDialog from '@/components/PdkConfigurationDialog.vue'
 import WorkspaceStepConfigDialog from '@/components/WorkspaceStepConfigDialog.vue'
 import type { WorkspaceConfig } from '@/types'
 import {

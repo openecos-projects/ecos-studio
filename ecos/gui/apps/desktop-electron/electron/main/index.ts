@@ -12,6 +12,7 @@ import { handleSecondInstance } from '../services/appSecondInstance'
 import { createAgentRuntimeFromEnvironment } from '../services/agent/agentProviderRuntimeFactory'
 import { CodexDependencyService } from '../services/agent/codexDependencyService'
 import { ModelProfileService } from '../services/agent/modelProfileService'
+import { PdkConfigurationService } from '../services/pdkConfigurationService'
 import { AppInfoService } from '../services/appInfoService'
 import { EccCliCommandError, EccCliProcess } from '../services/eccCli/cliProcess'
 import {
@@ -117,6 +118,7 @@ let services: {
   resourceManagerService: ResourceManagerService
   resourceUpdateScheduler: ResourceUpdateScheduler
   pdkInventoryService: PdkInventoryService
+  pdkConfigurationService: PdkConfigurationService
   projectEccConfigService: ProjectEccConfigService
   chipViewerService: ChipViewerService
   shellService: ShellPtyService
@@ -221,7 +223,12 @@ function getDesktopServices() {
       return windows.length > 0
     },
   })
+  const pdkConfigurationService = new PdkConfigurationService({
+    resolveCommand: () => resolveDurableEccExecutable(eccRuntimeOptions),
+    envProvider: () => runtimeEnvProvider(),
+  })
   const pdkInventoryService = resourceManagerService.getPdkInventoryService()
+  pdkInventoryService.setConfigurationService(pdkConfigurationService)
   const cliInstallerService = new CliInstallerService({
     resourceManager: resourceManagerService,
     env: process.env,
@@ -455,6 +462,7 @@ function getDesktopServices() {
     quickStartResourceService,
     projectDoctorService,
     pdkInventoryService,
+    pdkConfigurationService,
     projectEccConfigService,
     resourceManagerService,
     resourceUpdateScheduler,

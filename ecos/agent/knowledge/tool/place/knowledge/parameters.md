@@ -61,6 +61,48 @@
 
 **Role:** It selects a predefined joint schedule and validates its required parameter combination.
 
+<a id="parameter.dreamplace.joint_alternating_outer_rounds"></a>
+## parameter.dreamplace.joint_alternating_outer_rounds
+
+**Meaning:** outer rounds for the discrete alternating sizing/buffering profile
+
+**Role:** Configured through the DreamPlace adapter; consult the linked tool source for backend constraints.
+
+<a id="parameter.dreamplace.joint_alternating_sizing_rounds"></a>
+## parameter.dreamplace.joint_alternating_sizing_rounds
+
+**Meaning:** discrete sizing rounds before each candidate buffering round
+
+**Role:** Configured through the DreamPlace adapter; consult the linked tool source for backend constraints.
+
+<a id="parameter.dreamplace.joint_alternating_sizing_shared_budget_percent"></a>
+## parameter.dreamplace.joint_alternating_sizing_shared_budget_percent
+
+**Meaning:** shared sizing budget percentage for the alternating profile
+
+**Role:** Configured through the DreamPlace adapter; consult the linked tool source for backend constraints.
+
+<a id="parameter.dreamplace.joint_alternating_buffering_rounds"></a>
+## parameter.dreamplace.joint_alternating_buffering_rounds
+
+**Meaning:** candidate buffering rounds after each sizing block
+
+**Role:** Configured through the DreamPlace adapter; consult the linked tool source for backend constraints.
+
+<a id="parameter.dreamplace.joint_alternating_buffering_selection_fraction"></a>
+## parameter.dreamplace.joint_alternating_buffering_selection_fraction
+
+**Meaning:** fraction of eligible nets selected by each candidate buffering round
+
+**Role:** Configured through the DreamPlace adapter; consult the linked tool source for backend constraints.
+
+<a id="parameter.dreamplace.joint_alternating_buffer_commit_policy"></a>
+## parameter.dreamplace.joint_alternating_buffer_commit_policy
+
+**Meaning:** physical buffer commit policy for the alternating profile
+
+**Role:** Configured through the DreamPlace adapter; consult the linked tool source for backend constraints.
+
 <a id="parameter.dreamplace.buffering_fixed_buffer_master"></a>
 ## parameter.dreamplace.buffering_fixed_buffer_master
 
@@ -817,12 +859,54 @@
 
 **Role:** It bounds continuous sizing before discrete refinement; zero disables the continuous phase.
 
+<a id="parameter.dreamplace.diff_sizing_terminal_gr_sta_enabled"></a>
+## parameter.dreamplace.diff_sizing_terminal_gr_sta_enabled
+
+**Meaning:** The terminal global-routing STA switch for differential sizing.
+
+**Role:** Enables a final timing evaluation using global-routing parasitics.
+
 <a id="parameter.dreamplace.diff_sizing_coefficients"></a>
 ## parameter.dreamplace.diff_sizing_coefficients
 
 **Meaning:** The differential-sizing WNS, TNS, capacitance, and slew coefficients.
 
 **Role:** It weights the continuous sizing objective in the standalone diff-sizing profile.
+
+<a id="parameter.dreamplace.diff_sizing_timing_rc_mode"></a>
+## parameter.dreamplace.diff_sizing_timing_rc_mode
+
+**Meaning:** standalone diff_sizing timing RC source; placement uses the placement parasitics and gr uses the frozen GR snapshot
+
+**Role:** Configured through the DreamPlace adapter; consult the linked tool source for backend constraints.
+
+<a id="parameter.dreamplace.diff_sizing_optimization_flows"></a>
+## parameter.dreamplace.diff_sizing_optimization_flows
+
+**Meaning:** ordered standalone diff_sizing phases: [action, rounds, [wns, tns, slew, cap], selection_percent]; action is quad, up, or down and percent is in (0, 100]; null selects a quad phase; ECC defaults to 50 rounds with diff_sizing_coefficients and a shared 1% budget per round
+
+**Role:** Configured through the DreamPlace adapter; consult the linked tool source for backend constraints.
+
+<a id="parameter.dreamplace.diff_buffering_rounds"></a>
+## parameter.dreamplace.diff_buffering_rounds
+
+**Meaning:** The differential buffering round limit.
+
+**Role:** Limits repeated buffer candidate optimization rounds.
+
+<a id="parameter.dreamplace.diff_buffering_selection_fraction"></a>
+## parameter.dreamplace.diff_buffering_selection_fraction
+
+**Meaning:** The fraction of differential buffer candidates selected per round.
+
+**Role:** Bounds the committed buffer actions.
+
+<a id="parameter.dreamplace.diff_buffering_coefficients"></a>
+## parameter.dreamplace.diff_buffering_coefficients
+
+**Meaning:** The differential buffering objective weights.
+
+**Role:** Weights WNS, TNS, capacitance and slew in the buffer selection objective.
 
 <a id="parameter.dreamplace.timing_placement_carrier"></a>
 ## parameter.dreamplace.timing_placement_carrier
@@ -929,6 +1013,27 @@
 
 **Role:** It selects automatic, mixed, LUT-only, or surrogate-only timing evaluation.
 
+<a id="parameter.dreamplace.timing_action_gradient_mode"></a>
+## parameter.dreamplace.timing_action_gradient_mode
+
+**Meaning:** discrete sizing gradient mode; default lut_action, off is the legacy path
+
+**Role:** Configured through the DreamPlace adapter; consult the linked tool source for backend constraints.
+
+<a id="parameter.dreamplace.timing_sizing_action"></a>
+## parameter.dreamplace.timing_sizing_action
+
+**Meaning:** action family for placement sizing windows and diff_opt sizing: up | down | quad; explicit diff_sizing phase masks take precedence
+
+**Role:** Configured through the DreamPlace adapter; consult the linked tool source for backend constraints.
+
+<a id="parameter.dreamplace.timing_action_score_objective"></a>
+## parameter.dreamplace.timing_action_score_objective
+
+**Meaning:** objective differentiated for the local LUT action score; loss uses diff_sizing_coefficients, tns/wns select a single timing metric
+
+**Role:** Configured through the DreamPlace adapter; consult the linked tool source for backend constraints.
+
 <a id="parameter.dreamplace.timing_topology_refresh_interval"></a>
 ## parameter.dreamplace.timing_topology_refresh_interval
 
@@ -964,12 +1069,47 @@
 
 **Role:** It controls how closely smooth aggregation approaches hard maxima and minima.
 
+<a id="parameter.dreamplace.timing_metric_scope"></a>
+## parameter.dreamplace.timing_metric_scope
+
+**Meaning:** max timing checks used by placement WNS/TNS: setup_only or setup_plus_recovery
+
+**Role:** Configured through the DreamPlace adapter; consult the linked tool source for backend constraints.
+
+<a id="parameter.dreamplace.timing_propagation_device"></a>
+## parameter.dreamplace.timing_propagation_device
+
+**Meaning:** TimingPropagation device: inherit the placement device, or explicitly use cpu/cuda
+
+**Role:** Configured through the DreamPlace adapter; consult the linked tool source for backend constraints.
+
 <a id="parameter.dreamplace.timing_grad_balance_target_ratio"></a>
 ## parameter.dreamplace.timing_grad_balance_target_ratio
 
 **Meaning:** The target timing-to-wirelength gradient balance.
 
 **Role:** It balances weighted timing and wirelength gradient norms; zero disables automatic balancing.
+
+<a id="parameter.dreamplace.timing_grad_balance_reset_on_restart"></a>
+## parameter.dreamplace.timing_grad_balance_reset_on_restart
+
+**Meaning:** reset and reinitialize the timing-gradient balance weight after each inflation/GP restart; 0 preserves the current weight
+
+**Role:** Configured through the DreamPlace adapter; consult the linked tool source for backend constraints.
+
+<a id="parameter.dreamplace.diff_optimization_mode"></a>
+## parameter.dreamplace.diff_optimization_mode
+
+**Meaning:** The differential optimization mode.
+
+**Role:** Selects the joint optimization implementation.
+
+<a id="parameter.dreamplace.diff_optimization_flows"></a>
+## parameter.dreamplace.diff_optimization_flows
+
+**Meaning:** The ordered sizing and buffering optimization schedule.
+
+**Role:** Specifies action type, round count and timing objective weights for each optimization window.
 
 <a id="parameter.dreamplace.placement_sizing_mode"></a>
 ## parameter.dreamplace.placement_sizing_mode
@@ -1019,6 +1159,20 @@
 **Meaning:** The enhanced inflation-controller switch.
 
 **Role:** It enables the enhanced outer-loop inflation schedule.
+
+<a id="parameter.dreamplace.inflation_density_weight_scale"></a>
+## parameter.dreamplace.inflation_density_weight_scale
+
+**Meaning:** positive scale for the Xplace-style density-weight restart ratio after inflation; the default 0.001 keeps the restarted density force small, 1.0 uses the normalized gradient ratio directly, and 0.1 reproduces the historical DreamPlace post-restart scale
+
+**Role:** Configured through the DreamPlace adapter; consult the linked tool source for backend constraints.
+
+<a id="parameter.dreamplace.inflation_filler_consumption_mode"></a>
+## parameter.dreamplace.inflation_filler_consumption_mode
+
+**Meaning:** how routability inflation consumes filler: filler_first subtracts the inflation area from filler before raising target density, proportional shrinks filler and non-filler whitespace together, capacity_only preserves the legacy limit-only shrink
+
+**Role:** Configured through the DreamPlace adapter; consult the linked tool source for backend constraints.
 
 <a id="parameter.dreamplace.enhanced_inflation_replay_best_round_flag"></a>
 ## parameter.dreamplace.enhanced_inflation_replay_best_round_flag
@@ -1075,6 +1229,27 @@
 **Meaning:** The buffering representation.
 
 **Role:** It selects the `segment` or `candidate` buffering lane and its matching defaults.
+
+<a id="parameter.dreamplace.buffering_candidate_strategy"></a>
+## parameter.dreamplace.buffering_candidate_strategy
+
+**Meaning:** The candidate buffering strategy.
+
+**Role:** Selects the candidate generation algorithm for buffer optimization.
+
+<a id="parameter.dreamplace.buffering_candidate_drive_type_mode"></a>
+## parameter.dreamplace.buffering_candidate_drive_type_mode
+
+**Meaning:** candidate discrete buffer type selection, single_fixed | four_strength_table
+
+**Role:** Configured through the DreamPlace adapter; consult the linked tool source for backend constraints.
+
+<a id="parameter.dreamplace.buffering_candidate_drive_strength_table"></a>
+## parameter.dreamplace.buffering_candidate_drive_strength_table
+
+**Meaning:** external four-buffer drive-strength table used by typed discrete candidate buffering
+
+**Role:** Configured through the DreamPlace adapter; consult the linked tool source for backend constraints.
 
 <a id="parameter.dreamplace.buffering_segment_strategy"></a>
 ## parameter.dreamplace.buffering_segment_strategy
@@ -1215,3 +1390,10 @@
 **Meaning:** The maximum adaptive L-shape gradient ratio.
 
 **Role:** It caps the routability gradient target during optimization.
+
+<a id="parameter.dreamplace.l_shape_weight_max_multiplier"></a>
+## parameter.dreamplace.l_shape_weight_max_multiplier
+
+**Meaning:** maximum adaptive L-shape weight as a multiple of the first calibrated weight in each calibration epoch; 0 disables the relative cap
+
+**Role:** Configured through the DreamPlace adapter; consult the linked tool source for backend constraints.
