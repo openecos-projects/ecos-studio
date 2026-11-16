@@ -96,24 +96,26 @@ pub struct Delta {
     pub checkpoint: bool,
     #[serde(default)]
     pub base_checkpoint: Option<usize>,
-    pub upsert: BTreeMap<String, Arc<Object>>,
+    pub upsert: Arc<BTreeMap<String, Arc<Object>>>,
     pub remove: Vec<String>,
     #[serde(default)]
     pub translate: BTreeMap<String, [i64; 2]>,
-    pub touched: BTreeSet<String>,
+    pub touched: Arc<BTreeSet<String>>,
     #[serde(default)]
-    pub deleted: BTreeMap<String, Object>,
+    pub deleted: Arc<BTreeMap<String, Object>>,
     #[serde(default)]
-    pub restored: BTreeSet<String>,
+    pub restored: Arc<BTreeSet<String>>,
 }
 
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct Scene {
-    pub objects: BTreeMap<String, Arc<Object>>,
-    pub touched: BTreeSet<String>,
+    // Share immutable tables during worker/UI handoff and checkpoint lookup.
+    // Mutation detaches the ordered map and then only the changed objects.
+    pub objects: Arc<BTreeMap<String, Arc<Object>>>,
+    pub touched: Arc<BTreeSet<String>>,
     pub revision: Option<usize>,
-    pub deleted: BTreeMap<String, Object>,
-    pub restored: BTreeSet<String>,
+    pub deleted: Arc<BTreeMap<String, Object>>,
+    pub restored: Arc<BTreeSet<String>>,
 }
 
 impl Scene {
@@ -134,55 +136,76 @@ impl Scene {
         if delta.checkpoint && !delta.translate.is_empty() {
             return Err("Checkpoint cannot contain translations");
         }
-        let mut translated = Vec::new();
         for (id, [dx, dy]) in &delta.translate {
             if delta.upsert.contains_key(id) || delta.remove.contains(id) {
                 return Err("Conflicting Replay translation");
             }
-            let mut object = self
+            let object = self
                 .objects
                 .get(id)
-                .ok_or("Translation references absent object")?
-                .as_ref()
-                .clone();
+                .ok_or("Translation references absent object")?;
             if !matches!(object.kind.as_str(), "instance" | "macro") {
                 return Err("Only instances can be translated");
             }
             for axis in 0..4 {
-                object.bbox[axis] = object.bbox[axis]
+                object.bbox[axis]
                     .checked_add(if axis % 2 == 0 { *dx } else { *dy })
                     .ok_or("Translation coordinate overflow")?;
             }
             if let Some(pins) = object
                 .attributes
-                .get_mut("pins")
-                .and_then(serde_json::Value::as_object_mut)
+                .get("pins")
+                .and_then(serde_json::Value::as_object)
             {
-                for pin in pins.values_mut() {
+                for pin in pins.values() {
                     for (axis, offset) in [*dx, *dy].into_iter().enumerate() {
                         let coordinate = pin["position"][axis]
                             .as_i64()
                             .ok_or("Invalid pin position")?;
-                        pin["position"][axis] = coordinate
+                        coordinate
                             .checked_add(offset)
-                            .ok_or("Pin translation overflow")?
-                            .into();
+                            .ok_or("Pin translation overflow")?;
                     }
                 }
             }
-            translated.push((id.clone(), Arc::new(object)));
         }
         if delta.checkpoint {
             // A checkpoint already owns a complete ordered map. Move it rather
             // than reinserting every object into another tree on each seek.
             self.objects = delta.upsert;
-        } else {
+        } else if !delta.remove.is_empty() || !delta.upsert.is_empty() {
+            let objects = Arc::make_mut(&mut self.objects);
             for key in delta.remove {
-                self.objects.remove(&key);
+                objects.remove(&key);
             }
-            self.objects.extend(delta.upsert);
+            if !delta.upsert.is_empty() {
+                objects.extend(Arc::unwrap_or_clone(delta.upsert));
+            }
         }
-        self.objects.extend(translated);
+        // All translations have been validated before any mutation. Preserve
+        // shared historical snapshots, but reuse uniquely owned objects across
+        // consecutive deltas instead of copying every pin/attribute each time.
+        if !delta.translate.is_empty() {
+            let objects = Arc::make_mut(&mut self.objects);
+            for (id, [dx, dy]) in delta.translate {
+                let object = Arc::make_mut(objects.get_mut(&id).unwrap());
+                for axis in 0..4 {
+                    object.bbox[axis] += if axis % 2 == 0 { dx } else { dy };
+                }
+                if let Some(pins) = object
+                    .attributes
+                    .get_mut("pins")
+                    .and_then(serde_json::Value::as_object_mut)
+                {
+                    for pin in pins.values_mut() {
+                        for (axis, offset) in [dx, dy].into_iter().enumerate() {
+                            pin["position"][axis] =
+                                (pin["position"][axis].as_i64().unwrap() + offset).into();
+                        }
+                    }
+                }
+            }
+        }
         self.touched = delta.touched;
         self.deleted = delta.deleted;
         self.restored = delta.restored;
@@ -200,7 +223,7 @@ mod tests {
             base_revision: sequence as i64 - 1,
             checkpoint,
             base_checkpoint: None,
-            upsert: BTreeMap::from([(
+            upsert: Arc::new(BTreeMap::from([(
                 "a".into(),
                 Arc::new(Object {
                     kind: "instance".into(),
@@ -211,12 +234,12 @@ mod tests {
                     orient: None,
                     attributes: BTreeMap::new(),
                 }),
-            )]),
+            )])),
             remove: vec![],
             translate: BTreeMap::new(),
-            touched: BTreeSet::from(["a".into()]),
-            deleted: BTreeMap::new(),
-            restored: BTreeSet::new(),
+            touched: Arc::new(BTreeSet::from(["a".into()])),
+            deleted: Default::default(),
+            restored: Default::default(),
         }
     }
     #[test]
@@ -252,6 +275,75 @@ mod tests {
 mod translation_tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn repeated_moves_preserve_shared_history_and_reuse_private_objects() {
+        let initial: Delta = serde_json::from_value(json!({
+            "sequence":0,"base_revision":-1,"checkpoint":true,
+            "upsert":{"a":{"kind":"instance","bbox":[1,2,4,6],
+                "pins":{"A":{"net":"n","position":[2,3]}}}},
+            "remove":[],"touched":[]
+        }))
+        .unwrap();
+        let mut scene = Scene::default();
+        scene.apply(initial).unwrap();
+        let history = scene.clone();
+        for sequence in 1..=3 {
+            let previous = Arc::as_ptr(&scene.objects["a"]);
+            scene
+                .apply(
+                    serde_json::from_value(json!({
+                        "sequence":sequence,"base_revision":sequence-1,"checkpoint":false,
+                        "upsert":{},"translate":{"a":[10,-2]},"remove":[],"touched":["a"]
+                    }))
+                    .unwrap(),
+                )
+                .unwrap();
+            if sequence > 1 {
+                assert_eq!(Arc::as_ptr(&scene.objects["a"]), previous);
+            }
+        }
+        assert_eq!(history.objects["a"].bbox, [1, 2, 4, 6]);
+        assert_eq!(
+            history.objects["a"].attributes["pins"]["A"]["position"],
+            json!([2, 3])
+        );
+        assert_eq!(scene.objects["a"].bbox, [31, -4, 34, 0]);
+        assert_eq!(
+            scene.objects["a"].attributes["pins"]["A"]["position"],
+            json!([32, -3])
+        );
+    }
+
+    #[test]
+    fn late_invalid_pin_or_coordinate_rejects_all_translations() {
+        for pin in [json!([i64::MAX, 0]), json!([null, 0])] {
+            let mut scene = Scene::default();
+            scene
+                .apply(
+                    serde_json::from_value(json!({
+                        "sequence":0,"base_revision":-1,"checkpoint":true,
+                        "upsert":{
+                            "a":{"kind":"instance","bbox":[0,0,1,1]},
+                            "z":{"kind":"instance","bbox":[0,0,1,1],"pins":{"A":{"position":pin}}}
+                        },"remove":[],"touched":[]
+                    }))
+                    .unwrap(),
+                )
+                .unwrap();
+            let before = scene.clone();
+            assert!(scene
+                .apply(
+                    serde_json::from_value(json!({
+                        "sequence":1,"base_revision":0,"checkpoint":false,
+                        "upsert":{},"translate":{"a":[1,1],"z":[1,1]},
+                        "remove":[],"touched":["a","z"]
+                    }))
+                    .unwrap()
+                )
+                .is_err());
+            assert_eq!(scene, before);
+        }
+    }
     #[test]
     fn translated_instances_keep_pins_exact_and_invalid_batch_is_atomic() {
         let mut scene = Scene::default();

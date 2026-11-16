@@ -138,7 +138,7 @@ fn classify(scene: &Scene, delta: &Delta, frames: &[Frame], i: usize) -> (Kind, 
     let mut motion = !removed && i > 0 && compatible_frames(&frames[i - 1], frame);
     let mut groups = BTreeMap::new();
     let mut largest_move = 0.0_f64;
-    for (id, object) in &delta.upsert {
+    for (id, object) in delta.upsert.iter() {
         let old = scene.objects.get(id);
         if old == Some(object) {
             continue;

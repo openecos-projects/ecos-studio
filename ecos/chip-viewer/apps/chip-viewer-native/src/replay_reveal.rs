@@ -60,13 +60,13 @@ impl Reveal {
         {
             return;
         }
-        for (id, old) in &before.objects {
+        for (id, old) in before.objects.iter() {
             if after.objects.get(id) != Some(old) {
                 self.ghosts.push(old.clone());
             }
         }
         let mut groups: BTreeMap<(u8, u32, String), Vec<(&String, &Object)>> = BTreeMap::new();
-        for (id, object) in &after.objects {
+        for (id, object) in after.objects.iter() {
             if before.objects.get(id) == Some(object) {
                 continue;
             }

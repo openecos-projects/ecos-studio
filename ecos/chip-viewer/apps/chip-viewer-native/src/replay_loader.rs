@@ -34,6 +34,8 @@ pub struct Prepared {
     pub index: SceneIndex,
     pub logic: Option<crate::replay_logic::Logic>,
     pub results: Option<ResultAssets>,
+    #[cfg(test)]
+    pub timings_ms: [f64; 4],
 }
 
 pub struct Loaded {
@@ -147,6 +149,8 @@ fn prepare(
     request: &Request,
     alive: &impl Fn() -> bool,
 ) -> anyhow::Result<Prepared> {
+    #[cfg(test)]
+    let started = std::time::Instant::now();
     let mut motion = Motion::default();
     let mut reveal = Reveal::default();
     if request.animate && request.kind != Kind::Hold {
@@ -167,7 +171,11 @@ fn prepare(
         record.seek_frame_if(request.frame, alive)?;
     }
     anyhow::ensure!(alive(), "Seek superseded");
+    #[cfg(test)]
+    let reconstructed = std::time::Instant::now();
     let index = SceneIndex::build(&record.scene, &motion);
+    #[cfg(test)]
+    let indexed = std::time::Instant::now();
     let logic = crate::replay_logic::load(record)?;
     let results = request.results.then(|| {
         let mut maps = crate::replay_maps::ReplayMaps::default();
@@ -191,13 +199,23 @@ fn prepare(
             tree,
         }
     });
+    #[cfg(test)]
+    let assets = std::time::Instant::now();
+    let scene = record.scene.clone();
     Ok(Prepared {
-        scene: record.scene.clone(),
+        scene,
         motion,
         reveal,
         index,
         logic,
         results,
+        #[cfg(test)]
+        timings_ms: [
+            (reconstructed - started).as_secs_f64() * 1000.0,
+            (indexed - reconstructed).as_secs_f64() * 1000.0,
+            (assets - indexed).as_secs_f64() * 1000.0,
+            assets.elapsed().as_secs_f64() * 1000.0,
+        ],
     })
 }
 

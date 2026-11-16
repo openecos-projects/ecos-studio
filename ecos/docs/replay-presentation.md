@@ -68,15 +68,55 @@ cache has an ordinary delta budget (`ECOS_REPLAY_CACHE_MIB`, default 128 MiB,
 cap 512 MiB) and at most two oversized full checkpoints. Their additional byte
 budget is eight times the ordinary budget, capped at 1 GiB; zero disables both.
 Scene/index memory and the input anchor are separate. Immutable object records
-are shared across scenes. The loader pins one immutable input checkpoint and prefetches at most the next
+and their ordered tables, deletion records and highlight sets are shared across
+scenes. A delta validates all translations before mutation, then detaches the
+table and only the changed objects when another snapshot still references them.
+Consecutive private translations reuse objects and pin attributes. This changes
+in-memory ownership only; v1/v2 JSON and gzip captures remain compatible.
+The loader pins one immutable input checkpoint and prefetches at most the next
 compatible movement while the current animation plays. A new seek cancels old
 work; it does not retain every historical scene. Spatial queries exclude unplaced/offscreen geometry.
+The spatial tree sorts compact bounds/slots while object references and names
+stay in a separate stable array. Tests exercise queries across tree partitions
+and swept movement bounds. Highlight membership queries are limited to rendered
+instances/macros; the captured touched set itself remains unchanged.
 
 The 2D canvas retains static meshes and updates dynamic objects in compact
 batches. Full-chip static subpixel vias use pixel coverage; exact geometry is
 retained for zoom/focus and inspection. Dense track grids are hidden at the
 full-chip scale. Cache invalidation follows scene, animation, viewport and focus
 changes. This is separate from the ordinary layout renderer.
+
+### Snapshot ownership contract
+
+`Scene::apply(&mut self, delta: Delta) -> Result<(), &'static str>` preserves
+all existing snapshots. `Scene.objects` and `Delta.upsert` use
+`Arc<BTreeMap<String, Arc<Object>>>`; touched/restored sets and deletion tables
+also use `Arc`. Serde reads/writes the underlying collections, without adding
+JSON wrappers or changing capture schemas, paths, timestamps or cache budgets.
+Referenced checkpoints detach the anchor table before merging their overrides.
+
+Translation validation finishes for the entire batch before any mutation:
+
+| Input | Result |
+| --- | --- |
+| Existing instance/macro with valid coordinates and pins | Move bbox and all pin positions; preserve other attributes |
+| Shared table/object | Detach before mutation; cached input and previous scenes stay unchanged |
+| Private object in consecutive translations | Reuse its allocation and attributes |
+| Absent/non-instance target, upsert/remove conflict, coordinate overflow or invalid pin | Return an error; preserve the complete previous scene |
+| Translation in a checkpoint, unresolved base or non-checkpoint revision gap | Reject before changing geometry or highlights |
+
+Do not move objects while validating successive IDs: a later invalid pin must
+not leave earlier objects moved. Validate all IDs first, then use
+`Arc::make_mut` on the table and changed objects. A full checkpoint shares its
+validated table directly. Metric-only deltas leave the object table shared.
+
+Regression assertions cover snapshot bbox/pins, reuse across private moves,
+late invalid/overflowing pins and complete scene equality after rejection.
+Real-data validation compares sequential and 100 random reconstructions,
+including deleted/restored/touched sets. Tiny-via aggregation tests compare the
+complete mesh: hash accumulation retains pixel coverage and emits sorted pixel
+coordinates for deterministic drawing.
 
 ## Reproducible verification
 
@@ -278,3 +318,69 @@ required before advancing the product's packaged toolchain pin.
 Real installed AES Place capture with GPU animation and instance highlighting:
 
 ![AES Place Replay on the GPU](asset/replay-place-gpu.png)
+
+## Shared-table and compact-index verification (2026-11-16)
+
+The real-window probe now starts its seek timer immediately before the UI
+selection. Reading the manifest solely to choose a test timestamp happens before
+that timer; the application's own validation/reconstruction remains measured.
+Test-only timings separate reconstruction, index building, result assets,
+snapshot handoff and the update that builds the first mesh. These clocks and
+diagnostic fields are absent from production builds.
+
+Final serial GPU probes used an AMD EPYC 9654 host, RTX 4090/Vulkan (driver
+580.82.07), X11 display `:189`, 30 seconds of playback and 100 exact-node seeks:
+
+| Real capture | Frames / final objects | Active interval P95 | CPU+render P95 | Request → GPU readback P95 |
+| --- | --- | --- | --- | --- |
+| AES Place | 66 / 107,942 | 3.6 ms | 0.8 ms | 810.8 ms |
+| AES Route | 18 / 480,821 | 10.6 ms | 5.5 ms | 857.8 ms |
+
+Place was explicitly scoped with `ECOS_REPLAY_TEST_STEP=place`; its catalog also
+contains the preceding five flow steps. Route used its genuine one-step flow.
+No flow or captured data was changed. With corrected timing, the initial Place
+probe measured 1199.8 ms. Before shared tables/compact index work, the Route
+probe with object reuse measured 1178.1 ms. Final worker reconstruction/index
+P95 was 609.1/64.1 ms for Place and 372.8/239.5 ms for Route; snapshot handoff
+rounded to 0.0 ms. First-mesh update P95 remains 146.6/435.6 ms respectively.
+Phase percentiles are independent and must not be added as a total.
+
+These two runs satisfy the ordinary 1 s seek and active-playback 33 ms targets
+for these captures. The 200 ms cached-seek target, new cross-step timing,
+repeated isolated certification and a new peak-memory measurement remain open.
+GPU readback includes screenshot transfer; it is not monitor presentation time.
+The earlier 512 MiB Place cache trial did not improve latency, so the default
+128 MiB budget was retained.
+
+Both captures also passed 100 random full-state comparisons against sequential
+reconstruction, including revision, object attributes/pins, highlights and
+deleted/restored records; frozen assets were verified. Final Rust workspace
+validation passed 479 tests, with 4 opt-in tests ignored by the ordinary run:
+
+```sh
+cargo fmt --all -- --check
+cargo test --workspace -- --test-threads=1
+cargo install --path apps/chip-viewer-native --locked --force --root ~/.local
+```
+
+The opt-in commands above were additionally run for both real captures. Use
+`ECOS_REPLAY_TEST_STEP=place` or `route` to scope real-window measurements without
+changing the workspace flow. Full-state comparison used a temporary Place-only
+launch catalog and the Route catalog. Linux serial testing retains the earlier
+host workaround for parallel 3D GPU tests and still runs those tests.
+
+The Linux owner build and Electron smoke test passed:
+
+```sh
+CHIPCOMPILER_ECC_SIZER_ROOT=~/.local/share/ecc/tools/ecc-sizer/replay-complete-20261116 make build
+cd ecos/gui
+DISPLAY=:189 pnpm run desktop:smoke
+```
+
+Installed, release-target and packaged Native Viewer SHA256 all match
+`1f7061773529a91e4eb2c68013103e64553efecacbfb71c88c87de4bcbb6e230`.
+The version consistency check passed. GUI check/E2E, ECC and native tool suites
+were not repeated for this native-only follow-up; their earlier passing results
+remain recorded above. macOS/Windows builds were not run on this Linux host.
+No persisted data, dependency lock, ECC gitlink or packaged runtime provenance
+pin changed in this follow-up. Existing captures need no EDA rerun.
