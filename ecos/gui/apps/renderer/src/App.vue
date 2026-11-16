@@ -357,6 +357,7 @@ import {
   consumeWorkspaceWizardRequest,
   useWorkspaceWizardRequest,
 } from '@/utils/workspaceNavigation'
+import { normalizeWorkspaceFlowConfig } from '@/utils/workspaceReconfigure'
 
 type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
   managedWorkspaceRoot?: string

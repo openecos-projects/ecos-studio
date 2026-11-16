@@ -45,6 +45,7 @@ const wizardMocks = vi.hoisted(() => {
       pdkVersion: true,
     },
     discovery: {
+      workspaceExecutionConfig: true,
       flowDefinitions: [
         {
           flowId: 'rtl2gds',
@@ -168,6 +169,112 @@ const primevueStubs = {
 }
 
 describe('NewProjectWizard behavior', () => {
+  it.each([true, false])(
+    'preserves execution mode %s across Flow Setup edits',
+    async (mode) => {
+      const wrapper = mount(NewProjectWizard, {
+        props: {
+          initialConfig: {
+            standaloneWorkspace: true,
+            flow_config: {
+              start_step: 'Synthesis',
+              end_step: 'Harden',
+              steps: [],
+              step_subprocess: mode,
+            },
+          },
+        },
+        global: {
+          stubs: {
+            DesignFileTransfer: true,
+            PdkResourcePickerDialog: true,
+            ...primevueStubs,
+          },
+        },
+      })
+      await flushPromises()
+      const wizard = wrapper.vm as unknown as {
+        currentStep: number
+        config: {
+          flow_config: { step_subprocess?: boolean }
+          parameters: Record<string, unknown>
+        }
+      }
+      wizard.currentStep = 4
+      await flushPromises()
+      const control = wrapper.get('#workspace-step-execution')
+      expect((control.element as HTMLSelectElement).value).toBe(String(mode))
+      expect(wizard.config.flow_config.step_subprocess).toBe(mode)
+      await control.setValue(String(!mode))
+      await wrapper.get('[data-flow-step-card="postFloorplan"] button').trigger('click')
+      expect(wizard.config.flow_config.step_subprocess).toBe(!mode)
+      expect(wizard.config.parameters).not.toHaveProperty('step_subprocess')
+      wrapper.unmount()
+    },
+  )
+
+  it('inherits execution mode on derivation until the user chooses an override', async () => {
+    const wrapper = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          standaloneWorkspace: true,
+          source_context: {
+            workspaceId: 'source',
+            workspacePath: '/work/source',
+            step: 'route',
+            startStep: 'filler',
+          },
+        },
+      },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    await flushPromises()
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      config: { flow_config: { step_subprocess?: boolean } }
+    }
+    wizard.currentStep = 4
+    await flushPromises()
+    expect(wizard.config.flow_config).not.toHaveProperty('step_subprocess')
+    const control = wrapper.get('#workspace-step-execution')
+    expect(control.text()).toContain('Inherit source workspace')
+    await control.setValue('false')
+    expect(wizard.config.flow_config.step_subprocess).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('omits execution options when ECC does not advertise support', async () => {
+    const model = wizardMocks.defaultWorkspaceCreationModel()
+    model.discovery.workspaceExecutionConfig = false
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValueOnce(model)
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { standaloneWorkspace: true } },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    await flushPromises()
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      config: { flow_config: { step_subprocess?: boolean } }
+    }
+    wizard.currentStep = 4
+    await flushPromises()
+    expect(wrapper.get('#workspace-step-execution').attributes('disabled')).toBeDefined()
+    expect(wizard.config.flow_config).not.toHaveProperty('step_subprocess')
+    wrapper.unmount()
+  })
+
   it('accepts the preselected Quick Start GCD RTL on Import RTL', async () => {
     const projectContext = {
       mode: 'select' as const,
@@ -1537,7 +1644,7 @@ describe('NewProjectWizard behavior', () => {
     wizard.currentStep = 4
     await flushPromises()
 
-    const startSelect = wrapper.get('select')
+    const startSelect = wrapper.get('#workspace-flow-start')
     const parallelCorners = wrapper.get('#sta-max-parallel-corners')
     expect(wizardMocks.getWorkspaceCreationModel).toHaveBeenCalledWith(
       expect.objectContaining({ flowId: 'rtl2gds' }),
@@ -1733,7 +1840,7 @@ describe('NewProjectWizard behavior', () => {
     wizard.currentStep = 4
     await flushPromises()
 
-    await wrapper.get('select').setValue('preplace')
+    await wrapper.get('#workspace-flow-start').setValue('preplace')
     await flushPromises()
 
     expect(wizard.flowStartStep).toBe('preplace')
@@ -1862,7 +1969,10 @@ describe('NewProjectWizard behavior', () => {
         mpc: true,
         pdkVersion: true,
       },
-      discovery: { flowDefinitions: [] },
+      discovery: {
+        ...wizardMocks.defaultWorkspaceCreationModel().discovery,
+        flowDefinitions: [],
+      },
       parameters: [],
       pdkInstallations: [],
     })
@@ -1906,6 +2016,7 @@ describe('NewProjectWizard behavior', () => {
         pdkVersion: true,
       },
       discovery: {
+        ...wizardMocks.defaultWorkspaceCreationModel().discovery,
         flowDefinitions: [
           {
             flowId: 'rtl2gds',
@@ -1963,6 +2074,7 @@ describe('NewProjectWizard behavior', () => {
         pdkVersion: true,
       },
       discovery: {
+        ...wizardMocks.defaultWorkspaceCreationModel().discovery,
         flowDefinitions: [
           {
             flowId: 'rtl2gds',
@@ -2036,6 +2148,7 @@ describe('NewProjectWizard behavior', () => {
         pdkVersion: true,
       },
       discovery: {
+        ...wizardMocks.defaultWorkspaceCreationModel().discovery,
         flowDefinitions: [
           {
             flowId: 'rtl2gds',

@@ -80,6 +80,7 @@ import {
 } from './cliProcess'
 import { parseEccLineRecords, parseJsonLiteral } from './lineRecords'
 import { flowBlockOutcome, terminalState } from './operationOutcome'
+import { stepSubprocessArgs } from './workspaceExecution'
 import {
   discoverProject,
   readProjectManifest,
@@ -137,6 +138,7 @@ export class EccCliRuntimeService {
   private catalog: Record<string, unknown> | null = null
   private contractCheck: Promise<void> | null = null
   private contractRuntimeId = 'ecc-cli-contract-1'
+  private supportsWorkspaceExecution = false
   private generation = 0
 
   constructor(private readonly options: EccCliRuntimeServiceOptions) {
@@ -406,7 +408,10 @@ export class EccCliRuntimeService {
       this.cli.run(['param', 'list', '--all', '--plain']),
       this.cli.run(['flow', 'list', '--plain']),
     ])
-    this.catalog = buildCatalog(parameters.stdout, flows.stdout)
+    this.catalog = {
+      ...buildCatalog(parameters.stdout, flows.stdout),
+      workspaceExecutionConfig: this.supportsWorkspaceExecution,
+    }
     return this.catalog
   }
 
@@ -420,6 +425,7 @@ export class EccCliRuntimeService {
     request: EccWorkspaceCreateRequest,
   ): Promise<EccWorkspaceCreateResult> {
     await this.ensureContract()
+    this.validateWorkspaceExecution(request.workspaceSpec)
     if (!request.projectRoot?.trim()) {
       throw new Error('Workspace creation requires an existing Project root.')
     }
@@ -527,6 +533,7 @@ export class EccCliRuntimeService {
   async updateWorkspace(
     request: EccWorkspaceUpdateRequest,
   ): Promise<EccWorkspaceUpdateResult> {
+    this.validateWorkspaceExecution(request.workspaceSpec)
     const session = this.requireSession(request.workspaceHandle)
     this.assertProjectWritable(session.projectRoot)
     const [manifest, snapshot] = await Promise.all([
@@ -692,6 +699,7 @@ export class EccCliRuntimeService {
             commandId: request.commandId,
             expectedWorkspaceRevision: request.expectedWorkspaceRevision,
             keepBackup: request.retainBackup === true,
+            stepSubprocess: flow.stepSubprocess,
             projectRoot: privateRoot,
             workspaceId: session.workspaceId,
           }),
@@ -1806,6 +1814,7 @@ export class EccCliRuntimeService {
           )
         }
         const version = typeof value.ecc === 'string' ? value.ecc : 'unknown'
+        this.supportsWorkspaceExecution = value.workspace_execution_config === 1
         this.contractRuntimeId = `tool:ecc@${version}`
           .replace(/[^A-Za-z0-9._:@+-]/g, '-')
           .slice(0, 128)
@@ -1815,6 +1824,13 @@ export class EccCliRuntimeService {
         throw error
       })
     return this.contractCheck
+  }
+
+  private validateWorkspaceExecution(spec: Record<string, unknown>): void {
+    const value = isRecord(spec.flow) ? spec.flow.stepSubprocess : undefined
+    if (stepSubprocessArgs(value).length && !this.supportsWorkspaceExecution) {
+      throw new Error('Update ECC to configure step execution for this workspace.')
+    }
   }
 
   private invalidate(): void {
@@ -2280,6 +2296,9 @@ export function workspaceCreateCommands(
   projectRoot: string,
 ): string[][] {
   const workspaceId = basename(resolve(request.targetDirectory))
+  const executionArgs = stepSubprocessArgs(
+    requireRecord(request.workspaceSpec.flow).stepSubprocess,
+  )
   if (request.deriveFrom) {
     const flow = requireRecord(request.workspaceSpec.flow)
     if (
@@ -2306,6 +2325,7 @@ export function workspaceCreateCommands(
         '--command-id',
         request.commandId,
         '--no-wait',
+        ...executionArgs,
       ],
       ...(parameters.length
         ? [
@@ -2344,6 +2364,7 @@ export function workspaceCreateCommands(
       request.commandId,
       '--no-wait',
       ...workspaceFlowArgs(request.workspaceSpec),
+      ...executionArgs,
       ...parameterArgs(request.workspaceSpec.parameters),
     ],
   ]
@@ -2356,6 +2377,7 @@ export function workspaceRefreshArgs(options: {
   keepBackup?: boolean
   projectRoot: string
   workspaceId: string
+  stepSubprocess?: unknown
 }): string[] {
   return [
     'workspace',
@@ -2371,6 +2393,7 @@ export function workspaceRefreshArgs(options: {
     '--no-wait',
     ...(options.force ? ['--force'] : []),
     ...(options.keepBackup ? ['--keep-backup'] : []),
+    ...stepSubprocessArgs(options.stepSubprocess),
   ]
 }
 

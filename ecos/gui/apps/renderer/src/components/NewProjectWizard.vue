@@ -493,6 +493,11 @@
                   <p class="mt-2 text-sm text-(--text-secondary)">
                     Select a continuous harden flow range. Step order remains fixed.
                   </p>
+                  <WorkspaceExecutionSettings
+                    v-model="stepSubprocess"
+                    :supported="supportsWorkspaceExecution"
+                    :inherit="Boolean(sourceContext)"
+                  />
                   <label
                     class="mt-4 flex cursor-pointer items-center gap-3 text-sm text-(--text-primary)"
                   >
@@ -523,6 +528,8 @@
                       >
                       <select
                         v-if="canChooseFlowStartStep"
+                        id="workspace-flow-start"
+                        aria-label="Start Step"
                         :value="flowStartStep"
                         class="mt-1 w-full cursor-pointer rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-2.5 py-1.5 text-sm font-semibold text-(--text-primary) transition-colors duration-200 outline-none focus:border-(--accent-color)"
                         @change="selectFlowStartStep"
@@ -1833,6 +1840,7 @@ import {
   type ProjectManifestMpc,
 } from '@ecos-studio/shared'
 import PdkResourcePickerDialog from './PdkResourcePickerDialog.vue'
+import WorkspaceExecutionSettings from './WorkspaceExecutionSettings.vue'
 import RtlImportStep from './RtlImportStep.vue'
 import TopModuleField from './TopModuleField.vue'
 import {
@@ -2213,6 +2221,14 @@ const projectContext = ref<ProjectContext>(
 )
 
 const config = ref<WorkspaceConfig>(createInitialConfig(props.initialConfig))
+const stepSubprocess = ref(
+  props.initialConfig?.flow_config?.step_subprocess ??
+    props.initialConfig?.source_config?.flow_config?.step_subprocess ??
+    (props.initialConfig?.source_context ? undefined : true),
+)
+const supportsWorkspaceExecution = computed(
+  () => workspaceCreationModel.value?.discovery.workspaceExecutionConfig === true,
+)
 const projectDesignName = ref(
   String(props.initialConfig?.parameters?.design ?? '').trim(),
 )
@@ -3053,6 +3069,7 @@ watch(selectedPdk, (selected) => {
     pdkConfigMode.value = 'manual'
 })
 watch(pdkSelections, syncWorkspaceConfig, { deep: true })
+watch([stepSubprocess, supportsWorkspaceExecution], syncWorkspaceConfig)
 
 function validateName(name: string, label: string) {
   if (!name) return ''
@@ -4249,6 +4266,9 @@ function syncWorkspaceConfig() {
     start_step: flowStartStep.value,
     end_step: flowEndStep.value,
     steps: selectedFlowSteps.value,
+    ...(supportsWorkspaceExecution.value && stepSubprocess.value !== undefined
+      ? { step_subprocess: stepSubprocess.value }
+      : {}),
   }
   config.value.pdk_config = {
     mode: pdkConfigMode.value,

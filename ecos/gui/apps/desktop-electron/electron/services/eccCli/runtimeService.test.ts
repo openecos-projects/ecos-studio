@@ -177,6 +177,48 @@ function request(
 }
 
 describe('ECC CLI workspace command planning', () => {
+  it.each([true, false])(
+    'sets execution mode %s on workspace lifecycle commands only',
+    (mode) => {
+      const input = request()
+      input.workspaceSpec.flow = {
+        ...(input.workspaceSpec.flow as object),
+        stepSubprocess: mode,
+      }
+      const flag = mode ? '--step-subprocess' : '--no-step-subprocess'
+      const fresh = workspaceCreateCommands(input, '/projects/demo')
+      expect(fresh[1]).toContain(flag)
+      expect(fresh[0]).not.toContain(flag)
+      expect(projectSettingsArgs(input)).not.toContain(
+        `execution.step_subprocess=${mode}`,
+      )
+      input.deriveFrom = { workspaceId: 'source' }
+      expect(workspaceCreateCommands(input, '/projects/demo')[0]).toContain(flag)
+      expect(
+        workspaceRefreshArgs({
+          commandId: 'refresh',
+          projectRoot: '/projects/demo',
+          workspaceId: 'ws_1',
+          stepSubprocess: mode,
+        }),
+      ).toContain(flag)
+    },
+  )
+
+  it.each(['false', 0, null])(
+    'rejects invalid execution mode %s before planning mutations',
+    (mode) => {
+      const input = request()
+      input.workspaceSpec.flow = {
+        ...(input.workspaceSpec.flow as object),
+        stepSubprocess: mode,
+      }
+      expect(() => workspaceCreateCommands(input, '/projects/demo')).toThrow(
+        'must be a boolean',
+      )
+    },
+  )
+
   it('sets Replay through ECC CLI for fresh and derived workspaces without changing flow selection', () => {
     const input = request()
     const flow = structuredClone(input.workspaceSpec.flow)
