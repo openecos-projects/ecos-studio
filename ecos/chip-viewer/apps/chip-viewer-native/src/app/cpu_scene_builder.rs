@@ -144,6 +144,7 @@ pub(super) fn empty_scene(key: &SceneKey, pattern_textures: Arc<PatternTextureSe
         initial_records: None,
         priority: None,
         priority_collector: None,
+        world_source: None,
     }
 }
 

@@ -6,6 +6,7 @@ use super::*;
 pub(in crate::app::cpu_scene) struct Candidates(
     Arc<Mutex<Arc<ShapeLabelCollector>>>,
     Arc<OnceLock<Option<(Arc<ShapeLabelCollector>, usize)>>>,
+    Arc<AtomicBool>,
 );
 
 impl Candidates {
@@ -45,7 +46,24 @@ impl Candidates {
     }
 
     pub(in crate::app::cpu_scene) fn needs_rebuild(&self) -> bool {
-        self.1.get().is_some_and(Option::is_none)
+        self.2.load(Ordering::Acquire) || self.1.get().is_some_and(Option::is_none)
+    }
+
+    pub(in crate::app::cpu_scene) fn require_rebuild(&self) {
+        self.2.store(true, Ordering::Release);
+    }
+
+    pub(in crate::app::cpu_scene) fn install_rebuilt(
+        &self,
+        candidates: &ShapeLabelCollector,
+        canvas: egui::Rect,
+    ) {
+        self.1.get_or_init(|| {
+            let compact = candidates.compact(canvas);
+            let bytes = compact.retained_bytes();
+            (bytes <= 64 * 1024 * 1024).then(|| (Arc::new(compact), bytes))
+        });
+        self.2.store(false, Ordering::Release);
     }
 
     pub(in crate::app::cpu_scene) fn insert(&mut self, candidate: ShapeLabelCandidate) {

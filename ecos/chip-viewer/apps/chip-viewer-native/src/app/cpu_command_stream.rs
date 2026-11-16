@@ -44,11 +44,19 @@ pub(in crate::app::cpu_scene) fn build_command_stream(
     is_current: &(impl Fn() -> bool + Sync),
     mut consume: impl FnMut(PaintPacket) -> bool,
 ) -> Option<CpuScene> {
+    if let Some(source) = request
+        .world_source
+        .as_ref()
+        .filter(|source| source.compatible(request))
+    {
+        return build_from_source(source, request, is_current, consume);
+    }
     let started = Instant::now();
     let workers = worker_count();
     let mut scene = empty_scene(&request.key, Arc::clone(&request.pattern_textures));
     let mut retained = retained_regions::RegionModel::new(request);
-    let capture = retained.is_some();
+    let mut world = world_source::Builder::new(request);
+    let capture = retained.is_some() || world.is_some();
     let mut consumer_duration = Duration::ZERO;
     scene.query_duration = queries::run(
         &request.layer_ids,
@@ -72,11 +80,15 @@ pub(in crate::app::cpu_scene) fn build_command_stream(
         },
         |(mut chunk, commands)| {
             let consumed_at = Instant::now();
-            if let Some(model) = &mut retained {
-                for (bbox, geometry, style) in commands.records {
+            for (bbox, geometry, style) in commands.records {
+                if let Some(model) = &mut retained {
                     if !model.push(bbox, geometry, style, &[]) {
                         retained = None;
-                        break;
+                    }
+                }
+                if let Some(model) = &mut world {
+                    if !model.push(bbox, geometry, style) {
+                        world = None;
                     }
                 }
             }
@@ -108,6 +120,59 @@ pub(in crate::app::cpu_scene) fn build_command_stream(
     scene.build_duration = started.elapsed().saturating_sub(consumer_duration);
     scene.pipeline_duration = started.elapsed();
     scene.retained = retained.map(Arc::new);
+    scene.world_source = world.map(|builder| Arc::new(builder.finish()));
+    finish_priority(request, &mut scene, &|| is_current());
+    is_current().then_some(scene)
+}
+
+fn build_from_source(
+    source: &Arc<world_source::WorldSource>,
+    request: &SceneRequest,
+    is_current: &(impl Fn() -> bool + Sync),
+    mut consume: impl FnMut(PaintPacket) -> bool,
+) -> Option<CpuScene> {
+    let started = Instant::now();
+    let mut scene = empty_scene(&request.key, Arc::clone(&request.pattern_textures));
+    let mut consumed = Duration::ZERO;
+    if let Some((labels, completed)) = &request.reused_labels {
+        scene.labels = labels.clone();
+        scene.completed_labels = Arc::clone(completed);
+    } else {
+        scene.labels.require_rebuild();
+    }
+    ordered::run(
+        worker_count(),
+        is_current,
+        |emit| {
+            for records in source.chunks() {
+                if !is_current() || !emit(records) {
+                    return None;
+                }
+            }
+            Some(())
+        },
+        |records| source.commands(records, request, &|| is_current()),
+        |(commands, drawn, primitives)| {
+            let before = Instant::now();
+            let current = consume(PaintPacket::Commands(commands));
+            consumed += before.elapsed();
+            scene.drawn += drawn;
+            scene.primitives += primitives;
+            current
+        },
+    )?;
+    if request.key.cache_overlays {
+        let (meshes, drawn, shapes) = overlays::build_with_shapes(request, is_current)?;
+        let before = Instant::now();
+        if !consume(PaintPacket::Overlays { meshes, shapes }) {
+            return None;
+        }
+        consumed += before.elapsed();
+        scene.overlay_drawn = drawn;
+    }
+    scene.build_duration = started.elapsed().saturating_sub(consumed);
+    scene.pipeline_duration = started.elapsed();
+    scene.world_source = Some(Arc::clone(source));
     finish_priority(request, &mut scene, &|| is_current());
     is_current().then_some(scene)
 }

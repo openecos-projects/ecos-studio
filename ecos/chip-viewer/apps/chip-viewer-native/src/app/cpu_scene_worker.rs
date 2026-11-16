@@ -11,7 +11,7 @@ pub(super) fn spawn(
         #[cfg(target_os = "linux")]
         let mut renderer = None;
         loop {
-            let (generation, request, retained) = {
+            let (generation, mut request, retained) = {
                 let mut pending = worker_inbox.request.lock().unwrap();
                 while pending.is_none() && !worker_inbox.stopped.load(Ordering::Relaxed) {
                     pending = worker_inbox.wake.wait(pending).unwrap();
@@ -29,6 +29,22 @@ pub(super) fn spawn(
                 !worker_inbox.stopped.load(Ordering::Relaxed)
                     && worker_inbox.generation.load(Ordering::Relaxed) == generation
             };
+            if request.glow
+                && request
+                    .world_source
+                    .as_ref()
+                    .is_some_and(|source| source.compatible(&request))
+                && retained.is_none()
+            {
+                let labels_scene =
+                    builder::empty_scene(&request.key, Arc::clone(&request.pattern_textures));
+                labels_scene.labels.require_rebuild();
+                label_worker.submit(&request, generation, &labels_scene);
+                request.reused_labels = Some((
+                    labels_scene.labels.clone(),
+                    Arc::clone(&labels_scene.completed_labels),
+                ));
+            }
             let scene = if let Some(scene) = retained {
                 if scene.key == request.key {
                     scene

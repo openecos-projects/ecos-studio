@@ -37,13 +37,20 @@ impl CpuSceneHistory {
                 initial_records: None,
                 priority: scene.priority.as_ref().map(Arc::clone),
                 priority_collector: None,
+                world_source: None,
             })
         } else {
             scene
         };
         let bytes = retained_bytes(&scene.meshes, scene.bitmap.as_ref())
             .saturating_add(scene.retained.as_ref().map_or(0, |model| model.byte_len()))
-            .saturating_add(scene.priority.as_ref().map_or(0, |cache| cache.byte_len()));
+            .saturating_add(scene.priority.as_ref().map_or(0, |cache| cache.byte_len()))
+            .saturating_add(
+                scene
+                    .world_source
+                    .as_ref()
+                    .map_or(0, |source| source.byte_len()),
+            );
         self.history.insert(scene.key().clone(), scene, bytes);
         self.trim_labels();
     }

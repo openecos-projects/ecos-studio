@@ -284,6 +284,8 @@ impl Fixture {
             publication: progress::Publication::Progressive,
             pattern_textures: Arc::new(PatternTextureSet::default()),
             priority: None,
+            world_source: None,
+            reused_labels: None,
         }
     }
 }

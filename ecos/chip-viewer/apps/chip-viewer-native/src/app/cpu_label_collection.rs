@@ -4,7 +4,7 @@
 use super::*;
 use std::collections::HashMap;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum Identity<'a> {
     Named(ShapeLabelKind, &'a str),
     Owner(u8, u64),
@@ -22,9 +22,64 @@ struct Winner<'a> {
 pub(super) struct Collector<'a> {
     lookup: HashMap<Identity<'a>, usize>,
     winners: Vec<Winner<'a>>,
+    compact_owners: bool,
 }
 
 impl<'a> Collector<'a> {
+    pub(super) fn for_compact() -> Self {
+        Self {
+            compact_owners: true,
+            ..Default::default()
+        }
+    }
+    pub(super) fn compact(
+        mut self,
+        canvas: egui::Rect,
+        current: &impl Fn() -> bool,
+    ) -> Option<ShapeLabelCollector> {
+        if self.compact_owners {
+            self.winners.sort_by(|a, b| {
+                a.identity
+                    .cmp(&b.identity)
+                    .then_with(|| b.rank_area.total_cmp(&a.rank_area))
+            });
+            self.winners
+                .dedup_by(|later, first| later.identity == first.identity);
+        }
+        let mut labels = ShapeLabelCollector::default();
+        let mut directory = Vec::with_capacity(self.winners.len());
+        for (index, winner) in self.winners.into_iter().enumerate() {
+            if index % 1024 == 0 && !current() {
+                return None;
+            }
+            let key = match winner.identity {
+                Identity::Named(kind, text) => ShapeLabelKey::Named {
+                    kind,
+                    text: text.to_owned(),
+                },
+                Identity::Owner(owner_type, owner_id) => ShapeLabelKey::Owner {
+                    owner_type,
+                    owner_id,
+                },
+            };
+            directory.push((key.clone(), winner.rank_area));
+            if winner
+                .kind
+                .eligible_in(false, winner.anchor_rect.intersect(canvas))
+            {
+                labels.insert(ShapeLabelCandidate {
+                    key,
+                    anchor_rect: winner.anchor_rect,
+                    text: winner.text.to_owned(),
+                    kind: winner.kind,
+                    rank_area: winner.rank_area,
+                    selected: false,
+                    highlighted: false,
+                });
+            }
+        }
+        current().then(|| ShapeLabelCollector::from_compact_parts(labels, directory))
+    }
     pub(super) fn observe(
         &mut self,
         geometry: chip_view_db::ShapeGeometry,
@@ -82,6 +137,10 @@ impl<'a> Collector<'a> {
             kind,
             rank_area: visible.area(),
         };
+        if self.compact_owners && matches!(identity, Identity::Owner(..)) {
+            self.winners.push(candidate);
+            return;
+        }
         if let Some(index) = self.lookup.get(&identity) {
             if candidate.rank_area > self.winners[*index].rank_area {
                 self.winners[*index] = candidate;
@@ -145,6 +204,7 @@ mod tests {
             let request = fixture.request(zoom, 1.0);
             let mut original = ShapeLabelCollector::default();
             let mut reuse = Collector::default();
+            let mut compact = Collector::for_compact();
             let owners: Vec<_> = [
                 OwnerType::NetWireSegment,
                 OwnerType::InstancePinPortShape,
@@ -182,6 +242,7 @@ mod tests {
                     original.insert(candidate);
                 }
                 reuse.observe(geometry, Some(owner), Some(name), &request.key);
+                compact.observe(geometry, Some(owner), Some(name), &request.key);
             }
             assert!(reuse.winners.len() <= 4);
             let mut published = labels::Candidates::default();
@@ -191,6 +252,11 @@ mod tests {
             let mut resolver = labels::LabelResolver::default();
             assert_eq!(
                 resolver.resolve(&request, &published.snapshot(), || true),
+                resolver.resolve(&request, &original, || true)
+            );
+            let compact = compact.compact(request.key.canvas, &|| true).unwrap();
+            assert_eq!(
+                resolver.resolve(&request, &compact, || true),
                 resolver.resolve(&request, &original, || true)
             );
         }

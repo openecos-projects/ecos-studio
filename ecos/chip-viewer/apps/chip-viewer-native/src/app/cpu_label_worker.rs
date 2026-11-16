@@ -66,6 +66,9 @@ impl LabelWorker {
                 };
                 if let Some(labels) = resolver.resolve_input(&job.input, &candidates, is_current) {
                     if is_current() {
+                        if job.rebuild.is_some() {
+                            job.source.install_rebuilt(&candidates, job.input.canvas);
+                        }
                         let retired = job.source.retire(job.input.canvas);
                         drop(job.candidates);
                         drop(candidates);

@@ -14,6 +14,8 @@ mod builder;
 mod pattern_texture;
 #[path = "cpu_preview_priority.rs"]
 mod preview_priority;
+#[path = "cpu_world_source.rs"]
+mod world_source;
 #[cfg(any(test, not(target_os = "linux")))]
 use builder::build_scene;
 pub(super) use pattern_texture::PatternTextureSet;
@@ -106,6 +108,8 @@ pub(super) struct SceneRequest {
     publication: progress::Publication,
     pattern_textures: Arc<PatternTextureSet>,
     priority: Option<Arc<PriorityCache>>,
+    world_source: Option<Arc<world_source::WorldSource>>,
+    reused_labels: Option<(labels::Candidates, Arc<LabelCompletion>)>,
 }
 
 type LabelCompletion = OnceLock<(Arc<ResolvedLabels>, Duration)>;
@@ -131,6 +135,7 @@ pub(super) struct CpuScene {
     initial_records: Option<Arc<[ShapeId]>>,
     priority: Option<Arc<PriorityCache>>,
     priority_collector: Option<PriorityBuilder>,
+    world_source: Option<Arc<world_source::WorldSource>>,
 }
 
 struct WorkerInbox {
@@ -154,6 +159,7 @@ pub(super) struct CpuSceneCache {
     pending: Option<SceneRequest>,
     initial_scene: Option<Arc<CpuScene>>,
     restored: bool,
+    world_source: Option<Arc<world_source::WorldSource>>,
 }
 
 impl Default for CpuSceneCache {
@@ -183,6 +189,7 @@ impl Default for CpuSceneCache {
             pending: None,
             initial_scene: None,
             restored: false,
+            world_source: None,
         }
     }
 }
@@ -197,6 +204,18 @@ impl Drop for CpuSceneCache {
 
 impl CpuSceneCache {
     pub(super) fn get_or_request(&mut self, mut request: SceneRequest) -> Option<Arc<CpuScene>> {
+        if self
+            .world_source
+            .as_ref()
+            .is_some_and(|source| !source.same_content(&request))
+        {
+            self.world_source = None;
+        }
+        request.world_source = self
+            .world_source
+            .as_ref()
+            .filter(|source| source.compatible(&request))
+            .map(Arc::clone);
         if request
             .priority
             .as_ref()
@@ -300,6 +319,9 @@ impl CpuSceneCache {
         }
         while let Ok((generation, scene)) = self.responses.try_recv() {
             if generation == self.inbox.generation.load(Ordering::Relaxed) {
+                if let Some(source) = &scene.world_source {
+                    self.world_source = Some(Arc::clone(source));
+                }
                 if self.anchor.is_none() {
                     self.anchor = Some(Arc::clone(&scene));
                 }
@@ -358,7 +380,11 @@ impl CpuSceneCache {
     }
 
     pub(super) fn history_bytes(&self) -> usize {
-        self.history.byte_len()
+        self.history.byte_len().saturating_add(
+            self.world_source
+                .as_ref()
+                .map_or(0, |source| source.byte_len()),
+        )
     }
 
     pub(super) fn restored(&self) -> bool {
@@ -605,6 +631,8 @@ impl LoadedViewer {
                 .get_or_init(|| Arc::new(PatternTextureSet::new(ctx)))
                 .clone(),
             priority: None,
+            world_source: None,
+            reused_labels: None,
         }
     }
 }

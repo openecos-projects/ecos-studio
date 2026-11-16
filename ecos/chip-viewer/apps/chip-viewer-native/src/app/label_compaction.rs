@@ -5,6 +5,9 @@ impl ShapeLabelCollector {
     /// Selection can promote a tiny anchor without copying names or scanning
     /// geometry again. The directory preserves deduplication and diagnostics.
     pub(in crate::app) fn compact(&self, canvas: egui::Rect) -> Self {
+        if !self.dormant.is_empty() {
+            return self.clone();
+        }
         let mut candidates = HashMap::new();
         let mut dormant = Vec::new();
         for candidate in self.candidates.values() {
@@ -19,6 +22,51 @@ impl ShapeLabelCollector {
             candidates,
             dormant: dormant.into(),
         }
+    }
+
+    pub(in crate::app) fn from_compact_parts(
+        labels: Self,
+        mut directory: Vec<(ShapeLabelKey, f32)>,
+    ) -> Self {
+        directory.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        Self {
+            candidates: labels.candidates,
+            dormant: directory.into(),
+        }
+    }
+
+    pub(in crate::app) fn merge_compact_sources(sources: Vec<Self>) -> Self {
+        let mut winners = Vec::new();
+        for (rank, source) in sources.iter().enumerate() {
+            winners.extend(
+                source
+                    .dormant
+                    .iter()
+                    .map(|(key, area)| (key.clone(), *area, rank)),
+            );
+        }
+        // Stable ordering retains the first source on equal-area candidates,
+        // including when that first anchor cannot display a label.
+        winners.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.total_cmp(&a.1)));
+        winners.dedup_by(|later, first| later.0 == first.0);
+        let mut labels = Self::default();
+        for (rank, source) in sources.into_iter().enumerate() {
+            for (key, candidate) in source.candidates {
+                let index = winners
+                    .binary_search_by(|(other, _, _)| other.cmp(&key))
+                    .unwrap();
+                if winners[index].2 == rank {
+                    labels.insert(candidate);
+                }
+            }
+        }
+        Self::from_compact_parts(
+            labels,
+            winners
+                .into_iter()
+                .map(|(key, area, _)| (key, area))
+                .collect(),
+        )
     }
 
     pub(super) fn candidate_count(&self) -> usize {
@@ -51,6 +99,57 @@ impl ShapeLabelCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compact_chunk_merge_preserves_first_equal_area_anchor_even_when_it_is_ineligible() {
+        let canvas = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 100.0));
+        let key = ShapeLabelKey::Owner {
+            owner_type: 4,
+            owner_id: 9,
+        };
+        let eligible = ShapeLabelCandidate {
+            key: key.clone(),
+            anchor_rect: egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(100.0, 8.0)),
+            text: "label".into(),
+            kind: ShapeLabelKind::Instance,
+            rank_area: 800.0,
+            selected: false,
+            highlighted: false,
+        };
+        let mut ineligible = eligible.clone();
+        ineligible.anchor_rect =
+            egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(400.0, 2.0));
+        let measure = |text: &str, size| egui::vec2(text.len() as f32 * size * 0.5, size);
+        for candidates in [
+            [ineligible.clone(), eligible.clone()],
+            [eligible, ineligible],
+        ] {
+            let mut original = ShapeLabelCollector::default();
+            let sources = candidates
+                .into_iter()
+                .map(|candidate| {
+                    original.insert(candidate.clone());
+                    let mut labels = ShapeLabelCollector::default();
+                    if candidate
+                        .kind
+                        .eligible_in(false, candidate.anchor_rect.intersect(canvas))
+                    {
+                        labels.insert(candidate);
+                    }
+                    ShapeLabelCollector::from_compact_parts(labels, vec![(key.clone(), 800.0)])
+                })
+                .collect();
+            let compact = ShapeLabelCollector::merge_compact_sources(sources);
+            assert_eq!(
+                compact.resolve(canvas, measure),
+                original.resolve(canvas, measure)
+            );
+            assert_eq!(
+                compact.compact(canvas).resolve(canvas, measure),
+                original.resolve(canvas, measure)
+            );
+        }
+    }
 
     #[test]
     fn compact_source_matches_full_source_when_tiny_anchor_is_promoted() {

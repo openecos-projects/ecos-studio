@@ -103,12 +103,18 @@ pub(in crate::app::cpu_scene) fn refresh_labels(
         return None;
     }
     let started = Instant::now();
-    let candidates = if let Some(cached) = previous.labels.reusable() {
-        cached
+    let rebuild = previous.labels.needs_rebuild() || previous.labels.reusable().is_none();
+    let candidates = if !rebuild {
+        previous.labels.reusable()?
     } else {
         collect_labels(request, is_current)?
     };
     let resolved = resolver.resolve(request, &candidates, is_current)?;
+    if rebuild && is_current() {
+        previous
+            .labels
+            .install_rebuilt(&candidates, request.key.canvas);
+    }
     drop(candidates);
     // A prior label job may have been cancelled before compacting its source.
     // Retire that raw source on this worker before publishing full readiness.
@@ -126,6 +132,7 @@ pub(in crate::app::cpu_scene) fn refresh_labels(
         .map(Arc::clone);
     scene.drawn = previous.drawn;
     scene.primitives = previous.primitives;
+    scene.world_source = previous.world_source.as_ref().map(Arc::clone);
     scene.overlay_drawn = previous.overlay_drawn;
     let _ = scene
         .completed_labels
@@ -137,22 +144,71 @@ pub(in crate::app::cpu_scene) fn collect_labels(
     request: &SceneRequest,
     is_current: &(impl Fn() -> bool + Sync),
 ) -> Option<Arc<ShapeLabelCollector>> {
-    let ids = request
-        .db
-        .query_layers_intersect(&request.layer_ids, request.key.viewport);
+    let ids: Vec<_> = request
+        .layer_ids
+        .iter()
+        .flat_map(|layer| {
+            request
+                .db
+                .query_cached_layer_intersect(*layer, request.key.viewport)
+        })
+        .collect();
     let chunks = thread::scope(|scope| {
         let tasks: Vec<_> = ids
             .chunks(ids.len().div_ceil(worker_count()).max(1))
-            .map(|ids| scope.spawn(move || build_chunk_sink(request, ids, is_current, LabelsOnly)))
+            .map(|ids| scope.spawn(move || collect_chunk(request, ids, is_current)))
             .collect();
         tasks
             .into_iter()
             .map(|task| task.join().expect("selection label worker panicked"))
             .collect::<Option<Vec<_>>>()
     })?;
-    let mut candidates = labels::Candidates::default();
-    for (chunk, _) in chunks {
-        candidates.append(chunk.labels);
+    is_current().then(|| Arc::new(ShapeLabelCollector::merge_compact_sources(chunks)))
+}
+
+fn collect_chunk(
+    request: &SceneRequest,
+    ids: &[ShapeId],
+    current: &(impl Fn() -> bool + Sync),
+) -> Option<ShapeLabelCollector> {
+    let mut collector = super::label_collection::Collector::for_compact();
+    let mut categories = OwnerCategoryCache::default();
+    for (index, id) in ids.iter().enumerate() {
+        if index % 1024 == 0 && !current() {
+            return None;
+        }
+        let Some(shape) = request.db.find_shape(*id) else {
+            continue;
+        };
+        if !is_renderable_shape(shape) {
+            continue;
+        }
+        let geometry = request.db.shape_geometry(shape);
+        if !matches!(geometry, chip_view_db::ShapeGeometry::Rect(_)) {
+            continue;
+        }
+        let owner = request.db.owner_for_shape(shape);
+        let kind = owner.and_then(|owner| OwnerType::from_raw(owner.owner_type));
+        let category =
+            owner.and_then(|owner| categories.get(request.key.epoch, &request.db, owner));
+        if !request.zoom_rules.is_drawn_at_zoom(kind, request.key.zoom)
+            || !shape_is_visible_fast(
+                shape,
+                kind,
+                category,
+                &request.layers,
+                &request.key.visibility,
+            )
+            || visible_style_for_shape_fast(shape, owner, kind, &request.layers).is_none()
+        {
+            continue;
+        }
+        collector.observe(
+            geometry,
+            owner,
+            owner.and_then(|owner| request.db.owner_name(owner)),
+            &request.key,
+        );
     }
-    Some(candidates.snapshot())
+    collector.compact(request.key.canvas, &|| current())
 }
