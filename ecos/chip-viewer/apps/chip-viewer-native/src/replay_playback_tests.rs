@@ -376,3 +376,33 @@ fn enabling_three_d_starts_slow_iso_rotation_until_manual_control() {
     assert!(view.spin_yaw.is_none());
     assert!(view.fit_requested);
 }
+
+#[test]
+fn clock_reveal_is_completion_only_and_obeys_seek_pause_and_speed() {
+    let fixture = Fixture::new();
+    let mut app = app(&fixture);
+    let process = app.plans[0].process_seconds;
+    assert_eq!(app.clock_progress(), None);
+    app.select(0, process, false);
+    app.finish_loading_for_test();
+    assert_eq!(app.clock_progress(), Some(0.0));
+    app.playing = true;
+    app.speed = 2.0;
+    app.advance_playback(0.35);
+    app.finish_loading_for_test();
+    assert!((app.clock_progress().unwrap() - 0.5).abs() < 1e-9);
+    app.playing = false;
+    app.advance_playback(0.5);
+    assert!((app.clock_progress().unwrap() - 0.5).abs() < 1e-9);
+    app.select(0, process, true);
+    app.finish_loading_for_test();
+    assert_eq!(app.clock_progress(), Some(1.0));
+    app.select(0, process - 0.1, false);
+    app.finish_loading_for_test();
+    assert_eq!(app.clock_progress(), None);
+    app.select(0, process + 0.35, false);
+    app.finish_loading_for_test();
+    assert!((app.clock_progress().unwrap() - 0.25).abs() < 1e-9);
+    app.error = "Replay attempt replaced".into();
+    assert_eq!(app.clock_progress(), None);
+}

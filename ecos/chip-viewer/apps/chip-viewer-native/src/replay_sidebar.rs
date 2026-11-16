@@ -117,6 +117,25 @@ impl ReplayApp {
                         }
                         if let Some(tree) = &mut self.clock_tree {
                             ui.strong("Clock tree");
+                            ui.small(format!(
+                                "{} highlighted net branches",
+                                self.clock_overlay.len()
+                            ));
+                            if self.clock_overlay.missing > 0 {
+                                ui.colored_label(
+                                    egui::Color32::LIGHT_YELLOW,
+                                    format!(
+                                        "{} branches have no verified geometry",
+                                        self.clock_overlay.missing
+                                    ),
+                                );
+                            }
+                            if !self.clock_overlay.error.is_empty() {
+                                ui.colored_label(
+                                    egui::Color32::LIGHT_YELLOW,
+                                    &self.clock_overlay.error,
+                                );
+                            }
                             let height = (ui.available_height() * 0.72).clamp(200.0, 340.0);
                             let action = ui
                                 .allocate_ui(egui::vec2(ui.available_width(), height), |ui| {

@@ -105,6 +105,18 @@ impl ReplayApp {
                     }
                 }
             }
+            if let Some(progress) = self.clock_progress() {
+                self.clock_overlay.paint(
+                    painter,
+                    |x, y, layer| {
+                        let z = layer
+                            .and_then(|id| meta.stack.band(id))
+                            .map_or(300.0, |band| band.z1 + 300.0);
+                        project(x, y, z)
+                    },
+                    progress,
+                );
+            }
             self.analysis.paint_layers(painter, |x, y, layer| {
                 let z = layer
                     .and_then(|id| meta.stack.band(id))
