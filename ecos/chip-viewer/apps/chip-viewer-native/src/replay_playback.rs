@@ -248,7 +248,13 @@ impl ReplayApp {
                         index,
                         logic,
                         results,
+                        #[cfg(test)]
+                        timings_ms,
                     } = prepared;
+                    #[cfg(test)]
+                    {
+                        self.prepare_timings_ms = timings_ms;
+                    }
                     self.logic = logic;
                     if let Some(results) = results {
                         self.maps = results.maps;

@@ -10,6 +10,9 @@ struct Measurements {
     cpu_ms: Vec<f64>,
     frame_intervals_ms: Vec<f64>,
     seek_readback_ms: Vec<f64>,
+    seek_ready_ms: Vec<f64>,
+    seek_update_ms: Vec<f64>,
+    prepare_ms: [Vec<f64>; 4],
     finished: bool,
 }
 
@@ -89,7 +92,6 @@ impl App for Probe {
                 let clip = &plan.clips[(self.seed >> 16) as usize % plan.clips.len()];
                 let target = clip.frame;
                 let position = self.app.starts[step] + clip.start;
-                self.seek = Some((Instant::now(), target));
                 let record = crate::replay_data::Recording::open(
                     &self.app.catalog.workspace,
                     self.app.catalog.steps[step].manifest.as_ref().unwrap(),
@@ -97,7 +99,7 @@ impl App for Probe {
                 .unwrap();
                 let source = record.manifest.frames[target].elapsed_ns as f64 / 1e9;
                 self.seek = Some((
-                    self.seek.unwrap().0,
+                    Instant::now(),
                     self.app.plans[step].frame_at_source(source).unwrap(),
                 ));
                 self.app.select_node(step, position, Some(source));
@@ -105,9 +107,11 @@ impl App for Probe {
         } else {
             self.previous_frame = None;
         }
+        let update_started = Instant::now();
         self.app.update(ctx, frame);
+        let update_ms = update_started.elapsed().as_secs_f64() * 1000.0;
         assert!(self.app.error.is_empty(), "{}", self.app.error);
-        if let Some((_, target)) = self.seek {
+        if let Some((started, target)) = self.seek {
             if self.app.pending.is_none()
                 && self
                     .app
@@ -116,6 +120,18 @@ impl App for Probe {
                     .is_some_and(|r| r.scene.revision == Some(target))
                 && !self.screenshot
             {
+                let mut results = self.measurements.lock().unwrap();
+                results
+                    .seek_ready_ms
+                    .push(started.elapsed().as_secs_f64() * 1000.0);
+                results.seek_update_ms.push(update_ms);
+                for (samples, time) in results
+                    .prepare_ms
+                    .iter_mut()
+                    .zip(self.app.prepare_timings_ms)
+                {
+                    samples.push(time);
+                }
                 self.screenshot = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
             }
@@ -186,4 +202,8 @@ fn real_window_gpu_playback_and_seek_readback() {
     let interval = p95(&mut results.frame_intervals_ms);
     let seek = p95(&mut results.seek_readback_ms);
     println!("Replay GPU UI: {count} active frames, CPU+render P95={cpu:.1}ms, frame interval P95={interval:.1}ms, request-to-GPU-readback P95={seek:.1}ms (100 seeks)");
+    let ready = p95(&mut results.seek_ready_ms);
+    let update = p95(&mut results.seek_update_ms);
+    let phases = results.prepare_ms.each_mut().map(|samples| p95(samples));
+    println!("Replay seek phases P95: ready={ready:.1}ms, update-with-first-mesh={update:.1}ms, reconstruct={:.1}ms, index={:.1}ms, assets={:.1}ms, handoff-clone={:.1}ms", phases[0], phases[1], phases[2], phases[3]);
 }

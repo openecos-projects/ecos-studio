@@ -41,17 +41,19 @@ impl CanvasCache {
         let mut highlights = Mesh::default();
         // Resolve subpixel static vias as pixel coverage at full-chip scale.
         // Exact DBU geometry remains available when zoom/focus changes the key.
-        let mut via_coverage = std::collections::BTreeMap::<(i32, i32), f32>::new();
+        let mut via_coverage = std::collections::HashMap::<(i32, i32), f32>::new();
         self.dynamic.clear();
         for (id, object) in index.visible(viewport) {
             if object.kind == "track_grid" && f32::from_bits(key.2) < 2.0 && !focused {
                 continue;
             }
+            let touched =
+                matches!(object.kind.as_str(), "instance" | "macro") && scene.touched.contains(id);
             if motion.contains(id) || reveal.contains(id) {
                 self.dynamic.push(AnimatedObject {
                     id: id.to_owned(),
                     object: object.clone(),
-                    touched: scene.touched.contains(id),
+                    touched,
                 });
             } else {
                 if object.kind == "via" {
@@ -70,7 +72,7 @@ impl CanvasCache {
                     &mut highlights,
                     id,
                     object,
-                    scene.touched.contains(id),
+                    touched,
                     motion,
                     reveal,
                     project,
@@ -79,7 +81,10 @@ impl CanvasCache {
                 );
             }
         }
-        for ((x, y), coverage) in via_coverage {
+        // Accumulate in constant time, then keep deterministic mesh order.
+        let mut via_pixels: Vec<_> = via_coverage.into_iter().collect();
+        via_pixels.sort_unstable_by_key(|(pixel, _)| *pixel);
+        for ((x, y), coverage) in via_pixels {
             base.add_colored_rect(
                 Rect::from_min_size(Pos2::new(x as f32, y as f32), egui::Vec2::splat(1.0)),
                 Color32::from_rgb(255, 211, 112).gamma_multiply(coverage.min(1.0)),
@@ -274,6 +279,44 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn tiny_vias_accumulate_coverage_in_deterministic_pixel_order() {
+        let scene = Scene {
+            objects: serde_json::from_value(json!({
+                "a":{"kind":"via","bbox":[10,10,12,12]},
+                "b":{"kind":"via","bbox":[12,10,14,12]},
+                "c":{"kind":"via","bbox":[25,10,27,12]}
+            }))
+            .unwrap(),
+            ..Default::default()
+        };
+        let index = SceneIndex::build(&scene, &Motion::default());
+        let rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(100.0, 100.0));
+        let mut cache = CanvasCache::default();
+        for _ in 0..3 {
+            cache.prepare(
+                (rect, [0, 0, 100, 100], 1.0_f32.to_bits(), None),
+                &scene,
+                &index,
+                &Motion::default(),
+                &Reveal::default(),
+                [0, 0, 100, 100],
+                false,
+                &|x, y| Pos2::new(x as f32 / 10.0, y as f32 / 10.0),
+                0.1,
+            );
+            let mut expected = Mesh::default();
+            let color = Color32::from_rgb(255, 211, 112);
+            for (x, coverage) in [(1.0, 0.08), (2.0, 0.04)] {
+                expected.add_colored_rect(
+                    Rect::from_min_size(Pos2::new(x, 1.0), egui::Vec2::splat(1.0)),
+                    color.gamma_multiply(coverage),
+                );
+            }
+            assert_eq!(*cache.base, expected);
+        }
+    }
+
+    #[test]
     fn retained_mesh_excludes_moving_objects_and_never_mutates_scene() {
         let before: Scene = Scene {
             objects: serde_json::from_value(json!({
@@ -286,7 +329,8 @@ mod tests {
             ..Default::default()
         };
         let mut after = before.clone();
-        Arc::make_mut(after.objects.get_mut("a").unwrap()).bbox = [20, 0, 30, 10];
+        Arc::make_mut(Arc::make_mut(&mut after.objects).get_mut("a").unwrap()).bbox =
+            [20, 0, 30, 10];
         after.revision = Some(1);
         let frames = (0..2)
             .map(|i| {

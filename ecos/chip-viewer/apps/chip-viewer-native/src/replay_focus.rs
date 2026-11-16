@@ -34,7 +34,7 @@ impl ReplayApp {
         };
         self.selected_objects.clear();
         let mut bounds: Option<[i64; 4]> = None;
-        for (id, object) in &recording.scene.objects {
+        for (id, object) in recording.scene.objects.iter() {
             let instance_match = instance.as_ref().is_some_and(|name| {
                 !name.is_empty() && (id == &format!("inst:{name}") || object.name == *name)
             });

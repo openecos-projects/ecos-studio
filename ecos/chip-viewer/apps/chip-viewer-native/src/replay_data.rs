@@ -90,10 +90,11 @@ impl Recording {
                 baseline.checkpoint && baseline.base_checkpoint.is_none(),
                 "Invalid Replay anchor"
             );
+            let objects = std::sync::Arc::make_mut(&mut baseline.upsert);
             for id in &delta.remove {
-                baseline.upsert.remove(id);
+                objects.remove(id);
             }
-            baseline.upsert.extend(delta.upsert);
+            objects.extend(std::sync::Arc::unwrap_or_clone(delta.upsert));
             delta.upsert = baseline.upsert;
             delta.remove.clear();
             delta.base_checkpoint = None;

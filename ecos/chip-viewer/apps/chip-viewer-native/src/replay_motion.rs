@@ -49,7 +49,7 @@ impl Motion {
         if !compatible_frames(a, b) {
             return;
         }
-        for (id, new) in &after.objects {
+        for (id, new) in after.objects.iter() {
             let Some(old) = before.objects.get(id) else {
                 continue;
             };
@@ -133,12 +133,12 @@ mod tests {
         }))
         .unwrap();
         let before = Scene {
-            objects: BTreeMap::from([("inst:a".into(), old)]),
+            objects: BTreeMap::from([("inst:a".into(), old)]).into(),
             revision: Some(0),
             ..Default::default()
         };
         let after = Scene {
-            objects: BTreeMap::from([("inst:a".into(), new)]),
+            objects: BTreeMap::from([("inst:a".into(), new)]).into(),
             revision: Some(1),
             ..Default::default()
         };
@@ -176,10 +176,20 @@ mod tests {
         motion.begin(&before, &after, &frames);
         motion.clear();
         assert_eq!(motion.bounds("inst:a", target), target);
-        std::sync::Arc::make_mut(after.objects.get_mut("inst:a").unwrap()).master = "BUF".into();
+        std::sync::Arc::make_mut(
+            std::sync::Arc::make_mut(&mut after.objects)
+                .get_mut("inst:a")
+                .unwrap(),
+        )
+        .master = "BUF".into();
         motion.begin(&before, &after, &frames);
         assert!(!motion.active());
-        std::sync::Arc::make_mut(after.objects.get_mut("inst:a").unwrap()).master = "INV".into();
+        std::sync::Arc::make_mut(
+            std::sync::Arc::make_mut(&mut after.objects)
+                .get_mut("inst:a")
+                .unwrap(),
+        )
+        .master = "INV".into();
         frames[1].phase = "after_legalization".into();
         motion.begin(&before, &after, &frames);
         assert!(!motion.active());

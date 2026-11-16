@@ -129,12 +129,12 @@ mod tests {
         let object =
             |x| serde_json::from_value(json!({"kind":"instance", "bbox":[x,0,x+10,10]})).unwrap();
         let before = Scene {
-            objects: std::collections::BTreeMap::from([("cell".into(), object(0))]),
+            objects: std::collections::BTreeMap::from([("cell".into(), object(0))]).into(),
             revision: Some(0),
             ..Default::default()
         };
         let after = Scene {
-            objects: std::collections::BTreeMap::from([("cell".into(), object(20))]),
+            objects: std::collections::BTreeMap::from([("cell".into(), object(20))]).into(),
             revision: Some(1),
             ..Default::default()
         };

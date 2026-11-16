@@ -85,7 +85,7 @@ impl ReplayAnalysis {
         let mut instances = BTreeMap::new();
         let mut nets: BTreeMap<&str, Vec<[i64; 4]>> = BTreeMap::new();
         let mut pins = BTreeMap::new();
-        for (id, object) in &scene.objects {
+        for (id, object) in scene.objects.iter() {
             if object
                 .attributes
                 .get("placed")

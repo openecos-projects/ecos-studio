@@ -42,6 +42,8 @@ pub struct ReplayApp {
     active_clip: Option<usize>,
     loader: crate::replay_loader::Loader,
     pending: Option<(u64, usize, Option<usize>)>,
+    #[cfg(test)]
+    prepare_timings_ms: [f64; 4],
     checked: Instant,
     maps: ReplayMaps,
     analysis: crate::replay_analysis::ReplayAnalysis,
@@ -137,6 +139,8 @@ impl ReplayApp {
             active_clip: None,
             loader: Default::default(),
             pending: None,
+            #[cfg(test)]
+            prepare_timings_ms: [0.0; 4],
             checked: Instant::now(),
             maps: ReplayMaps::default(),
             analysis: Default::default(),
