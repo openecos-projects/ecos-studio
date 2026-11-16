@@ -1,4 +1,5 @@
 use super::ReplayApp;
+use crate::replay_gpu_mesh::{paint, Slot};
 use egui::{Color32, Pos2, Rect, Sense, Stroke};
 
 impl ReplayApp {
@@ -34,7 +35,7 @@ impl ReplayApp {
         if response.hovered() {
             self.zoom = (self.zoom * ui.input(|i| i.zoom_delta())).clamp(0.2, 8.0);
         }
-        let [lx, ly, hx, hy] = die.bbox;
+        let [lx, ly, hx, hy] = self.focus.unwrap_or(die.bbox);
         let scale = ((rect.width() - 60.0) / (hx - lx).max(1) as f32)
             .min((rect.height() - 60.0) / (hy - ly).max(1) as f32)
             * self.zoom;
@@ -44,124 +45,208 @@ impl ReplayApp {
                 rect.center().y - (y as f64 - (ly as f64 + hy as f64) / 2.0) as f32 * scale,
             )
         };
-        for obj in &self.reveal.ghosts {
-            let [x1, y1, x2, y2] = obj.bbox;
-            painter.rect_stroke(
-                Rect::from_two_pos(project(x1, y1), project(x2, y2)),
-                0.0,
-                Stroke::new(
-                    1.0,
-                    Color32::from_rgb(245, 121, 101).gamma_multiply(self.reveal.ghost_opacity()),
-                ),
-                egui::StrokeKind::Inside,
+        let half_x = (rect.width() as f64 / (2.0 * f64::from(scale))).ceil() as i64;
+        let half_y = (rect.height() as f64 / (2.0 * f64::from(scale))).ceil() as i64;
+        let center_x = lx + (hx - lx) / 2;
+        let center_y = ly + (hy - ly) / 2;
+        let viewport = [
+            center_x - half_x,
+            center_y - half_y,
+            center_x + half_x,
+            center_y + half_y,
+        ];
+        let key = (rect, [lx, ly, hx, hy], self.zoom.to_bits(), scene.revision);
+        if self.canvas_cache.key.as_ref() != Some(&key) {
+            self.canvas_cache.prepare(
+                key,
+                scene,
+                &self.scene_index,
+                &self.motion,
+                &self.reveal,
+                viewport,
+                self.focus.is_some(),
+                &project,
+                scale,
             );
-        }
-        for (id, obj) in &scene.objects {
-            let fraction = self.reveal.fraction(id);
-            if fraction <= 0.0 {
-                continue;
-            }
-            let [x1, y1, x2, y2] = self.motion.bounds(id, self.reveal.bounds(id, obj));
-            let bounds = Rect::from_two_pos(project(x1, y1), project(x2, y2));
-            let color = match obj.kind.as_str() {
-                "macro" => Color32::from_rgb(124, 151, 214),
-                "pdn" => Color32::from_rgb(177, 143, 88),
-                "wire" => route_layer_color(&obj.layer),
-                "via" => Color32::from_rgb(255, 211, 112),
-                "pin" => Color32::from_rgb(112, 219, 198),
-                "row" => Color32::from_rgb(36, 64, 54),
-                "track_grid" => Color32::from_rgb(75, 89, 105),
-                "die" => Color32::from_rgb(131, 193, 234),
-                "core" => Color32::from_rgb(218, 175, 107),
-                _ => Color32::from_rgb(70, 147, 129),
-            }
-            .gamma_multiply(fraction);
-            if matches!(obj.kind.as_str(), "die" | "core") {
-                outline(&painter, bounds, Stroke::new(1.5, color), fraction);
-                continue;
-            }
-            if !matches!(obj.kind.as_str(), "die" | "core" | "row" | "halo") {
-                painter.rect_filled(bounds, 0.0, color);
-            }
-            let changed =
-                scene.touched.contains(id) && matches!(obj.kind.as_str(), "macro" | "instance");
-            painter.rect_stroke(
-                bounds,
-                0.0,
-                Stroke::new(
-                    if changed { 1.2 } else { 0.5 },
-                    if changed {
-                        Color32::from_rgb(255, 157, 185).gamma_multiply(fraction)
-                    } else {
-                        color
-                    },
-                ),
-                egui::StrokeKind::Inside,
-            );
-        }
-        if self.complete {
-            self.maps.paint(&painter, project);
-        }
-        // Draw highlights last so PDN geometry and heatmaps cannot obscure them.
-        for id in &scene.touched {
-            if let Some(obj) = scene.objects.get(id) {
-                let fraction = self.reveal.fraction(id);
-                if fraction <= 0.0 {
-                    continue;
+            if self.gpu_format.is_some() {
+                self.canvas_cache.animation = crate::replay_gpu_animation::Animation::build(
+                    &self.canvas_cache.dynamic,
+                    &self.motion,
+                    &self.reveal,
+                    &project,
+                    scale,
+                    Rect::EVERYTHING,
+                );
+                let animation = &self.canvas_cache.animation;
+                let largest = animation
+                    .geometry
+                    .motion
+                    .len()
+                    .max(animation.highlights.motion.len());
+                self.canvas_cache.gpu_animated = largest
+                    * std::mem::size_of::<crate::replay_gpu_animation::VertexMotion>()
+                    <= self.gpu_animation_limit;
+                if !self.canvas_cache.gpu_animated {
+                    self.canvas_cache.animation = Default::default();
                 }
-                let [x1, y1, x2, y2] = self.motion.bounds(id, self.reveal.bounds(id, obj));
+            }
+        }
+        paint(
+            &painter,
+            self.canvas_cache.ghosts.clone(),
+            Slot::Ghosts,
+            self.gpu_format,
+            self.reveal.ghost_opacity(),
+        );
+        paint(
+            &painter,
+            self.canvas_cache.base.clone(),
+            Slot::Base,
+            self.gpu_format,
+            1.0,
+        );
+        let mut moving = egui::Mesh::default();
+        let mut highlights = egui::Mesh::default();
+        let progress = self
+            .reveal
+            .progress()
+            .unwrap_or_else(|| self.motion.progress());
+        if let Some(format) = self.gpu_format.filter(|_| self.canvas_cache.gpu_animated) {
+            crate::replay_gpu_mesh::paint_animated(
+                &painter,
+                &self.canvas_cache.animation.geometry,
+                Slot::Dynamic,
+                format,
+                progress,
+            );
+        }
+        for item in &self.canvas_cache.dynamic {
+            if self.canvas_cache.gpu_animated
+                && crate::replay_gpu_animation::supported(&item.object)
+            {
+                continue;
+            }
+            crate::replay_batch::paint_object(
+                &mut moving,
+                &mut highlights,
+                &item.id,
+                &item.object,
+                item.touched,
+                &self.motion,
+                &self.reveal,
+                &project,
+                scale,
+                rect,
+            );
+        }
+        painter.add(egui::Shape::mesh(moving));
+        if self.complete && self.pending.is_none() {
+            self.maps.paint(&painter, project);
+            self.analysis.paint(&painter, project);
+        }
+        paint(
+            &painter,
+            self.canvas_cache.deleted.clone(),
+            Slot::Deleted,
+            self.gpu_format,
+            1.0,
+        );
+        // Draw highlights last so PDN geometry and heatmaps cannot obscure them.
+        paint(
+            &painter,
+            self.canvas_cache.highlights.clone(),
+            Slot::Highlights,
+            self.gpu_format,
+            1.0,
+        );
+        if let Some(format) = self.gpu_format.filter(|_| self.canvas_cache.gpu_animated) {
+            crate::replay_gpu_mesh::paint_animated(
+                &painter,
+                &self.canvas_cache.animation.highlights,
+                Slot::DynamicHighlights,
+                format,
+                progress,
+            );
+        }
+        painter.add(egui::Shape::mesh(highlights));
+        for (start, end) in self.motion.trails(scene) {
+            painter.line_segment(
+                [project(start[0], start[1]), project(end[0], end[1])],
+                Stroke::new(1.0, Color32::from_rgba_unmultiplied(240, 175, 201, 130)),
+            );
+        }
+        for id in &self.selected_objects {
+            if let Some(obj) = scene.objects.get(id) {
+                let [x1, y1, x2, y2] = obj.bbox;
                 painter.rect_stroke(
-                    Rect::from_two_pos(project(x1, y1), project(x2, y2)),
+                    Rect::from_two_pos(project(x1, y1), project(x2, y2)).expand(2.0),
                     0.0,
-                    Stroke::new(
-                        1.2,
-                        Color32::from_rgb(255, 157, 185).gamma_multiply(fraction),
-                    ),
-                    egui::StrokeKind::Inside,
+                    Stroke::new(2.0, Color32::WHITE),
+                    egui::StrokeKind::Outside,
                 );
             }
         }
     }
 }
 
-fn route_layer_color(layer: &str) -> Color32 {
-    const PALETTE: [Color32; 6] = [
-        Color32::from_rgb(73, 183, 217),
-        Color32::from_rgb(239, 126, 101),
-        Color32::from_rgb(144, 194, 104),
-        Color32::from_rgb(204, 144, 220),
-        Color32::from_rgb(232, 192, 93),
-        Color32::from_rgb(93, 145, 232),
-    ];
-    let index = layer.parse::<usize>().map_or_else(
-        |_| layer.bytes().fold(0usize, |sum, byte| sum + byte as usize),
-        |id| id,
-    ) % PALETTE.len();
-    PALETTE[index]
-}
+#[cfg(test)]
+mod benchmarks {
+    use super::*;
+    use crate::replay_data::Recording;
+    use std::{path::Path, time::Instant};
 
-fn outline(painter: &egui::Painter, rect: Rect, stroke: Stroke, fraction: f32) {
-    let corners = [
-        rect.left_top(),
-        rect.right_top(),
-        rect.right_bottom(),
-        rect.left_bottom(),
-        rect.left_top(),
-    ];
-    let mut length = 2.0 * (rect.width() + rect.height()) * fraction;
-    for pair in corners.windows(2) {
-        let edge = pair[1] - pair[0];
-        let size = edge.length();
-        if length <= 0.0 {
-            break;
+    #[test]
+    #[ignore = "set ECOS_REPLAY_TEST_CATALOG to a real workspace catalog"]
+    fn real_layout_animation_cpu_frame_time() {
+        let path = std::env::var("ECOS_REPLAY_TEST_CATALOG").unwrap();
+        let mut app = ReplayApp::open(Path::new(&path)).unwrap();
+        // Let the independent planner finish before measuring canvas work.
+        let _ = app.preparation.take().unwrap().recv().unwrap();
+        let step = app
+            .catalog
+            .steps
+            .iter()
+            .find(|s| s.name == "place")
+            .unwrap();
+        let mut record =
+            Recording::open(&app.catalog.workspace, step.manifest.as_ref().unwrap()).unwrap();
+        let target = record
+            .manifest
+            .frames
+            .windows(2)
+            .position(|frames| crate::replay_motion::compatible_frames(&frames[0], &frames[1]))
+            .unwrap()
+            + 1;
+        record.seek_frame(target - 1).unwrap();
+        let before = record.scene.clone();
+        record.seek_frame(target).unwrap();
+        app.motion
+            .begin(&before, &record.scene, &record.manifest.frames);
+        app.scene_index = crate::replay_index::SceneIndex::build(&record.scene, &app.motion);
+        app.recording = Some(record);
+        let ctx = egui::Context::default();
+        let mut times = Vec::new();
+        for frame in 0..120 {
+            app.motion.set_progress((frame % 60) as f64 / 59.0);
+            let start = Instant::now();
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1000.0, 800.0))),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| app.canvas(ui));
+                },
+            );
+            let _ = ctx.tessellate(output.shapes, output.pixels_per_point);
+            if frame > 0 {
+                times.push(start.elapsed().as_secs_f64() * 1000.0);
+            }
         }
-        painter.line_segment(
-            [
-                pair[0],
-                pair[0] + edge * (length / size.max(0.001)).min(1.0),
-            ],
-            stroke,
+        times.sort_by(f64::total_cmp);
+        println!(
+            "Replay CPU canvas+tessellation P95: {:.1}ms (1000x800, no GPU submission)",
+            times[112]
         );
-        length -= size;
     }
 }

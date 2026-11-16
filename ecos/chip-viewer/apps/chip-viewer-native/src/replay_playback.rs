@@ -6,47 +6,45 @@ use anyhow::{ensure, Result};
 
 impl ReplayApp {
     pub(super) fn clear_animation(&mut self) {
+        self.canvas_cache = Default::default();
+        self.loader.cancel();
+        self.pending = None;
         self.motion.clear();
         self.reveal.clear();
         self.active_clip = None;
     }
 
     pub(super) fn select_node(&mut self, step: usize, seconds: f64, source: Option<f64>) {
-        self.select(step, seconds, source.is_none());
-        if let Some(source) = source {
-            // A node inspects an exact recorded state, even when several idle
-            // boundaries collapse to one display position.
-            self.complete = false;
-            self.clear_animation();
-            self.maps.clear_selection();
-            if let Some(recording) = &mut self.recording {
-                if let Some(frame) = self.plans[step].frame_at_source(source) {
-                    if let Err(error) = recording.seek_frame(frame) {
-                        self.error = error.to_string();
-                        self.recording = None;
-                    }
-                } else {
-                    recording.scene = Default::default();
-                }
-            }
-        }
+        self.select_at(step, seconds, source.is_none(), source);
     }
 
     pub(super) fn select(&mut self, step: usize, seconds: f64, completion_node: bool) {
+        self.select_at(step, seconds, completion_node, None);
+    }
+
+    fn select_at(&mut self, step: usize, seconds: f64, completion_node: bool, source: Option<f64>) {
+        self.completion_node_selected = completion_node;
         self.position = seconds.clamp(
             self.starts[step],
             self.starts[step] + self.plans[step].seconds,
         );
         let local = self.position - self.starts[step];
-        self.complete = completion_node || local >= self.plans[step].process_seconds;
+        self.complete =
+            source.is_none() && (completion_node || local >= self.plans[step].process_seconds);
         if self.step != step || self.recording.is_none() {
+            self.loader.cancel();
+            self.pending = None;
             self.step = step;
+            self.focus = None;
+            self.selected_objects.clear();
             self.clear_animation();
             self.clock_tree = None;
             self.clock_tree_error.clear();
             self.clock_tree_attempted = false;
             self.checklist = None;
             self.maps = ReplayMaps::default();
+            self.analysis = Default::default();
+            self.logic = None;
             self.recording = None;
             self.error.clone_from(&self.plans[step].error);
             if self.error.is_empty() {
@@ -59,15 +57,25 @@ impl ReplayApp {
                                 == Some(&recording.manifest.attempt_id),
                             "Replay changed during preparation. Reopen after completion."
                         );
+                        let flow: serde_json::Value = crate::replay_data::read(
+                            &self.catalog.workspace.join("home/flow.json"),
+                        )?;
+                        let expected = if recording.manifest.diagnostic_only {
+                            "Incomplete"
+                        } else {
+                            "Success"
+                        };
+                        ensure!(
+                            flow["steps"].as_array().is_some_and(|steps| steps
+                                .iter()
+                                .any(|item| item["name"] == self.catalog.steps[step].name
+                                    && item["state"] == expected)),
+                            "Replay result and flow state disagree"
+                        );
                         Ok(recording)
                     })();
                     match opened {
                         Ok(recording) => {
-                            match recording.map_root() {
-                                Ok(Some(root)) => self.maps = ReplayMaps::open(&root),
-                                Err(error) => self.maps.error = error.to_string(),
-                                _ => {}
-                            }
                             self.recording = Some(recording);
                         }
                         Err(error) => self.error = error.to_string(),
@@ -75,7 +83,27 @@ impl ReplayApp {
                 }
             }
         }
-        if let Err(error) = self.sample(local) {
+        let sample = if let Some(source) = source {
+            // Exact nodes submit only their own sample, never a speculative
+            // animated request that would immediately be canceled.
+            // Keep the previous rendered frame while the exact target loads.
+            // Clearing its mesh here would rebuild it only to discard it again
+            // when the worker returns the requested scene.
+            self.loader.cancel();
+            self.pending = None;
+            if let Some(frame) = self.plans[step].frame_at_source(source) {
+                self.request_frame(frame, None, true)
+            } else {
+                self.clear_animation();
+                if let Some(recording) = &mut self.recording {
+                    recording.scene = Default::default();
+                }
+                Ok(())
+            }
+        } else {
+            self.sample(local)
+        };
+        if let Err(error) = sample {
             self.error = error.to_string();
             self.recording = None;
             self.clock_tree = None;
@@ -85,26 +113,22 @@ impl ReplayApp {
         if !self.error.is_empty() {
             self.playing = false;
         }
-        if self.complete && !self.clock_tree_attempted {
-            self.clock_tree_attempted = true;
-            if let Some(recording) = &self.recording {
-                match recording.clock_tree().and_then(|tree| {
-                    tree.map(|tree| crate::clock_tree::ClockTreePanel::from_snapshot(&tree))
-                        .transpose()
-                }) {
-                    Ok(tree) => self.clock_tree = tree,
-                    Err(error) => self.clock_tree_error = error.to_string(),
-                }
-            }
+        if !self.complete {
+            self.maps.clear_selection();
+            self.analysis.clear();
+        }
+        if self.pending.is_some() {
+            return;
         }
         if self.complete && self.error.is_empty() && self.checklist.is_none() {
-            self.checklist = Some(
-                crate::replay_checklist::load(
+            self.checklist = self.recording.as_ref().map(|recording| {
+                crate::replay_checklist::Checklist::from_recording(
+                    recording,
                     &self.catalog.workspace,
                     &self.catalog.steps[step].name,
                 )
-                .map_err(|error| error.to_string()),
-            );
+                .map_err(|error| error.to_string())
+            });
         }
         if self.complete {
             let hold = if completion_node {
@@ -112,14 +136,32 @@ impl ReplayApp {
             } else {
                 local - self.plans[step].process_seconds
             };
-            if hold >= RESULT_SECONDS && self.maps.len() > 0 {
+            if let Some(recording) = &self.recording {
+                self.analysis.resolve(&recording.scene);
+            }
+            self.analysis.clear();
+            if hold >= RESULT_SECONDS && self.maps.len() + self.analysis.len() > 0 {
                 let index = ((hold - RESULT_SECONDS) / MAP_SECONDS) as usize;
-                self.maps.select(index.min(self.maps.len() - 1));
+                if index < self.maps.len() {
+                    self.maps.select(index);
+                } else {
+                    self.maps.clear_selection();
+                    let progress = ((hold - RESULT_SECONDS) / MAP_SECONDS).fract() as f32;
+                    self.analysis.auto_select(
+                        (index - self.maps.len()).min(self.analysis.len().saturating_sub(1)),
+                        if local >= self.plans[step].seconds {
+                            1.0
+                        } else {
+                            progress
+                        },
+                    );
+                }
             } else {
                 self.maps.clear_selection();
             }
         } else {
             self.maps.clear_selection();
+            self.analysis.clear();
         }
     }
 
@@ -129,55 +171,130 @@ impl ReplayApp {
         } else {
             self.plans[self.step].clip_at(local)
         };
-        let Some(recording) = &mut self.recording else {
+        let Some(recording) = &self.recording else {
             return Ok(());
         };
-        let Some(index) = clip_index else {
-            recording.seek_frame(recording.manifest.frames.len() - 1)?;
-            self.clear_animation();
-            return Ok(());
-        };
-        let clip = &self.plans[self.step].clips[index];
-        if self.active_clip != Some(index) {
-            recording.check_current()?;
-            self.motion.clear();
-            self.reveal.clear();
-            if self.smooth && clip.kind != Kind::Hold {
-                if let Some(previous) = clip.frame.checked_sub(1) {
-                    recording.seek_frame(previous)?;
-                } else {
-                    recording.scene = Default::default();
-                }
-                let before = recording.scene.clone();
-                // One scene copy per clip, never per interpolated display frame.
-                recording
-                    .scene
-                    .apply(recording.delta(clip.frame)?)
-                    .map_err(anyhow::Error::msg)?;
-                match clip.kind {
-                    Kind::Motion => {
-                        self.motion
-                            .begin(&before, &recording.scene, &recording.manifest.frames)
-                    }
-                    Kind::Reveal => {
-                        self.reveal
-                            .begin(&before, &recording.scene, &recording.manifest.frames)
-                    }
-                    Kind::Hold => {}
-                }
-            } else {
-                recording.seek_frame(clip.frame)?;
-            }
-            self.active_clip = Some(index);
-        }
-        let progress = ((local - clip.start) / (clip.end - clip.start)).clamp(0.0, 1.0);
-        self.motion.set_progress(progress);
-        self.reveal.set_progress(progress);
+        let frame = clip_index.map_or(recording.manifest.frames.len() - 1, |index| {
+            self.plans[self.step].clips[index].frame
+        });
+        self.request_frame(frame, clip_index, false)?;
+        self.update_progress(local);
         Ok(())
     }
 
+    pub(super) fn request_frame(
+        &mut self,
+        frame: usize,
+        clip: Option<usize>,
+        exact: bool,
+    ) -> Result<()> {
+        let Some(recording) = &self.recording else {
+            return Ok(());
+        };
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|(_, target, pending_clip)| *target == frame && *pending_clip == clip)
+        {
+            return Ok(());
+        }
+        if self.pending.is_none()
+            && !exact
+            && !(self.complete && !self.clock_tree_attempted)
+            && recording.scene.revision == Some(frame)
+            && self.active_clip == clip
+        {
+            return Ok(());
+        }
+        let kind = clip.map_or(Kind::Hold, |index| self.plans[self.step].clips[index].kind);
+        let token = self.loader.submit(crate::replay_loader::Request {
+            workspace: self.catalog.workspace.clone(),
+            manifest: self.catalog.steps[self.step].manifest.clone().unwrap(),
+            attempt: recording.manifest.attempt_id.clone(),
+            frame,
+            kind,
+            animate: self.smooth && !exact && clip.is_some(),
+            results: self.complete && !self.clock_tree_attempted,
+        })?;
+        self.pending = Some((token, frame, clip));
+        Ok(())
+    }
+
+    fn update_progress(&mut self, local: f64) {
+        if let Some(index) = self.active_clip {
+            let clip = &self.plans[self.step].clips[index];
+            let progress = ((local - clip.start) / (clip.end - clip.start)).clamp(0.0, 1.0);
+            self.motion.set_progress(progress);
+            self.reveal.set_progress(progress);
+        }
+    }
+
+    pub(super) fn poll_loader(&mut self) {
+        while let Some(reply) = self.loader.poll() {
+            let Some((token, _, clip)) = self.pending else {
+                continue;
+            };
+            if token != reply.generation {
+                continue;
+            }
+            self.pending = None;
+            match reply.result {
+                Ok(prepared) => {
+                    self.canvas_cache = Default::default();
+                    let crate::replay_loader::Prepared {
+                        scene,
+                        motion,
+                        reveal,
+                        index,
+                        logic,
+                        results,
+                    } = prepared;
+                    self.logic = logic;
+                    if let Some(results) = results {
+                        self.maps = results.maps;
+                        self.analysis = results.analysis;
+                        self.clock_tree_attempted = true;
+                        match results.tree {
+                            Ok(tree) => self.clock_tree = tree,
+                            Err(error) => self.clock_tree_error = error,
+                        }
+                    }
+                    if let Some(recording) = &mut self.recording {
+                        recording.scene = scene;
+                    }
+                    self.scene_index = index;
+                    self.motion = motion;
+                    self.reveal = reveal;
+                    self.active_clip = clip;
+                    self.update_progress(self.position - self.starts[self.step]);
+                    if self.complete {
+                        self.select(self.step, self.position, self.completion_node_selected);
+                    }
+                }
+                Err(error) => {
+                    self.recording = None;
+                    self.clock_tree = None;
+                    self.error = error;
+                    self.playing = false;
+                    self.clear_animation();
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn finish_loading_for_test(&mut self) {
+        let started = std::time::Instant::now();
+        while self.pending.is_some() || self.maps.loading() {
+            self.poll_loader();
+            self.maps.poll();
+            assert!(started.elapsed().as_secs() < 5, "Replay seek timed out");
+            std::thread::yield_now();
+        }
+    }
+
     pub(super) fn advance_playback(&mut self, delta: f64) {
-        if !self.playing {
+        if !self.playing || self.pending.is_some() || self.maps.loading() {
             return;
         }
         // All transitions, result holds and maps use this same display clock.

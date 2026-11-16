@@ -13,11 +13,15 @@ async function readLayout(page: Page) {
       const bounds = element.getBoundingClientRect()
       const width = selector === '.flow-scroll' ? element.clientWidth : bounds.width
       const height = selector === '.flow-scroll' ? element.clientHeight : bounds.height
+      // clientWidth excludes the stable scrollbar gutters. Its origin must also
+      // exclude the left gutter/border, otherwise centered content looks shifted.
+      const left = bounds.left + (selector === '.flow-scroll' ? element.clientLeft : 0)
+      const top = bounds.top + (selector === '.flow-scroll' ? element.clientTop : 0)
       return {
-        left: bounds.left,
-        top: bounds.top,
-        right: bounds.left + width,
-        bottom: bounds.top + height,
+        left,
+        top,
+        right: left + width,
+        bottom: top + height,
         width,
         height,
       }

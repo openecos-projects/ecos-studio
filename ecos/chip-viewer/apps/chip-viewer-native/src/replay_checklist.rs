@@ -13,6 +13,8 @@ pub struct Checklist {
     pub blocked: bool,
     #[serde(default, rename = "checklist")]
     pub items: Vec<Item>,
+    #[serde(default)]
+    reason: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -113,7 +115,28 @@ fn color(blocked: bool) -> Color32 {
 }
 
 impl Checklist {
+    pub fn from_recording(
+        recording: &crate::replay_data::Recording,
+        workspace: &Path,
+        step_name: &str,
+    ) -> Result<Self> {
+        if let Some(value) = &recording.manifest.result_checklist {
+            return Ok(serde_json::from_value(value.clone())?);
+        }
+        if recording.manifest.results_frozen {
+            return Ok(Self {
+                status: "unavailable".into(),
+                reason: "No checklist captured for this attempt".into(),
+                ..Self::default()
+            });
+        }
+        load(workspace, step_name)
+    }
+
     pub fn show(&self, ui: &mut egui::Ui) {
+        if !self.reason.is_empty() {
+            ui.small(&self.reason);
+        }
         let blocked = self.blocked
             || self.status.eq_ignore_ascii_case("blocked")
             || self.items.iter().any(Item::is_blocked);
@@ -227,5 +250,21 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("escapes"));
+    }
+
+    #[test]
+    fn frozen_checklist_does_not_read_mutable_workspace_results() {
+        let fixture = Fixture::new();
+        let mut recording = fixture.open();
+        recording.manifest.results_frozen = true;
+        recording.manifest.result_checklist = Some(json!({"status":"blocked", "checklist":[
+            {"title":"Original check", "blocked":true}
+        ]}));
+        let checklist = Checklist::from_recording(&recording, &fixture.0, "place").unwrap();
+        assert_eq!(checklist.status, "blocked");
+        assert_eq!(checklist.items[0].title, "Original check");
+        recording.manifest.result_checklist = None;
+        let missing = Checklist::from_recording(&recording, &fixture.0, "place").unwrap();
+        assert_eq!(missing.status, "unavailable");
     }
 }

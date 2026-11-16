@@ -78,29 +78,6 @@ impl StepPlan {
     }
 
     fn assemble(mut clips: Vec<Clip>, frames: &[Frame], maps: usize, attempt: String) -> Self {
-        // Dense optimizer captures retain all intermediate samples, but share a
-        // 12-second budget per continuous phase. Large samples are not replayed
-        // slowly merely because the tool happened to record more frequently.
-        let mut start = 0;
-        while start < clips.len() {
-            if clips[start].kind != Kind::Motion {
-                start += 1;
-                continue;
-            }
-            let mut end = start + 1;
-            while end < clips.len()
-                && clips[end].kind == Kind::Motion
-                && compatible_frames(&frames[clips[end - 1].frame], &frames[clips[end].frame])
-            {
-                end += 1;
-            }
-            let sum: f64 = clips[start..end].iter().map(|clip| clip.end).sum();
-            let scale = (12.0 / sum).min(1.0);
-            for clip in &mut clips[start..end] {
-                clip.end *= scale;
-            }
-            start = end;
-        }
         let mut duration = 0.0;
         for clip in &mut clips {
             clip.start = duration;
@@ -160,19 +137,41 @@ fn classify(scene: &Scene, delta: &Delta, frames: &[Frame], i: usize) -> (Kind, 
                 .any(|id| !delta.upsert.contains_key(id)));
     let mut motion = !removed && i > 0 && compatible_frames(&frames[i - 1], frame);
     let mut groups = BTreeMap::new();
+    let mut largest_move = 0.0_f64;
     for (id, object) in &delta.upsert {
         let old = scene.objects.get(id);
         if old == Some(object) {
             continue;
         }
         motion &= old.is_some_and(|old| compatible_objects(old, object));
+        if let Some(old) = old {
+            let dx = (object.bbox[0] - old.bbox[0]) as f64;
+            let dy = (object.bbox[1] - old.bbox[1]) as f64;
+            largest_move = largest_move.max(dx.hypot(dy));
+        }
         if let Some(key) = group(object) {
             *groups.entry(key).or_insert(0usize) += 1;
         }
     }
+    for (id, [dx, dy]) in &delta.translate {
+        if let Some(object) = scene.objects.get(id) {
+            largest_move = largest_move.max((*dx as f64).hypot(*dy as f64));
+            if let Some(key) = group(object) {
+                *groups.entry(key).or_insert(0usize) += 1;
+            }
+        }
+    }
     if !groups.is_empty() || removed {
         if motion {
-            return (Kind::Motion, 0.3);
+            let extent = scene.objects.get("die").map_or(1.0, |die| {
+                ((die.bbox[2] - die.bbox[0]) as f64)
+                    .hypot((die.bbox[3] - die.bbox[1]) as f64)
+                    .max(1.0)
+            });
+            return (
+                Kind::Motion,
+                (0.3 + (largest_move / extent).sqrt() * 2.0).clamp(0.3, 1.2),
+            );
         }
         let seconds = groups
             .values()
@@ -213,7 +212,7 @@ pub fn prepare(catalog: &Catalog) -> Receiver<Vec<StepPlan>> {
                     let maps = recording
                         .map_root()?
                         .map_or(0, |root| ReplayMaps::open(&root).len());
-                    StepPlan::build(&recording, maps)
+                    StepPlan::build(&recording, maps + recording.manifest.analysis_view_count)
                 })();
                 result.unwrap_or_else(|error| StepPlan::unavailable(error.to_string()))
             })
@@ -291,7 +290,7 @@ mod tests {
     }
 
     #[test]
-    fn dense_motion_keeps_all_samples_with_a_bounded_budget() {
+    fn dense_motion_keeps_each_captured_transition_legible() {
         let frames = (0..100)
             .map(|i| {
                 serde_json::from_value(json!({
@@ -310,7 +309,7 @@ mod tests {
             .collect();
         let plan = StepPlan::assemble(clips, &frames, 0, "a".into());
         assert_eq!(plan.clips.len(), 100);
-        assert!((plan.process_seconds - 12.0).abs() < 1e-9);
+        assert!((plan.process_seconds - 30.0).abs() < 1e-9);
         assert_eq!(plan.frame_at_source(0.000000099), Some(99));
     }
 

@@ -8,6 +8,8 @@ pub const GEOMETRY_FILE_HEADER_SIZE: usize = core::mem::size_of::<GeometryFileHe
 
 mod clock_tree;
 pub mod replay;
+pub mod replay_analysis;
+mod replay_object;
 pub use clock_tree::*;
 
 pub type ShapeId = u64;

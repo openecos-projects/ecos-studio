@@ -20,10 +20,12 @@ Existing workspaces can enable capture with:
 ecc param set replay.enabled true --project /path/to/project --workspace ws_0001 --plain
 ```
 
-Use the updated ECC runtime and rebuilt ECC-Tools/ECC-DreamPlace. In a source
+Use matching ECC, ECC-Tools, ECC-DreamPlace, ECC-Sizer/OpenROAD, Kepler Formal and Native builds for new captures. Native reads both v1 and v2; older viewers cannot read v2. In a source
 Studio launch, `ECOS_ECC_BIN_DIR=/absolute/path/to/ecc/.venv/bin` selects that
 runtime. Build the viewer with `cargo build --release -p chip-viewer-native`
 from `ecos/chip-viewer`, then build/start the desktop using the GUI scripts.
+The development wrapper also launches the release profile so interactive Replay
+uses the same optimized native code as packaged builds.
 
 ## Playback
 
@@ -41,9 +43,7 @@ a long wait on an unchanged layout. See [presentation design](replay-presentatio
   exact final results. Overlapping nodes remain individually reachable through
   the bar's context menu. Dragging samples the same animated state as playback.
 - Compatible consecutive optimizer samples interpolate instance positions.
-  Dense continuous movement runs share a 12-second display budget while keeping
-  all captured samples in the mapping. The viewer may cross several tiny clips
-  per draw, but restores their deltas in order. Phase boundaries, legalization,
+  Each recorded movement receives 0.3–1.2 seconds, depending on normalized displacement; long sequences no longer share a fixed 12-second budget. Phase boundaries, legalization,
   rollback, replacement and committed results are not invented motion paths.
 - Generation transitions reveal die/core boundaries, rows, IO, physical cells,
   PDN and routed geometry by object type, numeric layer and spatial order.
@@ -63,11 +63,9 @@ a long wait on an unchanged layout. See [presentation design](replay-presentatio
   Playback speed applies equally to movement, generation, results and maps.
   **Play from step start** replays the selected step. Disabling animation shows
   exact samples but keeps the same display timeline.
-- Numeric result deltas compare matching IDs/units with the nearest earlier
-  step providing that metric; the comparison step is named. Result data and
+- Numeric result deltas use an explicit input-bound baseline with compatible measurement conditions; the comparison step is named. Missing timing/power context suppresses the delta instead of comparing unrelated corners. Result data and
   manual heatmap selection remain available when paused at completion.
-- Synthesis and LEC show recorded report progress and metrics without invented
-  physical geometry. Uncaptured steps remain visible as brief unavailable steps.
+- Synthesis shows recorded logical cell-type groups and connectivity; LEC shows structured proof status/coverage without invented physical geometry. Uncaptured steps remain visible as brief unavailable steps.
   Corrupt or stale recordings report an error rather than silently continuing.
 - Interpolation and staged batch order are display effects, not extra algorithm
   samples or claims about per-object execution order. Existing captures work
@@ -93,41 +91,16 @@ attempt identity. Rerunning/invalidation stops stale playback. The existing
 ordinary layout View/Edit modes keep their current launch and data contracts.
 The complete producer contract is in [ECC Replay](../../ecc/docs/replay.md).
 
-## Current scope
+## Current implementation and validation
 
-The native renderer shows recorded physical bounds for die/core, rows, IO,
-instances/macros, halos, PDN, signal wires and vias, with positional heatmaps.
-It is not a full cell-pin/polygon renderer. Geometry changes are semantic JSON
-diffs with periodic checkpoints; rendering currently draws the visible scene
-through egui. Chunked GPU updates, large-chip LOD/prefetch, and a retention policy
-remain future work and have not been scale-tested.
+See [the current contract and evidence](replay-presentation.md) and
+[ECC capture](../../ecc/docs/replay.md). Report adapters cover LVS, DRC, antenna,
+RCX, STA, power, EMIR and Harden. Frozen maps, clock trees, checklist, report
+sources and checksums belong to the exact attempt. Failed read-only checks can
+expose diagnostic results without marking the flow successful.
 
-GCD exercised no-op macro placement, not a real macro optimization trajectory.
-The earlier browser mockup remains design evidence; it is not the native runtime.
-
-## Checks and evidence
-
-From `ecos/gui`:
-
-```sh
-pnpm run check
-pnpm run desktop:build
-ELECTRON_DISABLE_SANDBOX=1 ECOS_ELECTRON_DISABLE_GPU=1 xvfb-run --auto-servernum pnpm run desktop:smoke
-```
-
-From `ecos/chip-viewer`:
-
-```sh
-cargo fmt --all -- --check
-cargo test --workspace
-cargo build --release -p chip-viewer-native
-```
-
-Integration validation used an isolated GCD workspace with real EDA execution,
-production catalog generation, the actual Electron workspace and native viewer.
-Local screenshots and run details are recorded in `.claude/replay-evidence/`
-and `.claude/replay.md` at the repository root (local design/evidence files).
-Exact commands, counts and skips are in `.claude/replay-evidence/validation.md`.
-The three full RTL-to-GDS desktop CI journeys and `make build` release packaging
-have not been run for this local first-phase validation; they require the pinned
-ECC CI toolchain/PDK/artifact set and remain gates before publication.
+This implementation does not claim to capture every internal solver action.
+Capability metadata distinguishes sampled physical history, final diffs and
+report-only data. Candidate summaries, available logical witness evidence and RC-network views
+retain their exact source semantics. Outstanding large-design acceptance and
+unsupported internal histories remain listed in the completion ledger.

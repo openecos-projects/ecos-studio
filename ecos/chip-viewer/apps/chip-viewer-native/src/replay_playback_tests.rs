@@ -23,6 +23,7 @@ fn app(fixture: &Fixture) -> ReplayApp {
     app.total = plans.iter().map(|plan| plan.seconds).sum();
     app.plans = plans;
     app.select(0, 0.0, false);
+    app.finish_loading_for_test();
     app
 }
 
@@ -33,17 +34,21 @@ fn final_change_animates_before_results_and_reverse_seek_is_deterministic() {
     let clip = app.plans[0].clips.last().unwrap();
     let midpoint = (clip.start + clip.end) / 2.0;
     app.select(0, midpoint, false);
+    app.finish_loading_for_test();
     assert!(!app.complete);
     assert!(app.reveal.active());
     assert_eq!(app.recording.as_ref().unwrap().scene.revision, Some(2));
     let fraction = app.reveal.fraction("inst:a");
     assert!(fraction > 0.0 && fraction < 1.0);
     app.select(0, app.plans[0].process_seconds, false);
+    app.finish_loading_for_test();
     assert!(app.complete);
     assert!(!app.reveal.active());
     app.select(0, midpoint, false);
+    app.finish_loading_for_test();
     assert_eq!(app.reveal.fraction("inst:a"), fraction);
     app.select_node(0, app.total, None);
+    app.finish_loading_for_test();
     assert!(app.complete);
     assert_eq!(
         app.recording.as_ref().unwrap().scene.objects["inst:a"].bbox,
@@ -66,6 +71,7 @@ fn motion_pause_resume_speed_and_result_hold_share_the_display_clock() {
     assert_eq!(clip.kind, Kind::Motion);
     let midpoint = (clip.start + clip.end) / 2.0;
     app.select(0, midpoint, false);
+    app.finish_loading_for_test();
     let position = app.position;
     let target = app.recording.as_ref().unwrap().scene.objects["inst:a"].bbox;
     let paused_bounds = app.motion.bounds("inst:a", target);
@@ -73,21 +79,27 @@ fn motion_pause_resume_speed_and_result_hold_share_the_display_clock() {
     app.playing = false;
     // A paused UI tick never advances or resets the clip.
     app.advance_playback(0.5);
+    app.finish_loading_for_test();
     assert_eq!(app.position, position);
     assert_eq!(app.motion.bounds("inst:a", target), paused_bounds);
     app.playing = true;
     app.speed = 2.0;
     app.advance_playback(0.025);
+    app.finish_loading_for_test();
     assert!((app.position - position - 0.05).abs() < 1e-9);
     assert!(app.motion.bounds("inst:a", target)[0] > paused_bounds[0]);
     app.select(0, app.plans[0].process_seconds, false);
+    app.finish_loading_for_test();
     let results = app.position;
     app.advance_playback(0.5);
+    app.finish_loading_for_test();
     assert_eq!(app.position, results + 1.0);
     assert!(app.complete);
     app.advance_playback(0.5);
+    app.finish_loading_for_test();
     assert_eq!(app.position, app.total);
     app.advance_playback(0.01);
+    app.finish_loading_for_test();
     assert!(!app.playing);
 }
 
@@ -96,7 +108,12 @@ fn subflow_node_shows_its_exact_frame_instead_of_the_next_animation() {
     let fixture = Fixture::new();
     let mut app = app(&fixture);
     let display = app.plans[0].display_at_source(1.0);
+    let clip = &app.plans[0].clips[1];
+    app.select(0, (clip.start + clip.end) / 2.0, false);
+    app.finish_loading_for_test();
+    assert!(app.reveal.active());
     app.select_node(0, display, Some(1.0));
+    app.finish_loading_for_test();
     assert!(!app.complete);
     assert!(!app.reveal.active());
     assert_eq!(app.recording.as_ref().unwrap().scene.revision, Some(1));
@@ -115,6 +132,7 @@ fn rerun_rejects_prepared_plan_before_loading_another_clip() {
         json!({"status":"recording","attempt_id":"b"}),
     );
     app.select(0, app.plans[0].clips[1].start, false);
+    app.finish_loading_for_test();
     assert!(app.error.contains("invalidated"));
     assert!(app.recording.is_none());
 }
@@ -139,22 +157,28 @@ fn maps_follow_completion_and_speed_without_leaking_into_process_seek() {
     let process = app.plans[0].process_seconds;
     assert_eq!(app.total, process + RESULT_SECONDS + 2.0 * MAP_SECONDS);
     app.select(0, process, false);
+    app.finish_loading_for_test();
     assert!(app.complete);
     assert_eq!(app.maps.selected, None);
     app.playing = true;
     app.speed = 4.0;
     app.advance_playback(0.5);
+    app.finish_loading_for_test();
     assert_eq!(app.maps.selected, Some(0));
     assert!(app.maps.error.is_empty());
     app.advance_playback(0.5);
+    app.finish_loading_for_test();
     assert_eq!(app.maps.selected, Some(1));
     app.playing = false;
     app.advance_playback(0.5);
+    app.finish_loading_for_test();
     assert_eq!(app.maps.selected, Some(1));
     app.select(0, process - 0.1, false);
+    app.finish_loading_for_test();
     assert!(!app.complete);
     assert_eq!(app.maps.selected, None);
     app.select_node(0, app.total, None);
+    app.finish_loading_for_test();
     assert!(app.complete);
     assert_eq!(app.maps.selected, None);
 }
