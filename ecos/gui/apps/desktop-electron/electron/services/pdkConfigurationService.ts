@@ -18,6 +18,7 @@ export class PdkConfigurationService {
     const actions = [
       'schema',
       'init',
+      'adopt',
       'discover',
       'show',
       'set',
@@ -25,6 +26,7 @@ export class PdkConfigurationService {
       'resolve',
       'library-list',
       'library-default',
+      'library-locate',
     ]
     if (!request || !actions.includes(request.action)) {
       throw new Error('Unknown PDK configuration action')
@@ -42,6 +44,12 @@ export class PdkConfigurationService {
       }
       args.push('--installation', request.installationId, '--client', request.client!)
     }
+    if (request.action === 'library-locate') {
+      if (!request.installationId?.trim() || !request.root || !isAbsolute(request.root)) {
+        throw new Error('PDK relocation requires an installation and absolute root')
+      }
+      args.push('--installation', request.installationId, '--root', request.root)
+    }
     if (request.action !== 'schema' && !libraryAction) {
       if (typeof request.root !== 'string' || !isAbsolute(request.root)) {
         throw new Error('PDK root must be an absolute directory path')
@@ -51,8 +59,8 @@ export class PdkConfigurationService {
         if (!isAbsolute(request.descriptionPath)) {
           throw new Error('PDK description path must be absolute')
         }
-        if (request.action === 'discover') {
-          throw new Error('Discovery does not accept a description path')
+        if (['discover', 'adopt'].includes(request.action)) {
+          throw new Error('This action does not accept a configuration path')
         }
         args.push('--output', request.descriptionPath)
       }

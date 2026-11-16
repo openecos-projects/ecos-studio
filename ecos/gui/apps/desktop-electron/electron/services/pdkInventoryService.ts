@@ -24,6 +24,7 @@ import { withPdkInventoryLock } from './pdkInventoryLock'
 import { assertManualPdkConfiguration } from './pdkManualConfiguration'
 import type { PdkConfigurationService } from './pdkConfigurationService'
 import { ResourceMetadataRestoreError } from './resourceInstallErrors'
+import { snapshotInstallation, configurationIdentity } from './pdkInstallationSnapshot'
 
 export interface PdkInventoryServiceOptions {
   inventoryPath?: string
@@ -72,14 +73,21 @@ export class PdkInventoryService {
   async importInstallation(request: PdkImportRequest): Promise<PdkInstallationSnapshot> {
     return await this.withLock(async () => {
       const root = await canonicalDirectory(request.root)
+      if (this.configurationService) {
+        const adopted = await this.configurationService.configure({
+          action: 'adopt',
+          root,
+        })
+        if (adopted.error) throw new Error(JSON.stringify(adopted.error))
+      }
       const inventory = await this.readInventory()
       const existing = inventory.installations.find(
         (installation) => installation.root === root,
       )
       if (existing) {
         const snapshot = await this.snapshot(existing)
-        if (snapshot.contentDigest && !existing.contentDigest) {
-          existing.contentDigest = snapshot.contentDigest
+        if (snapshot.readiness === 'ready' && snapshot.contentDigest) {
+          Object.assign(existing, configurationIdentity(snapshot))
           await this.writeInventory(inventory)
         }
         return snapshot
@@ -95,7 +103,8 @@ export class PdkInventoryService {
         registrySha256: null,
       }
       const snapshot = await this.snapshot(installation)
-      if (snapshot.contentDigest) installation.contentDigest = snapshot.contentDigest
+      if (snapshot.contentDigest)
+        Object.assign(installation, configurationIdentity(snapshot))
       inventory.installations.push(installation)
       await this.writeInventory(inventory)
       return snapshot
@@ -116,6 +125,13 @@ export class PdkInventoryService {
       const relativePath = relative(managedRoot, root)
       if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) {
         throw new Error('Managed PDK Installation is outside the managed root')
+      }
+      if (this.configurationService) {
+        const adopted = await this.configurationService.configure({
+          action: 'adopt',
+          root,
+        })
+        if (adopted.error) throw new Error(JSON.stringify(adopted.error))
       }
       const inventory = await this.readInventory()
       throwIfAborted(signal)
@@ -154,8 +170,8 @@ export class PdkInventoryService {
         throwIfAborted(signal)
         const result = await this.snapshot(installation)
         throwIfAborted(signal)
-        if (result.contentDigest && !installation.contentDigest) {
-          installation.contentDigest = result.contentDigest
+        if (result.readiness === 'ready' && result.contentDigest) {
+          Object.assign(installation, configurationIdentity(result))
           await this.writeInventory(inventory)
           throwIfAborted(signal)
         }
@@ -344,6 +360,34 @@ export class PdkInventoryService {
   }
 
   async locateInstallation(request: PdkLocateRequest): Promise<PdkInstallationSnapshot> {
+    if (this.configurationService) {
+      await this.withLock(async () => {
+        const inventory = await this.readInventory()
+        const installation = inventory.installations.find(
+          (item) => item.id === request.installationId,
+        )
+        if (!installation) throw new Error('PDK Installation was not found')
+        if ((await this.snapshot(installation)).readiness !== 'missing') {
+          throw new Error('Only a Missing PDK Installation can be located')
+        }
+      })
+      // ECC owns the configuration relocation and acquires the shared inventory
+      // lock itself; do not hold Studio's lock across this subprocess call.
+      const result = await this.configurationService.configure({
+        action: 'library-locate',
+        installationId: request.installationId,
+        root: await canonicalDirectory(request.root),
+      })
+      if (result.error) throw new Error(JSON.stringify(result.error))
+      return await this.withLock(async () => {
+        const inventory = await this.readInventory()
+        const installation = inventory.installations.find(
+          (item) => item.id === request.installationId,
+        )
+        if (!installation) throw new Error('Relocated PDK Installation was not found')
+        return await this.snapshot(installation)
+      })
+    }
     return await this.withLock(async () => {
       const inventory = await this.readInventory()
       const installation = inventory.installations.find(
@@ -463,105 +507,7 @@ export class PdkInventoryService {
   private async snapshot(
     installation: PdkInstallationRecord,
   ): Promise<PdkInstallationSnapshot> {
-    try {
-      const rootStats = await stat(installation.root)
-      if (!rootStats.isDirectory()) {
-        return {
-          ...installation,
-          readiness: 'missing',
-          reason: 'PDK root is unavailable',
-          supportsEccDefaults: false,
-        }
-      }
-      if (!this.configurationService) {
-        return {
-          ...installation,
-          readiness: 'unverified',
-          reason: 'ECC must validate ecc-pdk.json before this PDK can run',
-          supportsEccDefaults: false,
-        }
-      }
-      const description = await this.configurationService.configure({
-        action: 'show',
-        root: installation.root,
-      })
-      if (description.error) {
-        return {
-          ...installation,
-          readiness: 'invalid',
-          reason: JSON.stringify(description.error),
-          supportsEccDefaults: false,
-        }
-      }
-      const result = await this.configurationService.configure({
-        action: 'validate',
-        root: installation.root,
-      })
-      if (
-        result.error ||
-        !Array.isArray(result.diagnostics) ||
-        result.diagnostics.length > 0
-      ) {
-        return {
-          ...installation,
-          readiness: 'invalid',
-          reason: JSON.stringify(result),
-          supportsEccDefaults: false,
-        }
-      }
-      const context = await this.configurationService.configure({
-        action: 'resolve',
-        root: installation.root,
-      })
-      const digest =
-        typeof context.content_digest === 'string' ? context.content_digest : undefined
-      if (
-        context.error ||
-        !digest ||
-        !/^[0-9a-f]{64}$/.test(digest) ||
-        (installation.contentDigest && installation.contentDigest !== digest)
-      ) {
-        return {
-          ...installation,
-          readiness: 'invalid',
-          reason:
-            'PDK content identity changed or could not be verified; import a separate release',
-          supportsEccDefaults: false,
-        }
-      }
-      const resources = Object.values(
-        description.resolved_resources as Record<string, { role: string; path: string }>,
-      )
-      const techLef = resources.find((item) => item.role === 'tech')?.path
-      const cellLefs = resources
-        .filter((item) => item.role === 'lef')
-        .map((item) => item.path)
-      const liberty = resources
-        .filter((item) => item.role === 'liberty')
-        .map((item) => item.path)
-      return {
-        ...installation,
-        readiness: 'ready',
-        contentDigest: digest,
-        reason: null,
-        supportsEccDefaults: Boolean(liberty.length),
-        ...(liberty.length
-          ? { defaultResources: { techLef: techLef ?? '', cellLefs, liberty } }
-          : {}),
-      }
-    } catch (error) {
-      const missing = ['ENOENT', 'ENOTDIR'].includes(
-        String((error as NodeJS.ErrnoException).code),
-      )
-      return {
-        ...installation,
-        readiness: missing ? 'missing' : 'unverified',
-        reason: missing
-          ? 'PDK root is unavailable'
-          : `ECC validation unavailable: ${String(error)}`,
-        supportsEccDefaults: false,
-      }
-    }
+    return snapshotInstallation(installation, this.configurationService)
   }
 
   private async readInventory(): Promise<PdkInventoryFile> {

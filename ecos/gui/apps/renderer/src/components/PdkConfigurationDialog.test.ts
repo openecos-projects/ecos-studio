@@ -22,7 +22,12 @@ describe('PDK configuration clients', () => {
     const descriptor = { family_id: 'vendor', resources: {} }
     mocks.configure.mockImplementation(async (request) => {
       if (request.action === 'schema') return { properties: { resources: {}, cells: {} } }
-      if (request.action === 'show') return { descriptor, revision: 'revision-1' }
+      if (request.action === 'show')
+        return {
+          descriptor,
+          revision: 'revision-1',
+          path: '/ecc-management/configuration.json',
+        }
       if (request.action === 'discover')
         return { candidates: [{ path: 'technology.lef', candidate_role: 'lef' }] }
       return {}
@@ -32,6 +37,8 @@ describe('PDK configuration clients', () => {
     })
     const configured = requestPdkConfiguration('/data/vendor', 'vendor')
     await flushPromises()
+    expect(wrapper.text()).toContain('ECC adaptations')
+    expect(wrapper.text()).toContain('/ecc-management/configuration.json')
     await wrapper
       .findAll('button')
       .find((button) => button.text() === 'Discover files')!

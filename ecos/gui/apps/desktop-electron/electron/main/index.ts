@@ -568,6 +568,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       projectDoctorService: desktopServices.projectDoctorService,
       resourceManagerService: desktopServices.resourceManagerService,
       pdkInventoryService: desktopServices.pdkInventoryService,
+      pdkConfigurationService: desktopServices.pdkConfigurationService,
       projectEccConfigService: desktopServices.projectEccConfigService,
       chipViewerService: desktopServices.chipViewerService,
       settingsStore: desktopServices.settingsStore,

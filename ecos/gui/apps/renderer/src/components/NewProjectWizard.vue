@@ -1274,8 +1274,8 @@
                           >
                           <span
                             class="mt-1 block text-xs leading-5 text-(--text-secondary)"
-                            >Edit the package configuration. Use a separate copy for a
-                            different project technology.</span
+                            >Edit ECC-managed descriptions and tool adaptations. Existing
+                            projects keep their locked configuration.</span
                           >
                         </span>
                       </button>
@@ -2636,7 +2636,7 @@ const defaultConfigUnavailableReason = computed(() => {
   }
   if (!isPdkEligible(selectedPdk.value)) return 'This PDK is not validated.'
   if (!selectedPdk.value.supportsEccDefaults)
-    return 'Configure an ecc-pdk.json description with the resources required by your flow.'
+    return 'Configure a PDK description and ECC adaptation with the resources required by your flow.'
   if (!selectedPdk.value.defaultResources)
     return 'Default PDK resources are unavailable; re-check the PDK.'
   return ''

@@ -19,13 +19,10 @@ export interface E2EBridge {
   cliInstaller: {
     getStatus(): Promise<{ status: string; error?: string | null }>
   }
-  pdkInventory: {
-    import(request: {
-      root: string
-      familyId: string
-      displayName: string
-    }): Promise<{ id?: string; readiness?: string }>
-  }
+  pdkInventory: Pick<
+    DesktopApi['pdkInventory'],
+    'configure' | 'import' | 'list' | 'locate'
+  >
   projectManifest: {
     mutate(request: unknown): Promise<unknown>
   }

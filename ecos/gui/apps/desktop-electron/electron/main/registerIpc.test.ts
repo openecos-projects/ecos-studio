@@ -220,6 +220,7 @@ function registerHandlers(
       validatePdkRootForWorkspace: vi.fn(),
       onRegistryChanged: vi.fn(),
     },
+    pdkConfigurationService: { configure: vi.fn() },
     pdkInventoryService: {
       bindInstallation: vi.fn(),
       importInstallation: vi.fn(),
@@ -2158,6 +2159,19 @@ describe('registerIpc', () => {
     await expect(handler?.({ sender: { id: 'web-contents' } })).resolves.toEqual(result)
     expect(services.eccRuntimeService.discoverProject).toHaveBeenCalledWith('/work/demo')
     expect(services.environmentDoctorService?.run).toHaveBeenCalledWith('/work')
+  })
+
+  it('routes PDK authoring requests to the required configuration service', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const request = { action: 'init', root: '/readonly/pdk', familyId: 'vendor' }
+    services.pdkConfigurationService.configure.mockResolvedValue({
+      path: '/ecc/configuration.json',
+    })
+    await expect(
+      handlers.get('pdk-inventory:configure')?.(event, request),
+    ).resolves.toEqual({ path: '/ecc/configuration.json' })
+    expect(services.pdkConfigurationService.configure).toHaveBeenCalledWith(request)
   })
 
   it('lists typed PDK Installation snapshots', async () => {

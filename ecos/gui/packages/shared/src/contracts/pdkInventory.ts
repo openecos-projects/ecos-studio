@@ -10,6 +10,9 @@ export interface PdkInstallationRecord {
   ownership: PdkOwnership
   registrySha256: string | null
   contentDigest?: string
+  pdkDigest?: string
+  adaptationDigest?: string
+  configurationPath?: string
 }
 
 export interface PdkInstallationSnapshot extends PdkInstallationRecord {
@@ -72,6 +75,7 @@ export interface PdkConfigureRequest {
   action:
     | 'schema'
     | 'init'
+    | 'adopt'
     | 'discover'
     | 'show'
     | 'set'
@@ -79,6 +83,7 @@ export interface PdkConfigureRequest {
     | 'resolve'
     | 'library-list'
     | 'library-default'
+    | 'library-locate'
   root?: string
   descriptionPath?: string
   familyId?: string

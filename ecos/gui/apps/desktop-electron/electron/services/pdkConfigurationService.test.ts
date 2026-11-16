@@ -49,6 +49,20 @@ describe('PdkConfigurationService', () => {
       'a'.repeat(64),
     ])
   })
+  it('delegates configuration adoption and relocation to ECC', async () => {
+    const { root, service } = await fixture()
+    expect((await service.configure({ action: 'adopt', root })).args).toEqual([
+      'pdk',
+      'configure',
+      'adopt',
+      '--root',
+      root,
+    ])
+    expect(
+      (await service.configure({ action: 'library-locate', root, installationId: 'id' }))
+        .args,
+    ).toEqual(['pdk', 'library', 'locate', '--installation', 'id', '--root', root])
+  })
   it('preserves structured validation errors from ECC', async () => {
     const { root, service } = await fixture(
       'console.log(JSON.stringify({error: {code: "revision_conflict"}})); process.exit(2)',

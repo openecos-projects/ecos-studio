@@ -11,10 +11,14 @@
     "
   >
     <p class="mb-3 text-sm">
-      Select resources and configure this PDK before importing it. Paths are relative to
-      the PDK directory.
+      PDK descriptions identify the process, version and resources. ECC adaptations
+      configure tools separately. Changes are saved in ECC management; the PDK directory
+      remains unchanged. Resource paths are relative to the PDK directory.
     </p>
-    <p class="mb-3 text-sm break-all">{{ request?.root }}</p>
+    <p class="mb-3 text-sm break-all">PDK resources: {{ request?.root }}</p>
+    <p v-if="configurationPath" class="mb-3 text-sm break-all">
+      Configuration source: {{ configurationPath }}
+    </p>
     <div v-if="error" role="alert" class="mb-3 text-red-500">{{ error }}</div>
     <label class="block text-sm" for="pdk-family">Family ID</label>
     <input
@@ -151,6 +155,7 @@ const family = ref('')
 const field = ref('resources')
 const value = ref('{}')
 const revision = ref('')
+const configurationPath = ref('')
 const document = ref<Record<string, unknown>>({})
 const properties = ref<Record<string, { description?: string }>>({})
 const sections = computed(() =>
@@ -218,6 +223,7 @@ async function reload() {
   const result = await command('show')
   document.value = result.descriptor as Record<string, unknown>
   revision.value = String(result.revision)
+  configurationPath.value = typeof result.path === 'string' ? result.path : ''
   initialized.value = true
   loadSection()
 }
@@ -282,6 +288,7 @@ watch(request, async (current) => {
   if (!current) return
   family.value = current.familyId
   initialized.value = false
+  configurationPath.value = ''
   validated.value = false
   details.value = ''
   candidates.value = []

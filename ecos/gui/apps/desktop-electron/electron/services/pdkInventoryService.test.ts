@@ -79,6 +79,56 @@ describe('PdkInventoryService', () => {
     })
   })
 
+  it('keeps a process usable after its ECC adaptation changes', async () => {
+    const root = await createTempDir()
+    const pdkRoot = join(root, 'read-only-vendor')
+    await mkdir(pdkRoot)
+    const service = new PdkInventoryService({
+      inventoryPath: join(root, 'inventory.json'),
+    })
+    let revision = 'a'.repeat(64)
+    const actions: string[] = []
+    service.setConfigurationService({
+      configure: async ({ action }) => {
+        actions.push(action)
+        if (action === 'resolve')
+          return {
+            content_digest: revision,
+            legacy_content_digest: 'a'.repeat(64),
+            pdk_digest: 'b'.repeat(64),
+            adaptation_digest: revision,
+          }
+        if (action === 'show')
+          return {
+            path: join(root, 'ecc-management/configuration.json'),
+            resolved_resources: {
+              lib: { role: 'liberty', path: join(pdkRoot, 'cells.lib') },
+            },
+          }
+        return { diagnostics: [] }
+      },
+    })
+    const initial = await service.importInstallation({
+      root: pdkRoot,
+      familyId: 'vendor',
+      displayName: 'Vendor',
+    })
+    revision = 'c'.repeat(64)
+    const [updated] = await service.listInstallations()
+    expect(updated).toMatchObject({
+      readiness: 'ready',
+      pdkDigest: initial.pdkDigest,
+      adaptationDigest: revision,
+      configurationPath: join(root, 'ecc-management/configuration.json'),
+    })
+    // Inventories written before separate process identities remain readable.
+    const inventory = JSON.parse(await readFile(join(root, 'inventory.json'), 'utf8'))
+    delete inventory.installations[0].pdkDigest
+    await writeFile(join(root, 'inventory.json'), JSON.stringify(inventory))
+    expect((await service.listInstallations())[0].readiness).toBe('ready')
+    expect(actions[0]).toBe('adopt')
+  })
+
   it('represents a real directory and its symlink as one stable Installation', async () => {
     const root = await createTempDir()
     const pdkRoot = join(root, 'local', 'ics55')

@@ -499,7 +499,7 @@ export interface DesktopBridgeServices {
     }): Promise<unknown>
     onRegistryChanged(listener: () => void): () => void
   }
-  pdkConfigurationService?: {
+  pdkConfigurationService: {
     configure(request: PdkConfigureRequest): Promise<Record<string, unknown>>
   }
   pdkInventoryService: {
@@ -2871,8 +2871,6 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.pdkInventoryConfigure, async (event, request) => {
     requireBackendMutationAllowed(event)
-    if (!services.pdkConfigurationService)
-      throw new Error('PDK configuration service unavailable')
     return await services.pdkConfigurationService.configure(
       request as PdkConfigureRequest,
     )
