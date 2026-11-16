@@ -9,6 +9,7 @@ use crate::{
 use egui::{Color32, Pos2, Sense, Stroke};
 
 const AUTO_SPIN_RADIANS_PER_SECOND: f32 = 4.0_f32.to_radians();
+const DEFAULT_Z_SCALE: f32 = 1.35;
 
 pub struct View3d {
     pub enabled: bool,
@@ -42,7 +43,7 @@ impl Default for View3d {
             camera: Default::default(),
             state: None,
             z_cut: 1.0,
-            z_scale: 1.0,
+            z_scale: DEFAULT_Z_SCALE,
             reports: true,
             hidden_layers: Default::default(),
             filtered: None,
@@ -194,7 +195,7 @@ impl crate::replay::ReplayApp {
                 self.view3d.automatic = true;
                 self.view3d.auto_spin = false;
                 self.view3d.spin_yaw = None;
-                self.view3d.z_scale = 1.0;
+                self.view3d.z_scale = DEFAULT_Z_SCALE;
             }
             locate = ui.button("2D region").clicked();
             ui.checkbox(&mut self.view3d.reports, "Reports");
