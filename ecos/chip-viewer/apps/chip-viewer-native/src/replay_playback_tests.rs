@@ -352,3 +352,23 @@ fn disabling_three_d_preserves_a_pending_exact_node() {
     assert!(!application.complete);
     assert!(application.view3d.scene.is_none());
 }
+
+#[test]
+fn enabling_three_d_starts_slow_iso_rotation_until_manual_control() {
+    let view = crate::replay::view3d::View3d::default();
+    assert!(!view.auto_spin);
+    assert!(view.spin_yaw.is_none());
+
+    let mut view = view;
+    view.enabled = true;
+    view.auto_spin = true;
+    view.spin_yaw = Some(45.0_f32.to_radians());
+    let start = view.spin_yaw.unwrap();
+    view.spin_yaw = Some(start + 0.5_f32.to_radians());
+    assert!(view.spin_yaw.unwrap() > start);
+
+    view.auto_spin = false;
+    view.spin_yaw = None;
+    assert!(!view.auto_spin);
+    assert!(view.spin_yaw.is_none());
+}

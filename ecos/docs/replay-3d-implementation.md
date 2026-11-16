@@ -10,6 +10,8 @@
 
 相机按 step 和 phase 选视角：Place/Filler/合法化偏俯视，PDN/TA/详细布线偏倾斜，Map 接近顶视。阶段内视角过渡由播放位置决定，暂停和回退不会继续转动。拖动、缩放或选择 Iso/Top/Front 后由用户接管；**Stage camera** 恢复阶段视角。**2D region** 将当前 2D 区域定位到 3D，Layers 和 Z 控件可分层观察。
 
+打开 **Sync 3D** 时默认使用 Iso 视角，并以设计 XY 中心为旋转目标缓慢环绕，速度约 4°/秒。拖拽、缩放、点击版图对象、2D region、Iso/Top/Front、Fit 或 Stage camera 都会关闭自动旋转，保留原有手动/阶段相机行为；播放进度和几何数据不受相机旋转影响。
+
 ## 模块与接口
 
 | 位置 | 职责 |

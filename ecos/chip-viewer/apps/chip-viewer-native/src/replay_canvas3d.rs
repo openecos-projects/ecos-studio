@@ -8,6 +8,8 @@ use crate::{
 };
 use egui::{Color32, Pos2, Sense, Stroke};
 
+const AUTO_SPIN_RADIANS_PER_SECOND: f32 = 4.0_f32.to_radians();
+
 pub struct View3d {
     pub enabled: bool,
     pub budget: usize,
@@ -15,6 +17,8 @@ pub struct View3d {
     pub error: String,
     pub needs_prepare: bool,
     pub automatic: bool,
+    pub auto_spin: bool,
+    pub spin_yaw: Option<f32>,
     pub camera: CameraController3d,
     pub state: Option<egui_wgpu::RenderState>,
     pub z_cut: f32,
@@ -33,6 +37,8 @@ impl Default for View3d {
             error: String::new(),
             needs_prepare: false,
             automatic: true,
+            auto_spin: false,
+            spin_yaw: None,
             camera: Default::default(),
             state: None,
             z_cut: 1.0,
@@ -89,6 +95,9 @@ impl crate::replay::ReplayApp {
             })
             .flatten();
         self.view3d.enabled = enabled;
+        self.view3d.auto_spin = enabled;
+        self.view3d.spin_yaw = enabled.then_some(45.0_f32.to_radians());
+        self.view3d.automatic = false;
         self.view3d.scene = None;
         self.view3d.filtered = None;
         self.view3d.error.clear();
@@ -164,6 +173,8 @@ impl crate::replay::ReplayApp {
                 .clicked()
             {
                 self.view3d.automatic = true;
+                self.view3d.auto_spin = false;
+                self.view3d.spin_yaw = None;
             }
             for (name, pitch, yaw) in [
                 ("Iso", 38.0, 45.0),
@@ -172,6 +183,8 @@ impl crate::replay::ReplayApp {
             ] {
                 if ui.button(name).clicked() {
                     self.view3d.automatic = false;
+                    self.view3d.auto_spin = false;
+                    self.view3d.spin_yaw = None;
                     self.view3d.camera.current.pitch = f32::to_radians(pitch);
                     self.view3d.camera.current.yaw = f32::to_radians(yaw);
                     self.view3d.camera.target = self.view3d.camera.current;
@@ -179,6 +192,8 @@ impl crate::replay::ReplayApp {
             }
             if ui.button("Fit").clicked() {
                 self.view3d.automatic = true;
+                self.view3d.auto_spin = false;
+                self.view3d.spin_yaw = None;
                 self.view3d.z_scale = 1.0;
             }
             locate = ui.button("2D region").clicked();
@@ -206,6 +221,8 @@ impl crate::replay::ReplayApp {
         });
         ui.small(if self.view3d.automatic {
             "Stage camera · schematic layer heights"
+        } else if self.view3d.auto_spin {
+            "Iso camera · slow rotation · click or drag to control"
         } else {
             "Manual camera · click Stage camera to resume"
         });
@@ -256,7 +273,20 @@ impl crate::replay::ReplayApp {
             Color32::GRAY,
         );
         let aspect = (rect.width() / rect.height().max(1.0)).max(0.1);
-        if self.view3d.automatic {
+        if self.view3d.auto_spin {
+            let mut camera = Preset {
+                pitch: 38.0,
+                yaw: 45.0,
+            }
+            .camera(scene.world, scene.metadata.height(), aspect);
+            let yaw = self.view3d.spin_yaw.get_or_insert(camera.yaw);
+            *yaw +=
+                ui.input(|input| input.stable_dt).clamp(0.0, 0.1) * AUTO_SPIN_RADIANS_PER_SECOND;
+            camera.yaw = *yaw;
+            self.view3d.camera.current = camera;
+            self.view3d.camera.target = camera;
+            ui.ctx().request_repaint();
+        } else if self.view3d.automatic {
             self.view3d.camera.current =
                 preset.camera(scene.world, scene.metadata.height(), aspect);
             self.view3d.camera.target = self.view3d.camera.current;
@@ -273,10 +303,14 @@ impl crate::replay::ReplayApp {
                 camera.distance /= self.zoom.max(0.2);
                 self.view3d.camera.current = camera;
                 self.view3d.automatic = false;
+                self.view3d.auto_spin = false;
+                self.view3d.spin_yaw = None;
             }
         }
         if response.dragged() {
             self.view3d.automatic = false;
+            self.view3d.auto_spin = false;
+            self.view3d.spin_yaw = None;
             let delta = ui.input(|i| i.pointer.delta());
             if response.dragged_by(egui::PointerButton::Secondary)
                 || ui.input(|i| i.modifiers.shift)
@@ -293,6 +327,8 @@ impl crate::replay::ReplayApp {
             let zoom = ui.input(|i| i.zoom_delta() * (i.smooth_scroll_delta.y * 0.002).exp());
             if (zoom - 1.0).abs() > 0.0001 {
                 self.view3d.automatic = false;
+                self.view3d.auto_spin = false;
+                self.view3d.spin_yaw = None;
                 self.view3d.camera.current.distance /= zoom;
             }
         }
@@ -360,6 +396,9 @@ impl crate::replay::ReplayApp {
         };
         self.overlays3d(&painter, &project);
         if response.clicked() {
+            self.view3d.automatic = false;
+            self.view3d.auto_spin = false;
+            self.view3d.spin_yaw = None;
             if let Some(pos) = response.interact_pointer_pos() {
                 if let Some(ray) = camera.ray_from_screen(
                     [pos.x, pos.y],
