@@ -111,5 +111,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 For any issues you'd like to discuss, feel free to join our WeChat community.
 <div align="center">
-  <img src="https://github.com/next-zeta/image/blob/main/new_ecos_wechat.png alt="WeChat community">
+  <img src="https://github.com/next-zeta/image/blob/main/new_ecos_wechat.png" alt="WeChat community">
 </div>
