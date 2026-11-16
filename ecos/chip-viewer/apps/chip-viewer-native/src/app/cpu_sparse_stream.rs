@@ -86,6 +86,7 @@ impl OffscreenRenderer {
                             if let Some(trace) = &mut raster.trace {
                                 trace.command_append_ms += trace::milliseconds(append_at.elapsed());
                                 trace.software_operations = kernel.len();
+                                trace.software_retained_bytes = kernel.retained_bytes();
                                 trace.repair_tiles = kernel.repair_tiles();
                             }
                         }
@@ -149,6 +150,9 @@ impl OffscreenRenderer {
                     }
                 }
                 if !mesh_mode && kernel.prefers_meshes() {
+                    if let Some(trace) = &mut raster.trace {
+                        trace.fallback_reason = kernel.mesh_preference();
+                    }
                     mesh_mode = true;
                     if !raster.replay_sparse(&mut kernel, &is_current)? {
                         return Ok(false);
@@ -270,17 +274,38 @@ impl RasterStream<'_> {
         }
         if !*mesh_mode && kernel.has_holes() {
             let prepare_at = Instant::now();
-            let meshes = kernel.try_residual_meshes(self.key.canvas, is_current);
+            self.reset();
+            let mut failure = None;
+            let mut submission_duration = Duration::ZERO;
+            let current =
+                kernel.stream_repairs(self.key.canvas, is_current, 1024 * 1024, |meshes| {
+                    let packed = geometry::pack_meshes(&meshes);
+                    let submitted_at = Instant::now();
+                    let result = self.push(&meshes, &packed, is_current, &mut |_, _| {});
+                    submission_duration += submitted_at.elapsed();
+                    match result {
+                        Ok(current) => current,
+                        Err(error) => {
+                            failure = Some(error);
+                            false
+                        }
+                    }
+                });
+            if let Some(error) = failure {
+                return Err(error);
+            }
             if let Some(trace) = &mut self.trace {
                 trace.repair_tiles = kernel.repair_tiles();
-                trace.repair_prepare_ms += trace::milliseconds(prepare_at.elapsed());
+                trace.repair_prepare_ms +=
+                    trace::milliseconds(prepare_at.elapsed().saturating_sub(submission_duration));
             }
-            if let Some(meshes) = meshes {
-                let Some(repair) = self.repair(&meshes, is_current)? else {
-                    return Ok(false);
-                };
+            if current {
+                let repair = self.readback(trace::ReadbackKind::Complete)?;
                 kernel.merge(pixels, &repair);
             } else if is_current() {
+                if let Some(trace) = &mut self.trace {
+                    trace.fallback_reason = Some("repair_submission");
+                }
                 *mesh_mode = true;
                 if !self.replay_sparse(kernel, is_current)? {
                     return Ok(false);

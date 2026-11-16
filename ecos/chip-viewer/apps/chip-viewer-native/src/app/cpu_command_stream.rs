@@ -50,21 +50,14 @@ pub(in crate::app::cpu_scene) fn build_command_stream(
     let mut retained = retained_regions::RegionModel::new(request);
     let capture = retained.is_some();
     let mut consumer_duration = Duration::ZERO;
-    scene.query_duration = ordered::run(
+    scene.query_duration = queries::run(
+        &request.layer_ids,
         workers,
         is_current,
-        |emit| {
-            queries::produce(
-                &request.layer_ids,
-                workers,
-                is_current,
-                |layer| {
-                    request
-                        .db
-                        .query_layers_intersect(&[layer], request.key.viewport)
-                },
-                emit,
-            )
+        |layer| {
+            request
+                .db
+                .query_cached_layer_intersect(layer, request.key.viewport)
         },
         |ids: Vec<ShapeId>| {
             build_chunk_sink(

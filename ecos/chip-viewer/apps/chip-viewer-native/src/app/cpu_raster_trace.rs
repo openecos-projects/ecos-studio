@@ -27,6 +27,8 @@ struct Readback {
 pub(super) struct RasterTrace {
     pub(super) backend: &'static str,
     pub(super) software_operations: usize,
+    pub(super) software_retained_bytes: usize,
+    pub(super) fallback_reason: Option<&'static str>,
     pub(super) repair_tiles: usize,
     pub(super) command_append_ms: f64,
     pub(super) rectangle_paint_ms: f64,
@@ -69,6 +71,8 @@ impl RasterTrace {
         Self {
             backend: "ordered_gl",
             software_operations: 0,
+            software_retained_bytes: 0,
+            fallback_reason: None,
             repair_tiles: 0,
             command_append_ms: 0.0,
             rectangle_paint_ms: 0.0,

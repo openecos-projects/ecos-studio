@@ -19,12 +19,14 @@ struct LabelInput {
 
 impl LabelInput {
     fn from_request(request: &SceneRequest) -> Self {
+        let mut overlay_labels = builder::promoted(request);
+        overlay_labels.append(request.overlay_labels.clone());
         Self {
             canvas: request.key.canvas,
             pixels_per_point: request.key.pixels_per_point,
             texture_side: request.label_texture_side,
             fonts: request.label_fonts.clone(),
-            overlay_labels: request.overlay_labels.clone(),
+            overlay_labels,
         }
     }
 }

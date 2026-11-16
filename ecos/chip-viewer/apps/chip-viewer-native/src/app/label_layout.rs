@@ -5,6 +5,9 @@ use eframe::egui;
 #[path = "label_preparation.rs"]
 mod preparation;
 
+#[path = "label_compaction.rs"]
+mod compaction;
+
 #[path = "label_measurement.rs"]
 mod measurement;
 pub(in crate::app) use measurement::{FontMeasurement, LabelMeasurement};
@@ -21,6 +24,22 @@ pub(super) enum ShapeLabelKind {
 impl ShapeLabelKind {
     pub(super) fn is_pin(self) -> bool {
         matches!(self, Self::IoPin | Self::Pin)
+    }
+
+    pub(super) fn eligible_in(self, selected: bool, visible_rect: egui::Rect) -> bool {
+        if !visible_rect.is_positive() {
+            return false;
+        }
+        if self.is_pin() {
+            if selected {
+                return true;
+            }
+            let (short, long) = pin_size_threshold(self);
+            visible_rect.width().min(visible_rect.height()) >= short
+                && visible_rect.width().max(visible_rect.height()) >= long
+        } else {
+            visible_rect.width() >= 12.0 && visible_rect.height() >= 8.0
+        }
     }
 }
 
@@ -63,14 +82,43 @@ pub(super) struct ResolvedLabels {
 #[derive(Clone, Debug, Default)]
 pub(super) struct ShapeLabelCollector {
     candidates: HashMap<ShapeLabelKey, ShapeLabelCandidate>,
+    dormant: std::sync::Arc<[(ShapeLabelKey, f32)]>,
 }
 
 impl ShapeLabelCollector {
+    pub(in crate::app) fn byte_len(&self) -> usize {
+        self.candidates.capacity() * std::mem::size_of::<(ShapeLabelKey, ShapeLabelCandidate)>()
+            + self
+                .candidates
+                .iter()
+                .map(|(key, value)| {
+                    let key_bytes = match key {
+                        ShapeLabelKey::Named { text, .. } => text.capacity(),
+                        ShapeLabelKey::Owner { .. } => 0,
+                    };
+                    let value_key = match &value.key {
+                        ShapeLabelKey::Named { text, .. } => text.capacity(),
+                        ShapeLabelKey::Owner { .. } => 0,
+                    };
+                    key_bytes + value_key + value.text.capacity()
+                })
+                .sum::<usize>()
+    }
     pub(super) fn is_empty(&self) -> bool {
         self.candidates.is_empty()
     }
 
     pub(super) fn insert(&mut self, candidate: ShapeLabelCandidate) {
+        if !candidate.selected
+            && !candidate.highlighted
+            && self
+                .dormant
+                .binary_search_by(|(key, _)| key.cmp(&candidate.key))
+                .ok()
+                .is_some_and(|index| self.dormant[index].1 >= candidate.rank_area)
+        {
+            return;
+        }
         self.candidates
             .entry(candidate.key.clone())
             .and_modify(|current| {
@@ -83,6 +131,7 @@ impl ShapeLabelCollector {
 
     pub(super) fn clear(&mut self) {
         self.candidates.clear();
+        self.dormant = Default::default();
     }
 
     pub(super) fn append(&mut self, other: Self) {
@@ -183,7 +232,7 @@ impl ShapeLabelCollector {
             }
         }
         is_current().then_some(ResolvedLabels {
-            candidate_count: self.candidates.len(),
+            candidate_count: self.candidate_count(),
             labels,
             collision_suppressed,
         })
@@ -377,20 +426,7 @@ fn collision_bins(rect: egui::Rect) -> (i32, i32, i32, i32) {
 }
 
 fn candidate_eligible(candidate: &ShapeLabelCandidate, visible_rect: egui::Rect) -> bool {
-    if !visible_rect.is_positive() {
-        return false;
-    }
-    if candidate.kind.is_pin() {
-        if candidate.selected {
-            return true;
-        }
-        let short_side = visible_rect.width().min(visible_rect.height());
-        let long_side = visible_rect.width().max(visible_rect.height());
-        let (min_short_side, min_long_side) = pin_size_threshold(candidate.kind);
-        short_side >= min_short_side && long_side >= min_long_side
-    } else {
-        visible_rect.width() >= 12.0 && visible_rect.height() >= 8.0
-    }
+    candidate.kind.eligible_in(candidate.selected, visible_rect)
 }
 
 fn pin_size_threshold(kind: ShapeLabelKind) -> (f32, f32) {

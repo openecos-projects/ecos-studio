@@ -31,7 +31,7 @@ impl ShapeLabelCollector {
         });
         LabelPlan {
             canvas,
-            candidate_count: self.candidates.len(),
+            candidate_count: self.candidate_count(),
             candidates,
         }
     }

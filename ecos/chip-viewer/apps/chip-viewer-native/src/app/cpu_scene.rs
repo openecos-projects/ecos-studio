@@ -83,6 +83,7 @@ pub(super) struct SceneKey {
     cache_overlays: bool,
 }
 
+#[derive(Clone)]
 pub(super) struct SceneRequest {
     key: SceneKey,
     db: Arc<ChipViewDb>,

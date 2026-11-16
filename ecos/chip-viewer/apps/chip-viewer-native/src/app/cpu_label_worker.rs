@@ -27,6 +27,7 @@ struct LabelJob {
     input: LabelInput,
     source: Candidates,
     candidates: Arc<ShapeLabelCollector>,
+    rebuild: Option<SceneRequest>,
     completed: Arc<LabelCompletion>,
     repaint: egui::Context,
 }
@@ -55,12 +56,19 @@ impl LabelWorker {
                         && worker.version.load(Ordering::Relaxed) == job.version
                 };
                 let started = Instant::now();
-                if let Some(labels) =
-                    resolver.resolve_input(&job.input, &job.candidates, is_current)
-                {
+                let candidates = if let Some(request) = &job.rebuild {
+                    let Some(candidates) = builder::collect_labels(request, &is_current) else {
+                        continue;
+                    };
+                    candidates
+                } else {
+                    Arc::clone(&job.candidates)
+                };
+                if let Some(labels) = resolver.resolve_input(&job.input, &candidates, is_current) {
                     if is_current() {
-                        let retired = job.source.retire();
+                        let retired = job.source.retire(job.input.canvas);
                         drop(job.candidates);
+                        drop(candidates);
                         drop(retired);
                         let _ = job.completed.set((Arc::new(labels), started.elapsed()));
                         job.repaint.request_repaint();
@@ -101,7 +109,11 @@ impl LabelWorker {
             version,
             input: LabelInput::from_request(request),
             source: scene.labels.clone(),
-            candidates: scene.labels.snapshot(),
+            candidates: scene
+                .labels
+                .reusable()
+                .unwrap_or_else(|| scene.labels.snapshot()),
+            rebuild: scene.labels.needs_rebuild().then(|| request.clone()),
             completed: Arc::clone(&scene.completed_labels),
             repaint: request.repaint.clone(),
         });

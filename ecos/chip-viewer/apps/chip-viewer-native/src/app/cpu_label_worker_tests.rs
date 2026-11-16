@@ -106,6 +106,130 @@ fn full_ready_retires_raw_candidates_while_scene_and_cached_completion_stay_aliv
     assert_eq!(*restored.resolved_labels(), expected);
 }
 
+#[test]
+fn shared_label_source_concurrent_retirement_keeps_the_complete_compact_cache() {
+    use std::sync::Barrier;
+    let fixture = Fixture::new();
+    let request = fixture.request(1.0, 1.0);
+    for _ in 0..16 {
+        let mut source = labels::Candidates::default();
+        for id in 0..128 {
+            source.insert(ShapeLabelCandidate {
+                key: ShapeLabelKey::Owner {
+                    owner_type: OwnerType::InstanceBBox as u8,
+                    owner_id: id,
+                },
+                anchor_rect: request.key.canvas,
+                text: format!("concurrent-retirement-{id}"),
+                kind: ShapeLabelKind::Instance,
+                rank_area: request.key.canvas.area(),
+                selected: false,
+                highlighted: false,
+            });
+        }
+        let raw = source.snapshot();
+        let retired = Arc::downgrade(&raw);
+        let expected = raw.compact(request.key.canvas);
+        let expected_bytes = expected.retained_bytes();
+        let measure = |text: &str, size| egui::vec2(text.len() as f32 * size * 0.5, size);
+        let expected = expected.resolve(request.key.canvas, measure);
+        drop(raw);
+        let barrier = Barrier::new(8);
+        let cached = thread::scope(|scope| {
+            let tasks: Vec<_> = (0..8)
+                .map(|_| {
+                    let (source, barrier) = (source.clone(), &barrier);
+                    scope.spawn(move || {
+                        barrier.wait();
+                        drop(source.retire(request.key.canvas));
+                        source.reusable().expect("compact source must be published")
+                    })
+                })
+                .collect();
+            tasks
+                .into_iter()
+                .map(|task| task.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert!(retired.upgrade().is_none());
+        assert!(source.snapshot().is_empty());
+        assert_eq!(source.byte_len(), expected_bytes);
+        for cache in &cached {
+            assert!(Arc::ptr_eq(cache, &cached[0]));
+            assert_eq!(cache.resolve(request.key.canvas, measure), expected);
+        }
+    }
+}
+
+#[test]
+fn selection_refresh_retires_cancelled_raw_source_and_charges_shared_history_entries() {
+    let fixture = Fixture::new();
+    let request = fixture.request(1.0, 1.0);
+    let mut previous = scene_with_candidate(&request);
+    let pixels: Arc<[u8]> = vec![0; 640 * 480 * 4].into();
+    previous.bitmap = Some(Arc::clone(&pixels));
+    let previous = Arc::new(previous);
+    let worker = labels::LabelWorker::new(geometry_inbox(9));
+    worker.submit(&request, 8, &previous);
+    assert!(!previous.labels_ready());
+    let raw = previous.labels.snapshot();
+    assert!(!raw.is_empty());
+    let previous_expected = labels::LabelResolver::default()
+        .resolve(&request, &raw, || true)
+        .unwrap();
+    let retired = Arc::downgrade(&raw);
+    let mut next = fixture.request(1.0, 1.0);
+    next.key.selected = Some(1);
+    let expected = labels::LabelResolver::default()
+        .resolve(&next, &raw, || true)
+        .unwrap();
+    drop(raw);
+    let mut history = history::CpuSceneHistory::default();
+    history.insert(Arc::clone(&previous));
+    let before = history.byte_len();
+    let refreshed = builder::refresh_labels(
+        &next,
+        &previous,
+        &mut labels::LabelResolver::default(),
+        &|| true,
+    )
+    .unwrap();
+    assert!(refreshed.labels_ready());
+    assert_eq!(*refreshed.resolved_labels(), expected);
+    assert!(Arc::ptr_eq(refreshed.bitmap.as_ref().unwrap(), &pixels));
+    assert!(retired.upgrade().is_none());
+    assert!(previous.labels.snapshot().is_empty());
+    let compact = previous.labels.reusable().unwrap();
+    let bytes = compact.retained_bytes();
+    assert!(bytes > 0);
+    assert_eq!(previous.labels.byte_len(), bytes);
+    assert!(Arc::ptr_eq(&compact, &refreshed.labels.reusable().unwrap()));
+    assert_eq!(history.byte_len(), before + bytes);
+    let refreshed_bytes = pixels.len()
+        + refreshed
+            .retained
+            .as_ref()
+            .map_or(0, |model| model.byte_len())
+        + refreshed
+            .priority
+            .as_ref()
+            .map_or(0, |cache| cache.byte_len())
+        + bytes;
+    history.insert(Arc::new(refreshed));
+    assert_eq!(history.byte_len(), before + bytes + refreshed_bytes);
+    let restored = history.get(&next.key).unwrap();
+    assert!(restored.labels.snapshot().is_empty());
+    assert!(Arc::ptr_eq(&compact, &restored.labels.reusable().unwrap()));
+    assert_eq!(*restored.resolved_labels(), expected);
+    // The cancelled original scene still has no label completion. Restoring
+    // that history key must consume the shared compact source after raw retire.
+    let restored_previous = history.get(&request.key).unwrap();
+    assert!(!restored_previous.labels_ready());
+    worker.submit(&request, 9, &restored_previous);
+    wait_for_labels(&restored_previous.completed_labels);
+    assert_eq!(*restored_previous.resolved_labels(), previous_expected);
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn labels_can_finish_before_the_geometry_raster_readback() {

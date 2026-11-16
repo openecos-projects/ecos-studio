@@ -4,9 +4,21 @@
 use super::*;
 use egui::emath::GuiRounding as _;
 
+#[path = "cpu_axis_raster.rs"]
+mod axis;
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "cpu_axis_raster_tests.rs"]
+mod axis_tests;
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "cpu_axis_profile_tests.rs"]
+mod axis_profile_tests;
+
 #[derive(Clone, Copy)]
 pub(in crate::app::cpu_scene) struct PixelRectRasterizer {
     pixels_per_point: f32,
+    coarse_culling: bool,
 }
 
 enum RectPacket {
@@ -26,7 +38,10 @@ impl PixelRectRasterizer {
             && options.round_line_segments_to_pixels
             && !options.debug_paint_clip_rects
             && !options.debug_ignore_clip_rects)
-            .then_some(Self { pixels_per_point })
+            .then_some(Self {
+                pixels_per_point,
+                coarse_culling: options.coarse_tessellation_culling,
+            })
     }
 
     pub(super) fn paint(

@@ -110,7 +110,8 @@ fn large_outline_repairs_its_edges_without_abandoning_sparse_rendering() {
     }];
     let prepared = sparse_rects::SparseRects::prepare(&commands, &request).unwrap();
     assert!(prepared.has_holes());
-    assert!(prepared.repair_tiles() < 32 * 24 / 4);
+    // The 1024x768 target has 128x96 damage tiles at eight pixels per tile.
+    assert!(prepared.repair_tiles() < 128 * 96 / 4);
     assert!(!prepared.prefers_meshes());
 }
 
@@ -151,11 +152,26 @@ fn triangle_repair_matches_full_gl_with_clipping_order_alpha_and_pixel_scales() 
             });
             let prepared = sparse_rects::SparseRects::prepare(&commands, &request).unwrap();
             let mut actual = prepared.render(request.key.background);
-            let repair = pixels(
-                &mut renderer,
-                &request,
-                prepared.residual_meshes(request.key.canvas),
+            let mut repair_meshes = Vec::new();
+            let mut batches = 0;
+            assert!(
+                prepared.stream_repairs(request.key.canvas, &|| true, 256, |meshes| {
+                    batches += 1;
+                    repair_meshes.extend(meshes);
+                    true
+                })
             );
+            assert!(
+                batches > 1,
+                "repair oracle must cross bounded submission batches"
+            );
+            assert!(
+                !prepared.stream_repairs(request.key.canvas, &|| false, 256, |_| {
+                    panic!("cancelled repair submitted obsolete geometry")
+                })
+            );
+            assert!(!prepared.stream_repairs(request.key.canvas, &|| true, 256, |_| false));
+            let repair = pixels(&mut renderer, &request, repair_meshes);
             prepared.merge(&mut actual, &repair);
             let reference = meshes(
                 &fixture,

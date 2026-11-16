@@ -77,8 +77,15 @@ impl SparseRects {
         });
         if !meshes.is_empty() {
             self.residual_count += 1;
-            self.operations
-                .push(Operation::Residual(self.residuals.len()));
+            self.auxiliary_bytes += meshes.capacity() * size_of::<egui::ClippedPrimitive>();
+            for primitive in &meshes {
+                if let egui::epaint::Primitive::Mesh(mesh) = &primitive.primitive {
+                    self.auxiliary_bytes += mesh.vertices.capacity()
+                        * size_of::<egui::epaint::Vertex>()
+                        + mesh.indices.capacity() * size_of::<u32>();
+                }
+            }
+            self.push_operation(Operation::Residual(self.residuals.len()));
             self.residuals.push(meshes);
         }
     }

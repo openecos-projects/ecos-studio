@@ -22,7 +22,7 @@ impl CpuSceneHistory {
                 generation: scene.generation,
                 meshes: Vec::new(),
                 fallback_meshes: std::sync::OnceLock::new(),
-                labels: Default::default(),
+                labels: scene.labels.clone(),
                 drawn: scene.drawn,
                 primitives: scene.primitives,
                 build_duration: scene.build_duration,
@@ -45,9 +45,11 @@ impl CpuSceneHistory {
             .saturating_add(scene.retained.as_ref().map_or(0, |model| model.byte_len()))
             .saturating_add(scene.priority.as_ref().map_or(0, |cache| cache.byte_len()));
         self.history.insert(scene.key().clone(), scene, bytes);
+        self.trim_labels();
     }
 
     pub(super) fn get(&mut self, key: &SceneKey) -> Option<Arc<CpuScene>> {
+        self.trim_labels();
         self.history.get(key)
     }
 
@@ -66,7 +68,24 @@ impl CpuSceneHistory {
     }
 
     pub(super) fn byte_len(&self) -> usize {
-        self.history.bytes
+        self.history
+            .entries
+            .iter()
+            .fold(self.history.bytes, |bytes, entry| {
+                bytes.saturating_add(entry.value.labels.byte_len())
+            })
+    }
+
+    fn trim_labels(&mut self) {
+        // Label completion can install the compact source after this scene was
+        // inserted. Reconcile that asynchronous allocation before every lookup
+        // or insertion. Shared sources are conservatively charged per entry.
+        while self.byte_len() > MAX_BYTES {
+            let Some(oldest) = self.history.entries.pop_front() else {
+                break;
+            };
+            self.history.bytes -= oldest.bytes;
+        }
     }
 }
 

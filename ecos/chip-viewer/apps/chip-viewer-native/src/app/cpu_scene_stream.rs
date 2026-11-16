@@ -51,21 +51,14 @@ fn build_output(
     let workers = worker_count();
     let mut scene = empty_scene(&request.key, Arc::clone(&request.pattern_textures));
     let mut consumer_duration = Duration::ZERO;
-    let query_duration = ordered::run(
+    let query_duration = queries::run(
+        &request.layer_ids,
         workers,
         is_current,
-        |emit| {
-            queries::produce(
-                &request.layer_ids,
-                workers,
-                is_current,
-                |layer| {
-                    request
-                        .db
-                        .query_layers_intersect(&[layer], request.key.viewport)
-                },
-                emit,
-            )
+        |layer| {
+            request
+                .db
+                .query_cached_layer_intersect(layer, request.key.viewport)
         },
         |ids: Vec<ShapeId>| {
             let chunk = build_chunk(request, &ids, is_current, output)?;

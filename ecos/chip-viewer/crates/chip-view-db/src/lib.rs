@@ -27,6 +27,10 @@ pub use query_prefix::QueryPrefixLimits;
 mod query_sample;
 pub use query_sample::LayerQuerySample;
 
+mod query_window;
+
+mod shape_lookup;
+
 pub mod clock_tree;
 
 pub struct ChipViewDb {
@@ -38,6 +42,7 @@ pub struct ChipViewDb {
     shape_index: ShapeIdIndex,
     snapshot: GeometrySnapshot,
     view_index: ViewTileIndex,
+    window_queries: query_window::WindowQueries,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -199,6 +204,7 @@ pub struct LayerShapeIndex {
 #[derive(Clone, Debug, Default)]
 pub struct ShapeIdIndex {
     by_id: HashMap<ShapeId, usize>,
+    dense_base: Option<ShapeId>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -631,30 +637,6 @@ impl LayerShapeIndex {
                 shape_id,
                 distance_squared,
             })
-    }
-}
-
-impl ShapeIdIndex {
-    pub fn from_shapes(shapes: &[ShapeRecord]) -> Self {
-        let mut by_id = HashMap::<ShapeId, usize>::with_capacity(shapes.len());
-        for (index, shape) in shapes.iter().enumerate() {
-            by_id.entry(shape.id).or_insert(index);
-        }
-        Self { by_id }
-    }
-
-    pub fn estimated_heap_bytes(&self) -> usize {
-        size_of::<Self>() + self.by_id.capacity() * (size_of::<(ShapeId, usize)>() + 1)
-    }
-
-    pub fn find<'a>(
-        &self,
-        shapes: &'a [ShapeRecord],
-        shape_id: ShapeId,
-    ) -> Option<&'a ShapeRecord> {
-        self.by_id
-            .get(&shape_id)
-            .and_then(|index| shapes.get(*index))
     }
 }
 
@@ -1872,6 +1854,7 @@ impl ChipViewDb {
                 shape_index,
                 snapshot,
                 view_index,
+                window_queries: Default::default(),
             },
             timings,
         ))

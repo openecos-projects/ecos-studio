@@ -1,10 +1,15 @@
 use super::*;
 
+#[path = "cpu_label_collection.rs"]
+mod label_collection;
+
 #[path = "cpu_scene_stream.rs"]
 mod stream;
 
 #[path = "cpu_selection_refresh.rs"]
 mod selection;
+pub(super) use selection::collect_labels;
+pub(super) use selection::promoted;
 pub(super) use selection::refresh_labels;
 
 #[cfg(target_os = "linux")]
@@ -218,6 +223,7 @@ fn build_chunk_sink<Sink: SceneSink>(
     }
     scene.filter_duration = filter_started.elapsed();
     let pass = chip_render::geometry2d::GeometryPass::new(key.world, key.canvas, key.zoom, key.pan);
+    let mut label_candidates = label_collection::Collector::default();
     for (index, (shape, owner, geometry, style)) in shapes.iter().enumerate() {
         if index % 1024 == 0 && !is_current() {
             return None;
@@ -236,23 +242,17 @@ fn build_chunk_sink<Sink: SceneSink>(
         if !sink.collect_labels() {
             continue;
         }
-        if let Some(label) = shape_label_candidate(
+        label_candidates.observe(
             *geometry,
             *owner,
             owner.and_then(|owner| request.db.owner_name(owner)),
-            key.selected == Some(shape.id),
-            key.highlighted.contains(&shape.id),
-            key.world,
-            key.canvas,
-            key.zoom,
-            key.pan,
-        ) {
-            scene.labels.insert(label);
-        }
+            key,
+        );
     }
     if !is_current() {
         return None;
     }
+    label_candidates.publish(key.canvas, is_current, &mut scene.labels)?;
     drop(shapes);
     is_current().then_some((scene, sink))
 }

@@ -8,7 +8,13 @@ mod coverage;
 #[path = "cpu_sparse_grid.rs"]
 mod grid;
 
-const TILE: i32 = 32;
+const TILE: i32 = 8;
+
+#[path = "cpu_sparse_budget.rs"]
+mod budget;
+
+#[path = "cpu_sparse_repairs.rs"]
+mod repairs;
 
 pub(in crate::app) fn certified_profile(gl: &glow::Context) -> bool {
     unsafe {
@@ -20,7 +26,7 @@ pub(in crate::app) fn certified_profile(gl: &glow::Context) -> bool {
 
 enum Operation {
     Rect([u16; 4], egui::Color32),
-    Pattern(PatternOperation),
+    Pattern(Box<PatternOperation>),
     Residual(usize),
 }
 
@@ -32,7 +38,7 @@ struct PatternOperation {
 }
 
 pub(super) struct SparseRects {
-    operations: Vec<Operation>,
+    operations: budget::Operations,
     residuals: Vec<Vec<egui::ClippedPrimitive>>,
     holes: Vec<u64>,
     columns: usize,
@@ -42,6 +48,7 @@ pub(super) struct SparseRects {
     residual_count: usize,
     colors: [([u8; 4], egui::Color32); 2],
     pattern_textures: Arc<PatternTextureSet>,
+    auxiliary_bytes: usize,
 }
 
 impl SparseRects {
@@ -64,7 +71,7 @@ impl SparseRects {
         let columns = (key.screen_size[0] as usize).div_ceil(TILE as usize);
         let rows = (key.screen_size[1] as usize).div_ceil(TILE as usize);
         let mut result = Self {
-            operations: Vec::new(),
+            operations: Default::default(),
             residuals: Vec::new(),
             holes: vec![0; (columns * rows).div_ceil(64)],
             columns,
@@ -80,6 +87,7 @@ impl SparseRects {
             residual_count: 0,
             colors: [([0; 4], egui::Color32::TRANSPARENT); 2],
             pattern_textures: Arc::clone(&request.pattern_textures),
+            auxiliary_bytes: 0,
         };
         result.clip[0] = result.clip[0].clamp(0, result.size[0] as i32);
         result.clip[1] = result.clip[1].clamp(0, result.size[1] as i32);
@@ -108,11 +116,12 @@ impl SparseRects {
             } = command
             {
                 if self.pattern_textures.spec(pattern).is_some() {
-                    self.operations.push(Operation::Pattern(PatternOperation {
+                    self.push_operation(Operation::Pattern(Box::new(PatternOperation {
                         rect,
                         pattern,
                         color: color32(rgba),
-                    }));
+                    })));
+                    self.auxiliary_bytes += size_of::<PatternOperation>();
                     continue;
                 }
             }
@@ -146,7 +155,7 @@ impl SparseRects {
                     }
                     let bounds = self.bounds(rect);
                     if bounds[2] > bounds[0] && bounds[3] > bounds[1] {
-                        self.operations.push(Operation::Rect(
+                        self.push_operation(Operation::Rect(
                             bounds.map(|coordinate| coordinate as u16),
                             color,
                         ));
@@ -183,11 +192,21 @@ impl SparseRects {
     }
 
     pub(super) fn prefers_meshes(&self) -> bool {
+        self.mesh_preference().is_some()
+    }
+
+    pub(super) fn mesh_preference(&self) -> Option<&'static str> {
         let tiles = self.columns * (self.size[1] as usize).div_ceil(TILE as usize);
         let holes = self.repair_tiles();
-        self.operations.len() > 1_000_000
-            || (self.operations.len() >= 256 && self.residual_count * 32 > self.operations.len())
-            || holes * 4 > tiles
+        if self.retained_bytes() > budget::MAX_BYTES {
+            Some("retained_memory")
+        } else if self.operations.len() >= 256 && self.residual_count * 32 > self.operations.len() {
+            Some("residual_density")
+        } else if holes * 4 > tiles {
+            Some("damage_coverage")
+        } else {
+            None
+        }
     }
 
     fn bounds(&self, rect: egui::Rect) -> [i32; 4] {
@@ -231,111 +250,19 @@ impl SparseRects {
         is_current: &impl Fn() -> bool,
         budget: usize,
     ) -> Option<Vec<egui::ClippedPrimitive>> {
-        let (mut buckets, regions) = self.repair_regions(canvas);
-        let mut seen = vec![0; buckets.len()];
-        let mut stamp = 0;
+        let mut output = Vec::new();
         let mut bytes = 0;
-        for (index, operation) in self.operations.iter().enumerate() {
-            if index % 256 == 0 && !is_current() {
-                return None;
-            }
-            match operation {
-                Operation::Rect(bounds, color) => {
-                    stamp += 1;
-                    for tile in self.tiles(bounds.map(i32::from)) {
-                        let region = regions[tile];
-                        if region != usize::MAX && seen[region] != stamp {
-                            seen[region] = stamp;
-                            let bucket = &mut buckets[region];
-                            bytes += 4 * size_of::<egui::epaint::Vertex>() + 6 * size_of::<u32>();
-                            if bytes > budget {
-                                return None;
-                            }
-                            bucket.mesh.add_colored_rect(
-                                rect_points(*bounds, self.pixels_per_point),
-                                *color,
-                            );
-                            if bucket.mesh.indices.len() >= geometry::MAX_MESH_INDICES {
-                                bucket.flush();
-                            }
-                        }
-                    }
-                }
-                Operation::Pattern(operation) => {
-                    let primitive = pattern_primitive(*operation, &self.pattern_textures, canvas);
-                    let egui::epaint::Primitive::Mesh(mesh) = &primitive.primitive else {
-                        unreachable!()
-                    };
-                    let bounds =
-                        mesh.vertices
-                            .iter()
-                            .fold(egui::Rect::NOTHING, |bounds, vertex| {
-                                bounds.union(egui::Rect::from_min_max(vertex.pos, vertex.pos))
-                            });
-                    stamp += 1;
-                    for tile in self.tiles(self.bounds(bounds)) {
-                        let region = regions[tile];
-                        if region != usize::MAX && seen[region] != stamp {
-                            seen[region] = stamp;
-                            let bucket = &mut buckets[region];
-                            bytes += mesh.vertices.len() * size_of::<egui::epaint::Vertex>()
-                                + mesh.indices.len() * size_of::<u32>()
-                                + size_of::<egui::ClippedPrimitive>();
-                            if bytes > budget {
-                                return None;
-                            }
-                            let mut primitive = primitive.clone();
-                            primitive.clip_rect = bucket.canvas.intersect(primitive.clip_rect);
-                            bucket.append(primitive);
-                        }
-                    }
-                }
-                Operation::Residual(residual) => {
-                    for primitive in &self.residuals[*residual] {
-                        stamp += 1;
-                        let egui::epaint::Primitive::Mesh(mesh) = &primitive.primitive else {
-                            unreachable!()
-                        };
-                        let bounds =
-                            mesh.vertices
-                                .iter()
-                                .fold(egui::Rect::NOTHING, |bounds, vertex| {
-                                    bounds.union(egui::Rect::from_min_max(vertex.pos, vertex.pos))
-                                });
-                        let edge_padding = if self.pattern_textures.contains(mesh.texture_id) {
-                            0.0
-                        } else {
-                            1.0
-                        };
-                        for tile in self.tiles(self.bounds(bounds.expand(edge_padding))) {
-                            let region = regions[tile];
-                            if region != usize::MAX && seen[region] != stamp {
-                                seen[region] = stamp;
-                                let bucket = &mut buckets[region];
-                                bytes += mesh.vertices.len() * size_of::<egui::epaint::Vertex>()
-                                    + mesh.indices.len() * size_of::<u32>()
-                                    + size_of::<egui::ClippedPrimitive>();
-                                if bytes > budget {
-                                    return None;
-                                }
-                                let mut primitive = primitive.clone();
-                                primitive.clip_rect = bucket.canvas.intersect(primitive.clip_rect);
-                                bucket.append(primitive);
-                            }
-                        }
-                    }
+        self.stream_repairs(canvas, is_current, 1024 * 1024, |meshes| {
+            for primitive in &meshes {
+                if let egui::epaint::Primitive::Mesh(mesh) = &primitive.primitive {
+                    bytes += mesh.vertices.len() * size_of::<egui::epaint::Vertex>()
+                        + mesh.indices.len() * size_of::<u32>();
                 }
             }
-        }
-        Some(
-            buckets
-                .into_iter()
-                .flat_map(|mut bucket| {
-                    bucket.flush();
-                    bucket.output
-                })
-                .collect(),
-        )
+            output.extend(meshes);
+            bytes <= budget
+        })
+        .then_some(output)
     }
 
     fn repair_regions(&self, canvas: egui::Rect) -> (Vec<RepairBucket>, Vec<usize>) {
@@ -413,7 +340,7 @@ impl SparseRects {
         pixels: &mut [u8],
         is_current: &impl Fn() -> bool,
     ) -> bool {
-        for (index, operation) in self.operations[start..].iter().enumerate() {
+        for (index, operation) in self.operations.since(start).enumerate() {
             if index % 256 == 0 && !is_current() {
                 return false;
             }
@@ -422,7 +349,7 @@ impl SparseRects {
                     self.paint_rect(*bounds, *color, pixels, is_current);
                 }
                 Operation::Pattern(operation) => {
-                    self.paint_pattern(*operation, pixels, is_current);
+                    self.paint_pattern(**operation, pixels, is_current);
                 }
                 Operation::Residual(_) => {}
             }
@@ -508,7 +435,7 @@ impl SparseRects {
         };
         let scale = self.pixels_per_point;
         let mut residuals = std::mem::take(&mut self.residuals);
-        for operation in self.operations.drain(..) {
+        for operation in std::mem::take(&mut self.operations).into_operations() {
             match operation {
                 Operation::Rect(bounds, color) => {
                     bucket
@@ -519,7 +446,11 @@ impl SparseRects {
                     }
                 }
                 Operation::Pattern(operation) => {
-                    bucket.append(pattern_primitive(operation, &self.pattern_textures, canvas));
+                    bucket.append(pattern_primitive(
+                        *operation,
+                        &self.pattern_textures,
+                        canvas,
+                    ));
                 }
                 Operation::Residual(residual) => {
                     for primitive in std::mem::take(&mut residuals[residual]) {

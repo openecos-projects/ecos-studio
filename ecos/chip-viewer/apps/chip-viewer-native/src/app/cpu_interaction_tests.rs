@@ -174,6 +174,7 @@ fn selection_refresh_reuses_the_bitmap_through_the_actual_scene_coordinator() {
     let mut scene = builder::build_with_workers(&request, &|| true, 1).unwrap();
     let pixels = image(&request.key);
     scene.bitmap = Some(Arc::clone(&pixels));
+    drop(scene.labels.retire(request.key.canvas));
     let scene = Arc::new(scene);
     let mut cache = CpuSceneCache::default();
     cache.key = Some(request.key.clone());

@@ -174,13 +174,16 @@ impl PaintSink for GeometryMeshSink {
                 PaintCommand::FillRect { rgba, .. } | PaintCommand::FrameRect { rgba, .. } => {
                     Some(rgba)
                 }
-                PaintCommand::Line { .. } | PaintCommand::Disc { .. } => None,
+                PaintCommand::Line { rgba, .. } => Some(rgba),
+                PaintCommand::Disc { .. } => None,
                 PaintCommand::PatternRect { .. } => unreachable!(),
             };
             if let Some(rgba) = rgba {
                 self.use_default_texture();
                 let color = self.color(rgba);
-                if raster.paint(command, color, &mut self.mesh) {
+                if raster.paint(command, color, &mut self.mesh)
+                    || raster.paint_axis(command, color, self.canvas, &mut self.mesh)
+                {
                     if self.mesh.indices.len() >= MAX_MESH_INDICES - 256 {
                         self.flush();
                     }
