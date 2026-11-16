@@ -18,6 +18,8 @@ pub struct Step {
 pub struct Node {
     pub seconds: f64,
     pub label: String,
+    #[serde(default)]
+    pub sequence: Option<usize>,
 }
 
 #[derive(Deserialize)]

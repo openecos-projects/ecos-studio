@@ -28,6 +28,87 @@ fn app(fixture: &Fixture) -> ReplayApp {
 }
 
 #[test]
+fn filler_rows_play_as_one_fast_sweep_with_exact_seeks_and_complete_highlights() {
+    let fixture = Fixture::new();
+    let mut manifest: serde_json::Value =
+        read(&fixture.0.join("attempts/a/manifest.json")).unwrap();
+    let frames = manifest["frames"].as_array_mut().unwrap();
+    frames.truncate(1);
+    frames[0]["state_domain"] = json!("native_input");
+    let mut touched = Vec::new();
+    for i in 1..=42 {
+        let row = i <= 41;
+        frames.push(json!({
+            "sequence":i,"elapsed_ns":i * 1_000_000_000u64,
+            "phase":if row {"filler_row"} else {"committed_database"},
+            "subflow":if row {"run filler"} else {"save results"},
+            "state_domain":"native_committed","path":format!("frames/{i}.json"),
+            "checkpoint":false
+        }));
+        let mut upsert = serde_json::Map::new();
+        if row {
+            let id = format!("inst:filler{i}");
+            touched.push(id.clone());
+            upsert.insert(
+                id,
+                json!({"kind":"instance","master":format!("FILL{}",i%3),
+                "bbox":[0,i*10,5,i*10+5]}),
+            );
+        }
+        fixture.write(
+            &format!("attempts/a/frames/{i}.json"),
+            json!({
+                "sequence":i,"base_revision":i-1,"checkpoint":false,
+                "upsert":upsert,"remove":[],"touched":touched
+            }),
+        );
+    }
+    manifest["duration_ns"] = json!(43_000_000_000u64);
+    fixture.write("attempts/a/manifest.json", manifest);
+    let mut app = app(&fixture);
+    assert_eq!(app.plans[0].clips.len(), 3);
+    let clip = &app.plans[0].clips[1];
+    assert_eq!(clip.kind, Kind::Filler { first: 1 });
+    assert_eq!(clip.frame, 41);
+    assert!((clip.end - clip.start - 1.5).abs() < 1e-9);
+    let start = clip.start;
+    let middle = (clip.start + clip.end) / 2.0;
+    app.select(0, start, false);
+    app.finish_loading_for_test();
+    for id in &touched {
+        assert_eq!(app.reveal.fraction(id), 0.0);
+    }
+    assert!(!app.reveal.contains("inst:a"));
+    app.select(0, middle, false);
+    app.finish_loading_for_test();
+    assert_eq!(app.reveal.fraction("inst:filler1"), 1.0);
+    assert_eq!(app.reveal.fraction("inst:filler41"), 0.0);
+    assert!(app.reveal.fraction("inst:filler21") > 0.0);
+    assert!(app.reveal.fraction("inst:filler21") < 1.0);
+    assert_eq!(app.recording.as_ref().unwrap().scene.touched.len(), 41);
+
+    let node = app.plans[0].display_at_frame(20).unwrap();
+    assert!(node > start && node < middle);
+    app.select_node_frame(0, node, Some((20.0, Some(20))));
+    app.finish_loading_for_test();
+    assert!(!app.reveal.active());
+    assert_eq!(app.recording.as_ref().unwrap().scene.revision, Some(20));
+    assert_eq!(app.recording.as_ref().unwrap().scene.objects.len(), 21);
+    app.select(0, middle, false);
+    app.finish_loading_for_test();
+    assert_eq!(app.reveal.fraction("inst:filler1"), 1.0);
+    assert_eq!(app.reveal.fraction("inst:filler41"), 0.0);
+    app.select_node(0, app.total, None);
+    app.finish_loading_for_test();
+    let mut expected = fixture.open();
+    expected.seek_frame(42).unwrap();
+    assert_eq!(app.recording.as_ref().unwrap().scene, expected.scene);
+    assert!(app.complete);
+    assert!(!app.reveal.active());
+    assert!((app.plans[0].seconds - app.plans[0].process_seconds - 2.0).abs() < 1e-9);
+}
+
+#[test]
 fn final_change_animates_before_results_and_reverse_seek_is_deterministic() {
     let fixture = Fixture::new();
     let mut app = app(&fixture);
@@ -181,4 +262,17 @@ fn maps_follow_completion_and_speed_without_leaking_into_process_seek() {
     app.finish_loading_for_test();
     assert!(app.complete);
     assert_eq!(app.maps.selected, None);
+}
+
+#[test]
+fn frame_sequence_takes_priority_over_ambiguous_node_timestamp() {
+    let fixture = Fixture::new();
+    let mut app = app(&fixture);
+    let display = app.plans[0].display_at_frame(1).unwrap();
+    // The timestamp would select a later state; the recorded frame ID wins.
+    app.select_node_frame(0, display, Some((100.0, Some(1))));
+    app.finish_loading_for_test();
+    assert_eq!(app.recording.as_ref().unwrap().scene.revision, Some(1));
+    assert!(!app.complete);
+    assert!(!app.reveal.active());
 }

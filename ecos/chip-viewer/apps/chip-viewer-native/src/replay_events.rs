@@ -8,6 +8,19 @@ pub fn show(ui: &mut egui::Ui, metrics: &BTreeMap<String, Value>) {
         .max_height(260.0)
         .show(ui, |ui| {
             for (key, value) in metrics {
+                if key == "geometry"
+                    && matches!(value.as_str(), Some("box_owner_union" | "selected_tracks"))
+                {
+                    continue;
+                }
+                let label = match key.as_str() {
+                    "active_boxes" => "Active regions",
+                    "boxes" => "Partition regions",
+                    "violation_evaluation" => "Violation check",
+                    "conflicting_nets_before" => "Conflicting nets before reroute",
+                    "iteration" => "Iteration",
+                    _ => key,
+                };
                 if key == "decisions" {
                     if let Some(rows) = value.as_array() {
                         ui.collapsing(format!("Sizing decisions · {}", rows.len()), |ui| {
@@ -39,7 +52,7 @@ pub fn show(ui: &mut egui::Ui, metrics: &BTreeMap<String, Value>) {
                     });
                 } else {
                     ui.label(format!(
-                        "{key}: {}",
+                        "{label}: {}",
                         value
                             .as_str()
                             .map(str::to_owned)

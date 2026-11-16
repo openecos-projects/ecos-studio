@@ -103,7 +103,11 @@ impl ReplayApp {
             self.canvas_cache.base.clone(),
             Slot::Base,
             self.gpu_format,
-            1.0,
+            if self.complete {
+                1.0
+            } else {
+                self.route_overlay.context_opacity()
+            },
         );
         let mut moving = egui::Mesh::default();
         let mut highlights = egui::Mesh::default();
@@ -140,6 +144,9 @@ impl ReplayApp {
             );
         }
         painter.add(egui::Shape::mesh(moving));
+        if !self.complete {
+            self.route_overlay.paint(&painter, &project);
+        }
         if self.complete && self.pending.is_none() {
             self.maps.paint(&painter, project);
             self.analysis.paint(&painter, project);

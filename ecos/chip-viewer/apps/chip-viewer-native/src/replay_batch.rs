@@ -44,6 +44,12 @@ impl CanvasCache {
         let mut via_coverage = std::collections::HashMap::<(i32, i32), f32>::new();
         self.dynamic.clear();
         for (id, object) in index.visible(viewport) {
+            if matches!(
+                object.kind.as_str(),
+                "route_congestion" | "route_violation" | "route_region"
+            ) {
+                continue;
+            }
             if object.kind == "track_grid" && f32::from_bits(key.2) < 2.0 && !focused {
                 continue;
             }
@@ -168,11 +174,13 @@ pub fn paint_object(
         "track_grid" => Color32::from_rgb(75, 89, 105),
         "die" => Color32::from_rgb(131, 193, 234),
         "core" => Color32::from_rgb(218, 175, 107),
+        "access_candidate" => Color32::from_rgba_unmultiplied(120, 170, 255, 110),
+        "route_patch" => Color32::from_rgb(230, 160, 235),
         "access_point" => Color32::from_rgb(255, 190, 90),
         _ => Color32::from_rgb(70, 147, 129),
     }
     .gamma_multiply(fraction);
-    if object.kind == "access_point" {
+    if matches!(object.kind.as_str(), "access_point" | "access_candidate") {
         mesh.add_colored_rect(
             Rect::from_center_size(project(x1, y1), egui::vec2(3.0, 3.0)),
             color,

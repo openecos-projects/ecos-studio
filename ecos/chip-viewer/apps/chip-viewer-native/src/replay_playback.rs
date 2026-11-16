@@ -14,15 +14,38 @@ impl ReplayApp {
         self.active_clip = None;
     }
 
+    #[cfg(test)]
     pub(super) fn select_node(&mut self, step: usize, seconds: f64, source: Option<f64>) {
-        self.select_at(step, seconds, source.is_none(), source);
+        self.select_node_frame(step, seconds, source.map(|time| (time, None)));
+    }
+
+    pub(super) fn select_node_frame(
+        &mut self,
+        step: usize,
+        seconds: f64,
+        source: Option<(f64, Option<usize>)>,
+    ) {
+        self.select_at(
+            step,
+            seconds,
+            source.is_none(),
+            source.map(|s| s.0),
+            source.and_then(|s| s.1),
+        );
     }
 
     pub(super) fn select(&mut self, step: usize, seconds: f64, completion_node: bool) {
-        self.select_at(step, seconds, completion_node, None);
+        self.select_at(step, seconds, completion_node, None, None);
     }
 
-    fn select_at(&mut self, step: usize, seconds: f64, completion_node: bool, source: Option<f64>) {
+    fn select_at(
+        &mut self,
+        step: usize,
+        seconds: f64,
+        completion_node: bool,
+        source: Option<f64>,
+        sequence: Option<usize>,
+    ) {
         self.completion_node_selected = completion_node;
         self.position = seconds.clamp(
             self.starts[step],
@@ -44,6 +67,7 @@ impl ReplayApp {
             self.checklist = None;
             self.maps = ReplayMaps::default();
             self.analysis = Default::default();
+            self.route_overlay = Default::default();
             self.logic = None;
             self.recording = None;
             self.error.clone_from(&self.plans[step].error);
@@ -91,7 +115,7 @@ impl ReplayApp {
             // when the worker returns the requested scene.
             self.loader.cancel();
             self.pending = None;
-            if let Some(frame) = self.plans[step].frame_at_source(source) {
+            if let Some(frame) = sequence.or_else(|| self.plans[step].frame_at_source(source)) {
                 self.request_frame(frame, None, true)
             } else {
                 self.clear_animation();
@@ -243,6 +267,7 @@ impl ReplayApp {
                     self.canvas_cache = Default::default();
                     let crate::replay_loader::Prepared {
                         scene,
+                        mut route_overlay,
                         motion,
                         reveal,
                         index,
@@ -255,6 +280,8 @@ impl ReplayApp {
                     {
                         self.prepare_timings_ms = timings_ms;
                     }
+                    route_overlay.inherit_selection(&self.route_overlay);
+                    self.route_overlay = route_overlay;
                     self.logic = logic;
                     if let Some(results) = results {
                         self.maps = results.maps;
