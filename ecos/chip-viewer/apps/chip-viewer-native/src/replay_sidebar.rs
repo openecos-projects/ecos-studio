@@ -2,13 +2,15 @@ use super::ReplayApp;
 
 impl ReplayApp {
     pub(super) fn result_sidebar(&mut self, ctx: &egui::Context) {
+        let max_width = (ctx.screen_rect().width() * 0.5).max(1.0);
+        let min_width = max_width.min(320.0);
         egui::SidePanel::right("replay_results")
             .default_width(if self.view3d.enabled {
-                ctx.screen_rect().width() * 0.42
+                max_width
             } else {
                 420.0
             })
-            .width_range(320.0..=700.0)
+            .width_range(min_width..=max_width)
             .show(ctx, |ui| {
                 if self.view3d.enabled {
                     if !self.view3d.reports {

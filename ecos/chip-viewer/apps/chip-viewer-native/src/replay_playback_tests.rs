@@ -359,6 +359,7 @@ fn enabling_three_d_starts_slow_iso_rotation_until_manual_control() {
     assert!((view.z_scale - 1.35).abs() < f32::EPSILON);
     assert!(!view.auto_spin);
     assert!(view.spin_yaw.is_none());
+    assert!(!view.fit_requested);
 
     let mut view = view;
     view.enabled = true;
@@ -370,6 +371,8 @@ fn enabling_three_d_starts_slow_iso_rotation_until_manual_control() {
 
     view.auto_spin = false;
     view.spin_yaw = None;
+    view.fit_requested = true;
     assert!(!view.auto_spin);
     assert!(view.spin_yaw.is_none());
+    assert!(view.fit_requested);
 }
