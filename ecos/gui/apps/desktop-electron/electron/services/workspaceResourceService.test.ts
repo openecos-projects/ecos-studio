@@ -66,6 +66,22 @@ async function writeWorkspace(
 }
 
 describe('WorkspaceResourceService', () => {
+  it('resolves post-route LEC layout from its own output geometry', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'postRouteLec', tool: 'kepler_formal' }])
+    const output = join(root, 'postRouteLec_kepler_formal', 'output')
+    await mkdir(join(output, 'geometry'), { recursive: true })
+    await writeFile(join(output, 'gcd_postRouteLec.def.gz'), 'def')
+    await writeFile(join(output, 'geometry', 'geometry.manifest'), 'schema_version=1')
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const layout = await service.resolveStepInfo({ id: 'layout', step: 'postRouteLec' })
+    expect(layout.response).toBe('available')
+    expect(layout.info).toMatchObject({
+      geometryManifest: join(output, 'geometry', 'geometry.manifest'),
+      def: join(output, 'gcd_postRouteLec.def.gz'),
+    })
+  })
+
   afterEach(async () => {
     await Promise.all(
       tempDirectories

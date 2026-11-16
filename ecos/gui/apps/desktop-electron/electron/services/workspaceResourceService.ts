@@ -223,7 +223,7 @@ export class WorkspaceResourceService {
 
     if (toolKey === 'yosys') {
       addYosysResources(resources, directory, design, step.name)
-    } else if (toolKey === 'ecc') {
+    } else if (step.name.toLowerCase() === 'postroutelec' || toolKey === 'ecc') {
       addEccLikeResources(resources, directory, design, topModule, step.name)
     } else if (toolKey === 'dreamplace') {
       addEccLikeResources(resources, directory, design, topModule, step.name)

@@ -47,7 +47,10 @@
       :title="layoutTitle"
       @click="$emit('layout', step)"
     >
-      <img v-if="ownLayout" :src="ownLayout.url" :alt="`${step.label} layout`" />
+      <img v-if="ownLayout?.url" :src="ownLayout.url" :alt="`${step.label} layout`" />
+      <span v-else-if="ownLayout"
+        ><i class="ri-cpu-line" aria-hidden="true" /> Open layout</span
+      >
       <span v-else-if="macroPlacementSourceAvailable"
         ><i class="ri-drag-move-2-line" aria-hidden="true" /> Place macros</span
       >

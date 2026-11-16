@@ -11,9 +11,9 @@ export function isMacroPlacementLayoutStep(step: string): boolean {
 /** True when a flow card can open this thumbnail in Chip Viewer. */
 export function isUsableLayoutThumbnail(
   thumbnail: HomeLayoutThumbnail | null | undefined,
-): thumbnail is HomeLayoutThumbnail & { url: string } {
+): thumbnail is HomeLayoutThumbnail {
   return Boolean(
-    thumbnail?.url && thumbnail.availability === 'available' && thumbnail.hasGeometry,
+    thumbnail && thumbnail.availability === 'available' && thumbnail.hasGeometry,
   )
 }
 
