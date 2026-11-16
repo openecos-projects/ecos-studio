@@ -4264,10 +4264,7 @@ impl LoadedViewer {
         let mut drawn = 0usize;
         let pixels_per_point = ui.ctx().pixels_per_point();
         let use_view_tiles = self.should_use_view_tiles(viewport, world, canvas, pixels_per_point);
-        let view_lod = gpu_overview::overview_lod_for_renderer(
-            self.view_lod_level(world, canvas, pixels_per_point),
-            self.is_gpu_active(),
-        );
+        let view_lod = self.view_lod_level(world, canvas, pixels_per_point);
         let hover_nearest = if use_view_tiles {
             None
         } else {

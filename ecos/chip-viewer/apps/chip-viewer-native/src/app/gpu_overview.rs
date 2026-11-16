@@ -108,14 +108,6 @@ pub(super) fn pixel_overview_lod(
         .clamp(0.0, 3.0) as u8
 }
 
-pub(super) fn overview_lod_for_renderer(lod: u8, is_gpu: bool) -> u8 {
-    if is_gpu {
-        lod
-    } else {
-        lod.saturating_add(1).min(3)
-    }
-}
-
 /// Shared 2D CPU/GPU predicate for the overview tile summary. Highlights
 /// and selection still render as exact overlays on top of the tile
 /// summary, so they do not factor into the predicate; draft/edit mode
@@ -456,13 +448,6 @@ mod tests {
         assert_eq!(pixel_overview_lod(1.0, world, canvas, 1.0), 2);
         assert_eq!(pixel_overview_lod(0.25, world, canvas, 1.0), 3);
         assert_eq!(pixel_overview_lod(0.05, world, canvas, 1.0), 3);
-    }
-
-    #[test]
-    fn cpu_overview_uses_one_coarser_lod_and_gpu_keeps_requested_lod() {
-        assert_eq!(overview_lod_for_renderer(1, false), 2);
-        assert_eq!(overview_lod_for_renderer(3, false), 3);
-        assert_eq!(overview_lod_for_renderer(1, true), 1);
     }
 
     #[test]
