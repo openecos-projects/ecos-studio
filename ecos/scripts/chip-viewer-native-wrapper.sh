@@ -8,6 +8,7 @@ if [[ "${1:-}" == "--build-only" ]]; then
     printf '%s\n' 'Unexpected arguments for Chip Viewer build-only mode.' >&2
     exit 64
   fi
-  exec cargo build --package chip-viewer-native --bin chip-viewer-native
+  exec cargo build --release --package chip-viewer-native --bin chip-viewer-native
 fi
-exec cargo run --package chip-viewer-native --bin chip-viewer-native -- "$@"
+# Interactive layout/replay performance must match the packaged viewer.
+exec cargo run --release --package chip-viewer-native --bin chip-viewer-native -- "$@"

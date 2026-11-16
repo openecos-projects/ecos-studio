@@ -16,13 +16,13 @@ impl ClockTreePanel {
         Ok(panel)
     }
 
-    pub(crate) fn embedded_ui(&mut self, ui: &mut egui::Ui) {
+    pub(crate) fn embedded_ui(&mut self, ui: &mut egui::Ui) -> Option<super::LayoutTarget> {
         let Some(data) = self.data.clone() else {
-            return;
+            return None;
         };
         if data.view.clocks.is_empty() {
             ui.label("No clocks in this snapshot.");
-            return;
+            return None;
         }
         let previous = self.clock;
         egui::ComboBox::from_id_salt("replay_clock_selection")
@@ -42,7 +42,7 @@ impl ClockTreePanel {
             clock.summary.sink_count,
             super::status_label(data.view.status)
         ));
-        let _ = self.draw_graph(ui, GraphHost::Embedded);
+        self.draw_graph(ui, GraphHost::Embedded)
     }
 }
 

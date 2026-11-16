@@ -1,9 +1,14 @@
 #[path = "replay_canvas.rs"]
 mod canvas;
+#[path = "replay_focus.rs"]
+mod focus;
 #[path = "replay_playback.rs"]
 mod playback;
 #[path = "replay_sidebar.rs"]
 mod sidebar;
+#[cfg(all(test, target_os = "linux"))]
+#[path = "replay_ui_validation.rs"]
+mod ui_validation;
 use crate::replay_data::{read, Catalog, Recording};
 use crate::replay_maps::ReplayMaps;
 use crate::replay_motion::Motion;
@@ -21,6 +26,7 @@ pub struct ReplayApp {
     step: usize,
     position: f64,
     complete: bool,
+    completion_node_selected: bool,
     recording: Option<Recording>,
     clock_tree: Option<crate::clock_tree::ClockTreePanel>,
     checklist: Option<Result<crate::replay_checklist::Checklist, String>>,
@@ -34,14 +40,34 @@ pub struct ReplayApp {
     plans: Vec<StepPlan>,
     preparation: Option<std::sync::mpsc::Receiver<Vec<StepPlan>>>,
     active_clip: Option<usize>,
+    loader: crate::replay_loader::Loader,
+    pending: Option<(u64, usize, Option<usize>)>,
     checked: Instant,
     maps: ReplayMaps,
+    analysis: crate::replay_analysis::ReplayAnalysis,
+    logic: Option<crate::replay_logic::Logic>,
     smooth: bool,
     motion: Motion,
     reveal: Reveal,
+    focus: Option<[i64; 4]>,
+    scene_index: crate::replay_index::SceneIndex,
+    canvas_cache: crate::replay_batch::CanvasCache,
+    gpu_format: Option<wgpu::TextureFormat>,
+    gpu_animation_limit: usize,
+    selected_objects: std::collections::BTreeSet<String>,
 }
 
 impl ReplayApp {
+    pub fn configure_renderer(&mut self, cc: &eframe::CreationContext<'_>) {
+        if let Some(state) = &cc.wgpu_render_state {
+            let limits = state.device.limits();
+            if limits.max_storage_buffers_per_shader_stage > 0 {
+                self.gpu_format = Some(state.target_format);
+                self.gpu_animation_limit = limits.max_storage_buffer_binding_size as usize;
+            }
+        }
+    }
+
     fn check_flow(&self) -> Result<()> {
         let flow: serde_json::Value = read(&self.catalog.workspace.join("home/flow.json"))?;
         let steps = flow["steps"].as_array().context("Missing flow steps")?;
@@ -56,7 +82,12 @@ impl ReplayApp {
                 steps
                     .iter()
                     .any(|s| s["name"] == self.catalog.steps[self.step].name
-                        && s["state"] == "Success"),
+                        && (s["state"] == "Success"
+                            || (s["state"] == "Incomplete"
+                                && self
+                                    .recording
+                                    .as_ref()
+                                    .is_none_or(|r| r.manifest.diagnostic_only)))),
                 "This step result is no longer current. Rerun and reopen Replay."
             );
         }
@@ -79,11 +110,18 @@ impl ReplayApp {
         let total = 0.0;
         let app = Self {
             catalog,
+            focus: None,
+            scene_index: Default::default(),
+            canvas_cache: Default::default(),
+            gpu_format: None,
+            gpu_animation_limit: 0,
+            selected_objects: Default::default(),
             starts,
             total,
             step: 0,
             position: 0.0,
             complete: false,
+            completion_node_selected: false,
             recording: None,
             clock_tree: None,
             checklist: None,
@@ -97,8 +135,12 @@ impl ReplayApp {
             plans: Vec::new(),
             preparation,
             active_clip: None,
+            loader: Default::default(),
+            pending: None,
             checked: Instant::now(),
             maps: ReplayMaps::default(),
+            analysis: Default::default(),
+            logic: None,
             smooth: true,
             motion: Motion::default(),
             reveal: Reveal::default(),
@@ -267,6 +309,11 @@ impl eframe::App for ReplayApp {
                 }
             }
         }
+        self.poll_loader();
+        self.maps.poll();
+        if self.pending.is_some() || self.maps.loading() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        }
         let now = Instant::now();
         let delta = (now - self.tick).as_secs_f64().min(0.2);
         self.tick = now;
@@ -300,6 +347,10 @@ impl eframe::App for ReplayApp {
         egui::TopBottomPanel::top("replay_title").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("Layout Replay");
+                if self.pending.is_some() {
+                    ui.spinner();
+                    ui.label("Loading captured changes…");
+                }
                 let detail = self
                     .recording
                     .as_ref()
@@ -340,11 +391,15 @@ impl eframe::App for ReplayApp {
             if self.recording.as_ref().is_some_and(|recording| {
                 recording.manifest.geometry_detail.as_deref() == Some("report_only")
             }) {
-                ui.centered_and_justified(|ui| {
-                    ui.label(
-                        "This step records logical/report progress and has no physical layout.",
-                    );
-                });
+                if let Some(logic) = &self.logic {
+                    logic.show(ui);
+                } else if self.complete {
+                    self.analysis.report(ui);
+                } else {
+                    ui.centered_and_justified(|ui| {
+                        ui.label("Recorded logical/report progress");
+                    });
+                }
             } else {
                 self.canvas(ui);
             }

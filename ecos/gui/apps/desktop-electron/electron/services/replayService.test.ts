@@ -137,3 +137,51 @@ describe('Replay workspace boundary', () => {
     await expect(buildReplayCatalog(workspace)).rejects.toThrow('escapes')
   })
 })
+
+it('opens a current failed-check diagnostic without changing the failed flow state', async () => {
+  const root = await recording()
+  const pointerPath = join(root, 'manifest.json')
+  const manifestPath = join(root, 'attempts/a/manifest.json')
+  const pointer = JSON.parse(await readFile(pointerPath, 'utf8'))
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+  pointer.status = manifest.status = 'diagnostic_only'
+  manifest.diagnostic_only = true
+  manifest.flow_state = 'Incomplete'
+  await json(pointerPath, pointer)
+  await json(manifestPath, manifest)
+  const flow = { steps: [{ name: 'place', tool: 'dreamplace', state: 'Incomplete' }] }
+  await json(join(workspace, 'home/flow.json'), flow)
+  const catalog = JSON.parse(await readFile(await buildReplayCatalog(workspace), 'utf8'))
+  expect(catalog.steps[0].manifest).toBe(manifestPath)
+  expect(JSON.parse(await readFile(join(workspace, 'home/flow.json'), 'utf8'))).toEqual(
+    flow,
+  )
+  manifest.diagnostic_only = false
+  await json(manifestPath, manifest)
+  await expect(buildReplayCatalog(workspace)).rejects.toThrow('Replay attempt mismatch')
+})
+
+it.skipIf(!process.env.ECOS_REPLAY_TEST_WORKSPACE)(
+  'builds a catalog from the supplied completed tool workspace',
+  async () => {
+    const path = await buildReplayCatalog(process.env.ECOS_REPLAY_TEST_WORKSPACE!)
+    const catalog = JSON.parse(await readFile(path, 'utf8'))
+    expect(catalog.steps.some((step: { manifest?: string }) => step.manifest)).toBe(true)
+  },
+)
+
+it('accepts v2 only when the pointer and attempt schemas agree', async () => {
+  const root = await recording()
+  await json(join(workspace, 'home/flow.json'), {
+    steps: [{ name: 'place', tool: 'dreamplace', state: 'Success' }],
+  })
+  for (const name of ['manifest.json', 'attempts/a/manifest.json']) {
+    const path = join(root, name)
+    const data = JSON.parse(await readFile(path, 'utf8'))
+    data.schema = 'ecos.replay.v2'
+    await json(path, data)
+  }
+  await expect(buildReplayCatalog(workspace)).resolves.toBe(
+    join(workspace, 'home/replay-view.json'),
+  )
+})

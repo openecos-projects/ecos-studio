@@ -12,10 +12,24 @@ pub struct Reveal {
     groups: Vec<(f64, String)>,
     elapsed: f64,
     duration: f64,
-    pub ghosts: Vec<Object>,
+    pub ghosts: Vec<std::sync::Arc<Object>>,
 }
 
 impl Reveal {
+    pub fn interval(&self, id: &str) -> Option<(f32, f32)> {
+        self.entries.get(id).map(|entry| {
+            (
+                (entry.start / self.duration) as f32,
+                (0.4 / self.duration) as f32,
+            )
+        })
+    }
+    pub fn progress(&self) -> Option<f32> {
+        (self.duration > 0.0).then(|| (self.elapsed / self.duration) as f32)
+    }
+    pub fn contains(&self, id: &str) -> bool {
+        self.entries.contains_key(id)
+    }
     pub fn clear(&mut self) {
         *self = Self::default();
     }
@@ -95,16 +109,20 @@ impl Reveal {
     }
 
     pub fn bounds(&self, id: &str, object: &Object) -> [i64; 4] {
-        if !self.entries.contains_key(id) {
+        Self::bounds_at(object, self.fraction(id))
+    }
+
+    pub fn bounds_at(object: &Object, fraction: f32) -> [i64; 4] {
+        if fraction >= 1.0 {
             return object.bbox;
         }
-        let t = self.fraction(id) as f64;
+        let t = f64::from(fraction);
         let mut bounds = object.bbox;
         if matches!(object.kind.as_str(), "instance" | "macro") {
             for axis in 0..2 {
                 let extent = bounds[axis + 2] - bounds[axis];
                 let visible = (extent as f64 * t).round() as i64;
-                let center = (bounds[axis] + bounds[axis + 2]) / 2;
+                let center = bounds[axis] + extent / 2;
                 bounds[axis] = center - visible / 2;
                 bounds[axis + 2] = center + (visible + 1) / 2;
             }
@@ -169,6 +187,17 @@ fn numeric_layer(layer: &str) -> u32 {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn revealed_odd_negative_bounds_land_on_the_exact_captured_geometry() {
+        let object: Object = serde_json::from_value(json!({
+            "kind":"instance", "bbox":[-5,-7,0,0]
+        }))
+        .unwrap();
+        assert_eq!(Reveal::bounds_at(&object, 1.0), object.bbox);
+        let partial = Reveal::bounds_at(&object, 0.5);
+        assert!(partial[0] >= -5 && partial[1] >= -7 && partial[2] <= 0 && partial[3] <= 0);
+    }
 
     #[test]
     fn layers_types_and_positions_define_progressive_reveal_without_changing_scene() {

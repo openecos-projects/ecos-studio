@@ -8,11 +8,22 @@ const TRANSITION_SECONDS: f64 = 0.3;
 pub struct Motion {
     starts: BTreeMap<String, [i64; 4]>,
     elapsed: f64,
+    trails: Vec<String>,
 }
 
 impl Motion {
+    pub fn start_bounds(&self, id: &str) -> Option<[i64; 4]> {
+        self.starts.get(id).copied()
+    }
+    pub fn progress(&self) -> f32 {
+        (self.elapsed / TRANSITION_SECONDS).clamp(0.0, 1.0) as f32
+    }
+    pub fn contains(&self, id: &str) -> bool {
+        self.starts.contains_key(id)
+    }
     pub fn clear(&mut self) {
         self.starts.clear();
+        self.trails.clear();
         self.elapsed = 0.0;
     }
 
@@ -46,6 +57,32 @@ impl Motion {
                 self.starts.insert(id.clone(), old.bbox);
             }
         }
+        let mut distances = self
+            .starts
+            .iter()
+            .map(|(id, b)| {
+                let target = after.objects[id].bbox;
+                let distance = ((target[0] - b[0]) as f64).hypot((target[1] - b[1]) as f64);
+                (id.clone(), distance)
+            })
+            .collect::<Vec<_>>();
+        distances.sort_unstable_by(|a, b| b.1.total_cmp(&a.1));
+        self.trails = distances.into_iter().take(64).map(|(id, _)| id).collect();
+    }
+
+    pub fn trails<'a>(
+        &'a self,
+        scene: &'a Scene,
+    ) -> impl Iterator<Item = ([i64; 2], [i64; 2])> + 'a {
+        self.trails.iter().filter_map(move |id| {
+            if !self.active() {
+                return None;
+            }
+            let start = self.starts[id];
+            let current = self.bounds(id, scene.objects.get(id)?.bbox);
+            let center = |b: [i64; 4]| [b[0] + (b[2] - b[0]) / 2, b[1] + (b[3] - b[1]) / 2];
+            Some((center(start), center(current)))
+        })
     }
 
     pub fn bounds(&self, id: &str, target: [i64; 4]) -> [i64; 4] {
@@ -139,10 +176,10 @@ mod tests {
         motion.begin(&before, &after, &frames);
         motion.clear();
         assert_eq!(motion.bounds("inst:a", target), target);
-        after.objects.get_mut("inst:a").unwrap().master = "BUF".into();
+        std::sync::Arc::make_mut(after.objects.get_mut("inst:a").unwrap()).master = "BUF".into();
         motion.begin(&before, &after, &frames);
         assert!(!motion.active());
-        after.objects.get_mut("inst:a").unwrap().master = "INV".into();
+        std::sync::Arc::make_mut(after.objects.get_mut("inst:a").unwrap()).master = "INV".into();
         frames[1].phase = "after_legalization".into();
         motion.begin(&before, &after, &frames);
         assert!(!motion.active());

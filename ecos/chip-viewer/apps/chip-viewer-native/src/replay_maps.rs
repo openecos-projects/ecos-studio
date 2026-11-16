@@ -1,5 +1,4 @@
 use crate::map_data::{ColormapMode, HeatmapData, MapCatalog};
-use crate::replay_data::within;
 use egui::{Color32, Painter, Pos2, Rect};
 use std::path::{Path, PathBuf};
 
@@ -8,7 +7,8 @@ pub struct ReplayMaps {
     root: PathBuf,
     items: Vec<(String, PathBuf, PathBuf)>,
     pub selected: Option<usize>,
-    active: Option<HeatmapData>,
+    active: Option<std::sync::Arc<HeatmapData>>,
+    loader: Option<crate::replay_map_loader::MapLoader>,
     listed_selection: Option<usize>,
     pub error: String,
 }
@@ -42,6 +42,9 @@ impl ReplayMaps {
     }
 
     pub fn clear_selection(&mut self) {
+        if let Some(loader) = &mut self.loader {
+            loader.cancel();
+        }
         self.selected = None;
         self.active = None;
     }
@@ -53,12 +56,21 @@ impl ReplayMaps {
         self.selected = Some(index);
         self.active = None;
         if let Some((_, csv, layout)) = self.items.get(index) {
-            let loaded = (|| {
-                let csv = within(&self.root, csv).map_err(|e| e.to_string())?;
-                let layout = within(&self.root, layout).map_err(|e| e.to_string())?;
-                HeatmapData::load(&csv, &layout)
-            })();
-            match loaded {
+            self.loader.get_or_insert_with(Default::default).select(
+                self.root.clone(),
+                csv.clone(),
+                layout.clone(),
+            );
+        }
+    }
+
+    pub fn loading(&self) -> bool {
+        self.loader.as_ref().is_some_and(|loader| loader.pending)
+    }
+
+    pub fn poll(&mut self) {
+        if let Some(result) = self.loader.as_mut().and_then(|loader| loader.poll()) {
+            match result {
                 Ok(data) => self.active = Some(data),
                 Err(error) => self.error = error,
             }
@@ -67,6 +79,10 @@ impl ReplayMaps {
 
     /// Returns true when a user chooses a map; callers pause automatic cycling.
     pub fn controls(&mut self, ui: &mut egui::Ui) -> bool {
+        if self.loading() {
+            ui.spinner();
+            ui.ctx().request_repaint();
+        }
         let mut choice = self.selected;
         let follow = self.listed_selection != self.selected;
         if !self.items.is_empty() {

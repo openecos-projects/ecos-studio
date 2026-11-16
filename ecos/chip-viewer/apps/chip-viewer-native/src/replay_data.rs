@@ -1,5 +1,5 @@
 use anyhow::{ensure, Context, Result};
-use chipgeom_format::replay::{Delta, Manifest, Scene, SCHEMA};
+use chipgeom_format::replay::{Delta, Manifest, Scene, SCHEMA, SCHEMA_V2};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
@@ -50,16 +50,108 @@ pub struct Recording {
     root: PathBuf,
     pointer: PathBuf,
     pub scene: Scene,
+    cache: std::cell::RefCell<crate::replay_cache::DeltaCache>,
+    anchor: std::cell::RefCell<Option<Delta>>,
 }
 
 impl Recording {
+    pub fn asset(&self, path: &str) -> Result<PathBuf> {
+        let resolved = within(&self.root, &self.root.join(path))?;
+        if let Some(expected) = self.manifest.files.get(path) {
+            crate::replay_integrity::verify(&resolved, expected)?;
+        } else {
+            ensure!(self.manifest.files.is_empty(), "Unindexed Replay asset");
+        }
+        Ok(resolved)
+    }
+
+    fn verify_folder(&self, folder: &str) -> Result<()> {
+        for path in self.manifest.files.keys() {
+            if std::path::Path::new(path).starts_with(folder) {
+                self.asset(path)?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn delta(&self, index: usize) -> Result<Delta> {
+        let mut delta = self.raw_delta(index)?;
+        if let Some(base) = delta.base_checkpoint {
+            ensure!(
+                self.manifest.schema == SCHEMA_V2 && base == 0 && index > 0 && delta.checkpoint,
+                "Invalid Replay checkpoint base"
+            );
+            ensure!(
+                delta.translate.is_empty(),
+                "Referenced checkpoint contains translations"
+            );
+            let mut baseline = self.raw_delta(base)?;
+            ensure!(
+                baseline.checkpoint && baseline.base_checkpoint.is_none(),
+                "Invalid Replay anchor"
+            );
+            for id in &delta.remove {
+                baseline.upsert.remove(id);
+            }
+            baseline.upsert.extend(delta.upsert);
+            delta.upsert = baseline.upsert;
+            delta.remove.clear();
+            delta.base_checkpoint = None;
+        }
+        Ok(delta)
+    }
+
+    fn raw_delta(&self, index: usize) -> Result<Delta> {
+        if index == 0 {
+            if let Some(delta) = self.anchor.borrow().as_ref() {
+                return Ok(delta.clone());
+            }
+        }
+        if let Some(delta) = self.cache.borrow_mut().get(index) {
+            return Ok(delta);
+        }
         let frame = &self.manifest.frames[index];
-        let delta: Delta = read(&within(&self.root, &self.root.join(&frame.path))?)?;
+        let path = self.asset(&frame.path)?;
+        let delta: Delta = match frame.encoding.as_deref().unwrap_or("json") {
+            "json" | "json+base" => read(&path)?,
+            "gzip+json" | "gzip+json+base" => {
+                use std::io::Read;
+                let decoder = flate2::read::GzDecoder::new(std::fs::File::open(&path)?);
+                let mut data = Vec::new();
+                decoder.take(256 * 1024 * 1024 + 1).read_to_end(&mut data)?;
+                ensure!(
+                    data.len() <= 256 * 1024 * 1024,
+                    "Decoded Replay frame exceeds 256 MiB"
+                );
+                serde_json::from_slice(&data)?
+            }
+            _ => anyhow::bail!("Unsupported Replay frame encoding"),
+        };
         ensure!(
             delta.sequence == index && delta.checkpoint == frame.checkpoint,
             "Frame identity mismatch"
         );
+        ensure!(
+            delta.base_checkpoint.is_some()
+                == frame
+                    .encoding
+                    .as_deref()
+                    .is_some_and(|e| e.ends_with("+base")),
+            "Checkpoint base/encoding mismatch"
+        );
+        if index == 0
+            && self
+                .manifest
+                .frames
+                .iter()
+                .any(|f| f.encoding.as_deref().is_some_and(|e| e.ends_with("+base")))
+        {
+            // One shared immutable anchor, not a historical scene cache. Current
+            // scenes share its unchanged objects; dynamic cache remains bounded.
+            *self.anchor.borrow_mut() = Some(delta.clone());
+        } else {
+            self.cache.borrow_mut().insert(index, &delta);
+        }
         Ok(delta)
     }
 
@@ -67,7 +159,10 @@ impl Recording {
         self.manifest
             .maps
             .as_ref()
-            .map(|path| within(&self.root, &self.root.join(path)))
+            .map(|path| {
+                self.verify_folder(path)?;
+                within(&self.root, &self.root.join(path))
+            })
             .transpose()
     }
 
@@ -80,6 +175,19 @@ impl Recording {
     }
 
     fn clock_tree_path(&self) -> Result<Option<PathBuf>> {
+        if let Some(path) = &self.manifest.frozen_clock_tree {
+            self.verify_folder(
+                std::path::Path::new(path)
+                    .parent()
+                    .context("Missing tree folder")?
+                    .to_str()
+                    .context("Invalid tree path")?,
+            )?;
+            return Ok(Some(self.asset(path)?));
+        }
+        if self.manifest.results_frozen {
+            return Ok(None);
+        }
         let manifest_path = if let Some(path) = &self.manifest.clock_tree_manifest {
             within(&self.workspace, &self.workspace.join(path))?
         } else {
@@ -118,7 +226,11 @@ impl Recording {
             .to_path_buf();
         let manifest: Manifest = read(&path)?;
         ensure!(
-            manifest.schema == SCHEMA && manifest.status == "complete",
+            (manifest.schema == SCHEMA || manifest.schema == SCHEMA_V2)
+                && (manifest.status == "complete"
+                    || (manifest.status == "diagnostic_only"
+                        && manifest.diagnostic_only
+                        && manifest.flow_state.as_deref() == Some("Incomplete"))),
             "Replay attempt is incomplete or unsupported"
         );
         ensure!(!manifest.frames.is_empty(), "Empty Replay attempt");
@@ -155,15 +267,28 @@ impl Recording {
             root,
             pointer,
             scene: Scene::default(),
+            cache: Default::default(),
+            anchor: Default::default(),
         };
         result.check_current()?;
+        let pointer: serde_json::Value = read(&result.pointer)?;
+        if let Some(digest) = pointer["manifest_sha256"].as_str() {
+            crate::replay_integrity::verify(
+                &path,
+                &chipgeom_format::replay::Fingerprint {
+                    size: path.metadata()?.len(),
+                    sha256: digest.into(),
+                },
+            )?;
+        }
         Ok(result)
     }
 
     pub fn check_current(&self) -> Result<()> {
         let pointer: serde_json::Value = read(&self.pointer)?;
         ensure!(
-            pointer["status"] == "complete" && pointer["attempt_id"] == self.manifest.attempt_id,
+            pointer["status"] == self.manifest.status
+                && pointer["attempt_id"] == self.manifest.attempt_id,
             "Replay invalidated by a rerun. Reopen after completion."
         );
         Ok(())
@@ -171,21 +296,30 @@ impl Recording {
 
     /// Restore by identity, including distinct samples with equal timestamps.
     pub fn seek_frame(&mut self, target: usize) -> Result<()> {
+        self.seek_frame_if(target, || true)
+    }
+
+    pub fn seek_frame_if(&mut self, target: usize, alive: impl Fn() -> bool) -> Result<()> {
         self.check_current()?;
         ensure!(target < self.manifest.frames.len(), "Missing Replay frame");
         if self.scene.revision == Some(target) {
             return Ok(());
         }
-        let (start, mut next) = if self.scene.revision.is_some_and(|r| r < target) {
+        let checkpoint = (0..=target)
+            .rev()
+            .find(|&i| self.manifest.frames[i].checkpoint)
+            .context("Missing checkpoint")?;
+        let (start, mut next) = if self
+            .scene
+            .revision
+            .is_some_and(|r| r < target && r >= checkpoint)
+        {
             (self.scene.revision.unwrap() + 1, self.scene.clone())
         } else {
-            let start = (0..=target)
-                .rev()
-                .find(|&i| self.manifest.frames[i].checkpoint)
-                .context("Missing checkpoint")?;
-            (start, Scene::default())
+            (checkpoint, Scene::default())
         };
         for i in start..=target {
+            ensure!(alive(), "Seek superseded");
             next.apply(self.delta(i)?).map_err(anyhow::Error::msg)?;
         }
         self.scene = next;
@@ -233,6 +367,65 @@ pub(crate) mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn referenced_checkpoint_restores_input_and_applies_removals_on_random_seek() {
+        let fixture = Fixture::new();
+        let mut manifest: serde_json::Value =
+            read(&fixture.0.join("attempts/a/manifest.json")).unwrap();
+        manifest["schema"] = json!(SCHEMA_V2);
+        manifest["frames"][2]["checkpoint"] = json!(true);
+        manifest["frames"][2]["encoding"] = json!("json+base");
+        fixture.write("attempts/a/manifest.json", manifest);
+        fixture.write(
+            "attempts/a/frames/2.json",
+            json!({
+                "sequence":2,"base_revision":1,"checkpoint":true,"base_checkpoint":0,
+                "upsert":{"inst:b":{"kind":"instance","bbox":[50,0,55,5]}},
+                "remove":["inst:a"],"touched":["inst:a","inst:b"]
+            }),
+        );
+        let mut recording = fixture.open();
+        recording.seek_frame(2).unwrap();
+        let final_scene = recording.scene.clone();
+        assert_eq!(
+            final_scene.objects.keys().collect::<Vec<_>>(),
+            vec!["inst:b"]
+        );
+        recording.seek_frame(0).unwrap();
+        assert!(recording.scene.objects.contains_key("inst:a"));
+        recording.seek_frame(2).unwrap();
+        assert_eq!(recording.scene, final_scene);
+        assert!(recording.anchor.borrow().is_some());
+    }
+
+    #[test]
+    fn v2_explicit_gzip_encoding_and_translation_restore_exact_scene() {
+        use std::io::Write;
+        let fixture = Fixture::new();
+        let mut manifest: serde_json::Value =
+            read(&fixture.0.join("attempts/a/manifest.json")).unwrap();
+        manifest["schema"] = json!(SCHEMA_V2);
+        manifest["frames"][1]["encoding"] = json!("gzip+json");
+        fixture.write("attempts/a/manifest.json", manifest);
+        let delta = json!({"sequence":1,"base_revision":0,"checkpoint":false,
+        "upsert":{},"translate":{"inst:a":[10,0]},"remove":[],"touched":["inst:a"]});
+        let mut compressed = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        compressed
+            .write_all(&serde_json::to_vec(&delta).unwrap())
+            .unwrap();
+        std::fs::write(
+            fixture.0.join("attempts/a/frames/1.json"),
+            compressed.finish().unwrap(),
+        )
+        .unwrap();
+        let mut recording = fixture.open();
+        recording.seek_frame(1).unwrap();
+        assert_eq!(recording.scene.objects["inst:a"].bbox, [10, 0, 15, 5]);
+        recording.seek_frame(2).unwrap();
+        recording.seek_frame(1).unwrap();
+        assert_eq!(recording.scene.objects["inst:a"].bbox, [10, 0, 15, 5]);
     }
 
     #[test]

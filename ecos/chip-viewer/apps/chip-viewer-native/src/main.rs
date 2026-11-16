@@ -21,12 +21,26 @@ mod map_data;
 #[path = "render/nav3d.rs"]
 mod nav3d;
 mod replay;
+mod replay_analysis;
+mod replay_batch;
+mod replay_cache;
 mod replay_checklist;
 mod replay_data;
+mod replay_events;
+mod replay_gpu_animation;
+mod replay_gpu_mesh;
+mod replay_index;
+mod replay_integrity;
+mod replay_loader;
+mod replay_logic;
+mod replay_map_loader;
 mod replay_maps;
+mod replay_metrics;
 mod replay_motion;
 mod replay_plan;
 mod replay_reveal;
+#[cfg(test)]
+mod replay_validation_tests;
 mod timing;
 
 use std::path::{Path, PathBuf};
@@ -532,11 +546,14 @@ fn main() -> Result<()> {
     let native_options = create_native_options(render_mode, wgpu_backends);
 
     if args.mode == "replay" {
-        let replay = replay::ReplayApp::open(&args.manifest)?;
+        let mut replay = replay::ReplayApp::open(&args.manifest)?;
         return eframe::run_native(
             "Chip Viewer · Replay",
             native_options,
-            Box::new(move |_| Ok(Box::new(replay))),
+            Box::new(move |cc| {
+                replay.configure_renderer(cc);
+                Ok(Box::new(replay))
+            }),
         )
         .map_err(|error| anyhow::anyhow!("Replay window failed: {error}"));
     }

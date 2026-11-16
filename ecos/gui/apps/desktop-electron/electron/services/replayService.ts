@@ -92,23 +92,28 @@ export async function buildReplayCatalog(workspace: string): Promise<string> {
       metrics: [],
       nodes: [],
     }
-    if (step.state === 'Success') {
+    if (step.state === 'Success' || step.state === 'Incomplete') {
       try {
         const captureRoot = await inside(root, join(base, 'output/geometry/replay'))
         const pointer = record(
           await readJson(await inside(captureRoot, join(captureRoot, 'manifest.json'))),
         )
         if (
-          pointer.schema === 'ecos.replay.v1' &&
-          pointer.status === 'complete' &&
+          (pointer.schema === 'ecos.replay.v1' || pointer.schema === 'ecos.replay.v2') &&
+          (pointer.status === 'complete' || pointer.status === 'diagnostic_only') &&
           typeof pointer.manifest === 'string'
         ) {
           entry.manifest = await inside(captureRoot, join(captureRoot, pointer.manifest))
           const manifest = record(await readJson(entry.manifest))
           if (
             manifest.attempt_id !== pointer.attempt_id ||
-            manifest.status !== 'complete' ||
-            manifest.schema !== 'ecos.replay.v1'
+            manifest.status !== pointer.status ||
+            (manifest.status === 'complete' && step.state !== 'Success') ||
+            (manifest.status === 'diagnostic_only' &&
+              (manifest.diagnostic_only !== true ||
+                manifest.flow_state !== 'Incomplete' ||
+                step.state !== 'Incomplete')) ||
+            manifest.schema !== pointer.schema
           )
             throw new Error('Replay attempt mismatch')
           if (
