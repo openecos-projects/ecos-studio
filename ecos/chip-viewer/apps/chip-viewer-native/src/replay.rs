@@ -165,8 +165,14 @@ impl ReplayApp {
 
     fn timeline(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
+            let playback_icon = if self.playing { "⏸" } else { "▶" };
             if ui
-                .button(if self.playing { "Pause" } else { "Play" })
+                .add_sized([32.0, 32.0], egui::Button::new(playback_icon).small())
+                .on_hover_text(if self.playing {
+                    "Pause replay"
+                } else {
+                    "Play replay"
+                })
                 .clicked()
             {
                 if self.position >= self.total {

@@ -20,6 +20,7 @@ pub struct View3d {
     pub automatic: bool,
     pub auto_spin: bool,
     pub spin_yaw: Option<f32>,
+    pub fit_requested: bool,
     pub camera: CameraController3d,
     pub state: Option<egui_wgpu::RenderState>,
     pub z_cut: f32,
@@ -40,6 +41,7 @@ impl Default for View3d {
             automatic: true,
             auto_spin: false,
             spin_yaw: None,
+            fit_requested: false,
             camera: Default::default(),
             state: None,
             z_cut: 1.0,
@@ -170,12 +172,15 @@ impl crate::replay::ReplayApp {
         ui.horizontal_wrapped(|ui| {
             ui.strong("3D");
             if ui
-                .selectable_label(self.view3d.automatic, "Stage camera")
+                .selectable_label(
+                    self.view3d.automatic || self.view3d.auto_spin,
+                    "Stage camera",
+                )
                 .clicked()
             {
-                self.view3d.automatic = true;
-                self.view3d.auto_spin = false;
-                self.view3d.spin_yaw = None;
+                self.view3d.automatic = false;
+                self.view3d.auto_spin = true;
+                self.view3d.spin_yaw = Some(45.0_f32.to_radians());
             }
             for (name, pitch, yaw) in [
                 ("Iso", 38.0, 45.0),
@@ -192,10 +197,7 @@ impl crate::replay::ReplayApp {
                 }
             }
             if ui.button("Fit").clicked() {
-                self.view3d.automatic = true;
-                self.view3d.auto_spin = false;
-                self.view3d.spin_yaw = None;
-                self.view3d.z_scale = DEFAULT_Z_SCALE;
+                self.view3d.fit_requested = true;
             }
             locate = ui.button("2D region").clicked();
             ui.checkbox(&mut self.view3d.reports, "Reports");
@@ -274,6 +276,16 @@ impl crate::replay::ReplayApp {
             Color32::GRAY,
         );
         let aspect = (rect.width() / rect.height().max(1.0)).max(0.1);
+        if self.view3d.fit_requested && !self.view3d.auto_spin {
+            let camera = Preset {
+                pitch: self.view3d.camera.current.pitch.to_degrees(),
+                yaw: self.view3d.camera.current.yaw.to_degrees(),
+            }
+            .camera(scene.world, scene.metadata.height(), aspect);
+            self.view3d.camera.current = camera;
+            self.view3d.camera.target = camera;
+            self.view3d.fit_requested = false;
+        }
         if self.view3d.auto_spin {
             let mut camera = Preset {
                 pitch: 38.0,
@@ -286,6 +298,7 @@ impl crate::replay::ReplayApp {
             camera.yaw = *yaw;
             self.view3d.camera.current = camera;
             self.view3d.camera.target = camera;
+            self.view3d.fit_requested = false;
             ui.ctx().request_repaint();
         } else if self.view3d.automatic {
             self.view3d.camera.current =
