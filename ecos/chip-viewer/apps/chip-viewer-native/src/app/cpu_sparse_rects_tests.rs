@@ -1,6 +1,53 @@
 use super::*;
 
 #[test]
+fn sparse_axis_residuals_batch_locally_without_changing_full_rgba() {
+    let Some(mut renderer) = coverage_blend_tests::renderer() else {
+        return;
+    };
+    let fixture = Fixture::new();
+    let mut request = fixture.request(1.0, 1.0);
+    request.key.screen_size = [128, 128];
+    request.key.canvas = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(128.0, 128.0));
+    request.key.background = egui::Color32::from_rgba_premultiplied(13, 29, 51, 83);
+    let commands: Vec<_> = (0..512)
+        .map(|index| {
+            let y = 16.0 + (index % 32) as f32 * 0.5;
+            PaintCommand::Line {
+                points: [egui::pos2(16.0, y), egui::pos2(24.0, y)],
+                width: 1.0,
+                rgba: [
+                    (index * 17) as u8,
+                    (index * 29) as u8,
+                    (index * 43) as u8,
+                    [31, 112, 173, 255][index % 4],
+                ],
+            }
+        })
+        .collect();
+
+    let prepared = sparse_rects::SparseRects::prepare(&commands, &request).unwrap();
+    assert!(
+        prepared.mesh_preference() != Some("residual_density"),
+        "{} nearby axis commands forced the residual-density mesh fallback",
+        commands.len()
+    );
+    let mut actual = prepared.render(request.key.background);
+    let repair = prepared.residual_meshes(request.key.canvas);
+    let repair = pixels(&mut renderer, &request, repair);
+    prepared.merge(&mut actual, &repair);
+    let reference = meshes(
+        &fixture,
+        &request,
+        &commands,
+        geometry::GeometryOutput::Reference,
+    );
+    let reference = pixels(&mut renderer, &request, reference);
+
+    assert_eq!(actual, reference);
+}
+
+#[test]
 fn sparse_alpha_preserves_operand_order_at_integer_rounding_boundaries() {
     let fixture = Fixture::new();
     let mut request = fixture.request(1.0, 1.0);

@@ -18,6 +18,35 @@ fn anchored_pan_dispatches_without_waiting_for_input_to_stop() {
 }
 
 #[test]
+fn overview_suspension_cancels_stale_camera_work_and_allows_exact_work_to_resume() {
+    let fixture = Fixture::new();
+    let mut cache = CpuSceneCache::default();
+    let request = fixture.request(2.0, 1.0);
+    assert!(cache.get_or_request(request.clone()).is_none());
+    let first_generation = cache.inbox.generation.load(Ordering::Relaxed);
+    assert!(cache.key.is_some());
+
+    cache.suspend();
+    let suspended_generation = cache.inbox.generation.load(Ordering::Relaxed);
+    assert_eq!(suspended_generation, first_generation + 1);
+    assert!(cache.key.is_none());
+    assert!(cache.pending.is_none());
+
+    cache.suspend();
+    assert_eq!(
+        cache.inbox.generation.load(Ordering::Relaxed),
+        suspended_generation
+    );
+
+    assert!(cache.get_or_request(request).is_none());
+    assert_eq!(
+        cache.inbox.generation.load(Ordering::Relaxed),
+        suspended_generation + 1
+    );
+    assert!(cache.key.is_some());
+}
+
+#[test]
 fn preview_transform_matches_camera_projection_after_pan_zoom_and_resize() {
     let fixture = Fixture::new();
     let source = fixture.request(1.0, 1.0).key;

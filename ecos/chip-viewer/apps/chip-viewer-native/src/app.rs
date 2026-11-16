@@ -216,26 +216,29 @@ struct PreparedViewer {
     layer_catalog: Vec<LayerSummary>,
 }
 
+type DrawingCategoryCounts = Arc<OnceLock<BTreeMap<DrawingCategory, usize>>>;
+type UnroutedGuides = Arc<OnceLock<Vec<UnroutedNetGuide>>>;
+
+fn start_drawing_category_data(
+    db: Arc<ChipViewDb>,
+    counts: DrawingCategoryCounts,
+    guides: UnroutedGuides,
+) {
+    thread::spawn(move || {
+        let prepared_guides = db.unrouted_net_guides().to_vec();
+        let _ = guides.set(prepared_guides.clone());
+        let _ = counts.set(drawing_category_counts(&db, &prepared_guides));
+    });
+}
+
 impl From<ChipViewDb> for PreparedViewer {
     fn from(db: ChipViewDb) -> Self {
         // The three full-dataset scans are independent read-only passes over
         // the snapshot; run them in parallel so large designs prepare in
         // roughly one scan instead of three sequential ones.
-        let (stats, grid_bounds, drawing_category_counts) = thread::scope(|scope| {
-            let db = &db;
-            let stats_job = scope.spawn(|| db.stats());
-            let bounds_job = scope.spawn(|| grid_reference_bounds(db));
-            let counts_job = scope.spawn(|| drawing_category_counts(db));
-            let stats = stats_job.join().expect("snapshot stats scan panicked");
-            let grid_bounds = bounds_job
-                .join()
-                .expect("grid reference bounds scan panicked")
-                .or(stats.bbox);
-            let drawing_category_counts = counts_job
-                .join()
-                .expect("drawing category count scan panicked");
-            (stats, grid_bounds, drawing_category_counts)
-        });
+        let stats = db.stats();
+        let grid_bounds = stats.die_bbox.or(stats.bbox);
+        let drawing_category_counts = BTreeMap::new();
         let snapshot_signature = snapshot_signature_for_db(&db);
         let layer_catalog = db.layer_catalog();
         Self {
@@ -255,7 +258,9 @@ struct LoadedViewer {
     db: std::sync::Arc<ChipViewDb>,
     stats: SnapshotStats,
     grid_bounds: Option<Rect32>,
-    drawing_category_counts: BTreeMap<DrawingCategory, usize>,
+    drawing_category_counts: DrawingCategoryCounts,
+    unrouted_net_guides: UnroutedGuides,
+    spatial_index_prewarm_started: bool,
     layers: Vec<LayerUiState>,
     edit_enabled: bool,
     edit_command_dir: Option<PathBuf>,
@@ -1280,14 +1285,17 @@ impl ObjectVisibility {
     }
 }
 
-fn drawing_category_counts(db: &ChipViewDb) -> BTreeMap<DrawingCategory, usize> {
+fn drawing_category_counts(
+    db: &ChipViewDb,
+    guides: &[UnroutedNetGuide],
+) -> BTreeMap<DrawingCategory, usize> {
     let mut counts = BTreeMap::<DrawingCategory, usize>::new();
     for shape in db.snapshot().shapes() {
         if let Some(category) = drawing_category_for_shape(db, shape) {
             *counts.entry(category).or_insert(0) += 1;
         }
     }
-    for guide in db.unrouted_net_guides() {
+    for guide in guides {
         let category = net_kind_drawing_category(Some(&guide.net_kind));
         *counts.entry(category).or_insert(0) += guide.pin_centers.len();
     }
@@ -2401,6 +2409,21 @@ impl LoadedViewer {
                 None
             }
         };
+        let drawing_category_counts = {
+            let counts = Arc::new(OnceLock::new());
+            if !drawing_category_counts.is_empty() {
+                let _ = counts.set(drawing_category_counts);
+            }
+            counts
+        };
+        let unrouted_net_guides = Arc::new(OnceLock::new());
+        let index_db = Arc::clone(&db);
+        thread::spawn(move || index_db.prewarm_render_indexes());
+        start_drawing_category_data(
+            Arc::clone(&db),
+            Arc::clone(&drawing_category_counts),
+            Arc::clone(&unrouted_net_guides),
+        );
         Self {
             color_theme,
             start_time: Instant::now(),
@@ -2408,6 +2431,8 @@ impl LoadedViewer {
             stats,
             grid_bounds,
             drawing_category_counts,
+            unrouted_net_guides,
+            spatial_index_prewarm_started: false,
             layers,
             edit_enabled,
             edit_command_dir,
@@ -4148,7 +4173,8 @@ impl LoadedViewer {
         }
 
         let viewport = screen_to_world_rect(canvas, world, canvas, self.zoom, self.pan);
-        let use_view_tiles = self.should_use_view_tiles(viewport, world, canvas);
+        let pixels_per_point = ui.ctx().pixels_per_point();
+        let use_view_tiles = self.should_use_view_tiles(viewport, world, canvas, pixels_per_point);
         let cache_cpu_overlays = !self.is_gpu_active()
             && !use_view_tiles
             && (self.analysis_tab != AnalysisTab::Map || self.active_heatmap.is_none());
@@ -4236,8 +4262,12 @@ impl LoadedViewer {
             }
         }
         let mut drawn = 0usize;
-        let use_view_tiles = self.should_use_view_tiles(viewport, world, canvas);
-        let view_lod = self.view_lod_level();
+        let pixels_per_point = ui.ctx().pixels_per_point();
+        let use_view_tiles = self.should_use_view_tiles(viewport, world, canvas, pixels_per_point);
+        let view_lod = gpu_overview::overview_lod_for_renderer(
+            self.view_lod_level(world, canvas, pixels_per_point),
+            self.is_gpu_active(),
+        );
         let hover_nearest = if use_view_tiles {
             None
         } else {
@@ -4265,6 +4295,19 @@ impl LoadedViewer {
                     .input(|i| i.raw_scroll_delta.y.abs() > f32::EPSILON))
             || self.focus_animation.is_some())
             && !pointer_over_heatmap;
+        let mut overview_visible = use_view_tiles;
+
+        let visibility_hash = layers_visibility_hash(&self.layers);
+        if self.visibility_rules_cache.epoch != self.geometry_epoch
+            || self.visibility_rules_cache.layer_visibility_hash != visibility_hash
+        {
+            self.visibility_rules_cache = VisibilityRulesCache {
+                epoch: self.geometry_epoch,
+                layer_visibility_hash: visibility_hash,
+                layer_index: LayerRenderIndex::new(&self.layers),
+                zoom_rules: ZoomVisibilityRules::new(&self.db),
+            };
+        }
 
         if use_view_tiles {
             if self.is_gpu_active() {
@@ -4277,35 +4320,70 @@ impl LoadedViewer {
                     is_interacting,
                 );
             } else {
-                for (layer_id, style) in &visible_layers {
-                    for tile in self
-                        .view_tile_cache
-                        .visible_tiles(&self.db, view_lod, *layer_id, viewport)
-                        .iter()
-                    {
-                        let screen =
-                            world_to_screen_rect(tile.bbox, world, canvas, self.zoom, self.pan);
-                        if !screen.is_positive() || !screen.intersects(canvas) {
-                            continue;
+                if is_interacting {
+                    self.cpu_scene_cache.suspend();
+                    drawn += self.paint_cpu_2d_overview(
+                        &painter,
+                        viewport,
+                        world,
+                        canvas,
+                        view_lod,
+                        &visible_layers,
+                    );
+                } else {
+                    let request = self.cpu_scene_request(
+                        ui.ctx(),
+                        world,
+                        viewport,
+                        canvas,
+                        query_layer_ids.clone(),
+                        bg_color,
+                        false,
+                    );
+                    cpu_scene = self.cpu_scene_cache.get_or_request(request);
+                    let geometry_pending = cpu_scene.as_ref().is_none_or(|scene| {
+                        self.glow_rendering && !self.cpu_scene_cache.raster_ready(scene)
+                    });
+                    let labels_pending = cpu_scene
+                        .as_ref()
+                        .is_none_or(|scene| !self.cpu_scene_cache.labels_ready(scene));
+                    cpu_scene_pending = geometry_pending || labels_pending;
+                    if geometry_pending {
+                        if self.glow_rendering {
+                            self.cpu_scene_cache
+                                .paint_glow(cpu_scene.as_ref(), &painter, bg_color);
                         }
-                        let color = overview_tile_color(*style, tile.shape_count);
-                        painter.rect_filled(screen, 0.0, color);
-                        drawn += 1;
+                        drawn += self.paint_cpu_2d_overview(
+                            &painter,
+                            viewport,
+                            world,
+                            canvas,
+                            view_lod,
+                            &visible_layers,
+                        );
+                    } else if let Some(scene) = &cpu_scene {
+                        overview_visible = false;
+                        if self.glow_rendering {
+                            self.cpu_scene_cache
+                                .paint_glow(cpu_scene.as_ref(), &painter, bg_color);
+                            cpu_scene_visible = self.cpu_scene_cache.raster_visible();
+                        } else {
+                            scene.paint(&painter);
+                            cpu_scene_visible = true;
+                        }
+                        drawn = scene.drawn;
+                        estimated_primitives = scene.primitives;
+                    }
+                    if cpu_scene_pending {
+                        ui.ctx().request_repaint_after(Duration::from_millis(16));
+                    }
+                    if let Some(scene) = &cpu_scene {
+                        query_duration = scene.query_duration;
+                        filter_duration = scene.filter_duration;
                     }
                 }
             }
         } else {
-            let visibility_hash = layers_visibility_hash(&self.layers);
-            if self.visibility_rules_cache.epoch != self.geometry_epoch
-                || self.visibility_rules_cache.layer_visibility_hash != visibility_hash
-            {
-                self.visibility_rules_cache = VisibilityRulesCache {
-                    epoch: self.geometry_epoch,
-                    layer_visibility_hash: visibility_hash,
-                    layer_index: LayerRenderIndex::new(&self.layers),
-                    zoom_rules: ZoomVisibilityRules::new(&self.db),
-                };
-            }
             if self.is_gpu_active() {
                 let layer_index = &self.visibility_rules_cache.layer_index;
                 let gpu_start = Instant::now();
@@ -4474,6 +4552,7 @@ impl LoadedViewer {
                     canvas,
                     query_layer_ids.clone(),
                     bg_color,
+                    self.analysis_tab != AnalysisTab::Map || self.active_heatmap.is_none(),
                 );
                 cpu_scene = self.cpu_scene_cache.get_or_request(request);
                 if self.glow_rendering {
@@ -4506,6 +4585,11 @@ impl LoadedViewer {
         }
         let geometry_drawn_shapes =
             drawn.saturating_sub(cpu_scene.as_ref().map_or(0, |scene| scene.overlay_drawn));
+        if !self.spatial_index_prewarm_started && !cpu_scene_pending && drawn > 0 {
+            self.spatial_index_prewarm_started = true;
+            let db = Arc::clone(&self.db);
+            thread::spawn(move || db.prewarm_spatial_indexes());
+        }
         if !is_interacting {
             self.queue_selected_pin_label(world, canvas);
         }
@@ -4529,16 +4613,18 @@ impl LoadedViewer {
                 self.zoom,
                 self.pan,
             );
-            drawn += paint_unrouted_net_guides(
-                &painter,
-                self.db.unrouted_net_guides(),
-                self.object_visibility,
-                viewport,
-                world,
-                canvas,
-                self.zoom,
-                self.pan,
-            );
+            if let Some(guides) = self.unrouted_net_guides.get() {
+                drawn += paint_unrouted_net_guides(
+                    &painter,
+                    guides,
+                    self.object_visibility,
+                    viewport,
+                    world,
+                    canvas,
+                    self.zoom,
+                    self.pan,
+                );
+            }
         }
 
         let label_resolve_started = collect_stats.then(Instant::now);
@@ -4796,7 +4882,7 @@ impl LoadedViewer {
             &mut self.status_line_buffer,
             drawn,
             overlay_shape_ids.len(),
-            use_view_tiles,
+            overview_visible,
             view_lod,
             self.zoom,
             viewport,
@@ -4827,7 +4913,7 @@ impl LoadedViewer {
                 estimated_primitives,
                 label_count: resolved_labels.labels.len(),
                 selected_shape_id: self.selected,
-                use_view_tiles,
+                use_view_tiles: overview_visible,
                 zoom: self.zoom,
                 lod: view_lod,
                 visible_drc_count,
@@ -6744,6 +6830,7 @@ impl LoadedViewer {
         viewport: Rect32,
         world: Rect32,
         canvas: egui::Rect,
+        pixels_per_point: f32,
     ) -> bool {
         if !self.object_visibility.is_all_visible() {
             self.view_tiles_latch.reset();
@@ -6754,20 +6841,16 @@ impl LoadedViewer {
             self.draft.is_some(),
             self.edit_enabled,
             self.zoom,
+            self.stats.shape_count,
             viewport,
             world,
             canvas,
+            pixels_per_point,
         )
     }
 
-    fn view_lod_level(&self) -> u8 {
-        if self.zoom <= 0.35 {
-            3
-        } else if self.zoom <= 1.0 {
-            2
-        } else {
-            1
-        }
+    fn view_lod_level(&self, world: Rect32, canvas: egui::Rect, pixels_per_point: f32) -> u8 {
+        gpu_overview::pixel_overview_lod(self.zoom, world, canvas, pixels_per_point)
     }
 
     fn focus_pending_shape(&mut self, ctx: &egui::Context, world: Rect32, canvas: egui::Rect) {
@@ -8242,7 +8325,7 @@ impl LoadedViewer {
             db,
             stats,
             grid_bounds,
-            drawing_category_counts,
+            drawing_category_counts: _,
             snapshot_signature,
             layer_catalog,
         } = prepared;
@@ -8253,7 +8336,14 @@ impl LoadedViewer {
             .collect();
         self.grid_bounds = grid_bounds;
         self.stats = stats;
-        self.drawing_category_counts = drawing_category_counts;
+        let counts = Arc::new(OnceLock::new());
+        let guides = Arc::new(OnceLock::new());
+        self.drawing_category_counts = Arc::clone(&counts);
+        self.unrouted_net_guides = Arc::clone(&guides);
+        self.spatial_index_prewarm_started = false;
+        let index_db = Arc::clone(&db);
+        thread::spawn(move || index_db.prewarm_render_indexes());
+        start_drawing_category_data(Arc::clone(&db), Arc::clone(&counts), Arc::clone(&guides));
         self.layers = layer_ui_states_from_summaries(layer_catalog, &visibility, self.color_theme);
         self.db = db;
         self.gpu_tile_worker = GpuTileWorker::new(std::sync::Arc::clone(&self.db));
@@ -8323,7 +8413,8 @@ impl LoadedViewer {
 
     fn drawing_category_shape_count(&self, category: DrawingCategory) -> usize {
         self.drawing_category_counts
-            .get(&category)
+            .get()
+            .and_then(|counts| counts.get(&category))
             .copied()
             .unwrap_or(0)
     }
@@ -13817,7 +13908,7 @@ mod tests {
         let canvas = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1000.0, 800.0));
 
         assert!(!gpu_overview::should_use_view_tiles_for_state(
-            16, false, false, 1.0, world, world, canvas,
+            16, false, false, 1.0, 0, world, world, canvas, 1.0,
         ));
     }
 
@@ -13916,18 +14007,22 @@ mod tests {
             false,
             true,
             0.25,
+            0,
             overview_viewport,
             world,
             canvas,
+            1.0,
         ));
         assert!(!gpu_overview::should_use_view_tiles_for_state(
             16,
             true,
             false,
             0.25,
+            0,
             overview_viewport,
             world,
             canvas,
+            1.0,
         ));
     }
 
@@ -13954,9 +14049,11 @@ mod tests {
             false,
             false,
             0.25,
+            0,
             overview_viewport,
             world,
             canvas,
+            1.0,
         ));
     }
 
@@ -15822,7 +15919,8 @@ mod tests {
         let dir = temp_snapshot_dir("drawing-counts-unrouted");
         write_empty_snapshot(&dir, false);
         let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
-        let counts = drawing_category_counts(&db);
+        let guides = db.unrouted_net_guides();
+        let counts = drawing_category_counts(&db, guides);
         assert_eq!(
             counts
                 .get(&DrawingCategory::NetSignal)

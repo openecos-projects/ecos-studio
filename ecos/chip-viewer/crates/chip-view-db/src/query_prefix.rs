@@ -36,7 +36,7 @@ impl LayerShapeIndex {
                 return None;
             }
             ids.extend(indices.iter().map(|index| shapes[*index].id));
-        } else if let Some(tree) = self.spatial_by_layer.get(&layer_id) {
+        } else if let Some(tree) = self.spatial_tree(shapes, layer_id) {
             for (visited, entry) in tree
                 .locate_in_envelope_intersecting(rect_envelope(bbox))
                 .enumerate()

@@ -164,13 +164,36 @@ fn world_source_compatibility_checks_all_source_proofs_and_retains_bucket_misses
             16 => changed.db = Fixture::new().request(1.0, 1.0).db,
             _ => unreachable!(),
         }
-        assert!(
-            !source.same_content(&changed),
+        let reusable = (3..=8).contains(&variant);
+        assert_eq!(
+            source.same_content(&changed),
+            reusable,
             "source proof variant {variant}"
         );
-        assert!(!source.compatible(&changed));
-        assert!(source.commands(&[], &changed, &|| true).is_none());
+        assert_eq!(source.compatible(&changed), reusable);
+        assert_eq!(
+            source.commands(&[], &changed, &|| true).is_none(),
+            !reusable,
+            "source command compatibility variant {variant}"
+        );
     }
+}
+
+#[test]
+fn world_source_retains_fit_context_when_high_zoom_source_completes() {
+    let fixture = Fixture::new();
+    let fit_request = request(&fixture);
+    let fit = Builder::new(&fit_request).unwrap().finish();
+    let mut high_request = fit_request.clone();
+    high_request.key.zoom = 2.0;
+    let high = Builder::new(&high_request).unwrap().finish();
+
+    assert!(fit.same_content(&high_request));
+    assert!(!fit.compatible(&high_request));
+    assert!(fit.should_replace(&high));
+    assert!(!high.should_replace(&fit));
+    assert!(fit.compatible(&fit_request));
+    assert!(!high.compatible(&fit_request));
 }
 
 #[test]

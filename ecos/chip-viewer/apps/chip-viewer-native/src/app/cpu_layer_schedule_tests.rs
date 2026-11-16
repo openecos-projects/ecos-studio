@@ -44,25 +44,25 @@ fn layer_schedule_builds_a_ready_layer_while_the_first_query_is_blocked() {
 
 #[test]
 fn layer_schedule_prefers_frontier_and_round_robins_when_frontier_is_blocked() {
-    let mut state = Preparation::new(4, 8);
+    let mut state = Preparation::<usize>::new(4, 8);
     for layer in &mut state.layers {
-        layer.queried(vec![1; 50_000], 8);
+        layer.queried(Arc::from(vec![1; 50_000]), 8);
     }
     let ranks = (0..8)
         .map(|_| state.take_build().unwrap().rank)
         .collect::<Vec<_>>();
     assert_eq!(ranks, [0; 8], "ready frontier receives the worker group");
     assert!(state.take_build().is_none(), "active-build limit");
-    let mut state = Preparation::new(4, 8);
+    let mut state = Preparation::<usize>::new(4, 8);
     for layer in &mut state.layers[1..] {
-        layer.queried(vec![1; 50_000], 8);
+        layer.queried(Arc::from(vec![1; 50_000]), 8);
     }
     let ranks = (0..8)
         .map(|_| state.take_build().unwrap().rank)
         .collect::<Vec<_>>();
     assert_eq!(ranks, [1, 2, 3, 1, 2, 3, 1, 2]);
     state.running_builds = 0;
-    state.layers[0].queried(vec![0; 10], 8);
+    state.layers[0].queried(Arc::from(vec![0; 10]), 8);
     assert_eq!(state.take_build().unwrap().rank, 0);
     state.running_builds -= 1;
     assert_eq!(
@@ -70,8 +70,8 @@ fn layer_schedule_prefers_frontier_and_round_robins_when_frontier_is_blocked() {
         1,
         "spare workers prepare later layers after all frontier IDs are dispatched"
     );
-    let mut state = Preparation::new(3, 2);
-    state.layers[1].queried(vec![1; 50_000], 2);
+    let mut state = Preparation::<usize>::new(3, 2);
+    state.layers[1].queried(Arc::from(vec![1; 50_000]), 2);
     for _ in 0..4 {
         assert_eq!(state.take_build().unwrap().rank, 1);
         state.running_builds -= 1;
@@ -80,7 +80,7 @@ fn layer_schedule_prefers_frontier_and_round_robins_when_frontier_is_blocked() {
         state.take_build().is_none(),
         "later output storage is bounded"
     );
-    state.layers[0].queried(vec![0; 50_000], 2);
+    state.layers[0].queried(Arc::from(vec![0; 50_000]), 2);
     assert_eq!(state.take_build().unwrap().rank, 0);
     assert_eq!(state.outstanding, 5);
     assert_eq!(state.take_build().unwrap().rank, 0);
@@ -293,7 +293,7 @@ fn layer_schedule_query_and_builder_panics_release_scoped_workers() {
 
 #[test]
 fn layer_schedule_query_lookahead_stays_inside_its_fixed_window() {
-    let mut preparation = Preparation::new(64, 8);
+    let mut preparation = Preparation::<usize>::new(64, 8);
     assert_eq!(preparation.query_limit(), 8);
     preparation.frontier = 12;
     assert_eq!(preparation.query_limit(), 20);
@@ -357,12 +357,12 @@ fn layer_schedule_actual_gl_matches_baseline_with_translucent_overlapping_layers
         let query = |layer| {
             request
                 .db
-                .query_cached_layer_intersect(layer, request.key.viewport)
+                .query_cached_layer_record_indices(layer, request.key.viewport)
         };
-        let build = |ids: Vec<ShapeId>| {
-            build_chunk(
+        let build = |indices: Arc<[usize]>, range: std::ops::Range<usize>| {
+            builder::build_chunk_indices(
                 &request,
-                &ids,
+                &indices[range],
                 &|| true,
                 geometry::GeometryOutput::ExactRaster,
             )
@@ -372,9 +372,9 @@ fn layer_schedule_actual_gl_matches_baseline_with_translucent_overlapping_layers
             true
         };
         let result = if scheduled {
-            schedule::run(&request.layer_ids, 4, &|| true, query, build, consume)
+            schedule::run_shared(&request.layer_ids, 4, &|| true, query, build, consume)
         } else {
-            baseline::run(&request.layer_ids, 4, &|| true, query, build, consume)
+            baseline::run_shared(&request.layer_ids, 4, &|| true, query, build, consume)
         };
         assert!(result.is_some());
         scene

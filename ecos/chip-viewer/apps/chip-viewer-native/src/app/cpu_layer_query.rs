@@ -2,6 +2,7 @@
 //! Query results are bounded by a layer lookahead window; built results have
 //! their own credit limit and a reserved worker group for the presentation frontier.
 use super::*;
+use std::ops::Range;
 
 #[path = "cpu_layer_schedule.rs"]
 mod schedule;
@@ -9,18 +10,29 @@ mod schedule;
 #[path = "cpu_layer_baseline.rs"]
 mod baseline;
 
-pub(super) fn run<Output: Send>(
+pub(super) fn run_records<Output: Send>(
     layers: &[LayerId],
     workers: usize,
     is_current: &(impl Fn() -> bool + Sync),
-    query: impl Fn(LayerId) -> Vec<ShapeId> + Sync,
-    build: impl Fn(Vec<ShapeId>) -> Option<Output> + Sync,
+    query: impl Fn(LayerId) -> Arc<[usize]> + Sync,
+    build: impl Fn(Arc<[usize]>, Range<usize>) -> Option<Output> + Sync,
+    consume: impl FnMut(Output) -> bool,
+) -> Option<Duration> {
+    run_shared(layers, workers, is_current, query, build, consume)
+}
+
+fn run_shared<Item: Send + Sync, Output: Send>(
+    layers: &[LayerId],
+    workers: usize,
+    is_current: &(impl Fn() -> bool + Sync),
+    query: impl Fn(LayerId) -> Arc<[Item]> + Sync,
+    build: impl Fn(Arc<[Item]>, Range<usize>) -> Option<Output> + Sync,
     consume: impl FnMut(Output) -> bool,
 ) -> Option<Duration> {
     if std::env::var_os("ECOS_DISABLE_LAYER_SCHEDULER").is_some() {
-        baseline::run(layers, workers, is_current, query, build, consume)
+        baseline::run_shared(layers, workers, is_current, query, build, consume)
     } else {
-        schedule::run(layers, workers, is_current, query, build, consume)
+        schedule::run_shared(layers, workers, is_current, query, build, consume)
     }
 }
 
@@ -31,9 +43,8 @@ pub(super) fn tail_chunk_size(count: usize, workers: usize) -> usize {
     (count / workers.max(1)).clamp(1, MAX_IDS)
 }
 
-#[derive(Default)]
-struct Layer {
-    ids: Option<Vec<ShapeId>>,
+struct Layer<Item> {
+    indices: Option<Arc<[Item]>>,
     offset: usize,
     submitted: usize,
     consumed: usize,
@@ -41,50 +52,65 @@ struct Layer {
     chunk_size: usize,
 }
 
-impl Layer {
-    fn queried(&mut self, ids: Vec<ShapeId>, workers: usize) {
-        self.chunk_size = tail_chunk_size(ids.len().saturating_sub(FIRST_IDS), workers);
-        let tail = ids.len().saturating_sub(FIRST_IDS);
-        self.chunks = Some(usize::from(!ids.is_empty()) + tail.div_ceil(self.chunk_size));
-        if !ids.is_empty() {
-            self.ids = Some(ids);
+impl<Item> Default for Layer<Item> {
+    fn default() -> Self {
+        Self {
+            indices: None,
+            offset: 0,
+            submitted: 0,
+            consumed: 0,
+            chunks: None,
+            chunk_size: 0,
+        }
+    }
+}
+
+impl<Item> Layer<Item> {
+    fn queried(&mut self, indices: Arc<[Item]>, workers: usize) {
+        self.chunk_size = tail_chunk_size(indices.len().saturating_sub(FIRST_IDS), workers);
+        let tail = indices.len().saturating_sub(FIRST_IDS);
+        self.chunks = Some(usize::from(!indices.is_empty()) + tail.div_ceil(self.chunk_size));
+        if !indices.is_empty() {
+            self.indices = Some(indices);
         }
     }
 
     fn available(&self) -> bool {
-        self.ids.is_some()
+        self.indices.is_some()
     }
 
-    fn take(&mut self, rank: usize) -> BuildTask {
-        let ids = self.ids.as_ref().unwrap();
+    fn take(&mut self, rank: usize) -> BuildTask<Item> {
+        let indices = Arc::clone(self.indices.as_ref().unwrap());
         let length = if self.submitted == 0 {
             FIRST_IDS
         } else {
             self.chunk_size
         };
-        let end = (self.offset + length).min(ids.len());
+        let end = (self.offset + length).min(indices.len());
         let task = BuildTask {
             rank,
             chunk: self.submitted,
-            ids: ids[self.offset..end].to_vec(),
+            indices,
+            range: self.offset..end,
         };
         self.offset = end;
         self.submitted += 1;
-        if end == ids.len() {
-            self.ids = None;
+        if end == task.indices.len() {
+            self.indices = None;
         }
         task
     }
 }
 
-struct BuildTask {
+struct BuildTask<Item> {
     rank: usize,
     chunk: usize,
-    ids: Vec<ShapeId>,
+    indices: Arc<[Item]>,
+    range: Range<usize>,
 }
 
-struct Preparation {
-    layers: Vec<Layer>,
+struct Preparation<Item> {
+    layers: Vec<Layer<Item>>,
     frontier: usize,
     next_query: usize,
     round_robin: usize,
@@ -94,7 +120,7 @@ struct Preparation {
     query_workers: usize,
 }
 
-impl Preparation {
+impl<Item> Preparation<Item> {
     fn new(layers: usize, workers: usize) -> Self {
         Self {
             layers: (0..layers).map(|_| Layer::default()).collect(),
@@ -112,7 +138,7 @@ impl Preparation {
         (self.frontier + self.query_workers * 2).min(self.layers.len())
     }
 
-    fn take_build(&mut self) -> Option<BuildTask> {
+    fn take_build(&mut self) -> Option<BuildTask<Item>> {
         if self.running_builds == self.build_workers || self.frontier == self.layers.len() {
             return None;
         }

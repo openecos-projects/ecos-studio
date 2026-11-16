@@ -88,7 +88,9 @@ impl Key {
     }
 
     fn same_content(&self, request: &SceneRequest) -> bool {
-        self.scene.compatible(&request.key)
+        self.scene.epoch == request.key.epoch
+            && self.scene.layers == request.key.layers
+            && self.scene.visibility == request.key.visibility
             && self.db.as_ptr() == Arc::as_ptr(&request.db)
             && request.data_bounds == Some(self.bounds)
             && self.grid_rules
@@ -137,6 +139,12 @@ impl WorldSource {
 
     pub(in crate::app::cpu_scene) fn compatible(&self, request: &SceneRequest) -> bool {
         self.same_content(request) && self.key.context == (request.key.zoom > 1.25)
+    }
+
+    pub(in crate::app::cpu_scene) fn should_replace(&self, current: &Self) -> bool {
+        // Keep the fit source across high-zoom requests so returning to the
+        // full layout does not repeat its complete spatial query and filtering.
+        current.key.context || !self.key.context
     }
 
     /// Retain the complete source across a zoom visibility-bucket miss. Only

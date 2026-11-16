@@ -51,17 +51,17 @@ fn build_output(
     let workers = worker_count();
     let mut scene = empty_scene(&request.key, Arc::clone(&request.pattern_textures));
     let mut consumer_duration = Duration::ZERO;
-    let query_duration = queries::run(
+    let query_duration = queries::run_records(
         &request.layer_ids,
         workers,
         is_current,
         |layer| {
             request
                 .db
-                .query_cached_layer_intersect(layer, request.key.viewport)
+                .query_cached_layer_record_indices(layer, request.key.viewport)
         },
-        |ids: Vec<ShapeId>| {
-            let chunk = build_chunk(request, &ids, is_current, output)?;
+        |indices: Arc<[usize]>, range| {
+            let chunk = build_chunk_indices(request, &indices[range], is_current, output)?;
             let packed = match output {
                 geometry::GeometryOutput::Reference => Vec::new(),
                 geometry::GeometryOutput::ExactRaster => geometry::pack_meshes(&chunk.meshes),

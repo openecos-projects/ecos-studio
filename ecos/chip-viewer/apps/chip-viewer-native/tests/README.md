@@ -668,8 +668,10 @@ The interaction timing gate and its one midpoint screenshot did not detect
 cross-scale enlargement of the fit-view bitmap. `zoom_fidelity_e2e.py` reproduces
 that defect through the actual fullscreen window with all layers/categories on:
 first complete the fit view, zoom to about 318, then step down through about 122,
-47, 18, 6.8, 2.6 and 1. It captures transition frames until each camera completes,
-then repeats the descent with continuous wheel input.
+47, 18, 6.8 and 2.6 before explicitly fitting the design again. The wheel's
+fixed ratio skips over fit zoom, so the last transition uses the Fit shortcut.
+It captures transition frames until each camera completes, then repeats the
+descent with continuous wheel input and the same final Fit action.
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 apps/chip-viewer-native/tests/zoom_fidelity_e2e.py \
@@ -693,6 +695,19 @@ Outputs include every transition XWD/PNG, `comparison.png`, `stats.jsonl`,
 `viewer.log` and `report.json`. These are sampled visual regressions, not proof
 about every display refresh or every backend. The full timing interaction harness
 remains necessary, and the settled static reference remains the exact pixel gate.
+
+For an isolated uncached high-zoom-to-fit timing without writing progressive RGBA
+evidence, use `--fit-recovery-only`. It records exact-geometry and full-label
+readiness separately and requires that the fit source, rather than scene history,
+serves the return camera.
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 apps/chip-viewer-native/tests/zoom_fidelity_e2e.py \
+  --binary target/release/chip-viewer-native \
+  --manifest /path/to/output/geometry/geometry.manifest \
+  --output /tmp/chip-viewer-fit-recovery \
+  --fit-recovery-only
+```
 
 ## Explicit uncached zoom sampling
 

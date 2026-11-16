@@ -27,6 +27,9 @@ mod geometry;
 #[path = "cpu_labels.rs"]
 mod labels;
 
+#[path = "cpu_label_result_cache.rs"]
+mod label_result_cache;
+
 #[path = "cpu_overlays.rs"]
 mod overlays;
 
@@ -160,6 +163,7 @@ pub(super) struct CpuSceneCache {
     initial_scene: Option<Arc<CpuScene>>,
     restored: bool,
     world_source: Option<Arc<world_source::WorldSource>>,
+    label_results: label_result_cache::LabelResultCache,
 }
 
 impl Default for CpuSceneCache {
@@ -190,6 +194,7 @@ impl Default for CpuSceneCache {
             initial_scene: None,
             restored: false,
             world_source: None,
+            label_results: Default::default(),
         }
     }
 }
@@ -203,7 +208,30 @@ impl Drop for CpuSceneCache {
 }
 
 impl CpuSceneCache {
+    pub(super) fn suspend(&mut self) {
+        if self.key.is_none() && self.pending.is_none() {
+            return;
+        }
+        self.inbox.generation.fetch_add(1, Ordering::Relaxed);
+        self.progress.clear();
+        *self.inbox.request.lock().unwrap() = None;
+        self.pending = None;
+        self.initial_scene = None;
+        self.key = None;
+        self.restored = false;
+    }
+
     pub(super) fn get_or_request(&mut self, mut request: SceneRequest) -> Option<Arc<CpuScene>> {
+        let completed_scenes = self
+            .ready
+            .iter()
+            .chain(self.anchor.iter())
+            .filter(|scene| scene.labels_ready())
+            .cloned()
+            .collect::<Vec<_>>();
+        for scene in completed_scenes {
+            self.label_results.remember(&scene);
+        }
         if self
             .world_source
             .as_ref()
@@ -216,6 +244,9 @@ impl CpuSceneCache {
             .as_ref()
             .filter(|source| source.compatible(&request))
             .map(Arc::clone);
+        if request.world_source.is_some() {
+            request.reused_labels = self.label_results.reusable(&request.key);
+        }
         if request
             .priority
             .as_ref()
@@ -320,7 +351,13 @@ impl CpuSceneCache {
         while let Ok((generation, scene)) = self.responses.try_recv() {
             if generation == self.inbox.generation.load(Ordering::Relaxed) {
                 if let Some(source) = &scene.world_source {
-                    self.world_source = Some(Arc::clone(source));
+                    if self
+                        .world_source
+                        .as_ref()
+                        .is_none_or(|current| source.should_replace(current))
+                    {
+                        self.world_source = Some(Arc::clone(source));
+                    }
                 }
                 if self.anchor.is_none() {
                     self.anchor = Some(Arc::clone(&scene));
@@ -560,6 +597,7 @@ impl LoadedViewer {
         canvas: egui::Rect,
         layer_ids: Vec<LayerId>,
         background: egui::Color32,
+        cache_overlays: bool,
     ) -> SceneRequest {
         let pixels_per_point = ctx.pixels_per_point();
         let tessellation = ctx.tessellation_options(|options| *options);
@@ -606,8 +644,7 @@ impl LoadedViewer {
                 }),
                 background,
                 grid_bounds: self.grid_bounds.unwrap_or(world),
-                cache_overlays: self.analysis_tab != AnalysisTab::Map
-                    || self.active_heatmap.is_none(),
+                cache_overlays,
             },
             db: Arc::clone(&self.db),
             layer_ids,

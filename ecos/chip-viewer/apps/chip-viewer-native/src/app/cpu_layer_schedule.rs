@@ -1,7 +1,8 @@
 use super::*;
+use std::ops::Range;
 
-enum Event<Output> {
-    Query(usize, Vec<ShapeId>, Duration),
+enum Event<Item, Output> {
+    Query(usize, Arc<[Item]>, Duration),
     Built(usize, usize, Option<Output>),
     Panicked,
 }
@@ -13,8 +14,8 @@ impl Drop for StopOnDrop<'_> {
     }
 }
 
-struct PanicSignal<'a, Output>(&'a mpsc::Sender<Event<Output>>);
-impl<Output> Drop for PanicSignal<'_, Output> {
+struct PanicSignal<'a, Item, Output>(&'a mpsc::Sender<Event<Item, Output>>);
+impl<Item, Output> Drop for PanicSignal<'_, Item, Output> {
     fn drop(&mut self) {
         if thread::panicking() {
             let _sent = self.0.send(Event::Panicked);
@@ -41,6 +42,24 @@ pub(in crate::app::cpu_scene) fn run<Output: Send>(
     is_current: &(impl Fn() -> bool + Sync),
     query: impl Fn(LayerId) -> Vec<ShapeId> + Sync,
     build: impl Fn(Vec<ShapeId>) -> Option<Output> + Sync,
+    consume: impl FnMut(Output) -> bool,
+) -> Option<Duration> {
+    run_shared(
+        layers,
+        workers,
+        is_current,
+        |layer| Arc::from(query(layer)),
+        |ids, range| build(ids[range].to_vec()),
+        consume,
+    )
+}
+
+pub(super) fn run_shared<Item: Send + Sync, Output: Send>(
+    layers: &[LayerId],
+    workers: usize,
+    is_current: &(impl Fn() -> bool + Sync),
+    query: impl Fn(LayerId) -> Arc<[Item]> + Sync,
+    build: impl Fn(Arc<[Item]>, Range<usize>) -> Option<Output> + Sync,
     mut consume: impl FnMut(Output) -> bool,
 ) -> Option<Duration> {
     if !is_current() {
@@ -55,9 +74,9 @@ pub(in crate::app::cpu_scene) fn run<Output: Send>(
         let (events, completed) = mpsc::channel();
         let (queries, waiting_queries) = mpsc::channel::<usize>();
         let waiting_queries = Arc::new(Mutex::new(waiting_queries));
-        let (builds, waiting_builds) = mpsc::channel::<BuildTask>();
+        let (builds, waiting_builds) = mpsc::channel::<BuildTask<Item>>();
         let waiting_builds = Arc::new(Mutex::new(waiting_builds));
-        let mut preparation = Preparation::new(layers.len(), workers);
+        let mut preparation = Preparation::<Item>::new(layers.len(), workers);
         for _ in 0..preparation.query_workers.min(layers.len()) {
             let (waiting, events, query, stopped) = (
                 Arc::clone(&waiting_queries),
@@ -75,12 +94,12 @@ pub(in crate::app::cpu_scene) fn run<Output: Send>(
                         break;
                     }
                     let started = Instant::now();
-                    let ids = query(layers[rank]);
+                    let indices = query(layers[rank]);
                     let duration = started.elapsed();
                     if stopped.load(Ordering::Acquire) || !is_current() {
                         break;
                     }
-                    if events.send(Event::Query(rank, ids, duration)).is_err() {
+                    if events.send(Event::Query(rank, indices, duration)).is_err() {
                         break;
                     }
                 }
@@ -102,7 +121,7 @@ pub(in crate::app::cpu_scene) fn run<Output: Send>(
                     if stopped.load(Ordering::Acquire) || !is_current() {
                         break;
                     }
-                    let output = build(task.ids);
+                    let output = build(task.indices, task.range);
                     if events
                         .send(Event::Built(task.rank, task.chunk, output))
                         .is_err()
@@ -162,8 +181,8 @@ pub(in crate::app::cpu_scene) fn run<Output: Send>(
             // Poll cancellation even when all outstanding work is in a slow
             // query. No UI thread or graphics context participates here.
             match completed.recv_timeout(Duration::from_millis(10)) {
-                Ok(Event::Query(rank, ids, elapsed)) => {
-                    preparation.layers[rank].queried(ids, preparation.build_workers);
+                Ok(Event::Query(rank, indices, elapsed)) => {
+                    preparation.layers[rank].queried(indices, preparation.build_workers);
                     duration += elapsed;
                 }
                 Ok(Event::Built(rank, chunk, Some(output))) => {

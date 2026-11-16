@@ -56,24 +56,24 @@ pub(in crate::app::cpu_scene) fn build_command_stream(
     let mut scene = empty_scene(&request.key, Arc::clone(&request.pattern_textures));
     let mut retained = retained_regions::RegionModel::new(request);
     let mut world = world_source::Builder::new(request);
-    let capture = retained.is_some() || world.is_some();
+    let capture = Arc::new(AtomicBool::new(retained.is_some() || world.is_some()));
     let mut consumer_duration = Duration::ZERO;
-    scene.query_duration = queries::run(
+    scene.query_duration = queries::run_records(
         &request.layer_ids,
         workers,
         is_current,
         |layer| {
             request
                 .db
-                .query_cached_layer_intersect(layer, request.key.viewport)
+                .query_cached_layer_record_indices(layer, request.key.viewport)
         },
-        |ids: Vec<ShapeId>| {
-            build_chunk_sink(
+        |indices: Arc<[usize]>, range| {
+            build_chunk_sink_indices(
                 request,
-                &ids,
+                &indices[range],
                 is_current,
                 Commands {
-                    capture,
+                    capture: capture.load(Ordering::Relaxed),
                     ..Default::default()
                 },
             )
@@ -91,6 +91,9 @@ pub(in crate::app::cpu_scene) fn build_command_stream(
                         world = None;
                     }
                 }
+            }
+            if retained.is_none() && world.is_none() {
+                capture.store(false, Ordering::Relaxed);
             }
             let current = consume(PaintPacket::Commands(commands.paint));
             consumer_duration += consumed_at.elapsed();

@@ -9,6 +9,7 @@ mod coverage;
 mod grid;
 
 const TILE: i32 = 8;
+const MAX_RESIDUAL_BATCH_EXTENT_PX: f32 = 32.0;
 
 #[path = "cpu_sparse_budget.rs"]
 mod budget;
@@ -105,6 +106,8 @@ impl SparseRects {
         let start = self.operations.len();
         let key = &request.key;
         let raster = geometry::PixelRectRasterizer::new(key.pixels_per_point, key.tessellation)?;
+        let mut residual_sink = None;
+        let mut residual_bounds = None;
         for (index, &command) in commands.iter().enumerate() {
             if index % 256 == 0 && !is_current() {
                 return None;
@@ -116,6 +119,8 @@ impl SparseRects {
             } = command
             {
                 if self.pattern_textures.spec(pattern).is_some() {
+                    self.finish_residual_sink(&mut residual_sink);
+                    residual_bounds = None;
                     self.push_operation(Operation::Pattern(Box::new(PatternOperation {
                         rect,
                         pattern,
@@ -126,6 +131,8 @@ impl SparseRects {
                 }
             }
             if let Some(rectangles) = raster.rectangles(command) {
+                self.finish_residual_sink(&mut residual_sink);
+                residual_bounds = None;
                 let rgba = match command {
                     PaintCommand::FillRect { rgba, .. } | PaintCommand::FrameRect { rgba, .. } => {
                         rgba
@@ -162,18 +169,51 @@ impl SparseRects {
                     }
                 }
             } else {
-                let mut sink = geometry::GeometryMeshSink::new_with_patterns(
-                    request.tessellator.clone(),
-                    key.canvas,
-                    key.tessellation,
-                    Arc::clone(&request.pattern_textures),
-                );
+                let bounds = command_bounds(command, key.pixels_per_point).intersect(key.canvas);
+                let next_bounds =
+                    residual_bounds.map_or(bounds, |previous: egui::Rect| previous.union(bounds));
+                let command_extent_px = bounds.size() * key.pixels_per_point;
+                let command_fits_batch = bounds.is_finite()
+                    && bounds.is_positive()
+                    && command_extent_px.x <= MAX_RESIDUAL_BATCH_EXTENT_PX
+                    && command_extent_px.y <= MAX_RESIDUAL_BATCH_EXTENT_PX;
+                let batch_extent_px = next_bounds.size() * key.pixels_per_point;
+                let fits_current_batch = command_fits_batch
+                    && batch_extent_px.x <= MAX_RESIDUAL_BATCH_EXTENT_PX
+                    && batch_extent_px.y <= MAX_RESIDUAL_BATCH_EXTENT_PX;
+                if residual_sink.is_some() && !fits_current_batch {
+                    self.finish_residual_sink(&mut residual_sink);
+                    residual_bounds = None;
+                }
+                let sink = residual_sink.get_or_insert_with(|| {
+                    geometry::GeometryMeshSink::for_raster_with_patterns(
+                        request.tessellator.clone(),
+                        key.canvas,
+                        key.tessellation,
+                        key.pixels_per_point,
+                        Arc::clone(&request.pattern_textures),
+                    )
+                });
                 sink.paint(command);
-                let meshes = sink.finish();
-                self.append_meshes(meshes);
+                if command_fits_batch {
+                    residual_bounds = Some(
+                        residual_bounds
+                            .map_or(bounds, |previous: egui::Rect| previous.union(bounds)),
+                    );
+                } else {
+                    self.finish_residual_sink(&mut residual_sink);
+                    residual_bounds = None;
+                }
             }
         }
+        self.finish_residual_sink(&mut residual_sink);
         is_current().then_some(start)
+    }
+
+    fn finish_residual_sink(&mut self, sink: &mut Option<geometry::GeometryMeshSink>) {
+        if let Some(sink) = sink.take() {
+            self.append_meshes(sink.finish());
+        }
     }
 
     pub(super) fn len(&self) -> usize {
@@ -485,6 +525,23 @@ impl SparseRects {
                 pixels[start..start + (right - left) * 4]
                     .copy_from_slice(&residual[start..start + (right - left) * 4]);
             }
+        }
+    }
+}
+
+fn command_bounds(command: PaintCommand, pixels_per_point: f32) -> egui::Rect {
+    let pixel = 1.0 / pixels_per_point;
+    match command {
+        PaintCommand::FillRect { rect, .. } | PaintCommand::PatternRect { rect, .. } => {
+            rect.expand(pixel)
+        }
+        PaintCommand::FrameRect { rect, .. } => rect.expand(pixel),
+        PaintCommand::Line { points, width, .. } => {
+            egui::Rect::from_two_pos(points[0], points[1]).expand(width.abs() * 0.5 + pixel)
+        }
+        PaintCommand::Disc { center, radius, .. } => {
+            egui::Rect::from_center_size(center, egui::Vec2::splat(radius.abs() * 2.0))
+                .expand(pixel)
         }
     }
 }

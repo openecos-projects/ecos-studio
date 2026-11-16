@@ -151,6 +151,33 @@ impl<'a> Collector<'a> {
         }
     }
 
+    pub(super) fn observe_visible(
+        &mut self,
+        geometry: chip_view_db::ShapeGeometry,
+        owner: Option<&'a OwnerRef>,
+        db: &'a ChipViewDb,
+        key: &SceneKey,
+    ) {
+        let chip_view_db::ShapeGeometry::Rect(rect) = geometry else {
+            return;
+        };
+        let Some(owner) = owner else {
+            return;
+        };
+        let Some(owner_type) = OwnerType::from_raw(owner.owner_type) else {
+            return;
+        };
+        let Some(kind) = shape_label_kind(owner_type, owner) else {
+            return;
+        };
+        let visible =
+            shape_screen_rect(rect, key.world, key.canvas, key.zoom, key.pan).intersect(key.canvas);
+        if !kind.eligible_in(false, visible) {
+            return;
+        }
+        self.observe(geometry, Some(owner), db.owner_name(owner), key);
+    }
+
     pub(super) fn publish(
         self,
         canvas: egui::Rect,
@@ -260,5 +287,31 @@ mod tests {
                 resolver.resolve(&request, &original, || true)
             );
         }
+    }
+
+    #[test]
+    fn visible_collection_skips_dormant_labels_before_owner_name_lookup() {
+        let fixture = crate::app::cpu_scene::tests::Fixture::new();
+        let request = fixture.request(1.0, 1.0);
+        let owner = OwnerRef {
+            owner_type: OwnerType::InstancePinPortShape as u8,
+            owner_id: u64::MAX,
+            ..OwnerRef::default()
+        };
+        let mut collector = Collector::default();
+
+        collector.observe_visible(
+            chip_view_db::ShapeGeometry::Rect(Rect32 {
+                lx: 100,
+                ly: 100,
+                hx: 102,
+                hy: 102,
+            }),
+            Some(&owner),
+            &request.db,
+            &request.key,
+        );
+
+        assert!(collector.winners.is_empty());
     }
 }

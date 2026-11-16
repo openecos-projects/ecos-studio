@@ -35,6 +35,7 @@ pub(super) fn spawn(
                     .as_ref()
                     .is_some_and(|source| source.compatible(&request))
                 && retained.is_none()
+                && request.reused_labels.is_none()
             {
                 let labels_scene =
                     builder::empty_scene(&request.key, Arc::clone(&request.pattern_textures));

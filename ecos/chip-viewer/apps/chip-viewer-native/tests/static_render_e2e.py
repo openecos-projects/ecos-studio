@@ -194,7 +194,9 @@ def main():
         "p95_warm_frame_interval_ms": warm_intervals[min(len(warm_intervals) - 1, int(len(warm_intervals) * .95))] if warm_intervals else None,
         "drawn_shapes": ready[-1]["drawn_shapes"],
         "estimated_primitives": ready[-1]["estimated_primitives"],
-        "exact_all_frames": all(not item["use_view_tiles"] for item in samples),
+        "exact_ready_frames": sum(not item["use_view_tiles"] for item in ready),
+        "overview_feedback_frames": sum(item["use_view_tiles"] for item in samples),
+        "exact_all_frames": all(not item["use_view_tiles"] for item in ready),
         "is_gpu": ready[-1]["is_gpu"],
         "peak_viewer_rss_kib": peak_viewer_rss_kib,
     }
@@ -215,7 +217,7 @@ def main():
         difference.save(args.output / "layout-diff.png")
     (args.output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
-    assert report["exact_all_frames"], "approximate overview replaced exact geometry"
+    assert report["exact_all_frames"], "approximate overview remained after exact geometry settled"
     if report["cpu_rasterizations"]:
         assert all(item["cpu_rasterizations"] == ready[0]["cpu_rasterizations"] for item in ready), \
             "unchanged complete scene was rasterized again"

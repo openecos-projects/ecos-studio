@@ -28,7 +28,7 @@ pub(super) use stream::{build_command_stream, PaintPacket};
 
 /// Receives shape boundaries around the ordered paint commands from one record.
 /// Sinks that retain inputs must also retain records producing no commands.
-trait SceneSink: chip_render::geometry2d::PaintSink {
+pub(super) trait SceneSink: chip_render::geometry2d::PaintSink {
     fn collect_labels(&self) -> bool {
         true
     }
@@ -154,6 +154,28 @@ fn build_chunk(
     is_current: &(impl Fn() -> bool + Sync),
     output: geometry::GeometryOutput,
 ) -> Option<CpuScene> {
+    let shapes = ids.iter().filter_map(|id| request.db.find_shape(*id));
+    build_chunk_from_shapes(request, shapes, is_current, output)
+}
+
+pub(super) fn build_chunk_indices(
+    request: &SceneRequest,
+    indices: &[usize],
+    is_current: &(impl Fn() -> bool + Sync),
+    output: geometry::GeometryOutput,
+) -> Option<CpuScene> {
+    let shapes = indices
+        .iter()
+        .filter_map(|index| request.db.snapshot().shapes().get(*index));
+    build_chunk_from_shapes(request, shapes, is_current, output)
+}
+
+fn build_chunk_from_shapes<'a>(
+    request: &SceneRequest,
+    shapes: impl Iterator<Item = &'a ShapeRecord>,
+    is_current: &(impl Fn() -> bool + Sync),
+    output: geometry::GeometryOutput,
+) -> Option<CpuScene> {
     let key = &request.key;
     let sink = match output {
         geometry::GeometryOutput::Reference => geometry::GeometryMeshSink::new_with_patterns(
@@ -172,7 +194,7 @@ fn build_chunk(
             )
         }
     };
-    let (mut scene, sink) = build_chunk_sink(request, ids, is_current, sink)?;
+    let (mut scene, sink) = build_chunk_sink_records(request, shapes, is_current, sink)?;
     scene.meshes = prepare_meshes(sink.finish());
     is_current().then_some(scene)
 }
@@ -181,19 +203,38 @@ fn build_chunk_sink<Sink: SceneSink>(
     request: &SceneRequest,
     ids: &[ShapeId],
     is_current: &(impl Fn() -> bool + Sync),
+    sink: Sink,
+) -> Option<(CpuScene, Sink)> {
+    let shapes = ids.iter().filter_map(|id| request.db.find_shape(*id));
+    build_chunk_sink_records(request, shapes, is_current, sink)
+}
+
+pub(super) fn build_chunk_sink_indices<Sink: SceneSink>(
+    request: &SceneRequest,
+    indices: &[usize],
+    is_current: &(impl Fn() -> bool + Sync),
+    sink: Sink,
+) -> Option<(CpuScene, Sink)> {
+    let shapes = indices
+        .iter()
+        .filter_map(|index| request.db.snapshot().shapes().get(*index));
+    build_chunk_sink_records(request, shapes, is_current, sink)
+}
+
+fn build_chunk_sink_records<'a, Sink: SceneSink>(
+    request: &SceneRequest,
+    records: impl Iterator<Item = &'a ShapeRecord>,
+    is_current: &(impl Fn() -> bool + Sync),
     mut sink: Sink,
 ) -> Option<(CpuScene, Sink)> {
     let key = &request.key;
     let filter_started = Instant::now();
     let mut owner_cache = OwnerCategoryCache::default();
-    let mut shapes = Vec::with_capacity(ids.len());
-    for (index, shape_id) in ids.iter().enumerate() {
+    let mut shapes = Vec::new();
+    for (index, shape) in records.enumerate() {
         if index % 1024 == 0 && !is_current() {
             return None;
         }
-        let Some(shape) = request.db.find_shape(*shape_id) else {
-            continue;
-        };
         if !is_renderable_shape(shape) {
             continue;
         }
@@ -202,7 +243,11 @@ fn build_chunk_sink<Sink: SceneSink>(
         if !request.zoom_rules.is_drawn_at_zoom(owner_type, key.zoom) {
             continue;
         }
-        let category = owner.and_then(|owner| owner_cache.get(key.epoch, &request.db, owner));
+        let category = if key.visibility.is_all_visible() {
+            None
+        } else {
+            owner.and_then(|owner| owner_cache.get(key.epoch, &request.db, owner))
+        };
         if !shape_is_visible_fast(
             shape,
             owner_type,
@@ -243,12 +288,7 @@ fn build_chunk_sink<Sink: SceneSink>(
         if !sink.collect_labels() {
             continue;
         }
-        label_candidates.observe(
-            *geometry,
-            *owner,
-            owner.and_then(|owner| request.db.owner_name(owner)),
-            key,
-        );
+        label_candidates.observe_visible(*geometry, *owner, &request.db, key);
     }
     if !is_current() {
         return None;

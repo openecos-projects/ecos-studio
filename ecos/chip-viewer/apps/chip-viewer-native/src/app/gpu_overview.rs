@@ -13,11 +13,11 @@ use super::*;
 /// `4096 << lod` dbu grid, so lod 3 tiles are 32768 dbu across.
 pub(super) const VIEW_TILE_LOD3_SIZE_DBU: f32 = 4096.0 * 8.0;
 
-/// Zoom at or below which the overview latch may engage.
+/// Legacy far-zoom entry point. Dense views can also use pixel-scale tiles
+/// when their estimated visible shape count exceeds the physical pixel count.
 pub(super) const VIEW_TILE_OVERVIEW_ENTER_ZOOM: f32 = 0.35;
-/// Zoom above which the overview latch disengages. The gap to the enter
-/// zoom keeps a zoom resting on the boundary from flickering between the
-/// tile summary and the exact-shape path.
+/// Legacy far-zoom exit point; density-driven overview remains active while
+/// its estimated shape density is above the lower hysteresis bound.
 pub(super) const VIEW_TILE_OVERVIEW_EXIT_ZOOM: f32 = 0.40;
 
 /// Minimum on-screen edge length of a lod-3 tile for the overview summary
@@ -28,6 +28,10 @@ pub(super) const VIEW_TILE_OVERVIEW_EXIT_ZOOM: f32 = 0.40;
 /// summary flattens into blobs, and the exact path is cheap enough
 /// anyway, so the threshold sits at 8px.
 pub(super) const VIEW_TILE_MIN_SCREEN_PX: f32 = 8.0;
+const PIXEL_OVERVIEW_ENTER_SHAPES_PER_PIXEL: f64 = 1.0;
+const PIXEL_OVERVIEW_EXIT_SHAPES_PER_PIXEL: f64 = 0.5;
+const TARGET_OVERVIEW_TILE_SCREEN_PX: f64 = 16.0;
+const MAX_TILE_REFERENCES_PER_SHAPE: u64 = 64;
 
 /// `GpuBufferKey::zoom_tier` for overview instance buffers. Exact-path
 /// tiles use tiers 0 (label-less) and 1 (label-carrying), so tier 2 keeps
@@ -36,6 +40,80 @@ pub(super) const OVERVIEW_ZOOM_TIER: u8 = 2;
 
 fn lod3_tile_screen_px(zoom: f32, world: Rect32, canvas: egui::Rect) -> f32 {
     VIEW_TILE_LOD3_SIZE_DBU * world_to_screen_scale(world, canvas, zoom)
+}
+
+fn overview_tile_rect(tile: &chipgeom_format::GeometryViewTileRecord, lod: u8) -> Rect32 {
+    let tile_size = 4096_i64 << lod;
+    let span_x = i64::from(tile.bbox.hx).div_euclid(tile_size)
+        - i64::from(tile.bbox.lx).div_euclid(tile_size)
+        + 1;
+    let span_y = i64::from(tile.bbox.hy).div_euclid(tile_size)
+        - i64::from(tile.bbox.ly).div_euclid(tile_size)
+        + 1;
+    if tile.shape_count == 1 && span_x.saturating_mul(span_y) as u64 > MAX_TILE_REFERENCES_PER_SHAPE
+    {
+        return tile.bbox;
+    }
+    let lx = i64::from(tile.tile_x) * tile_size;
+    let ly = i64::from(tile.tile_y) * tile_size;
+    let hx = lx + tile_size;
+    let hy = ly + tile_size;
+    Rect32 {
+        lx: lx.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        ly: ly.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        hx: hx.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        hy: hy.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+    }
+}
+
+fn estimated_visible_shapes_per_pixel(
+    shape_count: usize,
+    viewport: Rect32,
+    world: Rect32,
+    canvas: egui::Rect,
+    pixels_per_point: f32,
+) -> f64 {
+    let width =
+        (i64::from(viewport.hx.min(world.hx)) - i64::from(viewport.lx.max(world.lx))).max(0) as f64;
+    let height =
+        (i64::from(viewport.hy.min(world.hy)) - i64::from(viewport.ly.max(world.ly))).max(0) as f64;
+    let world_width = (i64::from(world.hx) - i64::from(world.lx)).max(1) as f64;
+    let world_height = (i64::from(world.hy) - i64::from(world.ly)).max(1) as f64;
+    let visible_fraction = (width * height / (world_width * world_height)).clamp(0.0, 1.0);
+    let physical_pixels = f64::from(canvas.width().max(0.0))
+        * f64::from(canvas.height().max(0.0))
+        * f64::from(pixels_per_point.max(0.1)).powi(2);
+    if physical_pixels == 0.0 {
+        0.0
+    } else {
+        shape_count as f64 * visible_fraction / physical_pixels
+    }
+}
+
+pub(super) fn pixel_overview_lod(
+    zoom: f32,
+    world: Rect32,
+    canvas: egui::Rect,
+    pixels_per_point: f32,
+) -> u8 {
+    let tile_zero_screen_px = 4096.0_f64
+        * f64::from(world_to_screen_scale(world, canvas, zoom))
+        * f64::from(pixels_per_point.max(0.1));
+    if tile_zero_screen_px <= 0.0 {
+        return 0;
+    }
+    (TARGET_OVERVIEW_TILE_SCREEN_PX / tile_zero_screen_px)
+        .log2()
+        .ceil()
+        .clamp(0.0, 3.0) as u8
+}
+
+pub(super) fn overview_lod_for_renderer(lod: u8, is_gpu: bool) -> u8 {
+    if is_gpu {
+        lod
+    } else {
+        lod.saturating_add(1).min(3)
+    }
 }
 
 /// Shared 2D CPU/GPU predicate for the overview tile summary. Highlights
@@ -47,18 +125,31 @@ pub(super) fn should_use_view_tiles_for_state(
     has_draft: bool,
     edit_enabled: bool,
     zoom: f32,
+    shape_count: usize,
     viewport: Rect32,
     world: Rect32,
     canvas: egui::Rect,
+    pixels_per_point: f32,
 ) -> bool {
     if view_tile_count == 0 || has_draft || edit_enabled {
         return false;
     }
     if zoom > VIEW_TILE_OVERVIEW_ENTER_ZOOM {
-        return false;
+        return estimated_visible_shapes_per_pixel(
+            shape_count,
+            viewport,
+            world,
+            canvas,
+            pixels_per_point,
+        ) >= PIXEL_OVERVIEW_ENTER_SHAPES_PER_PIXEL;
     }
     // Primary signal: lod-3 tiles resolve to visible pixels on this canvas.
     if lod3_tile_screen_px(zoom, world, canvas) >= VIEW_TILE_MIN_SCREEN_PX {
+        return true;
+    }
+    if estimated_visible_shapes_per_pixel(shape_count, viewport, world, canvas, pixels_per_point)
+        >= PIXEL_OVERVIEW_ENTER_SHAPES_PER_PIXEL
+    {
         return true;
     }
     // Legacy fallback of the old area heuristic: when the die is a tiny
@@ -95,13 +186,22 @@ impl ViewTileOverviewLatch {
         has_draft: bool,
         edit_enabled: bool,
         zoom: f32,
+        shape_count: usize,
         viewport: Rect32,
         world: Rect32,
         canvas: egui::Rect,
+        pixels_per_point: f32,
     ) -> bool {
         if self.active {
             let preconditions = view_tile_count > 0 && !has_draft && !edit_enabled;
-            if !preconditions || zoom > VIEW_TILE_OVERVIEW_EXIT_ZOOM {
+            let dense = estimated_visible_shapes_per_pixel(
+                shape_count,
+                viewport,
+                world,
+                canvas,
+                pixels_per_point,
+            ) >= PIXEL_OVERVIEW_EXIT_SHAPES_PER_PIXEL;
+            if !preconditions || (zoom > VIEW_TILE_OVERVIEW_EXIT_ZOOM && !dense) {
                 self.active = false;
             }
         } else if should_use_view_tiles_for_state(
@@ -109,9 +209,11 @@ impl ViewTileOverviewLatch {
             has_draft,
             edit_enabled,
             zoom,
+            shape_count,
             viewport,
             world,
             canvas,
+            pixels_per_point,
         ) {
             self.active = true;
         }
@@ -123,14 +225,20 @@ impl ViewTileOverviewLatch {
 /// `overview_tile_color` shading exactly so both render paths look the
 /// same.
 pub(super) fn overview_tile_rgba(style: LayerStyle, shape_count: u32) -> [u8; 4] {
-    let occupancy_alpha = 16.0 + (shape_count.max(1) as f32).sqrt() * 4.0;
-    let alpha = occupancy_alpha.round().clamp(16.0, 52.0) as u8;
-    [style.rgba[0], style.rgba[1], style.rgba[2], alpha]
+    let occupancy = (shape_count.max(1) as f32).sqrt();
+    let alpha = (96.0 + occupancy * 8.0).round().clamp(96.0, 224.0) as u8;
+    [
+        (f32::from(style.rgba[0]) * 0.72).round() as u8,
+        (f32::from(style.rgba[1]) * 0.72).round() as u8,
+        (f32::from(style.rgba[2]) * 0.72).round() as u8,
+        alpha,
+    ]
 }
 
 fn overview_tile_instance(
     style: LayerStyle,
     tile: &chipgeom_format::GeometryViewTileRecord,
+    lod: u8,
 ) -> crate::canvas_gpu::GpuShapeInstance {
     // Pure fill: pattern 1 (solid), shape type 0 (rect), category 31
     // (uncategorized, so the visibility mask never culls it), no context
@@ -138,7 +246,10 @@ fn overview_tile_instance(
     // invisible exactly like the CPU `rect_filled` overview path.
     let pattern_bits = 1 | ((crate::canvas_gpu::UNCATEGORIZED_DRAWING_CATEGORY as u32) << 18);
     crate::canvas_gpu::GpuShapeInstance {
-        rect_dbu: [tile.bbox.lx, tile.bbox.ly, tile.bbox.hx, tile.bbox.hy],
+        rect_dbu: {
+            let rect = overview_tile_rect(tile, lod);
+            [rect.lx, rect.ly, rect.hx, rect.hy]
+        },
         fill_rgba: crate::canvas_gpu::pack_rgba_u32(overview_tile_rgba(style, tile.shape_count)),
         frame_rgba: 0,
         pattern_bits,
@@ -147,6 +258,43 @@ fn overview_tile_instance(
 }
 
 impl LoadedViewer {
+    pub(super) fn paint_cpu_2d_overview(
+        &mut self,
+        painter: &egui::Painter,
+        viewport: Rect32,
+        world: Rect32,
+        canvas: egui::Rect,
+        view_lod: u8,
+        visible_layers: &BTreeMap<LayerId, LayerStyle>,
+    ) -> usize {
+        let mut mesh = egui::Mesh::default();
+        let mut drawn = 0;
+        for (layer_id, style) in visible_layers {
+            for tile in self
+                .view_tile_cache
+                .visible_tiles(&self.db, view_lod, *layer_id, viewport)
+                .iter()
+            {
+                let screen = world_to_screen_rect(
+                    overview_tile_rect(tile, view_lod),
+                    world,
+                    canvas,
+                    self.zoom,
+                    self.pan,
+                );
+                if !screen.is_positive() || !screen.intersects(canvas) {
+                    continue;
+                }
+                mesh.add_colored_rect(screen, overview_tile_color(*style, tile.shape_count));
+                drawn += 1;
+            }
+        }
+        if !mesh.indices.is_empty() {
+            painter.add(egui::Shape::mesh(Arc::new(mesh)));
+        }
+        drawn
+    }
+
     /// Uniform shared by the GPU overview and exact-shape canvas paths.
     pub(super) fn gpu_canvas_uniform(
         &self,
@@ -223,7 +371,7 @@ impl LoadedViewer {
                     .visible_tiles(&self.db, view_lod, *layer_id, world)
                     .iter()
                 {
-                    instances.push(overview_tile_instance(*style, tile));
+                    instances.push(overview_tile_instance(*style, tile, view_lod));
                 }
             }
             let mut category_counts = [[0usize; 32]; 2];
@@ -287,12 +435,69 @@ mod tests {
         let viewport = world;
         // At zoom 0.35 one lod-3 tile is ~15px on a 1000px canvas.
         assert!(should_use_view_tiles_for_state(
-            16, false, false, 0.35, viewport, world, canvas,
+            16, false, false, 0.35, 500_000, viewport, world, canvas, 1.0,
         ));
-        // Fitted at zoom 1.0 the exact path must keep drawing shapes.
+        // A sparse fitted view stays exact.
         assert!(!should_use_view_tiles_for_state(
-            16, false, false, 1.0, viewport, world, canvas,
+            16, false, false, 1.0, 0, viewport, world, canvas, 1.0,
         ));
+        assert!(should_use_view_tiles_for_state(
+            16, false, false, 1.0, 1_000_000, viewport, world, canvas, 1.0,
+        ));
+        assert!(!should_use_view_tiles_for_state(
+            16, false, false, 1.0, 100_000, viewport, world, canvas, 1.0,
+        ));
+    }
+
+    #[test]
+    fn pixel_overview_lod_tracks_physical_tile_size() {
+        let world = test_world();
+        let canvas = test_canvas();
+        assert_eq!(pixel_overview_lod(1.0, world, canvas, 1.0), 2);
+        assert_eq!(pixel_overview_lod(0.25, world, canvas, 1.0), 3);
+        assert_eq!(pixel_overview_lod(0.05, world, canvas, 1.0), 3);
+    }
+
+    #[test]
+    fn cpu_overview_uses_one_coarser_lod_and_gpu_keeps_requested_lod() {
+        assert_eq!(overview_lod_for_renderer(1, false), 2);
+        assert_eq!(overview_lod_for_renderer(3, false), 3);
+        assert_eq!(overview_lod_for_renderer(1, true), 1);
+    }
+
+    #[test]
+    fn regular_tile_uses_its_grid_cell_while_a_large_shape_keeps_its_bounds() {
+        let regular = chipgeom_format::GeometryViewTileRecord {
+            tile_x: -1,
+            tile_y: 2,
+            shape_count: 20,
+            bbox: Rect32 {
+                lx: -10_000,
+                ly: 8_192,
+                hx: 30_000,
+                hy: 9_000,
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            overview_tile_rect(&regular, 0),
+            Rect32 {
+                lx: -4_096,
+                ly: 8_192,
+                hx: 0,
+                hy: 12_288,
+            }
+        );
+
+        let large = chipgeom_format::GeometryViewTileRecord {
+            shape_count: 1,
+            bbox: Rect32 {
+                hx: 500_000,
+                ..regular.bbox
+            },
+            ..regular
+        };
+        assert_eq!(overview_tile_rect(&large, 0), large.bbox);
     }
 
     #[test]
@@ -309,7 +514,7 @@ mod tests {
             hy: 3_000_000,
         };
         assert!(should_use_view_tiles_for_state(
-            16, false, false, 0.05, viewport, world, canvas,
+            16, false, false, 0.05, 0, viewport, world, canvas, 1.0,
         ));
     }
 
@@ -319,7 +524,7 @@ mod tests {
         let canvas = test_canvas();
         for (count, draft, edit) in [(0, false, false), (16, true, false), (16, false, true)] {
             assert!(!should_use_view_tiles_for_state(
-                count, draft, edit, 0.25, world, world, canvas,
+                count, draft, edit, 0.25, 0, world, world, canvas, 1.0,
             ));
         }
     }
@@ -331,25 +536,43 @@ mod tests {
         let mut latch = ViewTileOverviewLatch::default();
 
         // Enter at the enter zoom.
-        assert!(latch.update(16, false, false, 0.35, world, world, canvas));
+        assert!(latch.update(16, false, false, 0.35, 0, world, world, canvas, 1.0));
         // Stay engaged across the enter zoom up to the exit zoom.
-        assert!(latch.update(16, false, false, 0.38, world, world, canvas));
+        assert!(latch.update(16, false, false, 0.38, 0, world, world, canvas, 1.0));
         // Disengage past the exit zoom.
-        assert!(!latch.update(16, false, false, 0.41, world, world, canvas));
+        assert!(!latch.update(16, false, false, 0.41, 0, world, world, canvas, 1.0));
         // And re-entering needs the full predicate again.
-        assert!(latch.update(16, false, false, 0.30, world, world, canvas));
+        assert!(latch.update(16, false, false, 0.30, 0, world, world, canvas, 1.0));
         // A draft while engaged disengages immediately.
-        assert!(!latch.update(16, true, false, 0.30, world, world, canvas));
+        assert!(!latch.update(16, true, false, 0.30, 0, world, world, canvas, 1.0));
         // Reset forces disengagement.
         latch.reset();
-        assert!(!latch.update(16, false, false, 0.38, world, world, canvas));
+        assert!(!latch.update(16, false, false, 0.38, 0, world, world, canvas, 1.0));
+    }
+
+    #[test]
+    fn pixel_overview_latch_uses_density_hysteresis_at_fit_zoom() {
+        let world = test_world();
+        let canvas = test_canvas();
+        let mut latch = ViewTileOverviewLatch::default();
+
+        assert!(latch.update(16, false, false, 1.0, 1_000_000, world, world, canvas, 1.0));
+        assert!(latch.update(16, false, false, 1.0, 700_000, world, world, canvas, 1.0));
+        assert!(!latch.update(16, false, false, 1.0, 300_000, world, world, canvas, 1.0));
     }
 
     #[test]
     fn overview_tile_rgba_matches_cpu_shading() {
         let style = LayerStyle::default_for_layer(1, chip_display::ColorTheme::Vivid);
         let [r, g, b, a] = overview_tile_rgba(style, 100);
-        assert_eq!([r, g, b], style.rgba[..3]);
-        assert!((16..=52).contains(&a));
+        assert_eq!(
+            [r, g, b],
+            [
+                (f32::from(style.rgba[0]) * 0.72).round() as u8,
+                (f32::from(style.rgba[1]) * 0.72).round() as u8,
+                (f32::from(style.rgba[2]) * 0.72).round() as u8,
+            ]
+        );
+        assert!((96..=224).contains(&a));
     }
 }
