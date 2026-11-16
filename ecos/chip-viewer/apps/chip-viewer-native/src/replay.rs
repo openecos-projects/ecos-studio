@@ -2,6 +2,8 @@
 mod canvas;
 #[path = "replay_focus.rs"]
 mod focus;
+#[path = "replay_overlays3d.rs"]
+mod overlays3d;
 #[path = "replay_playback.rs"]
 mod playback;
 #[path = "replay_sidebar.rs"]
@@ -9,6 +11,8 @@ mod sidebar;
 #[cfg(all(test, target_os = "linux"))]
 #[path = "replay_ui_validation.rs"]
 mod ui_validation;
+#[path = "replay_canvas3d.rs"]
+mod view3d;
 use crate::replay_data::{read, Catalog, Recording};
 use crate::replay_maps::ReplayMaps;
 use crate::replay_motion::Motion;
@@ -57,11 +61,14 @@ pub struct ReplayApp {
     canvas_cache: crate::replay_batch::CanvasCache,
     gpu_format: Option<wgpu::TextureFormat>,
     gpu_animation_limit: usize,
+    view3d: view3d::View3d,
+    camera_exact: bool,
     selected_objects: std::collections::BTreeSet<String>,
 }
 
 impl ReplayApp {
     pub fn configure_renderer(&mut self, cc: &eframe::CreationContext<'_>) {
+        self.view3d.configure(cc);
         if let Some(state) = &cc.wgpu_render_state {
             let limits = state.device.limits();
             if limits.max_storage_buffers_per_shader_stage > 0 {
@@ -119,6 +126,8 @@ impl ReplayApp {
             gpu_format: None,
             gpu_animation_limit: 0,
             selected_objects: Default::default(),
+            view3d: Default::default(),
+            camera_exact: false,
             starts,
             total,
             step: 0,
@@ -371,8 +380,15 @@ impl eframe::App for ReplayApp {
                 } else {
                     "Recorded data · physical bounds"
                 });
+                let mut enabled = self.view3d.enabled;
+                if ui.checkbox(&mut enabled, "Sync 3D").changed() {
+                    self.set_three_d(enabled);
+                }
                 if ui.button("Fit").clicked() {
                     self.zoom = 1.0;
+                }
+                if !self.view3d.enabled && !self.view3d.error.is_empty() {
+                    ui.small(&self.view3d.error);
                 }
                 if self.recording.is_some() {
                     if ui

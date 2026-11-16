@@ -533,7 +533,8 @@ impl GeometrySnapshot {
     }
 }
 
-fn read_manifest(path: &Path) -> Result<GeometryManifest> {
+/// Read only geometry metadata, without opening shape buffers.
+pub fn read_manifest(path: &Path) -> Result<GeometryManifest> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path.display()))?;
     let mut values = HashMap::new();
@@ -748,7 +749,8 @@ fn parse_sidecar_lines<T: Send>(
     })
 }
 
-fn read_layer_metadata(path: Option<&Path>) -> Result<Vec<LayerMetadata>> {
+/// Read a layer sidecar without loading a geometry snapshot.
+pub fn read_layer_metadata(path: Option<&Path>) -> Result<Vec<LayerMetadata>> {
     let Some(path) = path else {
         return Ok(Vec::new());
     };

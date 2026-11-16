@@ -276,3 +276,79 @@ fn frame_sequence_takes_priority_over_ambiguous_node_timestamp() {
     assert!(!app.complete);
     assert!(!app.reveal.active());
 }
+
+#[test]
+fn dual_view_loads_one_revision_and_pause_keeps_camera_and_geometry_progress() {
+    let fixture = Fixture::new();
+    let mut application = app(&fixture);
+    application.view3d.enabled = true;
+    application.view3d.needs_prepare = true;
+    let clip = &application.plans[0].clips[1];
+    let midpoint = (clip.start + clip.end) * 0.5;
+    application.select(0, midpoint, false);
+    application.finish_loading_for_test();
+    assert!(application.view3d.error.is_empty());
+    let visual = application.view3d.scene.as_ref().unwrap();
+    assert_eq!(visual.ids, vec![Some("inst:a".into())]);
+    let progress = application
+        .reveal
+        .progress()
+        .unwrap_or_else(|| application.motion.progress());
+    let expected = application.motion.bounds(
+        "inst:a",
+        application.reveal.bounds(
+            "inst:a",
+            &application.recording.as_ref().unwrap().scene.objects["inst:a"],
+        ),
+    );
+    let actual = crate::replay_scene3d::bounds_at(&visual.instances[0], progress);
+    assert!(actual
+        .iter()
+        .zip(expected)
+        .all(|(a, b)| (*a - b as f32).abs() <= 1.0));
+    let camera = application.camera_preset();
+    application.playing = false;
+    application.advance_playback(1.0);
+    assert_eq!(application.camera_preset(), camera);
+    assert_eq!(application.position, midpoint);
+    application.select_node_frame(0, midpoint, Some((0.0, Some(0))));
+    application.finish_loading_for_test();
+    assert_eq!(
+        application.recording.as_ref().unwrap().scene.revision,
+        Some(0)
+    );
+    assert_eq!(
+        application.view3d.scene.as_ref().unwrap().instances[0].animation,
+        [0.0; 4]
+    );
+    application.view3d.automatic = false;
+    let manual = application.view3d.camera.current;
+    application.select(0, application.total, true);
+    application.finish_loading_for_test();
+    assert!(!application.view3d.automatic);
+    assert_eq!(application.view3d.camera.current, manual);
+    application.set_three_d(false);
+    application.finish_loading_for_test();
+    assert!(application.view3d.scene.is_none());
+    assert!(application.complete);
+}
+
+#[test]
+fn disabling_three_d_preserves_a_pending_exact_node() {
+    let fixture = Fixture::new();
+    let mut application = app(&fixture);
+    application.view3d.enabled = true;
+    application.view3d.needs_prepare = true;
+    let clip = &application.plans[0].clips[1];
+    let midpoint = (clip.start + clip.end) * 0.5;
+    application.select_node_frame(0, midpoint, Some((0.0, Some(0))));
+    application.set_three_d(false);
+    application.finish_loading_for_test();
+    assert_eq!(
+        application.recording.as_ref().unwrap().scene.revision,
+        Some(0)
+    );
+    assert!(application.camera_exact);
+    assert!(!application.complete);
+    assert!(application.view3d.scene.is_none());
+}
