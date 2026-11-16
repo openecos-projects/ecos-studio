@@ -29,6 +29,7 @@ pub struct ResultAssets {
 
 pub struct Prepared {
     pub scene: Scene,
+    pub route_overlay: crate::replay_route::RouteOverlay,
     pub motion: Motion,
     pub reveal: Reveal,
     pub index: SceneIndex,
@@ -154,7 +155,11 @@ fn prepare(
     let mut motion = Motion::default();
     let mut reveal = Reveal::default();
     if request.animate && request.kind != Kind::Hold {
-        if let Some(previous) = request.frame.checked_sub(1) {
+        let first = match request.kind {
+            Kind::Filler { first } => first,
+            _ => request.frame,
+        };
+        if let Some(previous) = first.checked_sub(1) {
             record.seek_frame_if(previous, alive)?;
         } else {
             record.scene = Scene::default();
@@ -165,6 +170,9 @@ fn prepare(
         match request.kind {
             Kind::Motion => motion.begin(&before, &record.scene, &record.manifest.frames),
             Kind::Reveal => reveal.begin(&before, &record.scene, &record.manifest.frames),
+            Kind::Filler { .. } => {
+                reveal.begin_filler(&before, &record.scene, &record.manifest.frames)
+            }
             Kind::Hold => {}
         }
     } else {
@@ -202,7 +210,9 @@ fn prepare(
     #[cfg(test)]
     let assets = std::time::Instant::now();
     let scene = record.scene.clone();
+    let route_overlay = crate::replay_route::RouteOverlay::from_scene(&scene);
     Ok(Prepared {
+        route_overlay,
         scene,
         motion,
         reveal,

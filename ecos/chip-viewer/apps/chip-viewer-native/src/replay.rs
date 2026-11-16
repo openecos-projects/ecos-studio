@@ -47,6 +47,7 @@ pub struct ReplayApp {
     checked: Instant,
     maps: ReplayMaps,
     analysis: crate::replay_analysis::ReplayAnalysis,
+    route_overlay: crate::replay_route::RouteOverlay,
     logic: Option<crate::replay_logic::Logic>,
     smooth: bool,
     motion: Motion,
@@ -144,6 +145,7 @@ impl ReplayApp {
             checked: Instant::now(),
             maps: ReplayMaps::default(),
             analysis: Default::default(),
+            route_overlay: Default::default(),
             logic: None,
             smooth: true,
             motion: Motion::default(),
@@ -192,9 +194,13 @@ impl ReplayApp {
                 ));
                 for node in &step.nodes {
                     nodes.push((
-                        self.starts[i] + self.plans[i].display_at_source(node.seconds),
+                        self.starts[i]
+                            + node
+                                .sequence
+                                .and_then(|frame| self.plans[i].display_at_frame(frame))
+                                .unwrap_or_else(|| self.plans[i].display_at_source(node.seconds)),
                         i,
-                        Some(node.seconds),
+                        Some((node.seconds, node.sequence)),
                         format!("{} · {}", step.name, node.label),
                     ));
                 }
@@ -223,7 +229,7 @@ impl ReplayApp {
                 for (time, step, source, label) in &nodes {
                     if ui.button(label).clicked() {
                         self.playing = false;
-                        self.select_node(*step, *time, *source);
+                        self.select_node_frame(*step, *time, *source);
                         ui.close_menu();
                     }
                 }
@@ -236,7 +242,7 @@ impl ReplayApp {
                         .min_by(|a, b| (x(a.0) - pos.x).abs().total_cmp(&(x(b.0) - pos.x).abs()))
                     {
                         self.playing = false;
-                        self.select_node(*step, *time, *source);
+                        self.select_node_frame(*step, *time, *source);
                     } else {
                         let t = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0) as f64
                             * self.total;

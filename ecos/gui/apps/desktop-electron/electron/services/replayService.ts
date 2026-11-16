@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile, realpath, rename, writeFile } from 'node:fs/promises'
 import { join, relative, isAbsolute } from 'node:path'
 import { parse } from 'smol-toml'
+import { routeMilestones } from './replayRouteNodes'
 
 async function inside(root: string, path: string): Promise<string> {
   const resolved = await realpath(path)
@@ -84,7 +85,7 @@ export async function buildReplayCatalog(workspace: string): Promise<string> {
       manifest?: string
       reason: string
       metrics: unknown[]
-      nodes: { seconds: number; label: string }[]
+      nodes: { seconds: number; label: string; sequence?: number }[]
     } = {
       name: step.name,
       seconds: Math.max(0, seconds),
@@ -162,6 +163,8 @@ export async function buildReplayCatalog(workspace: string): Promise<string> {
               }
             })
           }
+          entry.nodes.push(...routeMilestones(manifest.frames))
+          entry.nodes.sort((a, b) => a.seconds - b.seconds)
           entry.reason = ''
         } else
           entry.reason =

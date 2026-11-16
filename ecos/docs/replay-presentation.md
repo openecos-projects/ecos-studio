@@ -384,3 +384,206 @@ were not repeated for this native-only follow-up; their earlier passing results
 remain recorded above. macOS/Windows builds were not run on this Linux host.
 No persisted data, dependency lock, ECC gitlink or packaged runtime provenance
 pin changed in this follow-up. Existing captures need no EDA rerun.
+
+
+## Route internal phases (2026-11-16)
+
+The active router is PA → GR → TARouter → DetailedRouter → ViolationReporter.
+Replay preserves the workspace flow and the existing `run routing` subflow.
+Milestone nodes share the flow timeline; wave/box frames animate between nodes.
+Catalog nodes optionally carry `sequence`. Native prefers that exact frame over
+the timestamp, including when several observations share an elapsed time.
+Legacy catalogs with time-only nodes continue to work.
+
+PA now records initial candidates (a disclosed 100,000-point preview limit),
+selected access points, access wires/vias/patches, actual violations and best
+restore. GR records layer/GCell edge capacity, demand and overflow, each reroute
+accept/restore decision, and the committed guide boundary. TA records initial
+selected tracks and each conflict reroute iteration. Its `conflicting_nets_before`
+is the existing scan result, not a new scan or an after-routing measurement;
+the initial observation omits this metric because it has not been measured yet.
+
+DR captures each joined routing wave, normalization, minimum-area patch waves
+and checks, repair boxes, accept/restore, best restore and final routing. Wave
+observations union the model's retained geometry with every box's owned geometry;
+borrowed environment is excluded. This produces a complete read-only observation
+without prematurely moving box results back into the algorithm's model. VR
+captures the router's actual final violations, explicitly not signoff DRC.
+
+The first routing observation uses `scope=routing`; subsequent observations are
+compacted in the native producer to `scope=patch` with explicit `remove` IDs.
+The producer resets its comparison state on attempt changes or non-routing
+samples. This avoids writing repeated full geometry at every wave. ECC still
+publishes reversible diffs and bounded-depth checkpoints under each subflow's
+`geometry/replay/.../frames` directory. Shape multiplicity, via-master metadata,
+unchanged instances, PDN and unrelated nets remain represented.
+
+Process `route_congestion` and `route_violation` records deliberately use the
+same revisioned geometry stream rather than a separate overlay file clock.
+Their attributes and deletions are covered by the existing hashes/checkpoints.
+The worker prepares layer controls from the current reconstructed scene, and the
+canvas draws only the chosen process layer. Capacity-zero cells are distinct
+from ordinary zero demand; outside-grid edges are not emitted. Violation layers
+include cut layers. Unevaluated DR wave/repair geometry omits stale violation
+markers and labels evaluation as pending. Final Place maps, clock trees and
+checklists retain their completion-only behavior.
+
+All new observers enter `replay::guarded` before geometry reads, copies, JSON
+construction or serialization. Phase arguments use `string_view`, so disabled
+calls do not allocate temporary strings. No observer calls the mutating TA
+`scanOverflow`, reroutes nets, modifies cost weights or runs additional DRC.
+The transport's retained comparison state is created only inside enabled capture.
+Old recordings remain readable; collecting the added phases requires rerunning
+Route with Replay enabled using the updated ECC runtime.
+
+
+### Partition presentation and validation
+
+The grid follow-up adds actual PABox partitions, valid GR GCell edges, DRBox
+partitions with the current scheduled batch highlighted, and minimum-area/repair
+regions. The partition records (`route_region`) are frame-local and travel in
+the same transport patches. GR starts with capacity when there is no demand,
+then chooses demand/overflow from the observation; a manually selected metric
+is preserved. During process overlays the static layout context is dimmed while
+new geometry continues its retained GPU reveal. Turning off the overlay restores
+the context. Seeking keeps the previous frame's overlay with its geometry until
+the new frame is prepared; completion reports still wait for completion.
+
+Real AES validation used isolated derived workspaces, leaving user workspaces
+untouched. The old capture contained 18 frames, detailed capture 64, and the
+partition follow-up 65. The last contains 900 PA boxes, 30,624 GR edge samples,
+64 DR boxes with 16 scheduled in the first wave, five TA reroute iterations,
+20 DR waves and five minimum-area patch waves. Installed-runtime GCD generated
+31 frames with 36 PA boxes, 1,224 GR edges and four DR boxes.
+
+Replay disabled, full routing observations, compact native transport, and the
+grid follow-up produced byte-identical decompressed AES DEF, SHA256:
+`536128268c44e764695cc55eab56400851ee7cb372a1d93dbbff18b2ba5c6e13`.
+The runs overlapped other build/tests and do not establish an isolated runtime
+overhead percentage. Native transport compaction removes repeated raw snapshots;
+final published AES geometry remains about 529 MB. Its capture duration is not
+the animation duration. This case did not trigger GR reject/restore or DR repair
+accept/revert, so those branches are implemented but not claimed as real-case
+coverage. No macOS/Windows build was run on this Linux host.
+
+The 64-frame capture passed 100 random full-state seeks and frozen-file checks.
+Real-window playback/readback on RTX 4090 recorded active CPU+render P95 3.8 ms,
+active frame interval P95 7.2 ms, and request-to-GPU-readback P95 3480.6 ms.
+The larger capture currently misses the 1 s random-seek target; active rendering
+and seek latency are separate measurements. Do not interpret active intervals
+as a guarantee that no frame ever waits for reconstruction.
+
+Validation commands for this change:
+
+```sh
+# ECC (repository root ecc/)
+.venv/bin/pytest -q test/
+.venv/bin/pytest -q test/tools/test_replay_route.py test/tools/test_replay.py
+.venv/bin/ruff check chipcompiler/tools/replay_publish.py test/tools/test_replay_route.py
+# ECC-Tools
+cmake --build build --target ecc_bin ecc_py replay_capture_gate_test -j 8
+ctest --test-dir build -R '^replay_capture_gate_test$' --output-on-failure
+# Native
+cargo fmt --all -- --check
+cargo test --workspace -- --test-threads=1
+cargo install --path apps/chip-viewer-native --locked --force --root ~/.local
+# Desktop
+pnpm run check
+ECOS_REPLAY_TEST_WORKSPACE=/tmp/ecos-replay-validation-20261115/aes/route_grid pnpm --filter @ecos-studio/desktop-electron exec vitest run electron/services/replayService.test.ts
+DISPLAY=:189 pnpm run desktop:smoke
+```
+
+ECC's full suite passed 4495 tests (6 skipped, 1 deselected, 4 expected failures);
+the focused transport suite passed 20. The native workspace passed 482 tests,
+with four opt-in tests excluded by the default suite. The real 64-frame seek and
+GPU probes above were run separately. A parallel rerun stalled in existing GPU
+initialization tests on this host; serial workspace testing uses the documented
+host workaround. GUI check passed, including 1708 renderer and 1579 Electron
+tests. Linux `make build` produced the AppImage/deb and desktop smoke passed.
+
+The complete ECC-Tools build was attempted twice with
+`cmake --build build -j 8`. It remains blocked by
+`FastSTAInputFactsTest.cc:385` referring to missing `icts::SdcClockReader`.
+The modified runtime targets and Replay gate test build/pass; the unrelated CTS
+test source was not edited to mask this validation limitation.
+
+The system wrapper points to
+`~/.local/share/ecc/v0.1.0-alpha.12-replay-route-grid-20261116/ecc`.
+Its bundled ECC-Tools extension matches the installed validation extension
+(SHA256 `b94bc20f16a6b960d1010d70206148ddbe9f2cb5d533cba604eb0b12d75764ae`).
+Native is installed at `~/.local/bin/chip-viewer-native`. The Sizer runtime did
+not change in this routing refinement. Reopen Studio using the rebuilt product
+and rerun Route with Replay enabled to collect the grid/phase data. Existing
+captures still open but cannot acquire missing observations retroactively.
+Local screenshots/video are under `.claude/replay-evidence/route-20261116/`.
+
+
+Final desktop end-to-end validation passed all three journeys: GUI rtl2gds,
+terminal-started rtl2gds, and concurrent/cancelled workspace flows (3 files,
+9 tests passed, 1 optional signoff-lit test skipped because no lit suite was
+configured). The command was `pnpm --filter @ecos-studio/desktop-electron exec
+vitest run --config vitest.e2e.config.ts rtl2gds cli-flow flow-concurrency`, under
+`xvfb-run -a`, with `ECOS_E2E_ECC_BIN_DIR=~/.local/bin`, the installed ICS55 PDK,
+OSS CAD Suite 20260827, Sizer and Kepler replay-complete-20261116 roots. Evidence:
+`/tmp/replay-route-product-e2e`. This verifies the local Replay runtime, not a
+replacement CI provenance pin. Parent ECC gitlink/provenance were not advanced.
+
+Final installed, release-target and packaged Native hashes match:
+`eb1c8828c448156ca165592fe1f5d6cc440c04575db2ba55bbaa8c6d78dda5fd`.
+The final serial Rust workspace run and `cargo fmt --all -- --check` passed.
+Screenshots cover actual PA partition, GR overflow/GCell view and the first DR
+wave. `routing-waves.mp4` records 15 seconds of real playback; every one-second
+layout crop differs, verifying the recording contains geometry transitions.
+
+### Filler presentation batching (2026-11-16)
+
+Consecutive `filler_row` frames within the same subflow now share a single
+reveal, capped at 1.5 display seconds at 1×. The loader reconstructs the scene
+before the first row and the scene after the last row once. All changed filler
+masters share a row-ordered sweep (Y, then X), avoiding a separate animation and
+mesh rebuild for every row and cell master. This is presentation timing, not
+recorded algorithm timing. Source timestamps, deltas and flow ordering remain
+unchanged, and every delta is still validated while planning.
+
+A source-frame marker inside a batch maps proportionally into that batch's
+display interval; selecting it still reconstructs its exact recorded frame
+without animation. Resuming playback uses the full batch baseline. Normal
+result holds, final cumulative instance highlights and non-filler animations
+retain their existing behavior. Existing recordings work without rerunning ECC.
+
+The regression fixture covers 41 rows, mixed filler masters, partial reveal,
+reverse/exact frame seeking, cumulative highlights, and final-scene equality.
+
+Read-only validation against `/nfs/home/huangzengrong/projects/benchmark/gcd/ws_0004`:
+46 source frames, 41 filler-row batches, 17,316 final objects and 885 touched
+objects. The same recorded data's timeline dropped from 244.7 s to approximately
+4.8 s, including the unchanged 2 s result hold. X11 screenshots and an 8 s
+playback recording show a partial sweep and the completed highlighted layout:
+`.claude/replay-evidence/filler-20261116/`. No source workspace files were changed.
+
+Validation commands (Rust commands run in `ecos/chip-viewer`):
+
+- `cargo fmt --all -- --check` passed.
+- `cargo test --workspace -- --test-threads=1` passed: 483 passed, 4 opt-in tests
+  ignored. Serial execution avoids this host's concurrent GPU initialization issue.
+- `ECOS_REPLAY_TEST_CATALOG=/tmp/replay-filler-catalog.json cargo test -p
+  chip-viewer-native real_workspace_random_seek_and_frozen_artifacts -- --ignored
+  --nocapture --test-threads=1` passed: 100 random seeks matched complete scene
+  fingerprints and frozen assets. Debug-build seek+index P95 was 47.6 ms.
+- `cargo install --path apps/chip-viewer-native --locked --force --root
+  /nfs/home/huangzengrong/.local` installed the updated Native.
+
+Installed, release-target and staged Native SHA256:
+`a9783f6921c17df262a485c3eea492d44c797811d6053da7ea83479c5a37247b`.
+The 30 s GPU stress benchmark, full RTL-to-GDS desktop journeys, and macOS/Windows
+builds were not repeated for this focused presentation change; the real Filler
+playback recording exercises the changed rendering path. No ECC/Sizer code,
+capture format or installation changed in this optimization. Larger designs can
+still incur scene preparation time in addition to the bounded animation duration.
+
+Linux product delivery also passed:
+`CHIPCOMPILER_ECC_SIZER_ROOT=/nfs/home/huangzengrong/.local/share/ecc/tools/ecc-sizer/replay-complete-20261116 make build`
+from the repository root, and `DISPLAY=:189 pnpm run desktop:smoke` from
+`ecos/gui`. AppImage and deb were regenerated. The unpacked product's Native
+binary matches the installed/staged SHA256 above. Restart the rebuilt Studio
+and open Replay against existing workspace data to test the faster sweep.

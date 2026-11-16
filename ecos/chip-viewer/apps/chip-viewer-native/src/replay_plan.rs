@@ -10,12 +10,17 @@ use std::sync::mpsc::{self, Receiver};
 
 pub const RESULT_SECONDS: f64 = 2.0;
 pub const MAP_SECONDS: f64 = 2.0;
+const FILLER_SECONDS: f64 = 1.5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Hold,
     Motion,
     Reveal,
+    /// Consecutive filler rows share one reveal and one prepared mesh.
+    Filler {
+        first: usize,
+    },
 }
 
 #[derive(Debug)]
@@ -52,12 +57,28 @@ impl StepPlan {
     pub fn build(recording: &Recording, maps: usize) -> Result<Self> {
         let frames = &recording.manifest.frames;
         let mut scene = Scene::default();
-        let mut clips = Vec::new();
+        let mut clips: Vec<Clip> = Vec::new();
         for (i, frame) in frames.iter().enumerate() {
             let delta = recording.delta(i)?;
-            let (kind, seconds) = classify(&scene, &delta, frames, i);
+            let (mut kind, mut seconds) = classify(&scene, &delta, frames, i);
             // Applying every delta also validates revision continuity and bounds.
             scene.apply(delta).map_err(anyhow::Error::msg)?;
+            debug_assert_eq!(scene.revision, Some(frame.sequence));
+            if frame.phase == "filler_row" {
+                if let Some(clip) = clips.last_mut().filter(|clip| {
+                    matches!(clip.kind, Kind::Filler { .. })
+                        && frames[clip.frame].subflow == frame.subflow
+                        && frames[clip.frame + 1..i]
+                            .iter()
+                            .all(|frame| frame.phase == "filler_row")
+                }) {
+                    clip.frame = i;
+                    clip.end = (clip.end + seconds).min(FILLER_SECONDS);
+                    continue;
+                }
+                kind = Kind::Filler { first: i };
+                seconds = seconds.min(FILLER_SECONDS);
+            }
             if seconds > 0.0 {
                 clips.push(Clip {
                     frame: i,
@@ -66,7 +87,6 @@ impl StepPlan {
                     kind,
                 });
             }
-            debug_assert_eq!(scene.revision, Some(frame.sequence));
         }
         recording.check_current()?;
         Ok(Self::assemble(
@@ -88,6 +108,16 @@ impl StepPlan {
         let mut cursor = 0;
         let mut last = 0.0;
         for (i, value) in frame_ends.iter_mut().enumerate() {
+            if let Some(clip) = clips.get(cursor) {
+                if let Kind::Filler { first } = clip.kind {
+                    if i >= first {
+                        // Keep exact source-frame nodes addressable within the batch.
+                        last = clip.start
+                            + (clip.end - clip.start) * (i - first + 1) as f64
+                                / (clip.frame - first + 1) as f64;
+                    }
+                }
+            }
             if clips.get(cursor).is_some_and(|clip| clip.frame == i) {
                 last = clips[cursor].end;
                 cursor += 1;
@@ -110,7 +140,11 @@ impl StepPlan {
         (index < self.clips.len()).then_some(index)
     }
 
-    /// Subflow end markers map to completed changes, never into a transition.
+    /// Source markers retain exact frame selection, including frames inside a batch.
+    pub fn display_at_frame(&self, frame: usize) -> Option<f64> {
+        self.frame_ends.get(frame).copied()
+    }
+
     pub fn display_at_source(&self, seconds: f64) -> f64 {
         self.frame_at_source(seconds)
             .map_or(0.0, |i| self.frame_ends[i])

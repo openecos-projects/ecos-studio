@@ -30,6 +30,7 @@ mod replay_metrics;
 mod replay_motion;
 mod replay_plan;
 mod replay_reveal;
+mod replay_route;
 #[cfg(test)]
 mod replay_validation_tests;
 mod timing;

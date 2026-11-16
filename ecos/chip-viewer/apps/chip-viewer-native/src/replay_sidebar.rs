@@ -45,7 +45,7 @@ impl ReplayApp {
                     }
                     if let Some(index) = recording.scene.revision {
                         let frame = &recording.manifest.frames[index];
-                        ui.label(&frame.phase);
+                        ui.label(frame.phase.replace('_', " "));
                         ui.small(format!(
                             "Frame {} / {} · {} touched objects",
                             index + 1,
@@ -60,6 +60,9 @@ impl ReplayApp {
                         "Execution {:.2}s",
                         recording.manifest.duration_ns as f64 / 1e9
                     ));
+                }
+                if !self.complete && self.pending.is_none() {
+                    self.route_overlay.controls(ui);
                 }
                 ui.separator();
                 if !self.complete || self.pending.is_some() || !self.error.is_empty() {

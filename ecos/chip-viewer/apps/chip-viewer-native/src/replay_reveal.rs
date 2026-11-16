@@ -6,6 +6,12 @@ struct Entry {
     start: f64,
 }
 
+#[derive(Clone, Copy)]
+enum Pattern {
+    ByType,
+    FillerRows,
+}
+
 #[derive(Default)]
 pub struct Reveal {
     entries: BTreeMap<String, Entry>,
@@ -60,8 +66,35 @@ impl Reveal {
         {
             return;
         }
+        self.begin_changes(before, after, Pattern::ByType);
+    }
+
+    pub fn begin_filler(&mut self, before: &Scene, after: &Scene, frames: &[Frame]) {
+        self.clear();
+        let first = before.revision.map_or(0, |revision| revision + 1);
+        let Some(last) = after.revision else {
+            return;
+        };
+        let Some(batch) = frames.get(first..=last).filter(|batch| !batch.is_empty()) else {
+            return;
+        };
+        if batch.iter().any(|frame| {
+            frame.phase != "filler_row"
+                || frame.subflow != batch[0].subflow
+                || frame.state_domain == "native_input"
+        }) {
+            return;
+        }
+        self.begin_changes(before, after, Pattern::FillerRows);
+    }
+
+    fn begin_changes(&mut self, before: &Scene, after: &Scene, pattern: Pattern) {
         for (id, old) in before.objects.iter() {
-            if after.objects.get(id) != Some(old) {
+            if !matches!(
+                old.kind.as_str(),
+                "route_congestion" | "route_violation" | "route_region"
+            ) && after.objects.get(id) != Some(old)
+            {
                 self.ghosts.push(old.clone());
             }
         }
@@ -70,14 +103,22 @@ impl Reveal {
             if before.objects.get(id) == Some(object) {
                 continue;
             }
-            let Some(key) = group(object) else {
+            let Some(mut key) = group(object) else {
                 continue;
             };
+            if matches!(pattern, Pattern::FillerRows)
+                && matches!(object.kind.as_str(), "instance" | "macro")
+            {
+                key = (6, 0, "Filler cells".into());
+            }
             groups.entry(key).or_default().push((id, object));
         }
         for ((_, _, name), mut objects) in groups {
             // A deterministic left-to-right presentation within each type/layer.
-            objects.sort_by_key(|(id, object)| (object.bbox[0], object.bbox[1], *id));
+            objects.sort_by_key(|(id, object)| match pattern {
+                Pattern::ByType => (object.bbox[0], object.bbox[1], *id),
+                Pattern::FillerRows => (object.bbox[1], object.bbox[0], *id),
+            });
             let start = self.duration;
             self.groups.push((start, name));
             let count = objects.len();
@@ -143,6 +184,12 @@ impl Reveal {
 }
 
 pub fn group(object: &Object) -> Option<(u8, u32, String)> {
+    if matches!(
+        object.kind.as_str(),
+        "route_congestion" | "route_violation" | "route_region"
+    ) {
+        return None;
+    }
     let (rank, name) = match object.kind.as_str() {
         "die" => (0, "Die boundary".into()),
         "core" => (1, "Core boundary".into()),
