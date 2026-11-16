@@ -332,6 +332,7 @@ import {
   consumeWorkspaceWizardRequest,
   useWorkspaceWizardRequest,
 } from '@/utils/workspaceNavigation'
+import { normalizeWorkspaceFlowConfig } from '@/utils/workspaceReconfigure'
 
 type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
   managedWorkspaceRoot?: string
@@ -1745,28 +1746,6 @@ function normalizeWorkspaceParameters(
         parametersJson?.margin,
       0,
     ),
-  }
-}
-
-function normalizeWorkspaceFlowConfig(
-  flowText: string | null,
-): NonNullable<WorkspaceConfig['flow_config']> {
-  const flowJson = parseOptionalJson(flowText)
-  const steps = Array.isArray(flowJson?.steps)
-    ? flowJson.steps
-        .map((step) => {
-          if (typeof step === 'string') return step
-          if (optionalRecord(step)) return optionalString(optionalRecord(step)?.name)
-          return ''
-        })
-        .filter((step): step is string => step.trim() !== '')
-    : []
-  const normalizedSteps = steps.length > 0 ? steps : ['Synthesis', 'Harden']
-
-  return {
-    start_step: normalizedSteps[0],
-    end_step: normalizedSteps[normalizedSteps.length - 1],
-    steps: normalizedSteps,
   }
 }
 

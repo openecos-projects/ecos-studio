@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { workspaceReconfigureInitialConfig } from './workspaceReconfigure'
+import {
+  normalizeWorkspaceFlowConfig,
+  workspaceReconfigureInitialConfig,
+} from './workspaceReconfigure'
 
 describe('workspaceReconfigureInitialConfig', () => {
   it('maps the ECC canonical projection without reading derived files', () => {
@@ -28,7 +31,12 @@ describe('workspaceReconfigureInitialConfig', () => {
                 { fileId: 'lib', role: 'liberty' },
               ],
             },
-            flow: { flowId: 'rtl2gds', fromStepId: 'Synthesis', throughStepId: 'STA' },
+            flow: {
+              flowId: 'rtl2gds',
+              fromStepId: 'Synthesis',
+              throughStepId: 'STA',
+              stepSubprocess: false,
+            },
           },
           workspaceBindings: {
             inputs: { 'rtl-main': '/ws/origin/gcd.v', constraints: '/ws/origin/gcd.sdc' },
@@ -83,7 +91,7 @@ describe('workspaceReconfigureInitialConfig', () => {
         margin: 3,
         manual_macro_placement: true,
       },
-      flow_config: { steps: ['Synthesis', 'STA'] },
+      flow_config: { steps: ['Synthesis', 'STA'], step_subprocess: false },
       pdk_config: {
         tech_lef: ['/pdk/tech.lef'],
         cell_lef: ['/pdk/cells.lef'],
@@ -91,4 +99,41 @@ describe('workspaceReconfigureInitialConfig', () => {
       },
     })
   })
+})
+
+describe('normalizeWorkspaceFlowConfig', () => {
+  it.each([true, false])(
+    'restores saved step subprocess mode %s when reconfiguring',
+    (stepSubprocess) => {
+      expect(
+        normalizeWorkspaceFlowConfig(
+          JSON.stringify({
+            options: { execution: { step_subprocess: stepSubprocess } },
+            steps: [{ name: 'Synthesis', state: 'pass' }, 'Filler', { name: 'LVS' }],
+          }),
+        ),
+      ).toEqual({
+        start_step: 'Synthesis',
+        end_step: 'LVS',
+        steps: ['Synthesis', 'Filler', 'LVS'],
+        step_subprocess: stepSubprocess,
+      })
+    },
+  )
+
+  it.each([
+    null,
+    'invalid json',
+    '{}',
+    JSON.stringify({ options: { execution: { step_subprocess: 'false' } } }),
+  ])(
+    'keeps legacy defaults for absent or malformed execution settings: %s',
+    (flowText) => {
+      expect(normalizeWorkspaceFlowConfig(flowText)).toEqual({
+        start_step: 'Synthesis',
+        end_step: 'Harden',
+        steps: ['Synthesis', 'Harden'],
+      })
+    },
+  )
 })

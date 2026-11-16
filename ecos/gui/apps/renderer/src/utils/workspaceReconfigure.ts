@@ -23,6 +23,36 @@ function records(value: unknown): Record<string, unknown>[] {
     : []
 }
 
+export function normalizeWorkspaceFlowConfig(
+  flowText: string | null,
+): NonNullable<WorkspaceConfig['flow_config']> {
+  let flowJson: Record<string, unknown> = {}
+  try {
+    flowJson = record(JSON.parse(flowText ?? '{}'))
+  } catch {
+    // Legacy workspaces without a usable flow ledger retain the default range.
+  }
+  const steps = Array.isArray(flowJson?.steps)
+    ? flowJson.steps
+        .map((step) => {
+          if (typeof step === 'string') return step
+          return text(record(step).name)
+        })
+        .filter((step): step is string => step.trim() !== '')
+    : []
+  const normalizedSteps = steps.length > 0 ? steps : ['Synthesis', 'Harden']
+  const execution = record(record(flowJson.options).execution)
+
+  return {
+    start_step: normalizedSteps[0],
+    end_step: normalizedSteps[normalizedSteps.length - 1],
+    steps: normalizedSteps,
+    ...(typeof execution?.step_subprocess === 'boolean'
+      ? { step_subprocess: execution.step_subprocess }
+      : {}),
+  }
+}
+
 export function workspaceReconfigureInitialConfig(
   snapshot: EccWorkspaceRuntimeSnapshot,
   workspacePath: string,
@@ -110,6 +140,9 @@ export function workspaceReconfigureInitialConfig(
       start_step: text(flow.fromStepId) || steps[0] || 'Synthesis',
       end_step: text(flow.throughStepId) || steps[steps.length - 1] || 'Harden',
       steps,
+      ...(typeof flow.stepSubprocess === 'boolean'
+        ? { step_subprocess: flow.stepSubprocess }
+        : {}),
     },
     project_context: projectContext
       ? {

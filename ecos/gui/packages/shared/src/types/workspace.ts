@@ -82,6 +82,8 @@ export interface WorkspaceConfig {
     start_step: string
     end_step: string
     steps: string[]
+    /** Workspace-local option stored in home/flow.json. */
+    step_subprocess?: boolean
   }
   pdk_config?: {
     mode?: 'default' | 'manual'

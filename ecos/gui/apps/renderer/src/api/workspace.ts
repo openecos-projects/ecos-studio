@@ -269,6 +269,9 @@ export function backendWorkspaceOptions(
       },
       flow: {
         flowId,
+        ...(config.flow_config?.step_subprocess !== undefined
+          ? { stepSubprocess: config.flow_config.step_subprocess }
+          : {}),
         ...(startStep && endStep
           ? {
               fromStepId: startStep,
