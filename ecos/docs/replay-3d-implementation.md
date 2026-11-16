@@ -126,3 +126,13 @@ xvfb-run -a pnpm --filter @ecos-studio/desktop-electron exec vitest run \
 ```
 
 显示边界：实例采用已采集的包围盒；Z 高度为示意值，via 使用记录的 cut layer 高度，不推断未采集的真实连接。边界、Map 和算法 grid 是投影到同一坐标系的语义叠加，不参与 GPU 深度遮挡。静态背景聚合不是精确几何替代；GPU 使用连续脏区间上传，不是永久对象槽位。Linux 外的平台、完整显存峰值矩阵与旧/新版本隔离对照基准本轮未执行。
+
+## RCX / STA 分析矩形投影修正
+
+初版 `ReplayAnalysis::paint` 将两个对角点投影后调用屏幕矩形 API，导致分析区域始终水平/垂直于显示器。修正为依次投影版图 bbox 的四角，使用封闭凸多边形绘制填充和描边；屏幕包围盒只用于裁剪判断。RCX、STA 及共用分析渲染器的诊断视图均遵守这一规则。3D 仍采用当前相机的版图平面投影，2D 保持正交矩形。
+
+回归测试 `analysis_boxes_follow_all_four_projected_corners_in_2d_and_rotated_3d` 检查实际输出绘图形状，覆盖两类报告、2D 和两个不同的 3D yaw，验证四角坐标、填充、封闭描边及倾斜边方向。此修正只影响显示，无须重新运行 flow 或生成 Replay 数据。
+
+修正验证：`cargo test -p chip-viewer-native replay_analysis::tests -- --test-threads=1` 两项通过；`cargo test --workspace -- --test-threads=1` 491 项通过、4 项默认忽略；`cargo fmt --all -- --check` 通过。使用 `gcd/ws_0004` 的真实 RCX/STA 数据检查 3D 画面，截图位于 `.claude/replay-evidence/dual-20261116/projection-RCX/` 与 `projection-sta/`。
+
+再次执行前述 Native 安装和根目录 `make build`，`xvfb-run -a pnpm run desktop:smoke` 通过；本次系统安装、release target 和桌面包内 Native 的 SHA-256 一致为 `1bb016d60a886a4b750701837625036f19e7a58c3761309eb5cf5502de041cbe`，替代上一节的初次双视图构建。未改 ECC、数据格式或启动接口，本次未重复完整 EDA flow、Electron 服务测试、随机定位基准及跨平台验证。

@@ -266,17 +266,25 @@ impl ReplayAnalysis {
                 Color32::from_rgba_unmultiplied(255, 102, 129, 180)
             };
             for b in &geometry.boxes {
-                let rect = Rect::from_two_pos(project(b[0], b[1]), project(b[2], b[3])).expand(1.0);
-                if !rect.intersects(painter.clip_rect()) {
+                // Preserve the layout plane in either projection. Two projected
+                // corners only describe a screen-aligned bounding rectangle.
+                let points = vec![
+                    project(b[0], b[1]),
+                    project(b[2], b[1]),
+                    project(b[2], b[3]),
+                    project(b[0], b[3]),
+                ];
+                if !Rect::from_points(&points)
+                    .expand(1.0)
+                    .intersects(painter.clip_rect())
+                {
                     continue;
                 }
-                painter.rect_filled(rect, 0.0, color.gamma_multiply(0.35));
-                painter.rect_stroke(
-                    rect,
-                    0.0,
+                painter.add(egui::Shape::convex_polygon(
+                    points,
+                    color.gamma_multiply(0.35),
                     Stroke::new(1.5, color),
-                    egui::StrokeKind::Outside,
-                );
+                ));
             }
             for pair in geometry.points.windows(2) {
                 if let (Some(a), Some(b)) = (pair[0], pair[1]) {
@@ -373,6 +381,78 @@ fn bounds(geometry: &Geometry) -> Option<[i64; 4]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn analysis_boxes_follow_all_four_projected_corners_in_2d_and_rotated_3d() {
+        let screen = Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0));
+        for kind in ["rcx", "sta"] {
+            for yaw in [None, Some(45.0), Some(-30.0)] {
+                let analysis = ReplayAnalysis {
+                    data: serde_json::from_value(serde_json::json!({
+                        "schema": "ecos.replay.analysis.v1",
+                        "views": [{"label": kind, "kind": kind, "basis": "final",
+                            "items": [{"label": "region", "value": 1.0}]}]
+                    }))
+                    .unwrap(),
+                    geometry: vec![vec![Geometry {
+                        boxes: vec![[100, 100, 400, 300]],
+                        ..Default::default()
+                    }]],
+                    selected: Some(0),
+                    progress: 1.0,
+                    ..Default::default()
+                };
+                let matrix = yaw.map(|yaw| {
+                    crate::replay_camera_plan::Preset { pitch: 38.0, yaw }
+                        .camera(
+                            chipgeom_format::Rect32 {
+                                lx: 0,
+                                ly: 0,
+                                hx: 1000,
+                                hy: 1000,
+                            },
+                            200.0,
+                            4.0 / 3.0,
+                        )
+                        .view_proj(4.0 / 3.0)
+                });
+                let project = |x: i64, y: i64| {
+                    matrix.as_ref().map_or(Pos2::new(x as f32, y as f32), |m| {
+                        let p = m.transform_point([x as f32, y as f32, 0.0, 1.0]);
+                        Pos2::new(400.0 + 400.0 * p[0] / p[3], 300.0 - 300.0 * p[1] / p[3])
+                    })
+                };
+                let ctx = egui::Context::default();
+                let output = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        ..Default::default()
+                    },
+                    |ctx| analysis.paint(&ctx.layer_painter(egui::LayerId::background()), project),
+                );
+                assert_eq!(output.shapes.len(), 1);
+                let egui::Shape::Path(path) = &output.shapes[0].shape else {
+                    panic!("Analysis bounds must be a projected polygon, not a screen rectangle");
+                };
+                assert_eq!(
+                    path.points,
+                    vec![
+                        project(100, 100),
+                        project(400, 100),
+                        project(400, 300),
+                        project(100, 300)
+                    ]
+                );
+                assert!(path.closed);
+                assert_ne!(path.fill, Color32::TRANSPARENT);
+                if yaw.is_some() {
+                    assert!((path.points[0].y - path.points[1].y).abs() > 1.0);
+                    assert!((path.points[1].x - path.points[2].x).abs() > 1.0);
+                }
+            }
+        }
+    }
+
     #[test]
     fn diagnostic_rectangles_stay_local_and_missing_objects_are_reported() {
         let item: Item = serde_json::from_value(serde_json::json!({"label":"short","bboxes":[[1,2,3,4]],"nets":["whole_net"],"instances":["missing"]})).unwrap();
