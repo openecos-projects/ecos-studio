@@ -11,6 +11,7 @@ mod macro_staging;
 mod macro_toolbar;
 mod map_data;
 mod nav3d;
+mod power_map;
 mod replay;
 mod replay_analysis;
 mod replay_batch;
@@ -33,9 +34,11 @@ mod replay_plan;
 mod replay_reveal;
 mod replay_route;
 mod replay_scene3d;
+mod replay_timing;
 #[cfg(test)]
 mod replay_validation_tests;
 mod timing;
+mod timing_route;
 
 use std::path::{Path, PathBuf};
 
@@ -548,7 +551,7 @@ fn main() -> Result<()> {
     let antenna_data = args.antenna_data.clone();
     let antenna_statis = args.antenna_statis.clone();
     let lvs_data = args.lvs_data.clone();
-    let map_root = args.map_root.clone();
+    let map_root = crate::map_data::power_map_root(&manifest).or_else(|| args.map_root.clone());
     let sta_feature_dir = args.sta_feature_dir.clone();
 
     let run_result = eframe::run_native(

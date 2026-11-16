@@ -1,5 +1,6 @@
 //! Resolve frozen reports once against the final scene, then paint bounded overlays.
 use crate::replay_data::{read, Recording};
+use crate::replay_timing::{self, TimingPath};
 use chipgeom_format::replay::Scene;
 use chipgeom_format::replay_analysis::{Analysis, Item};
 use egui::{Color32, Pos2, Rect, Stroke};
@@ -12,6 +13,7 @@ struct Geometry {
     missing: usize,
     positions: Vec<[i64; 2]>,
     segments: Vec<[[i64; 2]; 2]>,
+    timing: Option<TimingPath>,
 }
 
 #[derive(Default)]
@@ -22,6 +24,7 @@ pub struct ReplayAnalysis {
     item: Option<usize>,
     progress: f32,
     pub error: String,
+    pub requested_time: Option<f64>,
 }
 
 impl ReplayAnalysis {
@@ -54,10 +57,13 @@ impl ReplayAnalysis {
             Ok(data)
         })();
         match loaded {
-            Ok(data) => Self {
-                data,
-                ..Self::default()
-            },
+            Ok(mut data) => {
+                replay_timing::group_corners(&mut data);
+                Self {
+                    data,
+                    ..Self::default()
+                }
+            }
             Err(error) => Self {
                 error: error.to_string(),
                 ..Self::default()
@@ -140,6 +146,21 @@ impl ReplayAnalysis {
                     .collect()
             })
             .collect();
+        // Legacy raw power reports have names but no positions. Resolve first,
+        // then order the reveal spatially just like the geometry TSV format.
+        for (view, geometry) in self.data.views.iter_mut().zip(&mut self.geometry) {
+            if view.kind == "power" {
+                let mut paired: Vec<_> = view.items.drain(..).zip(geometry.drain(..)).collect();
+                paired.sort_by_key(|(item, g)| {
+                    let b = g.boxes.first().copied().unwrap_or([i64::MAX; 4]);
+                    (b[1], b[0], item.label.clone())
+                });
+                for (item, g) in paired {
+                    view.items.push(item);
+                    geometry.push(g);
+                }
+            }
+        }
     }
 
     pub fn clear(&mut self) {
@@ -147,13 +168,69 @@ impl ReplayAnalysis {
         self.item = None;
     }
 
-    pub fn auto_select(&mut self, index: usize, progress: f32) {
-        self.selected = (index < self.len()).then_some(index);
-        self.item = None;
-        self.progress = progress.clamp(0.0, 1.0);
+    fn view_duration(&self, index: usize) -> f64 {
+        match self.data.views[index].kind.as_str() {
+            "timing" => replay_timing::CORNER_SECONDS,
+            "power" => 4.0,
+            _ => crate::replay_plan::MAP_SECONDS,
+        }
     }
 
-    /// Manual selection pauses playback; an item additionally requests layout focus.
+    pub fn duration(&self) -> f64 {
+        (0..self.len()).map(|i| self.view_duration(i)).sum()
+    }
+
+    fn offset(&self, index: usize) -> f64 {
+        (0..index).map(|i| self.view_duration(i)).sum()
+    }
+
+    pub fn auto_select_time(&mut self, mut seconds: f64) {
+        self.clear();
+        for index in 0..self.len() {
+            let duration = self.view_duration(index);
+            if seconds < duration || index + 1 == self.len() {
+                self.selected = Some(index);
+                let reveal = if self.data.views[index].kind == "power" {
+                    duration - 1.0
+                } else {
+                    duration
+                };
+                self.progress = (seconds / reveal).clamp(0.0, 1.0) as f32;
+                return;
+            }
+            seconds -= duration;
+        }
+    }
+
+    /// Loaded only by the worker, from this attempt's verified final snapshot.
+    pub fn resolve_routes(&mut self, recording: &Recording) {
+        if !self.data.views.iter().any(|v| v.kind == "timing") {
+            return;
+        }
+        let result = (|| -> anyhow::Result<()> {
+            let file = recording.final_geometry_path()?.ok_or_else(|| {
+                anyhow::anyhow!("No frozen routed snapshot; rerun STA with Replay enabled")
+            })?;
+            let mut resolver =
+                crate::timing_route::Resolver::new(chip_view_db::ChipViewDb::open(file)?);
+            for (view, geometry) in self.data.views.iter().zip(&mut self.geometry) {
+                if view.kind != "timing" {
+                    continue;
+                }
+                for (item, g) in view.items.iter().zip(geometry) {
+                    let path = TimingPath::resolve(item, &mut resolver);
+                    g.missing = path.unresolved;
+                    g.timing = Some(path);
+                }
+            }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            self.error = format!("Routed timing unavailable: {error}");
+        }
+    }
+
+    /// Timing and power selections request a seek; diagnostic items request layout focus.
     pub fn controls(&mut self, ui: &mut egui::Ui) -> (bool, Option<[i64; 4]>) {
         if self.len() == 0 && self.error.is_empty() && self.data.unavailable.is_empty() {
             return (false, None);
@@ -174,11 +251,61 @@ impl ReplayAnalysis {
             self.selected = selected;
             self.item = None;
             self.progress = 1.0;
+            if let Some(index) = selected {
+                if matches!(self.data.views[index].kind.as_str(), "timing" | "power") {
+                    self.requested_time = Some(self.offset(index));
+                }
+            }
         }
         let mut focus = None;
         if let Some(index) = self.selected {
             let view = &self.data.views[index];
-            ui.small("Completed analysis · recorded result");
+            ui.small(if view.kind == "power" {
+                "Power heatmap · completed result"
+            } else if view.kind == "timing" {
+                "Timing path replay · completed result"
+            } else {
+                "Completed analysis · recorded result"
+            });
+            if view.kind == "power" {
+                let maximum = view
+                    .items
+                    .iter()
+                    .filter_map(|i| i.value)
+                    .fold(0.0_f64, f64::max);
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 8.0),
+                    egui::Sense::hover(),
+                );
+                for i in 0..64 {
+                    let [r, g, b, _] = crate::map_data::ColormapMode::Turbo.sample(i as f32 / 63.0);
+                    ui.painter().rect_filled(
+                        Rect::from_min_max(
+                            egui::pos2(rect.left() + rect.width() * i as f32 / 64.0, rect.top()),
+                            egui::pos2(
+                                rect.left() + rect.width() * (i + 1) as f32 / 64.0,
+                                rect.bottom(),
+                            ),
+                        ),
+                        0.0,
+                        Color32::from_rgb(r, g, b),
+                    );
+                }
+                ui.small(format!("0 — {maximum:.3e} W · power per instance"));
+            }
+            if view.kind == "timing" {
+                ui.small("All paths in this corner · 6 s");
+                ui.small("Routed wires and vias · click a path to inspect");
+                ui.horizontal(|ui| {
+                    ui.colored_label(Color32::from_rgb(255, 177, 92), "Setup");
+                    ui.colored_label(Color32::from_rgb(90, 210, 240), "Hold");
+                });
+                if self.item.is_some() && ui.small_button("Show all paths").clicked() {
+                    self.item = None;
+                    self.progress = 1.0;
+                    changed = true;
+                }
+            }
             let missing: usize = self
                 .geometry
                 .get(index)
@@ -187,7 +314,7 @@ impl ReplayAnalysis {
                 .map(|g| g.missing)
                 .sum();
             ui.small(format!(
-                "{} items · {} unresolved references",
+                "{} items · {} unresolved references / route arcs",
                 view.items.len(),
                 missing
             ));
@@ -202,9 +329,35 @@ impl ReplayAnalysis {
                         let item = &view.items[i];
                         let label = item.value.map_or_else(
                             || item.label.clone(),
-                            |v| format!("{} · {:.4} {}", item.label, v, view.unit),
+                            |v| {
+                                if view.kind == "power" {
+                                    format!("{} · {v:.3e} W", item.label)
+                                } else {
+                                    format!("{} · {v:.4} {}", item.label, view.unit)
+                                }
+                            },
                         );
-                        if ui.selectable_label(self.item == Some(i), label).clicked() {
+                        let label = if view.kind == "timing" {
+                            format!(
+                                "#{:02} {} · slack {} ns · {}",
+                                i + 1,
+                                item.details["analysis_type"].as_str().unwrap_or(""),
+                                item.value
+                                    .map_or_else(|| "N/A".into(), |v| format!("{v:+.3}")),
+                                item.label.replace('→', "->")
+                            )
+                        } else {
+                            label
+                        };
+                        if ui
+                            .add(
+                                egui::Button::new(&label)
+                                    .selected(self.item == Some(i))
+                                    .truncate(),
+                            )
+                            .on_hover_text(&label)
+                            .clicked()
+                        {
                             self.item = Some(i);
                             self.progress = 1.0;
                             changed = true;
@@ -232,6 +385,15 @@ impl ReplayAnalysis {
     }
 
     pub fn paint(&self, painter: &egui::Painter, project: impl Fn(i64, i64) -> Pos2) {
+        self.paint_layers(painter, |x, y, _| project(x, y));
+    }
+
+    pub fn paint_layers(
+        &self,
+        painter: &egui::Painter,
+        project_layer: impl Fn(i64, i64, Option<u16>) -> Pos2,
+    ) {
+        let project = |x, y| project_layer(x, y, None);
         let Some(index) = self.selected else {
             return;
         };
@@ -239,22 +401,66 @@ impl ReplayAnalysis {
             return;
         };
         let view = &self.data.views[index];
+        if matches!(view.kind.as_str(), "timing" | "power") {
+            painter.rect_filled(painter.clip_rect(), 0.0, Color32::from_black_alpha(135));
+        }
         let maximum = view
             .items
             .iter()
             .filter_map(|item| item.value)
             .fold(0.0_f64, f64::max)
             .max(f64::EPSILON);
-        let visible = ((geometry.len() as f32 * self.progress).ceil() as usize).min(geometry.len());
-        for (i, geometry) in geometry.iter().enumerate().take(visible) {
+        if view.kind == "timing" {
+            let mut occupied = replay_timing::Labels::default();
+            for (i, g) in geometry.iter().enumerate() {
+                if self.item.is_some_and(|selected| selected != i) {
+                    continue;
+                }
+                if let Some(path) = &g.timing {
+                    path.paint(
+                        painter,
+                        &project_layer,
+                        &view.items[i],
+                        self.progress,
+                        &mut occupied,
+                        self.item == Some(i),
+                    );
+                }
+            }
+            return;
+        }
+        let mut power_mesh = egui::Mesh::default();
+        for (i, geometry) in geometry.iter().enumerate() {
             if self.item.is_some_and(|selected| selected != i) {
+                continue;
+            }
+            let fade = if view.kind == "power" && self.item.is_none() {
+                // Overlapping smooth fades form a spatial sweep, not a sequence
+                // of sudden static snapshots. Keep values and scale fixed.
+                let t = (self.progress * 1.2 - i as f32 / self.geometry[index].len().max(1) as f32)
+                    / 0.2;
+                let t = t.clamp(0.0, 1.0);
+                t * t * (3.0 - 2.0 * t)
+            } else {
+                if i as f32 >= self.geometry[index].len() as f32 * self.progress
+                    && self.item.is_none()
+                {
+                    continue;
+                }
+                1.0
+            };
+            if fade <= 0.0 {
                 continue;
             }
             let color = if view.items[i].value.is_none()
                 && matches!(view.kind.as_str(), "power" | "ir" | "em" | "rcx")
             {
                 Color32::GRAY
-            } else if matches!(view.kind.as_str(), "power" | "ir" | "em" | "rcx") {
+            } else if view.kind == "power" {
+                let value = (view.items[i].value.unwrap_or(0.0) / maximum).clamp(0.0, 1.0) as f32;
+                let [r, g, b, _] = crate::map_data::ColormapMode::Turbo.sample(value);
+                Color32::from_rgba_unmultiplied(r, g, b, 210)
+            } else if matches!(view.kind.as_str(), "ir" | "em" | "rcx") {
                 let value = (view.items[i].value.unwrap_or(0.0) / maximum).clamp(0.0, 1.0) as f32;
                 Color32::from_rgba_unmultiplied(
                     (80.0 + value * 175.0) as u8,
@@ -264,7 +470,8 @@ impl ReplayAnalysis {
                 )
             } else {
                 Color32::from_rgba_unmultiplied(255, 102, 129, 180)
-            };
+            }
+            .gamma_multiply(fade);
             for b in &geometry.boxes {
                 // Preserve the layout plane in either projection. Two projected
                 // corners only describe a screen-aligned bounding rectangle.
@@ -278,6 +485,25 @@ impl ReplayAnalysis {
                     .expand(1.0)
                     .intersects(painter.clip_rect())
                 {
+                    continue;
+                }
+                if view.kind == "power" {
+                    let start = power_mesh.vertices.len() as u32;
+                    for point in points {
+                        power_mesh.vertices.push(egui::epaint::Vertex {
+                            pos: point,
+                            uv: egui::epaint::WHITE_UV,
+                            color,
+                        });
+                    }
+                    power_mesh.indices.extend_from_slice(&[
+                        start,
+                        start + 1,
+                        start + 2,
+                        start,
+                        start + 2,
+                        start + 3,
+                    ]);
                     continue;
                 }
                 painter.add(egui::Shape::convex_polygon(
@@ -304,6 +530,9 @@ impl ReplayAnalysis {
                 painter.circle_filled(project(point[0], point[1]), 2.0, color);
             }
         }
+        if !power_mesh.is_empty() {
+            painter.add(power_mesh);
+        }
     }
 }
 
@@ -319,9 +548,15 @@ fn resolve(
         segments: item.segments.clone(),
         ..Geometry::default()
     };
+    if item.details["stages"].is_array() {
+        // Routed paths are prepared separately from the verified native snapshot.
+        return result;
+    }
     for name in &item.instances {
         if let Some(b) = instances.get(name.as_str()) {
-            result.boxes.push(*b);
+            if item.bboxes.is_empty() {
+                result.boxes.push(*b);
+            }
         } else {
             result.missing += 1;
         }
@@ -338,8 +573,8 @@ fn resolve(
         }
     }
     for name in &item.pins {
-        if let Some(point) = pins.get(name) {
-            result.points.push(Some(*point));
+        if let Some(point) = replay_timing::lookup_pin(name, pins) {
+            result.points.push(Some(point));
         } else {
             result.points.push(None);
             result.missing += 1;
@@ -354,6 +589,13 @@ fn bounds(geometry: &Geometry) -> Option<[i64; 4]> {
         .iter()
         .copied()
         .chain(geometry.positions.iter().map(|p| [p[0], p[1], p[0], p[1]]))
+        .chain(
+            geometry
+                .timing
+                .iter()
+                .flat_map(|t| t.points.iter().flatten())
+                .map(|p| [p[0], p[1], p[0], p[1]]),
+        )
         .chain(
             geometry
                 .segments
@@ -454,6 +696,38 @@ mod tests {
     }
 
     #[test]
+    fn corner_clock_is_independent_of_path_count_and_seeking_is_deterministic() {
+        let mut analysis=ReplayAnalysis {
+            data:serde_json::from_value(serde_json::json!({"schema":"ecos.replay.analysis.v1","views":[
+                {"label":"slow","kind":"timing","basis":"final","items":[{"label":"a"},{"label":"b"}]},
+                {"label":"fast","kind":"timing","basis":"final","items":[{"label":"c"}]},
+                {"label":"total","kind":"power","basis":"final","items":[{"label":"u"}]}
+            ]})).unwrap(),..Default::default()
+        };
+        assert_eq!(analysis.duration(), 16.0);
+        analysis.auto_select_time(3.0);
+        assert_eq!(
+            (analysis.selected, analysis.item, analysis.progress),
+            (Some(0), None, 0.5)
+        );
+        analysis.auto_select_time(6.0);
+        assert_eq!(
+            (analysis.selected, analysis.item, analysis.progress),
+            (Some(1), None, 0.0)
+        );
+        analysis.auto_select_time(13.5);
+        assert_eq!(
+            (analysis.selected, analysis.item, analysis.progress),
+            (Some(2), None, 0.5)
+        );
+        analysis.auto_select_time(3.0);
+        assert_eq!(
+            (analysis.selected, analysis.item, analysis.progress),
+            (Some(0), None, 0.5)
+        );
+    }
+
+    #[test]
     fn diagnostic_rectangles_stay_local_and_missing_objects_are_reported() {
         let item: Item = serde_json::from_value(serde_json::json!({"label":"short","bboxes":[[1,2,3,4]],"nets":["whole_net"],"instances":["missing"]})).unwrap();
         let geometry = resolve(
@@ -467,3 +741,7 @@ mod tests {
         assert_eq!(bounds(&geometry), Some([1, 2, 3, 4]));
     }
 }
+
+#[cfg(test)]
+#[path = "replay_timing_validation.rs"]
+mod routed_validation;

@@ -109,7 +109,13 @@ impl Metadata {
         if matches!(object.kind.as_str(), "instance" | "macro") {
             return (20.0, 220.0, LayerRole::Overlap, 0);
         }
-        if let Some(&(id, role, _)) = self.layers.get(&object.layer) {
+        // Early captures recorded the native layer ID as text. Match it to the
+        // frozen layer catalog so the base mesh and routed overlays share Z.
+        let layer = self.layers.get(&object.layer).or_else(|| {
+            let id = object.layer.parse::<u16>().ok()?;
+            self.layers.values().find(|(layer, _, _)| *layer == id)
+        });
+        if let Some(&(id, role, _)) = layer {
             if let Some(band) = self.stack.band(id) {
                 return (band.z0 + 300.0, band.z1 + 300.0, role, id);
             }
@@ -393,6 +399,20 @@ mod tests {
         );
         assert!(huge.rect([i64::MIN, 0, i64::MAX, 0]).is_err());
     }
+    #[test]
+    fn numeric_capture_layers_match_named_snapshot_layers_and_overlay_height() {
+        let fixture = Fixture::new();
+        let mut meta = Metadata::open(&fixture.open(), &|| true).unwrap();
+        meta.layers = BTreeMap::from([("MET2".into(), (10, LayerRole::Metal { level: 2 }, 9))]);
+        meta.stack = chip_display::heuristic_layer_stack(meta.layers.values().copied());
+        let mut object: Object =
+            serde_json::from_value(json!({"kind":"wire","layer":"10","bbox":[0,0,20,2]})).unwrap();
+        let numeric = meta.band(&object);
+        object.layer = "MET2".into();
+        assert_eq!(numeric, meta.band(&object));
+        assert_eq!(numeric.1, meta.stack.band(10).unwrap().z1 + 300.0);
+    }
+
     #[test]
     fn reveal_keeps_filler_batch_hidden_at_start_and_preserves_each_instance() {
         let fixture = Fixture::new();

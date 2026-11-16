@@ -159,6 +159,20 @@ impl Recording {
         Ok(delta)
     }
 
+    pub fn final_geometry_path(&self) -> Result<Option<PathBuf>> {
+        self.manifest
+            .final_geometry
+            .as_ref()
+            .map(|path| {
+                let folder = Path::new(path)
+                    .parent()
+                    .context("Missing geometry folder")?;
+                self.verify_folder(folder.to_str().context("Invalid geometry folder")?)?;
+                self.asset(path)
+            })
+            .transpose()
+    }
+
     pub fn map_root(&self) -> Result<Option<PathBuf>> {
         self.manifest
             .maps

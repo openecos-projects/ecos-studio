@@ -103,6 +103,15 @@ impl ReplayApp {
                             self.playing = false;
                             self.maps.clear_selection();
                         }
+                        if let Some(time) = self.analysis.requested_time.take() {
+                            let position = self.starts[self.step]
+                                + self.plans[self.step].process_seconds
+                                + crate::replay_plan::RESULT_SECONDS
+                                + self.maps.len() as f64 * crate::replay_plan::MAP_SECONDS
+                                + time;
+                            self.select(self.step, position, false);
+                            self.playing = true;
+                        }
                         if let Some(bounds) = focus {
                             self.focus_bounds(bounds);
                         }

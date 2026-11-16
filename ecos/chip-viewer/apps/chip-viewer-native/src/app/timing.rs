@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use chip_view_db::ChipViewDb;
@@ -1443,37 +1443,17 @@ fn shortest_timing_route_shape_ids(
     sinks: &[usize],
 ) -> Option<Vec<ShapeId>> {
     let sinks = sinks.iter().copied().collect::<BTreeSet<_>>();
-    let mut visited = vec![false; nodes.len()];
-    let mut previous = vec![None; nodes.len()];
-    let mut queue = VecDeque::new();
-    for start in starts {
-        if !visited[*start] {
-            visited[*start] = true;
-            queue.push_back(*start);
-        }
-    }
-
-    while let Some(current) = queue.pop_front() {
-        if sinks.contains(&current) {
-            let mut route = Vec::new();
-            let mut cursor = Some(current);
-            while let Some(index) = cursor {
-                route.push(nodes[index].shape_id);
-                cursor = previous[index];
-            }
-            route.reverse();
-            return Some(route);
-        }
-        for (next, node) in nodes.iter().enumerate() {
-            if visited[next] || !timing_route_shapes_connect(&nodes[current], node) {
-                continue;
-            }
-            visited[next] = true;
-            previous[next] = Some(current);
-            queue.push_back(next);
-        }
-    }
-    None
+    crate::timing_route::connected_chain(
+        nodes.len(),
+        starts.iter().copied(),
+        |i| sinks.contains(&i),
+        |i| {
+            nodes.iter().enumerate().filter_map(move |(j, other)| {
+                (i != j && timing_route_shapes_connect(&nodes[i], other)).then_some(j)
+            })
+        },
+    )
+    .map(|indices| indices.into_iter().map(|i| nodes[i].shape_id).collect())
 }
 
 fn timing_route_shapes_connect(left: &TimingRouteShape, right: &TimingRouteShape) -> bool {

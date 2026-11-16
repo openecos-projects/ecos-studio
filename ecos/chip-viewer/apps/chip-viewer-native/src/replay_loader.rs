@@ -216,6 +216,7 @@ fn prepare(
         }
         let mut analysis = crate::replay_analysis::ReplayAnalysis::open(record);
         analysis.resolve(&record.scene);
+        analysis.resolve_routes(record);
         let tree = record
             .clock_tree()
             .and_then(|tree| {
