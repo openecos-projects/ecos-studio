@@ -61,6 +61,33 @@ describe('flow step cards', () => {
     wrapper.unmount()
   })
 
+  it('opens a checker snapshot without requiring a preview image', async () => {
+    const checker: DashboardFlowStep = {
+      ...step,
+      id: 'powerAnalysis',
+      path: 'powerAnalysis',
+      label: 'Power',
+      thumbnail: {
+        id: 'power-geometry',
+        kind: 'layout',
+        label: 'Power Layout',
+        step: 'powerAnalysis',
+        url: null,
+        hasGeometry: true,
+        availability: 'available',
+        reason: null,
+      },
+    }
+    const wrapper = mount(FlowStepCard, { props: { step: checker } })
+    const button = wrapper.get('button.step-layout')
+    expect(button.attributes('disabled')).toBeUndefined()
+    expect(button.text()).toContain('Open layout')
+    expect(button.find('img').exists()).toBe(false)
+    await button.trigger('click')
+    expect(wrapper.emitted('layout')).toEqual([[checker]])
+    wrapper.unmount()
+  })
+
   it('offers macro placement from preFloorplan geometry before the step has output', async () => {
     const source = {
       id: 'preFloorplan-image',

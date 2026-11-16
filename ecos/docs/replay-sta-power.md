@@ -29,7 +29,7 @@ Cell arc 不包含单元内部物理走线数据，只高亮对应真实引脚�
 
 ## Power 数据契约
 
-只在 ECC Replay capture 上下文启用时，将字符串配置 `-replay_geometry_directory` 传给 iPW。关闭时不收集 bbox，不建立单元坐标索引，不生成地图或额外快照，不重新遍历功耗报告。
+只在 ECC Replay capture 上下文启用时，将字符串配置 `-replay_geometry_directory` 传给 iPW。关闭时不收集 Replay bbox，不建立 Replay 单元坐标索引，不生成 Power 地图，不重新遍历功耗报告。普通版图 geometry 快照与其他 checker 一致，由 save_data 保存，不依赖 Replay 开关。
 
 输出位置：`powerAnalysis_ecc/output/geometry/power/`（该 step 的 geometry 目录）。
 
@@ -42,7 +42,7 @@ Cell arc 不包含单元内部物理走线数据，只高亮对应真实引脚�
 
 这里的 CSV 索引是单元矩形索引，每行一单元，并非规则物理网格。普通 viewer 复用 Place 的空间矩形渲染能力。显示的是**单元功耗**，不是温度或功耗密度；峰值模式中的各单元独立峰值不代表同一时刻的全芯片峰值。
 
-iPW 只为已放置/固定/cover 且边界有效的 instance 取 IDB bbox。导出器读取已写出的 `instance_power.tsv`，直接保留其中四列数值，避免平均/峰值口径发生偏差。缺失坐标不会填造矩形，覆盖数量由 metadata 记录。文件全部关闭后才发布 geometry/power 目录，失败仅记录 Replay warning，不改变功耗分析算法结果。
+iPW 只为已放置/固定/cover 且边界有效的 instance 取 IDB bbox。导出器读取已写出的 `instance_power.tsv`，直接保留其中四列数值，避免平均/峰值口径发生偏差。缺失坐标不会填造矩形，覆盖数量由 metadata 记录。文件全部关闭后才发布 geometry/power 目录，地图失败仅记录 Replay warning，不改变功耗分析算法结果。普通版图快照属于该 step 的保存结果契约，导出失败会使保存阶段失败。
 
 ECC 在每次重跑前失效旧地图，包括后来关闭 Replay 的重跑。采集优先读取本次新生成 geometry TSV；不存在、过期或格式无效则回退本次原 TSV，按精确名称匹配最终 scene。Replay 冻结原始来源、内容摘要和元数据，播放不读取后续重跑的 live 数据。地图只描述完成结果，因此不虚构算法过程 timestamp；播放时间与真实采集时间分离。
 

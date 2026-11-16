@@ -121,6 +121,54 @@ describe('useHomeSnapshots', () => {
     expect(createObjectURL).toHaveBeenCalledTimes(1)
   })
 
+  it('exposes every step with saved geometry, including checkers beyond the 16th card without PNGs', async () => {
+    const names = [
+      'preFloorplan',
+      'macroPlacement',
+      'postFloorplan',
+      'preplace',
+      'place',
+      'diff_sizing',
+      'CTS',
+      'legalization',
+      'Timing optimization',
+      'route',
+      'filler',
+      'lvs',
+      'drc',
+      'antennaCheck',
+      'postRouteLec',
+      'RCX',
+      'sta',
+      'powerAnalysis',
+      'emir',
+      'Harden',
+    ]
+    testState.session!.projection.data.artifacts.data.items = names.map((step) => ({
+      artifactId: `geometry-${step}`,
+      availability: 'available',
+      kind: 'layout_geometry',
+      stepId: step,
+    }))
+    testState.session!.projection.data.flow.data.steps = names.map((step, order) => ({
+      name: step,
+      order,
+      state: 'succeeded',
+      stepId: step,
+    }))
+    const snapshots = scope.run(() => useHomeSnapshots())!
+    await vi.waitFor(() =>
+      expect(snapshots.layoutThumbnails.value).toHaveLength(names.length),
+    )
+    expect(snapshots.layoutThumbnails.value.map((item) => item.step)).toEqual(names)
+    expect(
+      snapshots.layoutThumbnails.value.every(
+        (item) => item.hasGeometry && item.url === null,
+      ),
+    ).toBe(true)
+    expect(testState.getArtifact).not.toHaveBeenCalled()
+  })
+
   it('reads stale layout bytes using the artifact source Revision', async () => {
     testState.session!.projection.data.artifacts.data.items[0].sourceRevision = 8
     testState.session!.projection.data.flow.data.steps[0].state = 'not-started'

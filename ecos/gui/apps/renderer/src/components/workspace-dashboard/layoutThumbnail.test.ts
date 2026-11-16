@@ -41,7 +41,7 @@ describe('layout thumbnail actions', () => {
   it('requires an available layout with geometry before opening Chip Viewer', () => {
     expect(isUsableLayoutThumbnail(thumbnail('preFloorplan'))).toBe(true)
     expect(isUsableLayoutThumbnail(null)).toBe(false)
-    expect(isUsableLayoutThumbnail(thumbnail('preFloorplan', { url: null }))).toBe(false)
+    expect(isUsableLayoutThumbnail(thumbnail('preFloorplan', { url: null }))).toBe(true)
     expect(
       isUsableLayoutThumbnail(thumbnail('preFloorplan', { hasGeometry: false })),
     ).toBe(false)

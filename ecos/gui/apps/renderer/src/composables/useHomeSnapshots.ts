@@ -1,4 +1,4 @@
-import { isLayoutFlowStep, type WorkspaceArtifactDescriptor } from '@ecos-studio/shared'
+import { type WorkspaceArtifactDescriptor } from '@ecos-studio/shared'
 import { onScopeDispose, ref, watch } from 'vue'
 import { onWorkspaceRerunPrepared } from './homeRunArtifacts'
 import { useWorkspace } from './useWorkspace'
@@ -86,27 +86,37 @@ export function useHomeSnapshots() {
         .filter((step) => step.state === 'succeeded' || step.state === 'skipped')
         .map((step) => step.stepId.trim().toLowerCase()),
     )
-    const images = artifacts
-      .filter(
-        (artifact) =>
-          artifact.kind === 'layout_image' &&
-          artifact.availability !== 'missing' &&
-          artifact.stepId &&
-          isLayoutFlowStep(artifact.stepId) &&
-          (artifact.sourceRevision !== undefined ||
-            successfulSteps.has(artifact.stepId.trim().toLowerCase())),
-      )
-      .slice(0, 16)
-    const geometrySteps = new Set(
-      availableArtifacts(artifacts, 'layout_geometry').map((artifact) =>
-        artifact.stepId?.trim().toLowerCase(),
-      ),
+    const images = artifacts.filter(
+      (artifact) =>
+        artifact.kind === 'layout_image' &&
+        artifact.availability !== 'missing' &&
+        artifact.stepId &&
+        (artifact.sourceRevision !== undefined ||
+          successfulSteps.has(artifact.stepId.trim().toLowerCase())),
     )
+
+    const geometries = availableArtifacts(artifacts, 'layout_geometry').filter(
+      (artifact) =>
+        artifact.stepId && successfulSteps.has(artifact.stepId.trim().toLowerCase()),
+    )
+    const geometrySteps = new Set(
+      geometries.map((artifact) => artifact.stepId!.trim().toLowerCase()),
+    )
+    // A native snapshot is usable without a PNG, including analysis-only steps.
+    const entries = [
+      ...images,
+      ...geometries.filter(
+        (geometry) =>
+          !images.some(
+            (image) => image.stepId?.toLowerCase() === geometry.stepId?.toLowerCase(),
+          ),
+      ),
+    ]
     loading.value = true
     error.value = null
     try {
       const thumbnails = await Promise.all(
-        images.map(async (artifact) => {
+        entries.map(async (artifact) => {
           const step = artifact.stepId!
           const thumbnail = (
             url: string | null,
@@ -122,7 +132,11 @@ export function useHomeSnapshots() {
             availability,
             reason,
           })
-          if (artifact.availability !== 'available') return thumbnail(null)
+          if (
+            artifact.kind === 'layout_geometry' ||
+            artifact.availability !== 'available'
+          )
+            return thumbnail(null)
           const artifactRevision = artifact.sourceRevision ?? revision
           const cacheId = `${contextId}:${session.generation}:${artifactRevision}:${artifact.artifactId}`
           let url = layoutUrls.get(cacheId)
