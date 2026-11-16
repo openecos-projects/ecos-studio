@@ -18,6 +18,7 @@ mod replay_batch;
 mod replay_cache;
 mod replay_camera_plan;
 mod replay_checklist;
+mod replay_clock;
 mod replay_data;
 mod replay_events;
 mod replay_gpu_animation;

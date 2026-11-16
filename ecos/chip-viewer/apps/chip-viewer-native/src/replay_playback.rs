@@ -51,6 +51,18 @@ impl ReplayApp {
         );
     }
 
+    pub(super) fn clock_progress(&self) -> Option<f64> {
+        if !self.complete || self.pending.is_some() || !self.error.is_empty() {
+            return None;
+        }
+        Some(if self.completion_node_selected {
+            1.0
+        } else {
+            ((self.position - self.starts[self.step] - self.plans[self.step].process_seconds) / 1.4)
+                .clamp(0.0, 1.0)
+        })
+    }
+
     pub(super) fn select(&mut self, step: usize, seconds: f64, completion_node: bool) {
         self.select_at(step, seconds, completion_node, None, None);
     }
@@ -80,6 +92,7 @@ impl ReplayApp {
             self.selected_objects.clear();
             self.clear_animation();
             self.clock_tree = None;
+            self.clock_overlay = Default::default();
             self.clock_tree_error.clear();
             self.clock_tree_attempted = false;
             self.checklist = None;
@@ -149,6 +162,7 @@ impl ReplayApp {
             self.error = error.to_string();
             self.recording = None;
             self.clock_tree = None;
+            self.clock_overlay = Default::default();
             self.playing = false;
             self.clear_animation();
         }
@@ -300,6 +314,7 @@ impl ReplayApp {
                     self.route_overlay = route_overlay;
                     self.logic = logic;
                     if let Some(results) = results {
+                        self.clock_overlay = results.clock_overlay;
                         self.maps = results.maps;
                         self.analysis = results.analysis;
                         self.clock_tree_attempted = true;
@@ -323,6 +338,7 @@ impl ReplayApp {
                 Err(error) => {
                     self.recording = None;
                     self.clock_tree = None;
+                    self.clock_overlay = Default::default();
                     self.error = error;
                     self.playing = false;
                     self.clear_animation();

@@ -214,6 +214,10 @@ impl ReplayApp {
                 Stroke::new(1.0, Color32::from_rgba_unmultiplied(240, 175, 201, 130)),
             );
         }
+        if let Some(progress) = self.clock_progress() {
+            self.clock_overlay
+                .paint(&painter, |x, y, _| project(x, y), progress);
+        }
         for id in &self.selected_objects {
             if let Some(obj) = scene.objects.get(id) {
                 let [x1, y1, x2, y2] = self.motion.bounds(id, self.reveal.bounds(id, obj));

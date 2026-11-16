@@ -23,6 +23,7 @@ pub struct Request {
 }
 
 pub struct ResultAssets {
+    pub clock_overlay: crate::replay_clock::ClockOverlay,
     pub maps: crate::replay_maps::ReplayMaps,
     pub analysis: crate::replay_analysis::ReplayAnalysis,
     pub tree: Result<Option<crate::clock_tree::ClockTreePanel>, String>,
@@ -217,14 +218,19 @@ fn prepare(
         let mut analysis = crate::replay_analysis::ReplayAnalysis::open(record);
         analysis.resolve(&record.scene);
         analysis.resolve_routes(record);
+        let mut clock_overlay = crate::replay_clock::ClockOverlay::default();
         let tree = record
             .clock_tree()
             .and_then(|tree| {
-                tree.map(|tree| crate::clock_tree::ClockTreePanel::from_snapshot(&tree))
-                    .transpose()
+                tree.map(|tree| {
+                    clock_overlay = crate::replay_clock::ClockOverlay::load(record, &tree);
+                    crate::clock_tree::ClockTreePanel::from_snapshot(&tree)
+                })
+                .transpose()
             })
             .map_err(|error| error.to_string());
         ResultAssets {
+            clock_overlay,
             maps,
             analysis,
             tree,

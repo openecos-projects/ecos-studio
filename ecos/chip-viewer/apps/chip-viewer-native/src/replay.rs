@@ -32,6 +32,7 @@ pub struct ReplayApp {
     complete: bool,
     completion_node_selected: bool,
     recording: Option<Recording>,
+    clock_overlay: crate::replay_clock::ClockOverlay,
     clock_tree: Option<crate::clock_tree::ClockTreePanel>,
     checklist: Option<Result<crate::replay_checklist::Checklist, String>>,
     clock_tree_error: String,
@@ -135,6 +136,7 @@ impl ReplayApp {
             complete: false,
             completion_node_selected: false,
             recording: None,
+            clock_overlay: Default::default(),
             clock_tree: None,
             checklist: None,
             clock_tree_error: String::new(),
@@ -348,6 +350,7 @@ impl eframe::App for ReplayApp {
                 self.error = error.to_string();
                 self.recording = None;
                 self.clock_tree = None;
+                self.clock_overlay = Default::default();
                 self.clock_tree_attempted = false;
                 self.playing = false;
                 self.clear_animation();
@@ -357,6 +360,7 @@ impl eframe::App for ReplayApp {
                     self.error = error.to_string();
                     self.recording = None;
                     self.clock_tree = None;
+                    self.clock_overlay = Default::default();
                     self.clock_tree_error.clear();
                     self.clock_tree_attempted = false;
                     self.playing = false;
