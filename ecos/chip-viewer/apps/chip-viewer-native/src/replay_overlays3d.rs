@@ -105,7 +105,12 @@ impl ReplayApp {
                     }
                 }
             }
-            self.analysis.paint(painter, |x, y| project(x, y, 0.0));
+            self.analysis.paint_layers(painter, |x, y, layer| {
+                let z = layer
+                    .and_then(|id| meta.stack.band(id))
+                    .map_or(240.0, |band| band.z1 + 300.0);
+                project(x, y, if layer.is_some() { z } else { 0.0 })
+            });
         }
     }
 }

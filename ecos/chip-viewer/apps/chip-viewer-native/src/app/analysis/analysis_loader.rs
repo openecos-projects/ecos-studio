@@ -103,6 +103,9 @@ impl LoadedViewer {
         if !self.analysis_tab_user_selected && self.analysis_tab != AnalysisTab::Timing {
             self.analysis_tab = self.default_analysis_tab();
         }
+        if let Some((item, layout)) = self.map_catalog.as_ref().and_then(MapCatalog::default_power_item) {
+            self.activate_map_item(&item, layout.as_deref());
+        }
     }
 
     pub(super) fn default_analysis_tab(&self) -> AnalysisTab {

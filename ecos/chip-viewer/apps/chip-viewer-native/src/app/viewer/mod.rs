@@ -589,7 +589,7 @@ impl LoadedViewer {
             });
     }
 
-    fn activate_map_item(&mut self, item: &MapItem, layout_path: Option<&Path>) {
+    pub(super) fn activate_map_item(&mut self, item: &MapItem, layout_path: Option<&Path>) {
         if let Some(current_csv) = &self.selected_map_item {
             if current_csv != &item.csv_path {
                 if let Some(catalog) = &self.map_catalog {
@@ -2814,6 +2814,9 @@ impl LoadedViewer {
             return None;
         }
         let heatmap = self.active_heatmap.as_ref()?;
+        if heatmap.data.is_instance_power() {
+            return Some(crate::power_map::legend_rect(canvas));
+        }
         let (popup_size, _) =
             map_heatmap_layout(canvas, heatmap.data.rows(), heatmap.data.columns());
         let min = egui::pos2(
@@ -2830,6 +2833,19 @@ impl LoadedViewer {
         let Some(heatmap) = self.active_heatmap.as_ref() else {
             return;
         };
+        if heatmap.data.is_instance_power() {
+            if crate::power_map::legend(
+                ui.ctx(),
+                canvas,
+                &heatmap.title,
+                &heatmap.data,
+                heatmap.colormap_mode,
+            ) {
+                self.active_heatmap = None;
+                self.selected_map_item = None;
+            }
+            return;
+        }
         let title = heatmap.title.clone();
         let rows = heatmap.data.rows();
         let columns = heatmap.data.columns();

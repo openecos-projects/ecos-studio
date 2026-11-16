@@ -28,6 +28,7 @@ pub struct MapItem {
 #[derive(Clone, Debug)]
 pub struct HeatmapData {
     values: Vec<Vec<Option<f64>>>,
+    instance_power: bool,
     layout: BTreeMap<(usize, usize), Rect32>,
     min: f64,
     max: f64,
@@ -41,6 +42,12 @@ struct LayoutRecord {
     ly: i32,
     ux: i32,
     uy: i32,
+}
+
+/// Power maps are published beside the snapshot; placement maps remain in feature/.
+pub fn power_map_root(manifest: &Path) -> Option<PathBuf> {
+    let root = manifest.parent()?.join("power");
+    root.join("power_map/layout.csv").is_file().then_some(root)
 }
 
 impl MapCatalog {
@@ -71,6 +78,16 @@ impl MapCatalog {
             categories,
             warnings,
         })
+    }
+
+    pub fn default_power_item(&self) -> Option<(MapItem, Option<PathBuf>)> {
+        let category = self.categories.iter().find(|c| c.id == "power_map")?;
+        let item = category.items.iter().find(|i| {
+            i.csv_path
+                .file_name()
+                .is_some_and(|n| n == "total_power_w.csv")
+        })?;
+        Some((item.clone(), category.layout_path.clone()))
     }
 
     pub fn item_count(&self) -> usize {
@@ -107,12 +124,23 @@ impl HeatmapData {
         let (min, max) = finite_values.fold((first, first), |(min, max), value| {
             (min.min(value), max.max(value))
         });
+        let instance_power = csv_path
+            .parent()
+            .and_then(Path::parent)
+            .and_then(|root| fs::read(root.join("metadata.json")).ok())
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .is_some_and(|value| value["schema"] == "ecos.power.geometry.v1");
         Ok(Self {
             values,
+            instance_power,
             layout,
             min,
             max,
         })
+    }
+
+    pub fn is_instance_power(&self) -> bool {
+        self.instance_power
     }
 
     pub fn rows(&self) -> usize {
@@ -493,7 +521,14 @@ fn discover_category(id: &str, directory: &Path) -> Result<MapCategory, String> 
         .filter_map(|csv_path| {
             let stem = csv_path.file_stem()?.to_string_lossy().into_owned();
             Some(MapItem {
-                label: humanize_identifier(&stem),
+                label: if id == "power_map" {
+                    format!(
+                        "{} power [W]",
+                        humanize_identifier(stem.trim_end_matches("_power_w"))
+                    )
+                } else {
+                    humanize_identifier(&stem)
+                },
                 csv_path,
             })
         })
@@ -621,6 +656,44 @@ mod tests {
         let directory = std::env::temp_dir().join(format!("chip-viewer-{name}-{unique}"));
         fs::create_dir_all(&directory).unwrap();
         directory
+    }
+
+    #[test]
+    fn power_maps_use_actual_instance_bounds_and_default_to_total_watts() {
+        let root = std::env::temp_dir().join(format!("ecos-power-maps-{}", std::process::id()));
+        let map = root.join("power/power_map");
+        std::fs::create_dir_all(&map).unwrap();
+        std::fs::write(
+            map.join("layout.csv"),
+            "pixel_row,pixel_col,lx,ly,ux,uy\n0,0,10,20,50,30\n1,0,100,200,105,207\n",
+        )
+        .unwrap();
+        for component in ["internal", "total"] {
+            std::fs::write(map.join(format!("{component}_power_w.csv")), "0.01\n0.02\n").unwrap();
+        }
+        std::fs::write(
+            root.join("power/metadata.json"),
+            r#"{"schema":"ecos.power.geometry.v1"}"#,
+        )
+        .unwrap();
+        let map_root = power_map_root(&root.join("geometry.manifest.json")).unwrap();
+        let catalog = MapCatalog::discover(&map_root).unwrap();
+        let (item, layout) = catalog.default_power_item().unwrap();
+        assert_eq!(item.label, "total power [W]");
+        let data = HeatmapData::load(&item.csv_path, &layout.unwrap()).unwrap();
+        assert!(data.is_instance_power());
+        assert_eq!(data.value(1, 0), Some(0.02));
+        assert_eq!(
+            data.bbox(1, 0),
+            Some(Rect32 {
+                lx: 100,
+                ly: 200,
+                hx: 105,
+                hy: 207
+            })
+        );
+        assert_eq!(data.core_pitch(), None);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -769,6 +842,7 @@ mod tests {
             })
             .collect::<BTreeMap<_, _>>();
         let zero_x = HeatmapData {
+            instance_power: false,
             values: vec![vec![Some(1.0); 3]; 3],
             layout: zero_x_layout,
             min: 1.0,

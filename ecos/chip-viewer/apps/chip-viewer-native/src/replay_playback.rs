@@ -26,6 +26,22 @@ impl ReplayApp {
         seconds: f64,
         source: Option<(f64, Option<usize>)>,
     ) {
+        if source.is_none()
+            && matches!(
+                self.catalog.steps[step].name.as_str(),
+                "sta" | "powerAnalysis"
+            )
+        {
+            self.playing = true;
+            self.select_at(
+                step,
+                self.starts[step] + self.plans[step].process_seconds + RESULT_SECONDS,
+                false,
+                None,
+                None,
+            );
+            return;
+        }
         self.select_at(
             step,
             seconds,
@@ -172,14 +188,8 @@ impl ReplayApp {
                     self.maps.select(index);
                 } else {
                     self.maps.clear_selection();
-                    let progress = ((hold - RESULT_SECONDS) / MAP_SECONDS).fract() as f32;
-                    self.analysis.auto_select(
-                        (index - self.maps.len()).min(self.analysis.len().saturating_sub(1)),
-                        if local >= self.plans[step].seconds {
-                            1.0
-                        } else {
-                            progress
-                        },
+                    self.analysis.auto_select_time(
+                        hold - RESULT_SECONDS - self.maps.len() as f64 * MAP_SECONDS,
                     );
                 }
             } else {
