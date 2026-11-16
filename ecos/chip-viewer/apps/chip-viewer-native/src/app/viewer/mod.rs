@@ -3405,7 +3405,7 @@ impl LoadedViewer {
                 .as_ref()
                 .map(|g| g.target_format)
                 .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
-            let callback = crate::canvas_gpu3d::CanvasGpu3dCallback {
+            let callback = crate::canvas_gpu3d::CanvasGpu3dCallback::<false> {
                 uniform: crate::canvas_gpu3d::CanvasUniform3d::from_camera(
                     current_camera,
                     aspect,

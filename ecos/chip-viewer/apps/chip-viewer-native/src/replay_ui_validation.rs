@@ -30,6 +30,13 @@ struct Probe {
 
 impl App for Probe {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if self.app.view3d.enabled && self.app.pending.is_none() && self.app.recording.is_some() {
+            assert!(
+                self.app.view3d.error.is_empty(),
+                "3D preparation: {}",
+                self.app.view3d.error
+            );
+        }
         assert!(
             self.started.elapsed() < Duration::from_secs(900),
             "UI probe timed out"
@@ -165,6 +172,9 @@ fn real_window_gpu_playback_and_seek_readback() {
             println!("Replay GPU adapter: {:?}", gpu.adapter.get_info());
             let mut app = ReplayApp::open(std::path::Path::new(&path))?;
             app.configure_renderer(cc);
+            if std::env::var_os("ECOS_REPLAY_TEST_3D").is_some() {
+                app.view3d.enabled = true;
+            }
             let selected_step = std::env::var("ECOS_REPLAY_TEST_STEP").ok().map(|name| {
                 app.catalog
                     .steps

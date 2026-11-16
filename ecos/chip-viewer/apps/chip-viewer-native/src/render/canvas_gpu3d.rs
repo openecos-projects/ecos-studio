@@ -63,6 +63,9 @@ pub struct GpuShapeInstance3d {
     pub semantic_info: u32,
     pub flags: u32,
     pub _pad: [u32; 2],
+    /// World-coordinate animation start; zero duration keeps static viewer behavior.
+    pub from_rect: [f32; 4],
+    pub animation: [f32; 4], // start, duration, mode (1 reveal, 2 move), reserved
 }
 
 impl CanvasUniform3d {
@@ -172,6 +175,8 @@ pub fn build_gpu_instances_3d_with_flags(
             semantic_info,
             flags: flags | extra_flags,
             _pad: [0, 0],
+            from_rect: [0.0; 4],
+            animation: [0.0; 4],
         });
     }
     instances
@@ -195,6 +200,8 @@ pub fn slab_instance(
         semantic_info,
         flags,
         _pad: [0, 0],
+        from_rect: [0.0; 4],
+        animation: [0.0; 4],
     }
 }
 
@@ -267,6 +274,7 @@ fn line_to_rect_dbu(line: chipgeom_format::LinePayload) -> [i32; 4] {
 pub const FLAG_GROUND_GRID: u32 = 4;
 pub const FLAG_SELECTED: u32 = 8;
 pub const FLAG_HIGHLIGHTED: u32 = 16;
+pub const FLAG_REPLAY_CHANGED: u32 = 512;
 pub const FLAG_OVERVIEW_TILE: u32 = 64;
 pub const FLAG_CLOCK_TREE_PARENT: u32 = 128;
 pub const FLAG_CLOCK_TREE_CHILD: u32 = 256;
@@ -288,6 +296,8 @@ pub fn ground_grid_instance(world: chipgeom_format::Rect32) -> GpuShapeInstance3
         semantic_info: 0,
         flags: FLAG_GROUND_GRID,
         _pad: [0, 0],
+        from_rect: [0.0; 4],
+        animation: [0.0; 4],
     }
 }
 
@@ -319,6 +329,8 @@ struct Instance3d {
     flags: u32,
     _pad0: u32,
     _pad1: u32,
+    from_rect: vec4<f32>,
+    animation: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u_scene: Uniform3d;
@@ -491,8 +503,14 @@ fn vs_main(
     );
 
     let uv = face_uvs[corner];
-    let min_xy = vec2<f32>(f32(inst.rect_dbu.x), f32(inst.rect_dbu.y));
-    let max_xy = vec2<f32>(f32(inst.rect_dbu.z), f32(inst.rect_dbu.w));
+    var min_xy = vec2<f32>(f32(inst.rect_dbu.x), f32(inst.rect_dbu.y));
+    var max_xy = vec2<f32>(f32(inst.rect_dbu.z), f32(inst.rect_dbu.w));
+    if inst.animation.y > 0.0 {
+        let t = clamp((u_scene.time - inst.animation.x) / inst.animation.y, 0.0, 1.0);
+        let f = t * t * (3.0 - 2.0 * t);
+        min_xy = mix(inst.from_rect.xy, min_xy, f);
+        max_xy = mix(inst.from_rect.zw, max_xy, f);
+    }
     let z0 = inst.z0 * u_scene.z_scale;
     let z1 = inst.z1 * u_scene.z_scale;
 
@@ -521,6 +539,9 @@ fn vs_main(
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let inst = s_instances[in.instance_idx];
 
+    if inst.animation.z == 1.0 && u_scene.time <= inst.animation.x {
+        discard;
+    }
     if ((inst.flags & 4u) != 0u) {
         discard;
     }
@@ -552,9 +573,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let is_overview = (inst.flags & 64u) != 0u;
     let feature_fade = select(smoothstep(4.0, 12.0, min_feature_px), 0.0, is_overview);
 
+    var bounds = vec4<f32>(inst.rect_dbu);
+    if inst.animation.y > 0.0 {
+        let t = clamp((u_scene.time - inst.animation.x) / inst.animation.y, 0.0, 1.0);
+        bounds = mix(inst.from_rect, bounds, t * t * (3.0 - 2.0 * t));
+    }
     let pos_xy = in.world_position.xy;
-    let d_min = min(abs(pos_xy.x - f32(inst.rect_dbu.x)), abs(pos_xy.y - f32(inst.rect_dbu.y)));
-    let d_max = min(abs(pos_xy.x - f32(inst.rect_dbu.z)), abs(pos_xy.y - f32(inst.rect_dbu.w)));
+    let d_min = min(abs(pos_xy.x - bounds.x), abs(pos_xy.y - bounds.y));
+    let d_max = min(abs(pos_xy.x - bounds.z), abs(pos_xy.y - bounds.w));
     let edge_dist_px = min(d_min, d_max) / max(pixel_size_dbu, 1.0);
     let bevel_edge = smoothstep(1.5, 0.0, edge_dist_px) * feature_fade * max(n.z, 0.0) * 0.08 * freq_damp;
 
@@ -650,6 +676,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         color = mix(color, vec3<f32>(1.00, 0.65, 0.25), 0.55);
     }
 
+    if ((inst.flags & 512u) != 0u) {
+        color = mix(color, vec3<f32>(0.93, 0.70, 0.78), 0.7);
+    }
+    if inst.animation.z == 1.0 {
+        let t = clamp((u_scene.time - inst.animation.x) / inst.animation.y, 0.0, 1.0);
+        alpha *= t * t * (3.0 - 2.0 * t);
+    }
     color = clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
 
     return vec4<f32>(color, alpha);
@@ -805,7 +838,7 @@ struct OffscreenTarget {
     height: u32,
 }
 
-struct CanvasGpu3dResources {
+struct CanvasGpu3dResources<const REPLAY: bool = false> {
     scene_pipeline: wgpu::RenderPipeline,
     grid_pipeline: wgpu::RenderPipeline,
     grid_vertex_buffer: wgpu::Buffer,
@@ -819,10 +852,12 @@ struct CanvasGpu3dResources {
     sampler: wgpu::Sampler,
     current_key: Option<u64>,
     instance_count: u32,
+    capacity: usize,
+    uploaded: Vec<GpuShapeInstance3d>,
     offscreen: Option<OffscreenTarget>,
 }
 
-impl CanvasGpu3dResources {
+impl<const REPLAY: bool> CanvasGpu3dResources<REPLAY> {
     fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Option<Self> {
         if device.limits().max_storage_buffers_per_shader_stage < 1 {
             log::warn!("GPU device lacks storage buffers; 3D GPU canvas disabled");
@@ -836,7 +871,7 @@ impl CanvasGpu3dResources {
         });
         let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Canvas 3D Persistent Instance Buffer"),
-            size: (MAX_3D_INSTANCES * std::mem::size_of::<GpuShapeInstance3d>()) as u64,
+            size: std::mem::size_of::<GpuShapeInstance3d>() as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -1101,6 +1136,8 @@ impl CanvasGpu3dResources {
             sampler,
             current_key: None,
             instance_count: 0,
+            capacity: 1,
+            uploaded: Vec::new(),
             offscreen: None,
         })
     }
@@ -1182,17 +1219,69 @@ impl CanvasGpu3dResources {
         });
     }
 
-    fn ensure_scene(&mut self, queue: &wgpu::Queue, instances: &[GpuShapeInstance3d], key: u64) {
+    fn ensure_scene(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        instances: &[GpuShapeInstance3d],
+        key: u64,
+    ) {
         if self.current_key == Some(key) && self.instance_count == instances.len() as u32 {
             return;
         }
+        let limit = (device.limits().max_storage_buffer_binding_size as u64)
+            .min(device.limits().max_buffer_size) as usize
+            / std::mem::size_of::<GpuShapeInstance3d>();
+        let required = instances.len().min(MAX_3D_INSTANCES).min(limit).max(1);
+        if required > self.capacity {
+            self.uploaded.clear();
+            self.capacity = required.next_power_of_two().min(limit);
+            self.instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Canvas 3D instance capacity"),
+                size: (self.capacity * std::mem::size_of::<GpuShapeInstance3d>()) as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Canvas 3D resized instances"),
+                layout: &self.scene_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: self.instance_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+        }
         if !instances.is_empty() {
-            let count = instances.len().min(MAX_3D_INSTANCES);
-            queue.write_buffer(
-                &self.instance_buffer,
-                0,
-                bytemuck::cast_slice(&instances[..count]),
-            );
+            let count = required;
+            let stride = std::mem::size_of::<GpuShapeInstance3d>();
+            let next = bytemuck::cast_slice::<_, u8>(&instances[..count]);
+            let previous = bytemuck::cast_slice::<_, u8>(&self.uploaded);
+            let first = (0..count).find(|i| {
+                previous.get(i * stride..(i + 1) * stride)
+                    != Some(&next[i * stride..(i + 1) * stride])
+            });
+            if let Some(first) = first {
+                let last = (first..count)
+                    .rfind(|i| {
+                        previous.get(i * stride..(i + 1) * stride)
+                            != Some(&next[i * stride..(i + 1) * stride])
+                    })
+                    .unwrap()
+                    + 1;
+                queue.write_buffer(
+                    &self.instance_buffer,
+                    (first * stride) as u64,
+                    &next[first * stride..last * stride],
+                );
+            }
+            self.uploaded.clear();
+            self.uploaded.extend_from_slice(&instances[..count]);
             self.instance_count = count as u32;
         } else {
             self.instance_count = 0;
@@ -1201,7 +1290,7 @@ impl CanvasGpu3dResources {
     }
 }
 
-pub struct CanvasGpu3dCallback {
+pub struct CanvasGpu3dCallback<const REPLAY: bool = false> {
     pub uniform: CanvasUniform3d,
     pub instances: Arc<Vec<GpuShapeInstance3d>>,
     pub instances_key: u64,
@@ -1209,7 +1298,7 @@ pub struct CanvasGpu3dCallback {
     pub target_format: wgpu::TextureFormat,
 }
 
-impl egui_wgpu::CallbackTrait for CanvasGpu3dCallback {
+impl<const REPLAY: bool> egui_wgpu::CallbackTrait for CanvasGpu3dCallback<REPLAY> {
     fn prepare(
         &self,
         device: &wgpu::Device,
@@ -1221,18 +1310,21 @@ impl egui_wgpu::CallbackTrait for CanvasGpu3dCallback {
         if device.limits().max_storage_buffers_per_shader_stage < 1 {
             return Vec::new();
         }
-        if callback_resources.get::<CanvasGpu3dResources>().is_none() {
-            if let Some(res) = CanvasGpu3dResources::new(device, self.target_format) {
+        if callback_resources
+            .get::<CanvasGpu3dResources<REPLAY>>()
+            .is_none()
+        {
+            if let Some(res) = CanvasGpu3dResources::<REPLAY>::new(device, self.target_format) {
                 callback_resources.insert(res);
             }
         }
-        let Some(resources) = callback_resources.get_mut::<CanvasGpu3dResources>() else {
+        let Some(resources) = callback_resources.get_mut::<CanvasGpu3dResources<REPLAY>>() else {
             return Vec::new();
         };
         let width = self.target_pixels[0].max(1);
         let height = self.target_pixels[1].max(1);
         resources.ensure_offscreen(device, width, height);
-        resources.ensure_scene(queue, &self.instances, self.instances_key);
+        resources.ensure_scene(device, queue, &self.instances, self.instances_key);
         queue.write_buffer(
             &resources.uniform_buffer,
             0,
@@ -1289,7 +1381,7 @@ impl egui_wgpu::CallbackTrait for CanvasGpu3dCallback {
         render_pass: &mut wgpu::RenderPass<'static>,
         callback_resources: &egui_wgpu::CallbackResources,
     ) {
-        let Some(resources) = callback_resources.get::<CanvasGpu3dResources>() else {
+        let Some(resources) = callback_resources.get::<CanvasGpu3dResources<REPLAY>>() else {
             return;
         };
         let Some(offscreen) = resources.offscreen.as_ref() else {
@@ -1533,7 +1625,7 @@ mod tests {
     #[test]
     fn uniform_and_instance_layouts_are_aligned() {
         assert_eq!(std::mem::size_of::<CanvasUniform3d>() % 16, 0);
-        assert_eq!(std::mem::size_of::<GpuShapeInstance3d>(), 48);
+        assert_eq!(std::mem::size_of::<GpuShapeInstance3d>(), 80);
         assert_eq!(std::mem::size_of::<GpuShapeInstance3d>() % 16, 0);
     }
 
@@ -1688,7 +1780,7 @@ mod tests {
             return;
         };
         let Some(mut resources) =
-            CanvasGpu3dResources::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb)
+            CanvasGpu3dResources::<false>::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb)
         else {
             return;
         };
@@ -1703,6 +1795,8 @@ mod tests {
                 semantic_info: 0,
                 flags: 0,
                 _pad: [0, 0],
+                from_rect: [0.0; 4],
+                animation: [0.0; 4],
             },
             ground_grid_instance(chipgeom_format::Rect32 {
                 lx: -5000,
@@ -1711,7 +1805,7 @@ mod tests {
                 hy: 5000,
             }),
         ];
-        resources.ensure_scene(&queue, &instances, 1);
+        resources.ensure_scene(&device, &queue, &instances, 1);
 
         for &shading_style in ShadingStyle::ALL {
             for &lighting_preset in chip_display::LightingPreset::ALL {
@@ -1794,10 +1888,15 @@ mod tests {
             return;
         };
         let Some(resources) =
-            CanvasGpu3dResources::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb)
+            CanvasGpu3dResources::<false>::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb)
         else {
             return;
         };
         assert_eq!(resources.grid_vertex_count, 404);
     }
+}
+
+/// Drop only the optional Replay viewport resources when it is closed.
+pub fn release_replay_resources(resources: &mut egui_wgpu::CallbackResources) {
+    resources.remove::<CanvasGpu3dResources<true>>();
 }

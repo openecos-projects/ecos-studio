@@ -7,6 +7,7 @@ use anyhow::{ensure, Result};
 impl ReplayApp {
     pub(super) fn clear_animation(&mut self) {
         self.canvas_cache = Default::default();
+        self.view3d.scene = None;
         self.loader.cancel();
         self.pending = None;
         self.motion.clear();
@@ -47,6 +48,7 @@ impl ReplayApp {
         sequence: Option<usize>,
     ) {
         self.completion_node_selected = completion_node;
+        self.camera_exact = source.is_some() || completion_node;
         self.position = seconds.clamp(
             self.starts[step],
             self.starts[step] + self.plans[step].seconds,
@@ -223,6 +225,7 @@ impl ReplayApp {
             return Ok(());
         }
         if self.pending.is_none()
+            && !self.view3d.needs_prepare
             && !exact
             && !(self.complete && !self.clock_tree_attempted)
             && recording.scene.revision == Some(frame)
@@ -239,6 +242,7 @@ impl ReplayApp {
             kind,
             animate: self.smooth && !exact && clip.is_some(),
             results: self.complete && !self.clock_tree_attempted,
+            three_d_budget: self.view3d.enabled.then_some(self.view3d.budget),
         })?;
         self.pending = Some((token, frame, clip));
         Ok(())
@@ -267,6 +271,7 @@ impl ReplayApp {
                     self.canvas_cache = Default::default();
                     let crate::replay_loader::Prepared {
                         scene,
+                        three_d,
                         mut route_overlay,
                         motion,
                         reveal,
@@ -280,6 +285,7 @@ impl ReplayApp {
                     {
                         self.prepare_timings_ms = timings_ms;
                     }
+                    self.view3d.accept(three_d);
                     route_overlay.inherit_selection(&self.route_overlay);
                     self.route_overlay = route_overlay;
                     self.logic = logic;

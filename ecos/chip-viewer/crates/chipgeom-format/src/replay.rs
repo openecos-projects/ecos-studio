@@ -72,6 +72,8 @@ pub struct Manifest {
     #[serde(default)]
     pub geometry_detail: Option<String>,
     #[serde(default)]
+    pub final_geometry: Option<String>,
+    #[serde(default)]
     pub capabilities: serde_json::Value,
     #[serde(default)]
     pub clock_tree_manifest: Option<String>,

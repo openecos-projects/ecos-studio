@@ -14,6 +14,9 @@ pub struct ReplayMaps {
 }
 
 impl ReplayMaps {
+    pub fn active_data(&self) -> Option<&HeatmapData> {
+        self.active.as_deref()
+    }
     pub fn open(root: &Path) -> Self {
         let mut result = Self {
             root: root.into(),

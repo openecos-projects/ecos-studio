@@ -52,6 +52,7 @@ pub struct Recording {
     root: PathBuf,
     pointer: PathBuf,
     pub scene: Scene,
+    pub metadata3d: Option<std::sync::Arc<crate::replay_scene3d::Metadata>>,
     cache: std::cell::RefCell<crate::replay_cache::DeltaCache>,
     anchor: std::cell::RefCell<Option<Delta>>,
 }
@@ -270,6 +271,7 @@ impl Recording {
             root,
             pointer,
             scene: Scene::default(),
+            metadata3d: None,
             cache: Default::default(),
             anchor: Default::default(),
         };

@@ -137,6 +137,63 @@ impl RouteOverlay {
         }
     }
 
+    pub fn visit_3d(&self, mut emit: impl FnMut(&Object, Color32, bool)) {
+        if !self.visible {
+            return;
+        }
+        for object in &self.regions {
+            let active = object.attributes.get("active").and_then(|v| v.as_bool()) == Some(true);
+            emit(
+                object,
+                if active {
+                    Color32::from_rgb(90, 220, 245)
+                } else {
+                    Color32::from_rgba_unmultiplied(160, 190, 210, 90)
+                },
+                false,
+            );
+        }
+        let Some(objects) = self.layers.get(&self.layer) else {
+            return;
+        };
+        let field = ["overflow", "demand", "capacity"][self.mode];
+        let max = objects
+            .iter()
+            .filter_map(|o| o.attributes.get(field)?.as_f64())
+            .fold(1.0, f64::max);
+        for object in objects {
+            if object.kind == "route_violation" {
+                emit(object, Color32::LIGHT_RED, false);
+            } else if object.attributes.get("blocked").and_then(|v| v.as_bool()) == Some(true) {
+                emit(
+                    object,
+                    Color32::from_rgba_unmultiplied(140, 140, 140, 40),
+                    true,
+                );
+            } else {
+                let ratio = (object
+                    .attributes
+                    .get(field)
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0)
+                    / max)
+                    .clamp(0.0, 1.0) as f32;
+                if ratio > 0.0 {
+                    emit(
+                        object,
+                        Color32::from_rgba_unmultiplied(
+                            (70.0 + 185.0 * ratio) as u8,
+                            (190.0 - 110.0 * ratio) as u8,
+                            80,
+                            85,
+                        ),
+                        true,
+                    );
+                }
+            }
+        }
+    }
+
     pub fn paint(&self, painter: &Painter, project: &impl Fn(i64, i64) -> Pos2) {
         if !self.visible {
             return;

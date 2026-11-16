@@ -1,6 +1,6 @@
 # Replay 右侧同步 3D 视图设计
 
-日期：2026-11-16。状态：方案草案，尚未实现。本文基于当前 Native、Replay 和真实 `gcd/ws_0004` 数据分析，不把设计目标当作已测能力。
+日期：2026-11-16。状态：同步双视图已实现。本文保留原设计目标；实际接口、验证结果和实现边界见 [replay-3d-implementation.md](replay-3d-implementation.md)，未验证的目标不视为已测能力。
 
 ## 1. 建议与范围
 
@@ -259,10 +259,10 @@ Z 值采用现有示意 LayerStack，单元 body 使用独立的器件示意高�
 - 不读取未来 shapes/view tiles；重新运行导致 attempt 失效时两视图一起停止；旧记录没有层数据时仍可用示意模式或明确降级。
 - 性能报告区分播放与定位，记录关闭/开启 3D 的 CPU、GPU/显存、等待时间和实际帧间隔；不以“能够打开”代替流畅性验收。
 
-## 11. 本次交付与验证状态
+## 11. 设计阶段记录与实现状态
 
 本次先上传了已完成的 Replay 代码到三个 `yell/replay` 分支：Studio `21f5ab4`、ECC `73a6de8c`、ECC-Tools `c507b04f8`。ECC 提交包含已发布的 ECC-Tools 子模块提交。Studio 的 ECC 发布 pin/CI toolchain lock 仍维持现状；本地联调使用上述分支运行时，不把它冒充正式 pinned runtime 更新。其他 workspace execution 配置改动未纳入本轮提交。
 
-代码验证沿用 [replay-presentation.md](replay-presentation.md) 中刚完成的记录：Rust 483 项通过、真实 Filler 100 次随机定位、Native 安装、Linux `make build` 和桌面 smoke 通过；Route 的 ECC/GUI/E2E 验证及 ECC-Tools 完整构建的既有 CTS 测试阻塞也在其中记录。本次没有改运行时代码，未重跑这些测试。
+设计阶段沿用 [replay-presentation.md](replay-presentation.md) 的历史记录：Rust 483 项通过、真实 Filler 100 次随机定位、Native 安装、Linux `make build` 和桌面 smoke 通过；Route 的 ECC/GUI/E2E 验证及 ECC-Tools 完整构建的既有 CTS 测试阻塞也在其中记录。设计文档提交当时没有修改运行时代码，未重复运行这些测试。
 
-本文完成本地源码/冻结文件检查及同步、数据和性能约束自审。3D 双视口方案未实现、未运行基准或跨平台测试，性能数字除明确标注的历史实测外均为验收目标。后续开发应按本文里程碑验证，不直接承诺复用现有 3D 后即可达到流畅同步。
+上述提交和验证属于设计前的交付记录。随后已完成同步 2D/3D、阶段视角、交互、分析叠加、按需 GPU 资源及 Linux 构建安装。最新验证及仍存在的性能/显示限制统一记录在 [实现说明](replay-3d-implementation.md)。本设计中的完整性能矩阵和跨平台验证仍是后续验收范围。

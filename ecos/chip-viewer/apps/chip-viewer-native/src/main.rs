@@ -24,6 +24,7 @@ mod replay;
 mod replay_analysis;
 mod replay_batch;
 mod replay_cache;
+mod replay_camera_plan;
 mod replay_checklist;
 mod replay_data;
 mod replay_events;
@@ -40,6 +41,7 @@ mod replay_motion;
 mod replay_plan;
 mod replay_reveal;
 mod replay_route;
+mod replay_scene3d;
 #[cfg(test)]
 mod replay_validation_tests;
 mod timing;

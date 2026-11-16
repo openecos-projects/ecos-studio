@@ -19,6 +19,7 @@ pub struct Request {
     pub kind: Kind,
     pub animate: bool,
     pub results: bool,
+    pub three_d_budget: Option<usize>,
 }
 
 pub struct ResultAssets {
@@ -29,6 +30,7 @@ pub struct ResultAssets {
 
 pub struct Prepared {
     pub scene: Scene,
+    pub three_d: Option<Result<crate::replay_scene3d::Scene3d, String>>,
     pub route_overlay: crate::replay_route::RouteOverlay,
     pub motion: Motion,
     pub reveal: Reveal,
@@ -88,6 +90,7 @@ impl Default for Loader {
                             && request.animate
                             && request.kind == Kind::Motion
                             && !request.results
+                            && request.three_d_budget.is_none()
                         {
                             return Ok(prepared);
                         }
@@ -112,6 +115,7 @@ impl Default for Loader {
                     && request.animate
                     && request.kind == Kind::Motion
                     && !request.results
+                    && request.three_d_budget.is_none()
                     && alive()
                 {
                     if let Some((path, record)) = &mut recording {
@@ -181,6 +185,24 @@ fn prepare(
     anyhow::ensure!(alive(), "Seek superseded");
     #[cfg(test)]
     let reconstructed = std::time::Instant::now();
+    let three_d = request.three_d_budget.map(|budget| {
+        (|| -> anyhow::Result<_> {
+            if record.metadata3d.is_none() {
+                record.metadata3d = Some(Arc::new(crate::replay_scene3d::Metadata::open(
+                    record, alive,
+                )?));
+            }
+            crate::replay_scene3d::Scene3d::build(
+                &record.scene,
+                &motion,
+                &reveal,
+                record.metadata3d.as_ref().unwrap().clone(),
+                budget,
+                alive,
+            )
+        })()
+        .map_err(|error| error.to_string())
+    });
     let index = SceneIndex::build(&record.scene, &motion);
     #[cfg(test)]
     let indexed = std::time::Instant::now();
@@ -212,6 +234,7 @@ fn prepare(
     let scene = record.scene.clone();
     let route_overlay = crate::replay_route::RouteOverlay::from_scene(&scene);
     Ok(Prepared {
+        three_d,
         route_overlay,
         scene,
         motion,
@@ -267,6 +290,7 @@ mod tests {
             kind: Kind::Motion,
             animate: true,
             results: false,
+            three_d_budget: None,
         };
         let receive = || {
             loader
@@ -299,6 +323,7 @@ mod tests {
             kind: Kind::Hold,
             animate: false,
             results: false,
+            three_d_budget: None,
         };
         loader.submit(request(2)).unwrap();
         let latest = loader.submit(request(0)).unwrap();

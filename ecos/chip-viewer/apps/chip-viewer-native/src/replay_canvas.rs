@@ -4,7 +4,7 @@ use egui::{Color32, Pos2, Rect, Sense, Stroke};
 
 impl ReplayApp {
     pub(super) fn canvas(&mut self, ui: &mut egui::Ui) {
-        let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
+        let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click());
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, Color32::from_rgb(12, 18, 24));
         let Some(recording) = &self.recording else {
@@ -55,6 +55,38 @@ impl ReplayApp {
             center_x + half_x,
             center_y + half_y,
         ];
+        if response.clicked() {
+            if let Some(pos) = response.interact_pointer_pos() {
+                let x = (center_x as f64 + f64::from(pos.x - rect.center().x) / f64::from(scale))
+                    .round() as i64;
+                let y = (center_y as f64 - f64::from(pos.y - rect.center().y) / f64::from(scale))
+                    .round() as i64;
+                let hit = self
+                    .scene_index
+                    .visible([x, y, x, y])
+                    .filter(|(id, object)| {
+                        let b = self.motion.bounds(id, self.reveal.bounds(id, object));
+                        self.reveal.fraction(id) > 0.0
+                            && matches!(
+                                object.kind.as_str(),
+                                "instance" | "macro" | "wire" | "via" | "pin"
+                            )
+                            && x >= b[0]
+                            && x <= b[2]
+                            && y >= b[1]
+                            && y <= b[3]
+                    })
+                    .min_by_key(|(_, o)| {
+                        (o.bbox[2] as i128 - o.bbox[0] as i128)
+                            * (o.bbox[3] as i128 - o.bbox[1] as i128)
+                    });
+                self.selected_objects.clear();
+                if let Some((id, _)) = hit {
+                    self.selected_objects.insert(id.to_owned());
+                }
+                ui.ctx().request_repaint();
+            }
+        }
         let key = (rect, [lx, ly, hx, hy], self.zoom.to_bits(), scene.revision);
         if self.canvas_cache.key.as_ref() != Some(&key) {
             self.canvas_cache.prepare(
@@ -184,7 +216,7 @@ impl ReplayApp {
         }
         for id in &self.selected_objects {
             if let Some(obj) = scene.objects.get(id) {
-                let [x1, y1, x2, y2] = obj.bbox;
+                let [x1, y1, x2, y2] = self.motion.bounds(id, self.reveal.bounds(id, obj));
                 painter.rect_stroke(
                     Rect::from_two_pos(project(x1, y1), project(x2, y2)).expand(2.0),
                     0.0,
