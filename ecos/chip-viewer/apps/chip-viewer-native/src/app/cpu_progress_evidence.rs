@@ -221,7 +221,10 @@ mod tests {
             assert_eq!(
                 metadata,
                 serde_json::json!({"zoom": 1.0, "width": 640, "height": 480,
-                    "generation": 4, "sequence": 64}),
+                    "generation": 4, "sequence": 64,
+                    "pan": [0.0, 0.0],
+                    "canvas": [10.0, 20.0, 510.0, 420.0],
+                    "viewport": [0, 0, 1000, 1000]}),
             );
             pixels.push(fs::read(path.with_extension("rgba")).unwrap());
         }

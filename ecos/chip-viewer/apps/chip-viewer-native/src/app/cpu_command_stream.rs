@@ -16,7 +16,6 @@ struct Commands {
         Rect32,
         chip_view_db::ShapeGeometry,
         chip_display::LayerStyle,
-        std::ops::Range<usize>,
     )>,
     capture: bool,
 }
@@ -35,14 +34,7 @@ impl SceneSink for Commands {
         style: chip_display::LayerStyle,
     ) {
         if self.capture {
-            self.records
-                .push((bbox, geometry, style, self.paint.len()..self.paint.len()));
-        }
-    }
-
-    fn end_shape(&mut self) {
-        if let Some(record) = self.records.last_mut() {
-            record.3.end = self.paint.len();
+            self.records.push((bbox, geometry, style));
         }
     }
 }
@@ -85,11 +77,11 @@ pub(in crate::app::cpu_scene) fn build_command_stream(
                 },
             )
         },
-        |(chunk, commands)| {
+        |(mut chunk, commands)| {
             let consumed_at = Instant::now();
             if let Some(model) = &mut retained {
-                for (bbox, geometry, style, range) in commands.records {
-                    if !model.push(bbox, geometry, style, &commands.paint[range]) {
+                for (bbox, geometry, style) in commands.records {
+                    if !model.push(bbox, geometry, style, &[]) {
                         retained = None;
                         break;
                     }
@@ -98,6 +90,9 @@ pub(in crate::app::cpu_scene) fn build_command_stream(
             let current = consume(PaintPacket::Commands(commands.paint));
             consumer_duration += consumed_at.elapsed();
             if !current {
+                return false;
+            }
+            if merge_priority(&mut scene, &mut chunk, &|| is_current()).is_none() {
                 return false;
             }
             scene.labels.append(chunk.labels);
@@ -120,5 +115,6 @@ pub(in crate::app::cpu_scene) fn build_command_stream(
     scene.build_duration = started.elapsed().saturating_sub(consumer_duration);
     scene.pipeline_duration = started.elapsed();
     scene.retained = retained.map(Arc::new);
+    finish_priority(request, &mut scene, &|| is_current());
     is_current().then_some(scene)
 }

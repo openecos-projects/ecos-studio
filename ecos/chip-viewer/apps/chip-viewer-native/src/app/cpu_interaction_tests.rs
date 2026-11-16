@@ -3,13 +3,15 @@ use crate::app::cpu_raster::test_support::Presentation;
 
 fn assert_pixels(actual: &[u8], expected: &[u8]) {
     assert_eq!(actual.len(), expected.len());
-    assert_eq!(
-        actual
-            .iter()
-            .zip(expected)
-            .position(|(actual, expected)| actual != expected),
-        None
-    );
+    if let Some(index) = actual.iter().zip(expected).position(|(a, b)| a != b) {
+        let offset = index / 4 * 4;
+        panic!(
+            "pixel {}: actual {:?}, expected {:?}",
+            index / 4,
+            &actual[offset..offset + 4],
+            &expected[offset..offset + 4]
+        );
+    }
 }
 
 fn renderer() -> Option<offscreen::OffscreenRenderer> {
@@ -302,6 +304,94 @@ fn pan_preserves_complete_overlap_and_fills_only_exposed_pixels_from_a_new_prefi
                 presentation.cache.is_preview(&current) || !retained.intersects(current.canvas)
             );
         }
+    });
+}
+
+#[test]
+fn retained_pan_repairs_damage_before_completion_and_prefixes_cannot_erase_it() {
+    let fixture = Fixture::new();
+    let mut request = fixture.request(1.0, 1.0);
+    request.layer_ids = vec![2];
+    request.pattern_textures = Arc::new(PatternTextureSet::new(&fixture.ctx));
+    let mut scene = builder::build_command_stream(&request, &|| true, |_| true).unwrap();
+    assert!(scene.retained.is_some());
+    let Some(mut renderer) = renderer() else {
+        return;
+    };
+    let source = builder::build_with_workers(&request, &|| true, 1).unwrap();
+    scene.bitmap = Some(
+        renderer
+            .rasterize_updates(&source, &request, || true, |_, _| {}, None)
+            .unwrap()
+            .unwrap()
+            .0
+            .into(),
+    );
+    let scene = Arc::new(scene);
+    request.key.pan.x -= 64.0;
+    request.key.viewport = screen_to_world_rect(
+        request.key.canvas,
+        request.key.world,
+        request.key.canvas,
+        request.key.zoom,
+        request.key.pan,
+    );
+    let target = builder::build_with_workers(&request, &|| true, 1).unwrap();
+    let expected = renderer
+        .rasterize_updates(&target, &request, || true, |_, _| {}, None)
+        .unwrap()
+        .unwrap()
+        .0;
+    let mut patterns = Vec::new();
+    builder::build_command_stream(&request, &|| true, |packet| {
+        if let builder::PaintPacket::Commands(commands) = packet {
+            patterns.extend(commands.into_iter().filter_map(|command| match command {
+                chip_render::geometry2d::PaintCommand::PatternRect { rect, .. } => Some(rect),
+                _ => None,
+            }));
+        }
+        true
+    })
+    .unwrap();
+    assert!(expected
+        .chunks_exact(4)
+        .any(|pixel| pixel != [0, 0, 0, 255]));
+    renderer.with_context(|gl| {
+        let presentation = Presentation::new(Arc::clone(gl), &request.key, fixture.ctx.clone());
+        presentation.paint(Some(&scene), scene.key(), None);
+        let progress = Arc::new(progress::ProgressFrame::new(
+            request.key.clone(),
+            2,
+            64,
+            [5, 103, 71, 255].repeat(640 * 480),
+        ));
+        let certified = sparse_rects::certified_profile(gl);
+        for actual in [
+            presentation.paint_until_retained(None, &request.key, None),
+            presentation.paint(None, &request.key, Some(&progress)),
+        ] {
+            for (index, (got, expected)) in actual
+                .chunks_exact(4)
+                .zip(expected.chunks_exact(4))
+                .enumerate()
+            {
+                let point =
+                    egui::pos2((index % 640) as f32 + 0.5, (479 - index / 640) as f32 + 0.5);
+                let allowance = if certified && patterns.iter().any(|rect| rect.contains(point)) {
+                    2
+                } else {
+                    0
+                };
+                assert!(
+                    got.iter()
+                        .zip(expected)
+                        .all(|(a, b)| a.abs_diff(*b) <= allowance),
+                    "pixel {point:?}: {got:?} != {expected:?}"
+                );
+            }
+        }
+        assert!(presentation.cache.is_partial(&request.key));
+        assert!(!presentation.cache.is_preview(&request.key));
     });
 }
 

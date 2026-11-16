@@ -1,6 +1,6 @@
 //! Bounded history of exact views, accounting for mesh and bitmap capacities.
 
-use super::{CpuScene, SceneKey};
+use super::{CpuScene, PriorityCache, SceneKey, SceneRequest};
 use std::collections::VecDeque;
 use std::mem::size_of;
 use std::sync::Arc;
@@ -34,17 +34,31 @@ impl CpuSceneHistory {
                 raster_duration: scene.raster_duration,
                 completed_labels: Arc::clone(&scene.completed_labels),
                 overlay_drawn: scene.overlay_drawn,
+                initial_records: None,
+                priority: scene.priority.as_ref().map(Arc::clone),
+                priority_collector: None,
             })
         } else {
             scene
         };
         let bytes = retained_bytes(&scene.meshes, scene.bitmap.as_ref())
-            .saturating_add(scene.retained.as_ref().map_or(0, |model| model.byte_len()));
+            .saturating_add(scene.retained.as_ref().map_or(0, |model| model.byte_len()))
+            .saturating_add(scene.priority.as_ref().map_or(0, |cache| cache.byte_len()));
         self.history.insert(scene.key().clone(), scene, bytes);
     }
 
     pub(super) fn get(&mut self, key: &SceneKey) -> Option<Arc<CpuScene>> {
         self.history.get(key)
+    }
+
+    pub(super) fn priority(&self, request: &SceneRequest) -> Option<Arc<PriorityCache>> {
+        self.history
+            .entries
+            .iter()
+            .rev()
+            .filter_map(|entry| entry.value.priority.as_ref())
+            .find(|cache| cache.compatible(request))
+            .map(Arc::clone)
     }
 
     pub(super) fn clear(&mut self) {

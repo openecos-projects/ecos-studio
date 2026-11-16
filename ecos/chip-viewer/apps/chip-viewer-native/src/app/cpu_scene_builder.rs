@@ -10,8 +10,10 @@ pub(super) use selection::refresh_labels;
 #[cfg(target_os = "linux")]
 #[path = "cpu_initial_progress.rs"]
 mod initial;
+#[cfg(all(test, target_os = "linux"))]
+pub(super) use initial::build_initial_scene_with_budget;
 #[cfg(target_os = "linux")]
-pub(super) use initial::build_initial_progress;
+pub(super) use initial::{build_initial_scene, build_ui_initial_scene};
 
 pub(super) use stream::build_raster_stream;
 #[cfg(test)]
@@ -22,6 +24,14 @@ pub(super) use stream::{build_command_stream, PaintPacket};
 /// Receives shape boundaries around the ordered paint commands from one record.
 /// Sinks that retain inputs must also retain records producing no commands.
 trait SceneSink: chip_render::geometry2d::PaintSink {
+    fn collect_labels(&self) -> bool {
+        true
+    }
+
+    fn capture_priority(&self) -> bool {
+        self.collect_labels()
+    }
+
     fn begin_shape(
         &mut self,
         _bbox: Rect32,
@@ -84,7 +94,8 @@ pub(super) fn build_with_workers(
             .collect::<Option<Vec<_>>>()
     })?;
     let mut scene = empty_scene(&request.key, Arc::clone(&request.pattern_textures));
-    for chunk in chunks {
+    for mut chunk in chunks {
+        merge_priority(&mut scene, &mut chunk, is_current)?;
         scene.meshes.extend(chunk.meshes);
         scene.labels.append(chunk.labels);
         scene.drawn += chunk.drawn;
@@ -102,10 +113,11 @@ pub(super) fn build_with_workers(
     }
     scene.build_duration = started.elapsed();
     scene.pipeline_duration = scene.build_duration;
+    finish_priority(request, &mut scene, is_current);
     is_current().then_some(scene)
 }
 
-fn empty_scene(key: &SceneKey, pattern_textures: Arc<PatternTextureSet>) -> CpuScene {
+pub(super) fn empty_scene(key: &SceneKey, pattern_textures: Arc<PatternTextureSet>) -> CpuScene {
     CpuScene {
         key: key.clone(),
         pattern_textures,
@@ -124,6 +136,9 @@ fn empty_scene(key: &SceneKey, pattern_textures: Arc<PatternTextureSet>) -> CpuS
         raster_duration: Duration::ZERO,
         completed_labels: Arc::default(),
         overlay_drawn: 0,
+        initial_records: None,
+        priority: None,
+        priority_collector: None,
     }
 }
 
@@ -198,11 +213,17 @@ fn build_chunk_sink<Sink: SceneSink>(
         shapes.push((shape, owner, request.db.shape_geometry(shape), style));
     }
     let mut scene = empty_scene(key, Arc::clone(&request.pattern_textures));
+    if sink.capture_priority() {
+        scene.priority_collector = PriorityBuilder::new(request);
+    }
     scene.filter_duration = filter_started.elapsed();
     let pass = chip_render::geometry2d::GeometryPass::new(key.world, key.canvas, key.zoom, key.pan);
     for (index, (shape, owner, geometry, style)) in shapes.iter().enumerate() {
         if index % 1024 == 0 && !is_current() {
             return None;
+        }
+        if let Some(priority) = &mut scene.priority_collector {
+            priority.observe(shape.id, shape.bbox, *style);
         }
         sink.begin_shape(shape.bbox, *geometry, *style);
         let primitives = pass.draw(*geometry, style, &mut sink);
@@ -212,6 +233,9 @@ fn build_chunk_sink<Sink: SceneSink>(
         }
         scene.drawn += 1;
         scene.primitives += primitives;
+        if !sink.collect_labels() {
+            continue;
+        }
         if let Some(label) = shape_label_candidate(
             *geometry,
             *owner,
@@ -231,6 +255,39 @@ fn build_chunk_sink<Sink: SceneSink>(
     }
     drop(shapes);
     is_current().then_some((scene, sink))
+}
+
+pub(super) fn merge_priority(
+    scene: &mut CpuScene,
+    chunk: &mut CpuScene,
+    is_current: &impl Fn() -> bool,
+) -> Option<()> {
+    if let Some(local) = chunk.priority_collector.take() {
+        if let Some(global) = &mut scene.priority_collector {
+            global.merge(local, is_current)?;
+        } else {
+            scene.priority_collector = Some(local);
+        }
+    }
+    is_current().then_some(())
+}
+
+pub(super) fn finish_priority(
+    request: &SceneRequest,
+    scene: &mut CpuScene,
+    is_current: &impl Fn() -> bool,
+) {
+    scene.priority = scene
+        .priority_collector
+        .take()
+        .and_then(|collector| collector.finish(is_current))
+        .or_else(|| {
+            request
+                .priority
+                .as_ref()
+                .filter(|cache| cache.compatible(request))
+                .map(Arc::clone)
+        });
 }
 
 pub(super) fn prepare_meshes(

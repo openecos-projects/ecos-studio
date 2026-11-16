@@ -1,5 +1,12 @@
 # Native rendering checks
 
+The November 16 missing-content investigation is recorded in
+[`render-interaction-damage.md`](../../../docs/render-interaction-damage.md).
+Zoom feedback now checks captured routing pixels against the completed target;
+`cpu_scene_partial` alone cannot prove useful layout visibility. The historical
+passes below predate this stronger content check. The first multilayer CPU
+preview experiment failed on both minirv2 and TPU and is not accepted as a fix.
+
 The current combined `initial-pool` revision passes the native 2D gates on
 all-visible minirv2 with the certified llvmpipe driver. See
 `../../../docs/render-acceptance-2026-11-13.md` for exact source identity,

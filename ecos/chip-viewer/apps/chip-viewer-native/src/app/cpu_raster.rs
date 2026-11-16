@@ -26,8 +26,16 @@ use trace::PresentTrace;
 #[path = "cpu_pan_presentation.rs"]
 mod pan;
 
+use super::cpu_scene::retained_regions::worker as retained_worker;
+
 #[path = "cpu_presentation_stats.rs"]
 mod stats;
+
+#[path = "cpu_initial_presentation.rs"]
+mod initial;
+
+#[path = "cpu_seed_evidence.rs"]
+mod seed_evidence;
 
 #[path = "cpu_canvas_background.rs"]
 pub(super) mod background;
@@ -66,17 +74,28 @@ impl CpuRasterCache {
         painter: &egui::Painter,
         background: egui::Color32,
     ) {
+        self.paint_with_initial(scene, None, key, progress, generation, painter, background);
+    }
+
+    pub(super) fn paint_with_initial(
+        self: &Arc<Self>,
+        scene: Option<&Arc<CpuScene>>,
+        initial: Option<&Arc<CpuScene>>,
+        key: &SceneKey,
+        progress: Arc<ProgressMailbox>,
+        generation: u64,
+        painter: &egui::Painter,
+        background: egui::Color32,
+    ) {
         if self.failed.load(Ordering::Relaxed) {
             if let Some(scene) = scene {
                 scene.paint(painter);
             }
             return;
         }
-        if let Some(resources) = self.resources.lock().unwrap().as_mut() {
-            resources.prepare_retained(key);
-        }
         let cache = Arc::clone(self);
         let scene = scene.map(Arc::clone);
+        let initial = initial.map(Arc::clone);
         let key = key.clone();
         let ctx = painter.ctx().clone();
         painter.add(egui::PaintCallback {
@@ -97,10 +116,12 @@ impl CpuRasterCache {
                     }
                     trace.mark("resources_setup");
                     let progress = progress.current(&key, generation);
-                    resources.as_mut().unwrap().paint(
+                    resources.as_mut().unwrap().paint_with_initial(
                         &info,
                         scene.as_ref(),
+                        initial.as_ref(),
                         &key,
+                        generation,
                         progress.as_ref(),
                         &ctx,
                         background,
@@ -136,15 +157,15 @@ impl CpuRasterCache {
     #[cfg(target_os = "linux")]
     pub(super) fn supports_initial_progress(&self, key: &SceneKey) -> bool {
         !self.failed.load(Ordering::Relaxed)
-            && self.sparse_prefix.load(Ordering::Relaxed)
             && self
                 .resources
                 .lock()
                 .unwrap()
                 .as_ref()
-                .is_some_and(|resources| {
+                .is_none_or(|resources| {
                     !resources.frames().any(|frame| {
-                        frame.scene.retained.is_some()
+                        key.same_raster_scale(frame.scene.key())
+                            && frame.scene.key().compatible(key)
                             && key
                                 .raster_destination(frame.scene.key())
                                 .is_some_and(|destination| destination.intersects(key.canvas()))
@@ -221,7 +242,8 @@ impl CpuRasterCache {
             .is_some_and(|resources| {
                 resources.presentation_source(key).is_some_and(|source| {
                     resources.retained_for(key, source.key()).is_some()
-                        || matches!(source, RasterSource::Partial(frame) if frame.frame.key == *key)
+                        || matches!(source, RasterSource::Partial(frame) if frame.frame.key.same_geometry(key))
+                        || matches!(source, RasterSource::Seed(frame) if frame.scene.key() == key)
                 })
             })
     }
@@ -269,8 +291,13 @@ struct RasterResources {
     front: Option<RasterFrame>,
     building: Option<RasterBuild>,
     progress: Option<ProgressTarget>,
+    initial: Option<initial::SeedTarget>,
+    seed_evidence: seed_evidence::SeedEvidence,
+    #[cfg(target_os = "linux")]
+    seed_batch: super::cpu_scene::TextureBatch,
     retained_pan: Option<pan::RetainedPan>,
     retained_target: Option<pan::RetainedTarget>,
+    retained_worker: retained_worker::RetainedWorker,
 }
 
 struct ProgressTarget {
@@ -281,6 +308,7 @@ struct ProgressTarget {
 enum RasterSource<'a> {
     Complete(&'a RasterFrame),
     Partial(&'a ProgressTarget),
+    Seed(&'a initial::SeedTarget),
 }
 
 impl RasterSource<'_> {
@@ -288,6 +316,7 @@ impl RasterSource<'_> {
         match self {
             Self::Complete(frame) => frame.scene.key(),
             Self::Partial(frame) => &frame.frame.key,
+            Self::Seed(frame) => frame.scene.key(),
         }
     }
 
@@ -295,6 +324,7 @@ impl RasterSource<'_> {
         match self {
             Self::Complete(frame) => &frame.target,
             Self::Partial(frame) => &frame.target,
+            Self::Seed(frame) => &frame.target,
         }
     }
 }
@@ -315,8 +345,13 @@ impl RasterResources {
             front: None,
             building: None,
             progress: None,
+            initial: None,
+            seed_evidence: Default::default(),
+            #[cfg(target_os = "linux")]
+            seed_batch: Default::default(),
             retained_pan: None,
             retained_target: None,
+            retained_worker: Default::default(),
         })
     }
 
@@ -366,8 +401,11 @@ impl RasterResources {
             .progress
             .as_ref()
             .filter(|frame| key.raster_destination(&frame.frame.key).is_some());
-        if let Some(frame) = progress.filter(|frame| frame.frame.key == *key) {
+        if let Some(frame) = progress.filter(|frame| frame.frame.key.same_geometry(key)) {
             return Some(RasterSource::Partial(frame));
+        }
+        if let Some(seed) = self.initial.as_ref().filter(|seed| seed.scene.key() == key) {
+            return Some(RasterSource::Seed(seed));
         }
         progress.map(RasterSource::Partial)
     }
@@ -377,6 +415,24 @@ impl RasterResources {
         info: &egui::PaintCallbackInfo,
         scene: Option<&Arc<CpuScene>>,
         key: &SceneKey,
+        generation: u64,
+        progress: Option<&Arc<ProgressFrame>>,
+        ctx: &egui::Context,
+        background: egui::Color32,
+        trace: &mut PresentTrace,
+    ) -> Result<bool, String> {
+        self.paint_with_initial(
+            info, scene, None, key, generation, progress, ctx, background, trace,
+        )
+    }
+
+    fn paint_with_initial(
+        &mut self,
+        info: &egui::PaintCallbackInfo,
+        scene: Option<&Arc<CpuScene>>,
+        initial: Option<&Arc<CpuScene>>,
+        key: &SceneKey,
+        generation: u64,
         progress: Option<&Arc<ProgressFrame>>,
         ctx: &egui::Context,
         background: egui::Color32,
@@ -385,7 +441,11 @@ impl RasterResources {
         let gl = Arc::clone(self.painter.gl());
         let draw = unsafe { gl.get_parameter_framebuffer(glow::DRAW_FRAMEBUFFER_BINDING) };
         let read = unsafe { gl.get_parameter_framebuffer(glow::READ_FRAMEBUFFER_BINDING) };
-        let result = self.paint_inner(info, scene, key, progress, ctx, background, draw, trace);
+        let result = (|| {
+            self.paint_inner(
+                info, scene, initial, key, generation, progress, ctx, background, draw, trace,
+            )
+        })();
         unsafe {
             gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, draw);
             gl.bind_framebuffer(glow::READ_FRAMEBUFFER, read);
@@ -398,7 +458,9 @@ impl RasterResources {
         &mut self,
         info: &egui::PaintCallbackInfo,
         scene: Option<&Arc<CpuScene>>,
+        initial: Option<&Arc<CpuScene>>,
         key: &SceneKey,
+        generation: u64,
         progress: Option<&Arc<ProgressFrame>>,
         ctx: &egui::Context,
         background: egui::Color32,
@@ -412,6 +474,7 @@ impl RasterResources {
             self.clear_frames();
         }
         trace.mark("compatibility_cleanup");
+        self.prepare_initial(info, initial, key, generation, ctx, background, trace)?;
         self.targets.observe(key);
         let already_ready = self.frames().any(|frame| {
             frame.scene.key().same_geometry(key) && frame.target.size == info.screen_size_px
@@ -434,6 +497,12 @@ impl RasterResources {
             if let Some(previous) = self.progress.take() {
                 self.targets.retire(&gl, previous.target);
             }
+        }
+        if self.initial.as_ref().is_some_and(|seed| {
+            exact || seed.scene.key() != key || seed.target.size != info.screen_size_px
+        }) {
+            let seed = self.initial.take().unwrap();
+            self.targets.retire(&gl, seed.target);
         }
         trace.mark("advance");
         if !exact {
@@ -458,7 +527,9 @@ impl RasterResources {
             }
         }
         trace.mark("progress_upload");
-        self.upload_retained(key)?;
+        self.prepare_retained(key, generation, ctx);
+        trace.mark("retained_prepare");
+        self.upload_retained(key, ctx)?;
         trace.mark("retained_upload");
         self.present(&gl, info, draw, key);
         if already_ready && self.targets.warm_when_idle(&gl, info.screen_size_px)? {
@@ -568,6 +639,7 @@ impl RasterResources {
     fn clear_frames(&mut self) {
         let gl = self.painter.gl();
         self.retained_pan = None;
+        self.retained_worker.cancel();
         if let Some(target) = self.retained_target.take() {
             target.target.destroy(gl);
         }
@@ -580,11 +652,16 @@ impl RasterResources {
         if let Some(progress) = self.progress.take() {
             progress.target.destroy(gl);
         }
+        if let Some(initial) = self.initial.take() {
+            initial.target.destroy(gl);
+        }
         self.targets.destroy(gl);
     }
 
     fn destroy(&mut self) {
         self.clear_frames();
+        #[cfg(target_os = "linux")]
+        self.seed_batch.destroy(self.painter.gl());
         self.painter.destroy();
     }
 }

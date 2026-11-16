@@ -12,9 +12,12 @@ use std::sync::{Arc, Condvar};
 mod builder;
 #[path = "cpu_pattern_texture.rs"]
 mod pattern_texture;
+#[path = "cpu_preview_priority.rs"]
+mod preview_priority;
 #[cfg(any(test, not(target_os = "linux")))]
 use builder::build_scene;
 pub(super) use pattern_texture::PatternTextureSet;
+pub(in crate::app::cpu_scene) use preview_priority::{PriorityBuilder, PriorityCache};
 
 #[path = "cpu_geometry.rs"]
 mod geometry;
@@ -35,6 +38,7 @@ pub(super) mod progress;
 mod history;
 
 #[cfg(target_os = "linux")]
+#[cfg(test)]
 #[path = "cpu_initial_pixels.rs"]
 mod initial_pixels;
 
@@ -44,6 +48,8 @@ mod worker;
 #[cfg(target_os = "linux")]
 #[path = "cpu_offscreen.rs"]
 mod offscreen;
+#[cfg(target_os = "linux")]
+pub(in crate::app) use offscreen::TextureBatch;
 
 #[cfg(target_os = "linux")]
 #[path = "cpu_sparse_rects.rs"]
@@ -87,6 +93,10 @@ pub(super) struct SceneRequest {
     tessellator: egui::epaint::Tessellator,
     repaint: egui::Context,
     glow: bool,
+    #[cfg(target_os = "linux")]
+    initial_progress: bool,
+    #[cfg(target_os = "linux")]
+    initial_scene: Option<Arc<CpuScene>>,
     glow_renderer: Option<String>,
     label_fonts: egui::FontDefinitions,
     label_texture_side: usize,
@@ -94,6 +104,7 @@ pub(super) struct SceneRequest {
     grid_layers: Vec<LayerUiState>,
     publication: progress::Publication,
     pattern_textures: Arc<PatternTextureSet>,
+    priority: Option<Arc<PriorityCache>>,
 }
 
 type LabelCompletion = OnceLock<(Arc<ResolvedLabels>, Duration)>;
@@ -116,6 +127,9 @@ pub(super) struct CpuScene {
     pub(super) raster_duration: Duration,
     completed_labels: Arc<LabelCompletion>,
     pub(super) overlay_drawn: usize,
+    initial_records: Option<Arc<[ShapeId]>>,
+    priority: Option<Arc<PriorityCache>>,
+    priority_collector: Option<PriorityBuilder>,
 }
 
 struct WorkerInbox {
@@ -130,8 +144,6 @@ struct WorkerInbox {
 pub(super) struct CpuSceneCache {
     raster: Arc<super::cpu_raster::CpuRasterCache>,
     progress: Arc<progress::ProgressMailbox>,
-    #[cfg(target_os = "linux")]
-    initial_pixels: initial_pixels::Pool,
     history: history::CpuSceneHistory,
     inbox: Arc<WorkerInbox>,
     responses: Receiver<(u64, Arc<CpuScene>)>,
@@ -139,6 +151,7 @@ pub(super) struct CpuSceneCache {
     ready: Option<Arc<CpuScene>>,
     anchor: Option<Arc<CpuScene>>,
     pending: Option<SceneRequest>,
+    initial_scene: Option<Arc<CpuScene>>,
     restored: bool,
 }
 
@@ -160,8 +173,6 @@ impl Default for CpuSceneCache {
         Self {
             raster: Arc::default(),
             progress,
-            #[cfg(target_os = "linux")]
-            initial_pixels: Default::default(),
             history: history::CpuSceneHistory::default(),
             inbox,
             responses,
@@ -169,6 +180,7 @@ impl Default for CpuSceneCache {
             ready: None,
             anchor: None,
             pending: None,
+            initial_scene: None,
             restored: false,
         }
     }
@@ -184,6 +196,20 @@ impl Drop for CpuSceneCache {
 
 impl CpuSceneCache {
     pub(super) fn get_or_request(&mut self, mut request: SceneRequest) -> Option<Arc<CpuScene>> {
+        if request
+            .priority
+            .as_ref()
+            .is_none_or(|cache| !cache.compatible(&request))
+        {
+            request.priority = self
+                .ready
+                .iter()
+                .chain(self.anchor.iter())
+                .filter_map(|scene| scene.priority.as_ref())
+                .find(|cache| cache.compatible(&request))
+                .map(Arc::clone)
+                .or_else(|| self.history.priority(&request));
+        }
         if self.raster.failed() {
             request.glow = false;
         }
@@ -198,6 +224,7 @@ impl CpuSceneCache {
             self.key = None;
         }
         if self.key.as_ref() != Some(&request.key) {
+            self.initial_scene = None;
             let retained = self
                 .ready
                 .as_ref()
@@ -250,28 +277,17 @@ impl CpuSceneCache {
         if self.pending.is_some() {
             let generation = self.inbox.generation.load(Ordering::Relaxed);
             #[cfg(target_os = "linux")]
-            if self.ready.is_none() {
-                if let Some(request) = self.pending.as_ref().filter(|request| {
-                    request.glow && self.raster.supports_initial_progress(&request.key)
-                }) {
-                    let mut pixels = self.initial_pixels.take(
-                        request.key.screen_size[0] as usize
-                            * request.key.screen_size[1] as usize
-                            * 4,
-                    );
-                    if let Some(sequence) = builder::build_initial_progress(request, &mut pixels) {
-                        let frame = self.progress.publish(progress::ProgressFrame::new(
-                            request.key.clone(),
-                            generation,
-                            sequence,
-                            pixels,
-                        ));
-                        self.initial_pixels.keep(Arc::clone(&frame.pixels));
-                        if let Err(error) = self.inbox.initial_evidence.enqueue(frame) {
-                            eprintln!("Initial progress evidence unavailable: {error}");
-                        }
-                    } else {
-                        self.initial_pixels.keep(Arc::new(pixels));
+            if let Some(request) = self.pending.as_mut() {
+                request.initial_progress = self.ready.is_none()
+                    && request.glow
+                    && self.raster.supports_initial_progress(&request.key);
+                if request.initial_progress {
+                    if let Some(mut scene) = builder::build_ui_initial_scene(request) {
+                        scene.generation = generation;
+                        let scene = Arc::new(scene);
+                        self.progress.protect_initial(&request.key, generation);
+                        request.initial_scene = Some(Arc::clone(&scene));
+                        self.initial_scene = Some(scene);
                     }
                 }
             }
@@ -312,8 +328,9 @@ impl CpuSceneCache {
         background: egui::Color32,
     ) {
         if let Some(key) = &self.key {
-            self.raster.paint(
+            self.raster.paint_with_initial(
                 scene,
+                self.initial_scene.as_ref(),
                 key,
                 Arc::clone(&self.progress),
                 self.inbox.generation.load(Ordering::Relaxed),
@@ -450,6 +467,18 @@ impl SceneKey {
 }
 
 impl CpuScene {
+    /// Counts cannot prove that a refinement contains spatially dispersed UI
+    /// seeds. This set is independent of their layer/shape paint ordering.
+    pub(in crate::app::cpu_scene) fn covers_initial_records(&self, initial: &Self) -> bool {
+        self.key == initial.key
+            && match (&self.initial_records, &initial.initial_records) {
+                (Some(prepared), Some(required)) => {
+                    required.iter().all(|id| prepared.binary_search(id).is_ok())
+                }
+                _ => false,
+            }
+    }
+
     pub(super) fn key(&self) -> &SceneKey {
         &self.key
     }
@@ -559,6 +588,10 @@ impl LoadedViewer {
             zoom_rules: self.visibility_rules_cache.zoom_rules.clone(),
             tessellator,
             repaint: ctx.clone(),
+            #[cfg(target_os = "linux")]
+            initial_progress: false,
+            #[cfg(target_os = "linux")]
+            initial_scene: None,
             glow: self.glow_rendering,
             glow_renderer: self.glow_renderer.clone(),
             label_fonts,
@@ -570,6 +603,7 @@ impl LoadedViewer {
                 .pattern_textures
                 .get_or_init(|| Arc::new(PatternTextureSet::new(ctx)))
                 .clone(),
+            priority: None,
         }
     }
 }

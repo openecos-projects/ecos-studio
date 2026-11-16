@@ -5,6 +5,9 @@ use geometry::{PackedMesh, PackedVertex};
 #[path = "cpu_compact_solid.rs"]
 mod solid;
 
+#[path = "cpu_texture_batch.rs"]
+pub(super) mod textures;
+
 #[derive(Default)]
 enum Backend {
     #[default]
@@ -16,6 +19,7 @@ enum Backend {
 #[derive(Default)]
 pub(super) struct CompactPainter {
     backend: Backend,
+    textures: textures::TextureBatch,
 }
 
 struct Buffers {
@@ -36,9 +40,13 @@ impl CompactPainter {
         &mut self,
         painter: &mut eframe::egui_glow::Painter,
         key: &SceneKey,
+        patterns: &PatternTextureSet,
         batch: &[egui::ClippedPrimitive],
         prepared: &[Option<PackedMesh>],
     ) -> usize {
+        if let Some(bytes) = self.textures.paint(painter, key, patterns, batch) {
+            return bytes;
+        }
         if matches!(self.backend, Backend::Reference) || prepared.len() != batch.len() {
             painter.paint_primitives(key.screen_size, key.pixels_per_point, batch);
             return reference_bytes(batch);
@@ -127,6 +135,7 @@ impl CompactPainter {
     }
 
     pub(super) fn destroy(&mut self, gl: &glow::Context) {
+        self.textures.destroy(gl);
         if let Backend::Ready(buffers) = std::mem::replace(&mut self.backend, Backend::Reference) {
             buffers.destroy(gl);
         }

@@ -24,6 +24,9 @@ pub use view_tiles::ViewTileIndex;
 mod query_prefix;
 pub use query_prefix::QueryPrefixLimits;
 
+mod query_sample;
+pub use query_sample::LayerQuerySample;
+
 pub mod clock_tree;
 
 pub struct ChipViewDb {

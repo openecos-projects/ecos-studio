@@ -7,7 +7,11 @@ impl PaintSink for LabelsOnly {
     fn paint(&mut self, _: PaintCommand) {}
 }
 
-impl SceneSink for LabelsOnly {}
+impl SceneSink for LabelsOnly {
+    fn capture_priority(&self) -> bool {
+        false
+    }
+}
 
 pub(in crate::app::cpu_scene) fn refresh_labels(
     request: &SceneRequest,
@@ -42,6 +46,11 @@ pub(in crate::app::cpu_scene) fn refresh_labels(
     scene.fallback_meshes = previous.fallback_meshes.clone();
     scene.bitmap = previous.bitmap.as_ref().map(Arc::clone);
     scene.retained = previous.retained.as_ref().map(Arc::clone);
+    scene.priority = previous
+        .priority
+        .as_ref()
+        .filter(|cache| cache.compatible(request))
+        .map(Arc::clone);
     scene.drawn = previous.drawn;
     scene.primitives = previous.primitives;
     scene.overlay_drawn = previous.overlay_drawn;

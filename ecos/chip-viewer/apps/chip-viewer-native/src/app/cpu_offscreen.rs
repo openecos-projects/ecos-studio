@@ -16,6 +16,7 @@ mod trace;
 
 #[path = "cpu_compact_mesh.rs"]
 mod compact;
+pub(in crate::app) use compact::textures::TextureBatch;
 
 #[path = "cpu_raster_font.rs"]
 mod font;
@@ -150,8 +151,13 @@ impl OffscreenRenderer {
         );
         target.clear(&gl, key.background);
         let packed = geometry::pack_meshes(&scene.meshes);
-        self.compact
-            .paint(&mut self.painter, key, &scene.meshes, &packed);
+        self.compact.paint(
+            &mut self.painter,
+            key,
+            &scene.pattern_textures,
+            &scene.meshes,
+            &packed,
+        );
         let result = read_pixels(&gl, key.screen_size);
         target.destroy(&gl);
         result

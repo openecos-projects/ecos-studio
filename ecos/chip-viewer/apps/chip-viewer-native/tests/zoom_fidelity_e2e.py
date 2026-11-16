@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare real zoom-out transition frames with completed layout references."""
+"""Compare zoom transitions against completed minirv/TPU targets with colored routes."""
 
 import argparse
 import json
@@ -16,6 +16,7 @@ from interaction_render_e2e import (
 )
 from static_render_e2e import read_samples, screenshot, viewer_window
 from render_latency import camera_latencies
+from render_zoom_content import conservative_feedback_seconds, feedback_capture, layout_feedback
 from x11_capture import WindowCapture
 
 
@@ -52,7 +53,7 @@ def capture_frame(window, output, name, stats, direct=None):
 
 def progress_references(output, zoom=None):
     references = []
-    for metadata in (output / "progress").glob("*.json"):
+    for metadata in (output / "progress").rglob("*.json"):
         record = json.loads(metadata.read_text())
         if zoom is not None and abs(record["zoom"] / zoom - 1) > 0.0001:
             continue
@@ -177,6 +178,7 @@ def run(args):
             references = [previous, previous_geometry]
             assert read_samples(stats)[-1]["zoom"] > 100, "high zoom was not established"
             records = []
+            target_geometry = []
             failures = []
             for step in range(6):
                 before = len(read_samples(stats))
@@ -191,6 +193,7 @@ def run(args):
                 )
                 captured_at = time.monotonic() - started
                 frames = [early]
+                capture_evidence = [(captured_at, first, last)]
                 while True:
                     samples = read_samples(stats)
                     if len(samples) >= before + 2 and all(
@@ -200,12 +203,15 @@ def run(args):
                     ):
                         break
                     assert time.monotonic() - started < args.timeout, "zoom did not settle"
-                    frames.append(capture_frame(
+                    frame, frame_first, frame_last = capture_frame(
                         window, args.output, f"out-{step:02}-frame-{len(frames):03}", stats, direct,
-                    )[0])
+                    )
+                    frames.append(frame)
+                    capture_evidence.append((time.monotonic() - started, frame_first, frame_last))
                 wait_ready(process, stats, args.timeout, before)
                 time.sleep(0.05)
                 exact = capture(window, args.output, f"out-{step:02}-exact")
+                exact_captured_at = time.monotonic() - started
                 samples = read_samples(stats)
                 zoom = samples[-1]["zoom"]
                 for index, frame in enumerate(frames):
@@ -226,6 +232,25 @@ def run(args):
                 ) / pixel_count
                 active = samples[before:]
                 latencies = camera_latencies(active, zoom)
+                image_evidence = []
+                for frame, (at, sample_first, sample_last) in zip(frames, capture_evidence):
+                    evidence = feedback_capture(
+                        frame, exact_geometry,
+                        samples[max(before, sample_first - 1):max(sample_first, sample_last)], zoom,
+                    )
+                    image_evidence.append({"captured_at_seconds": at, **evidence})
+                exact_content = layout_feedback(exact, exact_geometry)
+                # Feedback includes screenshot overhead: it is a conservative
+                # upper bound, and cannot establish <50ms from an earlier flag.
+                # Keep the raw native feedback separately for diagnosis.
+                verified = next((item["captured_at_seconds"] for item in image_evidence
+                                 if item["verified_current_layout"]), None)
+                if verified is None and exact_content["usable_layout_image"]:
+                    verified = exact_captured_at
+                flag_feedback = latencies["first_current_view_seconds"]
+                latencies["first_current_view_seconds"] = conservative_feedback_seconds(
+                    flag_feedback, verified,
+                )
                 response_seconds = latencies["geometry_response_seconds"]
                 feedback_seconds = latencies["first_current_view_seconds"]
                 record = {
@@ -236,6 +261,11 @@ def run(args):
                     "difference_from_current_exact": current_difference,
                     "unrecognized_colored_pixel_fraction": unknown_fraction,
                     **latencies,
+                    "stats_first_current_view_seconds": flag_feedback,
+                    "first_verified_layout_capture_seconds": verified,
+                    "layout_feedback_captures": image_evidence,
+                    "exact_colored_route_pixels": exact_content["colored_route_pixels"],
+                    "reference_colored_route_pixels": exact_content["reference_colored_route_pixels"],
                     "published_partial_references": len(progressive),
                     "frame_p95_ms": percentile([item["frame_interval_ms"] for item in active], 0.95),
                     "max_frame_ms": max(item["frame_interval_ms"] for item in active),
@@ -243,9 +273,18 @@ def run(args):
                 if args.uncached_steps and step < 5 and record["full_response_cache_hit"] is not False:
                     failures.append(f"step {step}: uncached camera unexpectedly restored history")
                 records.append(record)
+                target_geometry.append(exact_geometry)
                 print(json.dumps(record), flush=True)
                 if unknown_fraction > 0.025:
                     failures.append(f"step {step}: transition is neither prior nor current exact geometry")
+                if not exact_content["colored_reference_applicable"]:
+                    failures.append(f"step {step}: completed layout reference has no colored routes")
+                elif not exact_content["usable_layout_image"]:
+                    failures.append(f"step {step}: completed screenshot has less than 25% of target route ink")
+                if any(item["partial_insufficient_routes"] for item in image_evidence):
+                    failures.append(f"step {step}: current partial has less than 25% of target route ink")
+                if any(not item["usable_layout_image"] for item in image_evidence):
+                    failures.append(f"step {step}: captured transition has less than 25% of target route ink")
                 if colored_difference(previous, exact) < 1000:
                     failures.append(f"step {step}: zoom did not change visible layout")
                 if response_seconds is None or response_seconds > args.max_response_seconds:
@@ -274,14 +313,17 @@ def run(args):
             if args.uncached_steps:
                 prepare_uncached_camera(pointer, center, process, stats, args.timeout)
             continuous = []
+            continuous_ranges = []
             before = len(read_samples(stats))
             for step in range(6):
                 started = time.monotonic()
                 pointer.wheel(-1)
                 time.sleep(0.02)
-                continuous.append(capture_frame(
+                frame, first, last = capture_frame(
                     window, args.output, f"continuous-{step:02}", stats, direct,
-                )[0])
+                )
+                continuous.append(frame)
+                continuous_ranges.append((first, last))
                 remaining = 0.08 - (time.monotonic() - started)
                 if remaining > 0:
                     time.sleep(remaining)
@@ -295,6 +337,31 @@ def run(args):
             ) / pixel_count
             if continuous_unknown > 0.025:
                 failures.append("continuous zoom: frame does not match any completed camera")
+            continuous_samples = read_samples(stats)
+            continuous_content = []
+            for step, (frame, (first, last)) in enumerate(zip(continuous, continuous_ranges)):
+                # Compare each camera with its own completed geometry. Fit-view
+                # route density is not the denominator for a high-zoom view.
+                zoom = records[step]["zoom"]
+                content = feedback_capture(
+                    frame, target_geometry[step],
+                    continuous_samples[max(before, first - 1):max(first, last)], zoom,
+                )
+                # A restored exact target can reach the window before another
+                # stats line is written. An independent, identical target crop
+                # establishes correctness even without a new partial flag.
+                matches_target = ImageChops.difference(
+                    layout(frame), layout(target_geometry[step]),
+                ).getbbox() is None
+                content["matches_completed_target_pixels"] = matches_target
+                content["verified_current_layout"] = content["verified_current_layout"] or (
+                    matches_target and content["usable_layout_image"]
+                )
+                continuous_content.append({"zoom": zoom, **content})
+            if any(not item["usable_layout_image"] for item in continuous_content):
+                failures.append("continuous zoom: captured layout has less than 25% of target route ink")
+            if any(not item["verified_current_layout"] for item in continuous_content):
+                failures.append("continuous zoom: capture does not establish current-camera routing")
             comparison_sheet(args.output, records)
             evidence_complete = "evidence unavailable:" not in (args.output / "viewer.log").read_text().lower()
             if not evidence_complete:
@@ -305,10 +372,14 @@ def run(args):
                            for sample in final_samples) for stage, after_paint in
                            (("gl_after_paint", True), ("ui_before_paint", False))},
                       "progress_evidence_complete": evidence_complete,
-                      "raster_trace_diagnostic": args.raster_trace,
+                      "raster_trace_diagnostic": args.raster_trace or (args.output / "progress" / "ui").exists(),
+                      "ui_seed_readback_diagnostic": (args.output / "progress" / "ui").exists(),
                       "uncached_steps": args.uncached_steps,
                       "capture_backend": "XGetImage" if args.direct_capture else "xwd",
+                      "colored_layout_reference_required": True,
+                      "minimum_reference_route_ink_fraction": 0.25,
                       "continuous_unrecognized_colored_pixel_fraction": continuous_unknown,
+                      "continuous_layout_content": continuous_content,
                       "display_size": list(initial.size), "is_gpu": samples[-1]["is_gpu"]}
             (args.output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
             assert not failures, "\n".join(failures)

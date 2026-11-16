@@ -1,24 +1,23 @@
 use super::*;
 
-pub(super) struct RetainedPan {
-    key: SceneKey,
-    source: SceneKey,
-    bitmap: Vec<u8>,
-    pixels: usize,
-    duration: Duration,
-}
+pub(super) use super::retained_worker::Prepared as RetainedPan;
 
 pub(super) struct RetainedTarget {
-    key: SceneKey,
+    key: Option<SceneKey>,
     pub(super) target: RasterTarget,
 }
 
 impl RasterResources {
-    pub(super) fn prepare_retained(&mut self, key: &SceneKey) {
+    pub(super) fn prepare_retained(
+        &mut self,
+        key: &SceneKey,
+        generation: u64,
+        ctx: &egui::Context,
+    ) {
         if self
             .retained_pan
             .as_ref()
-            .is_some_and(|pan| pan.key == *key)
+            .is_some_and(|pan| pan.key == *key && pan.generation == generation)
         {
             return;
         }
@@ -27,11 +26,12 @@ impl RasterResources {
             .frames()
             .any(|frame| frame.scene.key().same_geometry(key))
         {
+            self.retained_worker.cancel();
             return;
         }
-        let frame = self
+        let scene = self
             .frames()
-            .filter(|frame| frame.scene.retained.is_some())
+            .filter(|frame| frame.scene.retained.is_some() && frame.scene.bitmap.is_some())
             .filter(|frame| {
                 frame.scene.key().compatible(key) && key.same_raster_scale(frame.scene.key())
             })
@@ -43,41 +43,39 @@ impl RasterResources {
                         .max(0.0)
                 };
                 coverage(first).total_cmp(&coverage(second))
-            });
-        let Some(frame) = frame else { return };
-        let started = Instant::now();
-        let Some(regions) = frame.scene.retained.as_ref().unwrap().validate(
-            key,
-            thread::available_parallelism()
-                .map_or(1, usize::from)
-                .div_ceil(2)
-                .clamp(1, 8),
-        ) else {
+            })
+            .map(|frame| Arc::clone(&frame.scene));
+        let Some(scene) = scene else {
+            self.retained_worker.cancel();
             return;
         };
-        let pixels = regions.pixel_count();
-        if pixels > 0 {
-            let Some(bitmap) = frame.scene.bitmap.as_ref().and_then(|source| {
-                frame
-                    .scene
-                    .retained
-                    .as_ref()
-                    .unwrap()
-                    .compose(key, &regions, source)
-            }) else {
-                return;
-            };
-            self.retained_pan = Some(RetainedPan {
+        // This runs only inside the GL callback, with the actual context current.
+        #[cfg(target_os = "linux")]
+        let cpu_style = super::super::cpu_scene::sparse_rects::certified_profile(self.painter.gl());
+        #[cfg(not(target_os = "linux"))]
+        let cpu_style = false;
+        if let Some(prepared) = self
+            .retained_worker
+            .request(super::retained_worker::Request {
                 key: key.clone(),
-                source: frame.scene.key().clone(),
-                bitmap,
-                pixels,
-                duration: started.elapsed(),
-            });
-        }
+                generation,
+                scene,
+                cpu_style,
+                repaint: ctx.clone(),
+            })
+        {
+            if let Some(target) = &mut self.retained_target {
+                target.key = None;
+            }
+            self.retained_pan = Some(prepared);
+        };
     }
 
-    pub(super) fn upload_retained(&mut self, key: &SceneKey) -> Result<(), String> {
+    pub(super) fn upload_retained(
+        &mut self,
+        key: &SceneKey,
+        ctx: &egui::Context,
+    ) -> Result<(), String> {
         if self
             .presentation_source(key)
             .is_none_or(|source| self.retained_for(key, source.key()).is_none())
@@ -87,30 +85,47 @@ impl RasterResources {
         if self
             .retained_target
             .as_ref()
-            .is_some_and(|target| target.key == *key)
+            .is_some_and(|target| target.key.as_ref() == Some(key))
         {
             return Ok(());
         }
-        let gl = self.painter.gl();
+        let gl = Arc::clone(self.painter.gl());
         if self
             .retained_target
             .as_ref()
             .is_some_and(|target| target.target.size != key.screen_size())
         {
             self.targets
-                .retire(gl, self.retained_target.take().unwrap().target);
+                .retire(&gl, self.retained_target.take().unwrap().target);
         }
         if self.retained_target.is_none() {
             self.retained_target = Some(RetainedTarget {
-                key: key.clone(),
-                target: self.targets.acquire(gl, key.screen_size())?,
+                key: None,
+                target: self.targets.acquire(&gl, key.screen_size())?,
             });
         }
         let target = self.retained_target.as_mut().unwrap();
-        target
-            .target
-            .upload(gl, &self.retained_pan.as_ref().unwrap().bitmap);
-        target.key = key.clone();
+        let retained = self.retained_pan.as_ref().unwrap();
+        target.target.upload(&gl, &retained.bitmap);
+        if !retained.repairs.is_empty() {
+            self.painter.set_texture(
+                egui::TextureId::default(),
+                &egui::epaint::ImageDelta::full(
+                    ctx.fonts(egui::epaint::Fonts::image),
+                    egui::TextureOptions::LINEAR,
+                ),
+            );
+            retained
+                .textures
+                .upload_for(&mut self.painter, &retained.repairs);
+            unsafe { gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.target.framebuffer)) };
+            self.painter.paint_primitives(
+                key.screen_size(),
+                ctx.pixels_per_point(),
+                &retained.repairs,
+            );
+        }
+        target.key = Some(key.clone());
         Ok(())
     }
 
@@ -129,6 +144,17 @@ impl RasterResources {
             .filter(|pan| pan.key == *key && pan.source == *source)
     }
 
+    #[cfg(test)]
+    pub(super) fn retained_ready(&self, key: &SceneKey) -> bool {
+        self.retained_pan
+            .as_ref()
+            .is_some_and(|pan| pan.key == *key)
+            && self
+                .retained_target
+                .as_ref()
+                .is_some_and(|target| target.key.as_ref() == Some(key))
+    }
+
     pub(super) fn present(
         &self,
         gl: &glow::Context,
@@ -143,10 +169,12 @@ impl RasterResources {
             if let Some(target) = self
                 .retained_target
                 .as_ref()
-                .filter(|target| target.key == *key)
+                .filter(|target| target.key.as_ref() == Some(key))
             {
                 target.target.blit(gl, info, draw, key, key);
             }
+            // The model covers the complete layout and the ordered repairs
+            // have filled all damage. An unfinished prefix must not erase it.
             return;
         }
         source.target().blit(gl, info, draw, key, source.key());

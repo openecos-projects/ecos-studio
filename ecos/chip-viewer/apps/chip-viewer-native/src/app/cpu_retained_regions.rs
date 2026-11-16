@@ -2,29 +2,42 @@ use super::*;
 use chip_display::LayerStyle;
 use chip_render::geometry2d::{GeometryPass, PaintCommand, PaintSink};
 use chip_view_db::ShapeGeometry;
-use std::ops::Range;
 
 const TILE: usize = 8;
 const MAX_BYTES: usize = 64 * 1024 * 1024;
+
+#[path = "cpu_retained_plan.rs"]
+mod plan;
+
+#[path = "cpu_retained_worker.rs"]
+pub(in crate::app) mod worker;
 
 #[cfg(test)]
 #[path = "cpu_retained_copy_tests.rs"]
 mod copy_tests;
 
+#[cfg(test)]
+#[path = "cpu_retained_cancel_tests.rs"]
+mod cancel_tests;
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "cpu_retained_regression_tests.rs"]
+mod regression_tests;
+
 struct Record {
     bbox: Rect32,
     geometry: ShapeGeometry,
     style: LayerStyle,
-    commands: Range<usize>,
+    #[cfg(test)]
     recomposable: bool,
-    coverage: bool,
 }
 
 pub(in crate::app) struct RegionModel {
     key: SceneKey,
     pattern_textures: Arc<PatternTextureSet>,
     records: Vec<Record>,
-    commands: Vec<PaintCommand>,
+    tessellator: egui::epaint::Tessellator,
+    identity: Arc<()>,
 }
 
 pub(in crate::app) struct Regions {
@@ -39,6 +52,9 @@ pub(in crate::app) struct Regions {
 struct CameraProof {
     source: SceneKey,
     current: SceneKey,
+    identity: Arc<()>,
+    records: usize,
+    plan: plan::Plan,
 }
 
 impl RegionModel {
@@ -78,7 +94,8 @@ impl RegionModel {
             key: key.clone(),
             pattern_textures: Arc::clone(&request.pattern_textures),
             records: Vec::new(),
-            commands: Vec::new(),
+            tessellator: request.tessellator.clone(),
+            identity: Arc::new(()),
         })
     }
 
@@ -89,32 +106,24 @@ impl RegionModel {
         style: LayerStyle,
         commands: &[PaintCommand],
     ) -> bool {
-        let supported = commands
-            .iter()
-            .copied()
-            .all(|command| self.supported_command(command));
-        let coverage = commands
-            .iter()
-            .copied()
-            .all(|command| self.coverage_command(command));
-        let recomposable = matches!(geometry, ShapeGeometry::Rect(_)) && supported;
-        let coverage = matches!(geometry, ShapeGeometry::Rect(_)) && coverage;
-        let start = self.commands.len();
-        self.commands.extend_from_slice(commands);
+        // Source commands are useful diagnostics, never target eligibility proof.
+        #[cfg(not(test))]
+        let _ = commands;
         self.records.push(Record {
             bbox,
             geometry,
             style,
-            commands: start..self.commands.len(),
-            recomposable,
-            coverage,
+            #[cfg(test)]
+            recomposable: matches!(geometry, ShapeGeometry::Rect(_))
+                && commands
+                    .iter()
+                    .all(|&command| self.supported_command(command)),
         });
         self.byte_len() <= MAX_BYTES
     }
 
     pub(in crate::app) fn byte_len(&self) -> usize {
         self.records.capacity() * size_of::<Record>()
-            + self.commands.capacity() * size_of::<PaintCommand>()
     }
 
     #[cfg(test)]
@@ -122,6 +131,7 @@ impl RegionModel {
         self.records.iter().all(|record| record.recomposable)
     }
 
+    #[cfg(test)]
     fn supported_command(&self, command: PaintCommand) -> bool {
         match command {
             PaintCommand::FillRect { .. } | PaintCommand::FrameRect { .. } => {
@@ -135,135 +145,78 @@ impl RegionModel {
         }
     }
 
-    fn coverage_command(&self, command: PaintCommand) -> bool {
-        matches!(
-            command,
-            PaintCommand::FillRect { .. } | PaintCommand::FrameRect { .. }
-        ) && self.supported_command(command)
-    }
-
+    /// Compose only the commands prepared for this exact target. Old RGBA is
+    /// never a fallback for failed preparation, changed clipping, or GL style.
     pub(in crate::app) fn compose(
         &self,
         key: &SceneKey,
         regions: &Regions,
         source: &[u8],
     ) -> Option<Vec<u8>> {
-        let size = key.screen_size;
-        let count = size[0] as usize * size[1] as usize;
+        self.compose_current(key, regions, source, &|| true)
+    }
+
+    pub(in crate::app) fn compose_current(
+        &self,
+        key: &SceneKey,
+        regions: &Regions,
+        source: &[u8],
+        is_current: &impl Fn() -> bool,
+    ) -> Option<Vec<u8>> {
+        let count = key.screen_size[0] as usize * key.screen_size[1] as usize;
+        let proof = regions.proof.as_ref()?;
         if source.len() != count * 4
-            || regions.size != size
-            || regions
-                .proof
-                .as_ref()
-                .is_none_or(|proof| proof.source != self.key || proof.current != *key)
+            || regions.size != key.screen_size
+            || proof.source != self.key
+            || proof.current != *key
+            || !Arc::ptr_eq(&proof.identity, &self.identity)
+            || proof.records != self.records.len()
         {
             return None;
         }
-        let pan = (key.pan - self.key.pan) * key.pixels_per_point;
-        let mut pixels = key.background.to_array().repeat(count);
-        if !self.records.is_empty() && self.records.iter().all(|record| record.coverage) {
-            if let Some(candidate) = self.shifted_coverage(key) {
-                copy_valid_tiles(&mut pixels, &candidate, regions);
-                return Some(pixels);
-            }
-        }
-        if !self.records.is_empty() && self.records.iter().all(|record| record.recomposable) {
-            if let Some(candidate) = self.recompose(key) {
-                copy_valid_tiles(&mut pixels, &candidate, regions);
-                return Some(pixels);
-            }
-        }
-        for (tile_row, invalid) in regions.invalid.chunks(regions.columns).enumerate() {
-            let mut column = 0;
-            while column < invalid.len() {
-                if invalid[column] {
-                    column += 1;
-                    continue;
-                }
-                let left = column * TILE;
-                while column < invalid.len() && !invalid[column] {
-                    column += 1;
-                }
-                let right = (column * TILE).min(size[0] as usize);
-                let top = tile_row * TILE;
-                let bottom = (top + TILE).min(size[1] as usize);
-                let source_column = (left as i32 - pan.x as i32) as usize;
-                for row in top..bottom {
-                    let source_row = (row as i32 - pan.y as i32) as usize;
-                    let old = ((size[1] as usize - 1 - source_row) * size[0] as usize
-                        + source_column)
-                        * 4;
-                    let new = ((size[1] as usize - 1 - row) * size[0] as usize + left) * 4;
-                    let bytes = (right - left) * 4;
-                    pixels[new..new + bytes].copy_from_slice(&source[old..old + bytes]);
-                }
-            }
-        }
-        Some(pixels)
+        let candidate = proof.plan.paint(key, &self.pattern_textures, is_current)?;
+        let mut pixels = blank_pixels(key, is_current)?;
+        copy_valid_tiles_current(&mut pixels, &candidate, regions, is_current)?;
+        is_current().then_some(pixels)
     }
 
-    /// Moves geometry-only commands by the integral physical-pixel pan. The
-    /// command colors are applied only after the move, so the retained source
-    /// is geometry coverage rather than a translated final RGBA image.
-    fn shifted_coverage(&self, key: &SceneKey) -> Option<Vec<u8>> {
-        let raster = geometry::PixelRectRasterizer::new(key.pixels_per_point, key.tessellation)?;
-        let delta = key.pan - self.key.pan;
-        let mut pixels = key
-            .background
-            .to_array()
-            .repeat(key.screen_size[0] as usize * key.screen_size[1] as usize);
-        for record in &self.records {
-            if !record.coverage {
-                continue;
-            }
-            for &command in &self.commands[record.commands.clone()] {
-                let command = translate_coverage_command(command, delta)?;
-                paint_recomposed_command(
-                    command,
-                    raster,
-                    key,
-                    &self.pattern_textures,
-                    &mut pixels,
-                )?;
-            }
-        }
-        Some(pixels)
+    /// Presentation must use the actual GL profile. Uncertified blend/texture
+    /// implementations replay target meshes instead of trusting CPU byte math.
+    pub(in crate::app) fn prepare_for_gl(
+        &self,
+        key: &SceneKey,
+        workers: usize,
+        gl: &eframe::glow::Context,
+    ) -> Option<Regions> {
+        #[cfg(target_os = "linux")]
+        let cpu_style = sparse_rects::certified_profile(gl);
+        #[cfg(not(target_os = "linux"))]
+        let cpu_style = {
+            let _ = gl;
+            false
+        };
+        let _ = workers;
+        self.prepare_current(key, cpu_style, &|| true)
     }
 
-    /// Rebuilds destination style from retained geometry commands. The result
-    /// is only copied into tiles proven valid by `validate`; uncovered tiles
-    /// are intentionally left for the current-camera damage render.
-    fn recompose(&self, key: &SceneKey) -> Option<Vec<u8>> {
-        let raster = geometry::PixelRectRasterizer::new(key.pixels_per_point, key.tessellation)?;
-        let size = key.screen_size;
-        let mut pixels = key
-            .background
-            .to_array()
-            .repeat(size[0] as usize * size[1] as usize);
-        let pass = GeometryPass::new(key.world, key.canvas, key.zoom, key.pan);
-        let mut commands = Commands::default();
-        for record in &self.records {
-            if !record.recomposable {
-                continue;
-            }
-            commands.0.clear();
-            if record.bbox.intersects(key.viewport) {
-                pass.draw(record.geometry, &record.style, &mut commands);
-            }
-            for &command in &commands.0 {
-                paint_recomposed_command(
-                    command,
-                    raster,
-                    key,
-                    &self.pattern_textures,
-                    &mut pixels,
-                )?;
-            }
-        }
-        Some(pixels)
+    /// The CPU-only seam is for the certified sparse rendering profile.
+    #[cfg(test)]
+    pub(in crate::app) fn validate(&self, key: &SceneKey, workers: usize) -> Option<Regions> {
+        let _ = workers;
+        self.prepare_current(key, true, &|| true)
     }
 
-    pub(in crate::app) fn validate(&self, key: &SceneKey, _workers: usize) -> Option<Regions> {
+    /// The GL profile is captured by the presenter with its context current.
+    /// This preparation uses only immutable CPU data and can run on a worker.
+    pub(in crate::app) fn prepare_current(
+        &self,
+        key: &SceneKey,
+        cpu_style: bool,
+        is_current: &impl Fn() -> bool,
+    ) -> Option<Regions> {
+        if !is_current() {
+            return None;
+        }
         let source = &self.key;
         let pan = (key.pan - source.pan) * key.pixels_per_point;
         if !source.compatible(key)
@@ -271,6 +224,8 @@ impl RegionModel {
             || source.canvas != key.canvas
             || source.screen_size != key.screen_size
             || source.font_texture_size != key.font_texture_size
+            || source.selected != key.selected
+            || source.highlighted != key.highlighted
             || !pan.is_finite()
             || pan.x.fract() != 0.0
             || pan.y.fract() != 0.0
@@ -284,40 +239,46 @@ impl RegionModel {
         }
         let mut result = Regions::new(key);
         for index in 0..result.invalid.len() {
-            let tile = result.tile(index);
-            result.invalid[index] = !overlap.contains_rect(tile);
-        }
-        if !self.records.is_empty() {
-            if self.records.iter().any(|record| !record.recomposable) {
-                let source_pass =
-                    GeometryPass::new(source.world, source.canvas, source.zoom, source.pan);
-                let current_pass = GeometryPass::new(key.world, key.canvas, key.zoom, key.pan);
-                for record in &self.records {
-                    if record.coverage {
-                        continue;
-                    }
-                    result.exclude(footprint(&source_pass, source, record.geometry).translate(pan));
-                    result.exclude(footprint(&current_pass, key, record.geometry));
-                }
+            if index % 4096 == 0 && !is_current() {
+                return None;
             }
-            result.proof = Some(CameraProof {
-                source: source.clone(),
-                current: key.clone(),
-            });
-            return Some(result);
+            let tile = result.tile(index);
+            // Unknown blend profiles replay the canvas once in GL. Splitting
+            // damage around every command duplicates large meshes per clip.
+            result.invalid[index] = if cpu_style {
+                !overlap.contains_rect(tile)
+            } else {
+                tile.intersects(clip)
+            };
         }
+        let plan = plan::Plan::prepare(self, key, &mut result, cpu_style, is_current)?;
         result.proof = Some(CameraProof {
             source: source.clone(),
             current: key.clone(),
+            identity: Arc::clone(&self.identity),
+            records: self.records.len(),
+            plan,
         });
-        Some(result)
+        is_current().then_some(result)
     }
 }
 
 fn copy_valid_tiles(destination: &mut [u8], source: &[u8], regions: &Regions) {
+    copy_valid_tiles_current(destination, source, regions, &|| true).unwrap();
+}
+
+fn copy_valid_tiles_current(
+    destination: &mut [u8],
+    source: &[u8],
+    regions: &Regions,
+    is_current: &impl Fn() -> bool,
+) -> Option<()> {
     let width = regions.size[0] as usize;
     let height = regions.size[1] as usize;
     for (tile_row, invalid) in regions.invalid.chunks(regions.columns).enumerate() {
+        if tile_row % 4 == 0 && !is_current() {
+            return None;
+        }
         let top = tile_row * TILE;
         let bottom = (top + TILE).min(height);
         let mut column = 0;
@@ -339,33 +300,25 @@ fn copy_valid_tiles(destination: &mut [u8], source: &[u8], regions: &Regions) {
             }
         }
     }
+    is_current().then_some(())
 }
 
-fn footprint(pass: &GeometryPass, key: &SceneKey, geometry: ShapeGeometry) -> egui::Rect {
-    let bounds = pass.project(geometry).bounds();
-    egui::Rect::from_min_max(
-        bounds.min * key.pixels_per_point,
-        bounds.max * key.pixels_per_point,
-    )
-    .expand(2.0)
-    .intersect(physical_clip(key))
-}
-
-fn translate_coverage_command(command: PaintCommand, delta: egui::Vec2) -> Option<PaintCommand> {
-    Some(match command {
-        PaintCommand::FillRect { rect, rgba } => PaintCommand::FillRect {
-            rect: rect.translate(delta),
-            rgba,
-        },
-        PaintCommand::FrameRect { rect, width, rgba } => PaintCommand::FrameRect {
-            rect: rect.translate(delta),
-            width,
-            rgba,
-        },
-        PaintCommand::PatternRect { .. }
-        | PaintCommand::Line { .. }
-        | PaintCommand::Disc { .. } => return None,
-    })
+fn blank_pixels(key: &SceneKey, is_current: &impl Fn() -> bool) -> Option<Vec<u8>> {
+    let width = key.screen_size[0] as usize;
+    let height = key.screen_size[1] as usize;
+    let mut pixels = Vec::with_capacity(width * height * 4);
+    let background = key.background.to_array();
+    for top in (0..height).step_by(32) {
+        if !is_current() {
+            return None;
+        }
+        let start = pixels.len();
+        pixels.resize(width * (top + 32).min(height) * 4, 0);
+        for pixel in pixels[start..].chunks_exact_mut(4) {
+            pixel.copy_from_slice(&background);
+        }
+    }
+    is_current().then_some(pixels)
 }
 
 fn paint_recomposed_command(
@@ -374,20 +327,25 @@ fn paint_recomposed_command(
     key: &SceneKey,
     pattern_textures: &PatternTextureSet,
     pixels: &mut [u8],
+    is_current: &impl Fn() -> bool,
 ) -> Option<()> {
     match command {
         PaintCommand::FillRect { rgba, .. } | PaintCommand::FrameRect { rgba, .. } => {
+            let source = color32(rgba).to_array();
             for rect in raster.rectangles(command)? {
                 let Some([left, top, right, bottom]) = physical_bounds(rect, key) else {
                     continue;
                 };
                 for row in top..bottom {
+                    if (row - top) % 32 == 0 && !is_current() {
+                        return None;
+                    }
                     let offset = ((key.screen_size[1] as usize - 1 - row)
                         * key.screen_size[0] as usize
                         + left)
                         * 4;
                     for pixel in pixels[offset..offset + (right - left) * 4].chunks_exact_mut(4) {
-                        blend_recomposed_pixel(pixel, rgba);
+                        blend_recomposed_pixel(pixel, source);
                     }
                 }
             }
@@ -397,10 +355,16 @@ fn paint_recomposed_command(
             pattern,
             rgba,
         } => {
-            let [left, top, right, bottom] = physical_bounds(rect, key)?;
+            let Some([left, top, right, bottom]) = physical_bounds(rect, key) else {
+                return Some(());
+            };
             let tile = pattern_textures.spec(pattern)?.1;
+            let color = color32(rgba).to_array();
             let scale = key.pixels_per_point;
             for row in top..bottom {
+                if (row - top) % 32 == 0 && !is_current() {
+                    return None;
+                }
                 for column in left..right {
                     let point =
                         egui::pos2((column as f32 + 0.5) / scale, (row as f32 + 0.5) / scale);
@@ -421,7 +385,7 @@ fn paint_recomposed_command(
                     if mask[0] == 0 && mask[3] == 0 {
                         continue;
                     }
-                    let mut source = rgba;
+                    let mut source = color;
                     for channel in 0..4 {
                         source[channel] = multiply_recomposed(source[channel], mask[channel]);
                     }
@@ -479,6 +443,85 @@ fn multiply_recomposed(left: u8, right: u8) -> u8 {
 }
 
 impl Regions {
+    /// Render these ordered meshes over the composed bitmap before presenting
+    /// it. Damage pixels start at background, so translucent repairs blend once.
+    /// Failure means the retained presentation must be discarded in full.
+    pub(in crate::app) fn repair_meshes(
+        &self,
+        key: &SceneKey,
+    ) -> Option<Vec<egui::ClippedPrimitive>> {
+        self.repair_meshes_current(key, &|| true)
+    }
+
+    pub(in crate::app) fn repair_meshes_current(
+        &self,
+        key: &SceneKey,
+        is_current: &impl Fn() -> bool,
+    ) -> Option<Vec<egui::ClippedPrimitive>> {
+        let proof = self.proof.as_ref()?;
+        if proof.current != *key {
+            return None;
+        }
+        proof.plan.repair_meshes(
+            key,
+            &self.damage_clips_current(key, is_current)?,
+            is_current,
+        )
+    }
+
+    pub(in crate::app) fn damage_clips(&self, key: &SceneKey) -> Vec<egui::Rect> {
+        self.damage_clips_current(key, &|| true).unwrap()
+    }
+
+    fn damage_clips_current(
+        &self,
+        key: &SceneKey,
+        is_current: &impl Fn() -> bool,
+    ) -> Option<Vec<egui::Rect>> {
+        let mut output = Vec::new();
+        let mut previous = BTreeMap::<(usize, usize), usize>::new();
+        for (row, invalid) in self.invalid.chunks(self.columns).enumerate() {
+            if row % 4 == 0 && !is_current() {
+                return None;
+            }
+            let mut current = BTreeMap::new();
+            let mut column = 0;
+            while column < invalid.len() {
+                if !invalid[column] {
+                    column += 1;
+                    continue;
+                }
+                let left = column;
+                while column < invalid.len() && invalid[column] {
+                    column += 1;
+                }
+                let span = (left, column);
+                let rect = self
+                    .tile(row * self.columns + left)
+                    .union(self.tile(row * self.columns + column - 1));
+                let rect = egui::Rect::from_min_max(
+                    rect.min / key.pixels_per_point,
+                    rect.max / key.pixels_per_point,
+                )
+                .intersect(key.canvas);
+                if !rect.is_positive() {
+                    continue;
+                }
+                let index = if let Some(&index) = previous.get(&span) {
+                    output[index] = egui::Rect::union(output[index], rect);
+                    index
+                } else {
+                    let index = output.len();
+                    output.push(rect);
+                    index
+                };
+                current.insert(span, index);
+            }
+            previous = current;
+        }
+        is_current().then_some(output)
+    }
+
     pub(in crate::app) fn pixel_count(&self) -> usize {
         self.invalid
             .iter()

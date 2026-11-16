@@ -156,7 +156,18 @@ fn bitmap_history_shares_pixels_and_rebuilds_meshes_when_gl_cache_fails() {
         original.bitmap.as_ref().unwrap(),
         cached.bitmap.as_ref().unwrap()
     ));
-    assert_eq!(history.byte_len(), 640 * 480 * 4);
+    assert_eq!(
+        history.byte_len(),
+        640 * 480 * 4
+            + original
+                .priority
+                .as_ref()
+                .map_or(0, |cache| cache.byte_len())
+    );
+    assert!(Arc::ptr_eq(
+        original.priority.as_ref().unwrap(),
+        cached.priority.as_ref().unwrap()
+    ));
     let mut cache = CpuSceneCache::default();
     cache.key = Some(request.key.clone());
     cache.ready = Some(cached);

@@ -75,11 +75,14 @@ fn build_output(
             };
             is_current().then_some((chunk, packed))
         },
-        |(chunk, packed)| {
+        |(mut chunk, packed)| {
             let consumed_at = Instant::now();
             let current = consume(&chunk.meshes, &packed);
             consumer_duration += consumed_at.elapsed();
             if !current {
+                return false;
+            }
+            if merge_priority(&mut scene, &mut chunk, &|| is_current()).is_none() {
                 return false;
             }
             scene.meshes.extend(chunk.meshes);
@@ -114,6 +117,7 @@ fn build_output(
     }
     scene.build_duration = started.elapsed().saturating_sub(consumer_duration);
     scene.pipeline_duration = started.elapsed();
+    finish_priority(request, &mut scene, &|| is_current());
     is_current().then_some(scene)
 }
 

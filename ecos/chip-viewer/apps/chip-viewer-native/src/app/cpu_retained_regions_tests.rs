@@ -91,11 +91,121 @@ fn project(records: &[(Rect32, ShapeGeometry, LayerStyle)], key: &SceneKey) -> V
     commands.0
 }
 
+fn managed_meshes(
+    request: &SceneRequest,
+    commands: &[PaintCommand],
+) -> Vec<egui::ClippedPrimitive> {
+    let mut sink = geometry::GeometryMeshSink::for_raster_with_patterns(
+        request.tessellator.clone(),
+        request.key.canvas,
+        request.key.tessellation,
+        request.key.pixels_per_point,
+        Arc::clone(&request.pattern_textures),
+    );
+    for &command in commands {
+        sink.paint(command);
+    }
+    sink.finish()
+}
+
+fn assert_current_pixels(
+    actual: &[u8],
+    expected: &[u8],
+    request: &SceneRequest,
+    commands: &[PaintCommand],
+    certified: bool,
+    context: &str,
+) {
+    assert_eq!(actual.len(), expected.len());
+    let patterns = commands
+        .iter()
+        .filter_map(|command| match command {
+            PaintCommand::PatternRect { rect, .. } => Some(*rect),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let mut differences = Vec::new();
+    for (index, (actual, expected)) in actual
+        .chunks_exact(4)
+        .zip(expected.chunks_exact(4))
+        .enumerate()
+    {
+        let column = index % request.key.screen_size[0] as usize;
+        let row =
+            request.key.screen_size[1] as usize - 1 - index / request.key.screen_size[0] as usize;
+        let point = egui::pos2(
+            (column as f32 + 0.5) / request.key.pixels_per_point,
+            (row as f32 + 0.5) / request.key.pixels_per_point,
+        );
+        // Existing sparse managed-texture allowance, confined to its profile
+        // and target footprint. Solids and actual GL repairs remain byte exact.
+        let allowance = if certified && patterns.iter().any(|rect| rect.contains(point)) {
+            2
+        } else {
+            0
+        };
+        if actual
+            .iter()
+            .zip(expected)
+            .any(|(a, b)| a.abs_diff(*b) > allowance)
+            && differences.len() < 8
+        {
+            differences.push((column, row, actual.to_vec(), expected.to_vec()));
+        }
+    }
+    assert!(differences.is_empty(), "{context}: {differences:?}");
+}
+
+fn compose_and_repair(
+    renderer: &mut offscreen::OffscreenRenderer,
+    request: &SceneRequest,
+    model: &retained_regions::RegionModel,
+    source: &[u8],
+) -> (retained_regions::Regions, Vec<u8>, Vec<u8>) {
+    let regions = renderer
+        .with_context(|gl| model.prepare_for_gl(&request.key, 4, gl))
+        .expect("target plan must prepare on the actual GL profile");
+    let composed = model.compose(&request.key, &regions, source).unwrap();
+    assert_eq!(
+        composed,
+        model
+            .compose(&request.key, &regions, &vec![0x5a; source.len()])
+            .unwrap(),
+        "target composition must not depend on source RGBA"
+    );
+    let repairs = regions.repair_meshes(&request.key).unwrap_or_else(|| {
+        panic!(
+            "retained corpus exceeds GL repair budget: DPR {}, {} damage clips",
+            request.key.pixels_per_point,
+            regions.damage_clips(&request.key).len()
+        )
+    });
+    assert!(
+        !repairs.is_empty(),
+        "fixture must exercise target GL repairs"
+    );
+    let repair = pixels(renderer, request, repairs);
+    let mut finished = composed.clone();
+    let [width, height] = request.key.screen_size;
+    let scale = request.key.pixels_per_point;
+    for damage in regions.damage_clips(&request.key) {
+        let left = (damage.left() * scale).round().max(0.0) as usize;
+        let right = (damage.right() * scale).round().min(width as f32) as usize;
+        let top = (damage.top() * scale).round().max(0.0) as usize;
+        let bottom = (damage.bottom() * scale).round().min(height as f32) as usize;
+        for row in top..bottom {
+            let start = ((height as usize - 1 - row) * width as usize + left) * 4;
+            let end = start + (right - left) * 4;
+            finished[start..end].copy_from_slice(&repair[start..end]);
+        }
+    }
+    (regions, composed, finished)
+}
+
 #[test]
 fn retained_regions_match_fresh_gl_at_every_declared_pixel_after_interrupted_pans() {
-    let Some(mut renderer) = coverage_blend_tests::renderer() else {
-        return;
-    };
+    let mut renderer = offscreen::OffscreenRenderer::new("").expect("retained oracle requires EGL");
+    let certified = renderer.with_context(|gl| sparse_rects::certified_profile(gl));
     let fixture = Fixture::new();
     let records = records();
     for scale in [1.0, 2.0, 4.0] {
@@ -107,6 +217,7 @@ fn retained_regions_match_fresh_gl_at_every_declared_pixel_after_interrupted_pan
         );
         request.key.pan = egui::vec2(0.125, -0.375) / scale;
         request.key.background = egui::Color32::from_rgba_premultiplied(13, 29, 51, 83);
+        request.pattern_textures = Arc::new(PatternTextureSet::new(&fixture.ctx));
         let mut model = retained_regions::RegionModel::new(&request).unwrap();
         let pass = GeometryPass::new(
             request.key.world,
@@ -121,12 +232,7 @@ fn retained_regions_match_fresh_gl_at_every_declared_pixel_after_interrupted_pan
             assert!(model.push(*bbox, *geometry, *style, &commands.0));
         }
         let source_commands = project(&records, &request.key);
-        let source_meshes = meshes(
-            &fixture,
-            &request,
-            &source_commands,
-            geometry::GeometryOutput::ExactRaster,
-        );
+        let source_meshes = managed_meshes(&request, &source_commands);
         let source = pixels(&mut renderer, &request, source_meshes);
         for pan in [
             egui::vec2(4.0, 3.0),
@@ -135,6 +241,7 @@ fn retained_regions_match_fresh_gl_at_every_declared_pixel_after_interrupted_pan
         ] {
             let mut current = fixture.request(1.0, scale);
             current.key = request.key.clone();
+            current.pattern_textures = Arc::clone(&request.pattern_textures);
             current.key.pan += pan / scale;
             current.key.viewport = screen_to_world_rect(
                 current.key.canvas,
@@ -143,49 +250,51 @@ fn retained_regions_match_fresh_gl_at_every_declared_pixel_after_interrupted_pan
                 current.key.zoom,
                 current.key.pan,
             );
-            let regions = model.validate(&current.key, 4).unwrap();
-            let clips = regions.clips();
             let commands = project(&records, &current.key);
-            let target_meshes = meshes(
-                &fixture,
-                &current,
-                &commands,
-                geometry::GeometryOutput::ExactRaster,
-            );
+            let target_meshes = managed_meshes(&current, &commands);
             let target = pixels(&mut renderer, &current, target_meshes);
-            let composed = model.compose(&current.key, &regions, &source).unwrap();
+            let (regions, composed, repaired) =
+                compose_and_repair(&mut renderer, &current, &model, &source);
             let mut expected = current.key.background.to_array().repeat(512 * 512);
             let mut compared = 0;
-            for clip in clips {
+            let mut foreground = 0;
+            for clip in regions.clips() {
                 for row in (clip.top() * scale) as usize..(clip.bottom() * scale) as usize {
                     let start = ((511 - row) * 512 + (clip.left() * scale) as usize) * 4;
                     let end = ((511 - row) * 512 + (clip.right() * scale) as usize) * 4;
                     expected[start..end].copy_from_slice(&target[start..end]);
-                    for column in (clip.left() * scale) as usize..(clip.right() * scale) as usize {
-                        let source_row = (row as i32 - pan.y as i32) as usize;
-                        let source_column = (column as i32 - pan.x as i32) as usize;
-                        let old = ((511 - source_row) * 512 + source_column) * 4;
-                        let new = ((511 - row) * 512 + column) * 4;
-                        assert_eq!(
-                            &source[old..old + 4],
-                            &target[new..new + 4],
-                            "DPR {scale}, pan {pan:?}, pixel {column},{row}"
-                        );
-                        compared += 1;
-                    }
+                    compared += (end - start) / 4;
+                    foreground += target[start..end]
+                        .chunks_exact(4)
+                        .filter(|pixel| *pixel != current.key.background.to_array())
+                        .count();
                 }
             }
-            assert!(
-                compared >= 10_000,
-                "vacuous validity DPR {scale}, pan {pan:?}: {compared}"
+            if certified {
+                assert!(
+                    compared >= 10_000,
+                    "vacuous certified CPU validity DPR {scale}, pan {pan:?}: {compared}"
+                );
+                assert!(
+                    foreground > 0,
+                    "certified CPU plan retained only background"
+                );
+            }
+            assert_current_pixels(
+                &composed,
+                &expected,
+                &current,
+                &commands,
+                certified,
+                &format!("complete composed image DPR {scale}, pan {pan:?}"),
             );
-            assert_eq!(
-                composed
-                    .iter()
-                    .zip(&expected)
-                    .position(|(actual, expected)| actual != expected),
-                None,
-                "complete composed image DPR {scale}, pan {pan:?}"
+            assert_current_pixels(
+                &repaired,
+                &target,
+                &current,
+                &commands,
+                certified,
+                &format!("complete repaired target DPR {scale}, pan {pan:?}"),
             );
             let mut wrong = current.key.clone();
             wrong.pan.x += 0.5;
@@ -196,7 +305,8 @@ fn retained_regions_match_fresh_gl_at_every_declared_pixel_after_interrupted_pan
 
 #[test]
 fn retained_rectangles_and_patterns_recompose_without_using_old_rgba() {
-    let mut renderer = coverage_blend_tests::renderer();
+    let mut renderer = offscreen::OffscreenRenderer::new("").expect("retained oracle requires EGL");
+    let certified = renderer.with_context(|gl| sparse_rects::certified_profile(gl));
     let fixture = Fixture::new();
     let all_records = records();
     let mut records = all_records
@@ -250,24 +360,21 @@ fn retained_rectangles_and_patterns_recompose_without_using_old_rgba() {
         current.key.zoom,
         current.key.pan,
     );
-    let regions = model.validate(&current.key, 2).unwrap();
     let target_commands = project(&records, &current.key);
-    let target = renderer.as_mut().map(|renderer| {
-        pixels(
-            renderer,
-            &current,
-            meshes(
-                &fixture,
-                &current,
-                &target_commands,
-                geometry::GeometryOutput::ExactRaster,
-            ),
-        )
-    });
+    assert!(target_commands
+        .iter()
+        .any(|command| matches!(command, PaintCommand::PatternRect { .. })));
+    let target = pixels(
+        &mut renderer,
+        &current,
+        managed_meshes(&current, &target_commands),
+    );
     let sentinel =
         vec![0x5a; current.key.screen_size[0] as usize * current.key.screen_size[1] as usize * 4];
-    let composed = model.compose(&current.key, &regions, &sentinel).unwrap();
+    let (regions, composed, repaired) =
+        compose_and_repair(&mut renderer, &current, &model, &sentinel);
     let mut compared = 0;
+    let mut foreground = 0;
     for clip in regions.clips() {
         for row in clip.top() as usize..clip.bottom() as usize {
             for column in clip.left() as usize..clip.right() as usize {
@@ -276,18 +383,30 @@ fn retained_rectangles_and_patterns_recompose_without_using_old_rgba() {
                     + column)
                     * 4;
                 assert_ne!(&composed[offset..offset + 4], &[0x5a; 4]);
-                if let Some(target) = target.as_ref() {
-                    assert_eq!(
-                        &composed[offset..offset + 4],
-                        &target[offset..offset + 4],
-                        "destination coverage mismatch at {column},{row}"
-                    );
-                }
+                foreground +=
+                    usize::from(composed[offset..offset + 4] != current.key.background.to_array());
                 compared += 1;
             }
         }
     }
-    assert!(compared >= 10_000, "vacuous valid region: {compared}");
+    if certified {
+        assert!(
+            compared >= 10_000,
+            "vacuous certified CPU region: {compared}"
+        );
+        assert!(
+            foreground > 0,
+            "certified CPU plan retained only background"
+        );
+    }
+    assert_current_pixels(
+        &repaired,
+        &target,
+        &current,
+        &target_commands,
+        certified,
+        "managed patterns plus repairs must match the complete target",
+    );
 }
 
 #[test]
@@ -319,15 +438,16 @@ fn retained_regions_reject_unproven_camera_and_style_changes() {
 
 #[test]
 fn retained_models_reject_visible_grid_overlays_and_mesh_fallback() {
-    let Some(mut renderer) = coverage_blend_tests::renderer() else {
-        return;
-    };
+    let mut renderer = offscreen::OffscreenRenderer::new("").expect("retained oracle requires EGL");
     let mut fixture = Fixture::new();
     let request = fixture.request(1.0, 1.0);
-    let scene = renderer
-        .build_sparse_updates(&request, || true, |_, _| {})
-        .unwrap()
-        .unwrap();
+    let scene = if renderer.with_context(|gl| sparse_rects::certified_profile(gl)) {
+        renderer.build_sparse_updates(&request, || true, |_, _| {})
+    } else {
+        renderer.build_streaming_updates(&request, || true, |_, _| {}, None)
+    }
+    .unwrap()
+    .unwrap();
     assert!(scene.bitmap.is_some());
     assert!(scene.retained.is_none());
     fs::write(
@@ -345,21 +465,35 @@ fn retained_models_reject_visible_grid_overlays_and_mesh_fallback() {
 
 #[test]
 fn retained_capture_presents_only_valid_current_pixels_and_keeps_full_completion_separate() {
-    let Some(mut renderer) = coverage_blend_tests::renderer() else {
-        return;
-    };
+    let mut renderer = offscreen::OffscreenRenderer::new("").expect("retained oracle requires EGL");
     let fixture = Fixture::new();
     let mut request = fixture.request(0.05, 1.0);
     request.layer_ids = vec![2];
-    let source = renderer
-        .build_sparse_updates(&request, || true, |_, _| {})
-        .unwrap()
-        .unwrap();
+    let mut source_commands = Vec::new();
+    let mut source = builder::build_command_stream(&request, &|| true, |packet| {
+        if let builder::PaintPacket::Commands(paint) = packet {
+            source_commands.extend(paint);
+        }
+        true
+    })
+    .unwrap();
+    source.bitmap = Some(
+        pixels(
+            &mut renderer,
+            &request,
+            managed_meshes(&request, &source_commands),
+        )
+        .into(),
+    );
     let model = source
         .retained
         .as_ref()
         .expect("complete world input retained");
     assert!(model.byte_len() > 0);
+    assert!(
+        !source.labels_ready(),
+        "the retained source must not pre-complete label recovery"
+    );
     let mut current = fixture.request(0.05, 1.0);
     current.layer_ids = vec![2];
     current.key.pan = egui::vec2(31.0, -17.0);
@@ -370,8 +504,10 @@ fn retained_capture_presents_only_valid_current_pixels_and_keeps_full_completion
         current.key.zoom,
         current.key.pan,
     );
-    let clips = model.validate(&current.key, 4).unwrap().clips();
-    assert!(!clips.is_empty());
+    let regions = renderer
+        .with_context(|gl| model.prepare_for_gl(&current.key, 4, gl))
+        .unwrap();
+    assert!(!regions.clips().is_empty());
     let mut commands = Vec::new();
     builder::build_command_stream(&current, &|| true, |packet| {
         if let builder::PaintPacket::Commands(paint) = packet {
@@ -380,12 +516,7 @@ fn retained_capture_presents_only_valid_current_pixels_and_keeps_full_completion
         true
     })
     .unwrap();
-    let target_meshes = meshes(
-        &fixture,
-        &current,
-        &commands,
-        geometry::GeometryOutput::ExactRaster,
-    );
+    let target_meshes = managed_meshes(&current, &commands);
     let target = pixels(&mut renderer, &current, target_meshes);
     let source = Arc::new(source);
     renderer.with_context(|gl| {
@@ -395,18 +526,10 @@ fn retained_capture_presents_only_valid_current_pixels_and_keeps_full_completion
             fixture.ctx.clone(),
         );
         presentation.paint(Some(&source), &request.key, None);
-        let actual = presentation.paint(None, &current.key, None);
-        let mut expected = [0, 0, 0, 255].repeat(640 * 480);
-        for clip in &clips {
-            for row in clip.top() as usize..clip.bottom() as usize {
-                let start = ((479 - row) * 640 + clip.left() as usize) * 4;
-                let end = ((479 - row) * 640 + clip.right() as usize) * 4;
-                expected[start..end].copy_from_slice(&target[start..end]);
-            }
-        }
+        let actual = presentation.paint_until_retained(None, &current.key, None);
         assert_eq!(
-            actual, expected,
-            "actual blits match fresh current regions and clear every other pixel"
+            actual, target,
+            "target composition plus ordered GL repairs presents every current pixel"
         );
         assert!(presentation.cache.is_partial(&current.key));
         assert!(!presentation.cache.is_preview(&current.key));

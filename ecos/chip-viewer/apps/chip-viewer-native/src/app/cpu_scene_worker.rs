@@ -52,6 +52,21 @@ pub(super) fn spawn(
                         &mut renderer,
                         is_current,
                         |pixels, sequence| {
+                            if is_current() {
+                                let frame =
+                                    worker_progress.publish_initial(progress::ProgressFrame::new(
+                                        request.key.clone(),
+                                        generation,
+                                        sequence,
+                                        pixels,
+                                    ));
+                                request.repaint.request_repaint();
+                                if let Err(error) = worker_inbox.initial_evidence.enqueue(frame) {
+                                    eprintln!("Initial progress evidence unavailable: {error}");
+                                }
+                            }
+                        },
+                        |pixels, sequence| {
                             if is_current()
                                 && !worker_progress.contains(
                                     &request.key,
@@ -66,7 +81,9 @@ pub(super) fn spawn(
                                     sequence,
                                     pixels,
                                 );
-                                let frame = worker_progress.publish(frame);
+                                let Some(frame) = worker_progress.publish_ordered(frame) else {
+                                    return;
+                                };
                                 request.repaint.request_repaint();
                                 if let Err(error) = worker_inbox.initial_evidence.enqueue(frame) {
                                     eprintln!("Progress evidence unavailable: {error}");
@@ -131,6 +148,7 @@ fn build_raster_scene(
     request: &SceneRequest,
     renderer: &mut Option<Result<offscreen::OffscreenRenderer, ()>>,
     is_current: impl Fn() -> bool + Sync,
+    mut publish_initial: impl FnMut(Vec<u8>, usize),
     publish: impl FnMut(Vec<u8>, usize),
     prepared: impl FnOnce(&CpuScene),
 ) -> Option<CpuScene> {
@@ -142,6 +160,43 @@ fn build_raster_scene(
                 })
         });
         if let Ok(active) = renderer {
+            if request.initial_progress {
+                // Reuse the UI-prepared geometry as the first worker seed. A
+                // larger bounded sample may refine it without a gray prefix.
+                if let Some(seeds) = request
+                    .initial_scene
+                    .clone()
+                    .or_else(|| builder::build_initial_scene(request, &is_current).map(Arc::new))
+                {
+                    match active.rasterize_initial_seeds(&seeds, request, &is_current) {
+                        Ok(Some((pixels, _))) if is_current() => {
+                            publish_initial(pixels, seeds.primitives)
+                        }
+                        Ok(_) => {}
+                        Err(error) => eprintln!("Initial seed rasterization unavailable: {error}"),
+                    }
+                }
+            }
+
+            if request.initial_scene.is_some() && is_current() {
+                if let Some(refined) =
+                    builder::build_initial_scene(request, &is_current).filter(|refined| {
+                        request
+                            .initial_scene
+                            .as_ref()
+                            .is_some_and(|initial| refined.covers_initial_records(initial))
+                    })
+                {
+                    match active.rasterize_initial_seeds(&refined, request, &is_current) {
+                        Ok(Some((pixels, _))) if is_current() => {
+                            publish_initial(pixels, refined.primitives)
+                        }
+                        Ok(_) => {}
+                        Err(error) => eprintln!("Initial refinement unavailable: {error}"),
+                    }
+                }
+            }
+
             match active.build_streaming_scene_with_prepared(
                 request,
                 &is_current,

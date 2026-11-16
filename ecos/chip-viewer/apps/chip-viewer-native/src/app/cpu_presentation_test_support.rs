@@ -41,7 +41,6 @@ impl Presentation {
     ) -> Vec<u8> {
         let mut guard = self.cache.resources.lock().unwrap();
         let resources = guard.as_mut().unwrap();
-        resources.prepare_retained(key);
         let gl = Arc::clone(resources.painter.gl());
         let output = self.output.as_ref().unwrap();
         output.clear(&gl, egui::Color32::BLACK);
@@ -50,6 +49,7 @@ impl Presentation {
                 &self.info,
                 scene,
                 key,
+                0,
                 progress,
                 &self.context,
                 egui::Color32::BLACK,
@@ -72,6 +72,35 @@ impl Presentation {
             assert_eq!(gl.get_error(), glow::NO_ERROR);
         }
         pixels
+    }
+
+    /// Exercise real asynchronous preparation and presentation, keeping the GL
+    /// context on this test thread until the current target has been uploaded.
+    pub(in crate::app) fn paint_until_retained(
+        &self,
+        scene: Option<&Arc<CpuScene>>,
+        key: &SceneKey,
+        progress: Option<&Arc<ProgressFrame>>,
+    ) -> Vec<u8> {
+        let started = Instant::now();
+        loop {
+            let pixels = self.paint(scene, key, progress);
+            let guard = self.cache.resources.lock().unwrap();
+            let resources = guard.as_ref().unwrap();
+            if resources.retained_ready(key) {
+                return pixels;
+            }
+            assert!(
+                !resources.retained_worker.failed(),
+                "retained preparation failed for {key:?}"
+            );
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "retained preparation timed out for {key:?}"
+            );
+            drop(guard);
+            thread::sleep(Duration::from_millis(1));
+        }
     }
 
     pub(in crate::app) fn resize(&mut self, key: &SceneKey) {

@@ -20,6 +20,62 @@ pub(super) struct RasterStream<'a> {
 }
 
 impl OffscreenRenderer {
+    /// Draw a bounded multilayer preview in the worker's real GL context. Both
+    /// this temporary stream and the following exact stream begin from a
+    /// cleared target; seeds are never blended twice into exact completion.
+    pub(in crate::app::cpu_scene) fn rasterize_initial_seeds(
+        &mut self,
+        scene: &CpuScene,
+        request: &SceneRequest,
+        is_current: impl Fn() -> bool,
+    ) -> Result<Option<(Vec<u8>, Duration)>, String> {
+        if !is_current() || scene.key != request.key {
+            return Ok(None);
+        }
+        let Some(mut raster) = RasterStream::begin(
+            &mut self.painter,
+            &mut self.compact,
+            &mut self.targets,
+            request,
+            None,
+        )?
+        else {
+            return Ok(None);
+        };
+        // Seeds publish once, after drawing every participating layer. Keep
+        // cancellation and temporary uploads bounded without applying the
+        // small ordered-prefix batches used by the normal progressive stream.
+        for batch in scene.meshes.chunks(256) {
+            if !is_current() {
+                return Ok(None);
+            }
+            let started = Instant::now();
+            let packed = geometry::pack_meshes(batch);
+            if !raster.font.prepare(
+                raster.painter,
+                request,
+                batch,
+                &packed,
+                raster.trace.as_mut(),
+            ) {
+                return Ok(None);
+            }
+            let bytes = raster.compact.paint(
+                raster.painter,
+                &request.key,
+                &request.pattern_textures,
+                batch,
+                &packed,
+            );
+            raster.sequence += batch.len();
+            raster.raster_duration += started.elapsed();
+            if let Some(trace) = &mut raster.trace {
+                trace.submitted(batch, started.elapsed(), bytes);
+            }
+        }
+        raster.finish(&is_current)
+    }
+
     #[cfg(test)]
     pub(in crate::app::cpu_scene) fn rasterize_stream_primitives(
         &mut self,
@@ -252,7 +308,13 @@ impl<'a> RasterStream<'a> {
             ) {
                 return Ok(false);
             }
-            let uploaded_bytes = self.compact.paint(self.painter, &self.key, batch, prepared);
+            let uploaded_bytes = self.compact.paint(
+                self.painter,
+                &self.key,
+                &self.request.pattern_textures,
+                batch,
+                prepared,
+            );
             self.sequence += batch.len();
             self.raster_duration += started.elapsed();
             if let Some(trace) = &mut self.trace {

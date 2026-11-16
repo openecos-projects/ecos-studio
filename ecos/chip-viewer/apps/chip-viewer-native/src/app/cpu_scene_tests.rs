@@ -50,6 +50,14 @@ mod labels_parallel_tests;
 #[path = "cpu_label_cost_tests.rs"]
 mod label_cost_tests;
 
+#[cfg(target_os = "linux")]
+#[path = "cpu_preview_priority_cost_tests.rs"]
+mod preview_priority_cost_tests;
+
+#[cfg(target_os = "linux")]
+#[path = "cpu_seed_same_scene_tests.rs"]
+mod seed_same_scene_tests;
+
 #[path = "cpu_label_worker_tests.rs"]
 mod label_worker_tests;
 
@@ -263,6 +271,10 @@ impl Fixture {
             zoom_rules: ZoomVisibilityRules::new(&self.db),
             tessellator,
             repaint: self.ctx.clone(),
+            #[cfg(target_os = "linux")]
+            initial_progress: false,
+            #[cfg(target_os = "linux")]
+            initial_scene: None,
             glow: false,
             glow_renderer: None,
             label_fonts: egui::FontDefinitions::default(),
@@ -271,6 +283,7 @@ impl Fixture {
             grid_layers: vec![layer_state(1, true), layer_state(2, true)],
             publication: progress::Publication::Progressive,
             pattern_textures: Arc::new(PatternTextureSet::default()),
+            priority: None,
         }
     }
 }
