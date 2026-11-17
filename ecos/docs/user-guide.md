@@ -48,6 +48,8 @@ Chip Viewer and built-in Agent, and working with the experimental frontend
 - [Configuring the Flow](#configuring-the-flow)
 - [Chip Viewer](#chip-viewer)
   - [Opening the Chip Viewer](#opening-the-chip-viewer)
+  - [Layout Replay](#layout-replay)
+  - [EMIR IR Drop Heatmap](#emir-ir-drop-heatmap)
   - [Canvas Navigation](#canvas-navigation)
   - [Sidebar Panels](#sidebar-panels)
   - [Analysis Tabs](#analysis-tabs)
@@ -960,6 +962,55 @@ corresponding output files before either command can open it.
 
 The screenshot uses the software renderer in a virtual machine. Hardware GPU
 availability determines whether 3D mode is offered.
+
+### Layout Replay
+
+To record a flow, enable **Capture Replay data** in **Flow Setup** when creating
+the workspace, then run the desired steps. For an existing workspace, enable
+capture in the terminal before rerunning those steps:
+
+```bash
+ecc param set replay.enabled true --project /path/to/project --workspace ws_0001 --plain
+```
+
+After execution finishes, click **Replay** beside **Run Flow**. This opens a
+separate native viewer. The button appears when capture is enabled; enabling
+capture does not create recordings for earlier runs.
+
+Use the bottom timeline to play, pause, change speed, or seek. Small circles
+select captured intermediate states; large circles select final results. The
+timeline includes result and heatmap inspection. Selecting a map pauses
+playback, and **Play from step start** repeats the selected step. Recorded
+execution times are shown separately from presentation durations.
+
+Replay can show synchronized 2D and 3D layouts on supported GPUs. Movement and
+spatial reveal animations help inspect recorded changes; they do not represent
+additional solver samples. Steps without recordings remain visible with an
+unavailable indication. Rerun a step with capture enabled to record it.
+
+### EMIR IR Drop Heatmap
+
+Open the completed **emir** step in Chip Viewer. Its **Map** panel opens the
+first power network's IR heatmap automatically. Each network offers **All
+layers** and individual metal layers. The default Inferno palette runs from
+dark purple to bright yellow; brighter cells have larger voltage deviations.
+Values are in **mV**. The ground network shows ground bounce.
+
+Each cell shows the maximum solved node value in that region. All-layer views
+take the maximum across layers, and regions without samples stay transparent.
+Layer views share their network's scale so colors remain comparable. Use the
+existing opacity, threshold, hover, and hotspot controls to inspect the result.
+
+Replay reveals each completed network map over three seconds, holds it for one
+second, then switches networks. The layer selector works in both the 2D and 3D
+analysis views. This animation reveals a static analysis result; it does not
+represent transient voltages or solver iterations.
+
+New EMIR runs publish structured `ir_drop.json` samples alongside the saved
+geometry. Older Replay recordings with IR node data can display the heatmap
+directly. For an older ordinary EMIR view without the JSON artifact, rerun EMIR
+with the updated ECC/ecc-tools runtime. Text `.rpt` files are not parsed for this
+visualization.
 
 ### Canvas Navigation
 
