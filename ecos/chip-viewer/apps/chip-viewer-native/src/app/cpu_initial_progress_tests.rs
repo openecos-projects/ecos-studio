@@ -150,6 +150,19 @@ fn initial_progress_does_not_starve_visible_layers_behind_layer_zero() {
 }
 
 #[test]
+fn initial_progress_worker_refines_the_ui_sample_to_full_visible_layer_coverage() {
+    let fixture = Fixture::new();
+    let request = layered_request_with_spread(&fixture, 1024, true);
+    let ui = builder::build_ui_initial_scene(&request).unwrap();
+    let refined = builder::build_initial_scene(&request, &|| true).unwrap();
+
+    assert!(refined.covers_initial_records(&ui));
+    assert!(refined.drawn > ui.drawn);
+    assert_eq!(refined.drawn, 3 * 1024);
+    assert_eq!(refined.initial_records.as_ref().unwrap().len(), 3 * 1024);
+}
+
+#[test]
 fn initial_progress_matches_ordered_layer_samples_and_independent_gl_pixels() {
     let mut renderer = renderer();
     let fixture = Fixture::new();

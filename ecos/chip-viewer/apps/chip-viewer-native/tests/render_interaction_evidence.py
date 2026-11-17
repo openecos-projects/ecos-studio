@@ -43,3 +43,16 @@ def interaction_readiness(samples):
         "current_camera_fraction": current / len(samples) if samples else None,
         "max_old_view_or_empty_run_ms": maximum_proxy_ms if samples else None,
     }
+
+
+def no_overview_during_interaction(samples):
+    return bool(samples) and all(not sample.get("use_view_tiles", False) for sample in samples)
+
+
+def overview_preview_frames_during_recovery(samples):
+    return sum(
+        sample.get("use_view_tiles", False)
+        and sample.get("cpu_scene_preview", False)
+        and sample.get("cpu_scene_pending", False)
+        for sample in samples
+    )

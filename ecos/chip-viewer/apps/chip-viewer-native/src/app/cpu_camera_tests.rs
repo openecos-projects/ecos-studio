@@ -200,6 +200,38 @@ fn repeating_camera_requests_does_not_restart_inflight_work() {
 }
 
 #[test]
+fn interactive_camera_requests_coalesce_until_the_camera_settles() {
+    let fixture = Fixture::new();
+    let mut cache = CpuSceneCache::default();
+    let base = fixture.request(1.0, 1.0);
+    let scene = Arc::new(builder::build_with_workers(&base, &|| true, 1).unwrap());
+    cache.key = Some(base.key.clone());
+    cache.ready = Some(scene);
+
+    let initial_generation = cache.inbox.generation.load(Ordering::Relaxed);
+    let mut latest = base.clone();
+    latest.key.pan.x = 10.0;
+    cache.defer_camera_request(&latest);
+    let deferred_generation = cache.inbox.generation.load(Ordering::Relaxed);
+    assert_eq!(deferred_generation, initial_generation + 1);
+    assert!(cache.inbox.request.lock().unwrap().is_none());
+
+    for pan in [20.0, 30.0, 40.0] {
+        latest.key.pan.x = pan;
+        cache.defer_camera_request(&latest);
+        assert_eq!(
+            cache.inbox.generation.load(Ordering::Relaxed),
+            deferred_generation
+        );
+        assert!(cache.inbox.request.lock().unwrap().is_none());
+    }
+
+    cache.get_or_request(latest);
+    assert!(cache.inbox.generation.load(Ordering::Relaxed) > deferred_generation);
+    assert!(!cache.request_deferred);
+}
+
+#[test]
 fn parallel_chunks_preserve_full_mesh_and_label_results() {
     let fixture = Fixture::new();
     for zoom in [1.0, 2.0] {

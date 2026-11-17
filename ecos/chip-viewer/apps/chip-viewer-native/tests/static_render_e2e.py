@@ -99,6 +99,7 @@ def main():
     parser.add_argument("--max-warm-p95-ms", type=float, default=50)
     parser.add_argument("--timeout", type=float, default=60)
     parser.add_argument("--raster-trace", action="store_true")
+    parser.add_argument("--capture-startup-after-seconds", type=float)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     stats_path = args.output / "stats.jsonl"
@@ -121,6 +122,7 @@ def main():
         environment["ECOS_RENDER_RASTER_TRACE"] = str(trace_path.resolve())
     started = time.monotonic()
     captured = False
+    startup_capture = None
     first_geometry_seconds = None
     window_id = None
     peak_viewer_rss_kib = None
@@ -139,6 +141,20 @@ def main():
                     if window_id and args.size:
                         resize_window(window_id, args.size)
                 samples = read_samples(stats_path)
+                if (
+                    args.capture_startup_after_seconds is not None
+                    and startup_capture is None
+                    and time.monotonic() - started >= args.capture_startup_after_seconds
+                    and window_id is not None
+                ):
+                    startup_output = args.output / "startup"
+                    startup_output.mkdir(parents=True, exist_ok=True)
+                    image = screenshot(window_id, startup_output)
+                    startup_capture = {
+                        "elapsed_seconds": time.monotonic() - started,
+                        "display_size": list(image.size),
+                        "stats": samples[-1] if samples else None,
+                    }
                 ready = [item for item in samples if item["drawn_shapes"] > 0
                          and item.get("geometry_drawn_shapes", item["drawn_shapes"]) > 0
                          and not item.get("scene_pending", item.get("cpu_scene_pending", False))]
@@ -177,6 +193,7 @@ def main():
     warm_intervals = sorted(item["frame_interval_ms"] for item in ready[2:])
     report = {
         "raster_trace_diagnostic": args.raster_trace,
+        "startup_capture": startup_capture,
         "frames": len(samples),
         "complete_frames": len(ready),
         "max_canvas_ms": max(frames),

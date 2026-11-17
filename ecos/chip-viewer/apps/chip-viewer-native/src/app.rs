@@ -4205,11 +4205,30 @@ impl LoadedViewer {
             self.pan_drag.reset();
         }
 
+        let is_interacting = (response.dragged()
+            || response.drag_started()
+            || (ui.ctx().input(|i| i.zoom_delta()) - 1.0).abs() > 1e-5
+            || (response.hovered()
+                && ui
+                    .ctx()
+                    .input(|i| i.raw_scroll_delta.y.abs() > f32::EPSILON))
+            || self.focus_animation.is_some())
+            && !pointer_over_heatmap;
+        let is_pan_interacting = self.pan_drag.mode() == Some(CanvasDragMode::Pan)
+            && (response.dragged() || response.drag_started())
+            && !pointer_over_heatmap;
+        let camera_activity = if is_interacting {
+            gpu_overview::CameraActivity::Interacting
+        } else {
+            gpu_overview::CameraActivity::Settled
+        };
         let viewport = screen_to_world_rect(canvas, world, canvas, self.zoom, self.pan);
         let pixels_per_point = ui.ctx().pixels_per_point();
-        let use_view_tiles = self.should_use_view_tiles(viewport, world, canvas, pixels_per_point);
+        let use_view_tiles =
+            self.should_use_view_tiles(viewport, world, canvas, pixels_per_point, camera_activity);
+        // This also participates in SceneKey compatibility, so it must not
+        // change when the camera switches between overview and exact paths.
         let cache_cpu_overlays = !self.is_gpu_active()
-            && !use_view_tiles
             && (self.analysis_tab != AnalysisTab::Map || self.active_heatmap.is_none());
         let hover_world_point = ui
             .ctx()
@@ -4296,7 +4315,8 @@ impl LoadedViewer {
         }
         let mut drawn = 0usize;
         let pixels_per_point = ui.ctx().pixels_per_point();
-        let use_view_tiles = self.should_use_view_tiles(viewport, world, canvas, pixels_per_point);
+        let use_view_tiles =
+            self.should_use_view_tiles(viewport, world, canvas, pixels_per_point, camera_activity);
         let view_lod = self.view_lod_level(world, canvas, pixels_per_point);
         let hover_nearest = if use_view_tiles {
             None
@@ -4316,15 +4336,6 @@ impl LoadedViewer {
         let overlay_shape_ids = overlay_shape_ids(self.selected, &self.highlighted);
         self.label_collector.clear();
 
-        let is_interacting = (response.dragged()
-            || response.drag_started()
-            || (ui.ctx().input(|i| i.zoom_delta()) - 1.0).abs() > 1e-5
-            || (response.hovered()
-                && ui
-                    .ctx()
-                    .input(|i| i.raw_scroll_delta.y.abs() > f32::EPSILON))
-            || self.focus_animation.is_some())
-            && !pointer_over_heatmap;
         let mut overview_visible = use_view_tiles;
 
         let visibility_hash = layers_visibility_hash(&self.layers);
@@ -4342,48 +4353,35 @@ impl LoadedViewer {
         if use_view_tiles {
             self.gpu_tile_worker.clear_active_tiles();
             if self.is_gpu_active() {
-                drawn += self.paint_gpu_2d_overview(
-                    ui,
-                    canvas,
-                    world,
-                    view_lod,
-                    &visible_layers,
-                    is_interacting,
-                );
+                drawn += self.paint_gpu_2d_overview(ui, canvas, world, view_lod, &visible_layers);
             } else {
-                if is_interacting {
-                    self.cpu_scene_cache.suspend();
-                    drawn += self.paint_cpu_2d_overview(
-                        &painter,
-                        viewport,
-                        world,
-                        canvas,
-                        view_lod,
-                        &visible_layers,
-                    );
-                } else {
-                    let request = self.cpu_scene_request(
-                        ui.ctx(),
-                        world,
-                        viewport,
-                        canvas,
-                        query_layer_ids.clone(),
-                        bg_color,
-                        false,
-                    );
-                    cpu_scene = self.cpu_scene_cache.get_or_request(request);
-                    let geometry_pending = cpu_scene.as_ref().is_none_or(|scene| {
-                        self.glow_rendering && !self.cpu_scene_cache.raster_ready(scene)
-                    });
-                    let labels_pending = cpu_scene
-                        .as_ref()
-                        .is_none_or(|scene| !self.cpu_scene_cache.labels_ready(scene));
-                    cpu_scene_pending = geometry_pending || labels_pending;
-                    if geometry_pending {
-                        if self.glow_rendering {
-                            self.cpu_scene_cache
-                                .paint_glow(cpu_scene.as_ref(), &painter, bg_color);
-                        }
+                let request = self.cpu_scene_request(
+                    ui.ctx(),
+                    world,
+                    viewport,
+                    canvas,
+                    query_layer_ids.clone(),
+                    bg_color,
+                    cache_cpu_overlays,
+                );
+                cpu_scene = self.cpu_scene_cache.get_or_request(request);
+                let geometry_pending = cpu_scene.as_ref().is_none_or(|scene| {
+                    self.glow_rendering && !self.cpu_scene_cache.raster_ready(scene)
+                });
+                let labels_pending = cpu_scene
+                    .as_ref()
+                    .is_none_or(|scene| !self.cpu_scene_cache.labels_ready(scene));
+                cpu_scene_pending = geometry_pending || labels_pending;
+                if geometry_pending {
+                    if self.glow_rendering {
+                        self.cpu_scene_cache
+                            .paint_glow(cpu_scene.as_ref(), &painter, bg_color);
+                    }
+                    cpu_scene_visible =
+                        self.glow_rendering && self.cpu_scene_cache.raster_visible();
+                    if cpu_scene_visible {
+                        overview_visible = false;
+                    } else {
                         drawn += self.paint_cpu_2d_overview(
                             &painter,
                             viewport,
@@ -4392,26 +4390,26 @@ impl LoadedViewer {
                             view_lod,
                             &visible_layers,
                         );
-                    } else if let Some(scene) = &cpu_scene {
-                        overview_visible = false;
-                        if self.glow_rendering {
-                            self.cpu_scene_cache
-                                .paint_glow(cpu_scene.as_ref(), &painter, bg_color);
-                            cpu_scene_visible = self.cpu_scene_cache.raster_visible();
-                        } else {
-                            scene.paint(&painter);
-                            cpu_scene_visible = true;
-                        }
-                        drawn = scene.drawn;
-                        estimated_primitives = scene.primitives;
                     }
-                    if cpu_scene_pending {
-                        ui.ctx().request_repaint_after(Duration::from_millis(16));
+                } else if let Some(scene) = &cpu_scene {
+                    overview_visible = false;
+                    if self.glow_rendering {
+                        self.cpu_scene_cache
+                            .paint_glow(cpu_scene.as_ref(), &painter, bg_color);
+                        cpu_scene_visible = self.cpu_scene_cache.raster_visible();
+                    } else {
+                        scene.paint(&painter);
+                        cpu_scene_visible = true;
                     }
-                    if let Some(scene) = &cpu_scene {
-                        query_duration = scene.query_duration;
-                        filter_duration = scene.filter_duration;
-                    }
+                    drawn = scene.drawn;
+                    estimated_primitives = scene.primitives;
+                }
+                if cpu_scene_pending {
+                    ui.ctx().request_repaint_after(Duration::from_millis(16));
+                }
+                if let Some(scene) = &cpu_scene {
+                    query_duration = scene.query_duration;
+                    filter_duration = scene.filter_duration;
                 }
             }
         } else {
@@ -4610,33 +4608,60 @@ impl LoadedViewer {
                     canvas,
                     query_layer_ids.clone(),
                     bg_color,
-                    self.analysis_tab != AnalysisTab::Map || self.active_heatmap.is_none(),
+                    cache_cpu_overlays,
                 );
-                cpu_scene = self.cpu_scene_cache.get_or_request(request);
-                if self.glow_rendering {
-                    self.cpu_scene_cache
-                        .paint_glow(cpu_scene.as_ref(), &painter, bg_color);
-                    cpu_scene_visible = self.cpu_scene_cache.raster_visible();
-                }
-                if let Some(scene) = &cpu_scene {
-                    if self.glow_rendering {
-                        cpu_scene_pending = !self.cpu_scene_cache.raster_ready(scene);
+                let defer_camera_request = is_pan_interacting
+                    && self.glow_rendering
+                    && !self.cpu_scene_cache.raster_failed();
+                if defer_camera_request {
+                    self.cpu_scene_cache.defer_camera_request(&request);
+                    if self
+                        .cpu_scene_cache
+                        .paint_glow_preview(&request, &painter, bg_color)
+                    {
+                        cpu_scene_pending = true;
+                        ui.ctx().request_repaint_after(Duration::from_millis(16));
                     } else {
-                        scene.paint(&painter);
-                        cpu_scene_visible = true;
+                        cpu_scene = self.cpu_scene_cache.get_or_request(request);
+                        if let Some(scene) = &cpu_scene {
+                            self.cpu_scene_cache
+                                .paint_glow(cpu_scene.as_ref(), &painter, bg_color);
+                            cpu_scene_visible = self.cpu_scene_cache.raster_visible();
+                            cpu_scene_pending = !self.cpu_scene_cache.raster_ready(scene)
+                                || !self.cpu_scene_cache.labels_ready(scene);
+                            drawn = scene.drawn + scene.overlay_drawn;
+                            estimated_primitives = scene.primitives;
+                        } else {
+                            cpu_scene_pending = true;
+                        }
                     }
-                    if !cpu_scene_pending {
-                        drawn = scene.drawn + scene.overlay_drawn;
-                        estimated_primitives = scene.primitives;
-                    }
-                    cpu_scene_pending |= !self.cpu_scene_cache.labels_ready(scene);
-                    query_duration = scene.query_duration;
-                    filter_duration = scene.filter_duration;
                 } else {
-                    cpu_scene_pending = true;
-                }
-                if cpu_scene_pending {
-                    ui.ctx().request_repaint_after(Duration::from_millis(16));
+                    cpu_scene = self.cpu_scene_cache.get_or_request(request);
+                    if self.glow_rendering {
+                        self.cpu_scene_cache
+                            .paint_glow(cpu_scene.as_ref(), &painter, bg_color);
+                        cpu_scene_visible = self.cpu_scene_cache.raster_visible();
+                    }
+                    if let Some(scene) = &cpu_scene {
+                        if self.glow_rendering {
+                            cpu_scene_pending = !self.cpu_scene_cache.raster_ready(scene);
+                        } else {
+                            scene.paint(&painter);
+                            cpu_scene_visible = true;
+                        }
+                        if !cpu_scene_pending {
+                            drawn = scene.drawn + scene.overlay_drawn;
+                            estimated_primitives = scene.primitives;
+                        }
+                        cpu_scene_pending |= !self.cpu_scene_cache.labels_ready(scene);
+                        query_duration = scene.query_duration;
+                        filter_duration = scene.filter_duration;
+                    } else {
+                        cpu_scene_pending = true;
+                    }
+                    if cpu_scene_pending {
+                        ui.ctx().request_repaint_after(Duration::from_millis(16));
+                    }
                 }
                 paint_duration += paint_started.elapsed();
             }
@@ -4658,7 +4683,7 @@ impl LoadedViewer {
         // fit-to-die zoom where they matter most.
         self.paint_gpu_heatmap_overlay(ui, canvas, world);
 
-        if !cache_cpu_overlays {
+        if !cache_cpu_overlays || overview_visible {
             drawn += paint_parameterized_grid_overlay(
                 &painter,
                 self.db.grid_metadata(),
@@ -4960,6 +4985,15 @@ impl LoadedViewer {
             egui::FontId::proportional(13.0),
             ecos_text_secondary(),
         );
+        if cpu_scene_pending && self.glow_rendering && self.cpu_scene_cache.raster_partial() {
+            painter.text(
+                canvas.right_top() + egui::vec2(-10.0, 10.0),
+                egui::Align2::RIGHT_TOP,
+                "Partial preview - building exact layout",
+                egui::FontId::proportional(12.0),
+                ecos_text_secondary(),
+            );
+        }
         self.paint_reload_indicator(ui, &painter, canvas);
 
         if collect_stats {
@@ -6897,6 +6931,7 @@ impl LoadedViewer {
         world: Rect32,
         canvas: egui::Rect,
         pixels_per_point: f32,
+        camera_activity: gpu_overview::CameraActivity,
     ) -> bool {
         if !self.object_visibility.is_all_visible() {
             self.view_tiles_latch.reset();
@@ -6912,6 +6947,7 @@ impl LoadedViewer {
             world,
             canvas,
             pixels_per_point,
+            camera_activity,
         )
     }
 
@@ -13990,7 +14026,16 @@ mod tests {
             hy: 1000,
         };
         assert!(!gpu_overview::should_use_view_tiles_for_state(
-            16, false, false, 1.0, 0, world, world, canvas, 1.0,
+            16,
+            false,
+            false,
+            1.0,
+            0,
+            world,
+            world,
+            canvas,
+            1.0,
+            gpu_overview::CameraActivity::Settled,
         ));
     }
 
@@ -14093,6 +14138,7 @@ mod tests {
             world,
             canvas,
             1.0,
+            gpu_overview::CameraActivity::Settled,
         ));
         assert!(!gpu_overview::should_use_view_tiles_for_state(
             16,
@@ -14104,6 +14150,7 @@ mod tests {
             world,
             canvas,
             1.0,
+            gpu_overview::CameraActivity::Settled,
         ));
     }
 
@@ -14134,6 +14181,7 @@ mod tests {
             world,
             canvas,
             1.0,
+            gpu_overview::CameraActivity::Settled,
         ));
     }
 

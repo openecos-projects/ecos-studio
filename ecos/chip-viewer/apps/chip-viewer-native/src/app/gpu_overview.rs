@@ -33,6 +33,12 @@ const PIXEL_OVERVIEW_EXIT_SHAPES_PER_PIXEL: f64 = 0.5;
 const TARGET_OVERVIEW_TILE_SCREEN_PX: f64 = 16.0;
 const MAX_TILE_REFERENCES_PER_SHAPE: u64 = 64;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CameraActivity {
+    Settled,
+    Interacting,
+}
+
 /// `GpuBufferKey::zoom_tier` for overview instance buffers. Exact-path
 /// tiles use tiers 0 (label-less) and 1 (label-carrying), so tier 2 keeps
 /// overview buffers from ever sharing a cache key with a shape tile.
@@ -108,10 +114,8 @@ pub(super) fn pixel_overview_lod(
         .clamp(0.0, 3.0) as u8
 }
 
-/// Shared 2D CPU/GPU predicate for the overview tile summary. Highlights
-/// and selection still render as exact overlays on top of the tile
-/// summary, so they do not factor into the predicate; draft/edit mode
-/// needs the exact base geometry and disables it.
+/// Shared 2D CPU/GPU predicate for the overview tile summary. The summary is
+/// lossy, so camera interaction requires exact current-camera geometry.
 pub(super) fn should_use_view_tiles_for_state(
     view_tile_count: usize,
     has_draft: bool,
@@ -122,8 +126,13 @@ pub(super) fn should_use_view_tiles_for_state(
     world: Rect32,
     canvas: egui::Rect,
     pixels_per_point: f32,
+    camera_activity: CameraActivity,
 ) -> bool {
-    if view_tile_count == 0 || has_draft || edit_enabled {
+    if view_tile_count == 0
+        || has_draft
+        || edit_enabled
+        || camera_activity == CameraActivity::Interacting
+    {
         return false;
     }
     if zoom > VIEW_TILE_OVERVIEW_ENTER_ZOOM {
@@ -159,9 +168,9 @@ pub(super) fn should_use_view_tiles_for_state(
 /// Hysteresis latch for the 2D overview predicate. Entering requires the
 /// full [`should_use_view_tiles_for_state`] test; once active the latch
 /// stays engaged until the zoom rises past the exit zoom or a
-/// precondition (draft/edit/tile availability) breaks, so zooming back
-/// and forth across a single boundary does not thrash the two render
-/// paths.
+/// precondition breaks, so zooming back and forth across a single boundary
+/// does not thrash the two render paths. Camera interaction, draft/edit mode,
+/// and tile availability are preconditions.
 #[derive(Default)]
 pub(super) struct ViewTileOverviewLatch {
     active: bool,
@@ -183,9 +192,13 @@ impl ViewTileOverviewLatch {
         world: Rect32,
         canvas: egui::Rect,
         pixels_per_point: f32,
+        camera_activity: CameraActivity,
     ) -> bool {
         if self.active {
-            let preconditions = view_tile_count > 0 && !has_draft && !edit_enabled;
+            let preconditions = view_tile_count > 0
+                && !has_draft
+                && !edit_enabled
+                && camera_activity == CameraActivity::Settled;
             let dense = estimated_visible_shapes_per_pixel(
                 shape_count,
                 viewport,
@@ -206,6 +219,7 @@ impl ViewTileOverviewLatch {
             world,
             canvas,
             pixels_per_point,
+            camera_activity,
         ) {
             self.active = true;
         }
@@ -335,7 +349,6 @@ impl LoadedViewer {
         world: Rect32,
         view_lod: u8,
         visible_layers: &BTreeMap<LayerId, LayerStyle>,
-        is_interacting: bool,
     ) -> usize {
         let visibility_hash = layers_visibility_hash(&self.layers);
         self.gpu_tile_instances.retain(|key, _| {
@@ -382,8 +395,7 @@ impl LoadedViewer {
             );
         }
         let tile_instances = &self.gpu_tile_instances[&buffer_key];
-        let uniform =
-            self.gpu_canvas_uniform(world, canvas, ui.ctx().pixels_per_point(), is_interacting);
+        let uniform = self.gpu_canvas_uniform(world, canvas, ui.ctx().pixels_per_point(), false);
         let drawn = tile_instances.visible_count(uniform.visibility_mask, true);
         let target_format = self
             .gpu_canvas
@@ -427,17 +439,53 @@ mod tests {
         let viewport = world;
         // At zoom 0.35 one lod-3 tile is ~15px on a 1000px canvas.
         assert!(should_use_view_tiles_for_state(
-            16, false, false, 0.35, 500_000, viewport, world, canvas, 1.0,
+            16,
+            false,
+            false,
+            0.35,
+            500_000,
+            viewport,
+            world,
+            canvas,
+            1.0,
+            CameraActivity::Settled,
         ));
         // A sparse fitted view stays exact.
         assert!(!should_use_view_tiles_for_state(
-            16, false, false, 1.0, 0, viewport, world, canvas, 1.0,
+            16,
+            false,
+            false,
+            1.0,
+            0,
+            viewport,
+            world,
+            canvas,
+            1.0,
+            CameraActivity::Settled,
         ));
         assert!(should_use_view_tiles_for_state(
-            16, false, false, 1.0, 1_000_000, viewport, world, canvas, 1.0,
+            16,
+            false,
+            false,
+            1.0,
+            1_000_000,
+            viewport,
+            world,
+            canvas,
+            1.0,
+            CameraActivity::Settled,
         ));
         assert!(!should_use_view_tiles_for_state(
-            16, false, false, 1.0, 100_000, viewport, world, canvas, 1.0,
+            16,
+            false,
+            false,
+            1.0,
+            100_000,
+            viewport,
+            world,
+            canvas,
+            1.0,
+            CameraActivity::Settled,
         ));
     }
 
@@ -499,7 +547,16 @@ mod tests {
             hy: 3_000_000,
         };
         assert!(should_use_view_tiles_for_state(
-            16, false, false, 0.05, 0, viewport, world, canvas, 1.0,
+            16,
+            false,
+            false,
+            0.05,
+            0,
+            viewport,
+            world,
+            canvas,
+            1.0,
+            CameraActivity::Settled,
         ));
     }
 
@@ -509,7 +566,16 @@ mod tests {
         let canvas = test_canvas();
         for (count, draft, edit) in [(0, false, false), (16, true, false), (16, false, true)] {
             assert!(!should_use_view_tiles_for_state(
-                count, draft, edit, 0.25, 0, world, world, canvas, 1.0,
+                count,
+                draft,
+                edit,
+                0.25,
+                0,
+                world,
+                world,
+                canvas,
+                1.0,
+                CameraActivity::Settled,
             ));
         }
     }
@@ -521,18 +587,84 @@ mod tests {
         let mut latch = ViewTileOverviewLatch::default();
 
         // Enter at the enter zoom.
-        assert!(latch.update(16, false, false, 0.35, 0, world, world, canvas, 1.0));
+        assert!(latch.update(
+            16,
+            false,
+            false,
+            0.35,
+            0,
+            world,
+            world,
+            canvas,
+            1.0,
+            CameraActivity::Settled,
+        ));
         // Stay engaged across the enter zoom up to the exit zoom.
-        assert!(latch.update(16, false, false, 0.38, 0, world, world, canvas, 1.0));
+        assert!(latch.update(
+            16,
+            false,
+            false,
+            0.38,
+            0,
+            world,
+            world,
+            canvas,
+            1.0,
+            CameraActivity::Settled,
+        ));
         // Disengage past the exit zoom.
-        assert!(!latch.update(16, false, false, 0.41, 0, world, world, canvas, 1.0));
+        assert!(!latch.update(
+            16,
+            false,
+            false,
+            0.41,
+            0,
+            world,
+            world,
+            canvas,
+            1.0,
+            CameraActivity::Settled,
+        ));
         // And re-entering needs the full predicate again.
-        assert!(latch.update(16, false, false, 0.30, 0, world, world, canvas, 1.0));
+        assert!(latch.update(
+            16,
+            false,
+            false,
+            0.30,
+            0,
+            world,
+            world,
+            canvas,
+            1.0,
+            CameraActivity::Settled,
+        ));
         // A draft while engaged disengages immediately.
-        assert!(!latch.update(16, true, false, 0.30, 0, world, world, canvas, 1.0));
+        assert!(!latch.update(
+            16,
+            true,
+            false,
+            0.30,
+            0,
+            world,
+            world,
+            canvas,
+            1.0,
+            CameraActivity::Settled,
+        ));
         // Reset forces disengagement.
         latch.reset();
-        assert!(!latch.update(16, false, false, 0.38, 0, world, world, canvas, 1.0));
+        assert!(!latch.update(
+            16,
+            false,
+            false,
+            0.38,
+            0,
+            world,
+            world,
+            canvas,
+            1.0,
+            CameraActivity::Settled,
+        ));
     }
 
     #[test]
@@ -541,9 +673,98 @@ mod tests {
         let canvas = test_canvas();
         let mut latch = ViewTileOverviewLatch::default();
 
-        assert!(latch.update(16, false, false, 1.0, 1_000_000, world, world, canvas, 1.0));
-        assert!(latch.update(16, false, false, 1.0, 700_000, world, world, canvas, 1.0));
-        assert!(!latch.update(16, false, false, 1.0, 300_000, world, world, canvas, 1.0));
+        assert!(latch.update(
+            16,
+            false,
+            false,
+            1.0,
+            1_000_000,
+            world,
+            world,
+            canvas,
+            1.0,
+            CameraActivity::Settled,
+        ));
+        assert!(latch.update(
+            16,
+            false,
+            false,
+            1.0,
+            700_000,
+            world,
+            world,
+            canvas,
+            1.0,
+            CameraActivity::Settled,
+        ));
+        assert!(!latch.update(
+            16,
+            false,
+            false,
+            1.0,
+            300_000,
+            world,
+            world,
+            canvas,
+            1.0,
+            CameraActivity::Settled,
+        ));
+    }
+
+    #[test]
+    fn camera_interaction_exits_overview_and_allows_it_again_after_release() {
+        let world = test_world();
+        let canvas = test_canvas();
+        let mut latch = ViewTileOverviewLatch::default();
+
+        assert!(latch.update(
+            16,
+            false,
+            false,
+            1.0,
+            1_000_000,
+            world,
+            world,
+            canvas,
+            1.0,
+            CameraActivity::Settled,
+        ));
+        assert!(!latch.update(
+            16,
+            false,
+            false,
+            1.0,
+            1_000_000,
+            world,
+            world,
+            canvas,
+            1.0,
+            CameraActivity::Interacting,
+        ));
+        assert!(!latch.update(
+            16,
+            false,
+            false,
+            1.0,
+            1_000_000,
+            world,
+            world,
+            canvas,
+            1.0,
+            CameraActivity::Interacting,
+        ));
+        assert!(latch.update(
+            16,
+            false,
+            false,
+            1.0,
+            1_000_000,
+            world,
+            world,
+            canvas,
+            1.0,
+            CameraActivity::Settled,
+        ));
     }
 
     #[test]

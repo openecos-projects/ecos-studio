@@ -16,7 +16,11 @@ import time
 from PIL import Image, ImageChops
 
 from static_render_e2e import read_samples, screenshot, viewer_window
-from render_interaction_evidence import interaction_readiness
+from render_interaction_evidence import (
+    interaction_readiness,
+    no_overview_during_interaction,
+    overview_preview_frames_during_recovery,
+)
 
 
 class IsolatedDisplay:
@@ -180,7 +184,7 @@ def layout_ink_pixels(image):
     )
 
 
-def run_scenario(name, action, process, window, stats_path, output, timeout):
+def run_scenario(name, action, process, window, stats_path, output, timeout, capture_released):
     before = read_samples(stats_path)
     started = time.monotonic()
     action(lambda: capture(window, output, f"{name}-during"))
@@ -190,9 +194,12 @@ def run_scenario(name, action, process, window, stats_path, output, timeout):
         time.sleep(0.02)
         active = read_samples(stats_path)[len(before):]
     released_at = time.monotonic()
+    if capture_released:
+        capture(window, output, f"{name}-released")
     settle = wait_ready(process, stats_path, timeout, len(before) + len(active))
     time.sleep(0.1)
     after = read_samples(stats_path)
+    recovery = after[len(before) + len(active):]
     image = capture(window, output, f"{name}-after")
     active_intervals = [sample["frame_interval_ms"] for sample in active]
     assert active_intervals, f"no frames during {name}"
@@ -228,7 +235,8 @@ def run_scenario(name, action, process, window, stats_path, output, timeout):
         }),
         "rasterizations_during": after[-1].get("cpu_rasterizations", 0)
         - before[-1].get("cpu_rasterizations", 0),
-        "no_overview_substitution": all(not sample["use_view_tiles"] for sample in after[len(before):]),
+        "no_overview_substitution": no_overview_during_interaction(active),
+        "overview_preview_frames_during_recovery": overview_preview_frames_during_recovery(recovery),
         **interaction_readiness(active),
     }, image
 
@@ -328,7 +336,14 @@ def run(args):
                     (lambda: None) if args.skip_during_screenshots else during
                 )
                 result, image = run_scenario(
-                    name, measured_action, process, window, stats_path, args.output, args.timeout,
+                    name,
+                    measured_action,
+                    process,
+                    window,
+                    stats_path,
+                    args.output,
+                    args.timeout,
+                    args.capture_released,
                 )
                 if "drag" in name and not args.skip_during_screenshots:
                     during = Image.open(args.output / f"{name}-during" / "screen.png").convert("RGB")
@@ -371,6 +386,8 @@ def run(args):
                     failures.append(f"{name}: current-camera geometry absent beyond {args.max_proxy_run_ms} ms during input")
                 if not scenario["no_overview_substitution"]:
                     failures.append(f"{name}: overview substituted for exact geometry")
+                if "drag" in name and scenario["overview_preview_frames_during_recovery"]:
+                    failures.append(f"{name}: overview covered detailed preview while exact camera was pending")
                 if "changed_during_pixels" in scenario and scenario["changed_during_pixels"] < 1000:
                     failures.append(f"{name}: drag did not move the layout")
                 if "visible_layout_pixels_during" in scenario and scenario["visible_layout_pixels_during"] < initial_ink * 0.25:
@@ -408,6 +425,7 @@ def main():
     parser.add_argument("--max-settle-seconds", type=float, default=1)
     parser.add_argument("--max-proxy-run-ms", type=float)
     parser.add_argument("--skip-during-screenshots", action="store_true")
+    parser.add_argument("--capture-released", action="store_true")
     parser.add_argument("--presentation-trace", action="store_true")
     parser.add_argument("--raster-trace", action="store_true")
     parser.add_argument("--scenario", choices=[

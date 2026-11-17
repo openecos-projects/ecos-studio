@@ -7,7 +7,7 @@ use chip_render::geometry2d::{PaintCommand, PaintSink};
 const GRID: usize = 4;
 const MAX_LAYERS: usize = 64;
 const MAX_CANDIDATES: usize = 32_768;
-const WORKER_BUDGET: Duration = Duration::from_millis(20);
+const WORKER_BUDGET: Duration = Duration::from_millis(250);
 const UI_SPATIAL_CANDIDATES: usize = 256;
 const UI_CACHED_CANDIDATES: usize = 512;
 const UI_PRIORITY_CANDIDATES: usize = UI_CACHED_CANDIDATES * 3 / 4;

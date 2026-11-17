@@ -162,6 +162,7 @@ pub(super) struct CpuSceneCache {
     pending: Option<SceneRequest>,
     initial_scene: Option<Arc<CpuScene>>,
     restored: bool,
+    request_deferred: bool,
     world_source: Option<Arc<world_source::WorldSource>>,
     label_results: label_result_cache::LabelResultCache,
 }
@@ -193,6 +194,7 @@ impl Default for CpuSceneCache {
             pending: None,
             initial_scene: None,
             restored: false,
+            request_deferred: false,
             world_source: None,
             label_results: Default::default(),
         }
@@ -208,6 +210,21 @@ impl Drop for CpuSceneCache {
 }
 
 impl CpuSceneCache {
+    /// Cancel obsolete camera work once during interaction while retaining the
+    /// latest key for translated-frame presentation and later scheduling.
+    pub(super) fn defer_camera_request(&mut self, request: &SceneRequest) {
+        if !self.request_deferred {
+            self.inbox.generation.fetch_add(1, Ordering::Relaxed);
+            self.progress.clear();
+            *self.inbox.request.lock().unwrap() = None;
+            self.pending = None;
+            self.initial_scene = None;
+            self.request_deferred = true;
+        }
+        self.key = Some(request.key.clone());
+        self.restored = false;
+    }
+
     pub(super) fn suspend(&mut self) {
         if self.key.is_none() && self.pending.is_none() {
             return;
@@ -219,9 +236,14 @@ impl CpuSceneCache {
         self.initial_scene = None;
         self.key = None;
         self.restored = false;
+        self.request_deferred = false;
     }
 
     pub(super) fn get_or_request(&mut self, mut request: SceneRequest) -> Option<Arc<CpuScene>> {
+        if self.request_deferred {
+            self.key = None;
+            self.request_deferred = false;
+        }
         let completed_scenes = self
             .ready
             .iter()
@@ -400,6 +422,27 @@ impl CpuSceneCache {
         }
     }
 
+    pub(super) fn paint_glow_preview(
+        &self,
+        request: &SceneRequest,
+        painter: &egui::Painter,
+        background: egui::Color32,
+    ) -> bool {
+        if self.raster.failed() {
+            return false;
+        }
+        self.raster.paint_with_initial(
+            None,
+            None,
+            &request.key,
+            Arc::clone(&self.progress),
+            self.inbox.generation.load(Ordering::Relaxed),
+            painter,
+            background,
+        );
+        true
+    }
+
     pub(super) fn destroy_glow(&self) {
         self.raster.destroy();
     }
@@ -414,6 +457,10 @@ impl CpuSceneCache {
 
     pub(super) fn rasterizations(&self) -> usize {
         self.raster.rasterizations()
+    }
+
+    pub(super) fn raster_failed(&self) -> bool {
+        self.raster.failed()
     }
 
     pub(super) fn history_bytes(&self) -> usize {

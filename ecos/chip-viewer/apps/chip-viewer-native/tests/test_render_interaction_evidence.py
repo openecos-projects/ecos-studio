@@ -1,6 +1,11 @@
 import unittest
 
-from render_interaction_evidence import interaction_readiness, scene_availability
+from render_interaction_evidence import (
+    interaction_readiness,
+    no_overview_during_interaction,
+    overview_preview_frames_during_recovery,
+    scene_availability,
+)
 
 
 def sample(**values):
@@ -9,6 +14,23 @@ def sample(**values):
 
 
 class InteractionEvidenceTests(unittest.TestCase):
+    def test_overview_is_not_exact_geometry_during_interaction(self):
+        self.assertFalse(no_overview_during_interaction([
+            sample(is_gpu=True), sample(is_gpu=True, use_view_tiles=True),
+        ]))
+        self.assertTrue(no_overview_during_interaction([
+            sample(is_gpu=True), sample(is_gpu=True),
+        ]))
+        self.assertFalse(no_overview_during_interaction([]))
+
+    def test_overview_does_not_cover_detailed_preview_during_recovery(self):
+        self.assertEqual(overview_preview_frames_during_recovery([
+            sample(use_view_tiles=True, cpu_scene_preview=True, cpu_scene_pending=True),
+            sample(use_view_tiles=False, cpu_scene_preview=True, cpu_scene_pending=True),
+            sample(use_view_tiles=True, cpu_scene_preview=False, cpu_scene_pending=True),
+            sample(use_view_tiles=True, cpu_scene_preview=True, cpu_scene_pending=False),
+        ]), 1)
+
     def test_translated_and_held_bitmaps_are_not_current_geometry(self):
         samples = [sample(cpu_scene_preview=True)] * 50 + [sample(cpu_scene_held=True)] * 50
         result = interaction_readiness(samples)
