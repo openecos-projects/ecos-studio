@@ -17,6 +17,7 @@ import type {
   WorkspaceDesignFileEntry,
 } from '../types/designFiles.ts'
 import type {
+  DesktopDownloadSource,
   ResourceImportPdkRequest,
   ResourceImportLocalRequest,
   ResourceInfo,
@@ -331,6 +332,13 @@ export interface DesktopApi {
     ): Promise<T | null>
     set(key: string, value: DesktopSettingsValue): Promise<void>
     delete(key: string): Promise<void>
+    /**
+     * Fired in every window when the download-source preference is committed,
+     * so windows other than the initiating one update their control.
+     */
+    onDownloadSourceChanged?(
+      listener: (source: DesktopDownloadSource) => void,
+    ): DesktopEventUnsubscribe
   }
   projectManifest: {
     mutate(
