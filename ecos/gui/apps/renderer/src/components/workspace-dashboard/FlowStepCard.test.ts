@@ -21,6 +21,7 @@ function flowStep(status: DashboardFlowStep['status']): DashboardFlowStep {
     checklist: [],
     checkState: 'blocked',
     thumbnail: null,
+    macroPlacementSource: null,
   }
 }
 
@@ -57,6 +58,39 @@ describe('flow step cards', () => {
     expect(wrapper.get('button.step-state').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('--')
     expect(wrapper.text()).not.toContain('0 MB')
+    wrapper.unmount()
+  })
+
+  it('offers macro placement from preFloorplan geometry before the step has output', async () => {
+    const source = {
+      id: 'preFloorplan-image',
+      kind: 'layout' as const,
+      label: 'Pre Floorplan Layout',
+      step: 'preFloorplan',
+      url: 'blob:preFloorplan',
+      hasGeometry: true,
+      availability: 'available' as const,
+      reason: null,
+    }
+    const macroStep: DashboardFlowStep = {
+      ...flowStep('queued'),
+      id: 'macroPlacement',
+      path: 'macroPlacement',
+      label: 'Macro Placement',
+      thumbnail: null,
+      macroPlacementSource: source,
+    }
+    const wrapper = mount(FlowStepCard, { props: { step: macroStep } })
+
+    const layoutButton = wrapper.get('button.step-layout')
+    expect(layoutButton.attributes('disabled')).toBeUndefined()
+    expect(layoutButton.text()).toContain('Place macros')
+    expect(layoutButton.attributes('title')).toBe(
+      'Open the preFloorplan layout to place macros',
+    )
+
+    await layoutButton.trigger('click')
+    expect(wrapper.emitted('layout')).toEqual([[macroStep]])
     wrapper.unmount()
   })
 })

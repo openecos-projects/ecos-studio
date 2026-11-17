@@ -38,20 +38,19 @@
     <button
       type="button"
       class="step-layout"
-      :disabled="
-        !step.thumbnail?.url ||
-        !step.thumbnail.hasGeometry ||
-        step.thumbnail.availability !== 'available'
+      :disabled="!layoutAvailable"
+      :aria-label="
+        macroPlacementSourceAvailable
+          ? 'Place macros from preFloorplan layout'
+          : `Open ${step.label} layout`
       "
-      :aria-label="`Open ${step.label} layout`"
-      :title="step.thumbnail?.reason ?? `Open ${step.label} in Chip Viewer`"
+      :title="layoutTitle"
       @click="$emit('layout', step)"
     >
-      <img
-        v-if="step.thumbnail?.url"
-        :src="step.thumbnail.url"
-        :alt="`${step.label} layout`"
-      />
+      <img v-if="ownLayout" :src="ownLayout.url" :alt="`${step.label} layout`" />
+      <span v-else-if="macroPlacementSourceAvailable"
+        ><i class="ri-drag-move-2-line" aria-hidden="true" /> Place macros</span
+      >
       <span v-else><i class="ri-image-2-line" aria-hidden="true" /> No layout</span>
     </button>
     <div class="step-checks">
@@ -92,14 +91,16 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import {
   formatPeakMemory,
   statusIcon,
   statusLabel,
 } from '@/components/workbench/flowStatus'
 import type { DashboardFlowStep } from './flowDashboardData'
+import { isUsableLayoutThumbnail } from './layoutThumbnail'
 
-defineProps<{ step: DashboardFlowStep }>()
+const props = defineProps<{ step: DashboardFlowStep }>()
 defineEmits<{
   run: [step: DashboardFlowStep]
   layout: [step: DashboardFlowStep]
@@ -107,6 +108,24 @@ defineEmits<{
   reports: [step: DashboardFlowStep]
   log: [step: DashboardFlowStep]
 }>()
+
+const ownLayout = computed(() =>
+  isUsableLayoutThumbnail(props.step.thumbnail) ? props.step.thumbnail : null,
+)
+const ownLayoutAvailable = computed(() => ownLayout.value !== null)
+const macroPlacementSourceAvailable = computed(
+  () =>
+    !ownLayoutAvailable.value && isUsableLayoutThumbnail(props.step.macroPlacementSource),
+)
+const layoutAvailable = computed(
+  () => ownLayoutAvailable.value || macroPlacementSourceAvailable.value,
+)
+const layoutTitle = computed(() => {
+  if (macroPlacementSourceAvailable.value) {
+    return 'Open the preFloorplan layout to place macros'
+  }
+  return props.step.thumbnail?.reason ?? `Open ${props.step.label} in Chip Viewer`
+})
 </script>
 
 <style scoped>

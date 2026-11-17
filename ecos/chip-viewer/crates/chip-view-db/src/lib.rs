@@ -117,6 +117,16 @@ pub struct NearestShape {
     pub distance_squared: u64,
 }
 
+/// Geometry available for one requested timing endpoint.
+///
+/// `pin_bbox` is the preferred timing-path anchor. `instance_bbox` is the
+/// fallback when a pin-port shape is absent from the geometry snapshot.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EndpointPinGeometry {
+    pub instance_bbox: Option<Rect32>,
+    pub pin_bbox: Option<Rect32>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LayerSummary {
     pub layer_id: u16,
@@ -212,9 +222,15 @@ pub struct ShapeIdIndex {
 
 #[derive(Clone, Debug, Default)]
 pub struct OwnerNameIndex {
-    by_name: BTreeMap<Arc<str>, Vec<ShapeId>>,
     names: Vec<Arc<str>>,
     name_by_owner: HashMap<(u8, u64), u32>,
+    aliases_by_owner: HashMap<(u8, u64), Vec<u32>>,
+    owner_shapes: OnceLock<OwnerShapeLookup>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct OwnerShapeLookup {
+    by_name: BTreeMap<Arc<str>, Vec<ShapeId>>,
     shapes_by_owner: HashMap<(u8, u64), Vec<ShapeId>>,
 }
 
@@ -659,6 +675,21 @@ impl LayerShapeIndex {
     }
 }
 
+fn extend_name_shapes(
+    by_name: &mut BTreeMap<Arc<str>, Vec<ShapeId>>,
+    names: &[Arc<str>],
+    name_id: u32,
+    shape_ids: &[ShapeId],
+) {
+    let Some(name) = names.get(name_id as usize) else {
+        return;
+    };
+    by_name
+        .entry(Arc::clone(name))
+        .or_default()
+        .extend_from_slice(shape_ids);
+}
+
 impl OwnerNameIndex {
     fn from_snapshot(snapshot: &GeometrySnapshot) -> Self {
         let owner_names = snapshot.name_records().iter().filter_map(|record| {
@@ -668,14 +699,71 @@ impl OwnerNameIndex {
                 snapshot.owner_name(record)?,
             ))
         });
-        Self::from_shapes_and_names(snapshot.shapes(), snapshot.owners(), owner_names)
+        Self::from_names(owner_names)
     }
 
+    fn from_names<S: AsRef<str>>(owner_names: impl IntoIterator<Item = (u8, u64, S)>) -> Self {
+        // Intern names once so each unique name is allocated a single time
+        // and shared between the name table and the lazy search lookup.
+        let mut names = Vec::<Arc<str>>::new();
+        let mut name_ids = HashMap::<Arc<str>, u32>::new();
+        let mut name_by_owner = HashMap::<(u8, u64), u32>::new();
+        let mut aliases_by_owner = HashMap::<(u8, u64), Vec<u32>>::new();
+        for (owner_type, owner_id, name) in owner_names {
+            // Local names (for example via master names stored on OwnerRef.name_id)
+            // share the name-record file but are not owner-name query keys.
+            if owner_type == OwnerType::None as u8 {
+                continue;
+            }
+            let owner_key = (owner_type, owner_id);
+            let name = name.as_ref();
+            let name_id = match name_ids.get(name) {
+                Some(&name_id) => name_id,
+                None => {
+                    let interned: Arc<str> = Arc::from(name);
+                    let name_id = names.len() as u32;
+                    names.push(interned.clone());
+                    name_ids.insert(interned, name_id);
+                    name_id
+                }
+            };
+            if let Some(&canonical) = name_by_owner.get(&owner_key) {
+                if canonical != name_id {
+                    let aliases = aliases_by_owner.entry(owner_key).or_default();
+                    if !aliases.contains(&name_id) {
+                        aliases.push(name_id);
+                    }
+                }
+            } else {
+                name_by_owner.insert(owner_key, name_id);
+            }
+        }
+        Self {
+            names,
+            name_by_owner,
+            aliases_by_owner,
+            owner_shapes: OnceLock::new(),
+        }
+    }
+
+    #[cfg(test)]
     fn from_shapes_and_names<S: AsRef<str>>(
         shapes: &[ShapeRecord],
         owners: &[OwnerRef],
         owner_names: impl IntoIterator<Item = (u8, u64, S)>,
     ) -> Self {
+        let index = Self::from_names(owner_names);
+        let lookup = index.build_owner_shapes(shapes, owners);
+        let _ = index.owner_shapes.set(lookup);
+        index
+    }
+
+    fn owner_shapes(&self, shapes: &[ShapeRecord], owners: &[OwnerRef]) -> &OwnerShapeLookup {
+        self.owner_shapes
+            .get_or_init(|| self.build_owner_shapes(shapes, owners))
+    }
+
+    fn build_owner_shapes(&self, shapes: &[ShapeRecord], owners: &[OwnerRef]) -> OwnerShapeLookup {
         // Group alive shapes by owner key with a single sort instead of
         // growing one small Vec per owner through repeated map inserts.
         let mut owner_shape_pairs = Vec::with_capacity(shapes.len());
@@ -709,66 +797,59 @@ impl OwnerNameIndex {
             group_start = group_end;
         }
 
-        // Intern names once so each unique name is allocated a single time
-        // and shared between by_name, name_by_owner, and the names table.
-        let mut names = Vec::<Arc<str>>::new();
-        let mut name_ids = HashMap::<Arc<str>, u32>::new();
-        let mut records = Vec::new();
-        for (owner_type, owner_id, name) in owner_names {
-            let name = name.as_ref();
-            let name_id = match name_ids.get(name) {
-                Some(&name_id) => name_id,
-                None => {
-                    let interned: Arc<str> = Arc::from(name);
-                    let name_id = names.len() as u32;
-                    names.push(interned.clone());
-                    name_ids.insert(interned, name_id);
-                    name_id
-                }
-            };
-            records.push((owner_type, owner_id, name_id));
-        }
-
         let mut by_name = BTreeMap::<Arc<str>, Vec<ShapeId>>::new();
-        let mut name_by_owner = HashMap::<(u8, u64), u32>::new();
-        for (owner_type, owner_id, name_id) in records {
-            name_by_owner
-                .entry((owner_type, owner_id))
-                .or_insert(name_id);
-            let Some(shape_ids) = shapes_by_owner.get(&(owner_type, owner_id)) else {
+        for (&owner_key, &name_id) in &self.name_by_owner {
+            let Some(shape_ids) = shapes_by_owner.get(&owner_key) else {
                 continue;
             };
-            by_name
-                .entry(names[name_id as usize].clone())
-                .or_default()
-                .extend_from_slice(shape_ids);
+            extend_name_shapes(&mut by_name, &self.names, name_id, shape_ids);
+            if let Some(aliases) = self.aliases_by_owner.get(&owner_key) {
+                for &alias_id in aliases {
+                    extend_name_shapes(&mut by_name, &self.names, alias_id, shape_ids);
+                }
+            }
         }
         for shape_ids in by_name.values_mut() {
             shape_ids.sort_unstable();
             shape_ids.dedup();
         }
-        Self {
+        OwnerShapeLookup {
             by_name,
-            names,
-            name_by_owner,
             shapes_by_owner,
         }
     }
 
-    pub fn query(&self, name: &str) -> Vec<ShapeId> {
-        self.by_name.get(name).cloned().unwrap_or_default()
+    pub fn query(&self, shapes: &[ShapeRecord], owners: &[OwnerRef], name: &str) -> Vec<ShapeId> {
+        self.owner_shapes(shapes, owners)
+            .by_name
+            .get(name)
+            .cloned()
+            .unwrap_or_default()
     }
 
-    pub fn query_pattern(&self, pattern: &Regex) -> Vec<ShapeId> {
-        self.by_name
+    pub fn query_pattern(
+        &self,
+        shapes: &[ShapeRecord],
+        owners: &[OwnerRef],
+        pattern: &Regex,
+    ) -> Vec<ShapeId> {
+        self.owner_shapes(shapes, owners)
+            .by_name
             .iter()
             .filter(|(name, _)| pattern.is_match(name.as_ref()))
             .flat_map(|(_, shape_ids)| shape_ids.iter().copied())
             .collect()
     }
 
-    pub fn query_owner(&self, owner_type: u8, owner_id: u64) -> Vec<ShapeId> {
-        self.shapes_by_owner
+    pub fn query_owner(
+        &self,
+        shapes: &[ShapeRecord],
+        owners: &[OwnerRef],
+        owner_type: u8,
+        owner_id: u64,
+    ) -> Vec<ShapeId> {
+        self.owner_shapes(shapes, owners)
+            .shapes_by_owner
             .get(&(owner_type, owner_id))
             .cloned()
             .unwrap_or_default()
@@ -780,26 +861,38 @@ impl OwnerNameIndex {
             .iter()
             .map(|name| size_of::<Arc<str>>() + name.len())
             .sum::<usize>();
-        let by_name_bytes = self.by_name.len() * size_of::<Arc<str>>()
-            + self
-                .by_name
-                .values()
-                .map(|shape_ids| {
-                    size_of::<Vec<ShapeId>>() + shape_ids.capacity() * size_of::<ShapeId>()
-                })
-                .sum::<usize>();
         let name_by_owner_bytes =
             self.name_by_owner.len() * (size_of::<(u8, u64)>() + size_of::<u32>());
-        let shapes_by_owner_bytes = self
-            .shapes_by_owner
+        let aliases_by_owner_bytes = self
+            .aliases_by_owner
             .values()
-            .map(|shape_ids| {
-                size_of::<(u8, u64)>()
-                    + size_of::<Vec<ShapeId>>()
-                    + shape_ids.capacity() * size_of::<ShapeId>()
-            })
+            .map(|name_ids| size_of::<Vec<u32>>() + name_ids.capacity() * size_of::<u32>())
             .sum::<usize>();
-        size_of::<Self>() + name_bytes + by_name_bytes + name_by_owner_bytes + shapes_by_owner_bytes
+        let owner_shape_bytes = self.owner_shapes.get().map_or(0, |lookup| {
+            let by_name_bytes = lookup.by_name.len() * size_of::<Arc<str>>()
+                + lookup
+                    .by_name
+                    .values()
+                    .map(|shape_ids| {
+                        size_of::<Vec<ShapeId>>() + shape_ids.capacity() * size_of::<ShapeId>()
+                    })
+                    .sum::<usize>();
+            let shapes_by_owner_bytes = lookup
+                .shapes_by_owner
+                .values()
+                .map(|shape_ids| {
+                    size_of::<(u8, u64)>()
+                        + size_of::<Vec<ShapeId>>()
+                        + shape_ids.capacity() * size_of::<ShapeId>()
+                })
+                .sum::<usize>();
+            by_name_bytes + shapes_by_owner_bytes
+        });
+        size_of::<Self>()
+            + name_bytes
+            + name_by_owner_bytes
+            + aliases_by_owner_bytes
+            + owner_shape_bytes
     }
 
     pub fn name_for_owner(&self, owner_type: u8, owner_id: u64) -> Option<&str> {
@@ -1447,34 +1540,49 @@ fn decode_shape_payload<T: Pod>(shape: &ShapeRecord, payload_bytes: &[u8]) -> Op
     Some(bytemuck::pod_read_unaligned(payload_bytes.get(begin..end)?))
 }
 
-fn query_bus_shape_ids_from_parts(name_index: &OwnerNameIndex, bus: &BusMetadata) -> Vec<ShapeId> {
+fn query_bus_shape_ids_from_parts(
+    shapes: &[ShapeRecord],
+    owners: &[OwnerRef],
+    name_index: &OwnerNameIndex,
+    bus: &BusMetadata,
+) -> Vec<ShapeId> {
     let mut shape_ids = BTreeSet::new();
     for name in bus.net_names.iter().chain(bus.pin_names.iter()) {
-        collect_named_shape_ids(name_index, name, &mut shape_ids);
+        collect_named_shape_ids(shapes, owners, name_index, name, &mut shape_ids);
         if let Some((_, pin_name)) = name.rsplit_once('/') {
-            collect_named_shape_ids(name_index, pin_name, &mut shape_ids);
+            collect_named_shape_ids(shapes, owners, name_index, pin_name, &mut shape_ids);
         }
     }
     if shape_ids.is_empty() {
-        collect_named_shape_ids(name_index, &bus.name, &mut shape_ids);
+        collect_named_shape_ids(shapes, owners, name_index, &bus.name, &mut shape_ids);
     }
     shape_ids.into_iter().collect()
 }
 
 fn query_group_shape_ids_from_parts(
+    shapes: &[ShapeRecord],
+    owners: &[OwnerRef],
     name_index: &OwnerNameIndex,
     group: &GroupMetadata,
 ) -> Vec<ShapeId> {
     let mut shape_ids = BTreeSet::new();
     for instance_name in &group.instance_names {
-        collect_named_shape_ids(name_index, instance_name, &mut shape_ids);
+        collect_named_shape_ids(shapes, owners, name_index, instance_name, &mut shape_ids);
     }
-    collect_named_shape_ids(name_index, &group.region_name, &mut shape_ids);
+    collect_named_shape_ids(
+        shapes,
+        owners,
+        name_index,
+        &group.region_name,
+        &mut shape_ids,
+    );
     shape_ids.into_iter().collect()
 }
 
 #[cfg(test)]
 fn query_pin_shape_ids_from_parts(
+    shapes: &[ShapeRecord],
+    owners: &[OwnerRef],
     name_index: &OwnerNameIndex,
     endpoints: &[ConnectivityMetadata],
     pin_name: &str,
@@ -1483,20 +1591,42 @@ fn query_pin_shape_ids_from_parts(
         .iter()
         .filter(|endpoint| endpoint_matches_pin(endpoint, pin_name))
         .collect::<Vec<_>>();
-    query_pin_shape_ids_from_endpoint_refs(name_index, &matching_endpoints, pin_name)
+    query_pin_shape_ids_from_endpoint_refs(
+        shapes,
+        owners,
+        name_index,
+        &matching_endpoints,
+        pin_name,
+    )
 }
 
 fn query_pin_shape_ids_from_endpoint_refs(
+    shapes: &[ShapeRecord],
+    owners: &[OwnerRef],
     name_index: &OwnerNameIndex,
     endpoints: &[&ConnectivityMetadata],
     pin_name: &str,
 ) -> Vec<ShapeId> {
     let mut shape_ids = BTreeSet::new();
     for endpoint in endpoints {
-        collect_named_shape_ids(name_index, &endpoint.pin_name, &mut shape_ids);
-        collect_named_shape_ids(name_index, &endpoint.net_name, &mut shape_ids);
+        collect_named_shape_ids(
+            shapes,
+            owners,
+            name_index,
+            &endpoint.pin_name,
+            &mut shape_ids,
+        );
+        collect_named_shape_ids(
+            shapes,
+            owners,
+            name_index,
+            &endpoint.net_name,
+            &mut shape_ids,
+        );
         if !endpoint.instance_name.is_empty() && !endpoint.pin_name.is_empty() {
             collect_named_shape_ids(
+                shapes,
+                owners,
                 name_index,
                 &format!("{}/{}", endpoint.instance_name, endpoint.pin_name),
                 &mut shape_ids,
@@ -1504,12 +1634,165 @@ fn query_pin_shape_ids_from_endpoint_refs(
         }
     }
     if shape_ids.is_empty() {
-        collect_named_shape_ids(name_index, pin_name, &mut shape_ids);
+        collect_named_shape_ids(shapes, owners, name_index, pin_name, &mut shape_ids);
         if let Some((_, local_pin_name)) = pin_name.rsplit_once('/') {
-            collect_named_shape_ids(name_index, local_pin_name, &mut shape_ids);
+            collect_named_shape_ids(shapes, owners, name_index, local_pin_name, &mut shape_ids);
         }
     }
     shape_ids.into_iter().collect()
+}
+
+/// Resolves a batch of timing endpoints with one pass for instance extents and
+/// one pass for pin-port shapes. Timing paths contain tens of stages, so this
+/// avoids repeating the full shape scan performed by single-endpoint queries.
+fn resolve_endpoint_pins_from_parts(
+    shapes: &[ShapeRecord],
+    owners: &[OwnerRef],
+    shape_index: &ShapeIdIndex,
+    name_index: &OwnerNameIndex,
+    requests: &[(&str, &str)],
+) -> Vec<EndpointPinGeometry> {
+    let mut resolved = vec![EndpointPinGeometry::default(); requests.len()];
+    if requests.is_empty() {
+        return resolved;
+    }
+
+    let mut requests_by_instance = HashMap::<&str, Vec<usize>>::new();
+    let mut io_requests_by_pin = HashMap::<&str, Vec<usize>>::new();
+    for (index, (instance_name, pin_name)) in requests.iter().enumerate() {
+        let instance_name = instance_name.trim();
+        let pin_name = pin_name.trim();
+        if instance_name.is_empty() {
+            if !pin_name.is_empty() {
+                io_requests_by_pin.entry(pin_name).or_default().push(index);
+            }
+        } else {
+            requests_by_instance
+                .entry(instance_name)
+                .or_default()
+                .push(index);
+        }
+    }
+
+    let mut requests_by_path = HashMap::<u32, Vec<usize>>::new();
+    for (instance_name, request_indexes) in requests_by_instance {
+        for shape_id in name_index.query(shapes, owners, instance_name) {
+            let Some(shape) = shape_index.find(shapes, shape_id) else {
+                continue;
+            };
+            if shape.state != ShapeState::Alive as u8 {
+                continue;
+            }
+            let Some(owner) = owners.get(shape.owner_index as usize) else {
+                continue;
+            };
+            if !matches!(
+                OwnerType::from_raw(owner.owner_type),
+                Some(OwnerType::InstanceBBox | OwnerType::InstanceHalo)
+            ) {
+                continue;
+            }
+            for &request_index in &request_indexes {
+                requests_by_path
+                    .entry(owner.path0)
+                    .or_default()
+                    .push(request_index);
+                let instance_bbox = resolved[request_index]
+                    .instance_bbox
+                    .map_or(shape.bbox, |bbox| union_rect(bbox, shape.bbox));
+                resolved[request_index].instance_bbox = Some(instance_bbox);
+            }
+        }
+    }
+    for request_indexes in requests_by_path.values_mut() {
+        request_indexes.sort_unstable();
+        request_indexes.dedup();
+    }
+
+    for shape in shapes {
+        if shape.state != ShapeState::Alive as u8 {
+            continue;
+        }
+        let Some(owner) = owners.get(shape.owner_index as usize) else {
+            continue;
+        };
+        let Some(owner_type) = OwnerType::from_raw(owner.owner_type) else {
+            continue;
+        };
+        let Some(owner_name) = name_index.name_for_owner(owner.owner_type, owner.owner_id) else {
+            continue;
+        };
+        let owner_name = owner_name.trim();
+
+        match owner_type {
+            OwnerType::InstancePinPortShape => {
+                let Some(request_indexes) = requests_by_path.get(&owner.path0) else {
+                    continue;
+                };
+                for request_index in request_indexes {
+                    let (_, pin_name) = requests[*request_index];
+                    if !pin_name_matches(pin_name, owner_name) {
+                        continue;
+                    }
+                    let pin_bbox = resolved[*request_index]
+                        .pin_bbox
+                        .map_or(shape.bbox, |bbox| union_rect(bbox, shape.bbox));
+                    resolved[*request_index].pin_bbox = Some(pin_bbox);
+                }
+            }
+            OwnerType::IoPinPortShape | OwnerType::PinPortShape if owner.path0 == 0 => {
+                let Some(request_indexes) = io_requests_by_pin.get(owner_name) else {
+                    continue;
+                };
+                for request_index in request_indexes {
+                    let (_, pin_name) = requests[*request_index];
+                    if !pin_name_matches(pin_name, owner_name) {
+                        continue;
+                    }
+                    let pin_bbox = resolved[*request_index]
+                        .pin_bbox
+                        .map_or(shape.bbox, |bbox| union_rect(bbox, shape.bbox));
+                    resolved[*request_index].pin_bbox = Some(pin_bbox);
+                }
+            }
+            OwnerType::None
+            | OwnerType::Die
+            | OwnerType::Core
+            | OwnerType::Row
+            | OwnerType::InstanceBBox
+            | OwnerType::InstanceHalo
+            | OwnerType::NetWireSegment
+            | OwnerType::SpecialWireSegment
+            | OwnerType::Via
+            | OwnerType::IoPinPortShape
+            | OwnerType::PinPortShape
+            | OwnerType::Blockage
+            | OwnerType::Fill
+            | OwnerType::Region
+            | OwnerType::Slot
+            | OwnerType::TrackGrid
+            | OwnerType::GCellGrid
+            | OwnerType::Obs => {}
+        }
+    }
+
+    resolved
+}
+
+fn pin_name_matches(requested: &str, owner_name: &str) -> bool {
+    let requested = lookup_name_variants(requested);
+    let owner_name = lookup_name_variants(owner_name);
+    requested.iter().any(|requested_name| {
+        owner_name.iter().any(|owner_name| {
+            requested_name.eq_ignore_ascii_case(owner_name)
+                || requested_name
+                    .split_once('[')
+                    .is_some_and(|(base, _)| base.eq_ignore_ascii_case(owner_name))
+                || owner_name
+                    .split_once('[')
+                    .is_some_and(|(base, _)| base.eq_ignore_ascii_case(requested_name))
+        })
+    })
 }
 
 fn query_endpoint_pin_shape_ids_from_parts(
@@ -1596,6 +1879,8 @@ fn endpoint_matches_pin(endpoint: &ConnectivityMetadata, pin_name: &str) -> bool
 }
 
 fn collect_named_shape_ids(
+    shapes: &[ShapeRecord],
+    owners: &[OwnerRef],
     name_index: &OwnerNameIndex,
     name: &str,
     shape_ids: &mut BTreeSet<ShapeId>,
@@ -1603,7 +1888,7 @@ fn collect_named_shape_ids(
     if name.is_empty() {
         return;
     }
-    shape_ids.extend(name_index.query(name));
+    shape_ids.extend(name_index.query(shapes, owners, name));
 }
 
 fn unrouted_net_guides_from_parts(
@@ -2074,16 +2359,35 @@ impl ChipViewDb {
     /// `open` does not pay for a structure only some consumers need.
     pub fn unrouted_net_guides(&self) -> &[UnroutedNetGuide] {
         self.net_guides
-            .get_or_init(|| {
-                unrouted_net_guides_from_parts(
-                    self.snapshot.shapes(),
-                    self.snapshot.owners(),
-                    self.name_index(),
-                    self.net_index(),
-                    self.snapshot.connectivity_metadata(),
-                )
-            })
+            .get_or_init(|| self.build_unrouted_net_guides())
             .as_slice()
+    }
+
+    /// Returns already-built unrouted-net guides without starting a build.
+    /// UI paint paths use this to avoid blocking the first frame on a large
+    /// design; [`ChipViewDb::prewarm_unrouted_net_guides`] fills the cache in
+    /// the background.
+    pub fn try_unrouted_net_guides(&self) -> Option<&[UnroutedNetGuide]> {
+        self.net_guides.get().map(Vec::as_slice)
+    }
+
+    /// Builds unrouted-net guides for a background prewarm. Safe to call more
+    /// than once; only the first completed build is retained.
+    pub fn prewarm_unrouted_net_guides(&self) {
+        if self.net_guides.get().is_some() {
+            return;
+        }
+        let _ = self.net_guides.set(self.build_unrouted_net_guides());
+    }
+
+    fn build_unrouted_net_guides(&self) -> Vec<UnroutedNetGuide> {
+        unrouted_net_guides_from_parts(
+            self.snapshot.shapes(),
+            self.snapshot.owners(),
+            self.name_index(),
+            self.net_index(),
+            self.snapshot.connectivity_metadata(),
+        )
     }
 
     pub fn bus_metadata(&self) -> &[BusMetadata] {
@@ -2110,19 +2414,39 @@ impl ChipViewDb {
 
     pub fn query_bus_name(&self, name: &str) -> Vec<ShapeId> {
         self.bus_by_name(name)
-            .map(|bus| query_bus_shape_ids_from_parts(self.name_index(), bus))
+            .map(|bus| {
+                query_bus_shape_ids_from_parts(
+                    self.snapshot.shapes(),
+                    self.snapshot.owners(),
+                    self.name_index(),
+                    bus,
+                )
+            })
             .unwrap_or_default()
     }
 
     pub fn query_group_name(&self, name: &str) -> Vec<ShapeId> {
         self.group_by_name(name)
-            .map(|group| query_group_shape_ids_from_parts(self.name_index(), group))
+            .map(|group| {
+                query_group_shape_ids_from_parts(
+                    self.snapshot.shapes(),
+                    self.snapshot.owners(),
+                    self.name_index(),
+                    group,
+                )
+            })
             .unwrap_or_default()
     }
 
     pub fn query_pin_name(&self, pin_name: &str) -> Vec<ShapeId> {
         let endpoints = self.connectivity_for_pin(pin_name);
-        query_pin_shape_ids_from_endpoint_refs(self.name_index(), &endpoints, pin_name)
+        query_pin_shape_ids_from_endpoint_refs(
+            self.snapshot.shapes(),
+            self.snapshot.owners(),
+            self.name_index(),
+            &endpoints,
+            pin_name,
+        )
     }
 
     pub fn query_endpoint_pin_name(&self, instance_name: &str, pin_name: &str) -> Vec<ShapeId> {
@@ -2132,6 +2456,19 @@ impl ChipViewDb {
             self.name_index(),
             instance_name,
             pin_name,
+        )
+    }
+
+    /// Resolves instance and pin bounding boxes for a batch of timing
+    /// endpoints. The lookup scans shapes twice per batch instead of once per
+    /// endpoint, which keeps timing-path overlay resolution bounded.
+    pub fn resolve_endpoint_pins(&self, requests: &[(&str, &str)]) -> Vec<EndpointPinGeometry> {
+        resolve_endpoint_pins_from_parts(
+            self.snapshot.shapes(),
+            self.snapshot.owners(),
+            &self.shape_index,
+            self.name_index(),
+            requests,
         )
     }
 
@@ -2259,15 +2596,22 @@ impl ChipViewDb {
     }
 
     pub fn query_owner_name(&self, name: &str) -> Vec<ShapeId> {
-        self.name_index().query(name)
+        self.name_index()
+            .query(self.snapshot.shapes(), self.snapshot.owners(), name)
     }
 
     pub fn query_owner_name_pattern(&self, pattern: &Regex) -> Vec<ShapeId> {
-        self.name_index().query_pattern(pattern)
+        self.name_index()
+            .query_pattern(self.snapshot.shapes(), self.snapshot.owners(), pattern)
     }
 
     pub fn query_owner_shapes(&self, owner_type: OwnerType, owner_id: u64) -> Vec<ShapeId> {
-        self.name_index().query_owner(owner_type as u8, owner_id)
+        self.name_index().query_owner(
+            self.snapshot.shapes(),
+            self.snapshot.owners(),
+            owner_type as u8,
+            owner_id,
+        )
     }
 
     pub fn query_owner_name_for_owner_types(
@@ -3024,6 +3368,27 @@ mod tests {
         assert_eq!(index.find(&shapes, 10).map(|shape| shape.id), Some(10));
         assert_eq!(index.find(&shapes, 25).map(|shape| shape.layer_id), Some(8));
         assert!(index.find(&shapes, 999).is_none());
+        assert_eq!(index.dense_base, None);
+        assert_eq!(index.by_id.len(), shapes.len());
+    }
+
+    #[test]
+    fn shape_id_index_uses_direct_lookup_for_contiguous_ids() {
+        let shapes = [shape(100, 7), shape(101, 7), shape(102, 8)];
+        let index = ShapeIdIndex::from_shapes(&shapes);
+
+        assert_eq!(index.dense_base, Some(100));
+        assert!(index.by_id.is_empty());
+        assert_eq!(
+            index.find(&shapes, 100).map(|shape| shape.layer_id),
+            Some(7)
+        );
+        assert_eq!(
+            index.find(&shapes, 102).map(|shape| shape.layer_id),
+            Some(8)
+        );
+        assert!(index.find(&shapes, 99).is_none());
+        assert!(index.find(&shapes, 103).is_none());
     }
 
     #[test]
@@ -3245,9 +3610,56 @@ mod tests {
             ],
         );
 
-        assert_eq!(index.query("synthetic_clk"), vec![1, 2]);
-        assert_eq!(index.query("u0"), vec![3]);
-        assert!(index.query("missing").is_empty());
+        assert_eq!(index.query(&shapes, &owners, "synthetic_clk"), vec![1, 2]);
+        assert_eq!(index.query(&shapes, &owners, "u0"), vec![3]);
+        assert!(index.query(&shapes, &owners, "missing").is_empty());
+    }
+
+    #[test]
+    fn owner_name_index_ignores_local_names_and_keeps_owner_aliases() {
+        let owners = [OwnerRef {
+            owner_type: OwnerType::NetWireSegment as u8,
+            owner_id: 10,
+            ..OwnerRef::default()
+        }];
+        let shapes = [ShapeRecord {
+            owner_index: 0,
+            ..shape(1, 1)
+        }];
+        let index = OwnerNameIndex::from_names([
+            (OwnerType::None as u8, 0, "via:VIA12"),
+            (OwnerType::NetWireSegment as u8, 10, "clk"),
+            (OwnerType::NetWireSegment as u8, 10, "clock"),
+            (OwnerType::NetWireSegment as u8, 10, "clock"),
+        ]);
+
+        assert!(index.name_for_owner(OwnerType::None as u8, 0).is_none());
+        assert!(index.query(&shapes, &owners, "via:VIA12").is_empty());
+        assert_eq!(index.query(&shapes, &owners, "clk"), vec![1]);
+        assert_eq!(index.query(&shapes, &owners, "clock"), vec![1]);
+        assert_eq!(
+            index.query_owner(&shapes, &owners, OwnerType::NetWireSegment as u8, 10),
+            vec![1]
+        );
+    }
+
+    #[test]
+    fn owner_name_search_index_is_built_on_demand() {
+        let owners = [OwnerRef {
+            owner_type: OwnerType::NetWireSegment as u8,
+            owner_id: 10,
+            ..OwnerRef::default()
+        }];
+        let shapes = [ShapeRecord {
+            owner_index: 0,
+            ..shape(1, 1)
+        }];
+        let index =
+            OwnerNameIndex::from_names([(OwnerType::NetWireSegment as u8, 10, "clk".to_string())]);
+
+        assert!(index.owner_shapes.get().is_none());
+        assert_eq!(index.query(&shapes, &owners, "clk"), vec![1]);
+        assert!(index.owner_shapes.get().is_some());
     }
 
     #[test]
@@ -3288,15 +3700,15 @@ mod tests {
         );
 
         assert_eq!(
-            index.query_owner(OwnerType::NetWireSegment as u8, 10),
+            index.query_owner(&shapes, &owners, OwnerType::NetWireSegment as u8, 10),
             vec![2, 9]
         );
         assert_eq!(
-            index.query_owner(OwnerType::InstanceBBox as u8, 20),
+            index.query_owner(&shapes, &owners, OwnerType::InstanceBBox as u8, 20),
             vec![3]
         );
         assert!(index
-            .query_owner(OwnerType::NetWireSegment as u8, 99)
+            .query_owner(&shapes, &owners, OwnerType::NetWireSegment as u8, 99)
             .is_empty());
     }
 
@@ -3328,8 +3740,11 @@ mod tests {
             [(OwnerType::Region as u8, 7, "region0".to_string())],
         );
 
-        assert_eq!(index.query_owner(OwnerType::Region as u8, 7), vec![1]);
-        assert_eq!(index.query("region0"), vec![1]);
+        assert_eq!(
+            index.query_owner(&shapes, &owners, OwnerType::Region as u8, 7),
+            vec![1]
+        );
+        assert_eq!(index.query(&shapes, &owners, "region0"), vec![1]);
     }
 
     #[test]
@@ -3466,13 +3881,13 @@ mod tests {
             ],
         );
 
-        assert_eq!(index.query("clk"), vec![4, 5, 9]);
+        assert_eq!(index.query(&shapes, &owners, "clk"), vec![4, 5, 9]);
         assert_eq!(
-            index.query_owner(OwnerType::NetWireSegment as u8, 10),
+            index.query_owner(&shapes, &owners, OwnerType::NetWireSegment as u8, 10),
             vec![5, 9]
         );
         assert_eq!(
-            index.query_owner(OwnerType::SpecialWireSegment as u8, 11),
+            index.query_owner(&shapes, &owners, OwnerType::SpecialWireSegment as u8, 11),
             vec![4]
         );
         assert_eq!(
@@ -3483,7 +3898,7 @@ mod tests {
             index.name_for_owner(OwnerType::SpecialWireSegment as u8, 11),
             Some("clk")
         );
-        assert_eq!(index.query("u0"), vec![30]);
+        assert_eq!(index.query(&shapes, &owners, "u0"), vec![30]);
     }
 
     #[test]
@@ -3573,7 +3988,7 @@ mod tests {
 
         assert_eq!(
             filter_shape_ids_by_owner_types(
-                name_index.query("clk"),
+                name_index.query(&shapes, &owners, "clk"),
                 &shapes,
                 &owners,
                 &[
@@ -3585,7 +4000,7 @@ mod tests {
         );
         assert_eq!(
             filter_shape_ids_by_owner_types(
-                name_index.query("u0"),
+                name_index.query(&shapes, &owners, "u0"),
                 &shapes,
                 &owners,
                 &[OwnerType::InstanceBBox as u8, OwnerType::InstanceHalo as u8],
@@ -3660,11 +4075,11 @@ mod tests {
         };
 
         assert_eq!(
-            query_bus_shape_ids_from_parts(&name_index, &bus),
+            query_bus_shape_ids_from_parts(&shapes, &owners, &name_index, &bus),
             vec![2, 4]
         );
         assert_eq!(
-            query_group_shape_ids_from_parts(&name_index, &group),
+            query_group_shape_ids_from_parts(&shapes, &owners, &name_index, &group),
             vec![6, 8]
         );
     }
@@ -3738,15 +4153,21 @@ mod tests {
         assert!(endpoint_matches_pin(&endpoint, "u0/A"));
         assert!(!endpoint_matches_pin(&endpoint, "u1/A"));
         assert_eq!(
-            query_pin_shape_ids_from_parts(&name_index, std::slice::from_ref(&endpoint), "A"),
+            query_pin_shape_ids_from_parts(
+                &shapes,
+                &owners,
+                &name_index,
+                std::slice::from_ref(&endpoint),
+                "A",
+            ),
             vec![2, 4, 6]
         );
         assert_eq!(
-            query_pin_shape_ids_from_parts(&name_index, &[endpoint], "u0/A"),
+            query_pin_shape_ids_from_parts(&shapes, &owners, &name_index, &[endpoint], "u0/A"),
             vec![2, 4, 6]
         );
         assert_eq!(
-            query_pin_shape_ids_from_parts(&name_index, &[], "u0/A"),
+            query_pin_shape_ids_from_parts(&shapes, &owners, &name_index, &[], "u0/A"),
             vec![2, 6]
         );
     }
@@ -3838,6 +4259,143 @@ mod tests {
             "A"
         )
         .is_empty());
+    }
+
+    #[test]
+    fn batch_endpoint_resolution_merges_instance_and_pin_geometry() {
+        let owners = [
+            OwnerRef {
+                owner_type: OwnerType::InstanceBBox as u8,
+                owner_id: 20,
+                path0: 3,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::InstanceHalo as u8,
+                owner_id: 40,
+                path0: 3,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::InstancePinPortShape as u8,
+                owner_id: 21,
+                path0: 3,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::InstancePinPortShape as u8,
+                owner_id: 22,
+                path0: 3,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::IoPinPortShape as u8,
+                owner_id: 30,
+                ..OwnerRef::default()
+            },
+        ];
+        let shapes = [
+            ShapeRecord {
+                owner_index: 0,
+                bbox: Rect32 {
+                    lx: 0,
+                    ly: 0,
+                    hx: 10,
+                    hy: 10,
+                },
+                ..shape(1, 1)
+            },
+            ShapeRecord {
+                owner_index: 1,
+                bbox: Rect32 {
+                    lx: 20,
+                    ly: 20,
+                    hx: 30,
+                    hy: 30,
+                },
+                ..shape(2, 1)
+            },
+            ShapeRecord {
+                owner_index: 2,
+                bbox: Rect32 {
+                    lx: 40,
+                    ly: 40,
+                    hx: 50,
+                    hy: 50,
+                },
+                ..shape(3, 2)
+            },
+            ShapeRecord {
+                owner_index: 3,
+                bbox: Rect32 {
+                    lx: 45,
+                    ly: 45,
+                    hx: 60,
+                    hy: 60,
+                },
+                ..shape(4, 2)
+            },
+            ShapeRecord {
+                owner_index: 4,
+                bbox: Rect32 {
+                    lx: 70,
+                    ly: 70,
+                    hx: 80,
+                    hy: 80,
+                },
+                ..shape(5, 3)
+            },
+        ];
+        let name_index = OwnerNameIndex::from_shapes_and_names(
+            &shapes,
+            &owners,
+            [
+                (OwnerType::InstanceBBox as u8, 20, "u0".to_string()),
+                (OwnerType::InstanceHalo as u8, 40, "u0".to_string()),
+                (OwnerType::InstancePinPortShape as u8, 21, "A".to_string()),
+                (OwnerType::InstancePinPortShape as u8, 22, "A".to_string()),
+                (OwnerType::IoPinPortShape as u8, 30, "CLK".to_string()),
+            ],
+        );
+        let shape_index = ShapeIdIndex::from_shapes(&shapes);
+
+        let resolved = resolve_endpoint_pins_from_parts(
+            &shapes,
+            &owners,
+            &shape_index,
+            &name_index,
+            &[("u0", "A"), ("", "CLK"), ("missing", "A")],
+        );
+
+        assert_eq!(
+            resolved[0].instance_bbox,
+            Some(Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 30,
+                hy: 30,
+            })
+        );
+        assert_eq!(
+            resolved[0].pin_bbox,
+            Some(Rect32 {
+                lx: 40,
+                ly: 40,
+                hx: 60,
+                hy: 60,
+            })
+        );
+        assert_eq!(resolved[1].instance_bbox, None);
+        assert_eq!(
+            resolved[1].pin_bbox,
+            Some(Rect32 {
+                lx: 70,
+                ly: 70,
+                hx: 80,
+                hy: 80,
+            })
+        );
+        assert_eq!(resolved[2], EndpointPinGeometry::default());
     }
 
     #[test]

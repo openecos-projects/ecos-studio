@@ -44,6 +44,7 @@ mod label_layout;
 mod lvs;
 mod session_close;
 mod snapshot_reload;
+mod timing;
 mod wheel_camera;
 use gpu_tile_worker::GpuTileWorker;
 use label_layout::{
@@ -203,6 +204,7 @@ struct LoadingViewer {
     antenna_statis_path: Option<PathBuf>,
     lvs_data_path: Option<PathBuf>,
     map_root_path: Option<PathBuf>,
+    sta_feature_dir: Option<PathBuf>,
     pub target_format: wgpu::TextureFormat,
     pub render_mode: crate::RenderMode,
 }
@@ -233,9 +235,7 @@ fn start_drawing_category_data(
 
 impl From<ChipViewDb> for PreparedViewer {
     fn from(db: ChipViewDb) -> Self {
-        // The three full-dataset scans are independent read-only passes over
-        // the snapshot; run them in parallel so large designs prepare in
-        // roughly one scan instead of three sequential ones.
+        // Stats are cached; category counts and guides prepare off the UI thread.
         let stats = db.stats();
         let grid_bounds = stats.die_bbox.or(stats.bbox);
         let drawing_category_counts = BTreeMap::new();
@@ -309,6 +309,7 @@ struct LoadedViewer {
     lvs_analysis: Option<lvs::LvsAnalysis>,
     selected_lvs_group: Option<usize>,
     show_all_lvs: bool,
+    timing: Option<timing::TimingPanelState>,
     clock_tree: Option<crate::clock_tree::ClockTreePanel>,
     map_catalog: Option<MapCatalog>,
     map_catalog_error: Option<String>,
@@ -445,6 +446,7 @@ enum AnalysisTab {
     Drc,
     Lvs,
     Map,
+    Timing,
 }
 
 struct ActiveHeatmap {
@@ -1285,20 +1287,37 @@ impl ObjectVisibility {
     }
 }
 
-fn drawing_category_counts(
-    db: &ChipViewDb,
-    guides: &[UnroutedNetGuide],
-) -> BTreeMap<DrawingCategory, usize> {
-    let mut counts = BTreeMap::<DrawingCategory, usize>::new();
+fn drawing_shape_category_counts(db: &ChipViewDb) -> BTreeMap<DrawingCategory, usize> {
+    let mut counts = [0usize; DrawingCategory::ALL.len()];
     for shape in db.snapshot().shapes() {
         if let Some(category) = drawing_category_for_shape(db, shape) {
-            *counts.entry(category).or_insert(0) += 1;
+            counts[category as usize] += 1;
         }
     }
+    counts
+        .into_iter()
+        .zip(DrawingCategory::ALL)
+        .filter(|(count, _)| *count > 0)
+        .map(|(count, category)| (category, count))
+        .collect()
+}
+
+fn add_unrouted_net_guide_counts(
+    counts: &mut BTreeMap<DrawingCategory, usize>,
+    guides: &[UnroutedNetGuide],
+) {
     for guide in guides {
         let category = net_kind_drawing_category(Some(&guide.net_kind));
         *counts.entry(category).or_insert(0) += guide.pin_centers.len();
     }
+}
+
+fn drawing_category_counts(
+    db: &ChipViewDb,
+    guides: &[UnroutedNetGuide],
+) -> BTreeMap<DrawingCategory, usize> {
+    let mut counts = drawing_shape_category_counts(db);
+    add_unrouted_net_guide_counts(&mut counts, guides);
     counts
 }
 
@@ -1339,14 +1358,9 @@ fn drawing_category_for_owner(db: &ChipViewDb, owner: &OwnerRef) -> Option<Drawi
 }
 
 fn net_kind_drawing_category(kind: Option<&str>) -> DrawingCategory {
-    match kind
-        .map(str::trim)
-        .filter(|kind| !kind.is_empty())
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-    {
-        Some("signal") => DrawingCategory::NetSignal,
-        Some("clock") => DrawingCategory::NetClock,
+    match kind.map(str::trim) {
+        Some(kind) if kind.eq_ignore_ascii_case("signal") => DrawingCategory::NetSignal,
+        Some(kind) if kind.eq_ignore_ascii_case("clock") => DrawingCategory::NetClock,
         _ => DrawingCategory::NetOther,
     }
 }
@@ -1634,6 +1648,7 @@ impl ChipViewerApp {
         antenna_statis_path: Option<PathBuf>,
         lvs_data_path: Option<PathBuf>,
         map_root_path: Option<PathBuf>,
+        sta_feature_dir: Option<PathBuf>,
         target_format: wgpu::TextureFormat,
         render_mode: crate::RenderMode,
     ) -> Self {
@@ -1663,6 +1678,7 @@ impl ChipViewerApp {
                 antenna_statis_path,
                 lvs_data_path,
                 map_root_path,
+                sta_feature_dir,
                 target_format,
                 render_mode,
             }),
@@ -1728,23 +1744,27 @@ impl ChipViewerApp {
     fn poll_loading(&mut self) {
         let next_state = match &mut self.state {
             ViewerState::Loading(loading) => match loading.receiver.try_recv() {
-                Ok(Ok(db)) => Some(ViewerState::Loaded(LoadedViewer::new(
-                    chip_display::ColorTheme::Vivid,
-                    db,
-                    loading.edit_enabled,
-                    loading.initial_session_dirty,
-                    loading.edit_command_dir.clone(),
-                    loading.edit_result_dir.clone(),
-                    loading.macro_staging_path.clone(),
-                    loading.drc_data_path.clone(),
-                    loading.drc_statis_path.clone(),
-                    loading.antenna_data_path.clone(),
-                    loading.antenna_statis_path.clone(),
-                    loading.lvs_data_path.clone(),
-                    loading.map_root_path.clone(),
-                    loading.target_format,
-                    loading.render_mode,
-                ))),
+                Ok(Ok(db)) => {
+                    let mut loaded = LoadedViewer::new(
+                        chip_display::ColorTheme::Vivid,
+                        db,
+                        loading.edit_enabled,
+                        loading.initial_session_dirty,
+                        loading.edit_command_dir.clone(),
+                        loading.edit_result_dir.clone(),
+                        loading.macro_staging_path.clone(),
+                        loading.drc_data_path.clone(),
+                        loading.drc_statis_path.clone(),
+                        loading.antenna_data_path.clone(),
+                        loading.antenna_statis_path.clone(),
+                        loading.lvs_data_path.clone(),
+                        loading.map_root_path.clone(),
+                        loading.target_format,
+                        loading.render_mode,
+                    );
+                    loaded.attach_timing_feature_dir(loading.sta_feature_dir.clone());
+                    Some(ViewerState::Loaded(loaded))
+                }
                 Ok(Err(err)) => Some(ViewerState::Error(err)),
                 Err(mpsc::TryRecvError::Disconnected) => Some(ViewerState::Error(
                     "geometry loader stopped before returning a result".to_string(),
@@ -2479,6 +2499,7 @@ impl LoadedViewer {
             lvs_analysis,
             selected_lvs_group: None,
             show_all_lvs: false,
+            timing: None,
             clock_tree,
             map_catalog,
             map_catalog_error,
@@ -2536,6 +2557,7 @@ impl LoadedViewer {
             || self.map_catalog.is_some()
             || self.map_catalog_error.is_some()
             || self.clock_tree.is_some()
+            || self.timing.is_some()
     }
 
     fn analysis_sidebar(&mut self, ui: &mut egui::Ui) {
@@ -2544,9 +2566,15 @@ impl LoadedViewer {
         let has_lvs = self.lvs_analysis.is_some();
         let has_maps = self.map_catalog.is_some() || self.map_catalog_error.is_some();
         let has_clock_tree = self.clock_tree.is_some();
+        let has_timing = self.timing.is_some();
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
+            if has_timing
+                && analysis_tab_button(ui, "TIMING", self.analysis_tab == AnalysisTab::Timing)
+            {
+                self.analysis_tab = AnalysisTab::Timing;
+            }
             if has_drc && analysis_tab_button(ui, "DRC", self.analysis_tab == AnalysisTab::Drc) {
                 self.analysis_tab = AnalysisTab::Drc;
             }
@@ -2579,8 +2607,11 @@ impl LoadedViewer {
         let show_lvs = self.analysis_tab == AnalysisTab::Lvs && has_lvs;
         let show_map = self.analysis_tab == AnalysisTab::Map && has_maps;
         let show_clock_tree = self.analysis_tab == AnalysisTab::ClockTree && has_clock_tree;
+        let show_timing = self.analysis_tab == AnalysisTab::Timing && has_timing;
 
-        if show_drc {
+        if show_timing {
+            self.timing_sidebar(ui);
+        } else if show_drc {
             self.drc_sidebar(ui);
         } else if show_antenna {
             self.antenna_sidebar(ui);
@@ -2600,6 +2631,8 @@ impl LoadedViewer {
             self.map_sidebar(ui);
         } else if has_clock_tree {
             self.clock_tree_controls(ui);
+        } else if has_timing {
+            self.timing_sidebar(ui);
         }
     }
 
@@ -4307,6 +4340,7 @@ impl LoadedViewer {
         }
 
         if use_view_tiles {
+            self.gpu_tile_worker.clear_active_tiles();
             if self.is_gpu_active() {
                 drawn += self.paint_gpu_2d_overview(
                     ui,
@@ -4413,11 +4447,42 @@ impl LoadedViewer {
                     is_interacting,
                 );
 
-                let tiles = crate::canvas_gpu::tile_coords_for_bbox(
+                let mut tiles = crate::canvas_gpu::tile_coords_for_bbox(
                     viewport,
                     crate::canvas_gpu::GPU_TILE_SIZE_DBU,
                 );
+                let vx = (viewport.lx as i64 + viewport.hx as i64) / 2;
+                let vy = (viewport.ly as i64 + viewport.hy as i64) / 2;
+                let ts = crate::canvas_gpu::GPU_TILE_SIZE_DBU as i64;
+                // The request channel is deliberately small. Build the most
+                // useful tile at the viewport center first, then expand
+                // outward instead of following raw coordinate order.
+                tiles.sort_by_key(|(tx, ty)| {
+                    let center_x = *tx as i64 * ts + ts / 2;
+                    let center_y = *ty as i64 * ts + ts / 2;
+                    let dx = center_x - vx;
+                    let dy = center_y - vy;
+                    dx * dx + dy * dy
+                });
                 let visible_tiles: std::collections::HashSet<_> = tiles.iter().copied().collect();
+                // Labels are only painted on non-interacting frames, so the
+                // worker skips owner-name/label allocations while interacting.
+                // The tier keeps label-less and label-carrying buffers from
+                // sharing a cache key; the 16ms repaint catch-up rebuilds
+                // labels when a pan or zoom ends.
+                let build_labels = !is_interacting;
+                let active_tile_keys = tiles
+                    .iter()
+                    .map(|(tx, ty)| crate::canvas_gpu::GpuBufferKey {
+                        geometry_epoch: self.geometry_epoch,
+                        tile_x: *tx,
+                        tile_y: *ty,
+                        zoom_tier: u8::from(build_labels),
+                        layer_visibility_hash: self.visibility_rules_cache.layer_visibility_hash,
+                        object_visibility_bits: 0,
+                    })
+                    .collect();
+                self.gpu_tile_worker.set_active_tiles(active_tile_keys);
 
                 let cached_bytes = self
                     .gpu_tile_instances
@@ -4427,10 +4492,6 @@ impl LoadedViewer {
                 if self.gpu_tile_instances.len() > crate::canvas_gpu::MAX_CACHED_TILE_BUFFERS
                     || cached_bytes > crate::canvas_gpu::MAX_CACHED_TILE_BYTES
                 {
-                    let vx = (viewport.lx as i64 + viewport.hx as i64) / 2;
-                    let vy = (viewport.ly as i64 + viewport.hy as i64) / 2;
-                    let ts = crate::canvas_gpu::GPU_TILE_SIZE_DBU as i64;
-
                     let mut cached_keys: Vec<_> = self.gpu_tile_instances.keys().copied().collect();
                     cached_keys.sort_by_key(|k| {
                         let tx = k.tile_x as i64 * ts + ts / 2;
@@ -4760,6 +4821,14 @@ impl LoadedViewer {
                         }
                     }
                 }
+            }
+        }
+
+        if self.analysis_tab == AnalysisTab::Timing {
+            if let Some(timing) = &self.timing {
+                drawn += timing.paint(
+                    &self.db, &painter, world, viewport, canvas, self.zoom, self.pan,
+                );
             }
         }
 
@@ -8344,6 +8413,13 @@ impl LoadedViewer {
         self.layers = layer_ui_states_from_summaries(layer_catalog, &visibility, self.color_theme);
         self.db = db;
         self.gpu_tile_worker = GpuTileWorker::new(std::sync::Arc::clone(&self.db));
+        let guide_db = std::sync::Arc::clone(&self.db);
+        if let Err(err) = thread::Builder::new()
+            .name("chip-viewer-net-guides".to_string())
+            .spawn(move || guide_db.prewarm_unrouted_net_guides())
+        {
+            log::warn!("could not start unrouted-net guide prewarm: {err}");
+        }
         if let Some(staging) = self.macro_staging.as_mut() {
             staging.reconcile(&self.db);
         }
@@ -9030,6 +9106,15 @@ impl eframe::App for ChipViewerApp {
             .default_width(320.0)
             .show(ctx, |ui| self.sidebar(ui));
         if let ViewerState::Loaded(loaded) = &mut self.state {
+            if loaded.analysis_tab == AnalysisTab::Timing && loaded.has_selected_timing_path() {
+                egui::TopBottomPanel::bottom("chip_viewer_timing_timeline")
+                    .resizable(true)
+                    .min_height(170.0)
+                    .max_height(420.0)
+                    .default_height(260.0)
+                    .frame(egui::Frame::side_top_panel(&ctx.style()).fill(ecos_panel()))
+                    .show(ctx, |ui| loaded.timing_timeline(ui));
+            }
             loaded.show_clock_tree_graph(ctx);
         }
         let central_panel = match &self.state {
@@ -13375,6 +13460,7 @@ mod tests {
             object_visibility_bits: 0,
         };
         worker.set_view_state(1, 3);
+        worker.set_active_tiles(std::collections::HashSet::from([key]));
         worker
             .request(
                 key,
@@ -13895,15 +13981,14 @@ mod tests {
     }
 
     #[test]
-    fn fitted_view_uses_exact_shapes() {
+    fn small_fitted_view_uses_exact_shapes() {
+        let canvas = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1000.0, 800.0));
         let world = chipgeom_format::Rect32 {
             lx: 0,
             ly: 0,
             hx: 1000,
             hy: 1000,
         };
-        let canvas = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1000.0, 800.0));
-
         assert!(!gpu_overview::should_use_view_tiles_for_state(
             16, false, false, 1.0, 0, world, world, canvas, 1.0,
         ));
@@ -13985,6 +14070,7 @@ mod tests {
 
     #[test]
     fn edit_mode_keeps_precise_shapes_at_far_zoom() {
+        let canvas = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1000.0, 800.0));
         let world = chipgeom_format::Rect32 {
             lx: 0,
             ly: 0,
@@ -13997,8 +14083,6 @@ mod tests {
             hx: 2000,
             hy: 2000,
         };
-        let canvas = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1000.0, 800.0));
-
         assert!(!gpu_overview::should_use_view_tiles_for_state(
             16,
             false,
@@ -14025,6 +14109,7 @@ mod tests {
 
     #[test]
     fn overview_uses_view_tiles_when_far_even_with_exact_overlay() {
+        let canvas = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1000.0, 800.0));
         let world = chipgeom_format::Rect32 {
             lx: 0,
             ly: 0,
@@ -14037,8 +14122,6 @@ mod tests {
             hx: 2000,
             hy: 2000,
         };
-        let canvas = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1000.0, 800.0));
-
         // Highlights and selection render as exact overlays on top of the
         // tile summary, so they never block the overview path.
         assert!(gpu_overview::should_use_view_tiles_for_state(

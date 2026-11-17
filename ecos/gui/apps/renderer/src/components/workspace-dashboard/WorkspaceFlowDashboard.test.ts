@@ -4,6 +4,7 @@ import { nextTick, reactive, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const state = vi.hoisted(() => ({
+  layoutThumbnails: null as any,
   steps: null as any,
   session: null as any,
   loading: null as any,
@@ -16,7 +17,7 @@ vi.mock('@/composables/useBackendFlowStages', () => ({
   }),
 }))
 vi.mock('@/composables/useHomeSnapshots', () => ({
-  useHomeSnapshots: () => ({ layoutThumbnails: ref([]) }),
+  useHomeSnapshots: () => ({ layoutThumbnails: state.layoutThumbnails }),
 }))
 vi.mock('@/stores/backendWorkspaceSession', () => ({
   useBackendWorkspaceSession: () => state.session,
@@ -26,6 +27,7 @@ import WorkspaceFlowDashboard from './WorkspaceFlowDashboard.vue'
 describe('workspace flow diagram', () => {
   beforeEach(() => {
     state.loading = ref(false)
+    state.layoutThumbnails = ref([])
     state.steps = ref(
       [
         'Synthesis',
@@ -113,6 +115,38 @@ describe('workspace flow diagram', () => {
     state.session.workspaceContextId = 'context-b'
     await nextTick()
     expect(wrapper.find('.log-dialog').exists()).toBe(false)
+  })
+
+  it('opens macro placement from preFloorplan geometry before MacroPlacement runs', async () => {
+    const source = {
+      id: 'preFloorplan-image',
+      kind: 'layout' as const,
+      label: 'Pre Floorplan Layout',
+      step: 'preFloorplan',
+      url: 'blob:preFloorplan',
+      hasGeometry: true,
+      availability: 'available' as const,
+      reason: null,
+    }
+    state.steps.value = [
+      { stepId: 'preFloorplan', name: 'Pre Floorplan', order: 0, state: 'succeeded' },
+      {
+        stepId: 'macroPlacement',
+        name: 'Macro Placement',
+        order: 1,
+        state: 'not-started',
+      },
+    ]
+    state.layoutThumbnails.value = [source]
+    const wrapper = render()
+
+    const macroCard = wrapper.get('[data-step="macroPlacement"]')
+    const layoutButton = macroCard.get('button.step-layout')
+    expect(layoutButton.text()).toContain('Place macros')
+
+    await layoutButton.trigger('click')
+    expect(wrapper.emitted('layout')).toEqual([[source]])
+    wrapper.unmount()
   })
 
   it('keeps the status overview outside the movable canvas when fitting', async () => {

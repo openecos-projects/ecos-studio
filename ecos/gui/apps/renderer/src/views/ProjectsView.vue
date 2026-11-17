@@ -2476,6 +2476,7 @@ async function importProject() {
     })
     if (!directory) return
 
+    await desktopApi.workspace.registerProjectRoot(directory)
     const project = await loadProjectFromRoot(directory)
     const manifest = await readProjectManifest(project.path)
     projectHistory.value = await rememberProjectHistoryEntry(project)

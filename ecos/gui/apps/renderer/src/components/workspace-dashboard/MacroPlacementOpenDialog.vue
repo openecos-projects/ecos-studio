@@ -8,7 +8,7 @@
     @update:visible="emit('update:visible', $event)"
   >
     <p class="macro-placement-open-copy">
-      View the saved macro placement layout, or enter edit mode to adjust macro positions.
+      View the current floorplan layout, or enter edit mode to place and adjust macros.
     </p>
     <div class="macro-placement-open-actions">
       <button type="button" class="macro-placement-open-action" @click="emit('view')">

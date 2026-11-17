@@ -44,6 +44,46 @@ describe('dashboard flow data', () => {
       runtime: '',
       peakMemoryMb: null,
       thumbnail: null,
+      macroPlacementSource: null,
+    })
+  })
+
+  it('offers preFloorplan geometry as the macro-placement fallback before its own run', () => {
+    const steps = dashboardFlowSteps(
+      [
+        { stepId: 'preFloorplan', name: 'Pre Floorplan', order: 0, state: 'succeeded' },
+        {
+          stepId: 'macroPlacement',
+          name: 'Macro Placement',
+          order: 1,
+          state: 'not-started',
+        },
+      ],
+      [],
+      [
+        {
+          id: 'preFloorplan-image',
+          kind: 'layout',
+          label: 'Pre Floorplan',
+          step: 'preFloorplan',
+          url: 'blob:preFloorplan',
+          hasGeometry: true,
+          availability: 'available',
+          reason: null,
+        },
+      ],
+    )
+
+    expect(steps[0]).toMatchObject({
+      id: 'preFloorplan',
+      thumbnail: { id: 'preFloorplan-image' },
+      macroPlacementSource: null,
+    })
+    expect(steps[1]).toMatchObject({
+      id: 'macroPlacement',
+      status: 'queued',
+      thumbnail: null,
+      macroPlacementSource: { id: 'preFloorplan-image' },
     })
   })
 

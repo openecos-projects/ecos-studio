@@ -187,9 +187,12 @@
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Dialog from 'primevue/dialog'
-import { sameFlowStepName, StepEnum } from '@/api/type'
 import WorkspaceFlowDashboard from '@/components/workspace-dashboard/WorkspaceFlowDashboard.vue'
 import MacroPlacementOpenDialog from '@/components/workspace-dashboard/MacroPlacementOpenDialog.vue'
+import {
+  isMacroPlacementLayoutStep,
+  isUsableLayoutThumbnail,
+} from '@/components/workspace-dashboard/layoutThumbnail'
 import WorkspaceWorkbench from '@/components/workbench/WorkspaceWorkbench.vue'
 import FlowInsightsPanel from '@/components/flow-insights/FlowInsightsPanel.vue'
 import StatusPieChart from '@/components/home/StatusPieChart.vue'
@@ -366,13 +369,7 @@ function statusTone(summary: {
 }
 
 function canOpenLayoutThumbnail(thumbnail: HomeLayoutThumbnail): boolean {
-  if (
-    !thumbnail.url ||
-    thumbnail.availability !== 'available' ||
-    !thumbnail.hasGeometry
-  ) {
-    return false
-  }
+  if (!isUsableLayoutThumbnail(thumbnail)) return false
   return canOpenChipViewer({
     chipViewerBusy: openingLayoutStep.value !== null,
     chipViewerEditBusy: false,
@@ -383,7 +380,7 @@ function canOpenLayoutThumbnail(thumbnail: HomeLayoutThumbnail): boolean {
 }
 
 function requestLayoutThumbnail(thumbnail: HomeLayoutThumbnail): void {
-  if (sameFlowStepName(thumbnail.step, StepEnum.MACRO_PLACEMENT)) {
+  if (isMacroPlacementLayoutStep(thumbnail.step)) {
     pendingLayoutThumbnail.value = thumbnail
     showMacroPlacementOpen.value = true
     return
