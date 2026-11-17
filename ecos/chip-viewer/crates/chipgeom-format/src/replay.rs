@@ -52,9 +52,19 @@ pub struct Fingerprint {
     pub sha256: String,
 }
 
+/// Same-step geometry reference. Every native side file is content-verified.
+#[derive(Clone, Debug, Deserialize)]
+pub struct SharedGeometry {
+    pub manifest: String,
+    pub files: BTreeMap<String, Fingerprint>,
+    pub clock_tree: bool,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct Manifest {
     pub schema: String,
+    #[serde(default)]
+    pub step: String,
     pub status: String,
     #[serde(default)]
     pub diagnostic_only: bool,
@@ -66,6 +76,8 @@ pub struct Manifest {
     #[serde(default)]
     pub maps: Option<String>,
     #[serde(default)]
+    pub log_index: Option<String>,
+    #[serde(default)]
     pub analysis: Option<String>,
     #[serde(default)]
     pub analysis_view_count: usize,
@@ -74,11 +86,15 @@ pub struct Manifest {
     #[serde(default)]
     pub final_geometry: Option<String>,
     #[serde(default)]
+    pub shared_geometry: Option<SharedGeometry>,
+    #[serde(default)]
     pub capabilities: serde_json::Value,
     #[serde(default)]
     pub clock_tree_manifest: Option<String>,
     #[serde(default)]
     pub started_at_unix_ns: Option<u64>,
+    #[serde(default)]
+    pub capture_started_fs_ns: Option<u64>,
     #[serde(default)]
     pub frozen_clock_tree: Option<String>,
     #[serde(default)]
@@ -87,6 +103,8 @@ pub struct Manifest {
     pub result_checklist: Option<serde_json::Value>,
     #[serde(default)]
     pub result_metrics: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub result_feature_files: Vec<String>,
     #[serde(default)]
     pub files: BTreeMap<String, Fingerprint>,
 }

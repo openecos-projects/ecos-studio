@@ -1,9 +1,9 @@
 //! Compile a display transition once. The GPU varies only its progress uniform;
 //! exact captured objects and the software rendering path remain unchanged.
 use crate::{
-    replay_batch::{paint_object, AnimatedObject},
-    replay_motion::Motion,
-    replay_reveal::Reveal,
+    replay::batch::{paint_object, AnimatedObject},
+    replay::motion::Motion,
+    replay::reveal::Reveal,
 };
 use egui::{Mesh, Pos2, Rect};
 use std::sync::Arc;

@@ -265,7 +265,7 @@ struct LoadedViewer {
     map_catalog_error: Option<String>,
     analysis_tab: AnalysisTab,
     expanded_map_categories: BTreeSet<String>,
-    selected_map_item: Option<PathBuf>,
+    selected_map_item: Option<crate::map_source::MapKey>,
     previous_map_item: Option<(crate::map_data::MapItem, Option<PathBuf>)>,
     active_heatmap: Option<ActiveHeatmap>,
     map_item_error: Option<String>,
@@ -473,7 +473,7 @@ impl ActiveHeatmap {
     }
 
     fn new(title: String, data: HeatmapData) -> Self {
-        let colormap_mode = ColormapMode::default();
+        let colormap_mode = data.default_colormap();
         let threshold = 0.0;
         let invert_threshold = false;
         let instances = build_heatmap_instances(&data, colormap_mode, threshold, invert_threshold);
@@ -2298,6 +2298,9 @@ impl LoadedViewer {
         let (map_catalog, map_catalog_error) = match map_root_path.as_deref() {
             Some(root) => match MapCatalog::discover(root) {
                 Ok(catalog) if !catalog.is_empty() => (Some(catalog), None),
+                Ok(catalog) if !catalog.warnings.is_empty() => {
+                    (None, Some(catalog.warnings.join("; ")))
+                }
                 Ok(_) => (None, None),
                 Err(err) => (None, Some(err)),
             },
@@ -2340,9 +2343,16 @@ impl LoadedViewer {
                 None
             }
         };
-        let default_power = map_catalog
-            .as_ref()
-            .and_then(MapCatalog::default_power_item);
+        let default_power = map_catalog.as_ref().and_then(|catalog| {
+            catalog.default_power_item().or_else(|| {
+                catalog
+                    .categories
+                    .iter()
+                    .find(|c| c.id.starts_with("ir_"))
+                    .and_then(|c| c.items.first())
+                    .map(|item| (item.clone(), None))
+            })
+        });
         let mut app = Self {
             color_theme,
             start_time: Instant::now(),
@@ -2733,13 +2743,18 @@ impl LoadedViewer {
                         .strong()
                         .color(ecos_accent()),
                 );
-                ui.horizontal(|ui| {
+                if heatmap.data.is_ir_drop() {
+                    ui.small("Static IR · maximum sample per cell · mV");
+                    ui.small("Empty cells have no samples");
+                }
+                ui.horizontal_wrapped(|ui| {
                     ui.label("Colormap:");
                     let mut current_mode = heatmap.colormap_mode;
                     for mode in [
                         ColormapMode::Turbo,
                         ColormapMode::Viridis,
                         ColormapMode::Plasma,
+                        ColormapMode::Inferno,
                     ] {
                         if ui
                             .selectable_label(current_mode == mode, mode.label())
@@ -2773,8 +2788,10 @@ impl LoadedViewer {
                     .default_open(default_open)
                     .show(ui, |ui| {
                         for item in &category.items {
-                            let available = category.layout_path.is_some();
-                            let selected = self.selected_map_item.as_ref() == Some(&item.csv_path);
+                            let available = category.layout_path.is_some()
+                                || matches!(item.source, crate::map_source::MapSource::Ir { .. });
+                            let selected =
+                                self.selected_map_item.as_ref() == Some(&item.source.key());
                             ui.horizontal(|ui| {
                                 let button_width = ui.available_width().max(80.0);
                                 let response = ui.add_enabled(
@@ -2789,8 +2806,10 @@ impl LoadedViewer {
                                     .min_size(egui::vec2(button_width, 40.0)),
                                 );
                                 let response = if available {
-                                    response
-                                        .on_hover_text(format!("Open {}", item.csv_path.display()))
+                                    response.on_hover_text(format!(
+                                        "Open {}",
+                                        item.source.path().display()
+                                    ))
                                 } else {
                                     response.on_disabled_hover_text("layout.csv is missing")
                                 };
@@ -2808,25 +2827,21 @@ impl LoadedViewer {
 
     fn activate_map_item(&mut self, item: &MapItem, layout_path: Option<&Path>) {
         if let Some(current_csv) = &self.selected_map_item {
-            if current_csv != &item.csv_path {
+            if current_csv != &item.source.key() {
                 if let Some(catalog) = &self.map_catalog {
-                    if let Some((curr_item, curr_layout)) = catalog.find_item_by_csv(current_csv) {
+                    if let Some((curr_item, curr_layout)) = catalog.find_item(current_csv) {
                         self.previous_map_item =
                             Some((curr_item.clone(), curr_layout.map(|p| p.to_path_buf())));
                     }
                 }
             }
         }
-        self.selected_map_item = Some(item.csv_path.clone());
+        self.selected_map_item = Some(item.source.key());
         self.active_heatmap = None;
         self.map_item_error = None;
         self.selected_map_bbox = None;
 
-        let Some(layout_path) = layout_path else {
-            self.map_item_error = Some(format!("layout.csv is missing for {}", item.label));
-            return;
-        };
-        match HeatmapData::load(&item.csv_path, layout_path) {
+        match item.source.load(layout_path) {
             Ok(data) => {
                 self.active_heatmap = Some(ActiveHeatmap::new(item.label.clone(), data));
             }
@@ -14540,20 +14555,24 @@ mod tests {
                 layout_path: Some(PathBuf::from("/tmp/layout.csv")),
                 items: vec![crate::map_data::MapItem {
                     label: "Item 1".to_string(),
-                    csv_path: PathBuf::from("/tmp/item1.csv"),
+                    source: crate::map_source::MapSource::Csv(PathBuf::from("/tmp/item1.csv")),
                 }],
             }],
             warnings: Vec::new(),
         };
 
-        let found = catalog.find_item_by_csv(Path::new("/tmp/item1.csv"));
+        let found = catalog.find_item(&crate::map_source::MapKey::Csv(PathBuf::from(
+            "/tmp/item1.csv",
+        )));
         assert!(found.is_some());
         let (item, layout) = found.unwrap();
         assert_eq!(item.label, "Item 1");
         assert_eq!(layout, Some(Path::new("/tmp/layout.csv")));
 
         assert!(catalog
-            .find_item_by_csv(Path::new("/tmp/missing.csv"))
+            .find_item(&crate::map_source::MapKey::Csv(PathBuf::from(
+                "/tmp/missing.csv"
+            )))
             .is_none());
     }
 
@@ -17309,3 +17328,7 @@ mod tests {
         layers.iter().map(|layer| layer.visible).collect()
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "ir_drop_ui_validation.rs"]
+mod ir_drop_ui_validation;

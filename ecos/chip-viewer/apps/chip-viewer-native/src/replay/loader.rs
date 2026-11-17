@@ -1,9 +1,9 @@
 //! Latest-request-wins reconstruction outside the egui thread.
-use crate::replay_data::Recording;
-use crate::replay_index::SceneIndex;
-use crate::replay_motion::Motion;
-use crate::replay_plan::Kind;
-use crate::replay_reveal::Reveal;
+use crate::replay::data::Recording;
+use crate::replay::index::SceneIndex;
+use crate::replay::motion::Motion;
+use crate::replay::plan::Kind;
+use crate::replay::reveal::Reveal;
 use chipgeom_format::replay::Scene;
 use std::path::PathBuf;
 use std::sync::{
@@ -23,20 +23,20 @@ pub struct Request {
 }
 
 pub struct ResultAssets {
-    pub clock_overlay: crate::replay_clock::ClockOverlay,
-    pub maps: crate::replay_maps::ReplayMaps,
-    pub analysis: crate::replay_analysis::ReplayAnalysis,
+    pub clock_overlay: crate::replay::clock::ClockOverlay,
+    pub maps: crate::replay::maps::ReplayMaps,
+    pub analysis: crate::replay::analysis::ReplayAnalysis,
     pub tree: Result<Option<crate::clock_tree::ClockTreePanel>, String>,
 }
 
 pub struct Prepared {
     pub scene: Scene,
-    pub three_d: Option<Result<crate::replay_scene3d::Scene3d, String>>,
-    pub route_overlay: crate::replay_route::RouteOverlay,
+    pub three_d: Option<Result<crate::replay::scene3d::Scene3d, String>>,
+    pub route_overlay: crate::replay::route::RouteOverlay,
     pub motion: Motion,
     pub reveal: Reveal,
     pub index: SceneIndex,
-    pub logic: Option<crate::replay_logic::Logic>,
+    pub logic: Option<crate::replay::logic::Logic>,
     pub results: Option<ResultAssets>,
     #[cfg(test)]
     pub timings_ms: [f64; 4],
@@ -122,7 +122,7 @@ impl Default for Loader {
                     if let Some((path, record)) = &mut recording {
                         let next = request.frame + 1;
                         if record.manifest.frames.get(next).is_some_and(|frame| {
-                            crate::replay_motion::compatible_frames(
+                            crate::replay::motion::compatible_frames(
                                 &record.manifest.frames[request.frame],
                                 frame,
                             )
@@ -189,11 +189,11 @@ fn prepare(
     let three_d = request.three_d_budget.map(|budget| {
         (|| -> anyhow::Result<_> {
             if record.metadata3d.is_none() {
-                record.metadata3d = Some(Arc::new(crate::replay_scene3d::Metadata::open(
+                record.metadata3d = Some(Arc::new(crate::replay::scene3d::Metadata::open(
                     record, alive,
                 )?));
             }
-            crate::replay_scene3d::Scene3d::build(
+            crate::replay::scene3d::Scene3d::build(
                 &record.scene,
                 &motion,
                 &reveal,
@@ -207,23 +207,23 @@ fn prepare(
     let index = SceneIndex::build(&record.scene, &motion);
     #[cfg(test)]
     let indexed = std::time::Instant::now();
-    let logic = crate::replay_logic::load(record)?;
+    let logic = crate::replay::logic::load(record)?;
     let results = request.results.then(|| {
-        let mut maps = crate::replay_maps::ReplayMaps::default();
+        let mut maps = crate::replay::maps::ReplayMaps::default();
         match record.map_root() {
-            Ok(Some(root)) => maps = crate::replay_maps::ReplayMaps::open(&root),
+            Ok(Some(root)) => maps = crate::replay::maps::ReplayMaps::open(&root),
             Err(error) => maps.error = error.to_string(),
             _ => {}
         }
-        let mut analysis = crate::replay_analysis::ReplayAnalysis::open(record);
+        let mut analysis = crate::replay::analysis::ReplayAnalysis::open(record);
         analysis.resolve(&record.scene);
         analysis.resolve_routes(record);
-        let mut clock_overlay = crate::replay_clock::ClockOverlay::default();
+        let mut clock_overlay = crate::replay::clock::ClockOverlay::default();
         let tree = record
             .clock_tree()
             .and_then(|tree| {
                 tree.map(|tree| {
-                    clock_overlay = crate::replay_clock::ClockOverlay::load(record, &tree);
+                    clock_overlay = crate::replay::clock::ClockOverlay::load(record, &tree);
                     crate::clock_tree::ClockTreePanel::from_snapshot(&tree)
                 })
                 .transpose()
@@ -239,7 +239,7 @@ fn prepare(
     #[cfg(test)]
     let assets = std::time::Instant::now();
     let scene = record.scene.clone();
-    let route_overlay = crate::replay_route::RouteOverlay::from_scene(&scene);
+    let route_overlay = crate::replay::route::RouteOverlay::from_scene(&scene);
     Ok(Prepared {
         three_d,
         route_overlay,
@@ -284,7 +284,7 @@ impl Drop for Loader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::replay_data::tests::Fixture;
+    use crate::replay::data::tests::Fixture;
     #[test]
     fn animated_load_rejects_invalid_frame_and_stale_attempt_without_losing_worker() {
         let fixture = Fixture::new();

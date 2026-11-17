@@ -1,7 +1,7 @@
 //! Opt-in checks against real EDA output, independently of synthetic UI fixtures.
-use crate::replay_data::{read, Catalog, Recording};
-use crate::replay_index::SceneIndex;
-use crate::replay_motion::Motion;
+use crate::replay::data::{read, Catalog, Recording};
+use crate::replay::index::SceneIndex;
+use crate::replay::motion::Motion;
 use chipgeom_format::replay::Scene;
 use sha2::{Digest, Sha256};
 use std::path::Path;
@@ -58,7 +58,7 @@ fn real_workspace_random_seek_and_frozen_artifacts() {
         }
         recording.seek_frame(hashes.len() - 1).unwrap();
         let tree = recording.clock_tree().unwrap();
-        let mut analysis = crate::replay_analysis::ReplayAnalysis::open(&recording);
+        let mut analysis = crate::replay::analysis::ReplayAnalysis::open(&recording);
         assert!(
             analysis.error.is_empty(),
             "{}: {}",

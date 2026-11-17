@@ -1,6 +1,6 @@
 //! Completion-only clock networks. Routing is resolved on the loader thread,
 //! against the current attempt's frozen geometry, never against another step.
-use crate::{replay_data::Recording, timing_route};
+use crate::{replay::data::Recording, timing_route};
 use chipgeom_format::{ClockEdgeKind, ClockNodeRecord, ClockTreeStage, CLOCK_NODE_POSITION_VALID};
 use chipgeom_reader::ClockTreeSnapshot;
 use egui::{Color32, Painter, Pos2, Stroke};
@@ -222,5 +222,5 @@ fn levels(tree: &ClockTreeSnapshot) -> BTreeMap<u32, u32> {
 }
 
 #[cfg(test)]
-#[path = "replay_clock_tests.rs"]
+#[path = "clock_tests.rs"]
 mod tests;

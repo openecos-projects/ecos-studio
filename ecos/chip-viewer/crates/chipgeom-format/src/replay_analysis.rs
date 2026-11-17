@@ -4,6 +4,10 @@ use serde::Deserialize;
 #[derive(Default, Deserialize)]
 pub struct Analysis {
     pub schema: String,
+    #[serde(default)]
+    pub nets: Vec<String>,
+    #[serde(default)]
+    pub instances: Vec<String>,
     pub views: Vec<View>,
     #[serde(default)]
     pub unavailable: Vec<String>,
@@ -21,9 +25,14 @@ pub struct View {
     pub summary: serde_json::Value,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct Item {
+    #[serde(default)]
     pub label: String,
+    #[serde(default)]
+    pub net_ref: Option<usize>,
+    #[serde(default)]
+    pub instance_ref: Option<usize>,
     #[serde(default)]
     pub bboxes: Vec<[i64; 4]>,
     #[serde(default)]

@@ -1,6 +1,6 @@
 //! One background CSV decoder. Superseded selections never reach the canvas.
 use crate::map_data::HeatmapData;
-use crate::replay_data::within;
+use crate::replay::data::within;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
 

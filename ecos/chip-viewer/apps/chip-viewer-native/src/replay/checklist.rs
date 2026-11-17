@@ -1,11 +1,11 @@
 //! Read the selected step's existing checklist without changing workspace data.
-use crate::replay_data::{read, within};
+use crate::replay::data::{read, within};
 use anyhow::{Context, Result};
 use egui::Color32;
 use serde::Deserialize;
 use std::path::Path;
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct Checklist {
     #[serde(default)]
     pub status: String,
@@ -17,22 +17,24 @@ pub struct Checklist {
     reason: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Item {
     #[serde(default)]
-    step: String,
+    pub id: String,
     #[serde(default)]
-    title: String,
+    pub step: String,
     #[serde(default)]
-    state: String,
+    pub title: String,
     #[serde(default)]
-    blocked: bool,
+    pub state: String,
     #[serde(default)]
-    summary: String,
+    pub blocked: bool,
+    #[serde(default)]
+    pub summary: String,
 }
 
 impl Item {
-    fn is_blocked(&self) -> bool {
+    pub fn is_blocked(&self) -> bool {
         self.blocked || self.state.eq_ignore_ascii_case("blocked")
     }
 }
@@ -116,7 +118,7 @@ fn color(blocked: bool) -> Color32 {
 
 impl Checklist {
     pub fn from_recording(
-        recording: &crate::replay_data::Recording,
+        recording: &crate::replay::data::Recording,
         workspace: &Path,
         step_name: &str,
     ) -> Result<Self> {
@@ -175,7 +177,7 @@ impl Checklist {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::replay_data::tests::Fixture;
+    use crate::replay::data::tests::Fixture;
     use serde_json::json;
 
     #[test]

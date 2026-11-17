@@ -1,5 +1,5 @@
 use super::*;
-use crate::replay_data::{read, tests::Fixture};
+use crate::replay::data::{read, tests::Fixture};
 use serde_json::json;
 
 fn app(fixture: &Fixture) -> ReplayApp {
@@ -301,7 +301,7 @@ fn dual_view_loads_one_revision_and_pause_keeps_camera_and_geometry_progress() {
             &application.recording.as_ref().unwrap().scene.objects["inst:a"],
         ),
     );
-    let actual = crate::replay_scene3d::bounds_at(&visual.instances[0], progress);
+    let actual = crate::replay::scene3d::bounds_at(&visual.instances[0], progress);
     assert!(actual
         .iter()
         .zip(expected)
@@ -356,7 +356,7 @@ fn disabling_three_d_preserves_a_pending_exact_node() {
 #[test]
 fn enabling_three_d_starts_slow_iso_rotation_until_manual_control() {
     let view = crate::replay::view3d::View3d::default();
-    assert!((view.z_scale - 1.35).abs() < f32::EPSILON);
+    assert!((view.z_scale - 0.5).abs() < f32::EPSILON);
     assert!(!view.auto_spin);
     assert!(view.spin_yaw.is_none());
     assert!(!view.fit_requested);
@@ -405,4 +405,12 @@ fn clock_reveal_is_completion_only_and_obeys_seek_pause_and_speed() {
     assert!((app.clock_progress().unwrap() - 0.25).abs() < 1e-9);
     app.error = "Replay attempt replaced".into();
     assert_eq!(app.clock_progress(), None);
+}
+
+#[test]
+fn replay_starts_with_layout_inset_and_native_z_scale_defaults() {
+    let fixture = Fixture::new();
+    let app = app(&fixture);
+    assert_eq!(app.zoom, 0.82);
+    assert_eq!(app.view3d.z_scale, 0.5);
 }

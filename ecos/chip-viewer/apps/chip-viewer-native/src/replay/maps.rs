@@ -8,12 +8,17 @@ pub struct ReplayMaps {
     items: Vec<(String, PathBuf, PathBuf)>,
     pub selected: Option<usize>,
     active: Option<std::sync::Arc<HeatmapData>>,
-    loader: Option<crate::replay_map_loader::MapLoader>,
-    listed_selection: Option<usize>,
+    loader: Option<crate::replay::map_loader::MapLoader>,
+    follow: crate::replay::widgets::SelectionFollow,
     pub error: String,
 }
 
 impl ReplayMaps {
+    pub fn selected_label(&self) -> Option<&str> {
+        self.selected
+            .and_then(|i| self.items.get(i))
+            .map(|item| item.0.as_str())
+    }
     pub fn active_data(&self) -> Option<&HeatmapData> {
         self.active.as_deref()
     }
@@ -28,9 +33,11 @@ impl ReplayMaps {
                 for category in catalog.categories {
                     if let Some(layout) = category.layout_path {
                         for item in category.items {
-                            result
-                                .items
-                                .push((item.label, item.csv_path, layout.clone()));
+                            result.items.push((
+                                item.label,
+                                item.source.path().to_path_buf(),
+                                layout.clone(),
+                            ));
                         }
                     }
                 }
@@ -87,10 +94,10 @@ impl ReplayMaps {
             ui.ctx().request_repaint();
         }
         let mut choice = self.selected;
-        let follow = self.listed_selection != self.selected;
+        let follow = self.follow.changed(ui.id(), self.selected);
         if !self.items.is_empty() {
             ui.strong("Placement maps");
-            egui::ScrollArea::vertical()
+            let list = egui::ScrollArea::vertical()
                 .id_salt("replay_map_list")
                 .max_height(180.0)
                 .auto_shrink([false, false])
@@ -99,15 +106,17 @@ impl ReplayMaps {
                     for (i, (label, _, _)) in self.items.iter().enumerate() {
                         let response = ui.selectable_value(&mut choice, Some(i), label);
                         if follow && self.selected == Some(i) {
-                            response.scroll_to_me(Some(egui::Align::Center));
+                            response.scroll_to_me(None);
                         }
                     }
                 });
+            if follow && self.selected.is_some() {
+                ui.scroll_to_rect(list.inner_rect, None);
+            }
             if let Some(data) = &self.active {
                 ui.small(format!("{:.3} — {:.3}", data.min(), data.max()));
             }
         }
-        self.listed_selection = self.selected;
         let changed = choice != self.selected;
         if changed {
             if let Some(index) = choice {

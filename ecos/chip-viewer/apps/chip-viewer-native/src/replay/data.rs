@@ -52,16 +52,20 @@ pub struct Recording {
     root: PathBuf,
     pointer: PathBuf,
     pub scene: Scene,
-    pub metadata3d: Option<std::sync::Arc<crate::replay_scene3d::Metadata>>,
-    cache: std::cell::RefCell<crate::replay_cache::DeltaCache>,
+    pub metadata3d: Option<std::sync::Arc<crate::replay::scene3d::Metadata>>,
+    cache: std::cell::RefCell<crate::replay::cache::DeltaCache>,
     anchor: std::cell::RefCell<Option<Delta>>,
 }
 
 impl Recording {
+    pub fn current_pointer(&self) -> &Path {
+        &self.pointer
+    }
+
     pub fn asset(&self, path: &str) -> Result<PathBuf> {
         let resolved = within(&self.root, &self.root.join(path))?;
         if let Some(expected) = self.manifest.files.get(path) {
-            crate::replay_integrity::verify(&resolved, expected)?;
+            crate::replay::integrity::verify(&resolved, expected)?;
         } else {
             ensure!(self.manifest.files.is_empty(), "Unindexed Replay asset");
         }
@@ -160,6 +164,39 @@ impl Recording {
     }
 
     pub fn final_geometry_path(&self) -> Result<Option<PathBuf>> {
+        if let Some(shared) = &self.manifest.shared_geometry {
+            self.check_current()?;
+            let root = self
+                .root
+                .ancestors()
+                .nth(3)
+                .context("Missing step geometry directory")?;
+            ensure!(
+                root.ends_with("output/geometry"),
+                "Invalid shared geometry root"
+            );
+            ensure!(
+                shared.files.contains_key(&shared.manifest),
+                "Unindexed geometry manifest"
+            );
+            for (path, expected) in &shared.files {
+                let path = within(root, &root.join(path))?;
+                crate::replay::integrity::verify(&path, expected)?;
+            }
+            let manifest = within(root, &root.join(&shared.manifest))?;
+            for path in chipgeom_reader::read_manifest(&manifest)?.side_files() {
+                let path = within(root, path)?;
+                let relative = path
+                    .strip_prefix(root.canonicalize()?)?
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                ensure!(
+                    shared.files.contains_key(&relative),
+                    "Unindexed shared geometry side file: {relative}"
+                );
+            }
+            return Ok(Some(manifest));
+        }
         self.manifest
             .final_geometry
             .as_ref()
@@ -193,6 +230,13 @@ impl Recording {
     }
 
     fn clock_tree_path(&self) -> Result<Option<PathBuf>> {
+        if let Some(shared) = &self.manifest.shared_geometry {
+            return if shared.clock_tree {
+                self.final_geometry_path()
+            } else {
+                Ok(None)
+            };
+        }
         if let Some(path) = &self.manifest.frozen_clock_tree {
             self.verify_folder(
                 std::path::Path::new(path)
@@ -292,7 +336,7 @@ impl Recording {
         result.check_current()?;
         let pointer: serde_json::Value = read(&result.pointer)?;
         if let Some(digest) = pointer["manifest_sha256"].as_str() {
-            crate::replay_integrity::verify(
+            crate::replay::integrity::verify(
                 &path,
                 &chipgeom_format::replay::Fingerprint {
                     size: path.metadata()?.len(),
@@ -345,6 +389,10 @@ impl Recording {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "shared_geometry_tests.rs"]
+mod shared_geometry_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {

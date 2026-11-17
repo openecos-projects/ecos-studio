@@ -1,6 +1,6 @@
 //! Resolve frozen reports once against the final scene, then paint bounded overlays.
-use crate::replay_data::{read, Recording};
-use crate::replay_timing::{self, TimingPath};
+use crate::replay::data::Recording;
+use crate::replay::timing::{self, TimingPath};
 use chipgeom_format::replay::Scene;
 use chipgeom_format::replay_analysis::{Analysis, Item};
 use egui::{Color32, Pos2, Rect, Stroke};
@@ -20,24 +20,31 @@ struct Geometry {
 pub struct ReplayAnalysis {
     data: Analysis,
     geometry: Vec<Vec<Geometry>>,
+    rcx: crate::replay::rcx::RcxOverlay,
+    ir: crate::replay::ir::IrOverlays,
     pub selected: Option<usize>,
     item: Option<usize>,
     progress: f32,
+    follow: crate::replay::widgets::SelectionFollow,
     pub error: String,
     pub requested_time: Option<f64>,
 }
 
 impl ReplayAnalysis {
+    pub fn selected_label(&self) -> Option<&str> {
+        self.selected
+            .and_then(|i| self.data.views.get(i))
+            .map(|v| v.label.as_str())
+    }
+    pub fn selected_description(&self) -> Option<(&str, &str)> {
+        self.selected
+            .and_then(|i| self.data.views.get(i))
+            .map(|v| (v.kind.as_str(), v.label.as_str()))
+    }
+
     pub fn open(recording: &Recording) -> Self {
         let loaded = (|| -> anyhow::Result<Analysis> {
-            let Some(path) = &recording.manifest.analysis else {
-                return Ok(Analysis::default());
-            };
-            let data: Analysis = read(&recording.asset(path)?)?;
-            anyhow::ensure!(
-                data.schema == "ecos.replay.analysis.v1",
-                "Unsupported analysis schema"
-            );
+            let data = crate::replay::analysis_data::load(recording)?;
             anyhow::ensure!(
                 data.views.iter().all(|v| v.basis == "final"),
                 "Analysis basis mismatch"
@@ -58,9 +65,19 @@ impl ReplayAnalysis {
         })();
         match loaded {
             Ok(mut data) => {
-                replay_timing::group_corners(&mut data);
+                timing::group_corners(&mut data);
+                data.views.sort_by_key(|view| view.kind != "ir");
+                let (ir, error) = match crate::replay::ir::IrOverlays::load(&data) {
+                    Ok(ir) => (ir, String::new()),
+                    Err(error) => (
+                        Default::default(),
+                        format!("IR heatmap unavailable: {error:#}"),
+                    ),
+                };
                 Self {
                     data,
+                    ir,
+                    error,
                     ..Self::default()
                 }
             }
@@ -142,7 +159,13 @@ impl ReplayAnalysis {
             .map(|view| {
                 view.items
                     .iter()
-                    .map(|item| resolve(item, &instances, &nets, &pins))
+                    .map(|item| {
+                        if matches!(view.kind.as_str(), "rcx" | "ir") {
+                            Geometry::default()
+                        } else {
+                            resolve(item, &instances, &nets, &pins)
+                        }
+                    })
                     .collect()
             })
             .collect();
@@ -170,9 +193,10 @@ impl ReplayAnalysis {
 
     fn view_duration(&self, index: usize) -> f64 {
         match self.data.views[index].kind.as_str() {
-            "timing" => replay_timing::CORNER_SECONDS,
-            "power" => 4.0,
-            _ => crate::replay_plan::MAP_SECONDS,
+            "timing" => timing::CORNER_SECONDS,
+            "power" | "ir" => 4.0,
+            "rcx" => crate::replay::rcx::CORNER_SECONDS,
+            _ => crate::replay::plan::MAP_SECONDS,
         }
     }
 
@@ -190,11 +214,12 @@ impl ReplayAnalysis {
             let duration = self.view_duration(index);
             if seconds < duration || index + 1 == self.len() {
                 self.selected = Some(index);
-                let reveal = if self.data.views[index].kind == "power" {
-                    duration - 1.0
-                } else {
-                    duration
-                };
+                let reveal =
+                    if matches!(self.data.views[index].kind.as_str(), "power" | "rcx" | "ir") {
+                        duration - 1.0
+                    } else {
+                        duration
+                    };
                 self.progress = (seconds / reveal).clamp(0.0, 1.0) as f32;
                 return;
             }
@@ -204,6 +229,10 @@ impl ReplayAnalysis {
 
     /// Loaded only by the worker, from this attempt's verified final snapshot.
     pub fn resolve_routes(&mut self, recording: &Recording) {
+        match crate::replay::rcx::RcxOverlay::load(recording, &self.data) {
+            Ok(overlay) => self.rcx = overlay,
+            Err(error) => self.error = format!("RCX geometry unavailable: {error}"),
+        }
         if !self.data.views.iter().any(|v| v.kind == "timing") {
             return;
         }
@@ -236,23 +265,33 @@ impl ReplayAnalysis {
             return (false, None);
         }
         ui.strong("Result views");
+        let follow = self.follow.changed(ui.id(), self.selected);
         let mut selected = self.selected;
-        egui::ScrollArea::vertical()
+        let list = egui::ScrollArea::vertical()
             .id_salt("replay_analysis_views")
             .max_height(130.0)
             .show(ui, |ui| {
                 ui.selectable_value(&mut selected, None, "Layout");
                 for (i, view) in self.data.views.iter().enumerate() {
-                    ui.selectable_value(&mut selected, Some(i), &view.label);
+                    let response = ui.selectable_value(&mut selected, Some(i), &view.label);
+                    if follow && self.selected == Some(i) {
+                        response.scroll_to_me(None);
+                    }
                 }
             });
+        if follow && self.selected.is_some() {
+            ui.scroll_to_rect(list.inner_rect, None);
+        }
         let mut changed = selected != self.selected;
         if changed {
             self.selected = selected;
             self.item = None;
             self.progress = 1.0;
             if let Some(index) = selected {
-                if matches!(self.data.views[index].kind.as_str(), "timing" | "power") {
+                if matches!(
+                    self.data.views[index].kind.as_str(),
+                    "timing" | "power" | "rcx" | "ir"
+                ) {
                     self.requested_time = Some(self.offset(index));
                 }
             }
@@ -260,6 +299,16 @@ impl ReplayAnalysis {
         let mut focus = None;
         if let Some(index) = self.selected {
             let view = &self.data.views[index];
+            if view.kind == "ir" {
+                if self.ir.controls(ui, index) {
+                    self.progress = 1.0;
+                    changed = true;
+                }
+                if !self.error.is_empty() {
+                    ui.small(&self.error);
+                }
+                return (changed, None);
+            }
             ui.small(if view.kind == "power" {
                 "Power heatmap · completed result"
             } else if view.kind == "timing" {
@@ -306,13 +355,22 @@ impl ReplayAnalysis {
                     changed = true;
                 }
             }
+            if view.kind == "rcx" {
+                let shown = (view.items.len() as f32 * self.progress).ceil() as usize;
+                ui.small(format!(
+                    "SPEF result replay · {shown} / {} nets",
+                    view.items.len()
+                ));
+                ui.small("Native routed wires/vias · color = net capacitance");
+            }
             let missing: usize = self
                 .geometry
                 .get(index)
                 .into_iter()
                 .flatten()
                 .map(|g| g.missing)
-                .sum();
+                .sum::<usize>()
+                + self.rcx.missing(index);
             ui.small(format!(
                 "{} items · {} unresolved references / route arcs",
                 view.items.len(),
@@ -321,54 +379,71 @@ impl ReplayAnalysis {
             ui.collapsing("Report summary", |ui| {
                 ui.monospace(serde_json::to_string_pretty(&view.summary).unwrap_or_default());
             });
-            egui::ScrollArea::vertical()
+            let active_item = self.item.or_else(|| {
+                (view.kind == "rcx" && self.progress > 0.0 && !view.items.is_empty()).then(|| {
+                    ((view.items.len() as f32 * self.progress).ceil() as usize)
+                        .saturating_sub(1)
+                        .min(view.items.len() - 1)
+                })
+            });
+            let follow_item = self
+                .follow
+                .changed(ui.id().with("items"), (index, active_item));
+            let mut items = egui::ScrollArea::vertical()
                 .id_salt("replay_analysis_items")
-                .max_height(150.0)
-                .show_rows(ui, 20.0, view.items.len(), |ui, range| {
-                    for i in range {
-                        let item = &view.items[i];
-                        let label = item.value.map_or_else(
-                            || item.label.clone(),
-                            |v| {
-                                if view.kind == "power" {
-                                    format!("{} · {v:.3e} W", item.label)
-                                } else {
-                                    format!("{} · {v:.4} {}", item.label, view.unit)
-                                }
-                            },
-                        );
-                        let label = if view.kind == "timing" {
-                            format!(
-                                "#{:02} {} · slack {} ns · {}",
-                                i + 1,
-                                item.details["analysis_type"].as_str().unwrap_or(""),
-                                item.value
-                                    .map_or_else(|| "N/A".into(), |v| format!("{v:+.3}")),
-                                item.label.replace('→', "->")
-                            )
-                        } else {
-                            label
-                        };
-                        if ui
-                            .add(
-                                egui::Button::new(&label)
-                                    .selected(self.item == Some(i))
-                                    .truncate(),
-                            )
-                            .on_hover_text(&label)
-                            .clicked()
-                        {
-                            self.item = Some(i);
-                            self.progress = 1.0;
-                            changed = true;
-                            focus = self
-                                .geometry
+                .max_height(150.0);
+            if follow_item {
+                if let Some(item) = active_item {
+                    items = items
+                        .vertical_scroll_offset(item as f32 * (20.0 + ui.spacing().item_spacing.y));
+                }
+            }
+            items.show_rows(ui, 20.0, view.items.len(), |ui, range| {
+                for i in range {
+                    let item = &view.items[i];
+                    let label = item.value.map_or_else(
+                        || item.label.clone(),
+                        |v| {
+                            if view.kind == "power" {
+                                format!("{} · {v:.3e} W", item.label)
+                            } else {
+                                format!("{} · {v:.4} {}", item.label, view.unit)
+                            }
+                        },
+                    );
+                    let label = if view.kind == "timing" {
+                        format!(
+                            "#{:02} {} · slack {} ns · {}",
+                            i + 1,
+                            item.details["analysis_type"].as_str().unwrap_or(""),
+                            item.value
+                                .map_or_else(|| "N/A".into(), |v| format!("{v:+.3}")),
+                            item.label.replace('→', "->")
+                        )
+                    } else {
+                        label
+                    };
+                    if ui
+                        .add(
+                            egui::Button::new(&label)
+                                .selected(active_item == Some(i))
+                                .truncate(),
+                        )
+                        .on_hover_text(&label)
+                        .clicked()
+                    {
+                        self.item = Some(i);
+                        self.progress = 1.0;
+                        changed = true;
+                        focus = self.rcx.bounds(index, i).or_else(|| {
+                            self.geometry
                                 .get(index)
                                 .and_then(|items| items.get(i))
-                                .and_then(bounds);
-                        }
+                                .and_then(bounds)
+                        });
                     }
-                });
+                }
+            });
             if let Some(item) = self.item.and_then(|i| view.items.get(i)) {
                 ui.collapsing("Item details", |ui| {
                     ui.monospace(serde_json::to_string_pretty(&item.details).unwrap_or_default());
@@ -397,10 +472,26 @@ impl ReplayAnalysis {
         let Some(index) = self.selected else {
             return;
         };
+        let view = &self.data.views[index];
+        if view.kind == "ir" {
+            painter.rect_filled(painter.clip_rect(), 0.0, Color32::from_black_alpha(155));
+            self.ir.paint(painter, project, index, self.progress);
+            return;
+        }
         let Some(geometry) = self.geometry.get(index) else {
             return;
         };
-        let view = &self.data.views[index];
+        if view.kind == "rcx" {
+            self.rcx.paint(
+                painter,
+                project_layer,
+                index,
+                &view.items,
+                self.progress,
+                self.item,
+            );
+            return;
+        }
         if matches!(view.kind.as_str(), "timing" | "power") {
             painter.rect_filled(painter.clip_rect(), 0.0, Color32::from_black_alpha(135));
         }
@@ -411,7 +502,7 @@ impl ReplayAnalysis {
             .fold(0.0_f64, f64::max)
             .max(f64::EPSILON);
         if view.kind == "timing" {
-            let mut occupied = replay_timing::Labels::default();
+            let mut occupied = timing::Labels::default();
             for (i, g) in geometry.iter().enumerate() {
                 if self.item.is_some_and(|selected| selected != i) {
                     continue;
@@ -573,7 +664,7 @@ fn resolve(
         }
     }
     for name in &item.pins {
-        if let Some(point) = replay_timing::lookup_pin(name, pins) {
+        if let Some(point) = timing::lookup_pin(name, pins) {
             result.points.push(Some(point));
         } else {
             result.points.push(None);
@@ -627,7 +718,7 @@ mod tests {
     #[test]
     fn analysis_boxes_follow_all_four_projected_corners_in_2d_and_rotated_3d() {
         let screen = Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0));
-        for kind in ["rcx", "sta"] {
+        for kind in ["em", "sta"] {
             for yaw in [None, Some(45.0), Some(-30.0)] {
                 let analysis = ReplayAnalysis {
                     data: serde_json::from_value(serde_json::json!({
@@ -645,7 +736,7 @@ mod tests {
                     ..Default::default()
                 };
                 let matrix = yaw.map(|yaw| {
-                    crate::replay_camera_plan::Preset { pitch: 38.0, yaw }
+                    crate::replay::camera_plan::Preset { pitch: 38.0, yaw }
                         .camera(
                             chipgeom_format::Rect32 {
                                 lx: 0,
@@ -743,5 +834,5 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "replay_timing_validation.rs"]
+#[path = "timing_validation.rs"]
 mod routed_validation;

@@ -1,15 +1,15 @@
 //! Recorded bounds adapted to the existing 3D renderer. No final shapes are read.
 use crate::canvas_gpu3d::{slab_instance, GpuShapeInstance3d, FLAG_REPLAY_CHANGED};
-use crate::replay_data::Recording;
-use crate::replay_motion::Motion;
-use crate::replay_reveal::Reveal;
+use crate::replay::data::Recording;
+use crate::replay::motion::Motion;
+use crate::replay::reveal::Reveal;
 use anyhow::{ensure, Result};
 use chip_display::{ColorTheme, LayerRole, LayerStack, LayerStyle, MaterialKind};
 use chipgeom_format::{
     replay::{Object, Scene},
     Rect32,
 };
-use std::{collections::BTreeMap, path::Path, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 pub struct Metadata {
     pub layers: BTreeMap<String, (u16, LayerRole, u32)>,
@@ -22,16 +22,11 @@ impl Metadata {
     pub fn open(record: &Recording, alive: &impl Fn() -> bool) -> Result<Self> {
         let mut layers = BTreeMap::new();
         let mut units = None;
-        if let Some(path) = &record.manifest.final_geometry {
-            let file = record.asset(path)?;
+        if let Some(file) = record.final_geometry_path()? {
             let manifest = chipgeom_reader::read_manifest(&file)?;
             units = manifest.dbu_per_micron;
             if let Some(layer_path) = manifest.layers {
-                let relative = Path::new(path)
-                    .parent()
-                    .unwrap_or(Path::new(""))
-                    .join(layer_path.strip_prefix(file.parent().unwrap())?);
-                let verified = record.asset(&relative.to_string_lossy())?;
+                let verified = crate::replay::data::within(file.parent().unwrap(), &layer_path)?;
                 for layer in chipgeom_reader::read_layer_metadata(Some(&verified))? {
                     layers.insert(
                         layer.name.clone(),
@@ -324,7 +319,7 @@ pub fn bounds_at(instance: &GpuShapeInstance3d, progress: f32) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::replay_data::tests::Fixture;
+    use crate::replay::data::tests::Fixture;
     use serde_json::json;
     #[test]
     fn animation_uses_the_same_world_bounds_as_2d_and_never_moves_static_context() {
@@ -453,7 +448,7 @@ mod tests {
 #[cfg(test)]
 mod metadata_tests {
     use super::*;
-    use crate::replay_data::{read, tests::Fixture};
+    use crate::replay::data::{read, tests::Fixture};
     use serde_json::json;
     #[test]
     fn frozen_metadata_must_be_indexed_and_cannot_read_outside_attempt() {

@@ -67,6 +67,41 @@ pub struct GeometryManifest {
     pub clock_tree_error: Option<String>,
 }
 
+impl GeometryManifest {
+    /// All side files a consumer may read when opening this snapshot.
+    pub fn side_files(&self) -> impl Iterator<Item = &Path> {
+        [
+            Some(&self.meta),
+            Some(&self.shapes),
+            Some(&self.owners),
+            Some(&self.payload),
+            Some(&self.names),
+            Some(&self.name_index),
+            Some(&self.sidmap),
+            Some(&self.view),
+            self.delta.as_ref(),
+            self.layers.as_ref(),
+            self.sites.as_ref(),
+            self.masters.as_ref(),
+            self.vias.as_ref(),
+            self.grids.as_ref(),
+            self.connectivity.as_ref(),
+            self.nets.as_ref(),
+            self.buses.as_ref(),
+            self.groups.as_ref(),
+            self.drc.as_ref(),
+            self.clock_tree_meta.as_ref(),
+            self.clock_tree_nodes.as_ref(),
+            self.clock_tree_edges.as_ref(),
+            self.clock_tree_timing.as_ref(),
+            self.clock_tree_strings.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .map(PathBuf::as_path)
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LayerMetadata {
     pub layer_id: u16,

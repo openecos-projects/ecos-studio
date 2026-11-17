@@ -1,6 +1,6 @@
 //! Keep immutable Replay meshes on the GPU across animation frames. Each slot
 //! owns only its current mesh; changing scenes cannot accumulate GPU history.
-use crate::replay_gpu_animation::{AnimatedMesh, VertexMotion};
+use crate::replay::gpu_animation::{AnimatedMesh, VertexMotion};
 use egui::{Mesh, Painter};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -122,7 +122,7 @@ impl Resources {
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("replay retained mesh"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("replay_gpu_mesh.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("gpu_mesh.wgsl").into()),
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("replay retained mesh"), layout: Some(&pipeline_layout),

@@ -1,5 +1,5 @@
 //! Spatial index of the current revision, including swept motion bounds.
-use crate::replay_motion::Motion;
+use crate::replay::motion::Motion;
 use chipgeom_format::replay::{Object, Scene};
 use rstar::{RTree, RTreeObject, AABB};
 use std::sync::Arc;
