@@ -97,6 +97,10 @@ pub struct TimingAnalysis {
 
 impl TimingAnalysis {
     pub fn load(feature_dir: &Path) -> Self {
+        Self::load_files(feature_dir, discover_timing_files(feature_dir))
+    }
+
+    pub fn load_files(feature_dir: &Path, files: Vec<PathBuf>) -> Self {
         let mut analysis = Self {
             feature_dir: feature_dir.to_path_buf(),
             corners: Vec::new(),
@@ -104,7 +108,7 @@ impl TimingAnalysis {
             load_errors: Vec::new(),
             load_error: None,
         };
-        let files = discover_timing_files(feature_dir);
+
         if files.is_empty() {
             analysis.load_error = Some(format!(
                 "No STA timing_paths.json files found under {}",
@@ -227,6 +231,29 @@ fn discover_timing_files(feature_dir: &Path) -> Vec<PathBuf> {
 }
 
 fn read_timing_file(path: &Path) -> Result<Vec<TimingPath>, String> {
+    if path.extension().is_some_and(|e| e == "gdisplay") {
+        let asset =
+            chipgeom_reader::display::DisplayAsset::open(path).map_err(|e| e.to_string())?;
+        if asset.metadata["kind"] != "timing" || asset.count > MAX_TIMING_PATHS_PER_FILE {
+            return Err("Invalid timing display kind/count".into());
+        }
+        let corner = asset.metadata["corner"]
+            .as_str()
+            .ok_or("Missing timing corner")?;
+        let mut paths = Vec::new();
+        let mut ids = BTreeSet::new();
+        for i in 0..asset.count {
+            let raw: RawTimingPath = asset.record(i).map_err(|e| e.to_string())?;
+            let value = raw.into_timing_path(path, corner)?;
+            if !ids.insert(value.path_id.clone()) {
+                return Err("Duplicate timing path".into());
+            }
+            if value.slack_ns < 0.0 {
+                paths.push(value);
+            }
+        }
+        return Ok(paths);
+    }
     let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
     parse_timing_file_text(path, &text)
 }

@@ -39,6 +39,7 @@ use crate::map_data::{ColormapMode, HeatmapData, MapCatalog, MapItem};
 mod analysis_loader;
 #[path = "app/analysis/analysis_overlays.rs"]
 mod analysis_overlays;
+mod display_data;
 #[path = "app/analysis/clock_tree.rs"]
 mod clock_tree;
 #[cfg(test)]
@@ -262,6 +263,7 @@ impl ChipViewerApp {
                             antenna_stats: loading.antenna_statis_path.take(),
                             lvs_data: loading.lvs_data_path.take(),
                             map_root: loading.map_root_path.take(),
+                            ..Default::default()
                         },
                         loading.target_format,
                         loading.render_mode,

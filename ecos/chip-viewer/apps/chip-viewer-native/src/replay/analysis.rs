@@ -67,7 +67,7 @@ impl ReplayAnalysis {
             Ok(mut data) => {
                 timing::group_corners(&mut data);
                 data.views.sort_by_key(|view| view.kind != "ir");
-                let (ir, error) = match crate::replay::ir::IrOverlays::load(&data) {
+                let (ir, error) = match crate::replay::ir::IrOverlays::load(&data, recording) {
                     Ok(ir) => (ir, String::new()),
                     Err(error) => (
                         Default::default(),

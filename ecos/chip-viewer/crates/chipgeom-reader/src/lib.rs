@@ -13,6 +13,7 @@ use memmap2::{Mmap, MmapOptions};
 use thiserror::Error;
 
 mod clock_tree;
+pub mod display;
 use clock_tree::ClockTreeRead;
 pub use clock_tree::ClockTreeSnapshot;
 
@@ -58,6 +59,7 @@ pub struct GeometryManifest {
     pub buses: Option<PathBuf>,
     pub groups: Option<PathBuf>,
     pub drc: Option<PathBuf>,
+    pub display: Vec<PathBuf>,
     pub clock_tree_schema_version: Option<u32>,
     pub clock_tree_meta: Option<PathBuf>,
     pub clock_tree_nodes: Option<PathBuf>,
@@ -99,6 +101,7 @@ impl GeometryManifest {
         .into_iter()
         .flatten()
         .map(PathBuf::as_path)
+        .chain(self.display.iter().map(PathBuf::as_path))
     }
 }
 
@@ -180,7 +183,7 @@ pub struct GridMetadata {
     pub layer_names: Vec<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
 pub struct ConnectivityMetadata {
     pub net_name: String,
     pub net_kind: String,
@@ -190,13 +193,13 @@ pub struct ConnectivityMetadata {
     pub master_name: String,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
 pub struct NetMetadata {
     pub name: String,
     pub kind: String,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
 pub struct BusMetadata {
     pub name: String,
     pub bus_type: String,
@@ -208,7 +211,7 @@ pub struct BusMetadata {
     pub pin_names: Vec<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
 pub struct GroupMetadata {
     pub name: String,
     pub region_name: String,
@@ -577,7 +580,13 @@ pub fn read_manifest(path: &Path) -> Result<GeometryManifest> {
         let Some((key, value)) = line.split_once('=') else {
             continue;
         };
-        values.insert(key.trim().to_string(), value.trim().to_string());
+        anyhow::ensure!(
+            values
+                .insert(key.trim().to_string(), value.trim().to_string())
+                .is_none(),
+            "duplicate geometry manifest key: {}",
+            key.trim()
+        );
     }
 
     let base = path.parent().unwrap_or_else(|| Path::new("."));
@@ -600,6 +609,15 @@ pub fn read_manifest(path: &Path) -> Result<GeometryManifest> {
         .get("drc")
         .map(|value| safe_path("DRC", value))
         .transpose()?;
+    let mut display_keys: Vec<_> = values
+        .keys()
+        .filter(|key| key.starts_with("display."))
+        .collect();
+    display_keys.sort();
+    let display = display_keys
+        .into_iter()
+        .map(|key| safe_path(key, &values[key]))
+        .collect::<Result<Vec<_>>>()?;
     let required = |key: &'static str| -> Result<String> {
         values
             .get(key)
@@ -684,6 +702,7 @@ pub fn read_manifest(path: &Path) -> Result<GeometryManifest> {
         path: path.to_path_buf(),
         schema_version: required("schema_version")?.parse()?,
         design_name: optional_string("design_name"),
+        display,
         design_version: optional_string("design_version"),
         dbu_per_micron: optional_u32("dbu_per_micron")?,
         manufacture_grid: optional_i32("manufacture_grid")?,
@@ -708,10 +727,22 @@ pub fn read_manifest(path: &Path) -> Result<GeometryManifest> {
         masters: values.get("masters").map(|value| base.join(value)),
         vias: values.get("vias").map(|value| base.join(value)),
         grids: values.get("grids").map(|value| base.join(value)),
-        connectivity: values.get("connectivity").map(|value| base.join(value)),
-        nets: values.get("nets").map(|value| base.join(value)),
-        buses: values.get("buses").map(|value| base.join(value)),
-        groups: values.get("groups").map(|value| base.join(value)),
+        connectivity: values
+            .get("connectivity")
+            .map(|value| safe_path("connectivity", value))
+            .transpose()?,
+        nets: values
+            .get("nets")
+            .map(|value| safe_path("nets", value))
+            .transpose()?,
+        buses: values
+            .get("buses")
+            .map(|value| safe_path("buses", value))
+            .transpose()?,
+        groups: values
+            .get("groups")
+            .map(|value| safe_path("groups", value))
+            .transpose()?,
         drc,
         clock_tree_schema_version,
         clock_tree_meta,
@@ -1067,6 +1098,9 @@ fn read_connectivity_metadata(path: Option<&Path>) -> Result<Vec<ConnectivityMet
     let Some(path) = path else {
         return Ok(Vec::new());
     };
+    if path.extension().is_some_and(|e| e == "gdisplay") {
+        return display::read_records(path, "connectivity");
+    }
 
     let mapped = map_sidecar_text(path)?;
     let content = std::str::from_utf8(&mapped).expect("sidecar text validated by map_sidecar_text");
@@ -1101,6 +1135,9 @@ fn read_net_metadata(path: Option<&Path>) -> Result<Vec<NetMetadata>> {
     let Some(path) = path else {
         return Ok(Vec::new());
     };
+    if path.extension().is_some_and(|e| e == "gdisplay") {
+        return display::read_records(path, "net");
+    }
 
     let mapped = map_sidecar_text(path)?;
     let content = std::str::from_utf8(&mapped).expect("sidecar text validated by map_sidecar_text");
@@ -1131,6 +1168,9 @@ fn read_bus_metadata(path: Option<&Path>) -> Result<Vec<BusMetadata>> {
     let Some(path) = path else {
         return Ok(Vec::new());
     };
+    if path.extension().is_some_and(|e| e == "gdisplay") {
+        return display::read_records(path, "bus");
+    }
 
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path.display()))?;
@@ -1173,6 +1213,9 @@ fn read_group_metadata(path: Option<&Path>) -> Result<Vec<GroupMetadata>> {
     let Some(path) = path else {
         return Ok(Vec::new());
     };
+    if path.extension().is_some_and(|e| e == "gdisplay") {
+        return display::read_records(path, "group");
+    }
 
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path.display()))?;

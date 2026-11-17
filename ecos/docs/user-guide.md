@@ -1006,11 +1006,12 @@ second, then switches networks. The layer selector works in both the 2D and 3D
 analysis views. This animation reveals a static analysis result; it does not
 represent transient voltages or solver iterations.
 
-New EMIR runs publish structured `ir_drop.json` samples alongside the saved
-geometry. Older Replay recordings with IR node data can display the heatmap
-directly. For an older ordinary EMIR view without the JSON artifact, rerun EMIR
-with the updated ECC/ecc-tools runtime. Text `.rpt` files are not parsed for this
-visualization.
+New runs save heatmap data with the layout snapshot. Chip Viewer and Replay
+load these results in the background; the original text reports remain available
+for inspection and export. Older workspaces and Replay recordings with structured
+IR samples remain supported. If an older EMIR result has no spatial samples,
+rerun EMIR with the updated ECC/ecc-tools runtime. Text `.rpt` files are not
+parsed for this visualization.
 
 ### Canvas Navigation
 

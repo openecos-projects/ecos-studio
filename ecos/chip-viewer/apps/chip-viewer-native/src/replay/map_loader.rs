@@ -1,10 +1,11 @@
-//! One background CSV decoder. Superseded selections never reach the canvas.
+//! One background map decoder. Superseded selections never reach the canvas.
 use crate::map_data::HeatmapData;
+use crate::map_source::MapSource;
 use crate::replay::data::within;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
 
-type Selection = (u64, PathBuf, PathBuf, PathBuf);
+type Selection = (u64, PathBuf, MapSource, Option<PathBuf>);
 type Reply = (u64, Result<Arc<HeatmapData>, String>);
 
 pub struct MapLoader {
@@ -23,11 +24,14 @@ impl Default for MapLoader {
                 while let Ok(newer) = requests.try_recv() {
                     request = newer;
                 }
-                let (token, root, csv, layout) = request;
+                let (token, root, source, layout) = request;
                 let loaded = (|| {
-                    let csv = within(&root, &csv).map_err(|e| e.to_string())?;
-                    let layout = within(&root, &layout).map_err(|e| e.to_string())?;
-                    HeatmapData::load(&csv, &layout).map(Arc::new)
+                    within(&root, source.path()).map_err(|e| e.to_string())?;
+                    let layout = layout
+                        .as_deref()
+                        .map(|p| within(&root, p).map_err(|e| e.to_string()))
+                        .transpose()?;
+                    source.load(layout.as_deref()).map(Arc::new)
                 })();
                 if replies.send((token, loaded)).is_err() {
                     break;
@@ -44,7 +48,7 @@ impl Default for MapLoader {
 }
 
 impl MapLoader {
-    pub fn select(&mut self, root: PathBuf, csv: PathBuf, layout: PathBuf) {
+    pub fn select(&mut self, root: PathBuf, csv: MapSource, layout: Option<PathBuf>) {
         self.cancel();
         self.pending = self
             .sender

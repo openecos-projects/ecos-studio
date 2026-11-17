@@ -111,9 +111,7 @@ impl DrcOverlay {
         let mut counts = BTreeMap::new();
 
         if let Some(path) = data_path.as_deref() {
-            match fs::read_to_string(path)
-                .map_err(|err| err.to_string())
-                .and_then(|text| parse_drc_json_text(&text))
+            match display_data::drc(path)
             {
                 Ok((json_violations, json_counts)) => {
                     violations = json_violations;
@@ -226,7 +224,7 @@ pub(super) fn parse_drc_json_text(
     Ok((violations, counts))
 }
 
-fn parse_drc_violation(
+pub(super) fn parse_drc_violation(
     node: &serde_json::Value,
     id: usize,
     drc_type: &str,
@@ -313,7 +311,7 @@ fn merge_drc_counts(
     }
 }
 
-fn drc_counts_from_violations(violations: &[DrcViolation]) -> BTreeMap<String, DrcTypeCounts> {
+pub(super) fn drc_counts_from_violations(violations: &[DrcViolation]) -> BTreeMap<String, DrcTypeCounts> {
     let mut counts = BTreeMap::<String, DrcTypeCounts>::new();
     for violation in violations {
         let type_counts = counts.entry(violation.drc_type.clone()).or_default();
@@ -350,9 +348,7 @@ impl AntennaOverlay {
         let mut counts = BTreeMap::new();
 
         if let Some(path) = data_path.as_deref() {
-            match fs::read_to_string(path)
-                .map_err(|err| err.to_string())
-                .and_then(|text| parse_antenna_json_text(&text))
+            match display_data::antenna(path)
             {
                 Ok((json_violations, json_counts)) => {
                     violations = json_violations;
@@ -504,7 +500,7 @@ pub(super) fn parse_antenna_json_text(
     Ok((violations, counts))
 }
 
-fn parse_antenna_violation(
+pub(super) fn parse_antenna_violation(
     node: &serde_json::Value,
     id: usize,
     antenna_type: &str,
@@ -586,7 +582,7 @@ fn merge_antenna_counts(
     }
 }
 
-fn antenna_counts_from_violations(
+pub(super) fn antenna_counts_from_violations(
     violations: &[AntennaViolation],
 ) -> BTreeMap<String, AntennaTypeCounts> {
     let mut counts = BTreeMap::<String, AntennaTypeCounts>::new();

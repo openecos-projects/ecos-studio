@@ -9,7 +9,7 @@ impl LoadedViewer {
         edit_command_dir: Option<PathBuf>,
         edit_result_dir: Option<PathBuf>,
         macro_staging_path: Option<PathBuf>,
-        mut analysis_paths: analysis_loader::AnalysisPaths,
+        analysis_paths: analysis_loader::AnalysisPaths,
         target_format: wgpu::TextureFormat,
         render_mode: crate::RenderMode,
     ) -> Self {
@@ -38,20 +38,7 @@ impl LoadedViewer {
             set_layer_visibility(&mut layers, true);
             object_visibility.set_all_visible(true);
         }
-        analysis_paths.drc_data = db
-            .snapshot()
-            .manifest()
-            .drc
-            .clone()
-            .or(analysis_paths.drc_data);
-        let (analysis_loader, analysis_load_error) =
-            match analysis_loader::AnalysisLoader::start(analysis_paths) {
-                Ok(loader) => (loader, None),
-                Err(err) => (
-                    None,
-                    Some(format!("Failed to start analysis data loader: {err}")),
-                ),
-            };
+        let (analysis_loader, analysis_load_error) = analysis_paths.start_for(&db);
         let clock_tree = crate::clock_tree::ClockTreePanel::new(std::sync::Arc::clone(&db));
         let analysis_tab = if clock_tree.is_some() {
             AnalysisTab::ClockTree
@@ -154,6 +141,7 @@ impl LoadedViewer {
             selected_lvs_group: None,
             show_all_lvs: false,
             timing: None,
+            timing_loading: None,
             clock_tree,
             map_catalog: None,
             map_catalog_error: None,
@@ -164,6 +152,9 @@ impl LoadedViewer {
             active_heatmap: None,
             heatmap_composition: Default::default(),
             analysis_loader,
+            analysis_paths,
+            map_loading: None,
+            map_requests: None,
             analysis_load_error,
             analysis_tab_user_selected: false,
             map_item_error: None,
@@ -482,6 +473,10 @@ impl LoadedViewer {
             }
         });
 
+        if self.map_loading.is_some() {
+            ui.spinner();
+            ui.label("Loading map…");
+        }
         if let Some(err) = &self.map_catalog_error {
             ui.add_space(6.0);
             ui.colored_label(ecos_warning(), err);
@@ -562,7 +557,7 @@ impl LoadedViewer {
                     .show(ui, |ui| {
                         for item in &category.items {
                             let available = category.layout_path.is_some()
-                                || matches!(item.source, crate::map_source::MapSource::Ir { .. });
+                                || !matches!(item.source, crate::map_source::MapSource::Csv(_));
                             let selected =
                                 self.selected_map_item.as_ref() == Some(&item.source.key());
                             ui.horizontal(|ui| {
@@ -612,11 +607,13 @@ impl LoadedViewer {
         self.map_item_error = None;
         self.selected_map_bbox = None;
 
-        match item.source.load(layout_path) {
-            Ok(data) => {
-                self.active_heatmap = Some(ActiveHeatmap::new(item.label.clone(), data));
-            }
-            Err(err) => self.map_item_error = Some(err),
+        let requests = self.map_requests.get_or_insert_with(display_data::map_worker);
+        let (sender, receiver) = mpsc::channel();
+        if requests.send((item.clone(), layout_path.map(Path::to_path_buf), sender)).is_ok() {
+            self.map_loading = Some(receiver);
+        } else {
+            self.map_loading = None;
+            self.map_item_error = Some("Map loader stopped".into());
         }
     }
 
@@ -6155,6 +6152,7 @@ impl LoadedViewer {
         start_drawing_category_data(Arc::clone(&db), Arc::clone(&counts), Arc::clone(&guides));
         self.layers = layer_ui_states_from_summaries(layer_catalog, &visibility, self.color_theme);
         self.db = db;
+        self.refresh_display_data();
         self.gpu_tile_worker = GpuTileWorker::new(std::sync::Arc::clone(&self.db));
         let guide_db = std::sync::Arc::clone(&self.db);
         if let Err(err) = thread::Builder::new()

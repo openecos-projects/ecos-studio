@@ -28,7 +28,9 @@ pub struct MapItem {
 
 #[derive(Clone, Debug)]
 pub struct HeatmapData {
-    values: Vec<Vec<Option<f64>>>,
+    values: Vec<Option<f64>>,
+    rows: usize,
+    columns: usize,
     instance_power: bool,
     ir_drop: bool,
     layout: BTreeMap<(usize, usize), Rect32>,
@@ -121,6 +123,24 @@ impl MapCatalog {
 }
 
 impl HeatmapData {
+    pub fn geometry(
+        dimensions: (usize, usize),
+        values: Vec<Option<f64>>,
+        layout: BTreeMap<(usize, usize), Rect32>,
+        kind: GeometryMapKind,
+        range: (f64, f64),
+    ) -> Self {
+        Self {
+            values,
+            rows: dimensions.0,
+            columns: dimensions.1,
+            layout,
+            instance_power: matches!(kind, GeometryMapKind::Power),
+            ir_drop: matches!(kind, GeometryMapKind::Ir),
+            min: if range.0.is_finite() { range.0 } else { 0.0 },
+            max: if range.1.is_finite() { range.1 } else { 0.0 },
+        }
+    }
     pub fn load(csv_path: &Path, layout_path: &Path) -> Result<Self, String> {
         let values = read_value_matrix(csv_path)?;
         let layout = read_layout(layout_path)?;
@@ -138,7 +158,9 @@ impl HeatmapData {
             .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
             .is_some_and(|value| value["schema"] == "ecos.power.geometry.v1");
         Ok(Self {
-            values,
+            rows: values.len(),
+            columns: values.first().map_or(0, Vec::len),
+            values: values.into_iter().flatten().collect(),
             instance_power,
             ir_drop: false,
             layout,
@@ -153,7 +175,9 @@ impl HeatmapData {
         maximum: f64,
     ) -> Self {
         Self {
-            values,
+            rows: values.len(),
+            columns: values.first().map_or(0, Vec::len),
+            values: values.into_iter().flatten().collect(),
             layout,
             min: 0.0,
             max: maximum,
@@ -179,19 +203,18 @@ impl HeatmapData {
     }
 
     pub fn rows(&self) -> usize {
-        self.values.len()
+        self.rows
     }
 
     pub fn columns(&self) -> usize {
-        self.values.first().map_or(0, Vec::len)
+        self.columns
     }
 
     pub fn value(&self, row: usize, column: usize) -> Option<f64> {
-        self.values
-            .get(row)
-            .and_then(|values| values.get(column))
-            .copied()
-            .flatten()
+        if row >= self.rows || column >= self.columns {
+            return None;
+        }
+        self.values[row * self.columns + column]
     }
 
     pub fn bbox(&self, row: usize, column: usize) -> Option<Rect32> {
@@ -908,7 +931,9 @@ mod tests {
         let zero_x = HeatmapData {
             instance_power: false,
             ir_drop: false,
-            values: vec![vec![Some(1.0); 3]; 3],
+            values: vec![Some(1.0); 9],
+            rows: 3,
+            columns: 3,
             layout: zero_x_layout,
             min: 1.0,
             max: 1.0,
@@ -1054,4 +1079,10 @@ mod tests {
 
         fs::remove_dir_all(root).unwrap();
     }
+}
+
+pub enum GeometryMapKind {
+    Grid,
+    Power,
+    Ir,
 }

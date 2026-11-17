@@ -144,7 +144,24 @@ pub(super) struct TimingPanelState {
 
 impl TimingPanelState {
     pub(super) fn load(feature_dir: &Path, db: &ChipViewDb) -> Self {
-        let analysis = TimingAnalysis::load(feature_dir);
+        let native = crate::geometry_maps::assets(&db.snapshot().manifest().path).map(|assets| {
+            assets
+                .into_iter()
+                .filter(|(_, a)| a.metadata["kind"] == "timing")
+                .map(|(p, _)| p)
+                .collect::<Vec<_>>()
+        });
+        let analysis = match native {
+            Ok(files) if !files.is_empty() => TimingAnalysis::load_files(feature_dir, files),
+            Ok(_) => TimingAnalysis::load(feature_dir),
+            Err(error) => TimingAnalysis {
+                feature_dir: feature_dir.to_path_buf(),
+                corners: Vec::new(),
+                paths: Vec::new(),
+                load_errors: vec![error.to_string()],
+                load_error: Some(error.to_string()),
+            },
+        };
         let corner = analysis
             .paths
             .first()
@@ -957,22 +974,47 @@ impl TimingPanelState {
 }
 
 impl LoadedViewer {
+    pub(super) fn refresh_timing(&mut self) {
+        if let Some(timing) = &self.timing {
+            let directory = timing.analysis.feature_dir.clone();
+            self.timing = None;
+            self.attach_timing_feature_dir(Some(directory));
+        }
+    }
+
     pub(super) fn attach_timing_feature_dir(&mut self, feature_dir: Option<PathBuf>) {
         let Some(feature_dir) = feature_dir else {
             return;
         };
-        let timing = TimingPanelState::load(&feature_dir, &self.db);
-        let focus = timing.selected_bbox();
-        let has_violations = timing.has_violations();
-        self.timing = Some(timing);
-        if has_violations {
-            self.analysis_tab = super::AnalysisTab::Timing;
-            if let Some(bbox) = focus {
-                self.pending_focus = Some(PendingFocus {
-                    bbox: contextual_map_focus_bbox(bbox),
-                    select_shape_id: None,
-                    transition: FocusTransition::Immediate,
-                });
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let db = std::sync::Arc::clone(&self.db);
+        std::thread::spawn(move || {
+            let _ = sender.send(TimingPanelState::load(&feature_dir, &db));
+        });
+        self.timing_loading = Some(receiver);
+    }
+
+    pub(super) fn poll_timing(&mut self, ctx: &egui::Context) {
+        if let Some(receiver) = &self.timing_loading {
+            match receiver.try_recv() {
+                Ok(timing) => {
+                    self.timing_loading = None;
+                    if timing.has_violations() {
+                        self.analysis_tab = super::AnalysisTab::Timing;
+                    }
+                    if let Some(bbox) = timing.selected_bbox() {
+                        self.pending_focus = Some(PendingFocus {
+                            bbox: contextual_map_focus_bbox(bbox),
+                            select_shape_id: None,
+                            transition: FocusTransition::Immediate,
+                        });
+                    }
+                    self.timing = Some(timing);
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(30))
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.timing_loading = None,
             }
         }
     }

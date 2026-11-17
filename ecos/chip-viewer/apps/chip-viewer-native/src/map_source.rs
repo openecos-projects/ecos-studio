@@ -7,6 +7,7 @@ use std::{
 
 #[derive(Clone, Debug)]
 pub enum MapSource {
+    Geometry(PathBuf),
     Csv(PathBuf),
     Ir {
         file: PathBuf,
@@ -18,6 +19,7 @@ pub enum MapSource {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MapKey {
+    Geometry(PathBuf),
     Csv(PathBuf),
     Ir(PathBuf, usize, Option<String>),
 }
@@ -25,6 +27,7 @@ pub enum MapKey {
 impl MapSource {
     pub fn key(&self) -> MapKey {
         match self {
+            Self::Geometry(path) => MapKey::Geometry(path.clone()),
             Self::Csv(path) => MapKey::Csv(path.clone()),
             Self::Ir {
                 file, view, layer, ..
@@ -33,12 +36,14 @@ impl MapSource {
     }
     pub fn path(&self) -> &Path {
         match self {
+            Self::Geometry(path) => path,
             Self::Csv(path) => path,
             Self::Ir { file, .. } => file,
         }
     }
     pub fn load(&self, layout: Option<&Path>) -> Result<HeatmapData, String> {
         match self {
+            Self::Geometry(path) => crate::geometry_maps::load(path).map_err(|e| format!("{e:#}")),
             Self::Csv(path) => HeatmapData::load(path, layout.ok_or("Missing layout.csv")?),
             Self::Ir { data, .. } => Ok(data.as_ref().clone()),
         }

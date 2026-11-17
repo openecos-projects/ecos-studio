@@ -104,6 +104,8 @@ impl eframe::App for ChipViewerApp {
             }
             loaded.previous_native_cpu_ms = _frame.info().cpu_usage.unwrap_or_default() * 1000.0;
             loaded.poll_analysis(ctx);
+            loaded.poll_map(ctx);
+            loaded.poll_timing(ctx);
             loaded.poll_edit_result();
             loaded.poll_session_action_progress();
             close_after_session_action = loaded.poll_session_action_result();

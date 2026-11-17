@@ -1,7 +1,8 @@
 use super::*;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct AnalysisPaths {
+    pub(super) manifest: Option<PathBuf>,
     pub(super) drc_data: Option<PathBuf>,
     pub(super) drc_stats: Option<PathBuf>,
     pub(super) antenna_data: Option<PathBuf>,
@@ -10,36 +11,70 @@ pub(super) struct AnalysisPaths {
     pub(super) map_root: Option<PathBuf>,
 }
 
+impl AnalysisPaths {
+    pub(super) fn start_for(&self, db: &ChipViewDb) -> (Option<AnalysisLoader>, Option<String>) {
+        let mut paths = self.clone();
+        let manifest = db.snapshot().manifest();
+        paths.manifest = (!manifest.display.is_empty()).then(|| manifest.path.clone());
+        paths.drc_data = manifest.drc.clone().or(paths.drc_data);
+        match AnalysisLoader::start(paths) {
+            Ok(loader) => (loader, None),
+            Err(error) => (None, Some(format!("Failed to start analysis data loader: {error}"))),
+        }
+    }
+}
+
 struct AnalysisData {
     drc_overlay: Option<DrcOverlay>,
     antenna_overlay: Option<AntennaOverlay>,
     lvs_analysis: Option<lvs::LvsAnalysis>,
     map_catalog: Option<MapCatalog>,
     map_catalog_error: Option<String>,
+    timing_directory: Option<PathBuf>,
 }
 
 impl AnalysisData {
-    fn load(paths: AnalysisPaths) -> Self {
-        let drc_overlay = DrcOverlay::load(paths.drc_data, paths.drc_stats);
-        let antenna_overlay = AntennaOverlay::load(paths.antenna_data, paths.antenna_stats);
-        let lvs_analysis = lvs::LvsAnalysis::load(paths.lvs_data);
-        let (map_catalog, map_catalog_error) = match paths.map_root.as_deref() {
-            Some(root) => match MapCatalog::discover(root) {
-                Ok(catalog) if !catalog.is_empty() => (Some(catalog), None),
-                Ok(catalog) if !catalog.warnings.is_empty() => {
-                    (None, Some(catalog.warnings.join("; ")))
+    fn load(mut paths: AnalysisPaths) -> Self {
+        let mut timing_directory = None;
+        let maps = paths.manifest.as_deref().map(crate::geometry_maps::assets).transpose();
+        let mut native_maps = Vec::new();
+        let mut native_error = None;
+        match maps {
+            Ok(Some(assets)) => {
+                for (path, asset) in &assets {
+                    match asset.metadata["kind"].as_str() {
+                        Some("antenna") => paths.antenna_data = Some(path.clone()),
+                        Some("lvs") => paths.lvs_data = Some(path.clone()),
+                        Some("timing") => {
+                            timing_directory = paths.manifest.as_deref().and_then(Path::parent).map(Path::to_path_buf);
+                        }
+                        _ => {}
+                    }
                 }
-                Ok(_) => (None, None),
-                Err(err) => (None, Some(err)),
-            },
-            None => (None, None),
+                native_maps = crate::geometry_maps::categories(&assets);
+            }
+            Ok(None) => {}
+            Err(error) => native_error = Some(error.to_string()),
+        }
+        let (map_catalog, map_catalog_error) = if !native_maps.is_empty() {
+            (Some(MapCatalog { categories: native_maps, warnings: Vec::new() }), None)
+        } else if let Some(root) = paths.map_root.as_deref() {
+            match MapCatalog::discover(root) {
+                Ok(catalog) if !catalog.is_empty() => (Some(catalog), native_error),
+                Ok(catalog) if !catalog.warnings.is_empty() => (None, Some(catalog.warnings.join("; "))),
+                Ok(_) => (None, native_error),
+                Err(error) => (None, Some(error)),
+            }
+        } else {
+            (None, native_error)
         };
         Self {
-            drc_overlay,
-            antenna_overlay,
-            lvs_analysis,
+            drc_overlay: DrcOverlay::load(paths.drc_data, paths.drc_stats),
+            antenna_overlay: AntennaOverlay::load(paths.antenna_data, paths.antenna_stats),
+            lvs_analysis: lvs::LvsAnalysis::load(paths.lvs_data),
             map_catalog,
             map_catalog_error,
+            timing_directory,
         }
     }
 }
@@ -51,6 +86,7 @@ pub(super) struct AnalysisLoader {
 impl AnalysisLoader {
     pub(super) fn start(paths: AnalysisPaths) -> std::io::Result<Option<Self>> {
         if [
+            &paths.manifest,
             &paths.drc_data,
             &paths.drc_stats,
             &paths.antenna_data,
@@ -74,6 +110,18 @@ impl AnalysisLoader {
 }
 
 impl LoadedViewer {
+    pub(super) fn refresh_display_data(&mut self) {
+        (self.analysis_loader, self.analysis_load_error) = self.analysis_paths.start_for(&self.db);
+        self.map_loading = None;
+        self.active_heatmap = None;
+        self.map_catalog = None;
+        self.map_catalog_error = None;
+        self.drc_overlay = None;
+        self.antenna_overlay = None;
+        self.lvs_analysis = None;
+        self.refresh_timing();
+    }
+
     pub(super) fn poll_analysis(&mut self, ctx: &egui::Context) {
         let Some(loader) = &self.analysis_loader else {
             return;
@@ -92,6 +140,9 @@ impl LoadedViewer {
             }
         };
         self.analysis_loader = None;
+        if self.timing.is_none() && self.timing_loading.is_none() {
+            self.attach_timing_feature_dir(analysis.timing_directory);
+        }
         self.drc_overlay = analysis.drc_overlay;
         self.antenna_overlay = analysis.antenna_overlay;
         self.lvs_analysis = analysis.lvs_analysis;
@@ -108,8 +159,8 @@ impl LoadedViewer {
         }
         let default_map = self.map_catalog.as_ref().and_then(|catalog| {
             catalog.default_power_item().or_else(|| {
-                catalog.categories.iter().find(|category| category.id.starts_with("ir_"))
-                    .and_then(|category| category.items.first())
+                catalog.categories.iter().flat_map(|category| &category.items)
+                    .find(|item| item.label.contains("All layers") || item.label == "total power [W]")
                     .map(|item| (item.clone(), None))
             })
         });

@@ -12,6 +12,7 @@ mod dashboard;
 pub(crate) mod data;
 mod events;
 mod focus;
+mod geometry_analysis;
 mod gpu_animation;
 mod gpu_mesh;
 mod index;

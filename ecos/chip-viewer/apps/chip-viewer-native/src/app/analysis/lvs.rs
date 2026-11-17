@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use chipgeom_format::Rect32;
 use eframe::egui;
@@ -74,25 +74,23 @@ struct ParsedLvs {
 impl LvsAnalysis {
     pub(super) fn load(data_path: Option<PathBuf>) -> Option<Self> {
         let data_path = data_path?;
-        match fs::read_to_string(&data_path) {
-            Ok(text) => match parse_lvs_json_text(&text) {
-                Ok(parsed) => Some(Self {
-                    data_path,
-                    run_state: parsed.run_state,
-                    connectivity: parsed.connectivity,
-                    entities: parsed.entities,
-                    groups: parsed.groups,
-                    load_error: None,
-                }),
-                Err(err) => Some(Self::failed(
-                    data_path,
-                    format!("failed to parse LVS analysis: {err}"),
-                )),
-            },
-            Err(err) => Some(Self::failed(
+        let parsed = if data_path.extension().is_some_and(|e| e == "gdisplay") {
+            load_geometry(&data_path)
+        } else {
+            fs::read_to_string(&data_path)
+                .map_err(|e| e.to_string())
+                .and_then(|text| parse_lvs_json_text(&text))
+        };
+        match parsed {
+            Ok(parsed) => Some(Self {
                 data_path,
-                format!("failed to read LVS analysis: {err}"),
-            )),
+                run_state: parsed.run_state,
+                connectivity: parsed.connectivity,
+                entities: parsed.entities,
+                groups: parsed.groups,
+                load_error: None,
+            }),
+            Err(error) => Some(Self::failed(data_path, error)),
         }
     }
 
@@ -395,6 +393,22 @@ fn component_summary(components: &BTreeSet<usize>) -> String {
     }
 }
 
+fn load_geometry(path: &Path) -> Result<ParsedLvs, String> {
+    let load = || -> anyhow::Result<_> {
+        let asset = chipgeom_reader::display::DisplayAsset::open(path)?;
+        anyhow::ensure!(asset.metadata["kind"] == "lvs", "Wrong LVS display kind");
+        let rows = (0..asset.count).map(|i| asset.record::<Value>(i).map_err(|e| e.to_string()));
+        let groups = parse_fault_records(rows).map_err(anyhow::Error::msg)?;
+        Ok(ParsedLvs {
+            run_state: None,
+            connectivity: parse_connectivity(asset.metadata.get("connectivity")),
+            entities: parse_entity_anomalies(asset.metadata.get("entity")),
+            groups,
+        })
+    };
+    load().map_err(|e| e.to_string())
+}
+
 fn parse_lvs_json_text(text: &str) -> Result<ParsedLvs, String> {
     let root: Value = serde_json::from_str(text).map_err(|err| err.to_string())?;
     let run_state = root
@@ -469,6 +483,19 @@ fn parse_entity_anomalies(value: Option<&Value>) -> Vec<LvsEntityAnomaly> {
 }
 
 fn parse_fault_groups(value: Option<&Value>) -> Vec<LvsFaultGroup> {
+    parse_fault_records(
+        value
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .map(|v| Ok(v.clone())),
+    )
+    .unwrap_or_default()
+}
+
+fn parse_fault_records(
+    records: impl Iterator<Item = Result<Value, String>>,
+) -> Result<Vec<LvsFaultGroup>, String> {
     #[derive(Default)]
     struct Accumulator {
         components: BTreeSet<usize>,
@@ -480,7 +507,8 @@ fn parse_fault_groups(value: Option<&Value>) -> Vec<LvsFaultGroup> {
     }
 
     let mut groups = BTreeMap::<(String, String), Accumulator>::new();
-    for violation in value.and_then(Value::as_array).into_iter().flatten() {
+    for violation in records {
+        let violation = violation?;
         let violation_type = violation
             .get("type")
             .and_then(Value::as_str)
@@ -529,7 +557,7 @@ fn parse_fault_groups(value: Option<&Value>) -> Vec<LvsFaultGroup> {
             }
         }
     }
-    groups
+    Ok(groups
         .into_iter()
         .map(|((violation_type, net), group)| LvsFaultGroup {
             violation_type,
@@ -541,7 +569,7 @@ fn parse_fault_groups(value: Option<&Value>) -> Vec<LvsFaultGroup> {
             bbox: group.bbox,
             terminal_examples: group.terminal_examples,
         })
-        .collect()
+        .collect())
 }
 
 fn normalized_rect(lx: i32, ly: i32, hx: i32, hy: i32) -> Rect32 {

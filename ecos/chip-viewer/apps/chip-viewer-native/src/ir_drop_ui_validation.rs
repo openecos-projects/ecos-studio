@@ -49,14 +49,22 @@ impl App for Probe {
             ViewerState::Error(error) => panic!("{error}"),
             ViewerState::Loaded(loaded) => {
                 if !self.selected {
-                    let catalog = loaded.map_catalog.as_ref().expect("IR map catalog");
+                    let Some(catalog) = loaded.map_catalog.as_ref() else {
+                        ctx.request_repaint();
+                        return;
+                    };
                     assert!(catalog.warnings.is_empty(), "{:?}", catalog.warnings);
                     assert_eq!(catalog.categories.len(), 2);
                     let item = catalog.categories[self.sample].items[0].clone();
                     loaded.activate_map_item(&item, None);
-                    assert!(loaded.active_heatmap.as_ref().unwrap().data.is_ir_drop());
+
                     self.selected = true;
                 }
+                let Some(map) = loaded.active_heatmap.as_ref() else {
+                    ctx.request_repaint();
+                    return;
+                };
+                assert!(map.data.is_ir_drop());
                 self.settled += 1;
                 if self.settled > 8 && !self.requested {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
@@ -91,24 +99,26 @@ fn real_ir_standalone_screenshots() {
     let directory = PathBuf::from(std::env::var("ECOS_IR_EVIDENCE").unwrap());
     let map_root = directory.join("native-input");
     std::fs::create_dir_all(&map_root).unwrap();
-    // Adapt legacy structured Replay samples to the new native document envelope.
-    // This is a visual test input; the benchmark workspace is never modified.
-    let units = chipgeom_reader::read_manifest(&manifest)
-        .unwrap()
-        .dbu_per_micron
+    if source["geometry_display"] != true {
+        // Adapt legacy structured Replay samples to the new native document envelope.
+        // This is a visual test input; the benchmark workspace is never modified.
+        let units = chipgeom_reader::read_manifest(&manifest)
+            .unwrap()
+            .dbu_per_micron
+            .unwrap();
+        let views: Vec<_> = source["views"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|v| v["kind"] == "ir")
+            .collect();
+        let document = serde_json::json!({"schema":"ecos.emir.ir.v1","coordinate_unit":"dbu","dbu_per_micron":units,"views":views});
+        std::fs::write(
+            map_root.join("ir_drop.json"),
+            serde_json::to_vec(&document).unwrap(),
+        )
         .unwrap();
-    let views: Vec<_> = source["views"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|v| v["kind"] == "ir")
-        .collect();
-    let document = serde_json::json!({"schema":"ecos.emir.ir.v1","coordinate_unit":"dbu","dbu_per_micron":units,"views":views});
-    std::fs::write(
-        map_root.join("ir_drop.json"),
-        serde_json::to_vec(&document).unwrap(),
-    )
-    .unwrap();
+    }
     let mut options = crate::create_native_options(crate::RenderMode::Gpu, wgpu::Backends::VULKAN);
     options.event_loop_builder = Some(Box::new(|builder| {
         builder.with_any_thread(true);
