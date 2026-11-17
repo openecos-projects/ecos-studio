@@ -328,6 +328,23 @@ describe('ChipViewerService', () => {
     await expect(service.isOpen(request)).resolves.toEqual({ open: false })
   })
 
+  it('does not launch or report success when the development Rust build fails', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { execFile, service, spawnProcess } = createService({
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
+    })
+    vi.mocked(execFile).mockRejectedValueOnce(new Error('rustc compilation failed'))
+
+    await expect(
+      service.open({
+        projectPath: PROJECT_ROOT,
+        step: STEP_NAME,
+      }),
+    ).rejects.toThrow('Chip Viewer development build failed: rustc compilation failed')
+    expect(execFile).toHaveBeenCalledWith(devBinaries.viewer, ['--build-only'])
+    expect(spawnProcess).not.toHaveBeenCalled()
+  })
+
   it('rejects unsupported viewer modes before spawning the native process', async () => {
     const devBinaries = devChipViewerPaths()
     const { service, spawnProcess } = createService({
@@ -940,7 +957,7 @@ describe('ChipViewerService', () => {
       step: STEP_NAME,
     })
 
-    expect(execFile).not.toHaveBeenCalled()
+    expect(execFile).not.toHaveBeenCalledWith(devBinaries.ecc, expect.anything())
     expect(spawnProcess).toHaveBeenCalledWith(
       devBinaries.viewer,
       ['--manifest', GEOMETRY_MANIFEST, '--mode', 'view'],
@@ -966,7 +983,7 @@ describe('ChipViewerService', () => {
       step: 'defview',
     })
 
-    expect(execFile).not.toHaveBeenCalled()
+    expect(execFile).not.toHaveBeenCalledWith(devBinaries.ecc, expect.anything())
     expect(spawnProcess).toHaveBeenCalledWith(
       devBinaries.viewer,
       ['--manifest', DEF_VIEW_MANIFEST, '--mode', 'view'],

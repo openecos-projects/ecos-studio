@@ -130,6 +130,10 @@ const defaultSpawnProcess: SpawnProcess = (file, args, options) =>
 interface ChipViewerBinaries {
   eccPath: string
   viewerPath: string
+  developmentBuild?: {
+    file: string
+    args: string[]
+  }
 }
 
 interface LayoutEditRuntime {
@@ -763,6 +767,7 @@ export class ChipViewerService {
       : await this.resolveSnapshotInputs(projectPath, request.step)
     await this.requireSavedGeometry(snapshotInputs, request.step)
     const binaries = this.resolveBinaries()
+    await this.buildDevelopmentViewer(binaries)
 
     let viewerManifestPath = snapshotInputs.manifestPath
     let editCommandDirectory: string | undefined
@@ -1987,6 +1992,17 @@ export class ChipViewerService {
     return this.resolveDevBinaries()
   }
 
+  private async buildDevelopmentViewer(binaries: ChipViewerBinaries): Promise<void> {
+    if (!binaries.developmentBuild) return
+
+    try {
+      await this.execFile(binaries.developmentBuild.file, binaries.developmentBuild.args)
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      throw new Error(`Chip Viewer development build failed: ${detail}`)
+    }
+  }
+
   private resolvePackagedBinaries(): PackagedBinaryResolution {
     const binaryDir = this.resourcesPath ? join(this.resourcesPath, 'binaries') : ''
     const eccPath = join(binaryDir, executableName('ecc', this.platform))
@@ -2057,6 +2073,10 @@ export class ChipViewerService {
     return {
       eccPath: eccWrapperPath,
       viewerPath: viewerWrapperPath,
+      developmentBuild: {
+        file: viewerWrapperPath,
+        args: ['--build-only'],
+      },
     }
   }
 

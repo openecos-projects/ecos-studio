@@ -42,13 +42,24 @@ describe('development wrappers', () => {
     expect(env.PATH).toBe(`${runtimeBin}:/usr/bin`)
     expect(readFileSync(eccShimPath, 'utf8')).toContain(`exec '${eccWrapperPath}' "$@"`)
 
-    const chipExecFile = vi.fn(async () => ({ stderr: '', stdout: '' }))
+    const launchOrder: string[] = []
+    let finishBuild: (() => void) | undefined
+    const chipExecFile = vi.fn(async () => {
+      launchOrder.push('build')
+      await new Promise<void>((resolve) => {
+        finishBuild = resolve
+      })
+      return { stderr: '', stdout: '' }
+    })
     const chipViewerChild = new EventEmitter() as EventEmitter & {
       unref: () => void
     }
     const chipUnref = vi.fn(() => undefined)
     chipViewerChild.unref = chipUnref
-    const chipSpawnProcess = vi.fn(() => chipViewerChild)
+    const chipSpawnProcess = vi.fn(() => {
+      launchOrder.push('spawn')
+      return chipViewerChild
+    })
     const chipDefPath = '/project/Floorplan_ecc/output/gcd_Floorplan.def.gz'
     const chipDbPath = '/project/Floorplan_ecc/output/gcd_Floorplan_db'
     const chipGdsPath = '/project/Floorplan_ecc/output/gcd_Floorplan.gds'
@@ -121,12 +132,19 @@ describe('development wrappers', () => {
       },
     })
 
-    await chipService.open({
+    const opening = chipService.open({
       projectPath: '/project',
       step: 'Floorplan',
     })
 
-    expect(chipExecFile).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(chipExecFile).toHaveBeenCalledOnce(), { timeout: 100 })
+    expect(chipExecFile).toHaveBeenCalledWith(chipViewerWrapperPath, ['--build-only'])
+    expect(chipSpawnProcess).not.toHaveBeenCalled()
+
+    finishBuild?.()
+    await opening
+
+    expect(launchOrder).toEqual(['build', 'spawn'])
     expect(chipSpawnProcess).toHaveBeenCalledWith(
       chipViewerWrapperPath,
       ['--manifest', chipManifestPath, '--mode', 'view'],

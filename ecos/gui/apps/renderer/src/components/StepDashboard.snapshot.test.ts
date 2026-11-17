@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceStepDetail } from '@ecos-studio/shared'
@@ -9,6 +9,12 @@ const testState = vi.hoisted(() => ({
   dashboard: null as Record<string, unknown> | null,
   openReport: vi.fn(),
   chipViewerOpen: vi.fn(),
+  beginChipViewerOpening: vi.fn(),
+  openingStatusHandle: {
+    complete: vi.fn(),
+    finish: vi.fn(),
+    update: vi.fn(),
+  },
   showToast: vi.fn(),
 }))
 
@@ -48,6 +54,9 @@ vi.mock('@/composables/useWorkspace', () => ({
 }))
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => ({ chipViewer: { open: testState.chipViewerOpen } }),
+}))
+vi.mock('@/composables/chipViewerOpeningStatus', () => ({
+  beginChipViewerOpening: testState.beginChipViewerOpening,
 }))
 
 import StepDashboard from './StepDashboard.vue'
@@ -111,6 +120,11 @@ describe('StepDashboard committed Snapshot rendering', () => {
     testState.openReport.mockReset()
     testState.chipViewerOpen.mockReset()
     testState.chipViewerOpen.mockResolvedValue({})
+    testState.beginChipViewerOpening.mockReset()
+    testState.beginChipViewerOpening.mockReturnValue(testState.openingStatusHandle)
+    testState.openingStatusHandle.complete.mockReset()
+    testState.openingStatusHandle.finish.mockReset()
+    testState.openingStatusHandle.update.mockReset()
     testState.showToast.mockReset()
     testState.dashboard = {
       currentStep: ref('Place'),
@@ -149,6 +163,42 @@ describe('StepDashboard committed Snapshot rendering', () => {
     expect(testState.openReport).toHaveBeenCalledWith(
       expect.objectContaining({ artifactId: 'report-place' }),
     )
+  })
+
+  it('shows launch status while the native viewer startup request is pending', async () => {
+    let resolveOpen: ((result: object) => void) | undefined
+    testState.chipViewerOpen.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveOpen = resolve
+        }),
+    )
+    const wrapper = mount(StepDashboard, {
+      global: {
+        stubs: {
+          Dialog: { template: '<div><slot /></div>' },
+          StatusPieChart: true,
+          StepConfigPanel: true,
+          TimingAnalysisDialog: true,
+          TimingCornerTable: true,
+          TimingKpis: true,
+          StepDataSummaryDialog: true,
+          StepSnapshotPanel: true,
+        },
+      },
+    })
+
+    await wrapper.get('[aria-label="Open Chip Viewer"]').trigger('click')
+
+    expect(testState.beginChipViewerOpening).toHaveBeenCalledWith(
+      'Opening saved Chip Viewer layout...',
+      'place',
+    )
+    expect(testState.openingStatusHandle.finish).not.toHaveBeenCalled()
+    resolveOpen?.({})
+    await flushPromises()
+    expect(testState.openingStatusHandle.complete).toHaveBeenCalledOnce()
+    wrapper.unmount()
   })
 
   it('keeps scrollable data highlights aligned to the top', () => {

@@ -49,6 +49,7 @@
 
     <!-- 全局 Toast 通知 -->
     <Toast position="top-right" class="app-toast" />
+    <ChipViewerOpeningStatus />
 
     <!-- 全局新建工程向导 -->
     <WorkspaceWizard
@@ -281,6 +282,7 @@ import UserGuidePanel from '@/components/UserGuidePanel.vue'
 import StatusBar from '@/components/StatusBar.vue'
 import ECOSTerminal from '@/components/ECOSTerminal.vue'
 import AboutDialog from '@/components/AboutDialog.vue'
+import ChipViewerOpeningStatus from '@/components/ChipViewerOpeningStatus.vue'
 import SignoffPackageReviewDialog from '@/components/SignoffPackageReviewDialog.vue'
 import DesignReportExportDialog from '@/components/DesignReportExportDialog.vue'
 import Toast from 'primevue/toast'
