@@ -209,12 +209,11 @@ fn prepare(
     let indexed = std::time::Instant::now();
     let logic = crate::replay::logic::load(record)?;
     let results = request.results.then(|| {
-        let mut maps = crate::replay::maps::ReplayMaps::default();
-        match record.map_root() {
-            Ok(Some(root)) => maps = crate::replay::maps::ReplayMaps::open(&root),
-            Err(error) => maps.error = error.to_string(),
-            _ => {}
-        }
+        let maps = crate::replay::maps::ReplayMaps::from_record(record).unwrap_or_else(|error| {
+            let mut maps = crate::replay::maps::ReplayMaps::default();
+            maps.error = error.to_string();
+            maps
+        });
         let mut analysis = crate::replay::analysis::ReplayAnalysis::open(record);
         analysis.resolve(&record.scene);
         analysis.resolve_routes(record);

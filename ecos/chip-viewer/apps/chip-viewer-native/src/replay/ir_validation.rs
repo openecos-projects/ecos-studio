@@ -170,3 +170,20 @@ fn real_ir_replay_screenshots() {
     )
     .unwrap();
 }
+
+#[test]
+#[ignore = "requires ECOS_REPLAY_TEST_CATALOG with native geometry analyses"]
+fn real_geometry_catalog_duration_matches_decoded_views() {
+    let catalog: Catalog = read(Path::new(
+        &std::env::var("ECOS_REPLAY_TEST_CATALOG").unwrap(),
+    ))
+    .unwrap();
+    let step = catalog.steps.iter().find(|s| s.name == "emir").unwrap();
+    let record = Recording::open(&catalog.workspace, step.manifest.as_ref().unwrap()).unwrap();
+    let analysis = analysis::ReplayAnalysis::open(&record);
+    assert!(analysis.error.is_empty(), "{}", analysis.error);
+    assert_eq!(
+        analysis_data::duration(&record).unwrap(),
+        analysis.duration()
+    );
+}

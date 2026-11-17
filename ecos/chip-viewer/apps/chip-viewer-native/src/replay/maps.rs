@@ -1,11 +1,12 @@
 use crate::map_data::{ColormapMode, HeatmapData, MapCatalog};
+use crate::map_source::MapSource;
 use egui::{Color32, Painter, Pos2, Rect};
 use std::path::{Path, PathBuf};
 
 #[derive(Default)]
 pub struct ReplayMaps {
     root: PathBuf,
-    items: Vec<(String, PathBuf, PathBuf)>,
+    items: Vec<(String, MapSource, Option<PathBuf>)>,
     pub selected: Option<usize>,
     active: Option<std::sync::Arc<HeatmapData>>,
     loader: Option<crate::replay::map_loader::MapLoader>,
@@ -33,11 +34,9 @@ impl ReplayMaps {
                 for category in catalog.categories {
                     if let Some(layout) = category.layout_path {
                         for item in category.items {
-                            result.items.push((
-                                item.label,
-                                item.source.path().to_path_buf(),
-                                layout.clone(),
-                            ));
+                            result
+                                .items
+                                .push((item.label, item.source, Some(layout.clone())));
                         }
                     }
                 }
@@ -45,6 +44,32 @@ impl ReplayMaps {
             Err(error) => result.error = error,
         }
         result
+    }
+
+    pub fn from_record(record: &super::data::Recording) -> anyhow::Result<Self> {
+        if let Some(manifest) = record.final_geometry_path()? {
+            let categories = crate::geometry_maps::discover(&manifest)?;
+            let mut result = Self {
+                root: manifest.parent().unwrap().to_path_buf(),
+                ..Self::default()
+            };
+            for category in categories {
+                for item in category.items {
+                    if let MapSource::Geometry(path) = &item.source {
+                        let asset = chipgeom_reader::display::DisplayAsset::open(path)?;
+                        if asset.metadata["kind"] == "map" {
+                            result.items.push((item.label, item.source, None));
+                        }
+                    }
+                }
+            }
+            if !result.items.is_empty() {
+                return Ok(result);
+            }
+        }
+        Ok(record
+            .map_root()?
+            .map_or_else(Self::default, |root| Self::open(&root)))
     }
 
     pub fn len(&self) -> usize {

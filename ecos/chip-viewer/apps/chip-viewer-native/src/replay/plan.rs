@@ -243,12 +243,9 @@ pub fn prepare(catalog: &Catalog) -> Receiver<Vec<StepPlan>> {
                 };
                 let result = (|| -> Result<StepPlan> {
                     let recording = Recording::open(&workspace, &path)?;
-                    let maps = recording
-                        .map_root()?
-                        .map_or(0, |root| ReplayMaps::open(&root).len());
+                    let maps = ReplayMaps::from_record(&recording)?.len();
                     let mut plan = StepPlan::build(&recording, maps)?;
-                    plan.seconds +=
-                        crate::replay::analysis::ReplayAnalysis::open(&recording).duration();
+                    plan.seconds += crate::replay::analysis_data::duration(&recording)?;
                     Ok(plan)
                 })();
                 result.unwrap_or_else(|error| StepPlan::unavailable(error.to_string()))

@@ -34,6 +34,7 @@ use crate::macro_staging::{
 use crate::map_data::{ColormapMode, HeatmapData, MapCatalog, MapItem};
 
 mod clock_tree;
+mod display_data;
 mod gpu_overview;
 mod gpu_tile_worker;
 mod label_layout;
@@ -260,8 +261,13 @@ struct LoadedViewer {
     selected_lvs_group: Option<usize>,
     show_all_lvs: bool,
     timing: Option<timing::TimingPanelState>,
+    timing_loading: Option<Receiver<timing::TimingPanelState>>,
     clock_tree: Option<crate::clock_tree::ClockTreePanel>,
     map_catalog: Option<MapCatalog>,
+    display_loading: Option<Receiver<display_data::Analyses>>,
+    display_inputs: display_data::Inputs,
+    map_loading: Option<Receiver<Result<ActiveHeatmap, String>>>,
+    map_requests: Option<mpsc::Sender<display_data::MapRequest>>,
     map_catalog_error: Option<String>,
     analysis_tab: AnalysisTab,
     expanded_map_categories: BTreeSet<String>,
@@ -1735,10 +1741,7 @@ impl DrcOverlay {
         let mut counts = BTreeMap::new();
 
         if let Some(path) = data_path.as_deref() {
-            match fs::read_to_string(path)
-                .map_err(|err| err.to_string())
-                .and_then(|text| parse_drc_json_text(&text))
-            {
+            match display_data::drc(path) {
                 Ok((json_violations, json_counts)) => {
                     violations = json_violations;
                     counts = json_counts;
@@ -1983,10 +1986,7 @@ impl AntennaOverlay {
         let mut counts = BTreeMap::new();
 
         if let Some(path) = data_path.as_deref() {
-            match fs::read_to_string(path)
-                .map_err(|err| err.to_string())
-                .and_then(|text| parse_antenna_json_text(&text))
-            {
+            match display_data::antenna(path) {
                 Ok((json_violations, json_counts)) => {
                     violations = json_violations;
                     counts = json_counts;
@@ -2290,22 +2290,24 @@ impl LoadedViewer {
             log::warn!("could not start unrouted-net guide prewarm: {err}");
         }
         let layers = layer_ui_states_from_summaries(layer_catalog, &BTreeMap::new(), color_theme);
-        let drc_data_path = db.snapshot().manifest().drc.clone().or(drc_data_path);
-        let drc_overlay = DrcOverlay::load(drc_data_path, drc_statis_path);
-        let antenna_overlay = AntennaOverlay::load(antenna_data_path, antenna_statis_path);
-        let lvs_analysis = lvs::LvsAnalysis::load(lvs_data_path);
-        let clock_tree = crate::clock_tree::ClockTreePanel::new(std::sync::Arc::clone(&db));
-        let (map_catalog, map_catalog_error) = match map_root_path.as_deref() {
-            Some(root) => match MapCatalog::discover(root) {
-                Ok(catalog) if !catalog.is_empty() => (Some(catalog), None),
-                Ok(catalog) if !catalog.warnings.is_empty() => {
-                    (None, Some(catalog.warnings.join("; ")))
-                }
-                Ok(_) => (None, None),
-                Err(err) => (None, Some(err)),
-            },
-            None => (None, None),
+        let display_inputs = display_data::Inputs {
+            map_root: map_root_path,
+            drc: drc_data_path,
+            drc_stats: drc_statis_path,
+            antenna: antenna_data_path,
+            antenna_stats: antenna_statis_path,
+            lvs: lvs_data_path,
         };
+        let display_loading = Some(display_data::prepare(
+            db.snapshot().manifest().path.clone(),
+            display_inputs.clone(),
+        ));
+        let drc_overlay = None;
+        let antenna_overlay = None;
+        let lvs_analysis = None;
+        let map_catalog: Option<MapCatalog> = None;
+        let map_catalog_error = None;
+        let clock_tree = crate::clock_tree::ClockTreePanel::new(std::sync::Arc::clone(&db));
         let analysis_tab = if drc_overlay.is_some() {
             AnalysisTab::Drc
         } else if lvs_analysis.is_some() {
@@ -2402,8 +2404,13 @@ impl LoadedViewer {
             selected_lvs_group: None,
             show_all_lvs: false,
             timing: None,
+            timing_loading: None,
             clock_tree,
             map_catalog,
+            display_loading,
+            display_inputs,
+            map_loading: None,
+            map_requests: None,
             map_catalog_error,
             analysis_tab,
             expanded_map_categories,
@@ -2709,6 +2716,10 @@ impl LoadedViewer {
             }
         });
 
+        if self.display_loading.is_some() || self.map_loading.is_some() {
+            ui.spinner();
+            ui.label("Loading analysis…");
+        }
         if let Some(err) = &self.map_catalog_error {
             ui.add_space(6.0);
             ui.colored_label(ecos_warning(), err);
@@ -2789,7 +2800,7 @@ impl LoadedViewer {
                     .show(ui, |ui| {
                         for item in &category.items {
                             let available = category.layout_path.is_some()
-                                || matches!(item.source, crate::map_source::MapSource::Ir { .. });
+                                || !matches!(item.source, crate::map_source::MapSource::Csv(_));
                             let selected =
                                 self.selected_map_item.as_ref() == Some(&item.source.key());
                             ui.horizontal(|ui| {
@@ -2841,11 +2852,17 @@ impl LoadedViewer {
         self.map_item_error = None;
         self.selected_map_bbox = None;
 
-        match item.source.load(layout_path) {
-            Ok(data) => {
-                self.active_heatmap = Some(ActiveHeatmap::new(item.label.clone(), data));
-            }
-            Err(err) => self.map_item_error = Some(err),
+        let requests = self
+            .map_requests
+            .get_or_insert_with(display_data::map_worker);
+        let (sender, receiver) = mpsc::channel();
+        if requests
+            .send((item.clone(), layout_path.map(Path::to_path_buf), sender))
+            .is_ok()
+        {
+            self.map_loading = Some(receiver);
+        } else {
+            self.map_item_error = Some("Map loader stopped".into());
         }
     }
 
@@ -8250,6 +8267,7 @@ impl LoadedViewer {
         self.net_guide_counts_applied = false;
         self.layers = layer_ui_states_from_summaries(layer_catalog, &visibility, self.color_theme);
         self.db = db;
+        self.refresh_display_data();
         self.gpu_tile_worker = GpuTileWorker::new(std::sync::Arc::clone(&self.db));
         let guide_db = std::sync::Arc::clone(&self.db);
         if let Err(err) = thread::Builder::new()
@@ -8853,6 +8871,8 @@ impl eframe::App for ChipViewerApp {
         let close_requested = ctx.input(|input| input.viewport().close_requested());
         let mut close_after_session_action = false;
         if let ViewerState::Loaded(loaded) = &mut self.state {
+            loaded.poll_display(ctx);
+            loaded.poll_timing(ctx);
             if !loaded.apply_net_guide_counts_if_ready() {
                 ctx.request_repaint_after(Duration::from_millis(50));
             }

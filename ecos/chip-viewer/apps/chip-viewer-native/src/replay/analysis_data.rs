@@ -10,6 +10,9 @@ pub fn load(record: &Recording) -> Result<Analysis> {
     let path = record.asset(path)?;
     let mut data: Analysis = read(&path)?;
     expand_references(&mut data)?;
+    if data.geometry_display {
+        super::geometry_analysis::append(record, &mut data)?;
+    }
     Ok(data)
 }
 
@@ -62,5 +65,17 @@ mod tests {
         assert_eq!(data.views[0].items[1].instances, ["u"]);
         data.views[0].items[0].net_ref = Some(1);
         assert!(expand_references(&mut data).is_err());
+    }
+}
+
+pub fn duration(record: &Recording) -> Result<f64> {
+    let Some(path) = &record.manifest.analysis else {
+        return Ok(0.0);
+    };
+    let index: Analysis = read(&record.asset(path)?)?;
+    if index.geometry_display {
+        super::geometry_analysis::duration(record)
+    } else {
+        Ok(super::analysis::ReplayAnalysis::open(record).duration())
     }
 }

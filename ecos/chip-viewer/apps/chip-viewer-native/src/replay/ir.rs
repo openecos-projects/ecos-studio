@@ -10,7 +10,7 @@ pub struct IrOverlays {
 }
 
 impl IrOverlays {
-    pub fn load(data: &Analysis) -> anyhow::Result<Self> {
+    pub fn load(data: &Analysis, record: &super::data::Recording) -> anyhow::Result<Self> {
         let mut maps = BTreeMap::new();
         for (index, view) in data
             .views
@@ -18,7 +18,34 @@ impl IrOverlays {
             .enumerate()
             .filter(|(_, v)| v.kind == "ir")
         {
-            maps.insert(index, IrDrop::from_view(view)?);
+            let map = if let Some(network) = view.summary["geometry_network"].as_str() {
+                let path = record
+                    .final_geometry_path()?
+                    .ok_or_else(|| anyhow::anyhow!("Missing IR geometry"))?;
+                let assets = crate::geometry_maps::assets(&path)?;
+                let mut all = None;
+                let mut layers = BTreeMap::new();
+                for (path, asset) in assets {
+                    if asset.metadata["kind"] != "ir" || asset.metadata["network"] != network {
+                        continue;
+                    }
+                    let data = std::sync::Arc::new(crate::geometry_maps::load(&path)?);
+                    match asset.metadata["layer"].as_str().unwrap_or("") {
+                        "" => all = Some(data),
+                        name => {
+                            layers.insert(name.to_owned(), data);
+                        }
+                    }
+                }
+                IrDrop {
+                    all: all.ok_or_else(|| anyhow::anyhow!("Missing IR all-layer grid"))?,
+                    layers,
+                    samples: view.summary["nodes"].as_u64().unwrap_or(0) as usize,
+                }
+            } else {
+                IrDrop::from_view(view)?
+            };
+            maps.insert(index, map);
         }
         Ok(Self {
             maps,

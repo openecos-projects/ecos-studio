@@ -5,6 +5,8 @@ use serde::Deserialize;
 pub struct Analysis {
     pub schema: String,
     #[serde(default)]
+    pub geometry_display: bool,
+    #[serde(default)]
     pub nets: Vec<String>,
     #[serde(default)]
     pub instances: Vec<String>,

@@ -3,6 +3,7 @@ mod camera3d;
 mod canvas_gpu;
 mod canvas_gpu3d;
 mod clock_tree;
+mod geometry_maps;
 mod instance_visibility;
 mod ir_drop;
 mod macro_interaction;
