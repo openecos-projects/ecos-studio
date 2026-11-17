@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::map_source::{MapKey, MapSource};
 use chipgeom_format::{Point32, Rect32};
 use serde::Deserialize;
 
@@ -22,13 +23,14 @@ pub struct MapCategory {
 #[derive(Clone, Debug)]
 pub struct MapItem {
     pub label: String,
-    pub csv_path: PathBuf,
+    pub source: MapSource,
 }
 
 #[derive(Clone, Debug)]
 pub struct HeatmapData {
     values: Vec<Vec<Option<f64>>>,
     instance_power: bool,
+    ir_drop: bool,
     layout: BTreeMap<(usize, usize), Rect32>,
     min: f64,
     max: f64,
@@ -67,6 +69,10 @@ impl MapCatalog {
 
         let mut categories = Vec::new();
         let mut warnings = Vec::new();
+        match crate::map_source::discover_ir(root) {
+            Ok(ir) => categories.extend(ir),
+            Err(error) => warnings.push(error),
+        }
         for (id, directory) in category_directories {
             match discover_category(&id, &directory) {
                 Ok(category) if !category.items.is_empty() => categories.push(category),
@@ -83,7 +89,8 @@ impl MapCatalog {
     pub fn default_power_item(&self) -> Option<(MapItem, Option<PathBuf>)> {
         let category = self.categories.iter().find(|c| c.id == "power_map")?;
         let item = category.items.iter().find(|i| {
-            i.csv_path
+            i.source
+                .path()
                 .file_name()
                 .is_some_and(|n| n == "total_power_w.csv")
         })?;
@@ -101,10 +108,10 @@ impl MapCatalog {
         self.item_count() == 0
     }
 
-    pub fn find_item_by_csv(&self, path: &Path) -> Option<(&MapItem, Option<&Path>)> {
+    pub fn find_item(&self, key: &MapKey) -> Option<(&MapItem, Option<&Path>)> {
         for category in &self.categories {
             for item in &category.items {
-                if item.csv_path == path {
+                if &item.source.key() == key {
                     return Some((item, category.layout_path.as_deref()));
                 }
             }
@@ -133,10 +140,38 @@ impl HeatmapData {
         Ok(Self {
             values,
             instance_power,
+            ir_drop: false,
             layout,
             min,
             max,
         })
+    }
+
+    pub fn ir_drop(
+        values: Vec<Vec<Option<f64>>>,
+        layout: BTreeMap<(usize, usize), Rect32>,
+        maximum: f64,
+    ) -> Self {
+        Self {
+            values,
+            layout,
+            min: 0.0,
+            max: maximum,
+            instance_power: false,
+            ir_drop: true,
+        }
+    }
+
+    pub fn is_ir_drop(&self) -> bool {
+        self.ir_drop
+    }
+
+    pub fn default_colormap(&self) -> ColormapMode {
+        if self.ir_drop {
+            ColormapMode::Inferno
+        } else {
+            ColormapMode::default()
+        }
     }
 
     pub fn is_instance_power(&self) -> bool {
@@ -175,7 +210,7 @@ impl HeatmapData {
         let value = self.value(row, column)?;
         let range = self.max - self.min;
         if range.abs() <= f64::EPSILON {
-            return Some(0.5);
+            return Some(if self.ir_drop { 0.0 } else { 0.5 });
         }
         Some(((value - self.min) / range).clamp(0.0, 1.0) as f32)
     }
@@ -364,6 +399,9 @@ impl HeatmapData {
     /// larger step of the two neighbor directions; a zero result means the
     /// pitch is unknown and callers must keep every cell.
     pub fn core_pitch(&self) -> Option<(i32, i32)> {
+        if self.ir_drop {
+            return None;
+        } // IR grids have no synthetic placement boundary ring.
         let rows = self.rows();
         let cols = self.columns();
         if rows < 3 || cols < 3 {
@@ -421,6 +459,9 @@ impl HeatmapData {
     pub fn cell_at_world_point(&self, point: Point32) -> Option<(usize, usize)> {
         let pitch = self.core_pitch();
         for ((row, col), bbox) in &self.layout {
+            if self.ir_drop && (point.x == bbox.hx || point.y == bbox.hy) {
+                continue;
+            }
             if point.x >= bbox.lx && point.x <= bbox.hx && point.y >= bbox.ly && point.y <= bbox.hy
             {
                 if let Some((px, py)) = pitch {
@@ -445,6 +486,7 @@ pub enum ColormapMode {
     Turbo,
     Viridis,
     Plasma,
+    Inferno,
 }
 
 impl ColormapMode {
@@ -453,6 +495,7 @@ impl ColormapMode {
             Self::Turbo => "Turbo",
             Self::Viridis => "Viridis",
             Self::Plasma => "Plasma",
+            Self::Inferno => "Inferno",
         }
     }
 
@@ -462,6 +505,7 @@ impl ColormapMode {
             Self::Turbo => colormap_turbo(t),
             Self::Viridis => colormap_viridis(t),
             Self::Plasma => colormap_plasma(t),
+            Self::Inferno => colormap_inferno(t),
         };
         [
             (r.clamp(0.0, 1.0) * 255.0) as u8,
@@ -486,6 +530,26 @@ fn colormap_viridis(x: f32) -> (f32, f32, f32) {
     let g = 0.004 + x * (1.385 + x * (-0.354 - x * 0.035));
     let b = 0.329 + x * (1.393 + x * (-2.684 + x * 1.962));
     (r, g, b)
+}
+
+fn colormap_inferno(x: f32) -> (f32, f32, f32) {
+    const STOPS: [[f32; 3]; 9] = [
+        [0., 0., 4.],
+        [31., 12., 72.],
+        [85., 15., 109.],
+        [136., 34., 106.],
+        [186., 54., 85.],
+        [227., 89., 51.],
+        [249., 140., 10.],
+        [249., 201., 50.],
+        [252., 255., 164.],
+    ];
+    let position = x * 8.0;
+    let index = (position as usize).min(7);
+    let t = position - index as f32;
+    let color: [f32; 3] =
+        std::array::from_fn(|c| (STOPS[index][c] * (1.0 - t) + STOPS[index + 1][c] * t) / 255.0);
+    (color[0], color[1], color[2])
 }
 
 fn colormap_plasma(x: f32) -> (f32, f32, f32) {
@@ -529,7 +593,7 @@ fn discover_category(id: &str, directory: &Path) -> Result<MapCategory, String> 
                 } else {
                     humanize_identifier(&stem)
                 },
-                csv_path,
+                source: MapSource::Csv(csv_path),
             })
         })
         .collect();
@@ -680,7 +744,7 @@ mod tests {
         let catalog = MapCatalog::discover(&map_root).unwrap();
         let (item, layout) = catalog.default_power_item().unwrap();
         assert_eq!(item.label, "total power [W]");
-        let data = HeatmapData::load(&item.csv_path, &layout.unwrap()).unwrap();
+        let data = HeatmapData::load(item.source.path(), &layout.unwrap()).unwrap();
         assert!(data.is_instance_power());
         assert_eq!(data.value(1, 0), Some(0.02));
         assert_eq!(
@@ -716,7 +780,7 @@ mod tests {
         assert_eq!(catalog.categories[0].label, "DENSITY");
         assert_eq!(catalog.categories[0].items.len(), 1);
         assert_eq!(
-            catalog.categories[0].items[0].csv_path,
+            catalog.categories[0].items[0].source.path(),
             density.join("place_density.csv")
         );
         fs::remove_dir_all(root).unwrap();
@@ -843,6 +907,7 @@ mod tests {
             .collect::<BTreeMap<_, _>>();
         let zero_x = HeatmapData {
             instance_power: false,
+            ir_drop: false,
             values: vec![vec![Some(1.0); 3]; 3],
             layout: zero_x_layout,
             min: 1.0,

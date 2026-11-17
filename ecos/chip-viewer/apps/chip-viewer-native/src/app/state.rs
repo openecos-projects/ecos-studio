@@ -218,7 +218,7 @@ struct LoadedViewer {
     map_catalog_error: Option<String>,
     analysis_tab: AnalysisTab,
     expanded_map_categories: BTreeSet<String>,
-    selected_map_item: Option<PathBuf>,
+    selected_map_item: Option<crate::map_source::MapKey>,
     previous_map_item: Option<(crate::map_data::MapItem, Option<PathBuf>)>,
     active_heatmap: Option<ActiveHeatmap>,
     heatmap_composition: heatmap_composition::HeatmapComposition,
@@ -385,7 +385,7 @@ impl ActiveHeatmap {
     }
 
     fn new(title: String, data: HeatmapData) -> Self {
-        let colormap_mode = ColormapMode::default();
+        let colormap_mode = data.default_colormap();
         let threshold = 0.0;
         let invert_threshold = false;
         Self {

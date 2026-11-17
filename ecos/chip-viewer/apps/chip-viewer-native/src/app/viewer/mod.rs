@@ -516,13 +516,18 @@ impl LoadedViewer {
                         .strong()
                         .color(ecos_accent()),
                 );
-                ui.horizontal(|ui| {
+                if heatmap.data.is_ir_drop() {
+                    ui.small("Static IR · maximum sample per cell · mV");
+                    ui.small("Empty cells have no samples");
+                }
+                ui.horizontal_wrapped(|ui| {
                     ui.label("Colormap:");
                     let mut current_mode = heatmap.colormap_mode;
                     for mode in [
                         ColormapMode::Turbo,
                         ColormapMode::Viridis,
                         ColormapMode::Plasma,
+                        ColormapMode::Inferno,
                     ] {
                         if ui
                             .selectable_label(current_mode == mode, mode.label())
@@ -556,8 +561,10 @@ impl LoadedViewer {
                     .default_open(default_open)
                     .show(ui, |ui| {
                         for item in &category.items {
-                            let available = category.layout_path.is_some();
-                            let selected = self.selected_map_item.as_ref() == Some(&item.csv_path);
+                            let available = category.layout_path.is_some()
+                                || matches!(item.source, crate::map_source::MapSource::Ir { .. });
+                            let selected =
+                                self.selected_map_item.as_ref() == Some(&item.source.key());
                             ui.horizontal(|ui| {
                                 let button_width = ui.available_width().max(80.0);
                                 let response = ui.add_enabled(
@@ -573,7 +580,7 @@ impl LoadedViewer {
                                 );
                                 let response = if available {
                                     response
-                                        .on_hover_text(format!("Open {}", item.csv_path.display()))
+                                        .on_hover_text(format!("Open {}", item.source.path().display()))
                                 } else {
                                     response.on_disabled_hover_text("layout.csv is missing")
                                 };
@@ -590,26 +597,22 @@ impl LoadedViewer {
     }
 
     pub(super) fn activate_map_item(&mut self, item: &MapItem, layout_path: Option<&Path>) {
-        if let Some(current_csv) = &self.selected_map_item {
-            if current_csv != &item.csv_path {
+        if let Some(current_key) = &self.selected_map_item {
+            if current_key != &item.source.key() {
                 if let Some(catalog) = &self.map_catalog {
-                    if let Some((curr_item, curr_layout)) = catalog.find_item_by_csv(current_csv) {
+                    if let Some((curr_item, curr_layout)) = catalog.find_item(current_key) {
                         self.previous_map_item =
                             Some((curr_item.clone(), curr_layout.map(|p| p.to_path_buf())));
                     }
                 }
             }
         }
-        self.selected_map_item = Some(item.csv_path.clone());
+        self.selected_map_item = Some(item.source.key());
         self.active_heatmap = None;
         self.map_item_error = None;
         self.selected_map_bbox = None;
 
-        let Some(layout_path) = layout_path else {
-            self.map_item_error = Some(format!("layout.csv is missing for {}", item.label));
-            return;
-        };
-        match HeatmapData::load(&item.csv_path, layout_path) {
+        match item.source.load(layout_path) {
             Ok(data) => {
                 self.active_heatmap = Some(ActiveHeatmap::new(item.label.clone(), data));
             }

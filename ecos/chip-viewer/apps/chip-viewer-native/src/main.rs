@@ -7,6 +7,7 @@ mod canvas_gpu;
 mod canvas_gpu3d;
 mod clock_tree;
 mod instance_visibility;
+mod ir_drop;
 #[path = "macros/macro_interaction.rs"]
 mod macro_interaction;
 #[path = "macros/macro_ops.rs"]
@@ -18,35 +19,11 @@ mod macro_staging;
 #[path = "macros/macro_toolbar.rs"]
 mod macro_toolbar;
 mod map_data;
+mod map_source;
 #[path = "render/nav3d.rs"]
 mod nav3d;
 mod power_map;
 mod replay;
-mod replay_analysis;
-mod replay_batch;
-mod replay_cache;
-mod replay_camera_plan;
-mod replay_checklist;
-mod replay_clock;
-mod replay_data;
-mod replay_events;
-mod replay_gpu_animation;
-mod replay_gpu_mesh;
-mod replay_index;
-mod replay_integrity;
-mod replay_loader;
-mod replay_logic;
-mod replay_map_loader;
-mod replay_maps;
-mod replay_metrics;
-mod replay_motion;
-mod replay_plan;
-mod replay_reveal;
-mod replay_route;
-mod replay_scene3d;
-mod replay_timing;
-#[cfg(test)]
-mod replay_validation_tests;
 mod timing;
 mod timing_route;
 
@@ -550,9 +527,12 @@ fn main() -> Result<()> {
     );
     eprintln!("ECOS eframe: selected mode = {:?}", render_mode);
 
-    let native_options = create_native_options(render_mode, wgpu_backends);
+    let mut native_options = create_native_options(render_mode, wgpu_backends);
 
     if args.mode == "replay" {
+        native_options.viewport = native_options.viewport.with_maximized(true);
+        native_options.centered = false;
+        native_options.persist_window = false;
         let mut replay = replay::ReplayApp::open(&args.manifest)?;
         return eframe::run_native(
             "Chip Viewer · Replay",
@@ -576,7 +556,13 @@ fn main() -> Result<()> {
     let antenna_data = args.antenna_data.clone();
     let antenna_statis = args.antenna_statis.clone();
     let lvs_data = args.lvs_data.clone();
-    let map_root = crate::map_data::power_map_root(&manifest).or_else(|| args.map_root.clone());
+    let ir_root = manifest
+        .parent()
+        .map(|p| p.join("ir"))
+        .filter(|p| p.join("ir_drop.json").is_file());
+    let map_root = ir_root
+        .or_else(|| crate::map_data::power_map_root(&manifest))
+        .or_else(|| args.map_root.clone());
     let sta_feature_dir = args.sta_feature_dir.clone();
 
     let run_result = eframe::run_native(

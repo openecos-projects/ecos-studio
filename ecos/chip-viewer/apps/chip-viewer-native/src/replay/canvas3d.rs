@@ -3,13 +3,13 @@ use crate::{
     camera3d::Vec3,
     canvas_gpu3d::{CanvasGpu3dCallback, CanvasUniform3d, ShadingStyle},
     nav3d::CameraController3d,
-    replay_camera_plan::{blend, Preset},
-    replay_scene3d::Scene3d,
+    replay::camera_plan::{blend, Preset},
+    replay::scene3d::Scene3d,
 };
 use egui::{Color32, Pos2, Sense, Stroke};
 
 const AUTO_SPIN_RADIANS_PER_SECOND: f32 = 4.0_f32.to_radians();
-const DEFAULT_Z_SCALE: f32 = 1.35;
+const DEFAULT_Z_SCALE: f32 = 0.5;
 
 pub struct View3d {
     pub enabled: bool,
@@ -25,7 +25,6 @@ pub struct View3d {
     pub state: Option<egui_wgpu::RenderState>,
     pub z_cut: f32,
     pub z_scale: f32,
-    pub reports: bool,
     pub hidden_layers: std::collections::BTreeSet<u16>,
     pub filtered: Option<std::sync::Arc<Vec<crate::canvas_gpu3d::GpuShapeInstance3d>>>,
     pub epoch: u64,
@@ -46,7 +45,6 @@ impl Default for View3d {
             state: None,
             z_cut: 1.0,
             z_scale: DEFAULT_Z_SCALE,
-            reports: true,
             hidden_layers: Default::default(),
             filtered: None,
             epoch: 0,
@@ -140,7 +138,7 @@ impl crate::replay::ReplayApp {
                 current,
                 ((local
                     - self.plans[self.step].process_seconds
-                    - crate::replay_plan::RESULT_SECONDS)
+                    - crate::replay::plan::RESULT_SECONDS)
                     / 0.4) as f32,
             );
         }
@@ -200,7 +198,7 @@ impl crate::replay::ReplayApp {
                 self.view3d.fit_requested = true;
             }
             locate = ui.button("2D region").clicked();
-            ui.checkbox(&mut self.view3d.reports, "Reports");
+
             ui.menu_button("Layers", |ui| {
                 if let Some(scene) = &self.view3d.scene {
                     for (name, (id, _, _)) in &scene.metadata.layers {
@@ -219,7 +217,14 @@ impl crate::replay::ReplayApp {
             });
         });
         ui.horizontal(|ui| {
-            ui.add(egui::Slider::new(&mut self.view3d.z_scale, 0.2..=4.0).text("Z"));
+            ui.add(
+                egui::Slider::new(&mut self.view3d.z_scale, 0.05..=6.0)
+                    .logarithmic(true)
+                    .text("Z-scale"),
+            )
+            .on_hover_text(
+                "Vertical elevation scale: 0.05 = flat, 1.0 = standard depth, 6.0 = exaggerated",
+            );
             ui.add(egui::Slider::new(&mut self.view3d.z_cut, 0.0..=1.0).text("Layers"));
         });
         ui.small(if self.view3d.automatic {
@@ -347,7 +352,7 @@ impl crate::replay::ReplayApp {
             }
         }
         let mut camera = self.view3d.camera.current;
-        camera.z_scale *= self.view3d.z_scale;
+        camera.z_scale = self.view3d.z_scale;
         let progress = self
             .reveal
             .progress()
@@ -431,7 +436,7 @@ impl crate::replay::ReplayApp {
                             {
                                 return None;
                             }
-                            let b = crate::replay_scene3d::bounds_at(inst, progress);
+                            let b = crate::replay::scene3d::bounds_at(inst, progress);
                             ray.intersect_aabb(
                                 Vec3::new(b[0], b[1], inst.z0 * camera.z_scale),
                                 Vec3::new(b[2], b[3], inst.z1 * camera.z_scale),

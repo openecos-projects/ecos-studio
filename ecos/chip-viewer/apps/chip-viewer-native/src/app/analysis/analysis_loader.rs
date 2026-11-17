@@ -26,6 +26,9 @@ impl AnalysisData {
         let (map_catalog, map_catalog_error) = match paths.map_root.as_deref() {
             Some(root) => match MapCatalog::discover(root) {
                 Ok(catalog) if !catalog.is_empty() => (Some(catalog), None),
+                Ok(catalog) if !catalog.warnings.is_empty() => {
+                    (None, Some(catalog.warnings.join("; ")))
+                }
                 Ok(_) => (None, None),
                 Err(err) => (None, Some(err)),
             },
@@ -103,7 +106,14 @@ impl LoadedViewer {
         if !self.analysis_tab_user_selected && self.analysis_tab != AnalysisTab::Timing {
             self.analysis_tab = self.default_analysis_tab();
         }
-        if let Some((item, layout)) = self.map_catalog.as_ref().and_then(MapCatalog::default_power_item) {
+        let default_map = self.map_catalog.as_ref().and_then(|catalog| {
+            catalog.default_power_item().or_else(|| {
+                catalog.categories.iter().find(|category| category.id.starts_with("ir_"))
+                    .and_then(|category| category.items.first())
+                    .map(|item| (item.clone(), None))
+            })
+        });
+        if let Some((item, layout)) = default_map {
             self.activate_map_item(&item, layout.as_deref());
         }
     }

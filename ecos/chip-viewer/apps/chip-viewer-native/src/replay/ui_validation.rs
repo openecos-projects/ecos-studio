@@ -99,7 +99,7 @@ impl App for Probe {
                 let clip = &plan.clips[(self.seed >> 16) as usize % plan.clips.len()];
                 let target = clip.frame;
                 let position = self.app.starts[step] + clip.start;
-                let record = crate::replay_data::Recording::open(
+                let record = crate::replay::data::Recording::open(
                     &self.app.catalog.workspace,
                     self.app.catalog.steps[step].manifest.as_ref().unwrap(),
                 )

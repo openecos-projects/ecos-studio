@@ -1,7 +1,7 @@
 use super::ReplayApp;
-use crate::replay_data::Recording;
-use crate::replay_maps::ReplayMaps;
-use crate::replay_plan::{Kind, MAP_SECONDS, RESULT_SECONDS};
+use crate::replay::data::Recording;
+use crate::replay::maps::ReplayMaps;
+use crate::replay::plan::{Kind, MAP_SECONDS, RESULT_SECONDS};
 use anyhow::{ensure, Result};
 
 impl ReplayApp {
@@ -100,6 +100,7 @@ impl ReplayApp {
             self.analysis = Default::default();
             self.route_overlay = Default::default();
             self.logic = None;
+            self.log = Default::default();
             self.recording = None;
             self.error.clone_from(&self.plans[step].error);
             if self.error.is_empty() {
@@ -112,7 +113,7 @@ impl ReplayApp {
                                 == Some(&recording.manifest.attempt_id),
                             "Replay changed during preparation. Reopen after completion."
                         );
-                        let flow: serde_json::Value = crate::replay_data::read(
+                        let flow: serde_json::Value = crate::replay::data::read(
                             &self.catalog.workspace.join("home/flow.json"),
                         )?;
                         let expected = if recording.manifest.diagnostic_only {
@@ -131,6 +132,8 @@ impl ReplayApp {
                     })();
                     match opened {
                         Ok(recording) => {
+                            self.log =
+                                crate::replay::log::ReplayLog::open(&self.catalog.workspace, path);
                             self.recording = Some(recording);
                         }
                         Err(error) => self.error = error.to_string(),
@@ -178,7 +181,7 @@ impl ReplayApp {
         }
         if self.complete && self.error.is_empty() && self.checklist.is_none() {
             self.checklist = self.recording.as_ref().map(|recording| {
-                crate::replay_checklist::Checklist::from_recording(
+                crate::replay::checklist::Checklist::from_recording(
                     recording,
                     &self.catalog.workspace,
                     &self.catalog.steps[step].name,
@@ -258,7 +261,7 @@ impl ReplayApp {
             return Ok(());
         }
         let kind = clip.map_or(Kind::Hold, |index| self.plans[self.step].clips[index].kind);
-        let token = self.loader.submit(crate::replay_loader::Request {
+        let token = self.loader.submit(crate::replay::loader::Request {
             workspace: self.catalog.workspace.clone(),
             manifest: self.catalog.steps[self.step].manifest.clone().unwrap(),
             attempt: recording.manifest.attempt_id.clone(),
@@ -293,7 +296,7 @@ impl ReplayApp {
             match reply.result {
                 Ok(prepared) => {
                     self.canvas_cache = Default::default();
-                    let crate::replay_loader::Prepared {
+                    let crate::replay::loader::Prepared {
                         scene,
                         three_d,
                         mut route_overlay,
@@ -378,5 +381,5 @@ impl ReplayApp {
 }
 
 #[cfg(test)]
-#[path = "replay_playback_tests.rs"]
+#[path = "playback_tests.rs"]
 mod tests;

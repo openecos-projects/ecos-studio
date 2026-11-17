@@ -1,11 +1,51 @@
 //! Read-only validation against a real STA recording, including physical route coverage.
 use super::*;
+use crate::replay::data::read;
+
+#[test]
+#[ignore = "set ECOS_REPLAY_TEST_CATALOG to newly generated Power Replay data"]
+fn real_power_values_reuse_final_instance_geometry() {
+    let file = std::env::var("ECOS_REPLAY_TEST_CATALOG").unwrap();
+    let catalog: crate::replay::data::Catalog = read(std::path::Path::new(&file)).unwrap();
+    let step = catalog
+        .steps
+        .iter()
+        .find(|s| s.name == "powerAnalysis")
+        .unwrap();
+    let mut record = Recording::open(&catalog.workspace, step.manifest.as_ref().unwrap()).unwrap();
+    record.seek_frame(record.manifest.frames.len() - 1).unwrap();
+    let mut analysis = ReplayAnalysis::open(&record);
+    assert!(analysis.error.is_empty(), "{}", analysis.error);
+    assert_eq!(analysis.data.schema, "ecos.replay.analysis.v2");
+    assert_eq!(analysis.len(), 4);
+    assert!(analysis
+        .data
+        .views
+        .iter()
+        .flat_map(|v| &v.items)
+        .all(|i| i.bboxes.is_empty() && i.positions.is_empty() && i.segments.is_empty()));
+    analysis.resolve(&record.scene);
+    for (view, geometry) in analysis.data.views.iter().zip(&analysis.geometry) {
+        assert_eq!(
+            geometry.iter().map(|g| g.missing).sum::<usize>(),
+            0,
+            "{}",
+            view.label
+        );
+        assert!(geometry.iter().all(|g| g.boxes.len() == 1));
+        assert_eq!(geometry.len(), view.items.len());
+    }
+    println!(
+        "Power: 4 components, {} instances per view, no duplicated saved rectangles",
+        analysis.geometry[0].len()
+    );
+}
 
 #[test]
 #[ignore = "set ECOS_REPLAY_TEST_CATALOG to a real STA recording"]
 fn real_sta_corner_routes_follow_frozen_native_geometry() {
     let file = std::env::var("ECOS_REPLAY_TEST_CATALOG").unwrap();
-    let catalog: crate::replay_data::Catalog = read(std::path::Path::new(&file)).unwrap();
+    let catalog: crate::replay::data::Catalog = read(std::path::Path::new(&file)).unwrap();
     let step = catalog.steps.iter().find(|s| s.name == "sta").unwrap();
     let mut recording =
         Recording::open(&catalog.workspace, step.manifest.as_ref().unwrap()).unwrap();

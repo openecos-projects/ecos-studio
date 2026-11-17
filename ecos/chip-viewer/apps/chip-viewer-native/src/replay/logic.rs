@@ -1,5 +1,5 @@
 //! Logical synthesis snapshots, grouped by cell type; never presented as placement.
-use crate::replay_data::{read, Recording};
+use crate::replay::data::{read, Recording};
 use egui::{Color32, Pos2, Rect, Stroke, Vec2};
 use serde::Deserialize;
 use std::collections::BTreeMap;

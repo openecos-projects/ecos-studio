@@ -1,5 +1,5 @@
 //! Retained static geometry and compact dynamic meshes for Replay's 2D canvas.
-use crate::{replay_index::SceneIndex, replay_motion::Motion, replay_reveal::Reveal};
+use crate::replay::{index::SceneIndex, motion::Motion, reveal::Reveal};
 use chipgeom_format::replay::{Object, Scene};
 use egui::{Color32, Mesh, Pos2, Rect};
 use std::sync::Arc;
@@ -14,7 +14,7 @@ pub struct CanvasCache {
     pub dynamic: Vec<AnimatedObject>,
     pub ghosts: Arc<Mesh>,
     pub deleted: Arc<Mesh>,
-    pub animation: crate::replay_gpu_animation::Animation,
+    pub animation: crate::replay::gpu_animation::Animation,
     pub gpu_animated: bool,
 }
 

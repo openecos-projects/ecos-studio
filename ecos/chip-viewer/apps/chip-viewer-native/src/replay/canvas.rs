@@ -1,5 +1,5 @@
 use super::ReplayApp;
-use crate::replay_gpu_mesh::{paint, Slot};
+use crate::replay::gpu_mesh::{paint, Slot};
 use egui::{Color32, Pos2, Rect, Sense, Stroke};
 
 impl ReplayApp {
@@ -101,7 +101,7 @@ impl ReplayApp {
                 scale,
             );
             if self.gpu_format.is_some() {
-                self.canvas_cache.animation = crate::replay_gpu_animation::Animation::build(
+                self.canvas_cache.animation = crate::replay::gpu_animation::Animation::build(
                     &self.canvas_cache.dynamic,
                     &self.motion,
                     &self.reveal,
@@ -116,7 +116,7 @@ impl ReplayApp {
                     .len()
                     .max(animation.highlights.motion.len());
                 self.canvas_cache.gpu_animated = largest
-                    * std::mem::size_of::<crate::replay_gpu_animation::VertexMotion>()
+                    * std::mem::size_of::<crate::replay::gpu_animation::VertexMotion>()
                     <= self.gpu_animation_limit;
                 if !self.canvas_cache.gpu_animated {
                     self.canvas_cache.animation = Default::default();
@@ -148,7 +148,7 @@ impl ReplayApp {
             .progress()
             .unwrap_or_else(|| self.motion.progress());
         if let Some(format) = self.gpu_format.filter(|_| self.canvas_cache.gpu_animated) {
-            crate::replay_gpu_mesh::paint_animated(
+            crate::replay::gpu_mesh::paint_animated(
                 &painter,
                 &self.canvas_cache.animation.geometry,
                 Slot::Dynamic,
@@ -158,11 +158,11 @@ impl ReplayApp {
         }
         for item in &self.canvas_cache.dynamic {
             if self.canvas_cache.gpu_animated
-                && crate::replay_gpu_animation::supported(&item.object)
+                && crate::replay::gpu_animation::supported(&item.object)
             {
                 continue;
             }
-            crate::replay_batch::paint_object(
+            crate::replay::batch::paint_object(
                 &mut moving,
                 &mut highlights,
                 &item.id,
@@ -199,7 +199,7 @@ impl ReplayApp {
             1.0,
         );
         if let Some(format) = self.gpu_format.filter(|_| self.canvas_cache.gpu_animated) {
-            crate::replay_gpu_mesh::paint_animated(
+            crate::replay::gpu_mesh::paint_animated(
                 &painter,
                 &self.canvas_cache.animation.highlights,
                 Slot::DynamicHighlights,
@@ -235,7 +235,7 @@ impl ReplayApp {
 #[cfg(test)]
 mod benchmarks {
     use super::*;
-    use crate::replay_data::Recording;
+    use crate::replay::data::Recording;
     use std::{path::Path, time::Instant};
 
     #[test]
@@ -257,7 +257,7 @@ mod benchmarks {
             .manifest
             .frames
             .windows(2)
-            .position(|frames| crate::replay_motion::compatible_frames(&frames[0], &frames[1]))
+            .position(|frames| crate::replay::motion::compatible_frames(&frames[0], &frames[1]))
             .unwrap()
             + 1;
         record.seek_frame(target - 1).unwrap();
@@ -265,7 +265,7 @@ mod benchmarks {
         record.seek_frame(target).unwrap();
         app.motion
             .begin(&before, &record.scene, &record.manifest.frames);
-        app.scene_index = crate::replay_index::SceneIndex::build(&record.scene, &app.motion);
+        app.scene_index = crate::replay::index::SceneIndex::build(&record.scene, &app.motion);
         app.recording = Some(record);
         let ctx = egui::Context::default();
         let mut times = Vec::new();

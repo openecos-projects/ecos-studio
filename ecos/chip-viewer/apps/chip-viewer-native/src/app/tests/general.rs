@@ -1771,7 +1771,7 @@ fn heatmap_threshold_omits_sub_threshold_cells_for_transparency() {
 }
 
 #[test]
-fn map_catalog_find_item_by_csv_locates_matching_item_and_layout() {
+fn map_catalog_find_item_locates_matching_item_and_layout() {
     let catalog = MapCatalog {
         categories: vec![crate::map_data::MapCategory {
             id: "cat1".to_string(),
@@ -1779,20 +1779,20 @@ fn map_catalog_find_item_by_csv_locates_matching_item_and_layout() {
             layout_path: Some(PathBuf::from("/tmp/layout.csv")),
             items: vec![crate::map_data::MapItem {
                 label: "Item 1".to_string(),
-                csv_path: PathBuf::from("/tmp/item1.csv"),
+                source: crate::map_source::MapSource::Csv(PathBuf::from("/tmp/item1.csv")),
             }],
         }],
         warnings: Vec::new(),
     };
 
-    let found = catalog.find_item_by_csv(Path::new("/tmp/item1.csv"));
+    let found = catalog.find_item(&crate::map_source::MapKey::Csv(PathBuf::from("/tmp/item1.csv")));
     assert!(found.is_some());
     let (item, layout) = found.unwrap();
     assert_eq!(item.label, "Item 1");
     assert_eq!(layout, Some(Path::new("/tmp/layout.csv")));
 
     assert!(catalog
-        .find_item_by_csv(Path::new("/tmp/missing.csv"))
+        .find_item(&crate::map_source::MapKey::Csv(PathBuf::from("/tmp/missing.csv")))
         .is_none());
 }
 

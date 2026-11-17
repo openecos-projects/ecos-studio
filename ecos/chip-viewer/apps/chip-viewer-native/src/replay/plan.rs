@@ -1,8 +1,8 @@
 //! Display-time clips derived from real changes; never rewrites capture timestamps.
-use crate::replay_data::{Catalog, Recording};
-use crate::replay_maps::ReplayMaps;
-use crate::replay_motion::{compatible_frames, compatible_objects};
-use crate::replay_reveal::group;
+use crate::replay::data::{Catalog, Recording};
+use crate::replay::maps::ReplayMaps;
+use crate::replay::motion::{compatible_frames, compatible_objects};
+use crate::replay::reveal::group;
 use anyhow::Result;
 use chipgeom_format::replay::{Delta, Frame, Scene};
 use std::collections::BTreeMap;
@@ -248,7 +248,7 @@ pub fn prepare(catalog: &Catalog) -> Receiver<Vec<StepPlan>> {
                         .map_or(0, |root| ReplayMaps::open(&root).len());
                     let mut plan = StepPlan::build(&recording, maps)?;
                     plan.seconds +=
-                        crate::replay_analysis::ReplayAnalysis::open(&recording).duration();
+                        crate::replay::analysis::ReplayAnalysis::open(&recording).duration();
                     Ok(plan)
                 })();
                 result.unwrap_or_else(|error| StepPlan::unavailable(error.to_string()))
@@ -262,7 +262,7 @@ pub fn prepare(catalog: &Catalog) -> Receiver<Vec<StepPlan>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::replay_data::{read, tests::Fixture};
+    use crate::replay::data::{read, tests::Fixture};
     use serde_json::json;
 
     #[test]

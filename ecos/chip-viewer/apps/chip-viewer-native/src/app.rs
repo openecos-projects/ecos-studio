@@ -325,3 +325,7 @@ fn json_string_vec_or_single(value: Option<&serde_json::Value>) -> Vec<String> {
 #[cfg(test)]
 #[path = "app/tests/general.rs"]
 mod tests;
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "ir_drop_ui_validation.rs"]
+mod ir_drop_ui_validation;

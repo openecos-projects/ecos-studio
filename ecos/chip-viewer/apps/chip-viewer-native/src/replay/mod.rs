@@ -1,30 +1,71 @@
-#[path = "replay_canvas.rs"]
+//! Offline flow replay: capture loading, playback, rendering and analysis.
+mod analysis;
+pub(crate) mod analysis_data;
+mod batch;
+mod cache;
+mod camera_plan;
 mod canvas;
-#[path = "replay_focus.rs"]
+mod caption;
+mod checklist;
+mod clock;
+mod dashboard;
+pub(crate) mod data;
+mod events;
 mod focus;
-#[path = "replay_overlays3d.rs"]
-mod overlays3d;
-#[path = "replay_playback.rs"]
-mod playback;
-#[path = "replay_sidebar.rs"]
-mod sidebar;
+mod gpu_animation;
+mod gpu_mesh;
+mod index;
+pub(crate) mod integrity;
+mod ir;
 #[cfg(all(test, target_os = "linux"))]
-#[path = "replay_ui_validation.rs"]
+mod ir_validation;
+mod layout;
+mod loader;
+mod log;
+mod log_scroll;
+mod logic;
+mod map_loader;
+mod maps;
+mod metrics;
+mod motion;
+mod overlays3d;
+mod plan;
+mod playback;
+mod rcx;
+mod reveal;
+mod route;
+mod scene3d;
+mod sidebar;
+mod step_metrics;
+mod timing;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_validation;
-#[path = "replay_canvas3d.rs"]
+#[cfg(test)]
+mod validation_tests;
+#[path = "canvas3d.rs"]
 mod view3d;
-use crate::replay_data::{read, Catalog, Recording};
-use crate::replay_maps::ReplayMaps;
-use crate::replay_motion::Motion;
-use crate::replay_plan::{self, StepPlan};
-use crate::replay_reveal::Reveal;
+mod widgets;
+use crate::replay::data::{read, Catalog, Recording};
+use crate::replay::maps::ReplayMaps;
+use crate::replay::motion::Motion;
+use crate::replay::plan::StepPlan;
+use crate::replay::reveal::Reveal;
 use anyhow::{ensure, Context, Result};
 use egui::{Color32, Pos2, Sense, Stroke};
 use std::path::Path;
 use std::time::Instant;
 
+mod completion_results;
+
 pub struct ReplayApp {
     catalog: Catalog,
+    dashboard: Option<crate::replay::dashboard::Dashboard>,
+    dashboard_loading: Option<std::sync::mpsc::Receiver<crate::replay::dashboard::Dashboard>>,
+    completion_results: completion_results::CompletionResults,
+    log: crate::replay::log::ReplayLog,
+    maximize_on_open: bool,
+    analysis_open: bool,
+    auxiliary_open: bool,
     starts: Vec<f64>,
     total: f64,
     step: usize,
@@ -32,9 +73,9 @@ pub struct ReplayApp {
     complete: bool,
     completion_node_selected: bool,
     recording: Option<Recording>,
-    clock_overlay: crate::replay_clock::ClockOverlay,
+    clock_overlay: crate::replay::clock::ClockOverlay,
     clock_tree: Option<crate::clock_tree::ClockTreePanel>,
-    checklist: Option<Result<crate::replay_checklist::Checklist, String>>,
+    checklist: Option<Result<crate::replay::checklist::Checklist, String>>,
     clock_tree_error: String,
     clock_tree_attempted: bool,
     error: String,
@@ -45,21 +86,21 @@ pub struct ReplayApp {
     plans: Vec<StepPlan>,
     preparation: Option<std::sync::mpsc::Receiver<Vec<StepPlan>>>,
     active_clip: Option<usize>,
-    loader: crate::replay_loader::Loader,
+    loader: crate::replay::loader::Loader,
     pending: Option<(u64, usize, Option<usize>)>,
     #[cfg(test)]
     prepare_timings_ms: [f64; 4],
     checked: Instant,
     maps: ReplayMaps,
-    analysis: crate::replay_analysis::ReplayAnalysis,
-    route_overlay: crate::replay_route::RouteOverlay,
-    logic: Option<crate::replay_logic::Logic>,
+    analysis: crate::replay::analysis::ReplayAnalysis,
+    route_overlay: crate::replay::route::RouteOverlay,
+    logic: Option<crate::replay::logic::Logic>,
     smooth: bool,
     motion: Motion,
     reveal: Reveal,
     focus: Option<[i64; 4]>,
-    scene_index: crate::replay_index::SceneIndex,
-    canvas_cache: crate::replay_batch::CanvasCache,
+    scene_index: crate::replay::index::SceneIndex,
+    canvas_cache: crate::replay::batch::CanvasCache,
     gpu_format: Option<wgpu::TextureFormat>,
     gpu_animation_limit: usize,
     view3d: view3d::View3d,
@@ -75,6 +116,10 @@ impl ReplayApp {
             if limits.max_storage_buffers_per_shader_stage > 0 {
                 self.gpu_format = Some(state.target_format);
                 self.gpu_animation_limit = limits.max_storage_buffer_binding_size as usize;
+                self.view3d.enabled = true;
+                self.view3d.automatic = false;
+                self.view3d.auto_spin = true;
+                self.view3d.spin_yaw = Some(45.0_f32.to_radians());
             }
         }
     }
@@ -116,10 +161,18 @@ impl ReplayApp {
                 "Invalid step duration"
             );
         }
-        let preparation = Some(replay_plan::prepare(&catalog));
+        let preparation = Some(plan::prepare(&catalog));
         let starts = vec![0.0; catalog.steps.len()];
         let total = 0.0;
+        let dashboard_loading = Some(crate::replay::dashboard::prepare(&catalog));
         let app = Self {
+            dashboard_loading,
+            dashboard: None,
+            completion_results: Default::default(),
+            log: Default::default(),
+            maximize_on_open: true,
+            analysis_open: false,
+            auxiliary_open: true,
             catalog,
             focus: None,
             scene_index: Default::default(),
@@ -145,7 +198,7 @@ impl ReplayApp {
             playing: false,
             speed: 1.0,
             tick: Instant::now(),
-            zoom: 1.0,
+            zoom: 0.82,
             plans: Vec::new(),
             preparation,
             active_clip: None,
@@ -289,23 +342,32 @@ impl ReplayApp {
                     }
                 });
         });
-        ui.label(format!(
-            "{} · {}   Display {:.1}s / {:.1}s · Step execution {:.3}s · Right-click for nodes",
-            self.catalog.steps[self.step].name,
-            if self.complete {
-                "Completed result"
-            } else {
-                "Captured process"
-            },
-            self.position,
-            self.total,
-            self.catalog.steps[self.step].seconds
-        ));
+        ui.add(
+            egui::Label::new(format!(
+                "{} · {}   Display {:.1}s / {:.1}s · Step execution {:.3}s · Right-click for nodes",
+                self.catalog.steps[self.step].name,
+                if self.complete {
+                    "Completed result"
+                } else {
+                    "Captured process"
+                },
+                self.position,
+                self.total,
+                self.catalog.steps[self.step].seconds
+            ))
+            .truncate(),
+        );
     }
 }
 
 impl eframe::App for ReplayApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Some X11 window managers ignore the builder's pre-map maximize hint.
+        // Apply once after opening; subsequent manual window resizing is respected.
+        if self.maximize_on_open {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+            self.maximize_on_open = false;
+        }
         if let Some(receiver) = &self.preparation {
             match receiver.try_recv() {
                 Ok(plans) => {
@@ -336,6 +398,24 @@ impl eframe::App for ReplayApp {
                 }
             }
         }
+        if let Some(receiver) = &self.dashboard_loading {
+            match receiver.try_recv() {
+                Ok(data) => {
+                    self.dashboard = Some(data);
+                    self.dashboard_loading = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    let mut data = crate::replay::dashboard::Dashboard::default();
+                    data.errors
+                        .push("Result loading failed; reopen Replay".into());
+                    self.dashboard = Some(data);
+                    self.dashboard_loading = None;
+                }
+                _ => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(50));
+                }
+            }
+        }
         self.poll_loader();
         self.maps.poll();
         if self.pending.is_some() || self.maps.loading() {
@@ -346,6 +426,9 @@ impl eframe::App for ReplayApp {
         self.tick = now;
         if now.duration_since(self.checked).as_secs_f64() >= 1.0 {
             self.checked = now;
+            if let Some(data) = &mut self.dashboard {
+                data.check_current();
+            }
             if let Err(error) = self.check_flow() {
                 self.error = error.to_string();
                 self.recording = None;
@@ -376,20 +459,6 @@ impl eframe::App for ReplayApp {
         egui::TopBottomPanel::top("replay_title").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("Layout Replay");
-                if self.pending.is_some() {
-                    ui.spinner();
-                    ui.label("Loading captured changes…");
-                }
-                let detail = self
-                    .recording
-                    .as_ref()
-                    .and_then(|recording| recording.manifest.geometry_detail.as_deref())
-                    .unwrap_or("physical_bounds");
-                ui.label(if detail == "report_only" {
-                    "Recorded reports · no physical geometry"
-                } else {
-                    "Recorded data · physical bounds"
-                });
                 let mut enabled = self.view3d.enabled;
                 if ui.checkbox(&mut enabled, "Sync 3D").changed() {
                     self.set_three_d(enabled);
@@ -408,11 +477,6 @@ impl eframe::App for ReplayApp {
                         self.active_clip = None;
                         self.select(self.step, self.position, false);
                     }
-                    if self.motion.active() {
-                        ui.label("Interpolated movement between captured positions");
-                    } else if self.reveal.active() {
-                        ui.label(format!("{} · sampled batch animation", self.reveal.label()));
-                    }
                 }
                 if self.recording.is_some() && ui.button("Play from step start").clicked() {
                     self.select(self.step, self.starts[self.step], false);
@@ -421,24 +485,22 @@ impl eframe::App for ReplayApp {
                 }
             });
         });
-        egui::TopBottomPanel::bottom("replay_time").show(ctx, |ui| self.timeline(ui));
+        egui::TopBottomPanel::bottom("replay_time")
+            .exact_height(148.0)
+            .resizable(false)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("replay_live_information")
+                    .min_scrolled_height(0.0)
+                    .max_height(68.0)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| self.live_information(ui));
+                ui.separator();
+                self.timeline(ui);
+            });
+        self.update_completion_results(ctx);
         self.result_sidebar(ctx);
-        egui::CentralPanel::default().show(ctx, |ui| {
-            if self.recording.as_ref().is_some_and(|recording| {
-                recording.manifest.geometry_detail.as_deref() == Some("report_only")
-            }) {
-                if let Some(logic) = &self.logic {
-                    logic.show(ui);
-                } else if self.complete {
-                    self.analysis.report(ui);
-                } else {
-                    ui.centered_and_justified(|ui| {
-                        ui.label("Recorded logical/report progress");
-                    });
-                }
-            } else {
-                self.canvas(ui);
-            }
-        });
+        egui::CentralPanel::default().show(ctx, |ui| self.main_views(ui));
+        self.analysis_window(ctx);
     }
 }
