@@ -66,6 +66,12 @@ fn filler_rows_play_as_one_fast_sweep_with_exact_seeks_and_complete_highlights()
     manifest["duration_ns"] = json!(43_000_000_000u64);
     fixture.write("attempts/a/manifest.json", manifest);
     let mut app = app(&fixture);
+    app.catalog.steps[0].nodes = serde_json::from_value(json!([
+        {"seconds": 0.0, "label": "load data"},
+        {"seconds": 41.0, "label": "run filler · 41.000s"},
+        {"seconds": 42.0, "label": "save results · 1.000s"}
+    ]))
+    .unwrap();
     assert_eq!(app.plans[0].clips.len(), 3);
     let clip = &app.plans[0].clips[1];
     assert_eq!(clip.kind, Kind::Filler { first: 1 });
@@ -73,6 +79,17 @@ fn filler_rows_play_as_one_fast_sweep_with_exact_seeks_and_complete_highlights()
     assert!((clip.end - clip.start - 1.5).abs() < 1e-9);
     let start = clip.start;
     let middle = (clip.start + clip.end) / 2.0;
+    app.navigate_subflow(crate::replay::navigation::Direction::Next);
+    app.finish_loading_for_test();
+    assert_eq!(app.position, start);
+    assert!(app.reveal.active());
+    assert_eq!(app.reveal.fraction("inst:filler41"), 0.0);
+    app.playing = true;
+    app.advance_playback((middle - start) / app.speed);
+    app.finish_loading_for_test();
+    assert!(app.reveal.fraction("inst:filler21") > 0.0);
+    assert_eq!(app.reveal.fraction("inst:filler41"), 0.0);
+    app.playing = false;
     app.select(0, start, false);
     app.finish_loading_for_test();
     for id in &touched {
@@ -201,6 +218,102 @@ fn subflow_node_shows_its_exact_frame_instead_of_the_next_animation() {
     assert_eq!(
         app.recording.as_ref().unwrap().scene.objects["inst:a"].bbox,
         [10, 0, 15, 5]
+    );
+}
+
+#[test]
+fn navigation_visits_overlapping_subflows_and_ignores_route_milestones() {
+    use crate::replay::navigation::Direction;
+    let fixture = Fixture::new();
+    let mut app = app(&fixture);
+    app.catalog.steps[0].nodes = serde_json::from_value(json!([
+        {"seconds": 1.0, "label": "first"},
+        {"seconds": 1.0, "label": "second"},
+        {"seconds": 1.5, "label": "route milestone", "sequence": 2}
+    ]))
+    .unwrap();
+    app.playing = true;
+    app.navigate_subflow(Direction::Next);
+    assert!(!app.playing);
+    assert_eq!(app.navigation_node, Some((0, 0)));
+    app.navigate_subflow(Direction::Next);
+    assert_eq!(app.navigation_node, Some((0, 1)));
+    app.navigate_subflow(Direction::Next);
+    assert_eq!(app.navigation_node, Some((0, 1)));
+    app.navigate_subflow(Direction::Previous);
+    assert_eq!(app.navigation_node, Some((0, 0)));
+    app.navigate_step(Direction::Previous);
+    assert_eq!(
+        (app.step, app.position, app.navigation_node),
+        (0, 0.0, None)
+    );
+}
+
+#[test]
+fn step_navigation_moves_one_step_and_clamps_at_ends() {
+    use crate::replay::navigation::Direction;
+    let fixture = Fixture::new();
+    let mut app = app(&fixture);
+    app.catalog.steps.push(
+        serde_json::from_value(json!({
+            "name": "next", "seconds": 0.0, "reason": "unavailable", "metrics": []
+        }))
+        .unwrap(),
+    );
+    app.starts.push(app.total);
+    app.plans.push(crate::replay::plan::StepPlan::unavailable(
+        "unavailable".into(),
+    ));
+    app.navigate_step(Direction::Next);
+    assert_eq!((app.step, app.position), (1, app.starts[1]));
+    app.navigate_step(Direction::Next);
+    assert_eq!(app.step, 1);
+    app.navigate_step(Direction::Previous);
+    assert_eq!((app.step, app.position), (0, 0.0));
+}
+
+#[test]
+#[ignore = "requires ECOS_FILLER_CATALOG with a real filler recording"]
+fn real_filler_subflow_navigation_preserves_reveal() {
+    use crate::replay::navigation::Direction;
+    let mut app = ReplayApp::open(std::path::Path::new(
+        &std::env::var("ECOS_FILLER_CATALOG").unwrap(),
+    ))
+    .unwrap();
+    let plans = app
+        .preparation
+        .take()
+        .unwrap()
+        .recv_timeout(std::time::Duration::from_secs(120))
+        .unwrap();
+    app.total = plans.iter().map(|plan| plan.seconds).sum();
+    app.plans = plans;
+    app.select(0, 0.0, false);
+    app.finish_loading_for_test();
+    app.navigate_subflow(Direction::Next);
+    app.finish_loading_for_test();
+    let clip = app.plans[0]
+        .clips
+        .iter()
+        .find(|clip| matches!(clip.kind, Kind::Filler { .. }))
+        .unwrap();
+    assert!(app.position <= clip.start);
+    let middle = (clip.start + clip.end) / 2.0;
+    app.select(0, middle, false);
+    app.finish_loading_for_test();
+    let scene = &app.recording.as_ref().unwrap().scene;
+    let fractions: Vec<_> = scene
+        .objects
+        .keys()
+        .filter(|id| app.reveal.contains(id))
+        .map(|id| app.reveal.fraction(id))
+        .collect();
+    assert!(fractions.len() > 100, "{} filler cells", fractions.len());
+    assert!(fractions.iter().any(|f| *f == 0.0));
+    assert!(fractions.iter().any(|f| *f == 1.0));
+    println!(
+        "Verified {} real filler cells reveal progressively",
+        fractions.len()
     );
 }
 

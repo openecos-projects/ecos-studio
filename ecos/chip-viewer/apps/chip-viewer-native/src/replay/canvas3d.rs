@@ -216,16 +216,9 @@ impl crate::replay::ReplayApp {
                 }
             });
         });
-        ui.horizontal(|ui| {
-            ui.add(
-                egui::Slider::new(&mut self.view3d.z_scale, 0.05..=6.0)
-                    .logarithmic(true)
-                    .text("Z-scale"),
-            )
-            .on_hover_text(
-                "Vertical elevation scale: 0.05 = flat, 1.0 = standard depth, 6.0 = exaggerated",
-            );
-            ui.add(egui::Slider::new(&mut self.view3d.z_cut, 0.0..=1.0).text("Layers"));
+        ui.horizontal_wrapped(|ui| {
+            crate::controls3d::scale(ui, &mut self.view3d.z_scale);
+            crate::controls3d::layers(ui, &mut self.view3d.z_cut, false);
         });
         ui.small(if self.view3d.automatic {
             "Stage camera · schematic layer heights"

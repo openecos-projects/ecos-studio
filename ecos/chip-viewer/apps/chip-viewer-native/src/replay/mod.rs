@@ -29,6 +29,7 @@ mod map_loader;
 mod maps;
 mod metrics;
 mod motion;
+mod navigation;
 mod overlays3d;
 mod plan;
 mod playback;
@@ -71,6 +72,7 @@ pub struct ReplayApp {
     total: f64,
     step: usize,
     position: f64,
+    navigation_node: Option<(usize, usize)>,
     complete: bool,
     completion_node_selected: bool,
     recording: Option<Recording>,
@@ -187,6 +189,7 @@ impl ReplayApp {
             total,
             step: 0,
             position: 0.0,
+            navigation_node: None,
             complete: false,
             completion_node_selected: false,
             recording: None,
@@ -221,24 +224,8 @@ impl ReplayApp {
 
     fn timeline(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            let playback_icon = if self.playing { "⏸" } else { "▶" };
-            if ui
-                .add_sized([32.0, 32.0], egui::Button::new(playback_icon).small())
-                .on_hover_text(if self.playing {
-                    "Pause replay"
-                } else {
-                    "Play replay"
-                })
-                .clicked()
-            {
-                if self.position >= self.total {
-                    self.select(0, 0.0, false);
-                }
-                self.playing = !self.playing;
-                self.tick = Instant::now();
-            }
             let (rect, response) = ui.allocate_exact_size(
-                egui::vec2((ui.available_width() - 100.0).max(40.0), 40.0),
+                egui::vec2(ui.available_width().max(40.0), 40.0),
                 Sense::click_and_drag(),
             );
             let y = rect.center().y;
@@ -335,14 +322,8 @@ impl ReplayApp {
                     response.on_hover_text(label);
                 }
             }
-            egui::ComboBox::from_id_salt("speed")
-                .selected_text(format!("{}×", self.speed))
-                .show_ui(ui, |ui| {
-                    for speed in [0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 32.0, 64.0] {
-                        ui.selectable_value(&mut self.speed, speed, format!("{speed}×"));
-                    }
-                });
         });
+        self.playback_controls(ui);
         ui.add(
             egui::Label::new(format!(
                 "{} · {}   Display {:.1}s / {:.1}s · Step execution {:.3}s · Right-click for nodes",
@@ -487,7 +468,7 @@ impl eframe::App for ReplayApp {
             });
         });
         egui::TopBottomPanel::bottom("replay_time")
-            .exact_height(148.0)
+            .exact_height(180.0)
             .resizable(false)
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical()
