@@ -209,6 +209,21 @@ fn drc_json_parser_extracts_violations_and_counts() {
 }
 
 #[test]
+fn drc_json_parser_rejects_missing_or_malformed_distribution() {
+    assert!(parse_drc_json_text(r#"{"drc":{}}"#).is_err());
+    assert!(parse_drc_json_text(r#"{"drc":{"distribution":[]}}"#).is_err());
+}
+
+#[test]
+fn drc_json_parser_accepts_empty_distribution() {
+    let (violations, counts) =
+        parse_drc_json_text(r#"{"drc":{"number":0,"distribution":{}}}"#).unwrap();
+
+    assert!(violations.is_empty());
+    assert!(counts.is_empty());
+}
+
+#[test]
 fn drc_statis_csv_parser_extracts_type_layer_counts() {
     let counts = parse_drc_statis_csv(
         "Type,MET1,VIA1,MET2,total\nMetalShort,2,0,3,5\nSpacing,0,1,0,1\ntotal,2,1,3,6\n",
@@ -268,6 +283,25 @@ fn antenna_json_parser_accepts_ecc_step_json() {
     assert_eq!(counts["GateAntenna"].total_count, 1);
     assert_eq!(counts["GateAntenna"].layer_counts["met1"], 1);
     assert_eq!(counts["MetalAntenna"].total_count, 1);
+}
+
+#[test]
+fn antenna_json_parser_rejects_missing_or_malformed_distribution() {
+    assert!(parse_antenna_json_text(r#"{"antenna":{}}"#).is_err());
+    assert!(parse_antenna_json_text(r#"{"antenna":{"distribution":[]}}"#).is_err());
+}
+
+#[test]
+fn antenna_json_parser_accepts_empty_supported_reports() {
+    let distribution_report = r#"{"antenna":{"distribution":{}}}"#;
+    let ecc_report =
+        r#"{"step":"antennaCheck","antenna_check":{"violation_count":0},"violations":[]}"#;
+
+    for report in [distribution_report, ecc_report] {
+        let (violations, counts) = parse_antenna_json_text(report).unwrap();
+        assert!(violations.is_empty(), "report {report}");
+        assert!(counts.is_empty(), "report {report}");
+    }
 }
 
 #[test]

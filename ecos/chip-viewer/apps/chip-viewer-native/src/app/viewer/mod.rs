@@ -337,11 +337,13 @@ impl LoadedViewer {
 
         ui.add_space(6.0);
         if overlay.type_states.is_empty() {
-            ui.label(
-                egui::RichText::new("No DRC violations")
-                    .color(ecos_text_secondary())
-                    .size(13.0),
-            );
+            if overlay.load_error.is_none() {
+                ui.label(
+                    egui::RichText::new("No DRC violations")
+                        .color(ecos_text_secondary())
+                        .size(13.0),
+                );
+            }
             if let Some(path) = overlay.data_path.as_deref() {
                 ui.label(
                     egui::RichText::new(path.display().to_string())
@@ -412,11 +414,13 @@ impl LoadedViewer {
 
         ui.add_space(6.0);
         if overlay.type_states.is_empty() {
-            ui.label(
-                egui::RichText::new("No Antenna violations")
-                    .color(ecos_text_secondary())
-                    .size(13.0),
-            );
+            if overlay.load_error.is_none() {
+                ui.label(
+                    egui::RichText::new("No Antenna violations")
+                        .color(ecos_text_secondary())
+                        .size(13.0),
+                );
+            }
             if let Some(path) = overlay.data_path.as_deref() {
                 ui.label(
                     egui::RichText::new(path.display().to_string())

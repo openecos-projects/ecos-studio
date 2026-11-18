@@ -187,13 +187,11 @@ pub(super) fn parse_drc_json_text(
     text: &str,
 ) -> Result<(Vec<DrcViolation>, BTreeMap<String, DrcTypeCounts>), String> {
     let root: serde_json::Value = serde_json::from_str(text).map_err(|err| err.to_string())?;
-    let Some(distribution) = root
+    let distribution = root
         .get("drc")
         .and_then(|node| node.get("distribution"))
         .and_then(|node| node.as_object())
-    else {
-        return Ok((Vec::new(), BTreeMap::new()));
-    };
+        .ok_or_else(|| "expected an object at drc.distribution".to_string())?;
 
     let mut violations = Vec::new();
     let mut counts = BTreeMap::new();
@@ -436,11 +434,25 @@ pub(super) fn parse_antenna_json_text(
     let mut violations = Vec::new();
     let mut counts = BTreeMap::new();
 
-    if let Some(distribution) = root
+    let distribution = root
         .get("antenna")
-        .and_then(|node| node.get("distribution"))
-        .and_then(|node| node.as_object())
+        .and_then(|antenna| antenna.get("distribution"))
+        .and_then(|node| node.as_object());
+    let ecc_violations = root.get("violations").and_then(|node| node.as_array());
+
+    if root
+        .get("antenna")
+        .and_then(|antenna| antenna.get("distribution"))
+        .is_some()
+        && distribution.is_none()
     {
+        return Err("expected an object at antenna.distribution".into());
+    }
+    if distribution.is_none() && ecc_violations.is_none() {
+        return Err("expected an object at antenna.distribution or an array at violations".into());
+    }
+
+    if let Some(distribution) = distribution {
         for (antenna_type, type_node) in distribution {
             let mut type_counts = AntennaTypeCounts {
                 total_count: json_usize(type_node.get("number")).unwrap_or(0),
@@ -470,20 +482,18 @@ pub(super) fn parse_antenna_json_text(
         }
     }
 
-    if let Some(items) = root.get("violations").and_then(|node| node.as_array()) {
+    if let Some(items) = ecc_violations {
         for item in items {
             let antenna_type = item
                 .get("type")
                 .and_then(|value| value.as_str())
-                .unwrap_or("Unknown")
-                .to_string();
+                .unwrap_or("Unknown");
             let layer = item
                 .get("layer")
                 .and_then(|value| value.as_str())
-                .unwrap_or("unknown")
-                .to_string();
+                .unwrap_or("unknown");
             if let Some(violation) =
-                parse_antenna_violation(item, violations.len(), &antenna_type, &layer)
+                parse_antenna_violation(item, violations.len(), antenna_type, layer)
             {
                 violations.push(violation);
             }
