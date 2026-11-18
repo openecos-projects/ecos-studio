@@ -4,6 +4,8 @@ use crate::replay::data::{read, within, Catalog, Recording};
 use crate::replay::widgets::{CheckMark, SelectionFollow};
 use egui::{Color32, RichText};
 use serde_json::Value;
+#[path = "signoff_report.rs"]
+pub(super) mod signoff_report;
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
@@ -29,6 +31,7 @@ pub struct SignoffSummary {
     pub design: DesignSummary,
     pub qor: QorSummary,
     pub checklist: ChecklistSummary,
+    pub details: signoff_report::ReportDetails,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -172,8 +175,26 @@ impl Dashboard {
             snapshot.as_ref(),
             checklist.as_ref(),
         );
+        if let Some(path) = signoff_report::design_path(workspace, &data.signoff.design.name) {
+            data.watch(path.clone());
+            match signoff_report::read_design(workspace, &path) {
+                Ok(sections) => data.signoff.details.design = sections,
+                Err(error) => {
+                    data.signoff.details.design_error =
+                        format!("Design report unavailable: {error}")
+                }
+            }
+        } else {
+            data.signoff.details.design_error =
+                "Design report unavailable: missing design name".into();
+        }
         if !report_matches_flow {
             data.signoff.qor = QorSummary::default();
+            data.signoff.details = signoff_report::ReportDetails {
+                design: std::mem::take(&mut data.signoff.details.design),
+                design_error: std::mem::take(&mut data.signoff.details.design_error),
+                ..signoff_report::ReportDetails::load(None, checklist.as_ref())
+            };
         }
         let mut items: BTreeMap<(String, String), Item> = BTreeMap::new();
         match checklist {
@@ -375,6 +396,7 @@ impl SignoffSummary {
         checklist: Option<&Value>,
     ) -> Self {
         let mut summary = Self {
+            details: signoff_report::ReportDetails::load(report, checklist),
             qor: report.map(QorSummary::from_report).unwrap_or_default(),
             design: DesignSummary::from_snapshot(snapshot, flow),
             checklist: checklist
