@@ -28,6 +28,34 @@ fn app(fixture: &Fixture) -> ReplayApp {
 }
 
 #[test]
+fn harden_signoff_follows_completion_seek_errors_and_report_freshness() {
+    let fixture = Fixture::new();
+    let mut app = app(&fixture);
+    app.dashboard = Some(Default::default());
+    let end = app.plans[0].seconds;
+    app.select(0, end, true);
+    app.finish_loading_for_test();
+    assert!(!app.show_harden_signoff(), "other steps keep their sidebar");
+    app.catalog.steps[0].name = "Harden".into();
+    assert!(app.show_harden_signoff());
+    app.error = "Replay unavailable".into();
+    assert!(!app.show_harden_signoff());
+    app.error.clear();
+    app.dashboard.as_mut().unwrap().stale = true;
+    assert!(
+        !app.show_harden_signoff(),
+        "stale reports keep their warning"
+    );
+    app.dashboard.as_mut().unwrap().stale = false;
+    app.select(0, 0.0, false);
+    app.finish_loading_for_test();
+    assert!(
+        !app.show_harden_signoff(),
+        "seeking back hides final results"
+    );
+}
+
+#[test]
 fn filler_rows_play_as_one_fast_sweep_with_exact_seeks_and_complete_highlights() {
     let fixture = Fixture::new();
     let mut manifest: serde_json::Value =

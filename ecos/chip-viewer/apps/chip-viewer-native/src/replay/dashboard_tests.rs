@@ -86,6 +86,7 @@ fn stale_score_does_not_match_changed_flow() {
     );
     let d = Dashboard::load(&f.0, &[]);
     assert_eq!(d.score, None);
+    assert_eq!(d.signoff.qor, QorSummary::default());
     assert!(!d.errors.is_empty());
 }
 
@@ -102,4 +103,125 @@ fn stale_score_does_not_match_added_or_removed_flow_steps() {
         json!({"scalar_summary":{"score":95},"flow_steps":{"sta":"Success"}}),
     );
     assert_eq!(Dashboard::load(&f.0, &[]).score, None);
+}
+
+#[test]
+fn loads_signoff_card_summaries_from_ecc_report_artifacts() {
+    let f = Fixture::new();
+    std::fs::create_dir_all(f.0.join("home")).unwrap();
+    f.write(
+        "home/flow.json",
+        json!({"steps":[{"name":"Harden","state":"Success"}]}),
+    );
+    f.write(
+        "home/engineering-snapshot.json",
+        json!({"parameters":{"design":"aes","top_module":"aes_cipher_top","pdk":"ics55"}}),
+    );
+    f.write(
+        "home/qor_report.json",
+        json!({
+            "design":"aes",
+            "scalar_summary":{"score":88.25,"status":"ORANGE"},
+            "feasibility":{"status":"PASS","gates":[
+                {"state":"passed"},{"state":"warning"},{"state":"failed"}
+            ]}
+        }),
+    );
+    f.write(
+        "home/checklist.json",
+        json!({"status":"attention","summary":{"passed":8,"attention":2,"blocked":1,"unavailable":0},"checklist":[]}),
+    );
+
+    let dashboard = Dashboard::load(&f.0, &[]);
+    assert_eq!(
+        dashboard.signoff.design,
+        DesignSummary {
+            name: "aes".into(),
+            top_module: "aes_cipher_top".into(),
+            pdk: "ics55".into(),
+            harden_state: "Success".into(),
+        }
+    );
+    assert_eq!(
+        dashboard.signoff.qor,
+        QorSummary {
+            score: Some(88.25),
+            scalar_status: "ORANGE".into(),
+            feasibility_status: "PASS".into(),
+            gate_summary: "1 pass · 1 attention · 1 blocked".into(),
+        }
+    );
+    assert_eq!(
+        dashboard.signoff.checklist,
+        ChecklistSummary {
+            status: "attention".into(),
+            passed: Some(8),
+            attention: Some(2),
+            blocked: Some(1),
+            unavailable: Some(0),
+        }
+    );
+}
+
+#[test]
+fn missing_or_invalid_reports_do_not_fabricate_signoff_values() {
+    let f = Fixture::new();
+    assert_eq!(
+        Dashboard::load(&f.0, &[]).signoff,
+        SignoffSummary::default()
+    );
+    std::fs::create_dir_all(f.0.join("home")).unwrap();
+    std::fs::write(f.0.join("home/engineering-snapshot.json"), b"{invalid").unwrap();
+    f.write(
+        "home/qor_report.json",
+        json!({"design":"aes","scalar_summary":{"score":101}}),
+    );
+    f.write(
+        "home/checklist.json",
+        json!({"summary":{"passed":-1,"attention":"two","blocked":null,"unavailable":0}}),
+    );
+    let dashboard = Dashboard::load(&f.0, &[]);
+    assert_eq!(dashboard.signoff.design.name, "aes");
+    assert_eq!(dashboard.signoff.qor, QorSummary::default());
+    assert_eq!(
+        dashboard.signoff.checklist,
+        ChecklistSummary {
+            unavailable: Some(0),
+            ..Default::default()
+        }
+    );
+    assert!(dashboard
+        .errors
+        .iter()
+        .any(|error| error.starts_with("Design:")));
+}
+
+#[test]
+fn unknown_feasibility_gates_remain_unavailable() {
+    let qor = QorSummary::from_report(&json!({"feasibility":{"gates":[
+        {"state":"passed"},{"state":"unavailable"},{}
+    ]}}));
+    assert_eq!(
+        qor.gate_summary,
+        "1 pass · 0 attention · 0 blocked · 2 unavailable"
+    );
+}
+
+#[test]
+fn signoff_card_inputs_are_watched_for_staleness() {
+    let f = Fixture::new();
+    std::fs::create_dir_all(f.0.join("home")).unwrap();
+    for name in [
+        "flow.json",
+        "checklist.json",
+        "qor_report.json",
+        "engineering-snapshot.json",
+    ] {
+        f.write(&format!("home/{name}"), json!({}));
+    }
+    let mut dashboard = Dashboard::load(&f.0, &[]);
+    assert!(!dashboard.stale);
+    f.write("home/engineering-snapshot.json", json!({"changed":true}));
+    dashboard.check_current();
+    assert!(dashboard.stale);
 }

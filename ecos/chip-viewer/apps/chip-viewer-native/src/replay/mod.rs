@@ -38,6 +38,7 @@ mod reveal;
 mod route;
 mod scene3d;
 mod sidebar;
+mod signoff_cards;
 mod step_metrics;
 mod timing;
 #[cfg(all(test, target_os = "linux"))]
@@ -112,6 +113,19 @@ pub struct ReplayApp {
 }
 
 impl ReplayApp {
+    fn harden_replay_complete(&self) -> bool {
+        self.complete
+            && self.pending.is_none()
+            && self.error.is_empty()
+            && self.catalog.steps[self.step]
+                .name
+                .eq_ignore_ascii_case("harden")
+    }
+
+    fn show_harden_signoff(&self) -> bool {
+        self.harden_replay_complete() && self.dashboard.as_ref().is_some_and(|data| !data.stale)
+    }
+
     pub fn configure_renderer(&mut self, cc: &eframe::CreationContext<'_>) {
         self.view3d.configure(cc);
         if let Some(state) = &cc.wgpu_render_state {
@@ -468,6 +482,11 @@ impl eframe::App for ReplayApp {
         self.update_completion_results(ctx);
         self.result_sidebar(ctx);
         egui::CentralPanel::default().show(ctx, |ui| self.main_views(ui));
+        if self.show_harden_signoff() {
+            if let Some(data) = &self.dashboard {
+                data.show_signoff_cards(ctx);
+            }
+        }
         self.analysis_window(ctx);
     }
 }

@@ -3,6 +3,9 @@ use super::ReplayApp;
 
 impl ReplayApp {
     pub(super) fn result_sidebar(&mut self, ctx: &egui::Context) {
+        if self.show_harden_signoff() {
+            return;
+        }
         let width = ctx.screen_rect().width();
         egui::SidePanel::right("replay_dashboard")
             .default_width((width * 0.20).max(210.0))
