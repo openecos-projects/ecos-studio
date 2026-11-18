@@ -15,12 +15,45 @@ use std::{
 pub struct Dashboard {
     pub score: Option<f64>,
     pub score_status: String,
+    pub signoff: SignoffSummary,
     pub groups: Vec<Group>,
     pub errors: Vec<String>,
     watches: Vec<Watch>,
     pub stale: bool,
     unavailable_steps: BTreeSet<usize>,
     follow: SelectionFollow,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SignoffSummary {
+    pub design: DesignSummary,
+    pub qor: QorSummary,
+    pub checklist: ChecklistSummary,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DesignSummary {
+    pub name: String,
+    pub top_module: String,
+    pub pdk: String,
+    pub harden_state: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct QorSummary {
+    pub score: Option<f64>,
+    pub scalar_status: String,
+    pub feasibility_status: String,
+    pub gate_summary: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ChecklistSummary {
+    pub status: String,
+    pub passed: Option<usize>,
+    pub attention: Option<usize>,
+    pub blocked: Option<usize>,
+    pub unavailable: Option<usize>,
 }
 pub struct Group {
     pub name: String,
@@ -75,18 +108,27 @@ impl Dashboard {
             "home/flow.json",
             "home/checklist.json",
             "home/qor_report.json",
+            "home/engineering-snapshot.json",
         ] {
             data.watch(workspace.join(name));
         }
+        let flow = match optional(workspace, "home/flow.json") {
+            Ok(value) => value,
+            Err(error) => {
+                data.errors.push(format!("Flow: {error}"));
+                None
+            }
+        };
         let report = optional(workspace, "home/qor_report.json");
-        match report {
+        let mut report_matches_flow = true;
+        match &report {
             Ok(Some(report)) => {
-                data.score = final_score(&report);
+                data.score = final_score(report);
                 data.score_status = report["scalar_summary"]["status"]
                     .as_str()
                     .unwrap_or("")
                     .to_owned();
-                if let Ok(flow) = read::<Value>(&workspace.join("home/flow.json")) {
+                if let Some(flow) = &flow {
                     if let (Some(saved), Some(current)) =
                         (report["flow_steps"].as_object(), flow["steps"].as_array())
                     {
@@ -100,6 +142,7 @@ impl Dashboard {
                                 .any(|(name, state)| saved.get(*name) != Some(*state))
                         {
                             data.score = None;
+                            report_matches_flow = false;
                             data.errors
                                 .push("QoR report does not match the current flow".into());
                         }
@@ -109,13 +152,35 @@ impl Dashboard {
             Err(error) => data.errors.push(format!("QoR: {error}")),
             _ => {}
         }
+        let snapshot = match optional(workspace, "home/engineering-snapshot.json") {
+            Ok(value) => value,
+            Err(error) => {
+                data.errors.push(format!("Design: {error}"));
+                None
+            }
+        };
+        let checklist = match optional(workspace, "home/checklist.json") {
+            Ok(value) => value,
+            Err(error) => {
+                data.errors.push(format!("Checklist: {error}"));
+                None
+            }
+        };
+        data.signoff = SignoffSummary::load(
+            report.as_ref().ok().and_then(Option::as_ref),
+            flow.as_ref(),
+            snapshot.as_ref(),
+            checklist.as_ref(),
+        );
+        if !report_matches_flow {
+            data.signoff.qor = QorSummary::default();
+        }
         let mut items: BTreeMap<(String, String), Item> = BTreeMap::new();
-        match optional(workspace, "home/checklist.json") {
-            Ok(Some(value)) => match serde_json::from_value::<Checklist>(value) {
+        match checklist {
+            Some(value) => match serde_json::from_value::<Checklist>(value) {
                 Ok(checklist) => merge(&mut items, checklist.items, None),
                 Err(error) => data.errors.push(format!("Checklist: {error}")),
             },
-            Err(error) => data.errors.push(format!("Checklist: {error}")),
             _ => {}
         }
         for (step_index, (name, path)) in steps.iter().enumerate() {
@@ -295,6 +360,150 @@ impl Dashboard {
                     });
                 }
             });
+    }
+
+    pub fn show_signoff_cards(&self, ctx: &egui::Context) {
+        let _ = crate::replay::signoff_cards::show(ctx, &self.signoff);
+    }
+}
+
+impl SignoffSummary {
+    fn load(
+        report: Option<&Value>,
+        flow: Option<&Value>,
+        snapshot: Option<&Value>,
+        checklist: Option<&Value>,
+    ) -> Self {
+        let mut summary = Self {
+            qor: report.map(QorSummary::from_report).unwrap_or_default(),
+            design: DesignSummary::from_snapshot(snapshot, flow),
+            checklist: checklist
+                .map(ChecklistSummary::from_checklist)
+                .unwrap_or_default(),
+        };
+        if summary.design.name.is_empty() {
+            summary.design.name = report
+                .and_then(|value| value.get("design"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+        }
+        summary
+    }
+}
+
+impl DesignSummary {
+    fn from_snapshot(snapshot: Option<&Value>, flow: Option<&Value>) -> Self {
+        let parameters = snapshot
+            .and_then(|value| value.get("parameters"))
+            .and_then(Value::as_object);
+        let design = parameters
+            .and_then(|value| value.get("design"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let top_module = parameters
+            .and_then(|value| value.get("top_module"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let pdk = parameters
+            .and_then(|value| value.get("pdk"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let harden_state = flow
+            .and_then(|value| value.get("steps"))
+            .and_then(Value::as_array)
+            .and_then(|steps| {
+                steps.iter().find(|step| {
+                    step.get("name")
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| name.eq_ignore_ascii_case("harden"))
+                })
+            })
+            .and_then(|step| step.get("state"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        Self {
+            name: design.to_owned(),
+            top_module: top_module.to_owned(),
+            pdk: pdk.to_owned(),
+            harden_state,
+        }
+    }
+}
+
+impl QorSummary {
+    fn from_report(report: &Value) -> Self {
+        let score = final_score(report);
+        let scalar_status = report
+            .get("scalar_summary")
+            .and_then(|value| value.get("status"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let feasibility_status = report
+            .get("feasibility")
+            .and_then(|value| value.get("status"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let mut passed = 0;
+        let mut attention = 0;
+        let mut blocked = 0;
+        let mut unavailable = 0;
+        let mut gate_summary = String::new();
+        if let Some(gates) = report
+            .get("feasibility")
+            .and_then(|value| value.get("gates"))
+            .and_then(Value::as_array)
+        {
+            for gate in gates {
+                let state = gate.get("state").and_then(Value::as_str).unwrap_or("");
+                match state.to_ascii_lowercase().as_str() {
+                    "passed" | "pass" => passed += 1,
+                    "warning" | "attention" => attention += 1,
+                    "failed" | "blocked" | "fail" => blocked += 1,
+                    _ => unavailable += 1,
+                }
+            }
+            if !gates.is_empty() {
+                gate_summary = format!("{passed} pass · {attention} attention · {blocked} blocked");
+                if unavailable > 0 {
+                    gate_summary.push_str(&format!(" · {unavailable} unavailable"));
+                }
+            }
+        }
+        Self {
+            score,
+            scalar_status,
+            feasibility_status,
+            gate_summary,
+        }
+    }
+}
+
+impl ChecklistSummary {
+    fn from_checklist(checklist: &Value) -> Self {
+        let summary = checklist.get("summary").and_then(Value::as_object);
+        // ECC's summary accounts for each check's blocking policy. Do not infer
+        // it from state alone: an advisory failed check is not a blocking check.
+        let count = |key: &str| {
+            summary
+                .and_then(|value| value.get(key))
+                .and_then(Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+        };
+        Self {
+            status: checklist
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            passed: count("passed"),
+            attention: count("attention"),
+            blocked: count("blocked"),
+            unavailable: count("unavailable"),
+        }
     }
 }
 impl Group {
