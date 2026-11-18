@@ -135,8 +135,8 @@ fn report_field(ui: &mut egui::Ui, f: &Field) {
         TEXT
     };
     row(ui, &f.label, &f.value, tone);
-    if f.note.starts_with("Target freq:") {
-        text(ui, &f.note, 15.0, LABEL);
+    if let Some(frequency) = f.note.strip_prefix("Target freq:") {
+        row(ui, "Target freq", frequency.trim(), TEXT);
     }
 }
 fn report_table(ui: &mut egui::Ui, table: &Section) {
