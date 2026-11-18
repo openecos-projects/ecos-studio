@@ -2249,7 +2249,6 @@ impl ChipViewDb {
 
     pub fn stats(&self) -> SnapshotStats {
         let mut stats = SnapshotStats {
-            shape_count: self.snapshot.shapes().len(),
             owner_count: self.snapshot.owners().len(),
             name_count: self.snapshot.name_records().len(),
             site_count: self.snapshot.site_metadata().len(),
@@ -2264,6 +2263,10 @@ impl ChipViewDb {
         };
 
         for shape in self.snapshot.shapes() {
+            if shape.state != ShapeState::Alive as u8 {
+                continue;
+            }
+            stats.shape_count += 1;
             stats
                 .bbox
                 .as_mut()
@@ -2726,6 +2729,11 @@ mod tests {
             owner_id: 7,
             ..OwnerRef::default()
         };
+        let deleted_owner = OwnerRef {
+            owner_type: OwnerType::Die as u8,
+            owner_id: 8,
+            ..OwnerRef::default()
+        };
         let shape = ShapeRecord {
             id: 1,
             layer_id: 1,
@@ -2740,6 +2748,22 @@ mod tests {
             },
             ..ShapeRecord::default()
         };
+        let deleted_shape = ShapeRecord {
+            id: 2,
+            layer_id: 2,
+            kind: ShapeKind::Rect as u8,
+            state: ShapeState::Deleted as u8,
+            owner_index: 1,
+            bbox: Rect32 {
+                lx: 1_000,
+                ly: 2_000,
+                hx: 3_000,
+                hy: 4_000,
+            },
+            ..ShapeRecord::default()
+        };
+        let shapes = [shape, deleted_shape];
+        let owners = [owner, deleted_owner];
         let owner_name = b"netA";
         let name_record = GeometryNameRecord {
             owner_type: OwnerType::NetWireSegment as u8,
@@ -2748,9 +2772,9 @@ mod tests {
             ..GeometryNameRecord::default()
         };
         let meta = GeometryMetaRecord {
-            shape_count: 1,
-            owner_count: 1,
-            next_shape_id: 2,
+            shape_count: shapes.len() as u64,
+            owner_count: owners.len() as u64,
+            next_shape_id: 3,
             name_record_count: 1,
             name_payload_size: owner_name.len() as u64,
             ..GeometryMetaRecord::default()
@@ -2784,13 +2808,13 @@ mod tests {
             "geometry.shapes.bin",
             GeometryFileKind::Shapes,
             size_of::<ShapeRecord>() as u32,
-            bytemuck::bytes_of(&shape),
+            bytemuck::cast_slice(&shapes),
         );
         write_file(
             "geometry.owners.bin",
             GeometryFileKind::Owners,
             size_of::<OwnerRef>() as u32,
-            bytemuck::bytes_of(&owner),
+            bytemuck::cast_slice(&owners),
         );
         write_file("geometry.payload.bin", GeometryFileKind::Payload, 1, &[]);
         write_file("geometry.names.bin", GeometryFileKind::Names, 1, owner_name);
@@ -2804,7 +2828,13 @@ mod tests {
             "geometry.sidmap.bin",
             GeometryFileKind::SidMap,
             size_of::<GeometrySidMapRecord>() as u32,
-            bytemuck::bytes_of(&GeometrySidMapRecord { shape_id: 1, owner }),
+            bytemuck::cast_slice(&[
+                GeometrySidMapRecord { shape_id: 1, owner },
+                GeometrySidMapRecord {
+                    shape_id: 2,
+                    owner: deleted_owner,
+                },
+            ]),
         );
         write_file(
             "geometry.view.bin",
@@ -2820,7 +2850,7 @@ mod tests {
         let manifest = directory.join("geometry.manifest");
         std::fs::write(
             &manifest,
-            "schema_version=1\nshape_count=1\nowner_count=1\npayload_size=0\n\
+            "schema_version=1\nshape_count=2\nowner_count=2\npayload_size=0\n\
              meta=geometry.meta.bin\nshapes=geometry.shapes.bin\nowners=geometry.owners.bin\n\
              payload=geometry.payload.bin\nnames=geometry.names.bin\n\
              name_index=geometry.name_index.bin\nsidmap=geometry.sidmap.bin\n\
@@ -2878,6 +2908,34 @@ mod tests {
         assert!(db.view_index.get().is_some());
         assert_eq!(db.net_kind_for_name("netA"), None);
         assert!(db.net_index.get().is_some());
+
+        drop(db);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn stats_ignore_deleted_shapes_for_shape_derived_values() {
+        let manifest = write_open_fixture();
+        let directory = manifest.parent().unwrap().to_path_buf();
+        let db = ChipViewDb::open(&manifest).unwrap();
+
+        let stats = db.stats();
+
+        assert_eq!(stats.shape_count, 1);
+        assert_eq!(
+            stats.bbox,
+            Some(Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 10,
+                hy: 10,
+            })
+        );
+        assert_eq!(stats.die_bbox, None);
+        assert_eq!(
+            stats.owner_type_counts,
+            BTreeMap::from([(OwnerType::NetWireSegment as u8, 1)])
+        );
 
         drop(db);
         std::fs::remove_dir_all(directory).unwrap();
