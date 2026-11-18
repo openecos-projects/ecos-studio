@@ -36,6 +36,8 @@ use crate::macro_staging::{
 use crate::map_data::{ColormapMode, HeatmapData, MapCatalog, MapItem};
 
 mod clock_tree;
+#[cfg(test)]
+mod coordinate_rulers_tests;
 mod cpu_raster;
 mod cpu_scene;
 mod gpu_overview;
@@ -11644,7 +11646,7 @@ fn coordinate_ruler_interval_dbu(
     unit: CoordinateUnit,
     dbu_per_micron: Option<u32>,
 ) -> i64 {
-    let target_dbu = f64::from(COORDINATE_RULER_TARGET_TICK_PX / scale.max(0.001));
+    let target_dbu = f64::from(COORDINATE_RULER_TARGET_TICK_PX) / f64::from(scale);
     let interval = match effective_coordinate_unit(unit, dbu_per_micron) {
         CoordinateUnit::Dbu => nice_ruler_interval(target_dbu),
         CoordinateUnit::Micron => {
@@ -11989,10 +11991,9 @@ fn screen_to_world_rect(
     zoom: f32,
     pan: egui::Vec2,
 ) -> Rect32 {
-    let world_width = (world.hx - world.lx).max(1) as f32;
-    let world_height = (world.hy - world.ly).max(1) as f32;
-    let base_scale = (canvas.width() / world_width).min(canvas.height() / world_height);
-    let scale = (base_scale * zoom.max(0.001)).max(0.001);
+    // Large DBU extents can legitimately render below 0.001 pixels per DBU.
+    // Invert the actual drawing scale so the viewport still covers the canvas.
+    let scale = world_to_screen_scale(world, canvas, zoom);
     let world_cx = (world.lx + world.hx) as f32 * 0.5;
     let world_cy = (world.ly + world.hy) as f32 * 0.5;
     let center = canvas.center() + pan;
@@ -12032,10 +12033,7 @@ fn screen_to_world_delta(
     canvas: egui::Rect,
     zoom: f32,
 ) -> (i32, i32) {
-    let world_width = (world.hx - world.lx).max(1) as f32;
-    let world_height = (world.hy - world.ly).max(1) as f32;
-    let base_scale = (canvas.width() / world_width).min(canvas.height() / world_height);
-    let scale = (base_scale * zoom.max(0.001)).max(0.001);
+    let scale = world_to_screen_scale(world, canvas, zoom);
     (
         (delta.x / scale).round() as i32,
         (-delta.y / scale).round() as i32,
