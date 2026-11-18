@@ -169,6 +169,10 @@ struct LoadedViewer {
     query_input_mode: QueryInputMode,
     search_text: String,
     search_mode: SearchMode,
+    search_highlighted: BTreeSet<ShapeId>,
+    search_worker: search_worker::SearchWorker,
+    search_truncated: bool,
+    focus_search_results: bool,
     shape_id_text: String,
     last_query_status: Option<String>,
     highlighted: BTreeSet<ShapeId>,
@@ -218,6 +222,9 @@ struct LoadedViewer {
     previous_map_item: Option<(crate::map_data::MapItem, Option<PathBuf>)>,
     active_heatmap: Option<ActiveHeatmap>,
     map_item_error: Option<String>,
+    analysis_loader: Option<analysis_loader::AnalysisLoader>,
+    analysis_load_error: Option<String>,
+    analysis_tab_user_selected: bool,
     selected_map_bbox: Option<Rect32>,
     focus_animation: Option<FocusAnimation>,
     zoom: f32,
@@ -656,6 +663,11 @@ enum SearchMode {
     Pin,
     Bus,
     Group,
+}
+
+#[cfg(test)]
+fn search_pattern(query: &str) -> Result<Regex, regex::Error> {
+    Regex::new(query)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1346,45 +1358,111 @@ impl SearchMode {
         }
     }
 
-    fn query_shape_ids(self, db: &ChipViewDb, pattern: &Regex) -> Vec<ShapeId> {
+    fn query_shape_ids_bounded(
+        self,
+        db: &ChipViewDb,
+        pattern: &Regex,
+        is_current: &(impl Fn() -> bool + Sync),
+    ) -> Option<chip_view_db::BoundedShapeSearch> {
         match self {
-            SearchMode::All => db.query_owner_name_pattern(pattern),
-            SearchMode::Net | SearchMode::Instance => self
-                .owner_types()
-                .map(|owner_types| {
-                    db.query_owner_name_for_owner_types_pattern(pattern, owner_types)
-                })
-                .unwrap_or_default(),
-            SearchMode::Pin => db
-                .connectivity_metadata()
-                .iter()
-                .filter(|endpoint| pattern.is_match(&endpoint.pin_name))
-                .flat_map(|endpoint| db.query_pin_name(&endpoint.pin_name))
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect(),
-            SearchMode::Bus => db
-                .bus_metadata()
-                .iter()
-                .filter(|bus| pattern.is_match(&bus.name))
-                .flat_map(|bus| db.query_bus_name(&bus.name))
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect(),
-            SearchMode::Group => db
-                .group_metadata()
-                .iter()
-                .filter(|group| pattern.is_match(&group.name))
-                .flat_map(|group| db.query_group_name(&group.name))
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect(),
+            SearchMode::All | SearchMode::Net | SearchMode::Instance => {
+                db.query_owner_name_pattern_bounded(
+                    pattern,
+                    self.owner_types(),
+                    search_worker::SEARCH_RESULT_LIMIT,
+                    is_current,
+                )
+            }
+            SearchMode::Pin => bounded_metadata_search(
+                db.connectivity_metadata()
+                    .iter()
+                    .map(|endpoint| endpoint.pin_name.as_str()),
+                pattern,
+                is_current,
+                |name| db.query_pin_name_bounded(name, search_worker::SEARCH_RESULT_LIMIT, is_current),
+            ),
+            SearchMode::Bus => bounded_metadata_search(
+                db.bus_metadata().iter().map(|bus| bus.name.as_str()),
+                pattern,
+                is_current,
+                |name| db.query_bus_name_bounded(name, search_worker::SEARCH_RESULT_LIMIT, is_current),
+            ),
+            SearchMode::Group => bounded_metadata_search(
+                db.group_metadata().iter().map(|group| group.name.as_str()),
+                pattern,
+                is_current,
+                |name| {
+                    db.query_group_name_bounded(name, search_worker::SEARCH_RESULT_LIMIT, is_current)
+                },
+            ),
         }
     }
 }
 
-fn search_pattern(query: &str) -> Result<Regex, regex::Error> {
-    Regex::new(query)
+fn bounded_metadata_search<'a>(
+    names: impl Iterator<Item = &'a str>,
+    pattern: &Regex,
+    is_current: &(impl Fn() -> bool + Sync),
+    mut query: impl FnMut(&str) -> Option<chip_view_db::BoundedShapeSearch>,
+) -> Option<chip_view_db::BoundedShapeSearch> {
+    let mut shape_ids = BTreeSet::new();
+    let mut searched_names = std::collections::HashSet::new();
+    let mut truncated = false;
+    for (index, name) in names.enumerate() {
+        if index % 64 == 0 && !is_current() {
+            return None;
+        }
+        if pattern.is_match(name) && searched_names.insert(name) {
+            let result = query(name)?;
+            truncated |= result.truncated;
+            for shape_id in result.shape_ids {
+                shape_ids.insert(shape_id);
+                if shape_ids.len() > search_worker::SEARCH_RESULT_LIMIT {
+                    truncated = true;
+                    break;
+                }
+            }
+            if shape_ids.len() > search_worker::SEARCH_RESULT_LIMIT {
+                shape_ids.pop_last();
+                break;
+            }
+            if result.truncated {
+                break;
+            }
+        }
+    }
+    is_current().then_some(chip_view_db::BoundedShapeSearch {
+        shape_ids: shape_ids.into_iter().collect(),
+        truncated,
+    })
+}
+
+#[cfg(test)]
+mod bounded_metadata_search_tests {
+    use super::*;
+
+    #[test]
+    fn metadata_search_merges_and_deduplicates_matching_names() {
+        let names = ["pin_a", "pin_a", "pin_b", "other"];
+        let pattern = Regex::new("^pin").expect("valid metadata regex");
+        let mut queried = Vec::new();
+        let result = bounded_metadata_search(names.into_iter(), &pattern, &|| true, |name| {
+            queried.push(name.to_owned());
+            Some(chip_view_db::BoundedShapeSearch {
+                shape_ids: match name {
+                    "pin_a" => vec![1, 2],
+                    "pin_b" => vec![2, 3],
+                    _ => Vec::new(),
+                },
+                truncated: false,
+            })
+        })
+        .expect("current metadata search");
+
+        assert_eq!(result.shape_ids, vec![1, 2, 3]);
+        assert!(!result.truncated);
+        assert_eq!(queried, ["pin_a", "pin_b"]);
+    }
 }
 
 impl SidebarInfoPanel {

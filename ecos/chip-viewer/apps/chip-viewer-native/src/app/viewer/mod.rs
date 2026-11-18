@@ -9,12 +9,7 @@ impl LoadedViewer {
         edit_command_dir: Option<PathBuf>,
         edit_result_dir: Option<PathBuf>,
         macro_staging_path: Option<PathBuf>,
-        drc_data_path: Option<PathBuf>,
-        drc_statis_path: Option<PathBuf>,
-        antenna_data_path: Option<PathBuf>,
-        antenna_statis_path: Option<PathBuf>,
-        lvs_data_path: Option<PathBuf>,
-        map_root_path: Option<PathBuf>,
+        mut analysis_paths: analysis_loader::AnalysisPaths,
         target_format: wgpu::TextureFormat,
         render_mode: crate::RenderMode,
     ) -> Self {
@@ -41,35 +36,26 @@ impl LoadedViewer {
             set_layer_visibility(&mut layers, true);
             object_visibility.set_all_visible(true);
         }
-        let drc_data_path = db.snapshot().manifest().drc.clone().or(drc_data_path);
-        let drc_overlay = DrcOverlay::load(drc_data_path, drc_statis_path);
-        let antenna_overlay = AntennaOverlay::load(antenna_data_path, antenna_statis_path);
-        let lvs_analysis = lvs::LvsAnalysis::load(lvs_data_path);
+        analysis_paths.drc_data = db
+            .snapshot()
+            .manifest()
+            .drc
+            .clone()
+            .or(analysis_paths.drc_data);
+        let (analysis_loader, analysis_load_error) =
+            match analysis_loader::AnalysisLoader::start(analysis_paths) {
+                Ok(loader) => (loader, None),
+                Err(err) => (
+                    None,
+                    Some(format!("Failed to start analysis data loader: {err}")),
+                ),
+            };
         let clock_tree = crate::clock_tree::ClockTreePanel::new(std::sync::Arc::clone(&db));
-        let (map_catalog, map_catalog_error) = match map_root_path.as_deref() {
-            Some(root) => match MapCatalog::discover(root) {
-                Ok(catalog) if !catalog.is_empty() => (Some(catalog), None),
-                Ok(_) => (None, None),
-                Err(err) => (None, Some(err)),
-            },
-            None => (None, None),
-        };
-        let analysis_tab = if drc_overlay.is_some() {
-            AnalysisTab::Drc
-        } else if lvs_analysis.is_some() {
-            AnalysisTab::Lvs
-        } else if antenna_overlay.is_some() {
-            AnalysisTab::Antenna
-        } else if map_catalog.is_none() && clock_tree.is_some() {
+        let analysis_tab = if clock_tree.is_some() {
             AnalysisTab::ClockTree
         } else {
             AnalysisTab::Map
         };
-        let expanded_map_categories = map_catalog
-            .as_ref()
-            .and_then(|catalog| catalog.categories.first())
-            .map(|category| BTreeSet::from([category.id.clone()]))
-            .unwrap_or_default();
         let macro_staging = macro_staging_path.as_deref().and_then(|path| {
             MacroStagingState::load(path, &db).or_else(|| {
                 log::warn!(
@@ -125,6 +111,10 @@ impl LoadedViewer {
             query_input_mode: QueryInputMode::Search,
             search_text: String::new(),
             search_mode: SearchMode::All,
+            search_highlighted: BTreeSet::new(),
+            search_worker: search_worker::SearchWorker::new(),
+            search_truncated: false,
+            focus_search_results: false,
             shape_id_text: String::new(),
             last_query_status: None,
             highlighted: BTreeSet::new(),
@@ -154,22 +144,25 @@ impl LoadedViewer {
             view_tile_cache: ViewTilePlaneCache::default(),
             view_tiles_latch: gpu_overview::ViewTileOverviewLatch::default(),
             next_command_counter: 1,
-            drc_overlay,
+            drc_overlay: None,
             selected_drc: None,
-            antenna_overlay,
+            antenna_overlay: None,
             selected_antenna: None,
-            lvs_analysis,
+            lvs_analysis: None,
             selected_lvs_group: None,
             show_all_lvs: false,
             timing: None,
             clock_tree,
-            map_catalog,
-            map_catalog_error,
+            map_catalog: None,
+            map_catalog_error: None,
             analysis_tab,
-            expanded_map_categories,
+            expanded_map_categories: BTreeSet::new(),
             selected_map_item: None,
             previous_map_item: None,
             active_heatmap: None,
+            analysis_loader,
+            analysis_load_error,
+            analysis_tab_user_selected: false,
             map_item_error: None,
             selected_map_bbox: None,
             focus_animation: None,
@@ -215,11 +208,24 @@ impl LoadedViewer {
             || self.lvs_analysis.is_some()
             || self.map_catalog.is_some()
             || self.map_catalog_error.is_some()
+            || self.analysis_loader.is_some()
+            || self.analysis_load_error.is_some()
             || self.clock_tree.is_some()
             || self.timing.is_some()
     }
 
     pub(super) fn analysis_sidebar(&mut self, ui: &mut egui::Ui) {
+        if let Some(error) = &self.analysis_load_error {
+            ui.colored_label(ecos_warning(), error);
+            ui.separator();
+        }
+        if self.analysis_loader.is_some() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Loading analysis data");
+            });
+            ui.separator();
+        }
         let has_drc = self.drc_overlay.is_some();
         let has_antenna = self.antenna_overlay.is_some();
         let has_lvs = self.lvs_analysis.is_some();
@@ -233,20 +239,25 @@ impl LoadedViewer {
                 && analysis_tab_button(ui, "TIMING", self.analysis_tab == AnalysisTab::Timing)
             {
                 self.analysis_tab = AnalysisTab::Timing;
+                self.analysis_tab_user_selected = true;
             }
             if has_drc && analysis_tab_button(ui, "DRC", self.analysis_tab == AnalysisTab::Drc) {
                 self.analysis_tab = AnalysisTab::Drc;
+                self.analysis_tab_user_selected = true;
             }
             if has_antenna
                 && analysis_tab_button(ui, "ANTENNA", self.analysis_tab == AnalysisTab::Antenna)
             {
                 self.analysis_tab = AnalysisTab::Antenna;
+                self.analysis_tab_user_selected = true;
             }
             if has_lvs && analysis_tab_button(ui, "LVS", self.analysis_tab == AnalysisTab::Lvs) {
                 self.analysis_tab = AnalysisTab::Lvs;
+                self.analysis_tab_user_selected = true;
             }
             if has_maps && analysis_tab_button(ui, "MAP", self.analysis_tab == AnalysisTab::Map) {
                 self.analysis_tab = AnalysisTab::Map;
+                self.analysis_tab_user_selected = true;
             }
             if has_clock_tree
                 && analysis_tab_button(
@@ -256,6 +267,7 @@ impl LoadedViewer {
                 )
             {
                 self.analysis_tab = AnalysisTab::ClockTree;
+                self.analysis_tab_user_selected = true;
             }
         });
         ui.add_space(4.0);
@@ -1337,25 +1349,29 @@ impl LoadedViewer {
                                     ui.label(
                                         egui::RichText::new(status).small().color(ecos_warning()),
                                     );
-                                } else if !self.search_text.trim().is_empty() {
+                                } else if self.search_worker.is_pending() {
                                     ui.label(
-                                        egui::RichText::new(format!(
-                                            "{} matches",
-                                            self.highlighted.len()
-                                        ))
-                                        .small()
-                                        .color(ecos_text_secondary()),
+                                        egui::RichText::new("Searching…")
+                                            .small()
+                                            .color(ecos_text_secondary()),
                                     );
+                                } else if !self.search_text.trim().is_empty() {
+                                    let count = self.search_highlighted.len();
+                                    let (label, color) = if self.search_truncated {
+                                        (format!("{count}+ matches"), ecos_warning())
+                                    } else {
+                                        (format!("{count} matches"), ecos_text_secondary())
+                                    };
+                                    ui.label(egui::RichText::new(label).small().color(color));
                                     if ui.small_button("Locate").clicked() {
-                                        self.focus_highlighted_shapes();
+                                        self.focus_search_highlights();
                                     }
-                                    if ui.small_button("Clear").clicked() {
-                                        self.clock_tree_overlay.clear();
-                                        clear_search_state(
-                                            &mut self.search_text,
-                                            &mut self.highlighted,
-                                        );
-                                    }
+                                }
+                                if !self.search_text.is_empty()
+                                    && ui.small_button("Clear").clicked()
+                                {
+                                    self.search_text.clear();
+                                    self.schedule_search();
                                 }
                             }
                             self.query_mode_picker(ui);
@@ -1389,7 +1405,7 @@ impl LoadedViewer {
                     )
                     .changed()
                 {
-                    self.last_query_status = None;
+                    self.cancel_search();
                 }
                 ui.separator();
                 ui.label(
@@ -1408,7 +1424,7 @@ impl LoadedViewer {
                     if changed {
                         self.query_input_mode = QueryInputMode::Search;
                         self.search_mode = mode;
-                        self.refresh_highlight();
+                        self.schedule_search();
                     }
                 }
             });
@@ -1428,10 +1444,7 @@ impl LoadedViewer {
 
     fn submit_query(&mut self) {
         match self.query_input_mode {
-            QueryInputMode::Search => {
-                self.refresh_highlight();
-                self.focus_highlighted_shapes();
-            }
+            QueryInputMode::Search => self.run_search_now(true),
             QueryInputMode::ShapeId => self.select_shape_id_from_input(),
         }
     }
@@ -1446,7 +1459,7 @@ impl LoadedViewer {
         );
         if response.changed() {
             self.search_text = single_line_query_text(&self.search_text);
-            self.refresh_highlight();
+            self.schedule_search();
         }
         let submit = response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
         if submit {
@@ -3899,6 +3912,7 @@ impl LoadedViewer {
                     self.ruler_tool.clear();
                 } else if self.selected.is_some()
                     || !self.highlighted.is_empty()
+                    || self.search_worker.is_pending()
                     || self
                         .macro_staging
                         .as_ref()
@@ -3910,6 +3924,11 @@ impl LoadedViewer {
                     || self.selected_map_bbox.is_some()
                 {
                     self.selected = None;
+                    self.search_highlighted.clear();
+                    self.search_worker.cancel();
+                    self.search_truncated = false;
+                    self.focus_search_results = false;
+                    self.last_query_status = None;
                     self.highlighted.clear();
                     self.clock_tree_overlay.clear();
                     self.selected_drc = None;
@@ -6129,14 +6148,15 @@ impl LoadedViewer {
         self.geometry_epoch = self.geometry_epoch.wrapping_add(1);
         self.render_cache.clear();
         self.view_tile_cache.clear();
-        self.refresh_highlight();
+        self.clock_tree_overlay.clear();
+        if self.query_input_mode == QueryInputMode::Search {
+            self.run_search_now(false);
+        } else {
+            self.cancel_search();
+        }
         let db = &self.db;
         self.selected =
             retain_existing_shape_id(self.selected, |shape_id| db.find_shape(shape_id).is_some());
-        let db = &self.db;
-        retain_existing_shape_ids(&mut self.highlighted, |shape_id| {
-            db.find_shape(shape_id).is_some()
-        });
         self.rebuild_layer_stack();
         self.view3d_fitted = false;
         self.snapshot_signature = snapshot_signature;
@@ -6146,25 +6166,72 @@ impl LoadedViewer {
         next_native_command_id(&mut self.next_command_counter)
     }
 
-    fn refresh_highlight(&mut self) {
-        let query = self.search_text.trim();
+    fn run_search_now(&mut self, focus_results: bool) {
+        self.schedule_search();
+        self.focus_search_results = focus_results && self.search_worker.is_pending();
+        self.search_worker.start_now(&self.db);
+    }
+
+    fn schedule_search(&mut self) {
+        self.clear_search_results();
+        self.search_worker
+            .schedule(self.search_text.trim().to_owned(), self.search_mode);
+    }
+
+    fn cancel_search(&mut self) {
+        self.search_worker.cancel();
+        self.clear_search_results();
+    }
+
+    fn clear_search_results(&mut self) {
+        self.search_highlighted.clear();
+        self.search_truncated = false;
         self.last_query_status = None;
-        self.clock_tree_overlay.clear();
-        self.highlighted = if query.is_empty() {
-            BTreeSet::new()
-        } else {
-            match search_pattern(query) {
-                Ok(pattern) => self
-                    .search_mode
-                    .query_shape_ids(&self.db, &pattern)
-                    .into_iter()
-                    .collect(),
-                Err(error) => {
-                    self.last_query_status = Some(format!("Invalid search pattern: {error}"));
-                    BTreeSet::new()
+        self.focus_search_results = false;
+        self.rebuild_highlights();
+    }
+
+    pub(super) fn poll_search(&mut self, ctx: &egui::Context) {
+        if self.query_input_mode != QueryInputMode::Search {
+            return;
+        }
+        self.search_worker.poll_start(&self.db);
+        match self.search_worker.try_take() {
+            Ok(Some(result)) => {
+                self.search_highlighted = result.shape_ids;
+                self.rebuild_highlights();
+                self.search_truncated = result.truncated;
+                self.last_query_status = result.error;
+                if self.focus_search_results {
+                    self.focus_search_results = false;
+                    self.focus_search_highlights();
                 }
             }
-        };
+            Ok(None) if self.search_worker.is_pending() => {
+                ctx.request_repaint_after(Duration::from_millis(20));
+            }
+            Err(error) => {
+                self.focus_search_results = false;
+                self.last_query_status = Some(error);
+            }
+            Ok(None) => {}
+        }
+    }
+
+    pub(super) fn rebuild_highlights(&mut self) {
+        self.highlighted = self
+            .search_highlighted
+            .union(self.clock_tree_overlay.shape_ids())
+            .copied()
+            .collect();
+    }
+
+    fn focus_search_highlights(&mut self) {
+        if !self.search_highlighted.is_empty() {
+            self.pending_focus = focus_target_for_shape_ids(&self.search_highlighted, |id| {
+                self.db.find_shape(id).map(|shape| shape.bbox)
+            });
+        }
     }
 
     fn focus_highlighted_shapes(&mut self) {
@@ -6360,7 +6427,6 @@ impl LoadedViewer {
                 .find_shape(shape_id)
                 .is_some_and(|shape| self.shape_is_visible(shape))
         });
-        self.refresh_highlight();
     }
 
     fn pick_shape_at(

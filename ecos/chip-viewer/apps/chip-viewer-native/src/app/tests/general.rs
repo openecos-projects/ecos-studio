@@ -844,12 +844,7 @@ fn three_d_overview_extrudes_snapshot_tiles_instead_of_full_die_slabs() {
         None,
         None,
         None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        analysis_loader::AnalysisPaths::default(),
         wgpu::TextureFormat::Bgra8Unorm,
         crate::RenderMode::Gpu,
     );
@@ -927,12 +922,7 @@ fn three_d_fit_prefers_detailed_tiles_over_full_die_panels() {
         None,
         None,
         None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        analysis_loader::AnalysisPaths::default(),
         wgpu::TextureFormat::Bgra8Unorm,
         crate::RenderMode::Gpu,
     );
@@ -1004,14 +994,52 @@ fn clock_tree_markers_point_toward_parent_and_child_semantics() {
 }
 
 #[test]
-fn clear_search_state_resets_search_text_and_highlights() {
-    let mut search_text = "clk".to_string();
-    let mut highlighted = BTreeSet::from([10, 20]);
-
-    clear_search_state(&mut search_text, &mut highlighted);
-
-    assert!(search_text.is_empty());
-    assert!(highlighted.is_empty());
+fn viewer_installs_analysis_after_geometry_loads() {
+    let dir = temp_snapshot_dir("background-analysis");
+    write_empty_snapshot(&dir, false);
+    let report = dir.join("drc.json");
+    fs::write(&report, r#"{"drc":{"number":0,"distribution":{}}}"#).unwrap();
+    let mut app = ChipViewerApp::open(
+        dir.join("geometry.manifest"),
+        "view".into(),
+        None,
+        None,
+        false,
+        None,
+        Some(report),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        wgpu::TextureFormat::Bgra8Unorm,
+        crate::RenderMode::EguiOnly,
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while matches!(app.state, ViewerState::Loading(_)) {
+        app.poll_loading();
+        assert!(Instant::now() < deadline, "geometry load timed out");
+        thread::sleep(Duration::from_millis(1));
+    }
+    let ViewerState::Loaded(loaded) = &mut app.state else {
+        panic!("expected a loaded viewer");
+    };
+    assert!(loaded.drc_overlay.is_none());
+    assert!(loaded.analysis_loader.is_some());
+    let ctx = egui::Context::default();
+    while loaded.analysis_loader.is_some() {
+        loaded.poll_analysis(&ctx);
+        assert!(Instant::now() < deadline, "analysis load timed out");
+        thread::sleep(Duration::from_millis(1));
+    }
+    assert!(loaded
+        .drc_overlay
+        .as_ref()
+        .is_some_and(|overlay| { overlay.load_error.is_none() && overlay.total_count() == 0 }));
+    assert!(matches!(loaded.analysis_tab, AnalysisTab::Drc));
+    drop(app);
+    let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -1674,15 +1702,6 @@ fn retain_existing_shape_id_clears_stale_selection() {
         retain_existing_shape_id(None, |shape_id| shape_id == 10),
         None
     );
-}
-
-#[test]
-fn retain_existing_shape_ids_filters_stale_highlights() {
-    let mut shape_ids = BTreeSet::from([10, 20, 30]);
-
-    retain_existing_shape_ids(&mut shape_ids, |shape_id| shape_id != 20);
-
-    assert_eq!(shape_ids, BTreeSet::from([10, 30]));
 }
 
 #[test]
@@ -3052,12 +3071,7 @@ fn external_snapshot_refresh_records_reopened_manifest_file_set() {
         None,
         None,
         None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        analysis_loader::AnalysisPaths::default(),
         wgpu::TextureFormat::Bgra8Unorm,
         crate::RenderMode::Gpu,
     );
@@ -3100,12 +3114,7 @@ fn reload_while_reload_in_flight_is_rejected() {
         None,
         None,
         None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        analysis_loader::AnalysisPaths::default(),
         wgpu::TextureFormat::Bgra8Unorm,
         crate::RenderMode::Gpu,
     );
@@ -3139,12 +3148,7 @@ fn failed_reload_keeps_existing_database() {
         None,
         None,
         None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        analysis_loader::AnalysisPaths::default(),
         wgpu::TextureFormat::Bgra8Unorm,
         crate::RenderMode::Gpu,
     );
@@ -3185,12 +3189,7 @@ fn restored_edit_session_starts_dirty() {
         None,
         None,
         None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        analysis_loader::AnalysisPaths::default(),
         wgpu::TextureFormat::Bgra8Unorm,
         crate::RenderMode::Gpu,
     );
@@ -3315,12 +3314,7 @@ fn loaded_viewer_falls_back_to_cpu_when_wgpu_unavailable() {
         None,
         None,
         None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        analysis_loader::AnalysisPaths::default(),
         wgpu::TextureFormat::Bgra8Unorm,
         crate::RenderMode::EguiOnly,
     );
@@ -3769,12 +3763,7 @@ fn close_test_loaded_viewer(test_name: &str) -> (PathBuf, LoadedViewer) {
         None,
         None,
         None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        analysis_loader::AnalysisPaths::default(),
         wgpu::TextureFormat::Bgra8Unorm,
         crate::RenderMode::EguiOnly,
     );
@@ -4090,12 +4079,7 @@ fn accepted_staged_macro_edit_updates_local_staging_rect() {
         Some(command_dir.clone()),
         Some(result_dir),
         Some(staging_path),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        analysis_loader::AnalysisPaths::default(),
         wgpu::TextureFormat::Bgra8Unorm,
         crate::RenderMode::Gpu,
     );

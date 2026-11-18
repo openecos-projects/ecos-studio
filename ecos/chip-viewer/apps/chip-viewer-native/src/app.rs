@@ -35,6 +35,8 @@ use crate::macro_staging::{
 };
 use crate::map_data::{ColormapMode, HeatmapData, MapCatalog, MapItem};
 
+#[path = "app/analysis/analysis_loader.rs"]
+mod analysis_loader;
 #[path = "app/analysis/analysis_overlays.rs"]
 mod analysis_overlays;
 #[path = "app/analysis/clock_tree.rs"]
@@ -56,6 +58,8 @@ mod label_layout;
 mod lvs;
 #[path = "app/render/render_support.rs"]
 mod render_support;
+#[path = "app/analysis/search_worker.rs"]
+mod search_worker;
 #[path = "app/session/session_close.rs"]
 mod session_close;
 #[path = "app/session/snapshot_reload.rs"]
@@ -238,21 +242,23 @@ impl ChipViewerApp {
     fn poll_loading(&mut self) {
         let next_state = match &mut self.state {
             ViewerState::Loading(loading) => match loading.receiver.try_recv() {
-                Ok(Ok(db)) => {
+                Ok(Ok(prepared)) => {
                     let mut loaded = LoadedViewer::new(
                         chip_display::ColorTheme::Vivid,
-                        db,
+                        prepared,
                         loading.edit_enabled,
                         loading.initial_session_dirty,
                         loading.edit_command_dir.clone(),
                         loading.edit_result_dir.clone(),
                         loading.macro_staging_path.clone(),
-                        loading.drc_data_path.clone(),
-                        loading.drc_statis_path.clone(),
-                        loading.antenna_data_path.clone(),
-                        loading.antenna_statis_path.clone(),
-                        loading.lvs_data_path.clone(),
-                        loading.map_root_path.clone(),
+                        analysis_loader::AnalysisPaths {
+                            drc_data: loading.drc_data_path.take(),
+                            drc_stats: loading.drc_statis_path.take(),
+                            antenna_data: loading.antenna_data_path.take(),
+                            antenna_stats: loading.antenna_statis_path.take(),
+                            lvs_data: loading.lvs_data_path.take(),
+                            map_root: loading.map_root_path.take(),
+                        },
                         loading.target_format,
                         loading.render_mode,
                     );

@@ -29,7 +29,10 @@ pub use query_sample::LayerQuerySample;
 
 mod query_window;
 
+mod search;
 mod shape_lookup;
+
+pub use search::BoundedShapeSearch;
 
 pub mod clock_tree;
 
@@ -1020,12 +1023,15 @@ impl ConnectivityIndex {
         endpoints: &'a [ConnectivityMetadata],
         pin_name: &str,
     ) -> Vec<&'a ConnectivityMetadata> {
-        let indices = if pin_name.contains('/') {
+        self.endpoint_refs(endpoints, self.indices_for_pin(pin_name))
+    }
+
+    fn indices_for_pin(&self, pin_name: &str) -> Option<&Vec<usize>> {
+        if pin_name.contains('/') {
             self.by_qualified_pin_name.get(pin_name)
         } else {
             self.by_pin_name.get(pin_name)
-        };
-        self.endpoint_refs(endpoints, indices)
+        }
     }
 
     fn endpoint_refs<'a>(
@@ -1869,7 +1875,6 @@ fn query_endpoint_pin_shape_ids_from_parts(
         .collect()
 }
 
-#[cfg(test)]
 fn endpoint_matches_pin(endpoint: &ConnectivityMetadata, pin_name: &str) -> bool {
     if let Some((instance_name, local_pin_name)) = pin_name.rsplit_once('/') {
         endpoint.instance_name == instance_name && endpoint.pin_name == local_pin_name
@@ -3674,6 +3679,45 @@ mod tests {
     }
 
     #[test]
+    fn bounded_pattern_search_limits_results_and_supports_cancellation() {
+        let manifest = write_open_fixture();
+        let db = ChipViewDb::open(&manifest).unwrap();
+        let pattern = Regex::new("^net").unwrap();
+        let query = |owner_types, limit| {
+            db.query_owner_name_pattern_bounded(&pattern, owner_types, limit, || true)
+                .unwrap()
+        };
+        let expected = BoundedShapeSearch {
+            shape_ids: vec![1],
+            truncated: false,
+        };
+        assert_eq!(query(Some(&[OwnerType::NetWireSegment]), 1), expected);
+        assert_eq!(
+            query(Some(&[OwnerType::InstanceBBox]), 1),
+            BoundedShapeSearch::default()
+        );
+        assert_eq!(
+            query(None, 0),
+            BoundedShapeSearch {
+                shape_ids: Vec::new(),
+                truncated: true,
+            }
+        );
+        let checks = std::cell::Cell::new(0);
+        assert!(db
+            .query_owner_name_pattern_bounded(&pattern, None, 1, || {
+                checks.set(checks.get() + 1);
+                checks.get() == 1
+            })
+            .is_none());
+        assert!(db.name_index.get().is_none());
+        assert_eq!(db.query_owner_name("netA"), vec![1]);
+        assert_eq!(query(None, 1), expected);
+        drop(db);
+        std::fs::remove_dir_all(manifest.parent().unwrap()).unwrap();
+    }
+
+    #[test]
     fn owner_name_index_ignores_local_names_and_keeps_owner_aliases() {
         let owners = [OwnerRef {
             owner_type: OwnerType::NetWireSegment as u8,
@@ -4065,6 +4109,29 @@ mod tests {
             ),
             vec![3, 4]
         );
+    }
+
+    #[test]
+    fn bounded_pin_search_preserves_the_local_name_fallback() {
+        let manifest = write_open_fixture();
+        let db = ChipViewDb::open(&manifest).unwrap();
+        let expected = db.query_pin_name_bounded("instance/netA", 1, &|| true);
+        assert_eq!(
+            expected,
+            Some(BoundedShapeSearch {
+                shape_ids: vec![1],
+                truncated: false,
+            })
+        );
+        assert!(db.name_index.get().is_none());
+        assert!(db.connectivity_index.get().is_none());
+        assert_eq!(db.query_pin_name("instance/netA"), vec![1]);
+        assert_eq!(
+            db.query_pin_name_bounded("instance/netA", 1, &|| true),
+            expected
+        );
+        drop(db);
+        std::fs::remove_dir_all(manifest.parent().unwrap()).unwrap();
     }
 
     #[test]

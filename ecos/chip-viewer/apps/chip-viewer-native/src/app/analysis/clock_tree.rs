@@ -56,6 +56,10 @@ impl ClockTreeOverlay {
         self.highlight.as_ref()
     }
 
+    pub(super) fn shape_ids(&self) -> &BTreeSet<ShapeId> {
+        &self.shapes
+    }
+
     pub(super) fn set(
         &mut self,
         source: ClockTreeSelection,
@@ -73,33 +77,14 @@ impl ClockTreeOverlay {
         self.shapes.clear();
     }
 
-    /// Clears an overlay that belongs to a previous clock/node selection.
-    /// Returns the layout shapes owned by the stale overlay so the caller can
-    /// remove shared highlight state in the same frame.
-    pub(super) fn clear_if_stale(
-        &mut self,
-        current: ClockTreeSelection,
-    ) -> Option<BTreeSet<ShapeId>> {
+    fn clear_if_stale(&mut self, current: ClockTreeSelection) -> bool {
         if self.source.is_some() && self.source != Some(current) {
-            let shapes = std::mem::take(&mut self.shapes);
             self.clear();
-            Some(shapes)
+            true
         } else {
-            None
+            false
         }
     }
-}
-
-fn clear_stale_clock_tree_highlights(
-    overlay: &mut ClockTreeOverlay,
-    highlighted: &mut BTreeSet<ShapeId>,
-    current: ClockTreeSelection,
-) -> bool {
-    let Some(stale_shapes) = overlay.clear_if_stale(current) else {
-        return false;
-    };
-    highlighted.retain(|shape_id| !stale_shapes.contains(shape_id));
-    true
 }
 
 fn marker_for_node(
@@ -146,11 +131,9 @@ impl LoadedViewer {
             panel.sync_layout_selection(self.selected, &names);
             (action, panel.selection_key())
         };
-        clear_stale_clock_tree_highlights(
-            &mut self.clock_tree_overlay,
-            &mut self.highlighted,
-            selection,
-        );
+        if self.clock_tree_overlay.clear_if_stale(selection) {
+            self.rebuild_highlights();
+        }
         if let Some(target) = action {
             self.focus_clock_target(target, selection);
         }
@@ -279,8 +262,8 @@ impl LoadedViewer {
                     markers,
                 });
         self.clock_tree_overlay.set(selection, highlight, &shapes);
-        self.highlighted = shapes;
-        let focus = focus_target_for_shape_ids(&self.highlighted, |id| {
+        self.rebuild_highlights();
+        let focus = focus_target_for_shape_ids(&shapes, |id| {
             self.db.find_shape(id).map(|shape| shape.bbox)
         })
         .map(|mut focus| {
@@ -364,19 +347,18 @@ mod tests {
         };
         let shapes = BTreeSet::from([10, 20]);
         let mut overlay = ClockTreeOverlay::default();
-        assert!(overlay.clear_if_stale(clock_zero).is_none());
+        assert!(!overlay.clear_if_stale(clock_zero));
         overlay.set(clock_zero, Some(highlight.clone()), &shapes);
 
         assert!(overlay.highlight().is_some());
-        assert!(overlay.clear_if_stale(clock_zero).is_none());
-        assert_eq!(
-            overlay.clear_if_stale(clock_one),
-            Some(BTreeSet::from([10, 20]))
-        );
+        assert!(!overlay.clear_if_stale(clock_zero));
+        assert!(overlay.clear_if_stale(clock_one));
+        assert!(overlay.shape_ids().is_empty());
         assert!(overlay.highlight().is_none());
 
         overlay.set(clock_zero, Some(highlight), &shapes);
-        assert_eq!(overlay.clear_if_stale(node_four), Some(shapes));
+        assert!(overlay.clear_if_stale(node_four));
+        assert!(overlay.shape_ids().is_empty());
         assert!(overlay.highlight().is_none());
     }
 
@@ -394,31 +376,8 @@ mod tests {
         let mut overlay = ClockTreeOverlay::default();
         overlay.set(clock_zero, None, &net_shapes);
 
-        assert_eq!(overlay.clear_if_stale(clock_one), Some(net_shapes));
-        assert!(overlay.highlight().is_none());
-    }
-
-    #[test]
-    fn stale_clock_tree_selection_removes_only_owned_generic_highlights() {
-        let clock_zero = crate::clock_tree::ClockTreeSelection {
-            clock: 0,
-            node: Some(3),
-        };
-        let clock_one = crate::clock_tree::ClockTreeSelection {
-            clock: 1,
-            node: Some(4),
-        };
-        let owned = BTreeSet::from([10, 20]);
-        let mut overlay = ClockTreeOverlay::default();
-        overlay.set(clock_zero, None, &owned);
-        let mut highlighted = BTreeSet::from([10, 20, 99]);
-
-        assert!(clear_stale_clock_tree_highlights(
-            &mut overlay,
-            &mut highlighted,
-            clock_one
-        ));
-        assert_eq!(highlighted, BTreeSet::from([99]));
+        assert!(overlay.clear_if_stale(clock_one));
+        assert!(overlay.shape_ids().is_empty());
         assert!(overlay.highlight().is_none());
     }
 }

@@ -100,12 +100,14 @@ impl eframe::App for ChipViewerApp {
                 });
             }
             loaded.previous_native_cpu_ms = _frame.info().cpu_usage.unwrap_or_default() * 1000.0;
+            loaded.poll_analysis(ctx);
             loaded.poll_edit_result();
             loaded.poll_session_action_progress();
             close_after_session_action = loaded.poll_session_action_result();
             if loaded.poll_reload() {
                 close_after_session_action = true;
             }
+            loaded.poll_search(ctx);
             loaded.poll_external_snapshot_refresh();
             if close_requested && loaded.should_intercept_unsaved_close() {
                 loaded.close_confirmation_visible = true;

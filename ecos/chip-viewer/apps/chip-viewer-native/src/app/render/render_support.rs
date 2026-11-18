@@ -3640,11 +3640,6 @@ pub(super) fn shape_xy_rect(geometry: ShapeGeometry) -> Option<Rect32> {
     }
 }
 
-pub(super) fn clear_search_state(search_text: &mut String, highlighted: &mut BTreeSet<ShapeId>) {
-    search_text.clear();
-    highlighted.clear();
-}
-
 pub(super) fn selection_detail_lines(
     shape: &ShapeRecord,
     owner: Option<&OwnerRef>,
@@ -4021,13 +4016,6 @@ where
     F: FnMut(ShapeId) -> bool,
 {
     shape_id.filter(|shape_id| exists(*shape_id))
-}
-
-pub(super) fn retain_existing_shape_ids<F>(shape_ids: &mut BTreeSet<ShapeId>, mut exists: F)
-where
-    F: FnMut(ShapeId) -> bool,
-{
-    shape_ids.retain(|shape_id| exists(*shape_id));
 }
 
 pub(super) fn sidebar_section_heights(available_height: f32) -> SidebarSectionHeights {
