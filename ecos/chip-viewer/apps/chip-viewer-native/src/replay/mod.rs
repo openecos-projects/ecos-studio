@@ -486,10 +486,10 @@ impl eframe::App for ReplayApp {
             });
         self.update_completion_results(ctx);
         self.result_sidebar(ctx);
-        egui::CentralPanel::default().show(ctx, |ui| self.main_views(ui));
+        let display = egui::CentralPanel::default().show(ctx, |ui| self.main_views(ui));
         if self.show_harden_signoff() {
             if let Some(data) = &self.dashboard {
-                data.show_signoff_cards(ctx);
+                data.show_signoff_cards(ctx, display.response.rect);
             }
         } else {
             signoff_cards::reset_animation(ctx);

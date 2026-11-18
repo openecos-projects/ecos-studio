@@ -383,8 +383,8 @@ impl Dashboard {
             });
     }
 
-    pub fn show_signoff_cards(&self, ctx: &egui::Context) {
-        let _ = crate::replay::signoff_cards::show(ctx, &self.signoff);
+    pub fn show_signoff_cards(&self, ctx: &egui::Context, bounds: egui::Rect) {
+        let _ = crate::replay::signoff_cards::show(ctx, &self.signoff, bounds);
     }
 }
 

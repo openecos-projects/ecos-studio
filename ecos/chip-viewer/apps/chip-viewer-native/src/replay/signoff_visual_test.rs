@@ -24,6 +24,9 @@ impl eframe::App for Preview {
         });
         if let Some(image) = screenshot {
             let name = [
+                "signoff-reveal-1.png",
+                "signoff-reveal-2.png",
+                "signoff-reveal-3.png",
                 "signoff-desktop.png",
                 "signoff-laptop.png",
                 "signoff-small.png",
@@ -42,24 +45,51 @@ impl eframe::App for Preview {
             )
             .unwrap();
             self.sample += 1;
-            if self.sample == 3 {
+            if self.sample == 6 {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 return;
             }
             self.frames = 0;
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(if self.sample == 1 {
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(if self.sample == 4 {
                 Vec2::new(1440.0, 900.0)
-            } else {
+            } else if self.sample == 5 {
                 Vec2::new(800.0, 600.0)
+            } else {
+                Vec2::new(1920.0, 1200.0)
             }));
         }
+        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
+            ui.heading("Layout Replay");
+        });
         egui::TopBottomPanel::bottom("timeline")
             .exact_height(160.0)
-            .show(ctx, |_| {});
-        egui::CentralPanel::default().show(ctx, |_| {});
-        let _ = show(ctx, &self.summary);
+            .show(ctx, |ui| {
+                ui.label("Harden / completed");
+                ui.add_space(28.0);
+                ui.add(egui::ProgressBar::new(1.0).text("Replay complete"));
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    let _ = ui.button("Previous step");
+                    let _ = ui.button("Play from start");
+                    ui.label("Harden");
+                });
+            });
+        let display = egui::CentralPanel::default().show(ctx, |_| {});
+        // Hold representative animation phases to capture the real native painter.
+        let elapsed = if self.sample < 3 {
+            self.sample as f64 * (REVEAL_SECONDS + REVEAL_GAP_SECONDS) + REVEAL_SECONDS / 2.0
+        } else {
+            ENTRANCE_SECONDS + 1.0
+        };
+        let now = ctx.input(|i| i.time);
+        ctx.data_mut(|data| data.insert_temp(Id::new("signoff_entrance_start"), now - elapsed));
+        let overlay = show(ctx, &self.summary, display.response.rect);
+        assert!(
+            overlay.rect.bottom() <= display.response.rect.bottom(),
+            "overlay covers playback controls"
+        );
         self.frames += 1;
-        if self.frames == 90 {
+        if self.frames == 10 {
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
         }
         ctx.request_repaint();
