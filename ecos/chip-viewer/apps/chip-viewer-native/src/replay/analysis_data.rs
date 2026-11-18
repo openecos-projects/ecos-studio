@@ -3,12 +3,19 @@ use crate::replay::data::{read, Recording};
 use anyhow::{ensure, Context, Result};
 use chipgeom_format::replay_analysis::Analysis;
 
+/// Helper RCX runs for clock timing are not the owning step's RCX result.
+pub(super) fn belongs_to_step(step: &str, kind: &str) -> bool {
+    kind != "rcx" || step.eq_ignore_ascii_case("RCX")
+}
+
 pub fn load(record: &Recording) -> Result<Analysis> {
     let Some(path) = &record.manifest.analysis else {
         return Ok(Analysis::default());
     };
     let path = record.asset(path)?;
     let mut data: Analysis = read(&path)?;
+    data.views
+        .retain(|view| belongs_to_step(&record.manifest.step, &view.kind));
     expand_references(&mut data)?;
     if data.geometry_display {
         super::geometry_analysis::append(record, &mut data)?;
@@ -65,6 +72,30 @@ mod tests {
         assert_eq!(data.views[0].items[1].instances, ["u"]);
         data.views[0].items[0].net_ref = Some(1);
         assert!(expand_references(&mut data).is_err());
+    }
+
+    #[test]
+    fn same_rcx_report_only_adds_views_and_time_to_its_own_step() {
+        let fixture = crate::replay::data::tests::Fixture::new();
+        fixture.write(
+            "attempts/a/index.json",
+            serde_json::json!({
+                "schema":"ecos.replay.analysis.v2", "views":[
+                    {"kind":"rcx", "label":"TYPICAL SPEF extraction", "basis":"final", "items":[]}
+                ]
+            }),
+        );
+        let mut record = fixture.open();
+        record.manifest.analysis = Some("index.json".into());
+        record.manifest.step = "RCX".into();
+        assert_eq!(load(&record).unwrap().views.len(), 1);
+        assert_eq!(
+            duration(&record).unwrap(),
+            super::super::rcx::CORNER_SECONDS
+        );
+        record.manifest.step = "filler".into();
+        assert!(load(&record).unwrap().views.is_empty());
+        assert_eq!(duration(&record).unwrap(), 0.0);
     }
 }
 

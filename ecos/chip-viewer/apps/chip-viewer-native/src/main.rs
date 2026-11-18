@@ -53,6 +53,10 @@ struct Args {
     #[arg(long, default_value = "view", value_parser = ["view", "edit", "replay"])]
     mode: String,
 
+    /// App-owned startup status file for the unified Studio loading dialog.
+    #[arg(long)]
+    replay_progress_file: Option<PathBuf>,
+
     #[arg(long)]
     edit_command_dir: Option<PathBuf>,
 
@@ -536,6 +540,9 @@ fn main() -> Result<()> {
         native_options.centered = false;
         native_options.persist_window = false;
         let mut replay = replay::ReplayApp::open(&args.manifest)?;
+        if let Some(path) = &args.replay_progress_file {
+            replay.prepare_for_launch(path)?;
+        }
         return eframe::run_native(
             "Chip Viewer · Replay",
             native_options,

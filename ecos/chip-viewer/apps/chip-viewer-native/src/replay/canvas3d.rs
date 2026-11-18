@@ -9,7 +9,7 @@ use crate::{
 use egui::{Color32, Pos2, Sense, Stroke};
 
 const AUTO_SPIN_RADIANS_PER_SECOND: f32 = 4.0_f32.to_radians();
-const DEFAULT_Z_SCALE: f32 = 0.5;
+const DEFAULT_Z_SCALE: f32 = 1.0;
 
 pub struct View3d {
     pub enabled: bool,

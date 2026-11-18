@@ -26,6 +26,7 @@ mod layer_focus;
 mod layer_validation;
 mod layout;
 mod loader;
+mod loading;
 mod log;
 mod log_scroll;
 mod logic;
@@ -43,6 +44,7 @@ mod route;
 mod scene3d;
 mod sidebar;
 mod signoff_cards;
+mod startup;
 mod step_metrics;
 mod timing;
 #[cfg(all(test, target_os = "linux"))]
@@ -92,6 +94,10 @@ pub struct ReplayApp {
     tick: Instant,
     zoom: f32,
     plans: Vec<StepPlan>,
+    loading: loading::Progress,
+    first_layout_loading: bool,
+    startup_progress: Option<std::path::PathBuf>,
+    startup_painted: bool,
     preparation: Option<std::sync::mpsc::Receiver<Vec<StepPlan>>>,
     active_clip: Option<usize>,
     loader: crate::replay::loader::Loader,
@@ -183,7 +189,8 @@ impl ReplayApp {
                 "Invalid step duration"
             );
         }
-        let preparation = Some(plan::prepare(&catalog));
+        let loading = loading::Progress::default();
+        let preparation = Some(plan::prepare(&catalog, loading.clone()));
         let starts = vec![0.0; catalog.steps.len()];
         let total = 0.0;
         let dashboard_loading = Some(crate::replay::dashboard::prepare(&catalog));
@@ -224,6 +231,10 @@ impl ReplayApp {
             zoom: 0.82,
             plans: Vec::new(),
             preparation,
+            loading,
+            first_layout_loading: true,
+            startup_progress: None,
+            startup_painted: false,
             active_clip: None,
             loader: Default::default(),
             pending: None,
@@ -357,22 +368,11 @@ impl eframe::App for ReplayApp {
         if let Some(receiver) = &self.preparation {
             match receiver.try_recv() {
                 Ok(plans) => {
-                    self.plans = plans;
-                    self.preparation = None;
-                    self.total = 0.0;
-                    for (i, plan) in self.plans.iter().enumerate() {
-                        self.starts[i] = self.total;
-                        self.total += plan.seconds;
-                    }
-                    self.select(0, 0.0, false);
-                    self.tick = Instant::now();
+                    self.accept_plans(plans);
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    egui::CentralPanel::default().show(ctx, |ui| {
-                        ui.heading("Preparing Layout Replay");
-                        ui.spinner();
-                        ui.label("Finding layout changes and arranging playback…");
-                    });
+                    egui::CentralPanel::default().show(ctx, |_| {});
+                    self.loading.show(ctx, None);
                     ctx.request_repaint_after(std::time::Duration::from_millis(50));
                     return;
                 }
@@ -403,6 +403,9 @@ impl eframe::App for ReplayApp {
             }
         }
         self.poll_loader();
+        if self.pending.is_none() {
+            self.first_layout_loading = false;
+        }
         self.maps.poll();
         if self.pending.is_some() || self.maps.loading() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
@@ -495,5 +498,9 @@ impl eframe::App for ReplayApp {
             signoff_cards::reset_animation(ctx);
         }
         self.analysis_window(ctx);
+        self.finish_startup(ctx);
+        if self.first_layout_loading && self.pending.is_some() && self.error.is_empty() {
+            self.loading.show(ctx, Some("Loading the first layout"));
+        }
     }
 }

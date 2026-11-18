@@ -3301,6 +3301,29 @@ describe('registerIpc', () => {
     expect(services.chipViewerService.isOpen).toHaveBeenCalledWith(request)
   })
 
+  it('returns native Replay loading progress through the viewer status channel', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const request = { projectPath: '/tmp/project', step: 'replay', mode: 'replay' }
+    const status = {
+      open: true,
+      replayLoading: {
+        state: 'loading',
+        phase: 'Finding layout changes',
+        name: 'route',
+        step: 12,
+        steps: 22,
+        frame: 18,
+        frames: 69,
+      },
+    }
+    services.chipViewerService.isOpen.mockResolvedValue(status)
+    await expect(
+      handlers.get(desktopApiIpcChannels.chipViewerIsOpen)?.(event, request),
+    ).resolves.toEqual(status)
+    expect(services.chipViewerService.isOpen).toHaveBeenCalledWith(request)
+  })
+
   it('republishes layout-edit revision bumps on the subscribed workspace handle', async () => {
     const { handlers, services } = registerHandlers()
     const ownerSend = vi.fn()

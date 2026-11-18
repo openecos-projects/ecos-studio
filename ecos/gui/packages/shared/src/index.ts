@@ -188,6 +188,7 @@ export type {
   ChipViewerOpenRequest,
   ChipViewerOpenResult,
   ChipViewerOpenStatus,
+  ReplayLoadingProgress,
   PdkDetectedFiles,
   ScannedPdkDirectory,
   ScannedRtlDirectory,

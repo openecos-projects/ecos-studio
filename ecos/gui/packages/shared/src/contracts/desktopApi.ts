@@ -279,6 +279,18 @@ export interface ChipViewerOpenResult {
 export interface ChipViewerOpenStatus {
   open: boolean
   saving?: boolean
+  replayLoading?: ReplayLoadingProgress
+}
+
+/** Native Replay startup status, sampled through the existing viewer status API. */
+export interface ReplayLoadingProgress {
+  state: 'loading' | 'ready'
+  phase: string
+  step: number
+  steps: number
+  name: string
+  frame: number
+  frames: number
 }
 
 export interface WorkspaceDirectoryReplacement {

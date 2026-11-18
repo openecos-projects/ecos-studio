@@ -25,6 +25,9 @@ pub fn append(record: &Recording, data: &mut Analysis) -> Result<()> {
     for (_, asset) in assets {
         let m = &asset.metadata;
         let kind = m["kind"].as_str().unwrap_or("");
+        if !super::analysis_data::belongs_to_step(&record.manifest.step, kind) {
+            continue;
+        }
         if !matches!(
             kind,
             "ir" | "em" | "power" | "drc" | "antenna" | "lvs" | "timing" | "rcx"
@@ -198,6 +201,12 @@ pub fn duration(record: &Recording) -> Result<f64> {
     };
     for (_, asset) in crate::geometry_maps::assets(&path)? {
         let meta = &asset.metadata;
+        if !super::analysis_data::belongs_to_step(
+            &record.manifest.step,
+            meta["kind"].as_str().unwrap_or(""),
+        ) {
+            continue;
+        }
         total += match meta["kind"].as_str() {
             Some("ir") if meta["layer"] == "" => 4.0,
             Some("power") => 4.0,
