@@ -38,9 +38,12 @@ impl CpuRasterCache {
                     stats.cpu_scene_partial = visible
                         && (retained
                             || matches!(source, RasterSource::Partial(frame) if frame.frame.key.same_geometry(key))
-                            || matches!(source, RasterSource::Seed(frame) if frame.scene.key() == key));
-                    stats.cpu_scene_preview =
-                        visible && !retained && !source.key().same_geometry(key);
+                            || matches!(source, RasterSource::Seed(frame) if frame.scene.key() == key)
+                            || resources.has_seed_for_exposed(key, source.key()));
+                    stats.cpu_scene_preview = visible
+                        && !retained
+                        && !source.key().same_geometry(key)
+                        && !resources.has_seed_for_exposed(key, source.key());
                 }
                 (
                     stats.cpu_retained_valid_pixels,

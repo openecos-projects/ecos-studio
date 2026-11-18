@@ -200,35 +200,68 @@ fn repeating_camera_requests_does_not_restart_inflight_work() {
 }
 
 #[test]
-fn interactive_camera_requests_coalesce_until_the_camera_settles() {
+fn interactive_camera_seeds_refresh_at_a_bounded_interval_without_restarting_work() {
     let fixture = Fixture::new();
     let mut cache = CpuSceneCache::default();
-    let base = fixture.request(1.0, 1.0);
+    let mut base = fixture.request(1.0, 1.0);
+    base.glow = true;
     let scene = Arc::new(builder::build_with_workers(&base, &|| true, 1).unwrap());
     cache.key = Some(base.key.clone());
     cache.ready = Some(scene);
 
-    let initial_generation = cache.inbox.generation.load(Ordering::Relaxed);
+    let started = Instant::now();
+    let mut first = base.clone();
+    first.key.pan.x = 10.0;
+    cache.defer_camera_request(&first, started);
+    let submitted_generation = cache.inbox.generation.load(Ordering::Relaxed);
+    let first_seed = Arc::clone(cache.initial_scene.as_ref().unwrap());
+    assert_eq!(first_seed.key(), &first.key);
+
+    let mut latest = first.clone();
+    latest.key.pan.x = 20.0;
+    cache.defer_camera_request(&latest, started + Duration::from_millis(25));
+    assert_eq!(
+        cache.inbox.generation.load(Ordering::Relaxed),
+        submitted_generation
+    );
+    assert!(Arc::ptr_eq(
+        cache.initial_scene.as_ref().unwrap(),
+        &first_seed
+    ));
+
+    cache.defer_camera_request(&latest, started + Duration::from_millis(50));
+    assert_eq!(
+        cache.inbox.generation.load(Ordering::Relaxed),
+        submitted_generation
+    );
+    assert_eq!(cache.initial_scene.as_ref().unwrap().key(), &first.key);
+    assert!(cache.request_deferred);
+}
+
+#[test]
+fn ending_camera_interaction_submits_the_latest_camera_without_a_debounce() {
+    let fixture = Fixture::new();
+    let mut cache = CpuSceneCache::default();
+    let mut base = fixture.request(1.0, 1.0);
+    base.glow = true;
+    let scene = Arc::new(builder::build_with_workers(&base, &|| true, 1).unwrap());
+    cache.key = Some(base.key.clone());
+    cache.ready = Some(scene);
+
+    let started = Instant::now();
+    let mut submitted = base.clone();
+    submitted.key.pan.x = 10.0;
+    cache.defer_camera_request(&submitted, started);
+
     let mut latest = base.clone();
-    latest.key.pan.x = 10.0;
-    cache.defer_camera_request(&latest);
-    let deferred_generation = cache.inbox.generation.load(Ordering::Relaxed);
-    assert_eq!(deferred_generation, initial_generation + 1);
-    assert!(cache.inbox.request.lock().unwrap().is_none());
-
-    for pan in [20.0, 30.0, 40.0] {
-        latest.key.pan.x = pan;
-        cache.defer_camera_request(&latest);
-        assert_eq!(
-            cache.inbox.generation.load(Ordering::Relaxed),
-            deferred_generation
-        );
-        assert!(cache.inbox.request.lock().unwrap().is_none());
-    }
-
-    cache.get_or_request(latest);
-    assert!(cache.inbox.generation.load(Ordering::Relaxed) > deferred_generation);
+    latest.key.pan.x = 20.0;
+    cache.defer_camera_request(&latest, started + Duration::from_millis(25));
+    assert!(cache.request_deferred);
+    let submitted_generation = cache.inbox.generation.load(Ordering::Relaxed);
+    assert!(cache.get_or_request(latest).is_none());
+    assert!(cache.inbox.generation.load(Ordering::Relaxed) > submitted_generation);
     assert!(!cache.request_deferred);
+    assert_eq!(cache.key.as_ref().unwrap().pan.x, 20.0);
 }
 
 #[test]

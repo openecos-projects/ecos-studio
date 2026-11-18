@@ -572,6 +572,7 @@ fn paint_pixels(
     pixels: &mut [u8],
     is_current: &impl Fn() -> bool,
 ) {
+    let opaque = source[3] == u8::MAX;
     for row in rows {
         if row % 64 == 0 && !is_current() {
             return;
@@ -580,7 +581,11 @@ fn paint_pixels(
             ((size[1] as i32 - 1 - row) as usize * size[0] as usize + columns.start as usize) * 4;
         let end = start + columns.len() * 4;
         for pixel in pixels[start..end].chunks_exact_mut(4) {
-            blend_pixel(pixel, source);
+            if opaque {
+                pixel.copy_from_slice(&source);
+            } else {
+                blend_pixel(pixel, source);
+            }
         }
     }
 }

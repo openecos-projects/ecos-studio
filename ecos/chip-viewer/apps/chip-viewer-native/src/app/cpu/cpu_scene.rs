@@ -117,6 +117,8 @@ pub(super) struct SceneRequest {
 
 type LabelCompletion = OnceLock<(Arc<ResolvedLabels>, Duration)>;
 
+const INTERACTIVE_SEED_INTERVAL: Duration = Duration::from_millis(50);
+
 pub(super) struct CpuScene {
     key: SceneKey,
     pub(super) pattern_textures: Arc<PatternTextureSet>,
@@ -163,6 +165,7 @@ pub(super) struct CpuSceneCache {
     initial_scene: Option<Arc<CpuScene>>,
     restored: bool,
     request_deferred: bool,
+    interactive_seed_last_build: Option<Instant>,
     world_source: Option<Arc<world_source::WorldSource>>,
     label_results: label_result_cache::LabelResultCache,
 }
@@ -195,6 +198,7 @@ impl Default for CpuSceneCache {
             initial_scene: None,
             restored: false,
             request_deferred: false,
+            interactive_seed_last_build: None,
             world_source: None,
             label_results: Default::default(),
         }
@@ -210,9 +214,7 @@ impl Drop for CpuSceneCache {
 }
 
 impl CpuSceneCache {
-    /// Cancel obsolete camera work once during interaction while retaining the
-    /// latest key for translated-frame presentation and later scheduling.
-    pub(super) fn defer_camera_request(&mut self, request: &SceneRequest) {
+    pub(super) fn defer_camera_request(&mut self, request: &SceneRequest, now: Instant) {
         if !self.request_deferred {
             self.inbox.generation.fetch_add(1, Ordering::Relaxed);
             self.progress.clear();
@@ -223,6 +225,17 @@ impl CpuSceneCache {
         }
         self.key = Some(request.key.clone());
         self.restored = false;
+
+        let seed_due = self.interactive_seed_last_build.is_none_or(|last_build| {
+            now.saturating_duration_since(last_build) >= INTERACTIVE_SEED_INTERVAL
+        });
+        if seed_due && self.initial_scene.is_none() {
+            self.interactive_seed_last_build = Some(now);
+            if let Some(mut scene) = builder::build_ui_initial_scene(request) {
+                scene.generation = self.inbox.generation.load(Ordering::Relaxed);
+                self.initial_scene = Some(Arc::new(scene));
+            }
+        }
     }
 
     #[cfg(test)]
@@ -238,12 +251,14 @@ impl CpuSceneCache {
         self.key = None;
         self.restored = false;
         self.request_deferred = false;
+        self.interactive_seed_last_build = None;
     }
 
     pub(super) fn get_or_request(&mut self, mut request: SceneRequest) -> Option<Arc<CpuScene>> {
         if self.request_deferred {
             self.key = None;
             self.request_deferred = false;
+            self.interactive_seed_last_build = None;
         }
         let completed_scenes = self
             .ready
@@ -434,7 +449,7 @@ impl CpuSceneCache {
         }
         self.raster.paint_with_initial(
             None,
-            None,
+            self.initial_scene.as_ref(),
             &request.key,
             Arc::clone(&self.progress),
             self.inbox.generation.load(Ordering::Relaxed),

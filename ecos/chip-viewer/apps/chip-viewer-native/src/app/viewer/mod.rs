@@ -2290,7 +2290,8 @@ impl LoadedViewer {
                     && self.glow_rendering
                     && !self.cpu_scene_cache.raster_failed();
                 if defer_camera_request {
-                    self.cpu_scene_cache.defer_camera_request(&request);
+                    self.cpu_scene_cache
+                        .defer_camera_request(&request, Instant::now());
                     if self
                         .cpu_scene_cache
                         .paint_glow_preview(&request, &painter, bg_color)

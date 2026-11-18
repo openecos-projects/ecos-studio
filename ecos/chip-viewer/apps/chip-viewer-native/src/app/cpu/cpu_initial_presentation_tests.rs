@@ -32,7 +32,6 @@ fn initial_progress_equal_primitive_counts_still_present_a_new_refinement() {
         assert_ne!(first.sequence, second.sequence);
     });
 }
-
 #[test]
 fn initial_progress_ui_first_callback_draws_current_geometry_without_worker_or_readback() {
     let renderer = renderer();
@@ -92,7 +91,6 @@ fn initial_progress_ui_first_callback_draws_current_geometry_without_worker_or_r
         );
     });
 }
-
 #[test]
 fn initial_progress_pending_selection_keeps_rich_equivalent_geometry() {
     let mut renderer = renderer();
@@ -152,7 +150,6 @@ fn initial_progress_pending_selection_keeps_rich_equivalent_geometry() {
         assert!(presentation.cache.scene_for(&next).is_none());
     });
 }
-
 #[test]
 fn initial_progress_incompatible_anchor_cleanup_preserves_the_new_first_seed() {
     let mut renderer = renderer();

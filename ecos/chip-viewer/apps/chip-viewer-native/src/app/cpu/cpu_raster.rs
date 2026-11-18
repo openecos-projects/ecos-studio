@@ -217,6 +217,7 @@ impl CpuRasterCache {
                 resources.presentation_source(key).is_some_and(|source| {
                     !source.key().same_geometry(key)
                         && resources.retained_for(key, source.key()).is_none()
+                        && !resources.has_seed_for_exposed(key, source.key())
                         && key.destination(source.key()).intersects(key.canvas())
                 })
             })
@@ -232,6 +233,7 @@ impl CpuRasterCache {
                     resources.retained_for(key, source.key()).is_some()
                         || matches!(source, RasterSource::Partial(frame) if frame.frame.key.same_geometry(key))
                         || matches!(source, RasterSource::Seed(frame) if frame.scene.key() == key)
+                        || resources.has_seed_for_exposed(key, source.key())
                 })
             })
     }
@@ -392,10 +394,22 @@ impl RasterResources {
         if let Some(frame) = progress.filter(|frame| frame.frame.key.same_geometry(key)) {
             return Some(RasterSource::Partial(frame));
         }
-        if let Some(seed) = self.initial.as_ref().filter(|seed| seed.scene.key() == key) {
+        if let Some(seed) = self
+            .initial
+            .as_ref()
+            .filter(|seed| key.raster_destination(seed.scene.key()).is_some())
+        {
             return Some(RasterSource::Seed(seed));
         }
         progress.map(RasterSource::Partial)
+    }
+
+    fn has_seed_for_exposed(&self, key: &SceneKey, source: &SceneKey) -> bool {
+        self.initial.as_ref().is_some_and(|seed| {
+            key.raster_destination(seed.scene.key()).is_some()
+                && key.raster_destination(source).is_some()
+                && self.retained_for(key, source).is_none()
+        })
     }
 
     #[cfg(test)]
@@ -488,7 +502,9 @@ impl RasterResources {
             }
         }
         if self.initial.as_ref().is_some_and(|seed| {
-            exact || seed.scene.key() != key || seed.target.size != info.screen_size_px
+            exact
+                || key.raster_destination(seed.scene.key()).is_none()
+                || seed.target.size != info.screen_size_px
         }) {
             let seed = self.initial.take().unwrap();
             self.targets.retire(&gl, seed.target);

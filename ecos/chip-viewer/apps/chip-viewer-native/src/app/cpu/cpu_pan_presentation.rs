@@ -162,6 +162,42 @@ impl RasterResources {
         draw: Option<glow::Framebuffer>,
         key: &SceneKey,
     ) {
+        if let Some(source) = self.source(key) {
+            if self.retained_for(key, source.scene.key()).is_none() {
+                if let Some(seed) = self
+                    .initial
+                    .as_ref()
+                    .filter(|seed| key.raster_destination(seed.scene.key()).is_some())
+                {
+                    source.target.blit(gl, info, draw, key, source.scene.key());
+                    blit_exposed_from(
+                        gl,
+                        info,
+                        draw,
+                        key,
+                        source.scene.key(),
+                        &seed.target,
+                        seed.scene.key(),
+                    );
+                    if let Some(progress) = self
+                        .progress
+                        .as_ref()
+                        .filter(|frame| frame.frame.key == *key)
+                    {
+                        blit_exposed_from(
+                            gl,
+                            info,
+                            draw,
+                            key,
+                            source.scene.key(),
+                            &progress.target,
+                            &progress.frame.key,
+                        );
+                    }
+                    return;
+                }
+            }
+        }
         let Some(source) = self.presentation_source(key) else {
             return;
         };
@@ -191,22 +227,38 @@ impl RasterResources {
         else {
             return;
         };
-        let retained = key
-            .destination(completed.scene.key())
-            .intersect(info.clip_rect);
-        if !retained.is_positive() {
-            progress
-                .target
-                .blit(gl, info, draw, key, &progress.frame.key);
-            return;
-        }
-        for clip_rect in exposed(info.clip_rect, retained) {
-            if clip_rect.is_positive() {
-                let clipped = egui::PaintCallbackInfo { clip_rect, ..*info };
-                progress
-                    .target
-                    .blit(gl, &clipped, draw, key, &progress.frame.key);
-            }
+        blit_exposed_from(
+            gl,
+            info,
+            draw,
+            key,
+            completed.scene.key(),
+            &progress.target,
+            &progress.frame.key,
+        );
+    }
+}
+
+fn blit_exposed_from(
+    gl: &glow::Context,
+    info: &egui::PaintCallbackInfo,
+    draw: Option<glow::Framebuffer>,
+    current: &SceneKey,
+    retained_source: &SceneKey,
+    target: &RasterTarget,
+    source: &SceneKey,
+) {
+    let retained = current
+        .destination(retained_source)
+        .intersect(info.clip_rect);
+    if !retained.is_positive() {
+        target.blit(gl, info, draw, current, source);
+        return;
+    }
+    for clip_rect in exposed(info.clip_rect, retained) {
+        if clip_rect.is_positive() {
+            let clipped = egui::PaintCallbackInfo { clip_rect, ..*info };
+            target.blit(gl, &clipped, draw, current, source);
         }
     }
 }
