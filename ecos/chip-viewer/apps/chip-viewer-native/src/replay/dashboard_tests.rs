@@ -166,10 +166,10 @@ fn loads_signoff_card_summaries_from_ecc_report_artifacts() {
 #[test]
 fn missing_or_invalid_reports_do_not_fabricate_signoff_values() {
     let f = Fixture::new();
-    assert_eq!(
-        Dashboard::load(&f.0, &[]).signoff,
-        SignoffSummary::default()
-    );
+    let missing = Dashboard::load(&f.0, &[]).signoff;
+    assert_eq!(missing.design, DesignSummary::default());
+    assert_eq!(missing.qor, QorSummary::default());
+    assert!(!missing.details.design_error.is_empty());
     std::fs::create_dir_all(f.0.join("home")).unwrap();
     std::fs::write(f.0.join("home/engineering-snapshot.json"), b"{invalid").unwrap();
     f.write(
@@ -224,4 +224,24 @@ fn signoff_card_inputs_are_watched_for_staleness() {
     f.write("home/engineering-snapshot.json", json!({"changed":true}));
     dashboard.check_current();
     assert!(dashboard.stale);
+}
+
+#[test]
+fn design_report_creation_invalidates_the_loaded_summary() {
+    let f = Fixture::new();
+    std::fs::create_dir_all(f.0.join("home")).unwrap();
+    f.write("home/qor_report.json", json!({"design":"aes"}));
+    let mut dashboard = Dashboard::load(&f.0, &[]);
+    assert!(!dashboard.signoff.details.design_error.is_empty());
+    std::fs::create_dir_all(f.0.join("signoff")).unwrap();
+    std::fs::write(
+        f.0.join("signoff/aes_design_summary.txt"),
+        "DESIGN SUMMARY REPORT\n[ 1. PHYSICAL & AREA METRICS ]\n  Die Area      10 um²\n",
+    )
+    .unwrap();
+    dashboard.check_current();
+    assert!(dashboard.stale);
+    let current = Dashboard::load(&f.0, &[]);
+    assert!(current.signoff.details.design_error.is_empty());
+    assert_eq!(current.signoff.details.design[0].fields[0].value, "10 µm²");
 }
