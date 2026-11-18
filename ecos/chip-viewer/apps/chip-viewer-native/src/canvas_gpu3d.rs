@@ -50,6 +50,11 @@ pub struct CanvasUniform3d {
     pub time: f32,
     pub lighting_mode: u32,
     pub _pad_uniform: [u32; 3],
+    pub replay_classes_from: [f32; 4],
+    pub replay_classes_to: [f32; 4],
+    pub replay_band_from: [f32; 4],
+    pub replay_band_to: [f32; 4],
+    pub replay_blend: [f32; 4],
 }
 
 #[repr(C)]
@@ -118,6 +123,11 @@ impl CanvasUniform3d {
             time,
             lighting_mode: lighting_preset as u32,
             _pad_uniform: [0; 3],
+            replay_classes_from: [1.0; 4],
+            replay_classes_to: [1.0; 4],
+            replay_band_from: [-f32::MAX, f32::MAX, 1.0, 1.0],
+            replay_band_to: [-f32::MAX, f32::MAX, 1.0, 1.0],
+            replay_blend: [0.0; 4],
         }
     }
 }
@@ -319,6 +329,11 @@ struct Uniform3d {
     _pad0: u32,
     _pad1: u32,
     _pad2: u32,
+    replay_classes_from: vec4<f32>,
+    replay_classes_to: vec4<f32>,
+    replay_band_from: vec4<f32>,
+    replay_band_to: vec4<f32>,
+    replay_blend: vec4<f32>,
 };
 
 struct Instance3d {
@@ -537,9 +552,29 @@ fn vs_main(
     return out;
 }
 
+fn replay_coverage(inst: Instance3d, classes: vec4<f32>, band: vec4<f32>) -> f32 {
+    let z = (inst.z0 + inst.z1) * 0.5;
+    var coverage = 1.0;
+    if z < band.x { coverage = band.z; }
+    if z > band.y { coverage = band.w; }
+    return coverage * classes[min(inst._pad1, 3u)];
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let inst = s_instances[in.instance_idx];
+    let coverage = mix(
+        replay_coverage(inst, u_scene.replay_classes_from, u_scene.replay_band_from),
+        replay_coverage(inst, u_scene.replay_classes_to, u_scene.replay_band_to),
+        u_scene.replay_blend.x);
+    // Coverage fade also removes depth samples, so hidden power metal cannot
+    // occlude cells. Stable screen-space dithering needs neither sorted copies
+    // of the scene nor a wall-clock animation; the target is supersampled.
+    let bayer = array<f32, 16>(0.5, 8.5, 2.5, 10.5, 12.5, 4.5, 14.5, 6.5,
+        3.5, 11.5, 1.5, 9.5, 15.5, 7.5, 13.5, 5.5);
+    let pixel = vec2<u32>(in.clip_position.xy) % vec2<u32>(4u);
+    if coverage <= bayer[pixel.y * 4u + pixel.x] / 16.0 { discard; }
+
 
     if inst.animation.z == 1.0 && u_scene.time <= inst.animation.x {
         discard;
@@ -785,6 +820,11 @@ struct Uniform3d {
     _pad0: u32,
     _pad1: u32,
     _pad2: u32,
+    replay_classes_from: vec4<f32>,
+    replay_classes_to: vec4<f32>,
+    replay_band_from: vec4<f32>,
+    replay_band_to: vec4<f32>,
+    replay_blend: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u_scene: Uniform3d;

@@ -22,6 +22,10 @@ impl ReplayApp {
             return;
         };
         let scene = &recording.scene;
+        let drc_scan = self
+            .analysis
+            .drc_scan()
+            .filter(|_| self.complete && self.pending.is_none());
         let Some(die) = scene.objects.get("die") else {
             painter.text(
                 rect.center(),
@@ -181,7 +185,9 @@ impl ReplayApp {
         }
         if self.complete && self.pending.is_none() {
             self.maps.paint(&painter, project);
-            self.analysis.paint(&painter, project);
+            if drc_scan.is_none() {
+                self.analysis.paint(&painter, project);
+            }
         }
         paint(
             &painter,
@@ -217,6 +223,15 @@ impl ReplayApp {
         if let Some(progress) = self.clock_progress() {
             self.clock_overlay
                 .paint(&painter, |x, y, _| project(x, y), progress);
+        }
+        if let Some(scan) = drc_scan {
+            if !scan.restoring {
+                painter.rect_filled(rect, 0.0, Color32::from_black_alpha(180));
+                self.analysis
+                    .drc
+                    .paint_2d(&painter, &project, &self.scene_index, viewport, scan);
+            }
+            self.analysis.paint(&painter, project);
         }
         for id in &self.selected_objects {
             if let Some(obj) = scene.objects.get(id) {

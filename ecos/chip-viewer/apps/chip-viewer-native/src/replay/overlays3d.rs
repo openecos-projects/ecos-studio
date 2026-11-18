@@ -86,6 +86,34 @@ impl ReplayApp {
             });
         }
         if self.complete && self.pending.is_none() {
+            if self.view3d.auto_layers {
+                if let Some(scan) = self.analysis.drc_scan().filter(|scan| !scan.restoring) {
+                    if let Some(die) = record.scene.objects.get("die") {
+                        quad(
+                            painter,
+                            project,
+                            die.bbox,
+                            scan.height,
+                            Color32::from_rgba_unmultiplied(83, 206, 237, 16),
+                        );
+                        outline(
+                            painter,
+                            project,
+                            die.bbox,
+                            scan.height,
+                            Color32::from_rgb(83, 206, 237),
+                            1.2,
+                        );
+                    }
+                    painter.text(
+                        painter.clip_rect().left_top() + egui::vec2(10.0, 10.0),
+                        egui::Align2::LEFT_TOP,
+                        self.analysis.drc.caption(scan),
+                        egui::FontId::proportional(13.0),
+                        Color32::from_rgb(139, 221, 240),
+                    );
+                }
+            }
             if let Some(data) = self.maps.active_data() {
                 for row in 0..data.rows() {
                     for col in 0..data.columns() {

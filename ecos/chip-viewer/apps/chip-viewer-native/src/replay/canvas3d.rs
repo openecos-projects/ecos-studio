@@ -26,6 +26,7 @@ pub struct View3d {
     pub z_cut: f32,
     pub z_scale: f32,
     pub hidden_layers: std::collections::BTreeSet<u16>,
+    pub auto_layers: bool,
     pub filtered: Option<std::sync::Arc<Vec<crate::canvas_gpu3d::GpuShapeInstance3d>>>,
     pub epoch: u64,
 }
@@ -46,6 +47,7 @@ impl Default for View3d {
             z_cut: 1.0,
             z_scale: DEFAULT_Z_SCALE,
             hidden_layers: Default::default(),
+            auto_layers: true,
             filtered: None,
             epoch: 0,
         }
@@ -199,11 +201,21 @@ impl crate::replay::ReplayApp {
             }
             locate = ui.button("2D region").clicked();
 
+            if ui
+                .selectable_label(self.view3d.auto_layers, "Auto layers")
+                .on_hover_text("Follow the step's purpose; manual layer edits suspend this mode")
+                .clicked()
+            {
+                self.view3d.auto_layers = !self.view3d.auto_layers;
+                self.view3d.epoch = self.view3d.epoch.wrapping_add(1);
+            }
+
             ui.menu_button("Layers", |ui| {
                 if let Some(scene) = &self.view3d.scene {
                     for (name, (id, _, _)) in &scene.metadata.layers {
                         let mut visible = !self.view3d.hidden_layers.contains(id);
                         if ui.checkbox(&mut visible, name).changed() {
+                            self.view3d.auto_layers = false;
                             if visible {
                                 self.view3d.hidden_layers.remove(id);
                             } else {
@@ -218,8 +230,14 @@ impl crate::replay::ReplayApp {
         });
         ui.horizontal_wrapped(|ui| {
             crate::controls3d::scale(ui, &mut self.view3d.z_scale);
+            let previous = self.view3d.z_cut;
             crate::controls3d::layers(ui, &mut self.view3d.z_cut, false);
+            if previous != self.view3d.z_cut {
+                self.view3d.auto_layers = false;
+                self.view3d.epoch = self.view3d.epoch.wrapping_add(1);
+            }
         });
+        let layer_transition = self.layer_transition();
         ui.small(if self.view3d.automatic {
             "Stage camera · schematic layer heights"
         } else if self.view3d.auto_spin {
@@ -353,18 +371,27 @@ impl crate::replay::ReplayApp {
         let Some(state) = &self.view3d.state else {
             return;
         };
-        let uniform = CanvasUniform3d::from_camera(
+        let mut uniform = CanvasUniform3d::from_camera(
             camera,
             aspect,
             [0.047, 0.07, 0.094, 1.0],
             false,
             false,
-            scene.metadata.height() * self.view3d.z_cut,
+            scene.metadata.height()
+                * if self.view3d.auto_layers {
+                    1.0
+                } else {
+                    self.view3d.z_cut
+                },
             ShadingStyle::Normal,
             chip_display::LightingPreset::Studio,
             progress,
         );
-        if self.view3d.filtered.is_none() && !self.view3d.hidden_layers.is_empty() {
+        layer_transition.apply(&mut uniform);
+        if !self.view3d.auto_layers
+            && self.view3d.filtered.is_none()
+            && !self.view3d.hidden_layers.is_empty()
+        {
             self.view3d.filtered = Some(std::sync::Arc::new(
                 scene
                     .instances
@@ -378,11 +405,14 @@ impl crate::replay::ReplayApp {
             rect,
             CanvasGpu3dCallback::<true> {
                 uniform,
-                instances: self
-                    .view3d
-                    .filtered
-                    .clone()
-                    .unwrap_or_else(|| scene.instances.clone()),
+                instances: if self.view3d.auto_layers {
+                    scene.instances.clone()
+                } else {
+                    self.view3d
+                        .filtered
+                        .clone()
+                        .unwrap_or_else(|| scene.instances.clone())
+                },
                 instances_key: self.view3d.epoch,
                 target_pixels: [
                     (rect.width() * ui.ctx().pixels_per_point()).max(1.0) as u32,
@@ -423,7 +453,9 @@ impl crate::replay::ReplayApp {
                         .zip(&scene.ids)
                         .filter_map(|(inst, id)| {
                             let id = id.as_ref()?;
-                            if self.view3d.hidden_layers.contains(&(inst._pad[0] as u16))
+                            if (!self.view3d.auto_layers
+                                && self.view3d.hidden_layers.contains(&(inst._pad[0] as u16)))
+                                || layer_transition.coverage(inst) <= 0.01
                                 || inst.z0 > uniform.z_cut
                                 || (inst.animation[2] == 1.0 && progress <= inst.animation[0])
                             {

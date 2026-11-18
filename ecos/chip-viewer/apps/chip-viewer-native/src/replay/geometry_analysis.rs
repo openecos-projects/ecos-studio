@@ -192,7 +192,7 @@ pub fn duration(record: &Recording) -> Result<f64> {
         .as_ref()
         .is_some_and(|p| p.extension().is_some_and(|e| e == "gdisplay"))
     {
-        super::plan::MAP_SECONDS
+        super::drc_review::duration(super::layer_focus::routing_layers(record)?.len())
     } else {
         0.0
     };
