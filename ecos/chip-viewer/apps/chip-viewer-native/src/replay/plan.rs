@@ -39,6 +39,7 @@ pub struct StepPlan {
     pub error: String,
     frame_ends: Vec<f64>,
     source_ns: Vec<u64>,
+    subflow_starts: BTreeMap<String, f64>,
 }
 
 impl StepPlan {
@@ -51,6 +52,7 @@ impl StepPlan {
             error,
             frame_ends: Vec::new(),
             source_ns: Vec::new(),
+            subflow_starts: BTreeMap::new(),
         }
     }
 
@@ -124,6 +126,15 @@ impl StepPlan {
             }
             *value = last;
         }
+        let mut subflow_starts = BTreeMap::new();
+        for (i, frame) in frames.iter().enumerate() {
+            subflow_starts
+                .entry(frame.subflow.clone())
+                .or_insert_with(|| {
+                    i.checked_sub(1)
+                        .map_or(0.0, |previous| frame_ends[previous])
+                });
+        }
         Self {
             clips,
             process_seconds: duration,
@@ -132,6 +143,7 @@ impl StepPlan {
             error: String::new(),
             frame_ends,
             source_ns: frames.iter().map(|frame| frame.elapsed_ns).collect(),
+            subflow_starts,
         }
     }
 
@@ -143,6 +155,11 @@ impl StepPlan {
     /// Source markers retain exact frame selection, including frames inside a batch.
     pub fn display_at_frame(&self, frame: usize) -> Option<f64> {
         self.frame_ends.get(frame).copied()
+    }
+
+    pub fn subflow_start(&self, label: &str) -> Option<f64> {
+        let name = label.split_once(" · ").map_or(label, |(name, _)| name);
+        self.subflow_starts.get(name).copied()
     }
 
     pub fn display_at_source(&self, seconds: f64) -> f64 {

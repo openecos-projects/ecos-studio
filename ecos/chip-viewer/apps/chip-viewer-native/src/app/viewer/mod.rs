@@ -970,23 +970,9 @@ impl LoadedViewer {
             });
 
             ui.add_space(2.0);
-            ui.horizontal(|ui| {
-                ui.add(
-                    egui::Slider::new(&mut self.camera_ctrl_3d.target.z_scale, 0.05..=6.0)
-                        .logarithmic(true)
-                        .text("Z-scale"),
-                )
-                .on_hover_text("Vertical elevation scale (0.05 = flat, 1.0 = standard 3D depth, 6.0 = exaggerated)");
-            });
+            crate::controls3d::scale(ui, &mut self.camera_ctrl_3d.target.z_scale);
             ui.add_space(2.0);
-            ui.horizontal(|ui| {
-                ui.add(
-                    egui::Slider::new(&mut self.z_cut_ratio_3d, 0.0..=1.0)
-                        .custom_formatter(|n, _| format!("{:.0}%", n * 100.0))
-                        .text("Z-Cut"),
-                )
-                .on_hover_text("Top-down cross-section cut (0% = Full Stack, 30-50% = Slice top power roof to see routing, 100% = Base only)");
-            });
+            crate::controls3d::layers(ui, &mut self.z_cut_ratio_3d, true);
         }
     }
 

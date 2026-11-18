@@ -6,6 +6,7 @@ mod canvas_gpu;
 #[path = "render/canvas_gpu3d.rs"]
 mod canvas_gpu3d;
 mod clock_tree;
+mod controls3d;
 mod geometry_maps;
 mod instance_visibility;
 mod ir_drop;

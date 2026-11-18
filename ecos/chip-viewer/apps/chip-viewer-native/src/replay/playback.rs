@@ -75,6 +75,7 @@ impl ReplayApp {
         source: Option<f64>,
         sequence: Option<usize>,
     ) {
+        self.navigation_node = None;
         self.completion_node_selected = completion_node;
         self.camera_exact = source.is_some() || completion_node;
         self.position = seconds.clamp(
