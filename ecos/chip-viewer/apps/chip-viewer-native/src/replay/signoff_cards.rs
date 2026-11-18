@@ -8,6 +8,7 @@ mod widgets;
 use widgets::*;
 
 pub fn show(ctx: &egui::Context, summary: &SignoffSummary) -> egui::Response {
+    let elapsed = animation_elapsed(ctx);
     let screen = ctx.screen_rect();
     let width = (screen.width() - 48.0).clamp(280.0, 1800.0);
     let height = (screen.height() - 150.0).clamp(220.0, 1100.0);
@@ -57,7 +58,7 @@ pub fn show(ctx: &egui::Context, summary: &SignoffSummary) -> egui::Response {
                             ui,
                             card_width,
                             height,
-                            "01 / DESIGN",
+                            ("01 / DESIGN", reveal_progress(elapsed, 0)),
                             TEAL,
                             |ui| {
                                 hero(ui, &summary.design.name, &summary.design.harden_state);
@@ -78,7 +79,7 @@ pub fn show(ctx: &egui::Context, summary: &SignoffSummary) -> egui::Response {
                             ui,
                             card_width,
                             height,
-                            "02 / QOR",
+                            ("02 / QOR", reveal_progress(elapsed, 1)),
                             AMBER,
                             |ui| {
                                 hero(
@@ -97,7 +98,7 @@ pub fn show(ctx: &egui::Context, summary: &SignoffSummary) -> egui::Response {
                             ui,
                             card_width,
                             height,
-                            "03 / CHECKLIST",
+                            ("03 / CHECKLIST", reveal_progress(elapsed, 2)),
                             AMBER,
                             |ui| {
                                 hero(
@@ -126,6 +127,26 @@ pub fn show(ctx: &egui::Context, summary: &SignoffSummary) -> egui::Response {
         })
         .response
 }
+// A wall-clock entrance keeps animating after playback stops at the final node.
+fn animation_elapsed(ctx: &egui::Context) -> f64 {
+    let now = ctx.input(|i| i.time);
+    let start = ctx.data_mut(|data| {
+        *data.get_temp_mut_or_insert_with(Id::new("signoff_entrance_start"), || now)
+    });
+    let elapsed = (now - start).max(0.0);
+    if elapsed < 0.9 {
+        ctx.request_repaint();
+    }
+    elapsed
+}
+pub fn reset_animation(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.remove::<f64>(Id::new("signoff_entrance_start")));
+}
+fn reveal_progress(elapsed: f64, index: usize) -> f32 {
+    let t = ((elapsed - index as f64 * 0.18) / 0.48).clamp(0.0, 1.0) as f32;
+    1.0 - (1.0 - t).powi(3)
+}
+
 fn hero(ui: &mut egui::Ui, title: &str, status: &str) {
     if ui.available_width() < 300.0 {
         ui.add(
@@ -159,7 +180,7 @@ fn card(
     ui: &mut egui::Ui,
     width: f32,
     height: f32,
-    title: &str,
+    (title, progress): (&str, f32),
     accent: Color32,
     header: impl FnOnce(&mut egui::Ui),
     body: impl FnOnce(&mut egui::Ui),
@@ -170,27 +191,40 @@ fn card(
         .corner_radius(12)
         .inner_margin(18);
     let margins = frame.total_margin().sum();
-    frame.show(ui, |ui| {
-        ui.set_width(width - margins.x);
-        ui.set_min_height(height - margins.y);
-        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-            let top = ui.cursor().top();
-            ui.add(egui::Label::new(RichText::new(title).size(20.0).strong().color(accent)).wrap());
-            ui.separator();
-            header(ui);
-            let body_height = (height - margins.y - (ui.cursor().top() - top) - 26.0).max(80.0);
-            egui::ScrollArea::vertical()
-                .id_salt(title)
-                .auto_shrink([false, false])
-                .max_height(body_height)
-                .min_scrolled_height(0.0)
-                .show(ui, |ui| {
-                    ui.set_width(width - margins.x - 12.0);
-                    body(ui);
+    ui.with_visual_transform(
+        egui::emath::TSTransform::from_translation(egui::vec2(-18.0 * (1.0 - progress), 0.0)),
+        |ui| {
+            ui.set_opacity(progress);
+            if progress < 1.0 {
+                ui.disable();
+            }
+            frame.show(ui, |ui| {
+                ui.set_width(width - margins.x);
+                ui.set_min_height(height - margins.y);
+                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                    let top = ui.cursor().top();
+                    ui.add(
+                        egui::Label::new(RichText::new(title).size(20.0).strong().color(accent))
+                            .wrap(),
+                    );
+                    ui.separator();
+                    header(ui);
+                    let body_height =
+                        (height - margins.y - (ui.cursor().top() - top) - 26.0).max(80.0);
+                    egui::ScrollArea::vertical()
+                        .id_salt(title)
+                        .auto_shrink([false, false])
+                        .max_height(body_height)
+                        .min_scrolled_height(0.0)
+                        .show(ui, |ui| {
+                            ui.set_width(width - margins.x - 12.0);
+                            body(ui);
+                        });
+                    text(ui, "Scroll for full report details", 13.0, LABEL);
                 });
-            text(ui, "Scroll for full report details", 13.0, LABEL);
-        });
-    });
+            });
+        },
+    );
 }
 
 #[cfg(test)]

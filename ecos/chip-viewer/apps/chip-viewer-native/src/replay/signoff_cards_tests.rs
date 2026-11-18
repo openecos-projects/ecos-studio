@@ -67,10 +67,11 @@ fn three_cards_are_centered_and_text_wraps_without_horizontal_overflow() {
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
         let mut rect = egui::Rect::NOTHING;
         let mut output = egui::FullOutput::default();
-        for _ in 0..4 {
+        for frame in 0..4 {
             output = ctx.run(
                 egui::RawInput {
                     screen_rect: Some(screen),
+                    time: Some(frame as f64),
                     ..Default::default()
                 },
                 |ctx| {
@@ -124,6 +125,7 @@ fn report_scroll_reveals_final_fields() {
         output = ctx.run(
             egui::RawInput {
                 screen_rect: Some(screen),
+                time: Some(i as f64),
                 events: if i > 3 {
                     vec![
                         egui::Event::PointerMoved(egui::pos2(250.0, 450.0)),
@@ -154,4 +156,30 @@ fn report_scroll_reveals_final_fields() {
         }
     }
     assert!(found, "last report field should be accessible by scrolling");
+}
+
+#[test]
+fn cards_reveal_left_to_right_and_restart_after_leaving_completion() {
+    assert_eq!([0, 1, 2].map(|i| reveal_progress(0.0, i)), [0.0; 3]);
+    let progress = [0, 1, 2].map(|i| reveal_progress(0.3, i));
+    assert!(progress[0] > progress[1] && progress[1] > progress[2]);
+    assert_eq!([0, 1, 2].map(|i| reveal_progress(0.9, i)), [1.0; 3]);
+    let ctx = egui::Context::default();
+    for (time, expected) in [(5.0, 0.0), (6.0, 1.0)] {
+        let _ = ctx.run(
+            egui::RawInput {
+                time: Some(time),
+                ..Default::default()
+            },
+            |ctx| assert_eq!(animation_elapsed(ctx), expected),
+        );
+    }
+    reset_animation(&ctx);
+    let _ = ctx.run(
+        egui::RawInput {
+            time: Some(10.0),
+            ..Default::default()
+        },
+        |ctx| assert_eq!(animation_elapsed(ctx), 0.0),
+    );
 }

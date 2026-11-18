@@ -4,6 +4,8 @@ use crate::replay::data::{read, within, Catalog, Recording};
 use crate::replay::widgets::{CheckMark, SelectionFollow};
 use egui::{Color32, RichText};
 use serde_json::Value;
+#[path = "signoff_design.rs"]
+mod signoff_design;
 #[path = "signoff_report.rs"]
 pub(super) mod signoff_report;
 use std::{
@@ -175,19 +177,17 @@ impl Dashboard {
             snapshot.as_ref(),
             checklist.as_ref(),
         );
-        if let Some(path) = signoff_report::design_path(workspace, &data.signoff.design.name) {
-            data.watch(path.clone());
-            match signoff_report::read_design(workspace, &path) {
-                Ok(sections) => data.signoff.details.design = sections,
-                Err(error) => {
-                    data.signoff.details.design_error =
-                        format!("Design report unavailable: {error}")
-                }
-            }
-        } else {
-            data.signoff.details.design_error =
-                "Design report unavailable: missing design name".into();
+        let design = signoff_design::load(
+            workspace,
+            flow.as_ref(),
+            snapshot.as_ref(),
+            &mut data.signoff.design,
+        );
+        for path in design.paths {
+            data.watch(path);
         }
+        data.signoff.details.design = design.sections;
+        data.signoff.details.design_error = design.error;
         if !report_matches_flow {
             data.signoff.qor = QorSummary::default();
             data.signoff.details = signoff_report::ReportDetails {

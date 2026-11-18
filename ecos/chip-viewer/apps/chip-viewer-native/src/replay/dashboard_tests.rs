@@ -227,21 +227,26 @@ fn signoff_card_inputs_are_watched_for_staleness() {
 }
 
 #[test]
-fn design_report_creation_invalidates_the_loaded_summary() {
+fn design_metric_creation_invalidates_the_loaded_summary() {
     let f = Fixture::new();
     std::fs::create_dir_all(f.0.join("home")).unwrap();
-    f.write("home/qor_report.json", json!({"design":"aes"}));
+    f.write(
+        "home/flow.json",
+        json!({"steps":[{"name":"Harden","tool":"ecc","state":"Success"}]}),
+    );
     let mut dashboard = Dashboard::load(&f.0, &[]);
     assert!(!dashboard.signoff.details.design_error.is_empty());
-    std::fs::create_dir_all(f.0.join("signoff")).unwrap();
-    std::fs::write(
-        f.0.join("signoff/aes_design_summary.txt"),
-        "DESIGN SUMMARY REPORT\n[ 1. PHYSICAL & AREA METRICS ]\n  Die Area      10 um²\n",
-    )
-    .unwrap();
+    std::fs::create_dir_all(f.0.join("Harden_ecc/analysis")).unwrap();
+    f.write(
+        "Harden_ecc/analysis/qor_metrics.json",
+        json!({"metrics":[{"id":"die_area","value":1000}]}),
+    );
     dashboard.check_current();
     assert!(dashboard.stale);
     let current = Dashboard::load(&f.0, &[]);
     assert!(current.signoff.details.design_error.is_empty());
-    assert_eq!(current.signoff.details.design[0].fields[0].value, "10 µm²");
+    assert_eq!(
+        current.signoff.details.design[0].fields[0].value,
+        "1,000 µm² (0.0010 mm²)"
+    );
 }
