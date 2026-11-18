@@ -119,6 +119,7 @@ pub struct ReplayApp {
 impl ReplayApp {
     fn harden_replay_complete(&self) -> bool {
         self.complete
+            && self.position >= self.starts[self.step] + self.plans[self.step].seconds
             && self.pending.is_none()
             && self.error.is_empty()
             && self.catalog.steps[self.step]
@@ -490,6 +491,8 @@ impl eframe::App for ReplayApp {
             if let Some(data) = &self.dashboard {
                 data.show_signoff_cards(ctx);
             }
+        } else {
+            signoff_cards::reset_animation(ctx);
         }
         self.analysis_window(ctx);
     }

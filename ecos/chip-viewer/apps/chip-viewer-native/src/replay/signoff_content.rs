@@ -60,7 +60,7 @@ pub fn design(ui: &mut egui::Ui, s: &SignoffSummary) {
         .details
         .design
         .iter()
-        .find(|s| s.columns.first().is_some_and(|c| c == "Corner"))
+        .find(|s| !s.rows.is_empty() && s.columns.first().is_some_and(|c| c == "Corner"))
     {
         let passed = corners
             .rows

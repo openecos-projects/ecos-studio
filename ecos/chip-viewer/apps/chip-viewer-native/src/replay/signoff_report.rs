@@ -1,12 +1,5 @@
 //! Read existing ECC report fields without invoking tools or changing a workspace.
-use super::super::data::within;
-use anyhow::{ensure, Result};
-use regex::Regex;
 use serde_json::Value;
-use std::{
-    io::Read,
-    path::{Path, PathBuf},
-};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ReportDetails {
@@ -173,104 +166,6 @@ impl ReportDetails {
         }
         result
     }
-}
-
-pub fn design_path(workspace: &Path, name: &str) -> Option<PathBuf> {
-    if name.is_empty() || name.contains(['/', '\\']) || matches!(name, "." | "..") {
-        return None;
-    }
-    Some(
-        workspace
-            .join("signoff")
-            .join(format!("{name}_design_summary.txt")),
-    )
-}
-
-pub fn read_design(workspace: &Path, path: &Path) -> Result<Vec<Section>> {
-    let path = within(workspace, path)?;
-    let mut text = String::new();
-    std::fs::File::open(path)?
-        .take(2 * 1024 * 1024 + 1)
-        .read_to_string(&mut text)?;
-    ensure!(text.len() <= 2 * 1024 * 1024, "Design report exceeds 2 MiB");
-    parse_design(&text)
-}
-
-pub fn parse_design(text: &str) -> Result<Vec<Section>> {
-    ensure!(
-        text.contains("DESIGN SUMMARY REPORT"),
-        "Unrecognized design report"
-    );
-    let split = Regex::new(r"\s{2,}")?;
-    let mut sections: Vec<Section> = Vec::new();
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if let Some(title) = trimmed
-            .strip_prefix("[ ")
-            .and_then(|s| s.strip_suffix(" ]"))
-        {
-            sections.push(Section {
-                title: title.to_owned(),
-                ..Default::default()
-            });
-            continue;
-        }
-        let Some(section) = sections.last_mut() else {
-            continue;
-        };
-        if !line.starts_with("  ") || trimmed.is_empty() || trimmed.starts_with('-') {
-            continue;
-        }
-        let mut columns: Vec<String> = split.split(trimmed).map(str::to_owned).collect();
-        if matches!(
-            columns.first().map(String::as_str),
-            Some("Corner" | "Stage")
-        ) {
-            section.columns = columns;
-        } else if !section.columns.is_empty() {
-            // Long stage names exceed the CLI's 18-column stage field.
-            if section.columns[0] == "Stage" && columns.len() == 4 {
-                if let Some((stage, tool)) = columns[0].rsplit_once(' ') {
-                    let (stage, tool) = (stage.to_owned(), tool.to_owned());
-                    columns[0] = stage;
-                    columns.insert(1, tool);
-                }
-            }
-            ensure!(
-                columns.len() == section.columns.len(),
-                "Malformed {} table row",
-                section.columns[0]
-            );
-            section.rows.push(columns);
-        } else if columns.len() >= 2 {
-            let mut value = columns[1].clone();
-            let mut note = columns.get(2..).unwrap_or_default().join(" ");
-            // CLI values longer than 20 characters leave only one separating space.
-            if note.is_empty() {
-                for suffix in ["Physical boundary", "Total clock routing", "PASS", "FAIL"] {
-                    if let Some(prefix) = value.strip_suffix(&format!(" {suffix}")) {
-                        note = suffix.into();
-                        value = prefix.to_owned();
-                        break;
-                    }
-                }
-            }
-            section.fields.push(Field {
-                label: columns[0].clone(),
-                value: value.replace(" um", " µm"),
-                note,
-            });
-        }
-    }
-    ensure!(!sections.is_empty(), "No design report sections found");
-    for section in &sections {
-        ensure!(
-            !section.fields.is_empty() || !section.rows.is_empty(),
-            "Empty design section: {}",
-            section.title
-        );
-    }
-    Ok(sections)
 }
 
 #[cfg(test)]

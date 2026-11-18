@@ -56,6 +56,28 @@ fn harden_signoff_follows_completion_seek_errors_and_report_freshness() {
 }
 
 #[test]
+fn harden_without_process_clips_waits_until_its_result_hold_finishes() {
+    let fixture = Fixture::new();
+    let mut app = app(&fixture);
+    app.dashboard = Some(Default::default());
+    app.catalog.steps[0].name = "Harden".into();
+    app.plans[0].process_seconds = 0.0;
+    app.plans[0].seconds = crate::replay::plan::RESULT_SECONDS;
+    for time in [0.0, 0.1, app.plans[0].seconds - 0.01] {
+        app.select(0, time, false);
+        app.finish_loading_for_test();
+        assert!(app.complete, "geometry is already in its result phase");
+        assert!(!app.show_harden_signoff(), "must not show at {time}");
+    }
+    app.select(0, app.plans[0].seconds, false);
+    app.finish_loading_for_test();
+    assert!(app.show_harden_signoff());
+    app.select(0, 0.0, false);
+    app.finish_loading_for_test();
+    assert!(!app.show_harden_signoff());
+}
+
+#[test]
 fn filler_rows_play_as_one_fast_sweep_with_exact_seeks_and_complete_highlights() {
     let fixture = Fixture::new();
     let mut manifest: serde_json::Value =

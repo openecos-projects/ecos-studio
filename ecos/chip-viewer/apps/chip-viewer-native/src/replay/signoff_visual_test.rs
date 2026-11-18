@@ -59,7 +59,7 @@ impl eframe::App for Preview {
         egui::CentralPanel::default().show(ctx, |_| {});
         let _ = show(ctx, &self.summary);
         self.frames += 1;
-        if self.frames == 10 {
+        if self.frames == 90 {
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
         }
         ctx.request_repaint();
