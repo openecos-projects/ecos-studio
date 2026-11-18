@@ -324,21 +324,6 @@ impl ReplayApp {
             }
         });
         self.playback_controls(ui);
-        ui.add(
-            egui::Label::new(format!(
-                "{} · {}   Display {:.1}s / {:.1}s · Step execution {:.3}s · Right-click for nodes",
-                self.catalog.steps[self.step].name,
-                if self.complete {
-                    "Completed result"
-                } else {
-                    "Captured process"
-                },
-                self.position,
-                self.total,
-                self.catalog.steps[self.step].seconds
-            ))
-            .truncate(),
-        );
     }
 }
 
@@ -468,7 +453,7 @@ impl eframe::App for ReplayApp {
             });
         });
         egui::TopBottomPanel::bottom("replay_time")
-            .exact_height(180.0)
+            .exact_height(160.0)
             .resizable(false)
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical()
