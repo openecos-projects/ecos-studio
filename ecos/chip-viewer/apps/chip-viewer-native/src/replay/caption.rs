@@ -7,6 +7,13 @@ mod metrics;
 
 impl ReplayApp {
     pub(super) fn current_phase(&self) -> String {
+        if let Some(scan) = self
+            .analysis
+            .drc_scan()
+            .filter(|_| self.complete && self.pending.is_none())
+        {
+            return self.analysis.drc.caption(scan);
+        }
         if let Some(label) = self.maps.selected_label() {
             return format!("Map · {label}");
         }

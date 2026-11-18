@@ -18,6 +18,7 @@ struct Geometry {
 
 #[derive(Default)]
 pub struct ReplayAnalysis {
+    pub(super) drc: super::drc_review::DrcReview,
     data: Analysis,
     geometry: Vec<Vec<Geometry>>,
     rcx: crate::replay::rcx::RcxOverlay,
@@ -65,6 +66,11 @@ impl ReplayAnalysis {
         })();
         match loaded {
             Ok(mut data) => {
+                let drc = if data.views.iter().any(|v| v.kind == "drc") {
+                    super::drc_review::DrcReview::open(recording)
+                } else {
+                    Ok(Default::default())
+                };
                 timing::group_corners(&mut data);
                 data.views.sort_by_key(|view| view.kind != "ir");
                 let (ir, error) = match crate::replay::ir::IrOverlays::load(&data, recording) {
@@ -77,7 +83,11 @@ impl ReplayAnalysis {
                 Self {
                     data,
                     ir,
-                    error,
+                    error: match &drc {
+                        Ok(_) => error,
+                        Err(e) => format!("{error} DRC layers unavailable: {e}"),
+                    },
+                    drc: drc.unwrap_or_default(),
                     ..Self::default()
                 }
             }
@@ -193,6 +203,7 @@ impl ReplayAnalysis {
 
     fn view_duration(&self, index: usize) -> f64 {
         match self.data.views[index].kind.as_str() {
+            "drc" => super::drc_review::duration(self.drc.layers.len()),
             "timing" => timing::CORNER_SECONDS,
             "power" | "ir" => 4.0,
             "rcx" => crate::replay::rcx::CORNER_SECONDS,
@@ -202,6 +213,19 @@ impl ReplayAnalysis {
 
     pub fn duration(&self) -> f64 {
         (0..self.len()).map(|i| self.view_duration(i)).sum()
+    }
+
+    pub fn drc_scan(&self) -> Option<super::drc_review::Scan> {
+        if self.item.is_some() || self.selected_description()?.0 != "drc" {
+            return None;
+        }
+        self.drc.scan(self.progress)
+    }
+
+    pub fn show_drc_result(&mut self) {
+        self.selected = self.data.views.iter().position(|v| v.kind == "drc");
+        self.item = None;
+        self.progress = 1.0;
     }
 
     fn offset(&self, index: usize) -> f64 {
@@ -290,7 +314,7 @@ impl ReplayAnalysis {
             if let Some(index) = selected {
                 if matches!(
                     self.data.views[index].kind.as_str(),
-                    "timing" | "power" | "rcx" | "ir"
+                    "timing" | "power" | "rcx" | "ir" | "drc"
                 ) {
                     self.requested_time = Some(self.offset(index));
                 }
@@ -473,6 +497,16 @@ impl ReplayAnalysis {
             return;
         };
         let view = &self.data.views[index];
+        if view.kind == "drc" {
+            self.drc.paint_items(
+                painter,
+                &project_layer,
+                &view.items,
+                self.progress,
+                self.item,
+            );
+            return;
+        }
         if view.kind == "ir" {
             painter.rect_filled(painter.clip_rect(), 0.0, Color32::from_black_alpha(155));
             self.ir.paint(painter, project, index, self.progress);

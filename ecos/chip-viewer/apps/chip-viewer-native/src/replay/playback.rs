@@ -212,6 +212,9 @@ impl ReplayApp {
                 }
             } else {
                 self.maps.clear_selection();
+                if completion_node && self.catalog.steps[step].name.eq_ignore_ascii_case("drc") {
+                    self.analysis.show_drc_result();
+                }
             }
         } else {
             self.maps.clear_selection();

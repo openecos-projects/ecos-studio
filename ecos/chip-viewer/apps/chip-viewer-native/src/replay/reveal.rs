@@ -56,6 +56,20 @@ impl Reveal {
             .map_or("", |(_, name)| name.as_str())
     }
 
+    /// Captured batch display groups, using the same cursor as object reveal.
+    pub fn group_transition(&self) -> Option<(&str, Option<&str>, f32)> {
+        let index = self
+            .groups
+            .iter()
+            .rposition(|(time, _)| *time <= self.elapsed)?;
+        let (start, label) = &self.groups[index];
+        Some((
+            label,
+            index.checked_sub(1).map(|i| self.groups[i].1.as_str()),
+            ((self.elapsed - start) / 0.3).clamp(0.0, 1.0) as f32,
+        ))
+    }
+
     pub fn begin(&mut self, before: &Scene, after: &Scene, frames: &[Frame]) {
         self.clear();
         let Some(b) = after.revision else {

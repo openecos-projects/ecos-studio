@@ -120,6 +120,7 @@ impl Metadata {
 }
 
 pub struct Scene3d {
+    pub active_band: Option<[f32; 2]>,
     pub instances: Arc<Vec<GpuShapeInstance3d>>,
     pub ids: Vec<Option<String>>,
     pub metadata: Arc<Metadata>,
@@ -143,6 +144,7 @@ impl Scene3d {
                 .map_or([0, 0, 1000, 1000], |o| o.bbox),
         )?;
         let mut instances = Vec::new();
+        let mut active_band: Option<[f32; 2]> = None;
         let mut ids = Vec::new();
         let mut overflow: BTreeMap<(String, String, i32, i32), Object> = BTreeMap::new();
         let cell = ((world.hx as i64 - world.lx as i64).max(world.hy as i64 - world.ly as i64)
@@ -161,6 +163,11 @@ impl Scene3d {
                     continue;
                 }
                 if instances.len() < direct {
+                    if important && matches!(super::layer_focus::class(object), 2 | 3) {
+                        let (lo, hi, _, _) = metadata.band(object);
+                        active_band =
+                            Some(active_band.map_or([lo, hi], |b| [b[0].min(lo), b[1].max(hi)]));
+                    }
                     instances.push(instance(
                         id,
                         object,
@@ -208,6 +215,7 @@ impl Scene3d {
         }
         Ok(Self {
             instances: Arc::new(instances),
+            active_band,
             ids,
             metadata,
             world,
@@ -293,6 +301,7 @@ fn instance(
         if touched { FLAG_REPLAY_CHANGED } else { 0 },
     );
     out._pad[0] = u32::from(layer);
+    out._pad[1] = super::layer_focus::class(object);
     if let Some(start) = motion.start_bounds(id) {
         out.from_rect = rect_array(meta.rect(start)?);
         out.animation = [0.0, 1.0, 2.0, 0.0];

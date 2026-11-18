@@ -10,6 +10,7 @@ mod checklist;
 mod clock;
 mod dashboard;
 pub(crate) mod data;
+mod drc_review;
 mod events;
 mod focus;
 mod geometry_analysis;
@@ -20,6 +21,9 @@ pub(crate) mod integrity;
 mod ir;
 #[cfg(all(test, target_os = "linux"))]
 mod ir_validation;
+mod layer_focus;
+#[cfg(all(test, target_os = "linux"))]
+mod layer_validation;
 mod layout;
 mod loader;
 mod log;
