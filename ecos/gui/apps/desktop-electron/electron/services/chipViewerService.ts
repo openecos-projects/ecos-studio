@@ -718,6 +718,10 @@ export class ChipViewerService {
   onWorkspaceRevisionChanged?: ChipViewerServiceOptions['onWorkspaceRevisionChanged']
   private readonly editBridgeWatchers = new Map<string, DirectoryWatcher>()
   private readonly layoutEditContexts = new Map<string, LayoutEditContext>()
+  private readonly openingViewers = new Map<
+    string,
+    { mode: ChipViewerMode; promise: Promise<ChipViewerOpenResult> }
+  >()
   private readonly openViewerCounts = new Map<string, number>()
   private readonly processedEditCommands = new Set<string>()
   private nextEditBridgeId = 1
@@ -758,6 +762,31 @@ export class ChipViewerService {
   async open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult> {
     const projectPath = normalizeLocalPath(request.projectPath)
     const mode = normalizeChipViewerMode(request.mode)
+    const key = this.viewerKey(projectPath, request.step)
+    const opening = this.openingViewers.get(key)
+    if (opening) {
+      if (opening.mode !== mode) {
+        return Promise.reject(
+          new Error(`Chip Viewer is already opening this step in ${opening.mode} mode.`),
+        )
+      }
+      return opening.promise
+    }
+
+    const promise = this.openOnce(request, projectPath, mode)
+    this.openingViewers.set(key, { mode, promise })
+    void promise.then(
+      () => this.openingViewers.delete(key),
+      () => this.openingViewers.delete(key),
+    )
+    return promise
+  }
+
+  private async openOnce(
+    request: ChipViewerOpenRequest,
+    projectPath: string,
+    mode: ChipViewerMode,
+  ): Promise<ChipViewerOpenResult> {
     const defView = isDefViewStep(request.step)
     if (defView && mode === 'edit') {
       throw new Error('DEF View is read-only and cannot be opened in edit mode.')
@@ -894,10 +923,9 @@ export class ChipViewerService {
   async isOpen(request: ChipViewerOpenRequest): Promise<ChipViewerOpenStatus> {
     const saving =
       (this.savingProjectPaths.get(normalizeLocalPath(request.projectPath)) ?? 0) > 0
+    const key = this.viewerKey(request.projectPath, request.step)
     return {
-      open:
-        (this.openViewerCounts.get(this.viewerKey(request.projectPath, request.step)) ??
-          0) > 0,
+      open: this.openingViewers.has(key) || (this.openViewerCounts.get(key) ?? 0) > 0,
       ...(saving ? { saving: true } : {}),
     }
   }
