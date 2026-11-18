@@ -84,9 +84,13 @@ export interface PdkConfigureRequest {
     | 'library-list'
     | 'library-default'
     | 'library-locate'
+    | 'profiles-list'
+    | 'profiles-show'
+    | 'profiles-apply'
   root?: string
   descriptionPath?: string
   familyId?: string
+  profileId?: string
   field?: string
   value?: unknown
   expectedRevision?: string

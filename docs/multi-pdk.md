@@ -19,6 +19,20 @@ Studio does not maintain a second PDK parser. CLI `configure export-description`
 prints the tool-independent document a PDK maintainer can publish; the separate
 `export-adaptation` output belongs to ECC configuration management.
 
+ECC now ships reviewed defaults for the installed ICS55 v1.10.103 (7T) package and
+ICS55 v2-2026.10.28-7d83e6d (9T). On first import, an exact matching description
+selects its adaptation after every resource hash is checked. Existing managed
+policy is preserved. There is no family-name or version-prefix fallback.
+`ecc pdk profiles list/show/apply` exposes the same choices as the Configure PDK
+dialog. For missing metadata, explicitly choose a profile or author configuration
+manually; applying to existing managed defaults requires its revision and the
+dialog's replacement confirmation. If process facts would change an already
+registered installation's identity, import a separate root instead.
+See [ECC's default-profile contract](../ecc/docs/pdk-default-profiles.md) for the
+schemas, resource identities, version compatibility and CLI examples. This feature
+requires an ECC runtime containing the profiles API; older runtimes retain manual
+configuration. For development, select the matching local bundle explicitly.
+
 Use **Studio Default** to choose a default for new Studio projects. ECC's CLI
 default is independent. An explicit project selection overrides a client default.
 A project fixes its package contents and adaptation for all workspaces. Editing
@@ -31,10 +45,11 @@ The old workspace-level LEF/Liberty override mechanism cannot bypass this lock.
 Readiness means the requested files are present and valid; it does not certify a
 foundry process or a backend. Partial packages may support synthesis only.
 Capabilities blocked by missing physical resources remain unavailable. Current
-real-flow qualification covers ICS55 v2; Sizer has an explicit maximum of three
+real-flow GCD qualification covers installed ICS55 v1.10.103 and ICS55 v2; Sizer has an explicit maximum of three
 VT groups and extraction still needs a supported, explicitly selected backend.
-Authentic EM data is required for EMIR signoff. Test-only synthetic models are
-never injected into ordinary projects.
+Authentic EM data is required for EMIR signoff. The bundled ICS55 profiles explicitly
+select a synthetic EMIR model for flow testing and report it as non-signoff.
+This does not qualify arbitrary processes or waive physical violations on other designs.
 
 ## Isolated development and tests
 
@@ -47,5 +62,9 @@ Building a package does not require installing it.
 Desktop integration tests accept `ECOS_E2E_ECC_BIN_DIR`, `ECOS_E2E_PDK_ROOT` and
 `ECOS_E2E_OUT`. They create a separate PDK fixture with explicit synthetic EM data
 when the source package lacks an EM model. They never change the input package.
+For schema 2 descriptions, the fixture uses ECC to resolve the matching defaults
+in isolated management before copying the full resource set. The optional
+`ECOS_E2E_PROFILE_V1_ROOT` runs the actual default-selection dialog against a
+v1.10.103 root without a vendor description and captures a screenshot.
 The native test, real backend flow and signoff qualifications are separate checks;
 a successful flow using synthetic data is not foundry signoff.

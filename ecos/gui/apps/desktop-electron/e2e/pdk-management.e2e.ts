@@ -17,6 +17,8 @@ describe('ECC-managed PDK descriptions and adaptations', () => {
     app = await launchE2EApp(out)
   })
   afterAll(async () => {
+    if (app)
+      await app.page.screenshot({ path: join(app.outDir, 'pdk-management-final.png') })
     await app?.close()
   })
 
@@ -28,6 +30,33 @@ describe('ECC-managed PDK descriptions and adaptations', () => {
     expect(result.error).toBeUndefined()
     return result
   }
+
+  it('loads bundled profiles through the real CLI and rejects a mismatched package', async () => {
+    const listed = await configure({ action: 'profiles-list' })
+    expect(listed.profiles).toMatchObject([{ id: 'ics55-v1' }, { id: 'ics55-v2' }])
+    const shown = await configure({ action: 'profiles-show', profileId: 'ics55-v2' })
+    expect(shown.description).not.toHaveProperty('tools')
+    expect(shown.adaptation).toMatchObject({
+      tools: { compatibility: { sizer_vt_contract: 1 } },
+    })
+    const rejected = await app.page.evaluate(
+      (pdkRoot) =>
+        window.ecosDesktop!.pdkInventory.configure({
+          action: 'profiles-apply',
+          profileId: 'ics55-v2',
+          root: pdkRoot,
+        }),
+      root,
+    )
+    expect(rejected.error).toBeDefined()
+    expect(await readdir(root)).toEqual(['cells.lib'])
+    const missing = await app.page.evaluate(
+      (pdkRoot) =>
+        window.ecosDesktop!.pdkInventory.configure({ action: 'show', root: pdkRoot }),
+      root,
+    )
+    expect(missing.error).toBeDefined()
+  })
 
   it('authors outside the PDK, preserves process identity and relocates local metadata', async () => {
     const created = await configure({ action: 'init', root, familyId: 'vendor' })
@@ -79,4 +108,50 @@ describe('ECC-managed PDK descriptions and adaptations', () => {
     expect(stored.adaptation.parameters.max_fanout).toBe(16)
     expect(await readdir(moved)).toEqual(['cells.lib'])
   })
+
+  // Optional real-package UI journey: point at an unmodified v1.10.103 directory
+  // without ecc-pdk.json. All resulting metadata stays in this app's isolated XDG.
+  it.skipIf(!process.env.ECOS_E2E_PROFILE_V1_ROOT)(
+    'initializes v1 defaults from the configuration dialog',
+    async () => {
+      const pdkRoot = process.env.ECOS_E2E_PROFILE_V1_ROOT!
+      await app.app.evaluate(({ dialog }, path) => {
+        ;(dialog as unknown as Record<string, unknown>).showOpenDialog = async () => ({
+          canceled: false,
+          filePaths: [path],
+        })
+      }, pdkRoot)
+      await app.page.getByRole('button', { name: /Resource Manager/ }).click()
+      await app.page
+        .locator('.plugin-card')
+        .filter({
+          has: app.page
+            .locator('.plugin-card-title strong')
+            .filter({ hasText: /ICS.*55/i }),
+        })
+        .first()
+        .locator('[data-title="Import Local"]')
+        .click()
+      const naming = app.page.getByRole('dialog', { name: 'Import PDK', exact: true })
+      const configuration = app.page.getByRole('dialog', {
+        name: 'Configure PDK',
+        exact: true,
+      })
+      await naming.or(configuration).waitFor()
+      if (await naming.isVisible()) {
+        await naming.getByLabel('PDK Name').fill('ICS55 v1 local')
+        await naming.getByRole('button', { name: 'Import', exact: true }).click()
+      }
+      await configuration.getByLabel('ECC default adaptation').selectOption('ics55-v1')
+      await configuration
+        .getByRole('button', { name: 'Apply default adaptation' })
+        .click()
+      await configuration.getByRole('button', { name: 'Validate resources' }).waitFor()
+      const shown = await configure({ action: 'show', root: pdkRoot })
+      expect(shown.adaptation).toMatchObject({
+        profile_revision: expect.stringContaining('7t'),
+      })
+      await app.page.screenshot({ path: join(app.outDir, 'default-profile-v1.png') })
+    },
+  )
 })

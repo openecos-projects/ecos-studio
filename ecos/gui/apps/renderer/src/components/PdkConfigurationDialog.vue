@@ -20,6 +20,13 @@
       Configuration source: {{ configurationPath }}
     </p>
     <div v-if="error" role="alert" class="mb-3 text-red-500">{{ error }}</div>
+    <PdkProfileSelection
+      v-if="request"
+      :root="request.root"
+      :revision="initialized ? revision : undefined"
+      :disabled="busy"
+      @applied="profileApplied"
+    />
     <label class="block text-sm" for="pdk-family">Family ID</label>
     <input
       id="pdk-family"
@@ -149,6 +156,7 @@ import Dialog from 'primevue/dialog'
 import { getDesktopApi } from '@/platform/desktop'
 import { usePdkConfiguration } from '@/composables/usePdkConfiguration'
 import type { PdkConfigureRequest } from '@ecos-studio/shared'
+import PdkProfileSelection from './PdkProfileSelection.vue'
 
 const { request, finish } = usePdkConfiguration()
 const family = ref('')
@@ -232,6 +240,10 @@ async function initialize() {
     await command('init', { familyId: family.value })
     await reload()
   })
+}
+async function profileApplied() {
+  validated.value = false
+  await perform(reload)
 }
 async function save() {
   validated.value = false

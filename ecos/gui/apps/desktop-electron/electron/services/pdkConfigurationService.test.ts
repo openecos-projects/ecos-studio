@@ -63,6 +63,47 @@ describe('PdkConfigurationService', () => {
         .args,
     ).toEqual(['pdk', 'library', 'locate', '--installation', 'id', '--root', root])
   })
+  it('uses the shared profile CLI with literal IDs and revision checks', async () => {
+    const { root, service } = await fixture()
+    expect((await service.configure({ action: 'profiles-list' })).args).toEqual([
+      'pdk',
+      'profiles',
+      'list',
+    ])
+    expect(
+      (await service.configure({ action: 'profiles-show', profileId: 'ics55-v1' })).args,
+    ).toEqual(['pdk', 'profiles', 'show', '--profile', 'ics55-v1'])
+    expect(
+      (
+        await service.configure({
+          action: 'profiles-apply',
+          root,
+          profileId: 'ics55-v2',
+          expectedRevision: 'revision',
+        })
+      ).args,
+    ).toEqual([
+      'pdk',
+      'profiles',
+      'apply',
+      '--profile',
+      'ics55-v2',
+      '--expected-revision',
+      'revision',
+      '--root',
+      root,
+    ])
+    await expect(service.configure({ action: 'profiles-apply', root })).rejects.toThrow(
+      'profile is required',
+    )
+    await expect(
+      service.configure({
+        action: 'profiles-apply',
+        root: '../pdk',
+        profileId: 'ics55-v2',
+      }),
+    ).rejects.toThrow('absolute')
+  })
   it('preserves structured validation errors from ECC', async () => {
     const { root, service } = await fixture(
       'console.log(JSON.stringify({error: {code: "revision_conflict"}})); process.exit(2)',

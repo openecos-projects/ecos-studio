@@ -27,14 +27,32 @@ export class PdkConfigurationService {
       'library-list',
       'library-default',
       'library-locate',
+      'profiles-list',
+      'profiles-show',
+      'profiles-apply',
     ]
     if (!request || !actions.includes(request.action)) {
       throw new Error('Unknown PDK configuration action')
     }
     const libraryAction = request.action.startsWith('library-')
-    const args = libraryAction
-      ? ['pdk', 'library', request.action.slice('library-'.length)]
-      : ['pdk', 'configure', request.action]
+    const profileAction = request.action.startsWith('profiles-')
+    const group = libraryAction ? 'library' : 'profiles'
+    const args =
+      libraryAction || profileAction
+        ? ['pdk', group, request.action.slice(group.length + 1)]
+        : ['pdk', 'configure', request.action]
+    if (profileAction) {
+      if (request.descriptionPath !== undefined) {
+        throw new Error('Default profiles do not accept a configuration path')
+      }
+      if (request.action !== 'profiles-list') {
+        if (!request.profileId?.trim()) throw new Error('Default profile is required')
+        args.push('--profile', request.profileId)
+      }
+      if (request.action === 'profiles-apply' && request.expectedRevision) {
+        args.push('--expected-revision', request.expectedRevision)
+      }
+    }
     if (request.action === 'library-default') {
       if (
         !request.installationId?.trim() ||
@@ -50,7 +68,10 @@ export class PdkConfigurationService {
       }
       args.push('--installation', request.installationId, '--root', request.root)
     }
-    if (request.action !== 'schema' && !libraryAction) {
+    if (
+      (request.action !== 'schema' && !libraryAction && !profileAction) ||
+      request.action === 'profiles-apply'
+    ) {
       if (typeof request.root !== 'string' || !isAbsolute(request.root)) {
         throw new Error('PDK root must be an absolute directory path')
       }
