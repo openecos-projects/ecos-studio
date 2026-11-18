@@ -28,10 +28,17 @@ dialog. For missing metadata, explicitly choose a profile or author configuratio
 manually; applying to existing managed defaults requires its revision and the
 dialog's replacement confirmation. If process facts would change an already
 registered installation's identity, import a separate root instead.
-See [ECC's default-profile contract](../ecc/docs/pdk-default-profiles.md) for the
+See [ECC's default-profile contract](https://github.com/openecos-projects/ecc/blob/yell/ics55_v2/docs/pdk-default-profiles.md) for the
 schemas, resource identities, version compatibility and CLI examples. This feature
 requires an ECC runtime containing the profiles API; older runtimes retain manual
 configuration. For development, select the matching local bundle explicitly.
+
+The current development implementation is on `yell/ics55_v2` in ECC, Studio and
+Sizer. Updating Studio's release runtime pin requires a successful ECC packaged
+design CI run and its provenance lock. As of 2026-11-18, that publication step is
+blocked by private PDK authentication in ECC/ECC-Tools CI. Local builds and tests
+use explicit runtime paths; do not assume the unchanged release pin contains this
+feature. Sizer's capability build has passed CI and is pinned by ECC.
 
 Use **Studio Default** to choose a default for new Studio projects. ECC's CLI
 default is independent. An explicit project selection overrides a client default.
