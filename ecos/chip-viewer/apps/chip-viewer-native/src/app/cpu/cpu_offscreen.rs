@@ -177,6 +177,7 @@ impl OffscreenRenderer {
             is_current,
             publish,
             match request.publication {
+                #[cfg(test)]
                 progress::Publication::Complete => None,
                 progress::Publication::Progressive => {
                     Some([Duration::from_millis(25), Duration::from_millis(500)])

@@ -36,6 +36,7 @@ impl<Item, Output> Drop for PanicSignal<'_, Item, Output> {
 /// a whole worker group for a late or dominant frontier layer. A query
 /// already executing is not interruptible; cancellation checks stop dispatch
 /// and reject its result, then scope teardown waits for active calls to return.
+#[cfg(test)]
 pub(in crate::app::cpu_scene) fn run<Output: Send>(
     layers: &[LayerId],
     workers: usize,

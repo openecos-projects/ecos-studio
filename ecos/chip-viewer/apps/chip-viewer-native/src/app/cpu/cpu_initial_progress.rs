@@ -252,6 +252,7 @@ fn mixed_ui_layers(
     is_current().then_some(layers)
 }
 
+#[cfg(test)]
 fn initial_shape_ids(
     request: &SceneRequest,
     is_current: &impl Fn() -> bool,
@@ -259,6 +260,7 @@ fn initial_shape_ids(
     sampled_ids(request, is_current, MAX_CANDIDATES)
 }
 
+#[cfg(test)]
 fn sampled_ids(
     request: &SceneRequest,
     is_current: &impl Fn() -> bool,

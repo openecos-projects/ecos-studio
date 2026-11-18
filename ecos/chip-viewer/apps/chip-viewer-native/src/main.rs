@@ -1,15 +1,24 @@
 mod app;
+#[path = "render/camera3d.rs"]
 mod camera3d;
+#[path = "render/canvas_gpu.rs"]
 mod canvas_gpu;
+#[path = "render/canvas_gpu3d.rs"]
 mod canvas_gpu3d;
 mod clock_tree;
 mod instance_visibility;
+#[path = "macros/macro_interaction.rs"]
 mod macro_interaction;
+#[path = "macros/macro_ops.rs"]
 mod macro_ops;
+#[path = "macros/macro_orient.rs"]
 mod macro_orient;
+#[path = "macros/macro_staging.rs"]
 mod macro_staging;
+#[path = "macros/macro_toolbar.rs"]
 mod macro_toolbar;
 mod map_data;
+#[path = "render/nav3d.rs"]
 mod nav3d;
 mod timing;
 

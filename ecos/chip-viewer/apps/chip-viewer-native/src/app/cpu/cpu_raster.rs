@@ -65,18 +65,6 @@ impl CpuRasterCache {
         false
     }
 
-    pub(super) fn paint(
-        self: &Arc<Self>,
-        scene: Option<&Arc<CpuScene>>,
-        key: &SceneKey,
-        progress: Arc<ProgressMailbox>,
-        generation: u64,
-        painter: &egui::Painter,
-        background: egui::Color32,
-    ) {
-        self.paint_with_initial(scene, None, key, progress, generation, painter, background);
-    }
-
     pub(super) fn paint_with_initial(
         self: &Arc<Self>,
         scene: Option<&Arc<CpuScene>>,
@@ -410,6 +398,7 @@ impl RasterResources {
         progress.map(RasterSource::Partial)
     }
 
+    #[cfg(test)]
     fn paint(
         &mut self,
         info: &egui::PaintCallbackInfo,

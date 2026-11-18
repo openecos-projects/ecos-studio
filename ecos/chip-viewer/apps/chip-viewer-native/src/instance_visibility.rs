@@ -22,16 +22,6 @@ pub(crate) enum InstanceClass {
 }
 
 impl InstanceClass {
-    pub(crate) const ALL: [Self; 3] = [Self::Macro, Self::StdCell, Self::Filler];
-
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::Macro => "Macro",
-            Self::StdCell => "StdCell",
-            Self::Filler => "Filler",
-        }
-    }
-
     pub(crate) fn tooltip(self) -> &'static str {
         match self {
             Self::Macro => "Block macro instances.",
@@ -140,6 +130,7 @@ impl InstanceClassVisibility {
         self.macro_ || self.stdcell || self.filler
     }
 
+    #[cfg(test)]
     pub(crate) fn tri_state(self) -> TriState {
         match (self.macro_, self.stdcell, self.filler) {
             (true, true, true) => TriState::All,

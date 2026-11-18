@@ -225,6 +225,7 @@ impl CpuSceneCache {
         self.restored = false;
     }
 
+    #[cfg(test)]
     pub(super) fn suspend(&mut self) {
         if self.key.is_none() && self.pending.is_none() {
             return;

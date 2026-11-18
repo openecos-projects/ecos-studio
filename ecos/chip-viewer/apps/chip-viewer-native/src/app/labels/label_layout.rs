@@ -140,6 +140,7 @@ impl ShapeLabelCollector {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn resolve_with<F>(
         &self,
         extra: &Self,

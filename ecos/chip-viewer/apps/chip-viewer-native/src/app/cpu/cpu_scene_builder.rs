@@ -50,6 +50,7 @@ pub(super) trait SceneSink: chip_render::geometry2d::PaintSink {
 
 impl SceneSink for geometry::GeometryMeshSink {}
 
+#[cfg(any(test, not(target_os = "linux")))]
 pub(super) fn build_scene(
     request: &SceneRequest,
     is_current: impl Fn() -> bool + Sync,

@@ -50,25 +50,10 @@ impl Default for CameraController3d {
 }
 
 impl CameraController3d {
-    pub fn new(camera: OrbitCamera) -> Self {
-        Self {
-            current: camera,
-            target: camera,
-            profile: InputProfile::default(),
-            is_dragging: false,
-            yaw_vel: 0.0,
-            pitch_vel: 0.0,
-        }
-    }
-
     pub fn snap_to_target(&mut self) {
         self.current = self.target;
         self.yaw_vel = 0.0;
         self.pitch_vel = 0.0;
-    }
-
-    pub fn set_target(&mut self, camera: OrbitCamera) {
-        self.target = camera;
     }
 
     pub fn cancel_inertia(&mut self) {
@@ -141,6 +126,7 @@ impl CameraController3d {
         self.target.set_front();
     }
 
+    #[cfg(test)]
     pub fn fit_world(&mut self, world_min: Vec3, world_max: Vec3, stack_height: f32) {
         self.cancel_inertia();
         self.target.fit_world(world_min, world_max, stack_height);

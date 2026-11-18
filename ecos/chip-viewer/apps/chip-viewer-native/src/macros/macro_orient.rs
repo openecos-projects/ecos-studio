@@ -71,6 +71,7 @@ impl MacroOrientation {
     }
 
     /// Maps a DEF placement orientation token (N/W/S/E/FN/FE/FS/FW).
+    #[cfg(test)]
     pub(crate) fn from_def_alias(value: &str) -> Option<Self> {
         match value.to_ascii_uppercase().as_str() {
             "N" => Some(MacroOrientation::R0),
@@ -206,10 +207,12 @@ impl MasterSymmetry {
         symmetry
     }
 
+    #[cfg(test)]
     pub(crate) fn rotation_allowed(self) -> bool {
         self.r90
     }
 
+    #[cfg(test)]
     pub(crate) fn mirror_allowed(self) -> bool {
         self.x || self.y
     }
@@ -227,14 +230,17 @@ impl MasterSymmetry {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn rotate_90_allowed(self, current: MacroOrientation) -> bool {
         self.allows_orientation(current.rotated_90())
     }
 
+    #[cfg(test)]
     pub(crate) fn mirror_horizontal_allowed(self, current: MacroOrientation) -> bool {
         self.allows_orientation(current.mirrored_y())
     }
 
+    #[cfg(test)]
     pub(crate) fn mirror_vertical_allowed(self, current: MacroOrientation) -> bool {
         self.allows_orientation(current.mirrored_x())
     }

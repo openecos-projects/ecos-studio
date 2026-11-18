@@ -307,23 +307,9 @@ fn snap_coordinate(origin: i32, step: i64, value: i32) -> i64 {
 pub(crate) enum MacroOp {
     #[cfg(test)]
     Rotate90,
-    #[cfg(test)]
-    MirrorHorizontal,
-    #[cfg(test)]
-    MirrorVertical,
     CenterOnDie,
     #[cfg(test)]
     AlignLeft,
-    #[cfg(test)]
-    AlignRight,
-    #[cfg(test)]
-    AlignTop,
-    #[cfg(test)]
-    AlignBottom,
-    #[cfg(test)]
-    DistributeHorizontal,
-    #[cfg(test)]
-    DistributeVertical,
     Shift {
         direction: ShiftDirection,
         distance_dbu: i64,
@@ -345,6 +331,7 @@ pub(crate) enum MacroOp {
         target: BoundaryTarget,
         gap_dbu: i64,
     },
+    #[cfg(test)]
     SpaceBetween {
         axis: AlignAxis,
         gap_dbu: i64,
@@ -391,23 +378,9 @@ impl MacroOp {
         match self {
             #[cfg(test)]
             Self::Rotate90 => "rotate 90° counter-clockwise".to_string(),
-            #[cfg(test)]
-            Self::MirrorHorizontal => "flip horizontally".to_string(),
-            #[cfg(test)]
-            Self::MirrorVertical => "flip vertically".to_string(),
             Self::CenterOnDie => "center selection on DIE".to_string(),
             #[cfg(test)]
             Self::AlignLeft => "align left".to_string(),
-            #[cfg(test)]
-            Self::AlignRight => "align right".to_string(),
-            #[cfg(test)]
-            Self::AlignTop => "align top".to_string(),
-            #[cfg(test)]
-            Self::AlignBottom => "align bottom".to_string(),
-            #[cfg(test)]
-            Self::DistributeHorizontal => "distribute horizontally".to_string(),
-            #[cfg(test)]
-            Self::DistributeVertical => "distribute vertically".to_string(),
             Self::Shift {
                 direction,
                 distance_dbu,
@@ -435,6 +408,7 @@ impl MacroOp {
                 target_label(*target),
                 axis_label(*axis)
             ),
+            #[cfg(test)]
             Self::SpaceBetween { axis, gap_dbu } => {
                 format!("space {} by {gap_dbu} DBU", axis_label(*axis))
             }
@@ -541,10 +515,6 @@ pub(crate) fn plan_macro_op_with_snap(
     let mut plan = match op {
         #[cfg(test)]
         MacroOp::Rotate90 => transform_op(views, MacroTransform::RotateCounterClockwise, false),
-        #[cfg(test)]
-        MacroOp::MirrorHorizontal => transform_op(views, MacroTransform::FlipHorizontal, false),
-        #[cfg(test)]
-        MacroOp::MirrorVertical => transform_op(views, MacroTransform::FlipVertical, false),
         MacroOp::CenterOnDie => center_on_die_op(views, bounds),
         #[cfg(test)]
         MacroOp::AlignLeft => align_op(
@@ -554,34 +524,6 @@ pub(crate) fn plan_macro_op_with_snap(
             AlignEdge::Min,
             AlignReference::SelectionBounds,
         ),
-        #[cfg(test)]
-        MacroOp::AlignRight => align_op(
-            views,
-            bounds.core,
-            AlignAxis::X,
-            AlignEdge::Max,
-            AlignReference::SelectionBounds,
-        ),
-        #[cfg(test)]
-        MacroOp::AlignTop => align_op(
-            views,
-            bounds.core,
-            AlignAxis::Y,
-            AlignEdge::Max,
-            AlignReference::SelectionBounds,
-        ),
-        #[cfg(test)]
-        MacroOp::AlignBottom => align_op(
-            views,
-            bounds.core,
-            AlignAxis::Y,
-            AlignEdge::Min,
-            AlignReference::SelectionBounds,
-        ),
-        #[cfg(test)]
-        MacroOp::DistributeHorizontal => distribute_op_new(views, bounds.core, AlignAxis::X, None),
-        #[cfg(test)]
-        MacroOp::DistributeVertical => distribute_op_new(views, bounds.core, AlignAxis::Y, None),
         MacroOp::Shift {
             direction,
             distance_dbu,
@@ -603,6 +545,7 @@ pub(crate) fn plan_macro_op_with_snap(
             target,
             gap_dbu,
         } => space_from_center_op(views, bounds, *axis, *target, *gap_dbu),
+        #[cfg(test)]
         MacroOp::SpaceBetween { axis, gap_dbu } => {
             space_between_op(views, bounds.core, *axis, *gap_dbu)
         }
@@ -906,6 +849,7 @@ fn align_corner_op(
     plan
 }
 
+#[cfg(test)]
 fn space_between_op(
     views: &[crate::macro_staging::MacroPlacementView],
     core: Option<Rect32>,

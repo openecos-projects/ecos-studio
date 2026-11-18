@@ -1,14 +1,8 @@
 //! GPU-instanced canvas renderer implementation for Chip Viewer
 
-use std::collections::BTreeMap;
-use std::hash::{Hash, Hasher};
-
 #[cfg(test)]
 #[path = "canvas_gpu_tests.rs"]
 mod rendering_tests;
-
-pub const GPU_CANVAS_ENV: &str = "ECOS_GPU_CANVAS";
-pub const GPU_CANVAS_DEBUG_ENV: &str = "ECOS_GPU_CANVAS_DEBUG";
 
 pub const PATTERN_MIN_SIZE_PX: f32 = chip_render::geometry2d::PATTERN_MIN_SIZE_PX;
 pub const PATTERN_FRAME_FADE_SIZE_PX: f32 = chip_render::geometry2d::PATTERN_FRAME_FADE_SIZE_PX;
@@ -77,26 +71,7 @@ pub struct GpuBufferKey {
     pub object_visibility_bits: u32,
 }
 
-impl GpuBufferKey {
-    pub fn compute_layer_visibility_hash(
-        visible_layers: &BTreeMap<chipgeom_format::LayerId, bool>,
-    ) -> u64 {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        for (layer_id, visible) in visible_layers {
-            layer_id.hash(&mut hasher);
-            visible.hash(&mut hasher);
-        }
-        hasher.finish()
-    }
-
-    pub fn zoom_tier(zoom: f32) -> u8 {
-        if zoom > 1.25 {
-            1
-        } else {
-            0
-        }
-    }
-}
+impl GpuBufferKey {}
 
 pub struct GpuCanvasState {
     pub enabled: bool,
@@ -105,10 +80,6 @@ pub struct GpuCanvasState {
 }
 
 impl GpuCanvasState {
-    pub fn new_from_env(target_format: wgpu::TextureFormat) -> Self {
-        Self::new_with_wgpu(true, target_format)
-    }
-
     pub fn new_with_wgpu(has_wgpu: bool, target_format: wgpu::TextureFormat) -> Self {
         if !has_wgpu {
             return Self::cpu_only(target_format);
@@ -613,7 +584,7 @@ pub const MAX_CACHED_TILE_BUFFERS: usize = 128;
 pub const MAX_CACHED_TILE_BYTES: usize = 512 * 1024 * 1024;
 
 pub struct GpuBufferCacheEntry {
-    pub instance_buffer: wgpu::Buffer,
+    pub _instance_buffer: wgpu::Buffer,
     pub count: u32,
     pub bind_group: wgpu::BindGroup,
     pub last_used_frame: u64,
@@ -820,7 +791,7 @@ impl egui_wgpu::CallbackTrait for CanvasGpuCallback {
             resources.instance_buffers.insert(
                 self.buffer_key,
                 GpuBufferCacheEntry {
-                    instance_buffer: buffer,
+                    _instance_buffer: buffer,
                     count: self.instances.len() as u32,
                     bind_group,
                     last_used_frame: self.frame_counter,
@@ -978,7 +949,7 @@ impl egui_wgpu::CallbackTrait for HeatmapGpuCallback {
             resources.instance_buffers.insert(
                 self.buffer_key,
                 GpuBufferCacheEntry {
-                    instance_buffer: buffer,
+                    _instance_buffer: buffer,
                     bind_group,
                     count: self.instances.len() as u32,
                     last_used_frame: self.frame_counter,

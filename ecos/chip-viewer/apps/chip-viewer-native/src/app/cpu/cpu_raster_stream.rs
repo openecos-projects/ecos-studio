@@ -129,6 +129,7 @@ impl OffscreenRenderer {
         prepared: impl FnOnce(&CpuScene),
     ) -> Result<Option<CpuScene>, String> {
         let intervals = match request.publication {
+            #[cfg(test)]
             progress::Publication::Complete => None,
             progress::Publication::Progressive => {
                 Some([Duration::from_millis(25), Duration::from_millis(500)])
@@ -214,20 +215,6 @@ impl<'a> RasterStream<'a> {
             .unwrap()
             .clear(self.painter.gl(), self.key.background);
         self.sequence = 0;
-    }
-
-    fn repair(
-        &mut self,
-        meshes: &[egui::ClippedPrimitive],
-        is_current: &impl Fn() -> bool,
-    ) -> Result<Option<Vec<u8>>, String> {
-        self.reset();
-        let packed = geometry::pack_meshes(meshes);
-        if !self.push(meshes, &packed, is_current, &mut |_, _| {})? || !is_current() {
-            return Ok(None);
-        }
-        let pixels = self.readback(trace::ReadbackKind::Complete)?;
-        Ok(is_current().then_some(pixels))
     }
 
     fn begin(

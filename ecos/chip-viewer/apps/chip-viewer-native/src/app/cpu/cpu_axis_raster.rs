@@ -6,6 +6,7 @@ use super::*;
 impl PixelRectRasterizer {
     /// Separate from `rectangles`: existing consumers only extract rectangle
     /// command colors. They must explicitly handle Line before using this seam.
+    #[cfg(test)]
     pub(in crate::app::cpu_scene) fn axis_line_rectangle(
         self,
         points: [egui::Pos2; 2],

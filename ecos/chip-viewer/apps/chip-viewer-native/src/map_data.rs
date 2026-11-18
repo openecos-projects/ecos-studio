@@ -289,6 +289,7 @@ impl HeatmapData {
         peaks
     }
 
+    #[cfg(test)]
     pub fn peak_cell(&self, invert: bool) -> Option<(usize, usize)> {
         self.top_peaks(invert).first().copied()
     }
@@ -311,40 +312,6 @@ impl HeatmapData {
         } else {
             peaks.first().copied()
         }
-    }
-
-    pub fn grid_bbox(&self) -> Option<Rect32> {
-        let rows = self.rows();
-        let cols = self.columns();
-        if rows == 0 || cols == 0 {
-            return None;
-        }
-
-        let (&(r, c), rect) = self.layout.iter().next()?;
-
-        let pitch_x = self
-            .layout
-            .get(&(r, c + 1))
-            .map(|r2| r2.lx - rect.lx)
-            .filter(|&p| p > 0)
-            .unwrap_or(rect.hx - rect.lx);
-
-        let pitch_y = self
-            .layout
-            .get(&(r + 1, c))
-            .map(|r2| r2.ly - rect.ly)
-            .filter(|&p| p < 0)
-            .unwrap_or(-(rect.hy - rect.ly));
-
-        let grid_lx = rect.lx - (c as i32) * pitch_x;
-        let grid_hy = rect.hy - (r as i32) * pitch_y;
-
-        Some(Rect32 {
-            lx: grid_lx,
-            hy: grid_hy,
-            hx: grid_lx + pitch_x * cols as i32,
-            ly: grid_hy + pitch_y * rows as i32,
-        })
     }
 
     /// Pitch of the interior core grid, used to drop the non-uniform
@@ -377,6 +344,7 @@ impl HeatmapData {
             .map(|(&(row, col), &rect)| ((row, col), rect))
     }
 
+    #[cfg(test)]
     pub fn overall_layout_bbox(&self) -> Option<Rect32> {
         let mut rects = self.layout.values().copied();
         let first = rects.next()?;
@@ -388,6 +356,7 @@ impl HeatmapData {
         }))
     }
 
+    #[cfg(test)]
     pub fn to_rgba_bytes(&self, mode: ColormapMode) -> Vec<u8> {
         let rows = self.rows();
         let cols = self.columns();

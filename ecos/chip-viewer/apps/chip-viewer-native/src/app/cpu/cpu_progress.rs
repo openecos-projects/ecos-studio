@@ -8,6 +8,7 @@ pub(super) use evidence::{InitialEvidence, InitialEvidenceWrite};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Publication {
+    #[cfg(test)]
     Complete,
     Progressive,
 }

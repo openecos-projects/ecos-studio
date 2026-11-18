@@ -147,6 +147,7 @@ impl RegionModel {
 
     /// Compose only the commands prepared for this exact target. Old RGBA is
     /// never a fallback for failed preparation, changed clipping, or GL style.
+    #[cfg(test)]
     pub(in crate::app) fn compose(
         &self,
         key: &SceneKey,
@@ -182,6 +183,7 @@ impl RegionModel {
 
     /// Presentation must use the actual GL profile. Uncertified blend/texture
     /// implementations replay target meshes instead of trusting CPU byte math.
+    #[cfg(test)]
     pub(in crate::app) fn prepare_for_gl(
         &self,
         key: &SceneKey,
@@ -263,6 +265,7 @@ impl RegionModel {
     }
 }
 
+#[cfg(test)]
 fn copy_valid_tiles(destination: &mut [u8], source: &[u8], regions: &Regions) {
     copy_valid_tiles_current(destination, source, regions, &|| true).unwrap();
 }
@@ -446,6 +449,7 @@ impl Regions {
     /// Render these ordered meshes over the composed bitmap before presenting
     /// it. Damage pixels start at background, so translucent repairs blend once.
     /// Failure means the retained presentation must be discarded in full.
+    #[cfg(test)]
     pub(in crate::app) fn repair_meshes(
         &self,
         key: &SceneKey,
@@ -469,6 +473,7 @@ impl Regions {
         )
     }
 
+    #[cfg(test)]
     pub(in crate::app) fn damage_clips(&self, key: &SceneKey) -> Vec<egui::Rect> {
         self.damage_clips_current(key, &|| true).unwrap()
     }

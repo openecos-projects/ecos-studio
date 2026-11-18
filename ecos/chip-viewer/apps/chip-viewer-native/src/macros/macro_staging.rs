@@ -211,7 +211,6 @@ pub(crate) struct MacroStagingState {
 /// Visual placeholder covering the unplaced standard-cell population.
 pub(crate) struct StdcellBlob {
     pub count: u64,
-    pub area_dbu: i64,
     /// Blob rectangle in world (DBU) coordinates.
     pub rect: Rect32,
 }
@@ -348,7 +347,6 @@ impl MacroStagingState {
         let ly = die.ly as i64;
         self.stdcell_blob = Some(StdcellBlob {
             count,
-            area_dbu,
             rect: Rect32 {
                 lx: lx as i32,
                 ly: ly as i32,

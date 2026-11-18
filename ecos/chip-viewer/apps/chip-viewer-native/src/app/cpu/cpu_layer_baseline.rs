@@ -2,6 +2,7 @@
 use super::*;
 use std::ops::Range;
 
+#[cfg(test)]
 pub(super) fn run<Output: Send>(
     layers: &[LayerId],
     workers: usize,

@@ -276,14 +276,7 @@ impl SparseRects {
         self.repair_meshes(canvas, &|| true, usize::MAX).unwrap()
     }
 
-    pub(super) fn try_residual_meshes(
-        &self,
-        canvas: egui::Rect,
-        is_current: &impl Fn() -> bool,
-    ) -> Option<Vec<egui::ClippedPrimitive>> {
-        self.repair_meshes(canvas, is_current, 32 * 1024 * 1024)
-    }
-
+    #[cfg(test)]
     fn repair_meshes(
         &self,
         canvas: egui::Rect,

@@ -119,7 +119,8 @@ impl CanvasUniform3d {
     }
 }
 
-pub fn build_gpu_instances_3d(
+#[cfg(test)]
+fn build_gpu_instances_3d(
     shapes: impl Iterator<
         Item = (
             chip_view_db::ShapeGeometry,
@@ -263,12 +264,9 @@ fn line_to_rect_dbu(line: chipgeom_format::LinePayload) -> [i32; 4] {
     }
 }
 
-pub const FLAG_LINE: u32 = 1;
-pub const FLAG_POINT: u32 = 2;
 pub const FLAG_GROUND_GRID: u32 = 4;
 pub const FLAG_SELECTED: u32 = 8;
 pub const FLAG_HIGHLIGHTED: u32 = 16;
-pub const FLAG_FLAT: u32 = 32;
 pub const FLAG_OVERVIEW_TILE: u32 = 64;
 pub const FLAG_CLOCK_TREE_PARENT: u32 = 128;
 pub const FLAG_CLOCK_TREE_CHILD: u32 = 256;
@@ -697,45 +695,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 }
 "#;
 
-const WGSL_MIP_DOWNSAMPLE_SHADER: &str = r#"
-@group(0) @binding(0) var src_tex: texture_2d<f32>;
-@group(0) @binding(1) var src_samp: sampler;
-
-struct VertexOutput {
-    @builtin(position) clip_position: vec4<f32>,
-    @location(0) uv: vec2<f32>,
-};
-
-@vertex
-fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
-    var positions = array<vec2<f32>, 6>(
-        vec2<f32>(-1.0, -1.0),
-        vec2<f32>(1.0, -1.0),
-        vec2<f32>(1.0, 1.0),
-        vec2<f32>(-1.0, -1.0),
-        vec2<f32>(1.0, 1.0),
-        vec2<f32>(-1.0, 1.0),
-    );
-    var uvs = array<vec2<f32>, 6>(
-        vec2<f32>(0.0, 1.0),
-        vec2<f32>(1.0, 1.0),
-        vec2<f32>(1.0, 0.0),
-        vec2<f32>(0.0, 1.0),
-        vec2<f32>(1.0, 0.0),
-        vec2<f32>(0.0, 0.0),
-    );
-    var out: VertexOutput;
-    out.clip_position = vec4<f32>(positions[vertex_index], 0.0, 1.0);
-    out.uv = uvs[vertex_index];
-    return out;
-}
-
-@fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return textureSample(src_tex, src_samp, in.uv);
-}
-"#;
-
 const WGSL_GRID_SHADER: &str = r#"
 struct Uniform3d {
     view_proj: mat4x4<f32>,
@@ -837,118 +796,6 @@ fn create_grid_vertex_buffer(device: &wgpu::Device) -> (wgpu::Buffer, u32) {
     (buffer, count)
 }
 
-pub struct OverviewBakeTarget {
-    pub texture: wgpu::Texture,
-    pub full_view: wgpu::TextureView,
-    pub mip_views: Vec<wgpu::TextureView>,
-    pub msaa_color_view: wgpu::TextureView,
-    pub msaa_depth_view: wgpu::TextureView,
-    pub sampler: wgpu::Sampler,
-    pub size: u32,
-    pub mip_count: u32,
-    pub cache_key: Option<u64>,
-}
-
-impl OverviewBakeTarget {
-    pub fn new(device: &wgpu::Device, size: u32) -> Self {
-        let mip_count = (size as f32).log2().floor() as u32 + 1;
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Overview Bake Texture Mips"),
-            size: wgpu::Extent3d {
-                width: size,
-                height: size,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: mip_count,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let msaa_color = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Overview Bake MSAA Color"),
-            size: wgpu::Extent3d {
-                width: size,
-                height: size,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 4,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-        let msaa_depth = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Overview Bake MSAA Depth"),
-            size: wgpu::Extent3d {
-                width: size,
-                height: size,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 4,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-        let full_view = texture.create_view(&wgpu::TextureViewDescriptor {
-            label: Some("Overview Bake Full View"),
-            format: None,
-            dimension: Some(wgpu::TextureViewDimension::D2),
-            aspect: wgpu::TextureAspect::All,
-            base_mip_level: 0,
-            mip_level_count: Some(mip_count),
-            base_array_layer: 0,
-            array_layer_count: None,
-            ..Default::default()
-        });
-        let mip_views: Vec<_> = (0..mip_count)
-            .map(|mip| {
-                texture.create_view(&wgpu::TextureViewDescriptor {
-                    label: Some(&format!("Overview Bake Mip View {}", mip)),
-                    format: None,
-                    dimension: Some(wgpu::TextureViewDimension::D2),
-                    aspect: wgpu::TextureAspect::All,
-                    base_mip_level: mip,
-                    mip_level_count: Some(1),
-                    base_array_layer: 0,
-                    array_layer_count: None,
-                    ..Default::default()
-                })
-            })
-            .collect();
-        let msaa_color_view = msaa_color.create_view(&wgpu::TextureViewDescriptor::default());
-        let msaa_depth_view = msaa_depth.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("Overview Bake Anisotropic Sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
-            anisotropy_clamp: 16,
-            ..Default::default()
-        });
-
-        Self {
-            texture,
-            full_view,
-            mip_views,
-            msaa_color_view,
-            msaa_depth_view,
-            sampler,
-            size,
-            mip_count,
-            cache_key: None,
-        }
-    }
-}
-
 struct OffscreenTarget {
     color_view: wgpu::TextureView,
     msaa_color_view: wgpu::TextureView,
@@ -965,10 +812,7 @@ struct CanvasGpu3dResources {
     grid_vertex_count: u32,
     grid_bind_group: wgpu::BindGroup,
     blit_pipeline: wgpu::RenderPipeline,
-    downsample_pipeline: wgpu::RenderPipeline,
-    scene_bind_group_layout: wgpu::BindGroupLayout,
     blit_bind_group_layout: wgpu::BindGroupLayout,
-    downsample_bind_group_layout: wgpu::BindGroupLayout,
     uniform_buffer: wgpu::Buffer,
     instance_buffer: wgpu::Buffer,
     scene_bind_group: wgpu::BindGroup,
@@ -976,7 +820,6 @@ struct CanvasGpu3dResources {
     current_key: Option<u64>,
     instance_count: u32,
     offscreen: Option<OffscreenTarget>,
-    bake_target: Option<OverviewBakeTarget>,
 }
 
 impl CanvasGpu3dResources {
@@ -1008,10 +851,6 @@ impl CanvasGpu3dResources {
         let blit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("WGSL_BLIT_3D_SHADER"),
             source: wgpu::ShaderSource::Wgsl(WGSL_BLIT_SHADER.into()),
-        });
-        let downsample_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("WGSL_MIP_DOWNSAMPLE_SHADER"),
-            source: wgpu::ShaderSource::Wgsl(WGSL_MIP_DOWNSAMPLE_SHADER.into()),
         });
         let scene_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1097,28 +936,6 @@ impl CanvasGpu3dResources {
                     },
                 ],
             });
-        let downsample_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Canvas 3D Downsample Bind Group Layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-            });
         let scene_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Canvas 3D Scene Pipeline Layout"),
@@ -1135,12 +952,6 @@ impl CanvasGpu3dResources {
             bind_group_layouts: &[&blit_bind_group_layout],
             push_constant_ranges: &[],
         });
-        let downsample_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Canvas 3D Downsample Pipeline Layout"),
-                bind_group_layouts: &[&downsample_bind_group_layout],
-                push_constant_ranges: &[],
-            });
         let scene_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Canvas 3D Scene Pipeline"),
             layout: Some(&scene_pipeline_layout),
@@ -1268,31 +1079,6 @@ impl CanvasGpu3dResources {
             multiview: None,
             cache: None,
         });
-        let downsample_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Canvas 3D Downsample Pipeline"),
-            layout: Some(&downsample_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &downsample_shader,
-                entry_point: Some("vs_main"),
-                buffers: &[],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &downsample_shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("Canvas 3D Sampler"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -1308,10 +1094,7 @@ impl CanvasGpu3dResources {
             grid_vertex_count,
             grid_bind_group,
             blit_pipeline,
-            downsample_pipeline,
-            scene_bind_group_layout,
             blit_bind_group_layout,
-            downsample_bind_group_layout,
             uniform_buffer,
             instance_buffer,
             scene_bind_group,
@@ -1319,7 +1102,6 @@ impl CanvasGpu3dResources {
             current_key: None,
             instance_count: 0,
             offscreen: None,
-            bake_target: None,
         })
     }
 
@@ -1416,56 +1198,6 @@ impl CanvasGpu3dResources {
             self.instance_count = 0;
         }
         self.current_key = Some(key);
-    }
-
-    pub fn ensure_bake_target(&mut self, device: &wgpu::Device) -> &mut OverviewBakeTarget {
-        if self.bake_target.is_none() {
-            self.bake_target = Some(OverviewBakeTarget::new(device, 2048));
-        }
-        self.bake_target.as_mut().unwrap()
-    }
-
-    pub fn generate_mipmaps(
-        &self,
-        device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
-        target: &OverviewBakeTarget,
-    ) {
-        for mip in 0..(target.mip_count - 1) {
-            let src_view = &target.mip_views[mip as usize];
-            let dst_view = &target.mip_views[(mip + 1) as usize];
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Mip Downsample Bind Group"),
-                layout: &self.downsample_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(src_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&target.sampler),
-                    },
-                ],
-            });
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Mip Downsample Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: dst_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-            pass.set_pipeline(&self.downsample_pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-            pass.draw(0..6, 0..1);
-        }
     }
 }
 
@@ -1649,7 +1381,8 @@ pub fn use_overview_slabs(camera: OrbitCamera, world: chipgeom_format::Rect32) -
     camera.distance > die_diagonal(world) * 3.5
 }
 
-pub fn overview_blend_factor(camera: OrbitCamera, world: chipgeom_format::Rect32) -> f32 {
+#[cfg(test)]
+fn overview_blend_factor(camera: OrbitCamera, world: chipgeom_format::Rect32) -> f32 {
     let diag = die_diagonal(world).max(1.0);
     let d_min = diag * 1.8;
     let d_max = diag * 4.2;
@@ -2043,36 +1776,6 @@ mod tests {
         assert!(mid > 0.0 && mid < 1.0);
         camera.distance = diag * 5.0;
         assert_eq!(overview_blend_factor(camera, world), 1.0);
-    }
-
-    #[test]
-    fn test_overview_bake_target_creation_and_mipmaps() {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-        let adapter =
-            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()));
-        let Some(adapter) = adapter else {
-            return;
-        };
-        let device_result =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None));
-        let Ok((device, queue)) = device_result else {
-            return;
-        };
-        let Some(mut resources) =
-            CanvasGpu3dResources::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb)
-        else {
-            return;
-        };
-        resources.ensure_bake_target(&device);
-        let bake_target = resources.bake_target.as_ref().unwrap();
-        assert_eq!(bake_target.size, 2048);
-        assert_eq!(bake_target.mip_count, 12);
-        assert_eq!(bake_target.mip_views.len(), 12);
-
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        let target = resources.bake_target.as_ref().unwrap();
-        resources.generate_mipmaps(&device, &mut encoder, target);
-        queue.submit(Some(encoder.finish()));
     }
 
     #[test]

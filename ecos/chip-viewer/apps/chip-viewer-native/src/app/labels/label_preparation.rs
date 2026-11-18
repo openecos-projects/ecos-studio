@@ -48,6 +48,7 @@ impl<'a> LabelPlan<'a> {
 
     /// Measures independently on equivalent worker-private font contexts, then
     /// applies visibility and collision decisions in the original stable order.
+    #[cfg(test)]
     pub(in crate::app) fn resolve(
         self,
         workers: usize,

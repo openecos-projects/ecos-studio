@@ -259,51 +259,6 @@ impl Ray3 {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FrustumPlanes {
-    pub planes: [[f32; 4]; 6],
-}
-
-impl FrustumPlanes {
-    pub fn from_view_proj(vp: &Mat4) -> Self {
-        let m = &vp.cols;
-        let row = |i: usize| [m[0][i], m[1][i], m[2][i], m[3][i]];
-        let (r0, r1, r2, r3) = (row(0), row(1), row(2), row(3));
-        let add = |a: [f32; 4], b: [f32; 4]| [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3]];
-        let sub = |a: [f32; 4], b: [f32; 4]| [a[0] - b[0], a[1] - b[1], a[2] - b[2], a[3] - b[3]];
-        let mut planes = [
-            add(r3, r0),
-            sub(r3, r0),
-            add(r3, r1),
-            sub(r3, r1),
-            add(r3, r2),
-            sub(r3, r2),
-        ];
-        for p in &mut planes {
-            let len = (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
-            if len > 1e-6 {
-                p[0] /= len;
-                p[1] /= len;
-                p[2] /= len;
-                p[3] /= len;
-            }
-        }
-        Self { planes }
-    }
-
-    pub fn intersects_aabb(&self, min: [f32; 3], max: [f32; 3]) -> bool {
-        for p in &self.planes {
-            let px = if p[0] > 0.0 { max[0] } else { min[0] };
-            let py = if p[1] > 0.0 { max[1] } else { min[1] };
-            let pz = if p[2] > 0.0 { max[2] } else { min[2] };
-            if p[0] * px + p[1] * py + p[2] * pz + p[3] < 0.0 {
-                return false;
-            }
-        }
-        true
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OrbitCamera {
     pub target: Vec3,
     pub distance: f32,
@@ -330,6 +285,7 @@ impl OrbitCamera {
     pub const MIN_PITCH: f32 = 6_f32.to_radians();
     pub const MAX_PITCH: f32 = 88_f32.to_radians();
 
+    #[cfg(test)]
     pub fn fit_world(&mut self, world_min: Vec3, world_max: Vec3, stack_height: f32) {
         self.fit_world_with_aspect(world_min, world_max, stack_height, 1.0);
     }
@@ -374,11 +330,6 @@ impl OrbitCamera {
         self.pitch = 12_f32.to_radians();
     }
 
-    pub fn set_bottom(&mut self) {
-        self.yaw = -90_f32.to_radians();
-        self.pitch = Self::MIN_PITCH;
-    }
-
     pub fn focus_xy(&mut self, x: f32, y: f32, span: f32, stack_height: f32) {
         self.target.x = x;
         self.target.y = y;
@@ -398,10 +349,6 @@ impl OrbitCamera {
     pub fn orbit(&mut self, delta_yaw: f32, delta_pitch: f32) {
         self.yaw += delta_yaw;
         self.pitch = (self.pitch + delta_pitch).clamp(Self::MIN_PITCH, Self::MAX_PITCH);
-    }
-
-    pub fn zoom(&mut self, factor: f32) {
-        self.zoom_toward(factor, None);
     }
 
     pub fn zoom_toward(&mut self, factor: f32, pivot: Option<Vec3>) {
@@ -634,7 +581,8 @@ pub fn perspective(fov_y: f32, aspect: f32, near: f32, far: f32) -> Mat4 {
     ])
 }
 
-pub fn orthographic(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) -> Mat4 {
+#[cfg(test)]
+fn orthographic(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) -> Mat4 {
     let r_l = right - left;
     let t_b = top - bottom;
     let f_n = far - near;
@@ -658,7 +606,8 @@ pub fn orthographic(left: f32, right: f32, bottom: f32, top: f32, near: f32, far
     ])
 }
 
-pub fn orthographic_top_view_proj(
+#[cfg(test)]
+fn orthographic_top_view_proj(
     world_min: Vec3,
     world_max: Vec3,
     stack_height: f32,
