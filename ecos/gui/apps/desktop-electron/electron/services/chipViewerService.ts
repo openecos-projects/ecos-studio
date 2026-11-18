@@ -42,6 +42,7 @@ import {
 } from './chipViewerMacroStaging'
 import { parseMacroLocationTcl } from './chipViewerMacroLocationTcl'
 import { buildReplayCatalog } from './replayService'
+import { ReplayLoadingSession } from './replayLoadingSession'
 
 const BUILD_HINT =
   'Build them with: cd ecos/chip-viewer && cargo build --release -p chip-viewer-native; then build the ECC CLI package.'
@@ -715,6 +716,7 @@ export class ChipViewerService {
   private readonly editBridgeWatchers = new Map<string, DirectoryWatcher>()
   private readonly layoutEditContexts = new Map<string, LayoutEditContext>()
   private readonly openViewerCounts = new Map<string, number>()
+  private readonly replayLoadingSessions = new Map<string, ReplayLoadingSession>()
   private readonly processedEditCommands = new Set<string>()
   private nextEditBridgeId = 1
 
@@ -766,11 +768,28 @@ export class ChipViewerService {
         editCommandDirectory: '',
         editResultDirectory: '',
       }
-      const release = this.trackOpenViewer(projectPath, 'replay')
+      const session = await ReplayLoadingSession.create()
+      const key = this.viewerKey(projectPath, 'replay')
+      this.replayLoadingSessions.set(key, session)
+      const releaseViewer = this.trackOpenViewer(projectPath, 'replay')
+      const release = () => {
+        releaseViewer()
+        if (this.replayLoadingSessions.get(key) === session) {
+          this.replayLoadingSessions.delete(key)
+        }
+        void session.dispose()
+      }
       try {
         await this.launchViewer(
           this.resolveBinaries().viewerPath,
-          ['--manifest', manifestPath, '--mode', 'replay'],
+          [
+            '--manifest',
+            manifestPath,
+            '--mode',
+            'replay',
+            '--replay-progress-file',
+            session.path,
+          ],
           snapshotInputs,
           release,
         )
@@ -916,11 +935,16 @@ export class ChipViewerService {
   async isOpen(request: ChipViewerOpenRequest): Promise<ChipViewerOpenStatus> {
     const saving =
       (this.savingProjectPaths.get(normalizeLocalPath(request.projectPath)) ?? 0) > 0
+    const loading = this.replayLoadingSessions.get(
+      this.viewerKey(request.projectPath, request.step),
+    )
+    const replayLoading = loading ? await loading.read() : undefined
     return {
       open:
         (this.openViewerCounts.get(this.viewerKey(request.projectPath, request.step)) ??
           0) > 0,
       ...(saving ? { saving: true } : {}),
+      ...(replayLoading ? { replayLoading } : {}),
     }
   }
 

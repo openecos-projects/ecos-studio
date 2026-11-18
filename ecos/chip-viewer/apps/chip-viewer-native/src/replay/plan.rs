@@ -10,7 +10,7 @@ use std::sync::mpsc::{self, Receiver};
 
 pub const RESULT_SECONDS: f64 = 2.0;
 pub const MAP_SECONDS: f64 = 2.0;
-const FILLER_SECONDS: f64 = 1.5;
+const FILLER_SECONDS: f64 = 4.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -56,16 +56,33 @@ impl StepPlan {
         }
     }
 
+    #[cfg(test)]
     pub fn build(recording: &Recording, maps: usize) -> Result<Self> {
+        Self::build_with_progress(recording, maps, |_, _| {})
+    }
+
+    fn build_with_progress(
+        recording: &Recording,
+        maps: usize,
+        progress: impl Fn(usize, usize),
+    ) -> Result<Self> {
         let frames = &recording.manifest.frames;
         let mut scene = Scene::default();
         let mut clips: Vec<Clip> = Vec::new();
         for (i, frame) in frames.iter().enumerate() {
+            progress(i, frames.len());
             let delta = recording.delta(i)?;
             let (mut kind, mut seconds) = classify(&scene, &delta, frames, i);
             // Applying every delta also validates revision continuity and bounds.
             scene.apply(delta).map_err(anyhow::Error::msg)?;
             debug_assert_eq!(scene.revision, Some(frame.sequence));
+            // Older captures include RCX's helper events used to measure the
+            // final clock tree. Apply their deltas, but give them no filler clip.
+            if recording.manifest.step.eq_ignore_ascii_case("filler")
+                && frame.subflow.eq_ignore_ascii_case("run rcx")
+            {
+                continue;
+            }
             if frame.phase == "filler_row" {
                 if let Some(clip) = clips.last_mut().filter(|clip| {
                     matches!(clip.kind, Kind::Filler { .. })
@@ -243,31 +260,40 @@ fn classify(scene: &Scene, delta: &Delta, frames: &[Frame], i: usize) -> (Kind, 
 }
 
 /// Read and compare frames off the UI thread. Only compact plans cross back.
-pub fn prepare(catalog: &Catalog) -> Receiver<Vec<StepPlan>> {
+pub fn prepare(catalog: &Catalog, progress: super::loading::Progress) -> Receiver<Vec<StepPlan>> {
     let (sender, receiver) = mpsc::channel();
     let workspace = catalog.workspace.clone();
     let paths = catalog
         .steps
         .iter()
-        .map(|step| step.manifest.clone())
+        .map(|step| (step.name.clone(), step.manifest.clone()))
         .collect::<Vec<_>>();
     std::thread::spawn(move || {
+        let count = paths.len();
         let plans = paths
             .into_iter()
-            .map(|path| {
+            .enumerate()
+            .map(|(index, (name, path))| {
+                progress.step(index, count, &name);
                 let Some(path) = path else {
                     return StepPlan::unavailable(String::new());
                 };
                 let result = (|| -> Result<StepPlan> {
                     let recording = Recording::open(&workspace, &path)?;
+                    progress.phase("Reading layer and map catalogs");
                     let maps = ReplayMaps::from_record(&recording)?.len();
-                    let mut plan = StepPlan::build(&recording, maps)?;
+                    let mut plan =
+                        StepPlan::build_with_progress(&recording, maps, |frame, frames| {
+                            progress.frame(frame, frames)
+                        })?;
+                    progress.phase("Preparing result views");
                     plan.seconds += crate::replay::analysis_data::duration(&recording)?;
                     Ok(plan)
                 })();
                 result.unwrap_or_else(|error| StepPlan::unavailable(error.to_string()))
             })
             .collect();
+        progress.phase("Loading the first layout");
         let _ = sender.send(plans);
     });
     receiver
@@ -278,6 +304,26 @@ mod tests {
     use super::*;
     use crate::replay::data::{read, tests::Fixture};
     use serde_json::json;
+
+    #[test]
+    fn filler_skips_auxiliary_rcx_clips_but_keeps_final_geometry_and_source_nodes() {
+        let fixture = Fixture::new();
+        let mut record = fixture.open();
+        record.manifest.step = "filler".into();
+        record.manifest.frames[1].subflow = "run rcx".into();
+        let plan = StepPlan::build(&record, 0).unwrap();
+        assert!(!plan.clips.iter().any(|clip| clip.frame == 1));
+        assert_eq!(plan.display_at_frame(1), plan.display_at_frame(0));
+        assert_eq!(plan.clips.last().unwrap().frame, 2);
+        record.seek_frame(2).unwrap();
+        assert_eq!(record.scene.objects["inst:a"].bbox, [20, 0, 25, 5]);
+        record.manifest.step = "RCX".into();
+        assert!(StepPlan::build(&record, 0)
+            .unwrap()
+            .clips
+            .iter()
+            .any(|clip| clip.frame == 1));
+    }
 
     #[test]
     fn idle_execution_time_does_not_change_display_and_final_delta_has_a_clip() {

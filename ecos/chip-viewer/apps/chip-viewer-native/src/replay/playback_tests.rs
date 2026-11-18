@@ -126,7 +126,7 @@ fn filler_rows_play_as_one_fast_sweep_with_exact_seeks_and_complete_highlights()
     let clip = &app.plans[0].clips[1];
     assert_eq!(clip.kind, Kind::Filler { first: 1 });
     assert_eq!(clip.frame, 41);
-    assert!((clip.end - clip.start - 1.5).abs() < 1e-9);
+    assert!((clip.end - clip.start - 4.0).abs() < 1e-9);
     let start = clip.start;
     let middle = (clip.start + clip.end) / 2.0;
     app.navigate_subflow(crate::replay::navigation::Direction::Next);
@@ -326,6 +326,18 @@ fn step_navigation_moves_one_step_and_clamps_at_ends() {
 #[ignore = "requires ECOS_FILLER_CATALOG with a real filler recording"]
 fn real_filler_subflow_navigation_preserves_reveal() {
     use crate::replay::navigation::Direction;
+    fn finish_real_loading(app: &mut ReplayApp) {
+        let started = std::time::Instant::now();
+        while app.pending.is_some() || app.maps.loading() {
+            app.poll_loader();
+            app.maps.poll();
+            assert!(
+                started.elapsed().as_secs() < 120,
+                "Real workspace seek timed out"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
     let mut app = ReplayApp::open(std::path::Path::new(
         &std::env::var("ECOS_FILLER_CATALOG").unwrap(),
     ))
@@ -339,18 +351,29 @@ fn real_filler_subflow_navigation_preserves_reveal() {
     app.total = plans.iter().map(|plan| plan.seconds).sum();
     app.plans = plans;
     app.select(0, 0.0, false);
-    app.finish_loading_for_test();
+    finish_real_loading(&mut app);
     app.navigate_subflow(Direction::Next);
-    app.finish_loading_for_test();
+    finish_real_loading(&mut app);
     let clip = app.plans[0]
         .clips
         .iter()
         .find(|clip| matches!(clip.kind, Kind::Filler { .. }))
         .unwrap();
+    assert!((clip.end - clip.start - 4.0).abs() < 1e-9);
+    let record = app.recording.as_ref().unwrap();
+    assert!(app.plans[0]
+        .clips
+        .iter()
+        .all(|clip| record.manifest.frames[clip.frame].subflow != "run rcx"));
+    assert!(crate::replay::analysis_data::load(record)
+        .unwrap()
+        .views
+        .is_empty());
+    assert_eq!(crate::replay::analysis_data::duration(record).unwrap(), 0.0);
     assert!(app.position <= clip.start);
     let middle = (clip.start + clip.end) / 2.0;
     app.select(0, middle, false);
-    app.finish_loading_for_test();
+    finish_real_loading(&mut app);
     let scene = &app.recording.as_ref().unwrap().scene;
     let fractions: Vec<_> = scene
         .objects
@@ -364,6 +387,19 @@ fn real_filler_subflow_navigation_preserves_reveal() {
     println!(
         "Verified {} real filler cells reveal progressively",
         fractions.len()
+    );
+    app.select(0, app.total, true);
+    finish_real_loading(&mut app);
+    assert!(app.error.is_empty(), "{}", app.error);
+    assert!(app.complete && app.clock_tree.is_some());
+    assert!(app.clock_overlay.len() > 0);
+    assert!(app.analysis.selected_description().is_none());
+    assert_eq!(app.current_phase(), "Completed result");
+    println!(
+        "Filler final result: {} clock routes, {} analysis views, {:.2}s total",
+        app.clock_overlay.len(),
+        app.analysis.len(),
+        app.total
     );
 }
 
@@ -519,7 +555,7 @@ fn disabling_three_d_preserves_a_pending_exact_node() {
 #[test]
 fn enabling_three_d_starts_slow_iso_rotation_until_manual_control() {
     let view = crate::replay::view3d::View3d::default();
-    assert!((view.z_scale - 0.5).abs() < f32::EPSILON);
+    assert!((view.z_scale - 1.0).abs() < f32::EPSILON);
     assert!(!view.auto_spin);
     assert!(view.spin_yaw.is_none());
     assert!(!view.fit_requested);
@@ -575,5 +611,5 @@ fn replay_starts_with_layout_inset_and_native_z_scale_defaults() {
     let fixture = Fixture::new();
     let app = app(&fixture);
     assert_eq!(app.zoom, 0.82);
-    assert_eq!(app.view3d.z_scale, 0.5);
+    assert_eq!(app.view3d.z_scale, 1.0);
 }
