@@ -38,9 +38,14 @@ struct PatternOperation {
     color: egui::Color32,
 }
 
+struct ResidualPrimitive {
+    primitive: egui::ClippedPrimitive,
+    bounds: [u16; 4],
+}
+
 pub(super) struct SparseRects {
     operations: budget::Operations,
-    residuals: Vec<Vec<egui::ClippedPrimitive>>,
+    residuals: Vec<Vec<ResidualPrimitive>>,
     holes: Vec<u64>,
     columns: usize,
     size: [u32; 2],
@@ -487,7 +492,7 @@ impl SparseRects {
                 }
                 Operation::Residual(residual) => {
                     for primitive in std::mem::take(&mut residuals[residual]) {
-                        bucket.append(primitive);
+                        bucket.append(primitive.primitive);
                     }
                 }
             }

@@ -71,7 +71,7 @@ impl SparseRects {
     pub(in crate::app::cpu_scene) fn retained_bytes(&self) -> usize {
         self.operations.byte_len()
             + self.auxiliary_bytes
-            + self.residuals.capacity() * size_of::<Vec<egui::ClippedPrimitive>>()
+            + self.residuals.capacity() * size_of::<Vec<ResidualPrimitive>>()
             + self.holes.capacity() * size_of::<u64>()
     }
 }

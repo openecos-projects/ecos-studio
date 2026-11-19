@@ -44,49 +44,53 @@ impl SparseRects {
         (visible && is_current()).then_some(())
     }
 
-    pub(in crate::app::cpu_scene) fn append_meshes(
-        &mut self,
-        mut meshes: Vec<egui::ClippedPrimitive>,
-    ) {
-        meshes.retain(|primitive| {
+    pub(in crate::app::cpu_scene) fn append_meshes(&mut self, meshes: Vec<egui::ClippedPrimitive>) {
+        let mut residual = Vec::with_capacity(meshes.len());
+        for primitive in meshes {
             let egui::epaint::Primitive::Mesh(mesh) = &primitive.primitive else {
                 unreachable!("CPU geometry contains no callbacks")
             };
-            let mut visible = false;
+            let mut extent = [i32::MAX, i32::MAX, 0, 0];
+            let edge_padding = if self.pattern_textures.contains(mesh.texture_id) {
+                0.0
+            } else {
+                1.0
+            };
             for triangle in mesh.indices.chunks_exact(3) {
                 let bounds = triangle.iter().fold(egui::Rect::NOTHING, |bounds, index| {
                     let position = mesh.vertices[*index as usize].pos;
                     bounds.union(egui::Rect::from_min_max(position, position))
                 });
-                let edge_padding = if self.pattern_textures.contains(mesh.texture_id) {
-                    0.0
-                } else {
-                    1.0
-                };
                 let bounds =
                     self.bounds(bounds.expand(edge_padding).intersect(primitive.clip_rect));
                 if bounds[2] <= bounds[0] || bounds[3] <= bounds[1] {
                     continue;
                 }
-                visible = true;
+                extent = [
+                    extent[0].min(bounds[0]),
+                    extent[1].min(bounds[1]),
+                    extent[2].max(bounds[2]),
+                    extent[3].max(bounds[3]),
+                ];
                 for tile in self.tiles(bounds) {
                     self.holes[tile / 64] |= 1 << (tile % 64);
                 }
             }
-            visible
-        });
-        if !meshes.is_empty() {
-            self.residual_count += 1;
-            self.auxiliary_bytes += meshes.capacity() * size_of::<egui::ClippedPrimitive>();
-            for primitive in &meshes {
-                if let egui::epaint::Primitive::Mesh(mesh) = &primitive.primitive {
-                    self.auxiliary_bytes += mesh.vertices.capacity()
-                        * size_of::<egui::epaint::Vertex>()
-                        + mesh.indices.capacity() * size_of::<u32>();
-                }
+            if extent[0] < extent[2] {
+                self.auxiliary_bytes += mesh.vertices.capacity()
+                    * size_of::<egui::epaint::Vertex>()
+                    + mesh.indices.capacity() * size_of::<u32>();
+                residual.push(ResidualPrimitive {
+                    primitive,
+                    bounds: extent.map(|coordinate| coordinate as u16),
+                });
             }
+        }
+        if !residual.is_empty() {
+            self.residual_count += 1;
+            self.auxiliary_bytes += residual.capacity() * size_of::<ResidualPrimitive>();
             self.push_operation(Operation::Residual(self.residuals.len()));
-            self.residuals.push(meshes);
+            self.residuals.push(residual);
         }
     }
 }
