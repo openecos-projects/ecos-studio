@@ -306,9 +306,7 @@ jobs:
           test -x "$RUNNER_TEMP/ecc-bundle/ecc"
           echo "ECOS_E2E_ECC_BIN_DIR=$RUNNER_TEMP/ecc-bundle" >> "$GITHUB_ENV"
 
-      - name: Fetch private PDK
-        env:
-          GH_TOKEN: ${{ secrets.PDK_READ_TOKEN }}
+      - name: Fetch public PDK
         run: |
           set -euo pipefail
           bash "$RUNNER_TEMP/artifacts/icsprout55-pdk/fetch-pdk.sh" \
