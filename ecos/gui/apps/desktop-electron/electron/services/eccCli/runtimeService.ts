@@ -2,6 +2,7 @@ import { workspaceForkProbe, workspaceForkRequired } from '../cliSelfCheck'
 import { randomUUID } from 'node:crypto'
 import { mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { watch, type FSWatcher } from 'chokidar'
 import { basename, dirname, join, resolve } from 'node:path'
 import { stringify as stringifyToml } from 'smol-toml'
 import type {
@@ -64,7 +65,16 @@ import { parseEccLineRecords, parseJsonLiteral } from './lineRecords'
 import { blockedFlowStep, failedRunSteps, terminalState } from './operationOutcome'
 import { CandidateOperations } from './candidateOperations'
 import { buildOperationDiagnostics } from './operationDiagnostics'
-import { operationLogPath, readOperationLog, readRunFailure } from './operationLog'
+import {
+  operationLogPath,
+  readOperationLog,
+  readRunFailure,
+  readRunResult,
+  readRunSelection,
+  recentRunResults,
+  RECENT_RUN_LIMIT,
+  type RunSelection,
+} from './operationLog'
 import {
   discoverProject,
   readProjectManifest,
@@ -89,6 +99,7 @@ interface WorkspaceSession {
   projectRoot: string
   workspaceId: string
   workspaceRevision: number
+  projectWatcher?: FSWatcher
 }
 
 interface TrackedOperation {
@@ -503,7 +514,24 @@ export class EccCliRuntimeService {
     }
     this.sessions.set(session.handle, session)
     this.handleByDirectory.set(directory, session.handle)
-    await this.restoreRegisteredOperation(session, manifest)
+    const watcher = watch(session.projectRoot, {
+      depth: 0,
+      followSymlinks: false,
+      ignoreInitial: true,
+      persistent: false,
+    })
+    session.projectWatcher = watcher
+    watcher.on('all', (_event, path) => {
+      if (basename(path) === 'project.json') this.invalidate()
+    })
+    watcher.on('error', (error) =>
+      electronLogger.warn('[runtime] ECC Project watcher failed', error),
+    )
+    await new Promise<void>((ready) => watcher.once('ready', ready))
+    await this.restoreWorkspaceRuns(
+      session,
+      await readProjectManifest(session.projectRoot),
+    )
     this.emit({ type: 'runtime.ready', workspaceDirectory: directory })
     return sessionResult(session)
   }
@@ -527,6 +555,7 @@ export class EccCliRuntimeService {
     if (active) return { ok: true, retained: true }
     this.sessions.delete(request.workspaceHandle)
     this.handleByDirectory.delete(session.directory)
+    await session.projectWatcher?.close()
     for (const listener of this.releasedListeners) listener(request.workspaceHandle)
     return { ok: true }
   }
@@ -1134,7 +1163,7 @@ export class EccCliRuntimeService {
     await Promise.allSettled(
       [...this.sessions.values()].map(async (session) => {
         const manifest = await readProjectManifest(session.projectRoot)
-        await this.restoreRegisteredOperation(session, manifest)
+        await this.restoreWorkspaceRuns(session, manifest)
       }),
     )
     await Promise.allSettled(
@@ -1152,9 +1181,20 @@ export class EccCliRuntimeService {
     const { operation, session } = tracked
     if (request.includeDiagnostics) {
       const diagnostics = this.diagnostics.get(operation.operationId)
-      if (!diagnostics)
-        throw new Error('Run diagnostics are unavailable for this operation.')
-      return diagnostics
+      if (diagnostics) return diagnostics
+      if (operation.state === 'failed' || operation.state === 'interrupted') {
+        const log = await readOperationLog(
+          session.directory,
+          operation.operationId,
+        ).catch(() => null)
+        return await buildOperationDiagnostics(
+          operation,
+          log,
+          [],
+          this.options.mainLogFile,
+        )
+      }
+      throw new Error('Run diagnostics are unavailable for this operation.')
     }
     return await readOperationLog(session.directory, operation.operationId)
   }
@@ -1221,6 +1261,9 @@ export class EccCliRuntimeService {
 
   async shutdown() {
     await this.candidates.shutdown()
+    await Promise.all(
+      [...this.sessions.values()].map(({ projectWatcher }) => projectWatcher?.close()),
+    )
     for (const tracked of this.operations.values()) {
       if (tracked.poller) clearInterval(tracked.poller)
       tracked.poller = null
@@ -1370,6 +1413,62 @@ export class EccCliRuntimeService {
     return { ...tracked.operation }
   }
 
+  private async restoreWorkspaceRuns(
+    session: WorkspaceSession,
+    manifest: ProjectManifest,
+  ) {
+    await this.restoreRegisteredOperation(session, manifest)
+    const results = await recentRunResults(session.directory, session.workspaceId)
+    if (!this.sessions.has(session.handle)) return
+    let changed = false
+    for (const result of results) {
+      const existing = this.operations.get(result.runId)
+      if (existing) {
+        if (
+          isTerminal(existing.operation.state) &&
+          existing.session.directory === session.directory &&
+          !this.sessions.has(existing.session.handle)
+        ) {
+          existing.session = session
+          changed = true
+        }
+        continue
+      }
+      const operation = {
+        ...cliRunSnapshot(session, result.runId, result.startedAt, result.selection),
+        state: result.state,
+        updatedAt: result.finishedAt,
+        error:
+          result.error ??
+          (result.state === 'failed'
+            ? { code: 'flow_failed', message: 'ECC run failed. See the run log.' }
+            : result.state === 'interrupted'
+              ? {
+                  code: 'run_interrupted',
+                  message: 'ECC execution was interrupted. See the run log.',
+                }
+              : null),
+      }
+      this.operations.set(result.runId, {
+        operation,
+        projectRoot: session.projectRoot,
+        registrationPending: false,
+        requestedCancel: false,
+        poller: null,
+        refreshSequence: 0,
+        session,
+        waiters: [],
+        watcher: null,
+      })
+      this.outcomes.push(operation)
+      changed = true
+    }
+    if (changed) {
+      this.trimOutcomes()
+      this.invalidate()
+    }
+  }
+
   private async restoreRegisteredOperation(
     session: WorkspaceSession,
     manifest: ProjectManifest,
@@ -1377,6 +1476,7 @@ export class EccCliRuntimeService {
     const entry = manifest.runtime_processes?.[session.workspaceId]
     if (!entry || this.operations.has(entry.run_id)) return
     const alive = await this.processIsAlive(session, entry)
+    if (this.operations.has(entry.run_id)) return
     if (!alive) {
       await this.cli
         .run([
@@ -1394,11 +1494,12 @@ export class EccCliRuntimeService {
       return
     }
     const tracked: TrackedOperation = {
-      operation: {
-        ...operationSnapshot(session, entry.run_id, 'flow', '', false),
-        createdAt: entry.started_at,
-        origin: 'cli',
-      },
+      operation: cliRunSnapshot(
+        session,
+        entry.run_id,
+        entry.started_at,
+        readRunSelection(entry.selection),
+      ),
       projectRoot: session.projectRoot,
       registrationPending: false,
       requestedCancel: false,
@@ -1518,7 +1619,23 @@ export class EccCliRuntimeService {
     const selectedStep =
       tracked.operation.kind === 'step' ? tracked.operation.step : undefined
     const exit = tracked.child?.exit
-    const terminal = terminalState(flow, tracked.requestedCancel, exit)
+    const result = tracked.child
+      ? undefined
+      : await readRunResult(
+          tracked.session.directory,
+          tracked.session.workspaceId,
+          tracked.operation.operationId,
+        )
+    const terminal =
+      result?.state ??
+      terminalState(
+        flow,
+        tracked.requestedCancel,
+        exit,
+        selectedStep,
+        tracked.operation.flowScope?.fromStep,
+        tracked.operation.flowScope?.throughStep,
+      )
     const captureDiagnostics = terminal === 'failed' || terminal === 'interrupted'
     const log = captureDiagnostics
       ? await readOperationLog(
@@ -1531,10 +1648,15 @@ export class EccCliRuntimeService {
       isTerminal(tracked.operation.state)
     )
       return
-    const failure = log ? readRunFailure(log.content) : undefined
+    const failure = result?.error ?? (log ? readRunFailure(log.content) : undefined)
     const candidates =
       captureDiagnostics && flow
-        ? failedRunSteps(flow, selectedStep, tracked.operation.flowScope?.fromStep)
+        ? failedRunSteps(
+            flow,
+            selectedStep,
+            tracked.operation.flowScope?.fromStep,
+            tracked.operation.flowScope?.throughStep,
+          )
         : []
     let workerFailure: string | undefined
     const workers: string[] = []
@@ -1557,7 +1679,12 @@ ${message}`)
       return
     const blocked =
       terminal === 'failed' && !failure && !workerFailure && flow
-        ? blockedFlowStep(flow, selectedStep, tracked.operation.flowScope?.fromStep)
+        ? blockedFlowStep(
+            flow,
+            selectedStep,
+            tracked.operation.flowScope?.fromStep,
+            tracked.operation.flowScope?.throughStep,
+          )
         : null
     tracked.operation = {
       ...tracked.operation,
@@ -1587,7 +1714,7 @@ ${message}`)
       ...(flow ? { flow } : {}),
       ...(blocked && !selectedStep ? { flowBlock: blocked } : {}),
       state: terminal,
-      updatedAt: now(),
+      updatedAt: result?.finishedAt ?? now(),
     }
     if (tracked.operation.error) {
       electronLogger.warn(
@@ -1613,10 +1740,8 @@ ${message}`)
         ),
       )
     }
-    this.outcomes.unshift({ ...tracked.operation })
-    for (const outcome of this.outcomes.splice(64)) {
-      this.diagnostics.delete(outcome.operationId)
-    }
+    this.outcomes.push({ ...tracked.operation })
+    this.trimOutcomes()
     for (const resolveWait of tracked.waiters.splice(0))
       resolveWait({ ...tracked.operation })
     await this.refreshSessionRevision(tracked.session).catch(() => undefined)
@@ -1629,6 +1754,13 @@ ${message}`)
           ? 'operation.cancelled'
           : 'operation.failed',
     )
+  }
+
+  private trimOutcomes() {
+    this.outcomes.sort((left, right) => right.updatedAt - left.updatedAt)
+    for (const outcome of this.outcomes.splice(RECENT_RUN_LIMIT)) {
+      this.diagnostics.delete(outcome.operationId)
+    }
   }
 
   private async processIsAlive(
@@ -1894,6 +2026,27 @@ function operationSnapshot(
     updatedAt: timestamp,
     workspaceId: session.workspaceId,
     workspaceRevision: session.workspaceRevision,
+  }
+}
+
+function cliRunSnapshot(
+  session: WorkspaceSession,
+  runId: string,
+  startedAt: number,
+  { only, fromStep, throughStep }: RunSelection,
+): EccRuntimeOperation {
+  return {
+    ...operationSnapshot(
+      session,
+      runId,
+      only ? 'step' : 'flow',
+      only ?? '',
+      Boolean(fromStep),
+    ),
+    createdAt: startedAt,
+    updatedAt: startedAt,
+    origin: 'cli',
+    ...(fromStep ? { flowScope: { fromStep, throughStep } } : {}),
   }
 }
 

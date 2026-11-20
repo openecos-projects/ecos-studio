@@ -1216,6 +1216,20 @@ describe('ECC CLI live flow projection', () => {
         ],
       }),
     )
+    const finishedRunId = '33333333-3333-4333-8333-333333333333'
+    await mkdir(join(workspaceDirectory, 'log'))
+    await writeFile(
+      join(workspaceDirectory, 'log', `${finishedRunId}.run.json`),
+      JSON.stringify({
+        schema_version: 1,
+        run_id: finishedRunId,
+        workspace_id: 'ws_1',
+        started_at: 1,
+        finished_at: 2,
+        state: 'succeeded',
+        only: 'synthesis',
+      }),
+    )
     const service = new EccCliRuntimeService({
       resolveLaunch: vi.fn(),
       runtimeId: 'runtime-1',
@@ -1238,6 +1252,9 @@ describe('ECC CLI live flow projection', () => {
         projectRoot,
         workspaceDirectory,
       }),
+    ])
+    expect(projection.outcomes).toMatchObject([
+      { operationId: finishedRunId, state: 'succeeded', kind: 'step', step: 'synthesis' },
     ])
     await service.shutdown()
   })

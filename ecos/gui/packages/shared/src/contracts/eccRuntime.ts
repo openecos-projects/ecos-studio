@@ -393,7 +393,7 @@ export interface EccRuntimeOperation {
   currentTool: string
   error: { code: string; message: string } | null
   flow?: { steps: EccRuntimeStepSnapshot[] }
-  flowScope?: { fromStep?: string }
+  flowScope?: { fromStep?: string; throughStep?: string }
   /**
    * Set when the flow did not succeed because a step's checklist gate blocked
    * it (for example a required step failed its gate, or the flow stopped with

@@ -12,14 +12,17 @@ export function terminalState(
   flow: PersistedFlow | null,
   cancelled: boolean,
   exit?: { code: number | null },
+  selectedStep?: string,
+  fromStep?: string,
+  throughStep?: string,
 ): EccRuntimeOperation['state'] {
   if (cancelled) return 'cancelled'
   if (exit) {
     if (exit.code === null) return 'interrupted'
     return exit.code === 0 ? 'succeeded' : 'failed'
   }
-  // A run adopted from the terminal has no child exit status available.
-  const steps = flow?.steps ?? []
+  // Fallback for runtimes that predate persisted run results.
+  const steps = flow ? runSteps(flow, selectedStep, fromStep, throughStep) : []
   if (steps.some(({ state }) => state === 'Ongoing')) return 'interrupted'
   if (
     steps.some(
@@ -45,8 +48,9 @@ export function blockedFlowStep(
   flow: PersistedFlow,
   selectedStep?: string,
   fromStep?: string,
+  throughStep?: string,
 ): BlockedFlowStep | null {
-  for (const step of runSteps(flow, selectedStep, fromStep)) {
+  for (const step of runSteps(flow, selectedStep, fromStep, throughStep)) {
     if (!step.checklistBlocked) continue
     if (['Success', 'Skipped'].includes(step.state)) continue
     return {
@@ -61,16 +65,25 @@ export function failedRunSteps(
   flow: PersistedFlow,
   selectedStep?: string,
   fromStep?: string,
+  throughStep?: string,
 ) {
-  return runSteps(flow, selectedStep, fromStep).filter(
+  return runSteps(flow, selectedStep, fromStep, throughStep).filter(
     ({ name, state }) =>
       state === 'Invalid' ||
       (state === 'Incomplete' && (selectedStep || !ADVISORY_STEPS.has(name))),
   )
 }
 
-function runSteps(flow: PersistedFlow, selectedStep?: string, fromStep?: string) {
+function runSteps(
+  flow: PersistedFlow,
+  selectedStep?: string,
+  fromStep?: string,
+  throughStep?: string,
+) {
   if (selectedStep) return flow.steps.filter(({ name }) => name === selectedStep)
   const start = fromStep ? flow.steps.findIndex(({ name }) => name === fromStep) : 0
-  return start < 0 ? [] : flow.steps.slice(start)
+  const end = throughStep
+    ? flow.steps.findIndex(({ name }) => name === throughStep)
+    : flow.steps.length - 1
+  return start < 0 || end < start ? [] : flow.steps.slice(start, end + 1)
 }

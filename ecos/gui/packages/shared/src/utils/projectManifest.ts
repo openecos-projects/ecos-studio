@@ -180,6 +180,7 @@ export interface ProjectRuntimeProcessEntry {
   started_at: number
   runtime_id: string
   log_path: string
+  selection?: unknown
 }
 
 const RUNTIME_TOKEN = /^[A-Za-z0-9._:@+-]{1,128}$/
