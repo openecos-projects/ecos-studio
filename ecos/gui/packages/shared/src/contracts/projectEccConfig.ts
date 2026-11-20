@@ -26,6 +26,10 @@ export interface ProjectEccPdkConfig {
 export interface ProjectEccPdkConfigReadResult extends ProjectEccPdkConfig {
   /** False when the project has no ecc.toml yet. */
   exists: boolean
+  flowSelection?: {
+    skipSteps?: string[]
+    insertSteps?: string[]
+  }
 }
 
 export interface ProjectEccPdkConfigWriteRequest {

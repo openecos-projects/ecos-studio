@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import type { Page } from 'playwright-core'
+import { parse } from 'smol-toml'
 import { launchE2EApp, repoRoot, resolveOutDir } from './support/launch'
 import { prepareGcdProject } from './support/design'
 import { readFlowSteps } from './support/flow'
@@ -61,6 +62,7 @@ async function openConfiguredWorkspaceWizard(
   page: Page,
   projectName: string,
   shot?: ReturnType<typeof createMilestoneShots>,
+  editFlow = false,
 ) {
   const panel = await openWorkspaceWizard(page, projectName)
   await advanceWizard(panel, 1, 4)
@@ -73,6 +75,12 @@ async function openConfiguredWorkspaceWizard(
   await expect
     .poll(() => panel.locator('[data-flow-step-card="harden"]').isVisible())
     .toBe(true)
+  if (editFlow) {
+    await panel
+      .getByRole('checkbox', { name: 'Run timing_optimization in this project' })
+      .uncheck()
+    await panel.getByLabel('Insert LEC after').selectOption('synthesis')
+  }
   await shot?.('flow-setup')
   await advanceWizard(panel, 4, 7)
   await expect
@@ -186,9 +194,18 @@ describe('product e2e: repeated workspace creation', () => {
             (root) => window.ecosDesktop.projectManagement.readManifest(root),
             design.projectRoot,
           )
-        await openConfiguredWorkspaceWizard(page, projectName, shot)
+        await openConfiguredWorkspaceWizard(page, projectName, shot, mode === 'filelist')
         await submitWorkspaceWizard(page)
         await expect.poll(async () => (await readManifest())?.workspaces.length).toBe(1)
+        if (mode === 'filelist') {
+          const project = parse(
+            await readFile(join(design.projectRoot, 'ecc.toml'), 'utf8'),
+          )
+          expect(project.flow).toMatchObject({
+            skip_steps: expect.arrayContaining(['timing_optimization']),
+            insert_steps: ['lec@synthesis'],
+          })
+        }
         if (mode === 'rtl') {
           const manifest = await readManifest()
           const directory = resolve(
@@ -196,6 +213,9 @@ describe('product e2e: repeated workspace creation', () => {
             manifest!.workspaces[0]!.workspace_path,
           )
           const card = page.locator('.flow-step-card[data-step="synthesis"]')
+          expect(await readFile(join(directory, 'home/params.toml'), 'utf8')).not.toMatch(
+            /placement:place\.target_density.*"cli"/,
+          )
           await card.getByRole('button', { name: /run synthesis/i }).click()
           const runStep = page.getByRole('dialog', { name: 'Run Synthesis' })
           await runStep.getByRole('button', { name: 'Run current step' }).click()
@@ -233,7 +253,29 @@ describe('product e2e: repeated workspace creation', () => {
           ).toBe(originalSource)
         }
 
-        await openConfiguredWorkspaceWizard(page, projectName)
+        if (mode === 'filelist') {
+          const panel = await openWorkspaceWizard(page, projectName)
+          await advanceWizard(panel, 1, 4)
+          await expect
+            .poll(() =>
+              panel
+                .getByRole('checkbox', {
+                  name: 'Run timing_optimization in this project',
+                })
+                .isChecked(),
+            )
+            .toBe(false)
+          await panel
+            .getByText('lec@synthesis', { exact: false })
+            .waitFor({ state: 'visible' })
+          await shot('third-workspace-project-flow')
+          await advanceWizard(panel, 4, 7)
+          await expect
+            .poll(() => panel.locator('.top-module-select .p-select-label').innerText())
+            .toBe('gcd')
+        } else {
+          await openConfiguredWorkspaceWizard(page, projectName)
+        }
         await shot('third-workspace-top-module')
         console.log(
           `${mode}: second workspace created and third wizard retains gcd; evidence: ${outDir}`,

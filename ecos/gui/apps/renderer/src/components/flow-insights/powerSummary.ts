@@ -16,15 +16,15 @@ function finiteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
 }
 
-export function parsePowerSummaryStep(value: unknown): PowerSummaryModel | null {
+export function parsePowerSummary(value: unknown): PowerSummaryModel | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const summary = (value as Record<string, unknown>).power_summary
-  if (!summary || typeof summary !== 'object' || Array.isArray(summary)) return null
+  const summary = value as Record<string, unknown>
+  if (summary.schema_version !== 1) return null
 
   const parsed = Object.fromEntries(
     POWER_SUMMARY_KEYS.map(([modelKey, jsonKey]) => [
       modelKey,
-      finiteNumber((summary as Record<string, unknown>)[jsonKey]),
+      finiteNumber(summary[jsonKey]),
     ]),
   ) as Record<string, number | null>
   if (Object.values(parsed).some((entry) => entry === null)) return null
@@ -36,5 +36,3 @@ export function parsePowerSummaryStep(value: unknown): PowerSummaryModel | null 
     leakageUw: parsed.leakageUw as number,
   }
 }
-
-export const POWER_SUMMARY_STEP_PATH = 'feature/power_analysis.step.json'

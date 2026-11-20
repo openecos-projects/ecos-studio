@@ -8,7 +8,7 @@ import {
   type DesktopShutdownStatus,
   type EccWorkspaceCreateRequest,
 } from '@ecos-studio/shared'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
 interface MockBrowserWindow {
   isDestroyed(): boolean
@@ -98,6 +98,7 @@ vi.mock('../services/workspaceRerun', () => ({
 import { registerIpc, type DesktopBridgeServices } from './registerIpc'
 import { workspaceWindowRegistry } from '../services/workspaceWindowRegistry'
 import { getAgentOperationAssociation } from '../services/agent/agentOperationAssociations'
+import { clearWorkspaceParameterCatalogCache } from '../services/workspaceParameterCatalogCache'
 
 type RegisteredHandler = (event: { sender: unknown }, ...args: unknown[]) => unknown
 
@@ -1186,6 +1187,30 @@ describe('registerIpc', () => {
       startSession: vi.fn(async (request) => ({ sessionId: request.sessionId })),
     } as unknown as DesktopBridgeServices['agentRuntimeService']
     const { handlers, services } = registerHandlers(agentRuntimeService)
+    services.eccRuntimeService.describeWorkspaceSpec.mockResolvedValue({
+      parameterCatalog: [
+        { id: 'design.frequency_mhz', knob_id: 'design.frequency_max', type: 'float' },
+        {
+          id: 'place.stop_overflow',
+          knob_id: 'place.target_overflow',
+          appliesTo: 'placement',
+          type: 'float',
+        },
+        {
+          id: 'place.target_density',
+          knob_id: 'place.target_density',
+          appliesTo: 'placement',
+          type: 'float',
+        },
+        {
+          id: 'place.random_seed',
+          knob_id: 'place.random_seed',
+          appliesTo: 'placement',
+          type: 'int',
+        },
+      ],
+    })
+    onTestFinished(clearWorkspaceParameterCatalogCache)
     let currentHandle = 'workspace-1'
     let currentRevision = 4
     services.eccRuntimeService.openWorkspace.mockImplementation(
@@ -1207,7 +1232,10 @@ describe('registerIpc', () => {
       async (request: { step: string }) =>
         request.step === 'placement'
           ? {
-              parameters: [{ param: 'place.target_density', value: 0.55 }],
+              parameters: [
+                { param: 'place.target_density', value: 0.55 },
+                { param: 'place.random_seed', value: 42 },
+              ],
               status: 'available',
               step: 'placement',
               stepId: 'placement',
@@ -1244,6 +1272,7 @@ describe('registerIpc', () => {
         workspaceRevision: 4,
         workspaceParameterValues: expect.objectContaining({
           'place.target_density': 0.55,
+          'place.random_seed': 42,
           'design.frequency_max': 120,
           'place.target_overflow': 0.2,
         }),

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -22,39 +22,28 @@ afterEach(async () => {
 })
 
 describe('PdkInventoryService', () => {
-  it('exposes the validated ICS55 ECC default resource paths', async () => {
+  it('uses ECC verification for a PDK family with runtime defaults', async () => {
     const root = await createTempDir()
-    const pdkRoot = join(root, 'ics55')
-    const tech = 'prtech/techLEF/N551P6M_ecos.lef'
-    const cellLefs = [
-      'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/lef/ics55_LLSC_H7CR_ecos.lef',
-      'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/lef/ics55_LLSC_H7CL_ecos.lef',
-    ]
-    const liberty = [
-      'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/liberty/ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
-      'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/liberty/ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
-    ]
-    for (const file of [tech, ...cellLefs, ...liberty]) {
-      await mkdir(join(pdkRoot, file, '..'), { recursive: true })
-      await writeFile(join(pdkRoot, file), '')
-    }
+    const pdkRoot = join(root, 'sg13g2')
+    await mkdir(pdkRoot)
+    const verifyDefaults = vi.fn(async () => {})
     const service = new PdkInventoryService({
       inventoryPath: join(root, 'inventory.json'),
       managedRoot: join(root, 'managed'),
+      verifyDefaults,
     })
     const installation = await service.importInstallation({
-      displayName: 'ICS55',
-      familyId: 'ics55',
+      displayName: 'SG13G2',
+      familyId: 'sg13g2',
       root: pdkRoot,
     })
     expect(installation).toMatchObject({
       readiness: 'ready',
-      defaultResources: {
-        techLef: join(pdkRoot, tech),
-        cellLefs: cellLefs.map((file) => join(pdkRoot, file)),
-        liberty: liberty.map((file) => join(pdkRoot, file)),
-      },
+      supportsEccDefaults: true,
     })
+    expect(verifyDefaults).toHaveBeenCalledWith(
+      expect.objectContaining({ familyId: 'sg13g2', root: pdkRoot }),
+    )
   })
 
   it('represents a real directory and its symlink as one stable Installation', async () => {
@@ -83,7 +72,7 @@ describe('PdkInventoryService', () => {
     await expect(service.listInstallations()).resolves.toEqual([
       expect.objectContaining({
         id: imported.id,
-        readiness: 'invalid',
+        readiness: 'unverified',
         root: pdkRoot,
       }),
     ])

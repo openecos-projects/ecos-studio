@@ -27,6 +27,7 @@ const CATALOG_DISCOVERY = {
     {
       id: 'place.routability_opt_flag',
       knob_id: 'place.routability_opt',
+      appliesTo: 'placement',
       type: 'boolean',
     },
     {
@@ -194,6 +195,30 @@ describe('catalog-driven Agent Workspace knob table', () => {
         },
       ),
     ).toEqual(Object.fromEntries(patch.map((item) => [item.knob_id, item.value])))
+  })
+
+  it('addresses the same knob independently on two ECC steps', () => {
+    rememberWorkspaceParameterCatalog({
+      parameterCatalog: [
+        {
+          id: 'place.timing_sizing_action',
+          knob_id: 'place.sizing_action',
+          type: 'str',
+          appliesTo: 'placement, diff_opt',
+        },
+      ],
+    })
+    const patch = [
+      { knob_id: 'place.sizing_action', step: 'placement', value: 'up' },
+      { knob_id: 'place.sizing_action', step: 'diff_opt', value: 'down' },
+    ]
+    expect(deriveAgentWorkspaceParameterUpdates(patch)?.workspace_parameters).toEqual({
+      'placement:place.timing_sizing_action': 'up',
+      'diff_opt:place.timing_sizing_action': 'down',
+    })
+    expect(
+      deriveAgentWorkspaceParameterUpdates([{ ...patch[0]!, step: 'routing' }]),
+    ).toBeNull()
   })
 
   it('rejects conflicting canonical and legacy values for one parameter', () => {

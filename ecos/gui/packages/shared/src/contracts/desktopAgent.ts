@@ -363,6 +363,7 @@ export interface DesktopAgentWorkspaceParameterWrite {
   file: DesktopAgentParameterWriteFile
   json_path: (string | number)[]
   knob_id: string
+  step?: string
   surface: DesktopAgentParameterWriteSurface
   value: DesktopAgentWorkspaceRerunParameterValue
 }
@@ -445,6 +446,7 @@ export type DesktopAgentWorkspaceRerunParameterValue =
 
 export interface DesktopAgentWorkspaceRerunParameterPatch {
   knob_id: string
+  step?: string
   value: DesktopAgentWorkspaceRerunParameterValue
 }
 

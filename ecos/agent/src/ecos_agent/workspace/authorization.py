@@ -39,6 +39,8 @@ def assert_authorized_parameter_patch(
 ) -> None:
     if parameter_patch is None:
         return
+    if any(item.step is not None and item.step != target_step for item in parameter_patch.items):
+        raise ValueError("parameter patch targets another step")
     assert_authorized_candidate_knobs(
         target_step,
         (item.knob_id for item in parameter_patch.items),

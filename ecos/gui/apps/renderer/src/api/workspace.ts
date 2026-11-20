@@ -85,7 +85,15 @@ export function backendWorkspaceOptions(
   targetDirectory: string,
   parameterDisplayIndex?: Record<string, string> | null,
 ): BackendWorkspaceCreateOptions {
+  const submittedFields = config.parameter_override_fields
+    ? new Set(config.parameter_override_fields)
+    : null
   const parameters = config.parameters ?? {}
+  const hasOverride = (...keys: string[]) =>
+    keys.some(
+      (key) =>
+        parameters[key] !== undefined && (!submittedFields || submittedFields.has(key)),
+    )
   // Display keys come from the ECC parameter catalog when it carries
   // display_key fields; each maps to its ECC spec key. Old ECC (or an
   // unavailable catalog) yields a null/empty index, in which case the
@@ -116,6 +124,8 @@ export function backendWorkspaceOptions(
   }
   addInput('def', 'def', config.origin_def)
   addInput('sdc', 'sdc', config.sdc ?? '')
+  addInput('golden-netlist', 'golden_netlist', config.golden_netlist ?? '')
+  addInput('spef', 'spef', config.spef ?? '')
 
   const effectiveResources =
     config.pdk_config_mode === 'default' ? config.pdk_effective_resources : undefined
@@ -263,6 +273,15 @@ export function backendWorkspaceOptions(
       },
       flow: {
         flowId,
+        ...(config.flow_config?.enable_steps?.length
+          ? { enableSteps: config.flow_config.enable_steps }
+          : {}),
+        ...(config.flow_config?.disable_steps?.length
+          ? { disableSteps: config.flow_config.disable_steps }
+          : {}),
+        ...(config.flow_config?.insert_steps?.length
+          ? { insertSteps: config.flow_config.insert_steps }
+          : {}),
         ...(startStep && endStep
           ? {
               fromStepId: startStep,
@@ -280,13 +299,13 @@ export function backendWorkspaceOptions(
           }
         : {}),
       parameters: {
-        ...(parameterApplies(['sta'])
+        ...(parameterApplies(['sta']) && hasOverride('sta_max_parallel_corners')
           ? {
               [specKey('sta_max_parallel_corners', 'sta.max_parallel_corners')]:
                 parameters.sta_max_parallel_corners ?? 1,
             }
           : {}),
-        ...(synthesisApplies
+        ...(synthesisApplies && (hasOverride('frequency_max') || submittedFields !== null)
           ? {
               [specKey('frequency_max', 'design.frequency_mhz')]: numberValue(
                 parameters.frequency_max,
@@ -294,7 +313,8 @@ export function backendWorkspaceOptions(
               ),
             }
           : {}),
-        ...(floorplanApplies
+        ...(floorplanApplies &&
+        hasOverride('utilization', 'utilitization', 'core_utilization')
           ? {
               [specKey('utilization', 'floorplan.core_util')]: numberValue(
                 parameters.utilization ??
@@ -302,6 +322,11 @@ export function backendWorkspaceOptions(
                   parameters.core_utilization,
                 fixedDie ? 0.5 : 0.6,
               ),
+            }
+          : {}),
+        ...(floorplanApplies &&
+        hasOverride('die_area_mode', 'die_width', 'die_height', 'margin')
+          ? {
               [specKey('die_area_mode', 'floorplan.die_builder.mode')]: fixedDie
                 ? 'die_size'
                 : 'die_util',
@@ -314,15 +339,17 @@ export function backendWorkspaceOptions(
                       'floorplan.die_builder.die_size.height_micron',
                     )]: numberValue(parameters.die_height, 100),
                   }
-                : {
-                    [specKey('margin', 'floorplan.core_margin')]: [
-                      numberValue(parameters.margin, 0),
-                      numberValue(parameters.margin, 0),
-                    ],
-                  }),
+                : hasOverride('margin')
+                  ? {
+                      [specKey('margin', 'floorplan.core_margin')]: [
+                        numberValue(parameters.margin, 0),
+                        numberValue(parameters.margin, 0),
+                      ],
+                    }
+                  : {}),
             }
           : {}),
-        ...(ctsApplies
+        ...(ctsApplies && hasOverride('max_fanout')
           ? {
               [specKey('max_fanout', 'cts.max_fanout')]: numberValue(
                 parameters.max_fanout,
@@ -330,24 +357,30 @@ export function backendWorkspaceOptions(
               ),
             }
           : {}),
-        ...(placementApplies
+        ...(placementApplies && hasOverride('target_density')
           ? {
               ['placement:place.target_density']: numberValue(
                 parameters.target_density,
                 0.2,
               ),
+            }
+          : {}),
+        ...(placementApplies && hasOverride('target_overflow')
+          ? {
               ['placement:place.stop_overflow']: numberValue(
                 parameters.target_overflow,
                 0.1,
               ),
             }
           : {}),
-        ...(ctsApplies && clockTreeSpecKey
+        ...(ctsApplies && clockTreeSpecKey && hasOverride('clock_tree')
           ? {
               [clockTreeSpecKey]: parameters.clock_tree === true,
             }
           : {}),
-        ...(macroPlacementApplies && manualMacroPlacementSpecKey
+        ...(macroPlacementApplies &&
+        manualMacroPlacementSpecKey &&
+        hasOverride('manual_macro_placement')
           ? {
               [manualMacroPlacementSpecKey]: parameters.manual_macro_placement === true,
             }

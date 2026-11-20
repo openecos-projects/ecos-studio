@@ -1265,12 +1265,12 @@ describe('ResourceManagerService', () => {
       ]),
     )
     expect(result.resources).toContainEqual(
-      expect.objectContaining({ id: imported.id, path: pdkPath, status: 'invalid' }),
+      expect.objectContaining({ id: imported.id, path: pdkPath, status: 'installed' }),
     )
     await expect(service.getResource(imported.id)).resolves.toMatchObject({
       id: imported.id,
       path: pdkPath,
-      status: 'invalid',
+      status: 'installed',
     })
   })
 
@@ -2703,13 +2703,13 @@ describe('ResourceManagerService', () => {
 
     await expect(service.importLocalPath('pdk:ics55', pdkRoot)).resolves.toMatchObject({
       id: expect.stringMatching(/^pdk:ics55:local:/),
-      status: 'invalid',
+      status: 'installed',
       source: 'local',
       path: pdkRoot,
       actions: ['validate', 'remove_reference'],
       health: expect.objectContaining({
         managed: false,
-        status: 'invalid',
+        status: 'ok',
       }),
     })
 
@@ -3511,6 +3511,7 @@ describe('ResourceManagerService', () => {
     const service = new ResourceManagerService({
       ...dirs,
       registryUrl: `file://${registryPath}`,
+      verifyPdkDefaults: async () => {},
     })
     const imported = await service.getPdkInventoryService().importInstallation({
       displayName: 'Local ICS55',
@@ -6818,6 +6819,7 @@ describe('ResourceManagerService', () => {
     service = new ResourceManagerService({
       registryUrl: `file://${registryPath}`,
       ...testResourceDirs(root),
+      verifyPdkDefaults: async () => {},
       archiveExtractor: async (_archivePath, destination) => {
         await cp(join(root, 'pdk-source', 'icsprout55-pdk-1.10.100'), destination, {
           recursive: true,
@@ -6892,6 +6894,7 @@ describe('ResourceManagerService', () => {
     const service = new ResourceManagerService({
       registryUrl: `file://${registryPath}`,
       ...testResourceDirs(root),
+      verifyPdkDefaults: async () => {},
       archiveExtractor: async (_archivePath, destination, _stripPrefix, signal) => {
         operationSignal = signal
         await cp(join(root, 'pdk-source', 'icsprout55-pdk-1.10.100'), destination, {
@@ -9473,9 +9476,7 @@ describe('ResourceManagerService', () => {
     await expect(service.getResource(secondResource.id)).resolves.toMatchObject({
       active: false,
     })
-    await expect(service.validatePdkRootForWorkspace(first)).rejects.toThrow(
-      'PDK validation failed for ics55',
-    )
+    await expect(service.validatePdkRootForWorkspace(first)).resolves.toBeUndefined()
   })
 
   it('revalidates an existing local PDK when it is imported again', async () => {
@@ -9486,10 +9487,10 @@ describe('ResourceManagerService', () => {
     const service = new ResourceManagerService(testResourceDirs(root))
 
     const first = await service.importPdkPath(pdkRoot)
-    expect(first.status).toBe('invalid')
+    expect(first.status).toBe('installed')
 
     const second = await service.importPdkPath(pdkRoot)
-    expect(second.status).toBe('invalid')
+    expect(second.status).toBe('installed')
     expect(second.health).toMatchObject({
       detected_file_groups: { directories: expect.arrayContaining(['IP', 'prtech']) },
     })
@@ -9568,7 +9569,7 @@ describe('ResourceManagerService', () => {
     await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
       id: 'pdk:ics55',
       path: pdkRoot,
-      status: 'invalid',
+      status: 'installed',
     })
     const inventory = JSON.parse(
       await readFile(join(dirs.resourcesDir, 'pdk-inventory.json'), 'utf8'),
@@ -9774,7 +9775,7 @@ describe('ResourceManagerService', () => {
     })
 
     await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
-      status: 'invalid',
+      status: 'installed',
       active: false,
     })
   })

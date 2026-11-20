@@ -2,9 +2,6 @@ import type { EccWorkspaceConfigurationUpdateRequest } from '@ecos-studio/shared
 import { updateWorkspaceConfigurationApi } from '@/api/workspace'
 import type { ConfigData } from './useParameters'
 
-const FIXED_BOTTOM_LAYER = 'MET2'
-const FIXED_TOP_LAYER = 'MET5'
-
 export function workspaceConfigurationPatch(
   current: ConfigData,
   original: ConfigData,
@@ -63,8 +60,8 @@ function canonicalConfiguration(config: ConfigData) {
       'placement:place.stop_overflow': config.targetOverflow,
       'placement:place.cell_padding_x': config.cellPaddingX,
       'placement:place.routability_opt_flag': config.routabilityOptFlag ? 1 : 0,
-      'route.bottom_layer': FIXED_BOTTOM_LAYER,
-      'route.top_layer': FIXED_TOP_LAYER,
+      'route.bottom_layer': config.bottomLayer,
+      'route.top_layer': config.topLayer,
     },
   }
 }

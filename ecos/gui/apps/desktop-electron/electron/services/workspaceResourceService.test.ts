@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import type { WorkspaceResourceFile } from '@ecos-studio/shared'
@@ -149,6 +149,58 @@ describe('WorkspaceResourceService', () => {
     expect(layout.missing).not.toContain(join(outputDirectory, 'gcd_place.gds'))
     expect(index.flow.steps[0].resources.output.verilog).toMatchObject({
       path: join(outputDirectory, 'gcd_place.v.gz'),
+      exists: true,
+    })
+  })
+
+  it('uses ECC-indexed resources when their paths differ from the workspace convention', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'place', tool: 'ecc' }])
+    await mkdir(join(root, 'published'))
+    await writeFile(join(root, 'published', 'layout.def'), 'def')
+    await writeFile(join(root, 'published', 'metrics.json'), '{}')
+    const snapshot = JSON.parse(
+      await readFile(
+        new URL(
+          '../../../../../../ecc/test/formal/fixtures/snapshot/v6-valid.json',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
+    )
+    snapshot.schemaVersion = 7
+    snapshot.artifacts = [
+      { ...snapshot.artifacts[0], stepId: 'place', reference: 'published/metrics.json' },
+    ]
+    snapshot.stepOutputs = {
+      design: 'gcd',
+      directory: '.',
+      sdc: null,
+      steps: [
+        {
+          step: 'place',
+          tool: 'ecc',
+          state: 'Success',
+          def: { path: 'published/layout.def', exists: true },
+          verilog: { path: 'published/netlist.v', exists: false },
+        },
+      ],
+    }
+    const snapshotPath = join(root, 'home', 'engineering-snapshot.json')
+    await writeJson(snapshotPath, snapshot)
+
+    const projectScopeProvider = provider(root)
+    const index = await new WorkspaceResourceService({ projectScopeProvider }).getIndex()
+
+    expect(projectScopeProvider.requestProjectPathAccess).toHaveBeenCalledWith(
+      snapshotPath,
+    )
+    expect(index.flow.steps[0].resources.output.def).toMatchObject({
+      path: join(root, 'published', 'layout.def'),
+      exists: true,
+    })
+    expect(index.flow.steps[0].resources.analysis.metrics).toMatchObject({
+      path: join(root, 'published', 'metrics.json'),
       exists: true,
     })
   })

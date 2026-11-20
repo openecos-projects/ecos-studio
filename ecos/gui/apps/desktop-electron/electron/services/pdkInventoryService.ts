@@ -29,6 +29,7 @@ export interface PdkInventoryServiceOptions {
   managedRoot?: string
   jsonWriter?: typeof writeJsonAtomic
   legacyCleaner?: () => Promise<void>
+  verifyDefaults?: (installation: PdkInstallationRecord) => Promise<void>
 }
 
 export interface ManagedPdkInstallationRequest extends PdkImportRequest {
@@ -37,28 +38,13 @@ export interface ManagedPdkInstallationRequest extends PdkImportRequest {
   version: string
 }
 
-const ICS55_DEFAULT_RESOURCES = {
-  techLef: 'prtech/techLEF/N551P6M_ecos.lef',
-  cellLefs: [
-    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/lef/ics55_LLSC_H7CR_ecos.lef',
-    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/lef/ics55_LLSC_H7CL_ecos.lef',
-  ],
-  liberty: [
-    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/liberty/ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
-    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/liberty/ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
-  ],
-}
-const ICS55_MARKERS = [
-  ICS55_DEFAULT_RESOURCES.techLef,
-  ...ICS55_DEFAULT_RESOURCES.cellLefs,
-  ...ICS55_DEFAULT_RESOURCES.liberty,
-]
-
 export class PdkInventoryService {
   private operation: Promise<void> = Promise.resolve()
   private legacyCleanupComplete = false
-  private readonly options: Required<Omit<PdkInventoryServiceOptions, 'legacyCleaner'>> &
-    Pick<PdkInventoryServiceOptions, 'legacyCleaner'>
+  private readonly options: Required<
+    Omit<PdkInventoryServiceOptions, 'legacyCleaner' | 'verifyDefaults'>
+  > &
+    Pick<PdkInventoryServiceOptions, 'legacyCleaner' | 'verifyDefaults'>
 
   constructor(options: PdkInventoryServiceOptions = {}) {
     const stateRoot = process.env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state')
@@ -73,6 +59,7 @@ export class PdkInventoryService {
       managedRoot: options.managedRoot ?? join(dataRoot, 'ecos-studio', 'pdks'),
       jsonWriter: options.jsonWriter ?? writeJsonAtomic,
       legacyCleaner: options.legacyCleaner,
+      verifyDefaults: options.verifyDefaults,
     }
   }
 
@@ -423,58 +410,31 @@ export class PdkInventoryService {
   private async snapshot(
     installation: PdkInstallationRecord,
   ): Promise<PdkInstallationSnapshot> {
+    const rootStats = await stat(installation.root).catch(() => null)
+    if (!rootStats?.isDirectory()) {
+      return {
+        ...installation,
+        readiness: 'missing',
+        reason: 'PDK root is unavailable',
+        supportsEccDefaults: false,
+      }
+    }
     try {
-      const rootStats = await stat(installation.root)
-      if (!rootStats.isDirectory()) {
-        return {
-          ...installation,
-          readiness: 'missing',
-          reason: 'PDK root is unavailable',
-          supportsEccDefaults: installation.familyId === 'ics55',
-        }
-      }
-      if (installation.familyId !== 'ics55') {
-        return {
-          ...installation,
-          readiness: 'unverified',
-          reason: null,
-          supportsEccDefaults: false,
-        }
-      }
-      const markers = await Promise.all(
-        ICS55_MARKERS.map((marker) =>
-          stat(resolve(installation.root, marker)).catch(() => null),
-        ),
-      )
-      if (markers.some((marker) => !marker?.isFile())) {
-        return {
-          ...installation,
-          readiness: 'invalid',
-          reason: 'Required ICS55 PDK files are missing',
-          supportsEccDefaults: true,
-        }
-      }
+      if (!this.options.verifyDefaults)
+        throw new Error('ECC PDK verification is unavailable')
+      await this.options.verifyDefaults(installation)
       return {
         ...installation,
         readiness: 'ready',
         reason: null,
         supportsEccDefaults: true,
-        defaultResources: {
-          techLef: resolve(installation.root, ICS55_DEFAULT_RESOURCES.techLef),
-          cellLefs: ICS55_DEFAULT_RESOURCES.cellLefs.map((file) =>
-            resolve(installation.root, file),
-          ),
-          liberty: ICS55_DEFAULT_RESOURCES.liberty.map((file) =>
-            resolve(installation.root, file),
-          ),
-        },
       }
-    } catch {
+    } catch (error) {
       return {
         ...installation,
-        readiness: 'missing',
-        reason: 'PDK root is unavailable',
-        supportsEccDefaults: installation.familyId === 'ics55',
+        readiness: 'unverified',
+        reason: error instanceof Error ? error.message : String(error),
+        supportsEccDefaults: false,
       }
     }
   }

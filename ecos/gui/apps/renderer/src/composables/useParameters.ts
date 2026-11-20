@@ -119,10 +119,6 @@ export interface ConfigData {
 
 // ============ 工具函数 ============
 
-/** ICS55 routing is pinned to the MET2 through MET5 route window. */
-const FIXED_BOTTOM_LAYER = 'MET2'
-const FIXED_TOP_LAYER = 'MET5'
-const ROUTING_LAYER_ORDER = [FIXED_BOTTOM_LAYER, 'MET3', 'MET4', FIXED_TOP_LAYER]
 const FLOW_RUNNING_SAVE_BLOCKED_MESSAGE =
   'Flow is running. Configuration is read-only until the current run finishes.'
 
@@ -150,8 +146,8 @@ function getDefaultConfig(): ConfigData {
     routabilityOptFlag: true,
     clock: '',
     frequencyMax: 100,
-    bottomLayer: FIXED_BOTTOM_LAYER,
-    topLayer: FIXED_TOP_LAYER,
+    bottomLayer: '',
+    topLayer: '',
     frontend: {
       coreId: '',
       cpuWrapperId: '',
@@ -323,10 +319,8 @@ function normalizeParametersData(raw: ParameterRecord | ParametersData): Paramet
     ),
     frequency_max:
       record.frequency_max != null ? Number(record.frequency_max) : undefined,
-    'Bottom layer': String(
-      record['Bottom layer'] ?? record.bottom_layer ?? FIXED_BOTTOM_LAYER,
-    ),
-    'Top layer': String(record['Top layer'] ?? record.top_layer ?? FIXED_TOP_LAYER),
+    'Bottom layer': String(record['Bottom layer'] ?? record.bottom_layer ?? ''),
+    'Top layer': String(record['Top layer'] ?? record.top_layer ?? ''),
     'PDK Root':
       record['PDK Root'] != null || record.pdk_root != null
         ? String(record['PDK Root'] ?? record.pdk_root)
@@ -398,8 +392,8 @@ export function transformParametersToConfig(data: ParametersData): ConfigData {
     routabilityOptFlag: !!data['Routability opt flag'],
     clock: data.Clock || '',
     frequencyMax: data['Frequency max [MHz]'] ?? 100,
-    bottomLayer: FIXED_BOTTOM_LAYER,
-    topLayer: FIXED_TOP_LAYER,
+    bottomLayer: data['Bottom layer'] ?? '',
+    topLayer: data['Top layer'] ?? '',
     frontend: {
       ...(data['Design Tool'] === 'frontend'
         ? { designKind: normalizeFrontendDesignKind(data.frontend_design_kind) }
@@ -448,8 +442,8 @@ export function transformConfigToParameters(config: ConfigData): ParametersData 
     'Routability opt flag': config.routabilityOptFlag ? 1 : 0,
     Clock: config.clock,
     'Frequency max [MHz]': config.frequencyMax,
-    'Bottom layer': FIXED_BOTTOM_LAYER,
-    'Top layer': FIXED_TOP_LAYER,
+    'Bottom layer': config.bottomLayer,
+    'Top layer': config.topLayer,
   }
   out['PDK Root'] = config.pdkRoot ?? ''
   out['Design Tool'] = config.designTool
@@ -1088,18 +1082,6 @@ export function useParameters() {
     })
   }
 
-  const layerOptions = computed(() => {
-    return ROUTING_LAYER_ORDER.map((layer) => ({ label: layer, value: layer }))
-  })
-
-  const layersList = computed(() => {
-    return layerOptions.value.map((o) => o.value)
-  })
-
-  const isLayerInRange = (layer: string): boolean => {
-    return layersList.value.includes(layer)
-  }
-
   return {
     config,
     isLoading,
@@ -1108,9 +1090,6 @@ export function useParameters() {
     error,
     hasChanges,
     isMutationLocked,
-    layerOptions,
-    layersList,
-    isLayerInRange,
     loadParameters,
     saveParameters,
     resetParameters,

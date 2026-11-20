@@ -39,9 +39,15 @@ export function buildWorkspaceCreationModel(
       const preset = request.projectPresetParameters?.[definition.id]
       const appliesTo =
         typeof definition.appliesTo === 'string'
-          ? normalizeStep(definition.appliesTo)
-          : ''
-      const applicable = !applicableSteps || !appliesTo || applicableSteps.has(appliesTo)
+          ? definition.appliesTo.split(',').map((step) => step.trim())
+          : []
+      const applicable =
+        !applicableSteps ||
+        !appliesTo.length ||
+        appliesTo.some(
+          (step) =>
+            step === 'all' || step === 'pdk' || applicableSteps.has(normalizeStep(step)),
+        )
       return [
         {
           definition: definition as Record<string, unknown> & { id: string },

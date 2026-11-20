@@ -198,7 +198,7 @@ describe('useParameters helpers', () => {
     })
   })
 
-  it('pins routing layer fields to the ics55 MET2-MET5 route window', () => {
+  it('preserves the routing layers recorded by the runtime', () => {
     const config = transformParametersToConfig(
       parseParametersData(
         JSON.stringify({
@@ -228,8 +228,8 @@ describe('useParameters helpers', () => {
       ),
     )
 
-    expect(config.bottomLayer).toBe('MET2')
-    expect(config.topLayer).toBe('MET5')
+    expect(config.bottomLayer).toBe('MET3')
+    expect(config.topLayer).toBe('MET6')
 
     const parameters = transformConfigToParameters({
       ...config,
@@ -237,8 +237,8 @@ describe('useParameters helpers', () => {
       topLayer: 'MET6',
     })
 
-    expect(parameters['Bottom layer']).toBe('MET2')
-    expect(parameters['Top layer']).toBe('MET5')
+    expect(parameters['Bottom layer']).toBe('MET3')
+    expect(parameters['Top layer']).toBe('MET6')
   })
   it('treats empty snapshots as missing chip identity', () => {
     expect(parametersHaveChipIdentity({})).toBe(false)

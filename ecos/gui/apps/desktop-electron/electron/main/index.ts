@@ -201,6 +201,10 @@ function getDesktopServices() {
   const runtimeInUse = () =>
     eccRuntimeService?.isRuntimeResourceInUse('tool:ecc') ?? false
   const resourceManagerService = new ResourceManagerService({
+    verifyPdkDefaults: ({ familyId, root }) => {
+      if (!eccRuntimeService) throw new Error('ECC runtime is unavailable')
+      return eccRuntimeService.verifyPdkDefaults(familyId, root)
+    },
     resourceInUse: (resourceId) =>
       eccRuntimeService?.isRuntimeResourceInUse(resourceId) ?? false,
   })

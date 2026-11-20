@@ -216,19 +216,6 @@ describe('useParameters desktop bridge integration', () => {
     clearFlowExecutionActiveForWorkspace('/workspace/demo')
   })
 
-  it('exposes the ics55 routing layers supported by the route config', () => {
-    readProjectTextFile.mockResolvedValue(parametersJson())
-
-    const parameters = useParameters()
-
-    expect(parameters.layerOptions.value.map((layer) => layer.value)).toEqual([
-      'MET2',
-      'MET3',
-      'MET4',
-      'MET5',
-    ])
-  })
-
   it('loads and saves parameters through the bridge-backed file helpers', async () => {
     readProjectTextFile.mockResolvedValue(
       parametersJson({
@@ -247,8 +234,8 @@ describe('useParameters desktop bridge integration', () => {
 
     expect(parameters.config.design).toBe('demo')
     expect(parameters.config.topModule).toBe('chip_top')
-    expect(parameters.config.bottomLayer).toBe('MET2')
-    expect(parameters.config.topLayer).toBe('MET5')
+    expect(parameters.config.bottomLayer).toBe('MET3')
+    expect(parameters.config.topLayer).toBe('MET6')
 
     parameters.config.design = 'updated_demo'
 
@@ -260,8 +247,8 @@ describe('useParameters desktop bridge integration', () => {
     const savedContent = writeProjectTextFile.mock.calls[0][1] as string
     expect(JSON.parse(savedContent)).toMatchObject({
       Design: 'updated_demo',
-      'Bottom layer': 'MET2',
-      'Top layer': 'MET5',
+      'Bottom layer': 'MET3',
+      'Top layer': 'MET6',
     })
     expect(refreshConfigApi).toHaveBeenCalledWith({
       cmd: 'refresh_config',

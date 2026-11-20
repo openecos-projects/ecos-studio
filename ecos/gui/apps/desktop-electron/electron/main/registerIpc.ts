@@ -1275,6 +1275,9 @@ export function registerIpc(
     if (!Number.isInteger(workspaceRevision) || Number(workspaceRevision) < 1) {
       throw new Error('ECC Workspace Revision is unavailable.')
     }
+    rememberWorkspaceParameterCatalog(
+      await services.eccRuntimeService.describeWorkspaceSpec(),
+    )
     const stepConfigurations: Record<string, Record<string, unknown>> = {}
     await Promise.all(
       agentStepOptionSteps().map(async (step) => {

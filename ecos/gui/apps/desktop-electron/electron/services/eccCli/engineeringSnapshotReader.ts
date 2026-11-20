@@ -2,6 +2,10 @@ import { existsSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { EccPersistedEngineeringSnapshot, ReadSection } from '@ecos-studio/shared'
+import type {
+  EccWorkspaceStepOutputArtifact,
+  EccWorkspaceStepOutputsResult,
+} from '@ecos-studio/shared'
 import {
   ENGINEERING_SNAPSHOT_MAX_BYTES,
   validateEngineeringSnapshot,
@@ -16,14 +20,50 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function isStepOutputArtifact(
+  value: unknown,
+): value is EccWorkspaceStepOutputArtifact | null {
+  return (
+    value === null ||
+    (isRecord(value) &&
+      typeof value.path === 'string' &&
+      value.path.length > 0 &&
+      !value.path.includes('\0') &&
+      !value.path.split(/[/\\]/).includes('..') &&
+      typeof value.exists === 'boolean')
+  )
+}
+
+function isStepOutputs(value: unknown): value is EccWorkspaceStepOutputsResult {
+  return (
+    isRecord(value) &&
+    value.directory === '.' &&
+    typeof value.design === 'string' &&
+    isStepOutputArtifact(value.sdc) &&
+    Array.isArray(value.steps) &&
+    value.steps.every(
+      (entry) =>
+        isRecord(entry) &&
+        typeof entry.step === 'string' &&
+        entry.step.length > 0 &&
+        typeof entry.tool === 'string' &&
+        typeof entry.state === 'string' &&
+        isStepOutputArtifact(entry.def) &&
+        isStepOutputArtifact(entry.verilog),
+    )
+  )
+}
+
 export async function readPersistedEngineeringSnapshot(
   directory: string,
   expectedWorkspaceId?: string,
   expectedVersion: 6 | 7 = 7,
+  authorizePath?: (path: string) => Promise<string>,
 ): Promise<EccPersistedEngineeringSnapshot> {
-  const path = join(directory, 'home', 'engineering-snapshot.json')
   let content: string
   try {
+    const snapshotPath = join(directory, 'home', 'engineering-snapshot.json')
+    const path = authorizePath ? await authorizePath(snapshotPath) : snapshotPath
     if ((await stat(path)).size > ENGINEERING_SNAPSHOT_MAX_BYTES) {
       throw new Error('ENGINEERING_SNAPSHOT_TOO_LARGE')
     }
@@ -74,6 +114,7 @@ export async function readPersistedEngineeringSnapshot(
   return {
     ...validated.snapshot,
     ...configuration,
+    ...(isStepOutputs(parsed.stepOutputs) ? { stepOutputs: parsed.stepOutputs } : {}),
     artifacts: readyData(validated.sections.artifacts),
     checklist: readyData(validated.sections.checklist),
     flow: readyData(validated.sections.flow),

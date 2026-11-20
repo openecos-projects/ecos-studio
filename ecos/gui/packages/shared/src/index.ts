@@ -496,6 +496,7 @@ export type {
 } from './contracts/desktopAgent.ts'
 export { desktopAgentParameterWriteFiles } from './contracts/desktopAgent.ts'
 export {
+  agentParameterIdentity,
   canonicalParameterWriteKey,
   parameterWritesMatchPatch,
 } from './utils/agentParameterWrites.ts'

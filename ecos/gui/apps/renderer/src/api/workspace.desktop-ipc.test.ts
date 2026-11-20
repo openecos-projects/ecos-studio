@@ -153,13 +153,9 @@ describe('workspace desktop bridge', () => {
             },
             parameters: {
               'cts.max_fanout': 20,
-              'sta.max_parallel_corners': 1,
               'design.frequency_mhz': 100,
-              'floorplan.core_margin': [0, 0],
               'floorplan.core_util': 0.5,
-              'floorplan.die_builder.mode': 'die_util',
               'placement:place.target_density': 0.6,
-              'placement:place.stop_overflow': 0.1,
             },
           }),
         }),
@@ -207,7 +203,6 @@ describe('workspace desktop bridge', () => {
       'floorplan.core_margin': [2, 2],
       'cts.max_fanout': 20,
       'placement:place.target_density': 0.4,
-      'placement:place.stop_overflow': 0.1,
     })
   })
 
@@ -319,7 +314,7 @@ describe('workspace desktop bridge', () => {
         throughStepId: 'harden',
       },
     })
-    expect(options.workspaceSpec.parameters).toEqual({ 'sta.max_parallel_corners': 1 })
+    expect(options.workspaceSpec.parameters).toEqual({})
   })
 
   it('keeps a synthesis-only Flow range when endpoints are inferred', async () => {

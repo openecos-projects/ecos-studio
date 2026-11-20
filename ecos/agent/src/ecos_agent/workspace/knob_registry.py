@@ -306,12 +306,20 @@ def resolve_write(item: ECCParameterPatchItem) -> dict[str, object]:
     """
     spec = knob_spec(item.knob_id)
     target = spec.write_target
+    path = list(target.json_path)
+    scope: dict[str, str] = {}
+    if item.step is not None:
+        if target.file != PARAMS_TOML_FILE or path[:2] != ["params", "step_params"]:
+            raise ValueError(f"{item.knob_id} does not use step-scoped storage")
+        path[2] = item.step.value
+        scope["step"] = item.step.value
     return {
         "knob_id": item.knob_id,
+        **scope,
         "value": storage_value(item),
         "surface": target.surface,
         "file": target.file,
-        "json_path": list(target.json_path),
+        "json_path": path,
     }
 
 

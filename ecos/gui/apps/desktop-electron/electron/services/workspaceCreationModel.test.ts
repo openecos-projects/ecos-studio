@@ -136,7 +136,7 @@ describe('buildWorkspaceCreationModel', () => {
         parameterCatalog: [
           { id: 'frequency_mhz', default: 100, appliesTo: 'synthesis' },
           { id: 'target_density', default: 0.2, appliesTo: 'placement' },
-          { id: 'bottom_layer', default: 'MET2', appliesTo: 'routing' },
+          { id: 'bottom_layer', default: 'MET2', appliesTo: 'placement,routing' },
           { id: 'tech', default: '', appliesTo: 'pdk' },
         ],
       },
@@ -159,8 +159,7 @@ describe('buildWorkspaceCreationModel', () => {
       }),
       expect.objectContaining({
         definition: expect.objectContaining({ id: 'tech' }),
-        inapplicableReason: 'flow:rtl2gds',
-        state: 'inapplicable',
+        state: 'defaulted',
       }),
     ])
   })

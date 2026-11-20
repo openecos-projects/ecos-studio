@@ -1,7 +1,9 @@
 import { workspaceForkProbe, workspaceForkRequired } from '../cliSelfCheck'
 import { randomUUID } from 'node:crypto'
-import { lstat, open, realpath, stat } from 'node:fs/promises'
+import { lstat, mkdtemp, open, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
+import { stringify as stringifyToml } from 'smol-toml'
 import type {
   EccBackgroundOperationLogResult,
   EccBackgroundOperationProjection,
@@ -326,6 +328,23 @@ export class EccCliRuntimeService {
     ])
     this.catalog = buildCatalog(parameters.stdout, flows.stdout)
     return this.catalog
+  }
+
+  async verifyPdkDefaults(familyId: string, root: string): Promise<void> {
+    await this.ensureContract()
+    const directory = await mkdtemp(join(tmpdir(), 'ecos-pdk-verify-'))
+    try {
+      await writeFile(
+        join(directory, 'ecc.toml'),
+        stringifyToml({ pdk: { name: familyId, root } }),
+      )
+      await this.cli.run(['pdk', 'verify', '--project', directory, '--plain'], {
+        cwd: directory,
+        timeoutMs: 15_000,
+      })
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   }
 
   async validateWorkspaceSpec(
@@ -1937,6 +1956,8 @@ export function projectSettingsArgs(
     ...set('design.netlist', byRole.get('netlist')?.[0]),
     ...set('design.def', byRole.get('def')?.[0]),
     ...set('design.sdc', byRole.get('sdc')?.[0]),
+    ...set('design.golden_netlist', byRole.get('golden_netlist')?.[0]),
+    ...set('design.spef', byRole.get('spef')?.[0]),
     ...set('pdk.name', pdk.familyId),
     ...set('pdk.root', pdkBindings.root),
     ...set('pdk.external_paths', pdkConfig?.externalPaths),
@@ -2059,6 +2080,12 @@ export function workspaceCreateCommands(
         : []),
     ]
   }
+  const flow = requireRecord(request.workspaceSpec.flow)
+  const edits = [
+    ...flowEditFlags('--enable', flow.enableSteps),
+    ...flowEditFlags('--disable', flow.disableSteps),
+    ...flowEditFlags('--insert', flow.insertSteps),
+  ]
   return [
     [
       'project',
@@ -2068,6 +2095,9 @@ export function workspaceCreateCommands(
       ...projectSettingsArgs(request),
       '--no-wait',
     ],
+    ...(edits.length
+      ? [['flow', 'edit', '--project', projectRoot, '--yes', '--plain', ...edits]]
+      : []),
     [
       'workspace',
       'create',
@@ -2083,6 +2113,20 @@ export function workspaceCreateCommands(
       ...parameterArgs(request.workspaceSpec.parameters),
     ],
   ]
+}
+
+function flowEditFlags(flag: string, value: unknown): string[] {
+  if (value === undefined) return []
+  if (
+    !Array.isArray(value) ||
+    value.some(
+      (step) =>
+        typeof step !== 'string' || !/^[a-z][a-z0-9_]*(?:@[a-z][a-z0-9_]*)?$/.test(step),
+    )
+  ) {
+    throw new Error('Flow selection contains an invalid ECC step.')
+  }
+  return value.flatMap((step: string) => [flag, step])
 }
 
 export function workspaceRefreshArgs(options: {

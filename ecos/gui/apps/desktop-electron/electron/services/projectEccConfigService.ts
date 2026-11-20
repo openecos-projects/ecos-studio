@@ -103,7 +103,11 @@ export class ProjectEccConfigService {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyResult(false)
       throw error
     }
-    const pdk = pdkTableOf(parseDocument(text))
+    const document = parseDocument(text)
+    const pdk = pdkTableOf(document)
+    const flow = document.flow as Record<string, unknown> | undefined
+    const skipSteps = isStringArray(flow?.skip_steps) ? flow.skip_steps : undefined
+    const insertSteps = isStringArray(flow?.insert_steps) ? flow.insert_steps : undefined
     const externalPaths = isStringArray(pdk.external_paths) ? pdk.external_paths : []
     return {
       exists: true,
@@ -111,6 +115,7 @@ export class ProjectEccConfigService {
       pdkRoot: typeof pdk.root === 'string' ? pdk.root : '',
       externalPaths,
       overrides: readOverrides(pdk),
+      ...(skipSteps || insertSteps ? { flowSelection: { skipSteps, insertSteps } } : {}),
     }
   }
 

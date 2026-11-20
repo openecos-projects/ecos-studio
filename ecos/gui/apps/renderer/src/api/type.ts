@@ -376,11 +376,16 @@ export function sameFlowStepName(left: string, right: string): boolean {
  * config on `preFloorplan` rather than a `Floorplan` step.
  */
 export function catalogAppliesToFlowStep(appliesTo: string, stepPath: string): boolean {
-  if (sameFlowStepName(appliesTo, stepPath)) return true
-  return (
-    sameFlowStepName(appliesTo, StepEnum.FLOORPLAN) &&
-    sameFlowStepName(stepPath, StepEnum.PRE_FLOORPLAN)
-  )
+  return appliesTo
+    .split(',')
+    .some(
+      (step) =>
+        sameFlowStepName(step, stepPath) ||
+        (sameFlowStepName(step, StepEnum.FLOORPLAN) &&
+          sameFlowStepName(stepPath, StepEnum.PRE_FLOORPLAN)) ||
+        (sameFlowStepName(step, StepEnum.PRE_FLOORPLAN) &&
+          sameFlowStepName(stepPath, StepEnum.FLOORPLAN)),
+    )
 }
 
 const STEP_TOOL_LABELS: Record<string, string> = {

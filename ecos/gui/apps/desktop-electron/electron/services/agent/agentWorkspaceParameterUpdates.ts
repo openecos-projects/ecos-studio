@@ -19,6 +19,7 @@ type Knob = {
   kind: ValueKind
   parameter: string
   step?: string
+  applicableSteps?: string[]
   range?: readonly [number, number]
   transform?: (value: ParameterValue) => ParameterValue
 }
@@ -138,20 +139,32 @@ function knobFromCatalogEntry(
 ): Knob | null {
   const specKey = typeof entry.id === 'string' ? entry.id : ''
   if (!specKey) return null
-  // Known knobs keep their GUI-side value shaping (ranges, transforms).
   const builtin = builtinKnobs[knobId]
   const applies = entry.appliesTo ?? entry.applies
-  const step =
-    specKey.startsWith('place.') &&
-    typeof applies === 'string' &&
-    /^[a-z][a-z_]*$/.test(applies)
+  const applicableSteps =
+    typeof applies === 'string'
       ? applies
-      : undefined
-  if (builtin) return { ...builtin, parameter: specKey, step: step ?? builtin.step }
+          .split(',')
+          .map((step) => step.trim())
+          .filter(
+            (step) => /^[a-z][a-z0-9_]*$/.test(step) && step !== 'all' && step !== 'pdk',
+          )
+      : []
+  const scoped = specKey.startsWith('place.')
+  const step = scoped && applicableSteps.length === 1 ? applicableSteps[0] : undefined
+  if (builtin)
+    return {
+      ...builtin,
+      parameter: specKey,
+      step,
+      applicableSteps,
+      range: catalogRange(entry),
+    }
   const kind = catalogValueKind(entry.type)
   if (!kind) return null
   const knob = workspace(specKey, kind, catalogRange(entry))
-  if (step) knob.step = step
+  knob.step = step
+  knob.applicableSteps = applicableSteps
   if (kind === 'boolean') {
     return { ...knob, transform: (value) => (value ? 1 : 0) }
   }
@@ -291,7 +304,15 @@ export function deriveAgentWorkspaceParameterUpdates(
     const knob = knobs[item.knob_id]
     if (!knob || !validValue(item.value, knob)) return null
     const value = knob.transform?.(item.value) ?? item.value
-    const key = knob.step ? `${knob.step}:${knob.parameter}` : knob.parameter
+    const scoped = knob.parameter.startsWith('place.')
+    if (
+      item.step &&
+      (!scoped || !(knob.applicableSteps ?? [knob.step]).includes(item.step))
+    )
+      return null
+    const step = item.step ?? knob.step
+    if (scoped && !step) return null
+    const key = step ? `${step}:${knob.parameter}` : knob.parameter
     const previous = valuesByParameter.get(key)
     const conflicting =
       previous !== undefined &&

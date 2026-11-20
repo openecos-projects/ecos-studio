@@ -279,11 +279,55 @@ export function useDesignReportExport({
         currentProject.value?.name ||
         'gcd'
 
-      // Snapshots carry no inlined step reports; backend workspaces use
-      // the same bounded artifact-path scanning as frontend workspaces below.
       const stepMetrics: Record<string, unknown> = {}
       const stepSummaries: Record<string, unknown> = {}
       const stepHotspots: Record<string, unknown> = {}
+      let staTimingIssues: Record<string, unknown> | null = null
+
+      if (isBackend) {
+        const artifacts = runtimeSnapshot?.engineeringSnapshot?.artifacts ?? []
+        for (const entry of artifacts) {
+          if (entry.availability !== 'available') continue
+          const step = canonicalizeStageName(entry.stepId)
+          const bucket =
+            entry.kind === 'qor_metrics'
+              ? stepMetrics
+              : entry.kind === 'qor_summary'
+                ? stepSummaries
+                : entry.kind === 'qor_hotspots'
+                  ? stepHotspots
+                  : null
+          if (bucket) {
+            const report = await readWorkspaceJson(entry.reference)
+            if (report) bucket[step] = report
+          } else if (entry.kind === 'power_report') {
+            const report = await readWorkspaceText(entry.reference)
+            if (report) {
+              stepMetrics[step] = {
+                ...(stepMetrics[step] as object),
+                ...parsePowerRpt(report),
+              }
+            }
+          } else if (entry.kind === 'sta_timing_issues') {
+            staTimingIssues = await readWorkspaceJson(entry.reference)
+          } else if (entry.kind === 'timing_summary' || entry.kind === 'timing_paths') {
+            const report = await readWorkspaceJson(entry.reference)
+            if (report) {
+              const data = (stepMetrics[step] ?? {}) as Record<string, unknown>
+              const corner = entry.name.split('/').slice(0, -1).join('/')
+              if (corner) {
+                const corners = (data.corners ?? {}) as Record<string, object>
+                stepMetrics[step] = {
+                  ...data,
+                  corners: { ...corners, [corner]: { ...corners[corner], ...report } },
+                }
+              } else {
+                stepMetrics[step] = { ...data, ...report }
+              }
+            }
+          }
+        }
+      }
 
       const stepList =
         resourceIndex &&
@@ -295,7 +339,7 @@ export function useDesignReportExport({
             : []
 
       await Promise.all(
-        stepList.map(async (rawStep: unknown) => {
+        (isBackend ? [] : stepList).map(async (rawStep: unknown) => {
           if (!rawStep || typeof rawStep !== 'object') return
           const stepObj = rawStep as Record<string, unknown>
           const stepName = typeof stepObj.name === 'string' ? stepObj.name : ''
@@ -587,10 +631,11 @@ export function useDesignReportExport({
       )
 
       const sta = stepList.find((entry: { name?: string }) => entry?.name === 'sta')
-      const staTimingIssues =
-        typeof sta?.directory === 'string'
-          ? await readWorkspaceJson(`${sta.directory}/analysis/sta_timing_issues.json`)
-          : null
+      if (!isBackend && typeof sta?.directory === 'string') {
+        staTimingIssues = await readWorkspaceJson(
+          `${sta.directory}/analysis/sta_timing_issues.json`,
+        )
+      }
 
       if (unmounted || generation !== loadGeneration) return
 

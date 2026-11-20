@@ -40,6 +40,7 @@ import type {
 import {
   desktopAgentParameterWriteFiles,
   hasSafeJsonPath,
+  agentParameterIdentity,
   parameterWritesMatchPatch,
 } from '@ecos-studio/shared'
 import type {
@@ -1882,18 +1883,25 @@ function readWorkspaceRerunPatch(
     const record = readRecord(item)
     const knobId = record.knob_id
     const patchValue = record.value
+    const step = record.step
     if (
       typeof knobId !== 'string' ||
       !/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/.test(knobId) ||
+      (step !== undefined &&
+        (typeof step !== 'string' || !rerunStepPattern.test(step))) ||
       !isWorkspaceRerunParameterValue(patchValue)
     ) {
       return null
     }
-    return { knob_id: knobId, value: patchValue }
+    return {
+      knob_id: knobId,
+      value: patchValue,
+      ...(typeof step === 'string' ? { step } : {}),
+    }
   })
   if (patch.some((item) => item === null)) return null
   const normalized = patch as DesktopAgentWorkspaceRerunContract['parameter_patch']
-  return new Set(normalized.map((item) => item.knob_id)).size === normalized.length
+  return new Set(normalized.map(agentParameterIdentity)).size === normalized.length
     ? normalized
     : null
 }
@@ -2058,10 +2066,13 @@ function readWorkspaceParameterWrites(
     const file = record.file
     const surface = record.surface
     const jsonPath = record.json_path
+    const step = record.step
     if (
       typeof knobId !== 'string' ||
       !/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/.test(knobId) ||
       typeof file !== 'string' ||
+      (step !== undefined &&
+        (typeof step !== 'string' || !rerunStepPattern.test(step))) ||
       !(desktopAgentParameterWriteFiles as readonly string[]).includes(file) ||
       (surface !== 'parameters' && surface !== 'step_config') ||
       !isWorkspaceRerunParameterValue(record.value) ||
@@ -2074,13 +2085,14 @@ function readWorkspaceParameterWrites(
       file: file as DesktopAgentWorkspaceParameterWrite['file'],
       json_path: jsonPath as (string | number)[],
       knob_id: knobId,
+      ...(typeof step === 'string' ? { step } : {}),
       surface,
       value: record.value,
     }
   })
   if (writes.some((item) => item === null)) return null
   const normalized = writes as DesktopAgentWorkspaceParameterWrite[]
-  return new Set(normalized.map((item) => item.knob_id)).size === normalized.length
+  return new Set(normalized.map(agentParameterIdentity)).size === normalized.length
     ? normalized
     : null
 }

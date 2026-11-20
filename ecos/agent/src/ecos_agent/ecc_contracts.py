@@ -54,6 +54,7 @@ class ECCParameterPatchItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     knob_id: str
+    step: ECCStepName | None = Field(default=None, exclude_if=lambda value: value is None)
     value: ParameterPatchValue
 
     @field_validator("knob_id")
@@ -85,6 +86,6 @@ class ECCParameterPatch(BaseModel):
     @field_validator("items")
     @classmethod
     def require_unique_knobs(cls, value: list[ECCParameterPatchItem]) -> list[ECCParameterPatchItem]:
-        if len({item.knob_id for item in value}) != len(value):
-            raise ValueError("parameter patch knob_ids must be unique")
+        if len({(item.step, item.knob_id) for item in value}) != len(value):
+            raise ValueError("parameter patch step and knob_id pairs must be unique")
         return value

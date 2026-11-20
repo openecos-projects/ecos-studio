@@ -342,6 +342,43 @@ describe('product e2e: backend rtl2gds journey', () => {
     await shot('flow-success', '#/workspace/home')
   }, 120_000)
 
+  it('shows power summary values from the ECC artifact index', async () => {
+    const page = launched!.page
+    const snapshot = JSON.parse(
+      await readFile(
+        join(workspace!.workspaceDir, 'home/engineering-snapshot.json'),
+        'utf8',
+      ),
+    ) as { artifacts: Array<{ kind: string; reference: string; availability: string }> }
+    const power = snapshot.artifacts.find(
+      (entry) => entry.kind === 'power_summary' && entry.availability === 'available',
+    )
+    expect(power).toBeDefined()
+    const summary = JSON.parse(
+      await readFile(join(workspace!.workspaceDir, power!.reference), 'utf8'),
+    ) as Record<string, number>
+    await page.evaluate(() => {
+      window.location.hash = '#/workspace/home?insight=power'
+    })
+    const panel = page.locator('.power-summary-panel')
+    await panel
+      .getByRole('heading', { name: 'Power Summary' })
+      .waitFor({ state: 'visible' })
+    const keys = ['internal_uw', 'switching_uw', 'dynamic_uw', 'leakage_uw']
+    const expected = await page.evaluate(
+      (values) =>
+        values.map((value) =>
+          value.toLocaleString(undefined, { maximumFractionDigits: 3 }),
+        ),
+      keys.map((key) => summary[key]!),
+    )
+    expect(await panel.locator('dd').allTextContents()).toEqual(expected)
+    await shot('power-summary-from-ecc')
+    await page.evaluate(() => {
+      window.location.hash = '#/workspace/home'
+    })
+  }, 60_000)
+
   it.skipIf(!process.env.ECOS_E2E_LIT_SUITE)(
     'passes the signoff-lit artifact gate',
     () => {

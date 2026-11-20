@@ -777,6 +777,7 @@ export async function readWorkspaceArtifact(
       'qor_summary',
       'qor_hotspots',
       'report_text',
+      'power_summary',
     ].includes(artifact.kind) ||
     !reader
   ) {
@@ -818,7 +819,7 @@ export async function readWorkspaceArtifact(
     return unavailable('ARTIFACT_INVALID_JSON')
   }
   let text: string | undefined
-  if (artifact.kind === 'report_text') {
+  if (artifact.kind === 'report_text' || artifact.kind === 'power_summary') {
     try {
       text = new TextDecoder('utf-8', { fatal: true }).decode(read.bytes)
     } catch {

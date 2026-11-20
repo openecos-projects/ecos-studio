@@ -562,6 +562,35 @@
                     </div>
                   </div>
 
+                  <div
+                    v-if="
+                      !sourceContext && !standaloneWorkspace && runnableFlowSteps.length
+                    "
+                    class="mb-5 text-sm"
+                  >
+                    <label for="workspace-lec-after" class="mr-2 font-semibold"
+                      >Insert LEC after</label
+                    >
+                    <select
+                      id="workspace-lec-after"
+                      v-model="lecInsertion"
+                      name="lec-after"
+                      class="rounded-md border border-(--border-color) bg-(--bg-primary) px-2 py-1"
+                    >
+                      <option value="">Keep project setting</option>
+                      <option v-for="step in runnableFlowSteps" :key="step" :value="step">
+                        {{ step }}
+                      </option>
+                    </select>
+                    <p
+                      v-if="declaredFlowSelection?.insertSteps?.length"
+                      class="mt-2 text-xs text-(--text-secondary)"
+                    >
+                      Configured LEC checks
+                      {{ declaredFlowSelection.insertSteps.join(', ') }}
+                    </p>
+                  </div>
+
                   <p
                     v-if="sourceContext"
                     class="mb-5 rounded-lg border border-(--border-color) bg-(--bg-primary)/60 px-4 py-3 text-xs text-(--text-secondary)"
@@ -664,10 +693,10 @@
                             Before start
                           </span>
                           <span
-                            v-else-if="defaultSkippedFlowStepNames.has(step.name)"
+                            v-else-if="skippedFlowStepNames.has(step.name)"
                             class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
                           >
-                            Skipped by default
+                            Skipped
                           </span>
                           <span
                             v-else-if="skippableFlowStepNames.has(step.name)"
@@ -676,6 +705,33 @@
                             Skippable
                           </span>
                         </button>
+
+                        <label
+                          v-if="
+                            !sourceContext &&
+                            !standaloneWorkspace &&
+                            selectedFlowSteps.includes(step.name) &&
+                            skippableFlowStepNames.has(step.name)
+                          "
+                          class="mt-2 flex items-center gap-2 text-xs text-(--text-secondary)"
+                          @click.stop
+                        >
+                          <input
+                            type="checkbox"
+                            :name="`run-${step.name}`"
+                            :checked="!skippedFlowStepNames.has(step.name)"
+                            :disabled="
+                              step.name === flowStartStep || step.name === flowEndStep
+                            "
+                            @change="
+                              flowStepChoices.set(
+                                step.name,
+                                ($event.target as HTMLInputElement).checked,
+                              )
+                            "
+                          />
+                          Run {{ step.name }} in this project
+                        </label>
 
                         <div
                           v-if="step.name === 'cts' && isFlowStepRunnable(step.name)"
@@ -689,6 +745,7 @@
                             <input
                               id="cts-clock-tree-visualization"
                               v-model="config.parameters.clock_tree"
+                              @change="editedParameterFields.add('clock_tree')"
                               type="checkbox"
                               class="h-4 w-4 shrink-0 accent-(--accent-color)"
                             />
@@ -712,6 +769,9 @@
                           <select
                             id="sta-max-parallel-corners"
                             v-model.number="config.parameters.sta_max_parallel_corners"
+                            @change="
+                              editedParameterFields.add('sta_max_parallel_corners')
+                            "
                             class="mt-2 w-full cursor-pointer rounded-md border border-(--border-color) bg-(--bg-primary)/75 px-2 py-1.5 text-xs text-(--text-primary)"
                           >
                             <option
@@ -739,6 +799,9 @@
                             <input
                               id="macro-manual-placement"
                               v-model="config.parameters.manual_macro_placement"
+                              @change="
+                                editedParameterFields.add('manual_macro_placement')
+                              "
                               type="checkbox"
                               class="h-4 w-4 shrink-0 accent-(--accent-color)"
                             />
@@ -769,8 +832,7 @@
                 <header class="mb-7">
                   <h2 class="text-2xl font-bold text-(--text-primary)">Design Files</h2>
                   <p class="mt-2 text-sm text-(--text-secondary)">
-                    Inputs adapt to the first selected flow step. Constraints are imported
-                    here.
+                    ECC validates the files for the selected flow entry.
                   </p>
                 </header>
 
@@ -795,9 +857,6 @@
                       <span>
                         <span class="block text-sm font-semibold text-(--text-primary)">{{
                           item.label
-                        }}</span>
-                        <span class="mt-1 block text-xs text-(--text-secondary)">{{
-                          item.required ? 'Required' : 'Optional'
                         }}</span>
                       </span>
                       <i
@@ -866,11 +925,6 @@
                             {{ activeDesignInput?.description }}
                           </p>
                         </div>
-                        <span
-                          class="rounded-md border border-(--border-color) bg-(--bg-secondary)/55 px-2 py-1 text-xs font-semibold text-(--text-secondary)"
-                        >
-                          {{ activeDesignInput?.required ? 'Required' : 'Optional' }}
-                        </span>
                       </div>
 
                       <div class="flex flex-col gap-3 md:flex-row">
@@ -1305,7 +1359,18 @@
                     </div>
                   </section>
 
+                  <p
+                    v-if="
+                      pdkConfigMode === 'default' &&
+                      !hasProjectPdkResourceOverrides &&
+                      !selectedPdk?.defaultResources
+                    "
+                    class="rounded-lg border border-(--border-color) p-3 text-sm text-(--text-secondary)"
+                  >
+                    ECC selects the default resources for this installation.
+                  </p>
                   <section
+                    v-else
                     class="flex min-h-[420px] flex-col rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3"
                   >
                     <div class="mb-3 flex items-start justify-between gap-4">
@@ -1533,6 +1598,7 @@
                       >
                       <input
                         v-model.number="config.parameters.frequency_max"
+                        @input="editedParameterFields.add('frequency_max')"
                         type="number"
                         min="1"
                         step="1"
@@ -1546,6 +1612,7 @@
                       >
                       <input
                         v-model.number="config.parameters.max_fanout"
+                        @input="editedParameterFields.add('max_fanout')"
                         type="number"
                         min="1"
                         step="1"
@@ -1579,7 +1646,7 @@
                               ? 'bg-(--accent-color) text-white'
                               : 'text-(--text-secondary) hover:text-(--text-primary)'
                           "
-                          @click="dieAreaMode = 'width_height'"
+                          @click="selectDieAreaMode('width_height')"
                         >
                           Width / Height
                         </button>
@@ -1591,7 +1658,7 @@
                               ? 'bg-(--accent-color) text-white'
                               : 'text-(--text-secondary) hover:text-(--text-primary)'
                           "
-                          @click="dieAreaMode = 'utilization_margin'"
+                          @click="selectDieAreaMode('utilization_margin')"
                         >
                           Core Utilization
                         </button>
@@ -1607,6 +1674,7 @@
                           >
                           <input
                             v-model.number="config.parameters.die_width"
+                            @input="editedParameterFields.add('die_width')"
                             type="number"
                             min="1"
                             step="1"
@@ -1620,6 +1688,7 @@
                           >
                           <input
                             v-model.number="config.parameters.die_height"
+                            @input="editedParameterFields.add('die_height')"
                             type="number"
                             min="1"
                             step="1"
@@ -1664,6 +1733,7 @@
                         >
                         <input
                           v-model.number="config.parameters.utilization"
+                          @input="editedParameterFields.add('utilization')"
                           type="number"
                           min="0.01"
                           max="1"
@@ -1783,7 +1853,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import type { Project, WorkspaceConfig } from '../types'
 import { usePdkManager } from '../composables/usePdkManager'
 import { useWorkspace } from '../composables/useWorkspace'
@@ -1838,7 +1908,7 @@ type ProjectMode = 'select' | 'create'
 type FlowStepName = string
 
 const NO_FLOW_STEP_NAMES: ReadonlySet<string> = new Set()
-type DesignInputKey = 'rtl' | 'filelist' | 'def' | 'verilog' | 'sdc'
+type DesignInputKey = 'def' | 'verilog' | 'sdc' | 'golden_netlist' | 'spef'
 type PdkResourceKey = 'tech_lef' | 'cell_lef' | 'liberty'
 // Canonical mode is 'utilization_margin'; the misspelled 'utilitization_margin'
 // is a legacy persisted value that normalizeDieAreaMode still accepts.
@@ -1855,7 +1925,6 @@ interface ProjectContext {
 interface DesignInputType {
   key: DesignInputKey
   label: string
-  required: boolean
   description: string
 }
 
@@ -1878,6 +1947,7 @@ interface SourceContext {
 
 const emit = defineEmits<Emits>()
 const props = defineProps<Props>()
+const editedParameterFields = new Set(Object.keys(props.initialConfig?.parameters ?? {}))
 const wizardTitle = computed(() => props.title || 'New Workspace')
 const standaloneWorkspace = computed(() =>
   Boolean(props.initialConfig?.standaloneWorkspace),
@@ -2069,10 +2139,23 @@ const skippableFlowStepNames = computed<ReadonlySet<string>>(() => {
   return new Set(ids.filter((id): id is string => typeof id === 'string'))
 })
 
+const flowStepChoices = reactive(new Map<string, boolean>())
+const lecInsertion = ref('')
+const declaredFlowSelection = ref<ProjectEccPdkConfigReadResult['flowSelection']>()
 const defaultSkippedFlowStepNames = computed<ReadonlySet<string>>(() => {
   const ids = discoveredFlowDefinition.value?.defaultSkippedStepIds
   if (!Array.isArray(ids)) return NO_FLOW_STEP_NAMES
   return new Set(ids.filter((id): id is string => typeof id === 'string'))
+})
+const skippedFlowStepNames = computed(() => {
+  const skipped = new Set(
+    declaredFlowSelection.value?.skipSteps ?? defaultSkippedFlowStepNames.value,
+  )
+  for (const [name, enabled] of flowStepChoices) {
+    if (enabled) skipped.delete(name)
+    else skipped.add(name)
+  }
+  return skipped
 })
 
 const flowStepOptions = computed<Array<{ name: FlowStepName; description: string }>>(
@@ -2252,8 +2335,6 @@ function createInitialConfig(
       die_height: 100,
       utilization: 0.3,
       margin: 2,
-      target_density: 0.2,
-      target_overflow: 0.1,
       ...source_config?.parameters,
       ...initialConfig?.parameters,
     }),
@@ -2262,6 +2343,8 @@ function createInitialConfig(
         ? ''
         : (initialConfig?.origin_def ?? source_config?.origin_def ?? ''),
     origin_verilog: initialConfig?.origin_verilog ?? source_config?.origin_verilog ?? '',
+    golden_netlist: initialConfig?.golden_netlist ?? source_config?.golden_netlist,
+    spef: initialConfig?.spef ?? source_config?.spef,
     rtl_list: initialConfig?.rtl_list
       ? [...initialConfig.rtl_list]
       : source_config?.rtl_list
@@ -2530,11 +2613,8 @@ const flowStepsBeforeStart = computed<ReadonlySet<string>>(() => {
   if (start <= 0) return NO_FLOW_STEP_NAMES
   return new Set(flowStepOptions.value.slice(0, start).map((step) => step.name))
 })
-// Steps ECC will actually run for this range: the default skip policy still
-// applies (GUI submits no skip_steps), so default-skipped steps are in the
-// range but never execute.
 const runnableFlowSteps = computed(() =>
-  selectedFlowSteps.value.filter((name) => !defaultSkippedFlowStepNames.value.has(name)),
+  selectedFlowSteps.value.filter((name) => !skippedFlowStepNames.value.has(name)),
 )
 const flowSetupReady = computed(
   () => !isLoadingWorkspaceCreationModel.value && selectedFlowSteps.value.length > 0,
@@ -2548,56 +2628,39 @@ const hasSelectedPdkConfig = computed(
     config.value.pdk_root.trim() !== '',
 )
 
-const designInputTypes = computed<DesignInputType[]>(() => {
-  if (startsFromSynthesis.value) {
-    return [
-      {
-        key: 'sdc',
-        label: 'SDC',
-        required: false,
-        description: 'Import optional timing constraints.',
-      },
-    ]
-  }
+const constraintInput: DesignInputType = {
+  key: 'sdc',
+  label: 'SDC',
+  description: 'Timing constraints.',
+}
 
-  if (startsFromPreFloorplan.value) {
-    return [
-      {
-        key: 'verilog',
-        label: 'Verilog',
-        required: true,
-        description: 'Import the synthesized Verilog netlist for floorplan.',
-      },
-      {
-        key: 'sdc',
-        label: 'SDC',
-        required: false,
-        description: 'Import optional timing constraints.',
-      },
-    ]
-  }
-
-  return [
-    {
-      key: 'def',
-      label: 'DEF',
-      required: true,
-      description: 'Import the starting DEF file for post-synthesis flow.',
-    },
-    {
-      key: 'verilog',
-      label: 'Verilog',
-      required: true,
-      description: 'Import the synthesized Verilog netlist.',
-    },
-    {
-      key: 'sdc',
-      label: 'SDC',
-      required: false,
-      description: 'Import optional timing constraints.',
-    },
-  ]
-})
+const designInputTypes = computed<DesignInputType[]>(() =>
+  startsFromSynthesis.value
+    ? [constraintInput]
+    : [
+        {
+          key: 'def',
+          label: 'DEF',
+          description: 'Import the starting DEF file for post-synthesis flow.',
+        },
+        {
+          key: 'verilog',
+          label: 'Verilog',
+          description: 'Import the synthesized Verilog netlist.',
+        },
+        {
+          key: 'golden_netlist',
+          label: 'Reference netlist',
+          description: 'Reference Verilog for equivalence checking.',
+        },
+        {
+          key: 'spef',
+          label: 'SPEF',
+          description: 'Extracted parasitics for timing analysis.',
+        },
+        constraintInput,
+      ],
+)
 
 const activeDesignInput = computed(() =>
   designInputTypes.value.find((item) => item.key === activeDesignInputType.value),
@@ -2610,10 +2673,7 @@ const selectedPdk = computed(() =>
   pdkOptions.value.find((pdk) => pdk.id === selectedPdkId.value),
 )
 const defaultConfigAvailable = computed(
-  () =>
-    selectedPdk.value?.readiness === 'ready' &&
-    selectedPdk.value.supportsEccDefaults &&
-    Boolean(selectedPdk.value.defaultResources),
+  () => selectedPdk.value?.readiness === 'ready' && selectedPdk.value.supportsEccDefaults,
 )
 const defaultConfigUnavailableReason = computed(() => {
   if (!selectedPdk.value) return 'Select a PDK first.'
@@ -2624,8 +2684,6 @@ const defaultConfigUnavailableReason = computed(() => {
   if (!isPdkEligible(selectedPdk.value)) return 'This PDK is not validated.'
   if (!selectedPdk.value.supportsEccDefaults)
     return 'ECC defaults are only available for a known PDK layout.'
-  if (!selectedPdk.value.defaultResources)
-    return 'Default PDK resources are unavailable; re-check the PDK.'
   return ''
 })
 const manualPdkDetectedFiles = ref<PdkDetectedFiles | null>(null)
@@ -2661,7 +2719,6 @@ const projectPdkMismatch = computed(() => {
 const effectiveDefaultPdkResources = computed<Record<PdkResourceKey, string[]>>(() => {
   const defaults = selectedPdk.value?.defaultResources
   if (
-    !defaults ||
     projectPdkMismatch.value ||
     isLoadingProjectEccPdk.value ||
     projectEccPdkError.value
@@ -2673,13 +2730,19 @@ const effectiveDefaultPdkResources = computed<Record<PdkResourceKey, string[]>>(
   const resolve = (file: string) => resolvePdkFileIn(file, root)
   return {
     tech_lef:
-      overrides?.tech !== undefined ? [resolve(overrides.tech)] : [defaults.techLef],
+      overrides?.tech !== undefined
+        ? [resolve(overrides.tech)]
+        : defaults
+          ? [defaults.techLef]
+          : [],
     cell_lef:
       overrides?.lefs !== undefined
         ? overrides.lefs.map(resolve)
-        : [...defaults.cellLefs],
+        : [...(defaults?.cellLefs ?? [])],
     liberty:
-      overrides?.libs !== undefined ? overrides.libs.map(resolve) : [...defaults.liberty],
+      overrides?.libs !== undefined
+        ? overrides.libs.map(resolve)
+        : [...(defaults?.liberty ?? [])],
   }
 })
 const hasProjectPdkResourceOverrides = computed(() => {
@@ -2825,9 +2888,7 @@ const canProceed = computed(() => {
       )
         return false
       if (pdkConfigMode.value === 'default') {
-        return pdkWizardSteps.every(
-          (step) => effectiveDefaultPdkResources.value[step.key].length > 0,
-        )
+        return defaultConfigAvailable.value
       }
       return (
         pdkSelections.value.tech_lef.length > 0 &&
@@ -3459,7 +3520,7 @@ function isFlowStepSelected(stepName: FlowStepName) {
 }
 
 function isFlowStepRunnable(stepName: FlowStepName) {
-  return isFlowStepSelected(stepName) && !defaultSkippedFlowStepNames.value.has(stepName)
+  return isFlowStepSelected(stepName) && !skippedFlowStepNames.value.has(stepName)
 }
 
 function isFlowStepBeforeStart(stepName: FlowStepName) {
@@ -3641,6 +3702,7 @@ async function importDesignInput(type: DesignInputKey) {
   if (type === 'sdc') sdcPath.value = file
   if (type === 'def') config.value.origin_def = file
   if (type === 'verilog') config.value.origin_verilog = file
+  if (type === 'golden_netlist' || type === 'spef') config.value[type] = file
   syncWorkspaceConfig()
 }
 
@@ -3660,10 +3722,17 @@ function getDesignFileOptions(type: DesignInputKey): DesktopFileDialogOptions | 
         filters: [{ name: 'DEF Files', extensions: ['def', 'gz'] }],
       }
     case 'verilog':
+    case 'golden_netlist':
       return {
         ...common,
         title: 'Select Verilog Netlist',
         filters: [{ name: 'Verilog Files', extensions: ['v', 'sv', 'vg', 'gz'] }],
+      }
+    case 'spef':
+      return {
+        ...common,
+        title: 'Select SPEF File',
+        filters: [{ name: 'SPEF Files', extensions: ['spef', 'gz'] }],
       }
     default:
       return null
@@ -3680,7 +3749,8 @@ function isAllowedDesignInputPath(type: DesignInputKey, path: string) {
 
   if (type === 'sdc') return matches(['sdc'])
   if (type === 'def') return matches(['def'])
-  if (type === 'verilog') return matches(['v', 'sv', 'vg'])
+  if (type === 'verilog' || type === 'golden_netlist') return matches(['v', 'sv', 'vg'])
+  if (type === 'spef') return matches(['spef'])
   return false
 }
 
@@ -3688,6 +3758,7 @@ function getDesignInputPath(type: DesignInputKey) {
   if (type === 'sdc') return sdcPath.value
   if (type === 'def') return config.value.origin_def
   if (type === 'verilog') return config.value.origin_verilog
+  if (type === 'golden_netlist' || type === 'spef') return config.value[type] ?? ''
   return ''
 }
 
@@ -3745,12 +3816,8 @@ function designFilesReady() {
   if (startsFromSynthesis.value) {
     return mpcDesignProject.value || effectiveSynthesisDesignInputs() !== null
   }
-  if (startsFromPreFloorplan.value) {
-    return config.value.origin_verilog.trim() !== ''
-  }
-  return (
-    config.value.origin_def.trim() !== '' && config.value.origin_verilog.trim() !== ''
-  )
+  // ECC checks entry inputs against the selected execution plan.
+  return true
 }
 
 function pdkValidationMessage(pdk: import('../types').ImportedPdk): string {
@@ -4101,14 +4168,6 @@ function specReady() {
   if (!hasCoreFields || projectManifestError.value || isLoadingProjectManifest.value) {
     return false
   }
-  if (
-    Number(params.target_density) < 0.1 ||
-    Number(params.target_density) > 1 ||
-    Number(params.target_overflow) <= 0 ||
-    Number(params.target_overflow) > 1
-  ) {
-    return false
-  }
   if (dieAreaMode.value === 'width_height') {
     return (
       Number(params.die_width) > 0 &&
@@ -4133,6 +4192,28 @@ function syncWorkspaceConfig() {
     start_step: flowStartStep.value,
     end_step: flowEndStep.value,
     steps: selectedFlowSteps.value,
+    ...(sourceContext.value || standaloneWorkspace.value
+      ? {}
+      : {
+          enable_steps: [...flowStepChoices]
+            .filter(
+              ([step, enabled]) => enabled && selectedFlowSteps.value.includes(step),
+            )
+            .map(([step]) => step),
+          disable_steps: [...flowStepChoices]
+            .filter(
+              ([step, enabled]) =>
+                !enabled &&
+                selectedFlowSteps.value.includes(step) &&
+                step !== flowStartStep.value &&
+                step !== flowEndStep.value,
+            )
+            .map(([step]) => step),
+          insert_steps:
+            lecInsertion.value && runnableFlowSteps.value.includes(lecInsertion.value)
+              ? [`lec@${lecInsertion.value}`]
+              : [],
+        }),
   }
   config.value.pdk_config = {
     mode: pdkConfigMode.value,
@@ -4145,7 +4226,8 @@ function syncWorkspaceConfig() {
     hasProjectPdkResourceOverrides.value &&
     !projectPdkMismatch.value &&
     !isLoadingProjectEccPdk.value &&
-    !projectEccPdkError.value
+    !projectEccPdkError.value &&
+    pdkWizardSteps.every(({ key }) => effectiveDefaultPdkResources.value[key].length > 0)
   ) {
     config.value.pdk_effective_resources = {
       tech_lef: [...effectiveDefaultPdkResources.value.tech_lef],
@@ -4352,6 +4434,17 @@ const topModuleReturnToDesignFiles = computed(() => {
 })
 
 watch(currentStep, (step) => {
+  if (step === 4 && projectContext.value.mode === 'select') {
+    const root = projectContext.value.project_root
+    void getDesktopApi()
+      .projectEccConfig.read(root)
+      .then((result) => {
+        if (projectContext.value.project_root === root) {
+          declaredFlowSelection.value = result.flowSelection
+        }
+      })
+      .catch(() => {})
+  }
   if (step === 6) void loadProjectEccPdkConfig()
   if (step === 7) void refreshTopModuleDiscovery()
 })
@@ -4360,6 +4453,9 @@ watch(
   () => projectContext.value.project_root,
   (root, previousRoot) => {
     if (previousRoot && previousRoot !== root) {
+      declaredFlowSelection.value = undefined
+      flowStepChoices.clear()
+      lecInsertion.value = ''
       projectEccPdkLoadGeneration += 1
       projectEccPdkConfig.value = null
       projectEccPdkOverrides.value = null
@@ -4394,11 +4490,33 @@ function createWorkspace() {
   syncWorkspaceConfig()
   isCreating.value = true
   try {
-    emit('create', config.value)
+    emit('create', {
+      ...config.value,
+      parameter_override_fields: [...editedParameterFields],
+    })
   } finally {
     isCreating.value = false
   }
 }
+
+function selectDieAreaMode(mode: DieAreaMode) {
+  dieAreaMode.value = mode
+  editedParameterFields.add('die_area_mode')
+}
+
+watch(workspaceCreationModel, (model) => {
+  if (
+    editedParameterFields.has('frequency_max') ||
+    props.initialConfig?.source_config?.parameters?.frequency_max !== undefined
+  )
+    return
+  const frequency = model?.parameters.find(
+    (item) => item.definition.id === 'design.frequency_mhz',
+  )?.value
+  if (typeof frequency === 'number' && frequency > 0) {
+    config.value.parameters.frequency_max = frequency
+  }
+})
 </script>
 
 <style scoped>

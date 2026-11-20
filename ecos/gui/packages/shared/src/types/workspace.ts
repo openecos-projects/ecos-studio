@@ -68,8 +68,12 @@ export interface WorkspaceConfig {
   pdk_installation_id?: string
   pdk_requirement?: PdkRequirement
   parameters: Partial<WorkspaceParameters> & Record<string, unknown>
+  /** Fields explicitly supplied to the wizard or edited by its user. */
+  parameter_override_fields?: string[]
   origin_def: string
   origin_verilog: string
+  golden_netlist?: string
+  spef?: string
   rtl_list: string[]
   filelist?: string
   design_input_mode?: 'rtl' | 'post_synthesis' | 'def'
@@ -81,6 +85,9 @@ export interface WorkspaceConfig {
     start_step: string
     end_step: string
     steps: string[]
+    enable_steps?: string[]
+    disable_steps?: string[]
+    insert_steps?: string[]
   }
   pdk_config?: {
     mode?: 'default' | 'manual'

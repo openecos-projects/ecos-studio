@@ -22,6 +22,10 @@ export function canonicalParameterWriteKey(
   return JSON.stringify([write.file, ...write.json_path])
 }
 
+export function agentParameterIdentity(item: { knob_id: string; step?: string }): string {
+  return item.step ? `${item.step}:${item.knob_id}` : item.knob_id
+}
+
 /**
  * True when every advertised patch entry has exactly one matching write:
  * same knob, corresponding value, legal surface/file pairing, and a unique
@@ -33,15 +37,16 @@ export function parameterWritesMatchPatch(
   writes: readonly DesktopAgentWorkspaceParameterWrite[],
 ): boolean {
   if (writes.length !== patch.length) return false
-  const patchesByKnob = new Map(patch.map((item) => [item.knob_id, item]))
+  const patchesByKnob = new Map(patch.map((item) => [agentParameterIdentity(item), item]))
   const writeKnobs = new Set<string>()
   const writePaths = new Set<string>()
   return writes.every((write) => {
     const pathKey = canonicalParameterWriteKey(write)
-    const patchItem = patchesByKnob.get(write.knob_id)
+    const key = agentParameterIdentity(write)
+    const patchItem = patchesByKnob.get(key)
     if (
       !patchItem ||
-      writeKnobs.has(write.knob_id) ||
+      writeKnobs.has(key) ||
       writePaths.has(pathKey) ||
       !(desktopAgentParameterWriteFiles as readonly string[]).includes(write.file) ||
       (write.file === 'home/params.toml') !== (write.surface === 'parameters') ||
@@ -51,7 +56,7 @@ export function parameterWritesMatchPatch(
     ) {
       return false
     }
-    writeKnobs.add(write.knob_id)
+    writeKnobs.add(key)
     writePaths.add(pathKey)
     return true
   })
@@ -68,7 +73,7 @@ function writePathMatchesKnob(write: DesktopAgentWorkspaceParameterWrite): boole
           : field === 'routability_opt'
             ? 'routability_opt_flag'
             : field
-      expected = ['params', 'step_params', 'placement', `place.${name}`]
+      expected = ['params', 'step_params', write.step ?? 'placement', `place.${name}`]
     } else {
       expected = workspacePaths[write.knob_id]
     }

@@ -7,10 +7,7 @@
     </div>
     <template v-else>
       <header class="power-summary-header">
-        <div>
-          <p class="power-summary-eyebrow">powerAnalysis.step.json</p>
-          <h3>Power Summary</h3>
-        </div>
+        <h3>Power Summary</h3>
         <span>µW</span>
       </header>
       <dl class="power-summary-grid">
@@ -61,25 +58,15 @@ function formatValue(key: (typeof metrics)[number]['key']): string {
   margin-bottom: 20px;
 }
 
-.power-summary-header h3,
-.power-summary-header p {
-  margin: 0;
-}
-
 .power-summary-header h3 {
+  margin: 0;
   color: var(--text-primary);
   font-size: 20px;
 }
 
-.power-summary-header > span,
-.power-summary-eyebrow {
+.power-summary-header > span {
   color: var(--text-secondary);
   font-size: 11px;
-}
-
-.power-summary-eyebrow {
-  margin-bottom: 5px !important;
-  font-family: var(--font-mono, monospace);
 }
 
 .power-summary-grid {

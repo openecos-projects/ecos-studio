@@ -1,15 +1,13 @@
 import { useWorkspaceJsonFile } from '@/composables/useWorkspaceJsonFile'
-import {
-  parsePowerSummaryStep,
-  POWER_SUMMARY_STEP_PATH,
-} from '@/components/flow-insights/powerSummary'
+import { parsePowerSummary } from '@/components/flow-insights/powerSummary'
 
 export function usePowerSummary() {
   const { data, loading, error, refresh } = useWorkspaceJsonFile(
-    POWER_SUMMARY_STEP_PATH,
-    parsePowerSummaryStep,
+    '',
+    parsePowerSummary,
     'Power analysis result is invalid.',
     'power_analysis',
+    'power_summary',
   )
   return { summary: data, loading, error, refresh }
 }

@@ -104,7 +104,16 @@ describe('useDesignReportExport', () => {
     })
     mockRuntimeSnapshot.mockResolvedValue({
       engineeringSnapshot: {
-        artifacts: [],
+        artifacts: [
+          {
+            artifactId: 'indexed-timing-issues',
+            availability: 'available',
+            kind: 'sta_timing_issues',
+            name: 'issues.json',
+            stepId: 'sta',
+            reference: '19_sta_ecc/results/issues.json',
+          },
+        ],
         cause: 'workspace.created',
         checklist: { items: [] },
         flow: {
@@ -161,8 +170,6 @@ describe('useDesignReportExport', () => {
     })
     expect(mockReadFlow).not.toHaveBeenCalled()
     expect(mockReadParameters).not.toHaveBeenCalled()
-    // Snapshots carry no inlined step reports; backend workspaces scan
-    // the same bounded artifact paths inside the workspace instead.
     expect(mockRequestProjectPathAccess).toHaveBeenCalled()
     const requestedPaths = mockRequestProjectPathAccess.mock.calls.map(
       ([path]) => path as string,
@@ -306,7 +313,7 @@ describe('useDesignReportExport', () => {
     )
   })
 
-  it('resolves fallback analysis paths inside the active workspace', async () => {
+  it('reads the indexed analysis reference inside the active workspace', async () => {
     const workspacePath = '/projects/gcd/ws_001'
     currentProject.value = {
       path: workspacePath,
@@ -325,9 +332,7 @@ describe('useDesignReportExport', () => {
     const requestedPaths = mockRequestProjectPathAccess.mock.calls.map(
       ([path]) => path as string,
     )
-    expect(requestedPaths).toContain(
-      `${workspacePath}/19_sta_ecc/analysis/sta_timing_issues.json`,
-    )
+    expect(requestedPaths).toContain(`${workspacePath}/19_sta_ecc/results/issues.json`)
     expect(requestedPaths.every((path) => path.startsWith(`${workspacePath}/`))).toBe(
       true,
     )

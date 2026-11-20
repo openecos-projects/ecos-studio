@@ -4,6 +4,7 @@ import { parseWorkspaceFlow } from './eccCli/persistedState'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import type { DesktopAgentWorkspaceRerunContract } from '@ecos-studio/shared'
+import { agentParameterIdentity } from '@ecos-studio/shared'
 import { isPathWithinRoot, isRelativePathOutsideRoot } from './pathScope'
 import {
   executeWorkspaceRerunDomain,
@@ -232,13 +233,11 @@ function hasValidParameterPatch(
   if (!Array.isArray(patch) || patch.length > 16) return false
   const knobs = new Set<string>()
   return patch.every((item) => {
-    if (
-      !/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/.test(item.knob_id) ||
-      knobs.has(item.knob_id)
-    ) {
+    const identity = agentParameterIdentity(item)
+    if (!/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/.test(item.knob_id) || knobs.has(identity)) {
       return false
     }
-    knobs.add(item.knob_id)
+    knobs.add(identity)
     return isWorkspaceRerunParameterValue(item.value)
   })
 }
@@ -251,7 +250,12 @@ function hasAuthorizedParameterPatch(
   const allowed = AUTHORIZED_KNOBS[targetStep as keyof typeof AUTHORIZED_KNOBS]
   return (
     Boolean(allowed) &&
-    patch.every((item) => allowed.has(item.knob_id) && isAuthorizedValue(item))
+    patch.every(
+      (item) =>
+        (!item.step || item.step === targetStep) &&
+        allowed.has(item.knob_id) &&
+        isAuthorizedValue(item),
+    )
   )
 }
 

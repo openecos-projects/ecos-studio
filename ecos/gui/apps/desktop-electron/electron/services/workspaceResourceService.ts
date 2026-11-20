@@ -1,5 +1,5 @@
 import { open, readdir, stat } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 import { isObsoleteFlowStepName } from '@ecos-studio/shared'
 import type {
   WorkspaceResourceFile,
@@ -9,8 +9,10 @@ import type {
   WorkspaceStepInfoResult,
   WorkspaceStepResource,
   WorkspaceTechResources,
+  EccPersistedEngineeringSnapshot,
 } from '@ecos-studio/shared'
 import type { ProjectScopeProvider } from './workspaceService'
+import { readPersistedEngineeringSnapshot } from './eccCli/engineeringSnapshotReader'
 import {
   locateWorkspaceParametersFile,
   parseWorkspaceParametersText,
@@ -174,9 +176,12 @@ export class WorkspaceResourceService {
                 step !== null && !isObsoleteFlowStepName(step.name),
             )
         : []
+    const snapshot = await readPersistedEngineeringSnapshot(root, undefined, 7, (path) =>
+      this.projectScopeProvider.requestProjectPathAccess(path),
+    ).catch(() => null)
     const flowSteps = await Promise.all(
       steps.map((step) =>
-        this.buildStepResource(root, design, topModule, step, statErrors),
+        this.buildStepResource(root, design, topModule, step, statErrors, snapshot),
       ),
     )
     const tech = await this.discoverTechResources(root, design, flowSteps, statErrors)
@@ -216,6 +221,7 @@ export class WorkspaceResourceService {
     topModule: string,
     step: FlowStepInput,
     errors: string[],
+    snapshot: EccPersistedEngineeringSnapshot | null,
   ): Promise<WorkspaceStepResource> {
     const tool = step.tool || 'unknown'
     const directory = join(root, step.directory)
@@ -243,6 +249,7 @@ export class WorkspaceResourceService {
       addUnknownResources(resources, directory, step.name)
     }
 
+    if (snapshot) applyIndexedResources(resources, root, step.name, snapshot)
     await this.discoverReportFiles(resources, directory, errors)
     await this.describeBuckets(resources, errors)
 
@@ -742,6 +749,42 @@ function createEmptyBuckets(): StepFileBuckets {
     subflow: {},
     checklist: {},
     config: {},
+  }
+}
+
+function applyIndexedResources(
+  resources: StepFileBuckets,
+  root: string,
+  step: string,
+  snapshot: EccPersistedEngineeringSnapshot,
+): void {
+  const outputs = snapshot.stepOutputs?.steps.find((entry) => entry.step === step)
+  for (const kind of ['def', 'verilog'] as const) {
+    const artifact = outputs?.[kind]
+    if (artifact?.exists) {
+      resources.output[kind] = createFile(resolve(root, artifact.path), 'output')
+    }
+  }
+  for (const artifact of snapshot.artifacts) {
+    if (artifact.stepId !== step || artifact.availability !== 'available') continue
+    const path = join(root, artifact.reference)
+    switch (artifact.kind) {
+      case 'layout_image':
+        resources.output.image = createFile(path, 'layout-image')
+        break
+      case 'layout_geometry':
+        resources.output.geometryManifest = createFile(path, 'output')
+        break
+      case 'qor_metrics':
+        resources.analysis.metrics = createFile(path, 'metrics')
+        break
+      case 'qor_summary':
+        resources.analysis.summary = createFile(path, 'analysis')
+        break
+      case 'qor_hotspots':
+        resources.analysis.hotspots = createFile(path, 'analysis')
+        break
+    }
   }
 }
 

@@ -2,12 +2,14 @@ import { computed, onScopeDispose, ref, watch } from 'vue'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import { getDesktopApi } from '@/platform/desktop'
 
 export function useWorkspaceJsonFile<T>(
   path: string,
   parse: (value: unknown) => T | null,
   invalidMessage: string,
   stepId?: string,
+  artifactKind?: string,
 ) {
   const { currentProject } = useWorkspace()
   const session = useBackendWorkspaceSession()
@@ -27,11 +29,21 @@ export function useWorkspaceJsonFile<T>(
     const projectPath = currentProject.value?.path
     const version = ++requestVersion
     const flow = session.projection.data?.flow
+    const artifacts = session.projection.data?.artifacts
+    const artifact =
+      artifactKind && (artifacts?.status === 'ready' || artifacts?.status === 'partial')
+        ? artifacts.data.items.find(
+            (item) =>
+              item.stepId === stepId &&
+              item.kind === artifactKind &&
+              item.availability === 'available',
+          )
+        : undefined
     const directory =
       flow?.status === 'ready' || flow?.status === 'partial'
         ? flow.data.steps.find((step) => step.name === stepId)?.directory
         : undefined
-    if (!projectPath || (stepId && !directory)) {
+    if (!projectPath || (artifactKind ? !artifact : stepId && !directory)) {
       data.value = null
       loading.value = false
       error.value = null
@@ -41,10 +53,28 @@ export function useWorkspaceJsonFile<T>(
     loading.value = true
     error.value = null
     try {
-      const text = await readOptionalProjectTextFile(
-        stepId ? `${directory}/${path}` : path,
-        { projectPath },
-      )
+      let text: string | null = null
+      if (artifact) {
+        const workspaceContextId = session.workspaceContextId
+        const workspaceRevision = artifact.sourceRevision ?? revision.value
+        if (workspaceContextId && workspaceRevision !== null) {
+          const result = await getDesktopApi().backendWorkspace.getArtifact({
+            artifactId: artifact.artifactId,
+            workspaceContextId,
+            workspaceRevision,
+          })
+          if (
+            result.workspaceContextId === workspaceContextId &&
+            result.workspaceRevision === workspaceRevision &&
+            result.artifact.status === 'ready'
+          )
+            text = result.artifact.data.text ?? null
+        }
+      } else {
+        text = await readOptionalProjectTextFile(stepId ? `${directory}/${path}` : path, {
+          projectPath,
+        })
+      }
       if (version !== requestVersion) return
       if (!text) {
         data.value = null
@@ -62,9 +92,17 @@ export function useWorkspaceJsonFile<T>(
     }
   }
 
-  watch([() => currentProject.value?.path ?? '', revision], () => void load(), {
-    immediate: true,
-  })
+  watch(
+    [
+      () => currentProject.value?.path ?? '',
+      revision,
+      () => session.projection.data?.artifacts,
+    ],
+    () => void load(),
+    {
+      immediate: true,
+    },
+  )
   onScopeDispose(() => {
     requestVersion += 1
   })
