@@ -110,6 +110,17 @@ describe('workspace dashboard layout', () => {
       })
   }
 
+  it('renders the LVS icon in the workspace sidebar', async () => {
+    const link = launched!.page.getByRole('link', { name: 'LVS', exact: true })
+    const icon = link.locator('i[aria-hidden="true"]')
+    await expect
+      .poll(() =>
+        icon.evaluate((element) => getComputedStyle(element, '::before').content),
+      )
+      .not.toMatch(/^(?:none|normal|""|)$/)
+    await shot('workspace-sidebar-lvs')
+  })
+
   it.each([
     [1440, 1000],
     [1280, 800],

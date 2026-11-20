@@ -53,7 +53,7 @@ export const FLOW_INSIGHT_MODULES: FlowInsightsModuleDescriptor[] = [
   {
     id: 'lvs',
     title: 'LVS',
-    icon: 'ri-git-compare-line',
+    icon: 'ri-exchange-line',
     component: StepDetailsPanel,
     availability: () => ({
       available: true,
