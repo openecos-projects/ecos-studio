@@ -108,6 +108,8 @@ export class ProjectEccConfigService {
     const flow = document.flow as Record<string, unknown> | undefined
     const skipSteps = isStringArray(flow?.skip_steps) ? flow.skip_steps : undefined
     const insertSteps = isStringArray(flow?.insert_steps) ? flow.insert_steps : undefined
+    const maxParallelSteps =
+      typeof flow?.max_parallel_steps === 'number' ? flow.max_parallel_steps : undefined
     const externalPaths = isStringArray(pdk.external_paths) ? pdk.external_paths : []
     return {
       exists: true,
@@ -115,7 +117,15 @@ export class ProjectEccConfigService {
       pdkRoot: typeof pdk.root === 'string' ? pdk.root : '',
       externalPaths,
       overrides: readOverrides(pdk),
-      ...(skipSteps || insertSteps ? { flowSelection: { skipSteps, insertSteps } } : {}),
+      ...(skipSteps || insertSteps || maxParallelSteps !== undefined
+        ? {
+            flowSelection: {
+              skipSteps,
+              insertSteps,
+              ...(maxParallelSteps !== undefined ? { maxParallelSteps } : {}),
+            },
+          }
+        : {}),
     }
   }
 

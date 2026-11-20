@@ -11,6 +11,8 @@
     v-else
     :initial-config="initialConfig"
     :title="title"
+    :creation-pending="creationPending"
+    :creation-error="creationError"
     @select-frontend-project="frontendConfig = $event"
     @close="emit('close')"
     @create="emit('create', $event)"
@@ -27,6 +29,8 @@ import NewProjectWizard from './NewProjectWizard.vue'
 const props = defineProps<{
   initialConfig?: WorkspaceWizardInitialConfig
   title?: string
+  creationPending?: boolean
+  creationError?: string
 }>()
 const emit = defineEmits<{
   close: []

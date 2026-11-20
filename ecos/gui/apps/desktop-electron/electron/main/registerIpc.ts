@@ -147,6 +147,7 @@ import { rememberWorkspaceParameterCatalog } from '../services/workspaceParamete
 import {
   authorizeBackendProjectRootForCreate,
   prepareWorkspaceCreateBinding,
+  prepareWorkspaceCreatePreview,
   prepareWorkspaceOpenBinding,
 } from '../services/workspacePdkBindings'
 import { registerBackgroundLifecycleIpc } from './registerBackgroundLifecycleIpc'
@@ -3046,6 +3047,10 @@ export function registerIpc(
       invalidateWorkspace: (workspaceDirectory) => {
         invalidateBackendWorkspaceForSender(event.sender)
         services.backendProjectComparisonService.invalidateWorkspace(workspaceDirectory)
+      },
+      prepareCreatePreview: async (createRequest) => {
+        await authorizeBackendProjectRootForCreate(services, createRequest)
+        return await prepareWorkspaceCreatePreview(services, createRequest)
       },
       prepareCreate: async (createRequest) => {
         await authorizeBackendProjectRootForCreate(services, createRequest)

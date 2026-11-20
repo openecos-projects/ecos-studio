@@ -29,6 +29,7 @@ export interface ProjectEccPdkConfigReadResult extends ProjectEccPdkConfig {
   flowSelection?: {
     skipSteps?: string[]
     insertSteps?: string[]
+    maxParallelSteps?: number
   }
 }
 

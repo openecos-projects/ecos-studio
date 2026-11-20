@@ -455,7 +455,7 @@ describe('ECC CLI RTL import planning', () => {
     ).toThrow('not both')
   })
 
-  it('imports pending RTL after init and before the workspace commands', async () => {
+  it('passes pending RTL as part of the creation draft after init', async () => {
     const root = await mkdtemp(join(tmpdir(), 'ecc-rtl-import-'))
     temporaryDirectories.push(root)
     await writeFile(join(root, 'project.json'), '{"schema_version":1}')
@@ -463,23 +463,21 @@ describe('ECC CLI RTL import planning', () => {
     mockCliRun(commands)
     const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
     vi.spyOn(service, 'openWorkspace').mockResolvedValue({
-      directory: join(root, 'runs', 'ws_1'),
+      directory: join(root, 'ws_1'),
       workspaceHandle: 'handle-1',
       workspaceRevision: 1,
     })
     await service.createWorkspace(
-      request({ projectRoot: root, targetDirectory: join(root, 'runs', 'ws_1') }),
+      request({ projectRoot: root, targetDirectory: join(root, 'ws_1') }),
     )
 
     expect(commands.map((args) => args.slice(0, 2))).toEqual([
       ['init', root],
-      ['rtl', 'import'],
-      ['project', 'apply'],
       ['workspace', 'create'],
     ])
-    expect(commands[1]).toContain('--verilog')
-    expect(commands[1]).toContain('/inputs/design.v')
-    expect(commands[2]).not.toContainEqual(expect.stringMatching(/^design\.rtl=/))
+    const draft = JSON.parse(commands[1]!.at(-1)!)
+    expect(draft.rtl).toEqual(['/inputs/design.v'])
+    expect(draft.settings).not.toContainEqual(expect.stringMatching(/^design\.rtl=/))
   })
 
   it('skips the import when the project design RTL is reused', async () => {
@@ -490,13 +488,13 @@ describe('ECC CLI RTL import planning', () => {
     mockCliRun(commands)
     const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
     vi.spyOn(service, 'openWorkspace').mockResolvedValue({
-      directory: join(root, 'runs', 'ws_1'),
+      directory: join(root, 'ws_1'),
       workspaceHandle: 'handle-1',
       workspaceRevision: 1,
     })
     const input = request({
       projectRoot: root,
-      targetDirectory: join(root, 'runs', 'ws_1'),
+      targetDirectory: join(root, 'ws_1'),
     })
     const inputs = (input.workspaceSpec.inputs as Array<Record<string, unknown>>) ?? []
     input.workspaceSpec.inputs = inputs.filter((value) => value.role !== 'rtl')
@@ -505,9 +503,9 @@ describe('ECC CLI RTL import planning', () => {
 
     expect(commands.map((args) => args.slice(0, 2))).toEqual([
       ['init', root],
-      ['project', 'apply'],
       ['workspace', 'create'],
     ])
+    expect(JSON.parse(commands[1]!.at(-1)!)).not.toHaveProperty('rtl')
   })
 
   it('never imports for derived workspaces', async () => {

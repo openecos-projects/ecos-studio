@@ -287,6 +287,7 @@ export type {
   EccSignoffReviewStatus,
   EccWorkspaceCloseResult,
   EccWorkspaceCreateRequest,
+  EccWorkspaceCreationPreview,
   EccWorkspaceCreateResult,
   EccWorkspaceConfigurationUpdateRequest,
   EccWorkspaceDeriveRequest,

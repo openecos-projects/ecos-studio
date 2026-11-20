@@ -24,6 +24,7 @@ import type {
   EccWorkspaceCloseResult,
   EccWorkspaceConfigurationUpdateRequest,
   EccWorkspaceCreateRequest,
+  EccWorkspaceCreationPreview,
   EccWorkspaceCreateResult,
   EccWorkspaceDeriveRequest,
   EccWorkspaceDeriveResult,
@@ -381,6 +382,53 @@ export class EccCliRuntimeService {
     }
   }
 
+  async previewWorkspaceCreation(
+    request: EccWorkspaceCreateRequest,
+  ): Promise<EccWorkspaceCreationPreview> {
+    await this.ensureContract()
+    if (!request.projectRoot?.trim() || request.deriveFrom) {
+      throw new Error('Preview requires a Project and a new Workspace.')
+    }
+    const requestedRoot = resolve(request.projectRoot)
+    if (dirname(resolve(request.targetDirectory)) !== requestedRoot) {
+      throw new Error('New Workspaces must be direct children of the Project root.')
+    }
+    let staging: string | undefined
+    try {
+      if (request.projectMode === 'create') {
+        staging = await mkdtemp(join(tmpdir(), 'ecos-workspace-preview-'))
+        const init = projectInitArgs(request, staging)
+        if (init) await this.cli.run(init)
+      }
+      const projectRoot = staging ?? (await realpath(requestedRoot))
+      const { stdout } = await this.cli.run(
+        [...workspaceDraftArgs(request, projectRoot), '--preview', '--json'],
+        { cwd: projectRoot },
+      )
+      const records: unknown = JSON.parse(stdout)
+      const preview = Array.isArray(records) ? records[0] : undefined
+      if (
+        preview?.record !== 'workspace_preview' ||
+        !Array.isArray(preview.steps) ||
+        !preview.steps.every((step: unknown) => typeof step === 'string') ||
+        !Number.isSafeInteger(preview.max_parallel_steps) ||
+        preview.max_parallel_steps < 1
+      ) {
+        throw new Error('ECC did not return a Workspace preview.')
+      }
+      return { steps: preview.steps, maxParallelSteps: preview.max_parallel_steps }
+    } catch (error) {
+      if (workspaceDraftUnsupported(error)) {
+        throw new Error(
+          'Flow preview requires an ECC runtime with Workspace draft support.',
+        )
+      }
+      throw error
+    } finally {
+      if (staging) await rm(staging, { recursive: true, force: true })
+    }
+  }
+
   async createWorkspace(
     request: EccWorkspaceCreateRequest,
   ): Promise<EccWorkspaceCreateResult> {
@@ -389,6 +437,12 @@ export class EccCliRuntimeService {
       throw new Error('Workspace creation requires an existing Project root.')
     }
     const requestedProjectRoot = resolve(request.projectRoot)
+    if (
+      !request.deriveFrom &&
+      dirname(resolve(request.targetDirectory)) !== requestedProjectRoot
+    ) {
+      throw new Error('New Workspaces must be direct children of the Project root.')
+    }
     const initArgs = projectInitArgs(request, requestedProjectRoot)
     if (initArgs) await this.cli.run(initArgs)
     const projectRoot = await realpath(requestedProjectRoot)
@@ -398,10 +452,27 @@ export class EccCliRuntimeService {
       }
       throw error
     })
-    const rtlImport = workspaceCreateRtlImport(request, projectRoot)
-    if (rtlImport) await this.cli.run(rtlImport, { cwd: projectRoot })
-    for (const args of workspaceCreateCommands(request, projectRoot)) {
-      await this.cli.run(args, { cwd: projectRoot })
+    let drafted = false
+    if (!request.deriveFrom) {
+      const flow = requireRecord(request.workspaceSpec.flow)
+      try {
+        await this.cli.run(workspaceDraftArgs(request, projectRoot), { cwd: projectRoot })
+        drafted = true
+      } catch (error) {
+        if (!workspaceDraftUnsupported(error)) throw error
+        if (flow.removeSteps !== undefined || flow.maxParallelSteps !== undefined) {
+          throw new Error(
+            'Removing LEC checks or setting flow concurrency requires an ECC runtime with Workspace draft support.',
+          )
+        }
+      }
+    }
+    if (!drafted) {
+      const rtlImport = workspaceCreateRtlImport(request, projectRoot)
+      if (rtlImport) await this.cli.run(rtlImport, { cwd: projectRoot })
+      for (const args of workspaceCreateCommands(request, projectRoot)) {
+        await this.cli.run(args, { cwd: projectRoot })
+      }
     }
     this.knownProjectRoots.add(await realpath(projectRoot))
     return await this.openWorkspace({ directory: request.targetDirectory })
@@ -2154,6 +2225,52 @@ export function projectManifestCreateArgs(
     String(requireNonNegativeInteger(design.index)),
   )
   return args
+}
+
+function workspaceDraftUnsupported(error: unknown): boolean {
+  return (
+    error instanceof EccCliCommandError &&
+    /No such option:\s*--draft\b/.test(error.stderr)
+  )
+}
+
+export function workspaceDraftArgs(
+  request: EccWorkspaceCreateRequest,
+  projectRoot: string,
+): string[] {
+  const flow = requireRecord(request.workspaceSpec.flow)
+  const selection = inputRolePaths(request)
+  const filelist = selection.get('filelist')?.[0]
+  const rtl = selection.get('rtl')
+  const values = (value: unknown) =>
+    flowEditFlags('--step', value).filter((_, i) => i % 2)
+  const draft = {
+    settings: projectSettingsArgs(request).filter((_, i) => i % 2),
+    enable: values(flow.enableSteps),
+    disable: values(flow.disableSteps),
+    insert: values(flow.insertSteps),
+    remove: values(flow.removeSteps),
+    maxParallelSteps: flow.maxParallelSteps,
+    filelist,
+    rtl,
+  }
+  const target = resolve(request.targetDirectory)
+  return [
+    'workspace',
+    'create',
+    basename(target),
+    '--project',
+    projectRoot,
+    '--path',
+    join(projectRoot, basename(target)),
+    '--command-id',
+    request.commandId,
+    '--no-wait',
+    ...workspaceFlowArgs(request.workspaceSpec),
+    ...parameterArgs(request.workspaceSpec.parameters),
+    '--draft',
+    JSON.stringify(draft),
+  ]
 }
 
 export function workspaceCreateCommands(

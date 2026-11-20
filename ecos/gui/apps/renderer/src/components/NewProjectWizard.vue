@@ -563,9 +563,7 @@
                   </div>
 
                   <div
-                    v-if="
-                      !sourceContext && !standaloneWorkspace && runnableFlowSteps.length
-                    "
+                    v-if="supportsFlowDraft && runnableFlowSteps.length"
                     class="mb-5 text-sm"
                   >
                     <label for="workspace-lec-after" class="mr-2 font-semibold"
@@ -582,12 +580,51 @@
                         {{ step }}
                       </option>
                     </select>
-                    <p
+                    <fieldset
                       v-if="declaredFlowSelection?.insertSteps?.length"
-                      class="mt-2 text-xs text-(--text-secondary)"
+                      class="mt-3"
                     >
-                      Configured LEC checks
-                      {{ declaredFlowSelection.insertSteps.join(', ') }}
+                      <legend class="text-xs font-semibold">
+                        Keep project LEC checks
+                      </legend>
+                      <label
+                        v-for="check in declaredFlowSelection.insertSteps"
+                        :key="check"
+                        class="mt-2 mr-4 inline-flex items-center gap-2"
+                      >
+                        <input
+                          type="checkbox"
+                          :checked="!removedLecChecks.has(check)"
+                          @change="toggleLecRemoval(check)"
+                        />
+                        {{ check }}
+                      </label>
+                    </fieldset>
+                    <label
+                      for="workspace-parallel-steps"
+                      class="mt-4 block font-semibold"
+                    >
+                      Maximum parallel flow steps
+                    </label>
+                    <input
+                      id="workspace-parallel-steps"
+                      v-model.number="maxParallelSteps"
+                      type="number"
+                      min="1"
+                      step="1"
+                      :placeholder="
+                        String(declaredFlowSelection?.maxParallelSteps ?? 'ECC default')
+                      "
+                      class="mt-2 w-36 rounded-md border border-(--border-color) bg-(--bg-primary) px-2 py-1"
+                    />
+                    <p
+                      v-if="validFlowConcurrency()"
+                      class="mt-1 text-xs text-(--text-secondary)"
+                    >
+                      Applies to the project. Leave blank to keep its current limit.
+                    </p>
+                    <p v-else class="mt-1 text-xs text-red-600 dark:text-red-300">
+                      Enter a whole number of 1 or more.
                     </p>
                   </div>
 
@@ -1754,6 +1791,29 @@
             </Transition>
           </section>
 
+          <p
+            v-if="submissionError"
+            ref="submissionErrorElement"
+            role="alert"
+            tabindex="-1"
+            class="max-h-32 overflow-auto border-t border-(--border-color) px-6 py-3 text-sm text-red-600 dark:text-red-300"
+          >
+            {{ submissionError }}
+          </p>
+          <div
+            v-if="currentStep === steps.length && supportsFlowDraft"
+            role="status"
+            class="px-6"
+          >
+            <p v-if="flowPreview" class="max-h-32 overflow-auto py-3 text-sm">
+              {{ flowPreview.steps.length }} steps · Maximum
+              {{ flowPreview.maxParallelSteps }} in parallel
+              <span class="block text-xs text-(--text-secondary)">{{
+                flowPreview.steps.join(' → ')
+              }}</span>
+            </p>
+          </div>
+
           <footer
             class="flex shrink-0 items-center justify-between border-t border-(--border-color) bg-(--bg-primary) px-6 py-4 md:px-8"
           >
@@ -1791,6 +1851,15 @@
                 Cancel
               </button>
               <button
+                v-if="currentStep === steps.length && supportsFlowDraft"
+                type="button"
+                class="rounded-lg border border-(--border-color) px-4 py-2.5 text-sm font-semibold disabled:opacity-45"
+                :disabled="!canProceed || creationPending || previewPending"
+                @click="previewFlow"
+              >
+                {{ previewPending ? 'Checking flow…' : 'Preview flow' }}
+              </button>
+              <button
                 v-if="currentStep === 7 && topModuleReturnToDesignFiles"
                 type="button"
                 class="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-(--accent-color) px-5 py-2.5 text-sm font-semibold text-white transition-opacity duration-200 hover:opacity-90"
@@ -1816,16 +1885,16 @@
                 v-else-if="currentStep === steps.length"
                 type="button"
                 class="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-(--accent-color) px-5 py-2.5 text-sm font-bold text-white transition-opacity duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
-                :disabled="!canProceed || isCreating"
+                :disabled="!canProceed || creationPending || previewPending"
                 @click="createWorkspace"
               >
                 <i
-                  v-if="isCreating"
+                  v-if="creationPending"
                   class="ri-loader-4-line animate-spin"
                   aria-hidden="true"
                 ></i>
                 <i v-else class="ri-rocket-line" aria-hidden="true"></i>
-                {{ isCreating ? 'Creating Workspace...' : 'Create Workspace' }}
+                {{ creationPending ? 'Creating Workspace...' : 'Create Workspace' }}
               </button>
             </div>
           </footer>
@@ -1853,7 +1922,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import type { Project, WorkspaceConfig } from '../types'
 import { usePdkManager } from '../composables/usePdkManager'
 import { useWorkspace } from '../composables/useWorkspace'
@@ -1883,6 +1952,9 @@ import {
 } from './topModuleConfirmation'
 import type { HdlModuleDiscoveryResult, PdkRequirement } from '@ecos-studio/shared'
 import { toDesktopBridgeData } from '@/api/desktopPayload'
+import { previewWorkspaceCreation } from '@/api/workspace'
+import { loadWorkspaceParameterDisplayIndex } from '@/api/workspaceParameterCatalog'
+import type { EccWorkspaceCreationPreview } from '@ecos-studio/shared'
 
 interface Emits {
   (e: 'close'): void
@@ -1901,6 +1973,8 @@ type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
 interface Props {
   initialConfig?: WorkspaceWizardInitialConfig
   title?: string
+  creationPending?: boolean
+  creationError?: string
 }
 type ProjectMode = 'select' | 'create'
 /** Canonical ECC flow step id. The live list is discovered from ECC, so this
@@ -1972,7 +2046,16 @@ onBeforeUnmount(() => {
 const currentStep = ref(1)
 const highestStep = ref(1)
 const isWizardMaximized = ref(false)
-const isCreating = ref(false)
+const previewPending = ref(false)
+const flowPreview = ref<EccWorkspaceCreationPreview>()
+const previewError = ref('')
+const submissionError = computed(() => props.creationError || previewError.value)
+const submissionErrorElement = ref<HTMLElement>()
+watch(submissionError, async (error) => {
+  if (!error) return
+  await nextTick()
+  submissionErrorElement.value?.focus()
+})
 const topModuleDiscovery = ref<HdlModuleDiscoveryResult | null>(null)
 const topModuleDiscoverySeen = ref(false)
 const topModuleUserPickedOther = ref(false)
@@ -2141,6 +2224,16 @@ const skippableFlowStepNames = computed<ReadonlySet<string>>(() => {
 
 const flowStepChoices = reactive(new Map<string, boolean>())
 const lecInsertion = ref('')
+const removedLecChecks = reactive(new Set<string>())
+const maxParallelSteps = ref<number | string>('')
+const supportsFlowDraft = computed(
+  () => !sourceContext.value && !standaloneWorkspace.value,
+)
+
+function toggleLecRemoval(check: string) {
+  if (removedLecChecks.has(check)) removedLecChecks.delete(check)
+  else removedLecChecks.add(check)
+}
 const declaredFlowSelection = ref<ProjectEccPdkConfigReadResult['flowSelection']>()
 const defaultSkippedFlowStepNames = computed<ReadonlySet<string>>(() => {
   const ids = discoveredFlowDefinition.value?.defaultSkippedStepIds
@@ -2876,7 +2969,7 @@ const canProceed = computed(() => {
         !workspaceLocationError.value
       )
     case 4:
-      return flowSetupReady.value
+      return flowSetupReady.value && validFlowConcurrency()
     case 5:
       return designFilesReady()
     case 6:
@@ -4151,7 +4244,7 @@ function updatePdkResourceSelection(files: string[]) {
 }
 
 function specReady() {
-  if (!flowSetupReady.value) return false
+  if (!flowSetupReady.value || !validFlowConcurrency()) return false
   const params = config.value.parameters
   const hasCoreFields =
     String(params.design || '').trim() !== '' &&
@@ -4176,6 +4269,14 @@ function specReady() {
     )
   }
   return Number(params.utilization ?? params.utilitization) > 0
+}
+
+function validFlowConcurrency() {
+  const value = maxParallelSteps.value
+  return (
+    value === '' ||
+    (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1)
+  )
 }
 
 function syncWorkspaceConfig() {
@@ -4213,6 +4314,12 @@ function syncWorkspaceConfig() {
             lecInsertion.value && runnableFlowSteps.value.includes(lecInsertion.value)
               ? [`lec@${lecInsertion.value}`]
               : [],
+          remove_steps: [...removedLecChecks].filter(
+            (check) => check !== `lec@${lecInsertion.value}`,
+          ),
+          ...(typeof maxParallelSteps.value === 'number'
+            ? { max_parallel_steps: maxParallelSteps.value }
+            : {}),
         }),
   }
   config.value.pdk_config = {
@@ -4264,6 +4371,7 @@ function syncWorkspaceConfig() {
 applySourceWorkspaceDefaults(props.initialConfig)
 
 function closeWizard() {
+  if (props.creationPending) return
   emit('close')
 }
 
@@ -4456,6 +4564,8 @@ watch(
       declaredFlowSelection.value = undefined
       flowStepChoices.clear()
       lecInsertion.value = ''
+      removedLecChecks.clear()
+      maxParallelSteps.value = ''
       projectEccPdkLoadGeneration += 1
       projectEccPdkConfig.value = null
       projectEccPdkOverrides.value = null
@@ -4485,18 +4595,55 @@ watch(
   },
 )
 
-function createWorkspace() {
-  if (!specReady()) return
+function workspaceDraft() {
   syncWorkspaceConfig()
-  isCreating.value = true
-  try {
-    emit('create', {
-      ...config.value,
-      parameter_override_fields: [...editedParameterFields],
-    })
-  } finally {
-    isCreating.value = false
+  return {
+    ...config.value,
+    parameter_override_fields: [...editedParameterFields],
   }
+}
+
+let previewGeneration = 0
+watch(
+  [
+    config,
+    flowStartStep,
+    flowEndStep,
+    flowStepChoices,
+    lecInsertion,
+    removedLecChecks,
+    maxParallelSteps,
+  ],
+  () => {
+    previewGeneration += 1
+    flowPreview.value = undefined
+    previewError.value = ''
+  },
+  { deep: true, flush: 'sync' },
+)
+
+async function previewFlow() {
+  if (!specReady() || previewPending.value) return
+  const draft = workspaceDraft()
+  const generation = previewGeneration
+  previewError.value = ''
+  previewPending.value = true
+  try {
+    const index = await loadWorkspaceParameterDisplayIndex()
+    const preview = await previewWorkspaceCreation(draft, index)
+    if (generation === previewGeneration) flowPreview.value = preview
+  } catch (error) {
+    if (generation === previewGeneration) {
+      previewError.value = error instanceof Error ? error.message : String(error)
+    }
+  } finally {
+    previewPending.value = false
+  }
+}
+
+function createWorkspace() {
+  if (!specReady() || props.creationPending || previewPending.value) return
+  emit('create', workspaceDraft())
 }
 
 function selectDieAreaMode(mode: DieAreaMode) {

@@ -7,6 +7,7 @@ import type {
   EccRuntimeStartFlowRequest,
   EccRuntimeStartStepRequest,
   EccWorkspaceCreateRequest,
+  EccWorkspaceCreationPreview,
   EccWorkspaceCreateResult,
   EccWorkspaceOpenRequest,
   EccWorkspaceOpenResult,
@@ -28,6 +29,7 @@ export type ProductCommandRequest =
       command: 'workspace.create'
       payload: EccWorkspaceCreateRequest
     }
+  | { command: 'workspace.previewCreation'; payload: EccWorkspaceCreateRequest }
   | { command: 'workspace.run'; payload: EccRuntimeStartFlowRequest }
   | { command: 'workspace.runStep'; payload: EccRuntimeStartStepRequest }
   | {
@@ -110,6 +112,7 @@ export type ProductCommandRequest =
     }
 
 export type ProductCommandResult =
+  | EccWorkspaceCreationPreview
   | EccWorkspaceCreateResult
   | EccWorkspaceOpenResult
   | EccWorkspaceDeriveResult

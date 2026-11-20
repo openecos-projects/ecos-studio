@@ -8,6 +8,7 @@ import {
   type EccPdkOverrides,
   type EccWorkspaceConfigurationUpdateRequest,
   type EccWorkspaceCreateRequest,
+  type EccWorkspaceCreationPreview,
   type EccWorkspaceStepConfigurationReadRequest,
   type EccWorkspaceStepConfigurationReadResult,
   type EccWorkspaceStepConfigurationUpdateRequest,
@@ -282,6 +283,12 @@ export function backendWorkspaceOptions(
         ...(config.flow_config?.insert_steps?.length
           ? { insertSteps: config.flow_config.insert_steps }
           : {}),
+        ...(config.flow_config?.remove_steps?.length
+          ? { removeSteps: config.flow_config.remove_steps }
+          : {}),
+        ...(config.flow_config?.max_parallel_steps !== undefined
+          ? { maxParallelSteps: config.flow_config.max_parallel_steps }
+          : {}),
         ...(startStep && endStep
           ? {
               fromStepId: startStep,
@@ -542,6 +549,28 @@ export function createWorkspaceApi(
       message: [],
       response: ResponseEnum.success,
     })) as Promise<WorkspaceResponse>
+}
+
+export async function previewWorkspaceCreation(
+  config: WorkspaceConfig,
+  parameterDisplayIndex?: Record<string, string> | null,
+): Promise<EccWorkspaceCreationPreview> {
+  const { designTool: _designTool, ...draft } = backendWorkspaceOptions(
+    config,
+    config.directory,
+    parameterDisplayIndex,
+  )
+  const result = await getDesktopApi().productCommands.execute({
+    command: 'workspace.previewCreation',
+    payload: toDesktopBridgeData({
+      ...draft,
+      commandId: crypto.randomUUID(),
+    }) as unknown as EccWorkspaceCreateRequest,
+  })
+  if (!('steps' in result) || !('maxParallelSteps' in result)) {
+    throw new Error('ECC did not return a Workspace preview.')
+  }
+  return result
 }
 
 export function updateWorkspaceApi(

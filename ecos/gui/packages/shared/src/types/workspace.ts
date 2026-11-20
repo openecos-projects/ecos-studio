@@ -88,6 +88,8 @@ export interface WorkspaceConfig {
     enable_steps?: string[]
     disable_steps?: string[]
     insert_steps?: string[]
+    remove_steps?: string[]
+    max_parallel_steps?: number
   }
   pdk_config?: {
     mode?: 'default' | 'manual'

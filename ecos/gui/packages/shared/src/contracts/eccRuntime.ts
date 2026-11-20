@@ -37,6 +37,11 @@ export interface EccWorkspaceCreateRequest {
   eccPdkConfig?: EccWorkspacePdkConfigPersist
 }
 
+export interface EccWorkspaceCreationPreview {
+  steps: string[]
+  maxParallelSteps: number
+}
+
 export interface EccWorkspaceOpenRequest {
   directory: string
   workspaceBindings?: Record<string, unknown>

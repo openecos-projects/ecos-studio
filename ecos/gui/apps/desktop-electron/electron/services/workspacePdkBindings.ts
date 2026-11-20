@@ -61,6 +61,17 @@ export async function authorizeBackendProjectRootForCreate(
   await dependencies.workspaceService.registerProjectRoot(projectRoot)
 }
 
+export async function prepareWorkspaceCreatePreview(
+  dependencies: WorkspacePdkBindingDependencies,
+  request: EccWorkspaceCreateRequest,
+): Promise<EccWorkspaceCreateRequest> {
+  const requestedMpc = request.workspaceSpec.mpc
+  if (requestedMpc === undefined || request.projectMode !== 'create') return request
+  const mpc = await resolveMpcBinding(dependencies, requestedMpc)
+  if (!mpc) throw new Error('Project MPC Requirement is unbound')
+  return { ...request, projectMpc: mpc.projectMpc }
+}
+
 export async function prepareWorkspaceCreateBinding(
   dependencies: WorkspacePdkBindingDependencies,
   request: EccWorkspaceCreateRequest,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import type { Page } from 'playwright-core'
 import { parse } from 'smol-toml'
@@ -268,11 +268,64 @@ describe('product e2e: repeated workspace creation', () => {
           await panel
             .getByText('lec@synthesis', { exact: false })
             .waitFor({ state: 'visible' })
+          const draftSupported = process.env.ECOS_E2E_WORKSPACE_DRAFT === '1'
+          if (draftSupported) {
+            await panel
+              .getByRole('checkbox', { name: 'lec@synthesis', exact: true })
+              .uncheck()
+            await panel.getByLabel('Maximum parallel flow steps').fill('2')
+          }
           await shot('third-workspace-project-flow')
           await advanceWizard(panel, 4, 7)
           await expect
             .poll(() => panel.locator('.top-module-select .p-select-label').innerText())
             .toBe('gcd')
+          if (draftSupported) {
+            const configPath = join(design.projectRoot, 'ecc.toml')
+            const manifestPath = join(design.projectRoot, 'project.json')
+            const before = await readFile(configPath, 'utf8')
+            const manifestBefore = await readFile(manifestPath, 'utf8')
+            await panel.getByRole('button', { name: 'Preview flow', exact: true }).click()
+            const preview = panel
+              .getByRole('status')
+              .filter({ hasText: 'Maximum 2 in parallel' })
+            await preview.waitFor()
+            expect(await preview.innerText()).not.toContain('lec@synthesis')
+            expect(await readFile(configPath, 'utf8')).toBe(before)
+            expect(await readFile(manifestPath, 'utf8')).toBe(manifestBefore)
+            await shot('workspace-flow-preview')
+
+            const importedRtl = join(design.projectRoot, 'rtl/gcd.v')
+            await rename(importedRtl, importedRtl + '.missing')
+            try {
+              await panel
+                .getByRole('button', { name: 'Create Workspace', exact: true })
+                .click()
+              const alert = panel.getByRole('alert').filter({ hasText: 'gcd.v' })
+              await alert.waitFor({ timeout: 60_000 })
+              expect(
+                await alert.evaluate((node) => node === document.activeElement),
+              ).toBe(true)
+              expect(await readFile(configPath, 'utf8')).toBe(before)
+              expect(await readFile(manifestPath, 'utf8')).toBe(manifestBefore)
+              await shot('workspace-creation-error')
+            } finally {
+              await rename(importedRtl + '.missing', importedRtl)
+            }
+
+            await submitWorkspaceWizard(page)
+            const updated = parse(await readFile(configPath, 'utf8'))
+            expect(updated.flow).toMatchObject({
+              insert_steps: [],
+              max_parallel_steps: 2,
+            })
+            const third = (await readManifest())!.workspaces[2]!
+            expect(
+              (
+                await readFlowSteps(resolve(design.projectRoot, third.workspace_path))
+              ).map((step) => step.name),
+            ).not.toContain('lec@synthesis')
+          }
         } else {
           await openConfiguredWorkspaceWizard(page, projectName)
         }

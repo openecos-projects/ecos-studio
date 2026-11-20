@@ -55,6 +55,8 @@
       v-if="showNewProjectWizard"
       :title="workspaceWizardTitle"
       :initial-config="workspaceWizardInitialConfig"
+      :creation-pending="workspaceWizardCreating"
+      :creation-error="workspaceWizardError"
       @close="handleWizardClose"
       @create="handleWizardCreate"
     />
@@ -476,6 +478,8 @@ watch(
 
 const stepConfigDialogRef = ref<{ hasUnsavedChanges: boolean } | null>(null)
 const workspaceWizardInitialConfig = ref<WorkspaceWizardInitialConfig | undefined>()
+const workspaceWizardCreating = ref(false)
+const workspaceWizardError = ref('')
 const reconfigureWorkspacePath = ref('')
 const pendingWorkspaceUpdateConfig = ref<WorkspaceConfig | null>(null)
 const pendingWorkspaceWizardRequest = useWorkspaceWizardRequest()
@@ -1372,6 +1376,7 @@ function toggleTerminalMaximized() {
 }
 
 function resetWorkspaceWizard() {
+  workspaceWizardError.value = ''
   showNewProjectWizard.value = false
   workspaceWizardInitialConfig.value = undefined
   reconfigureWorkspacePath.value = ''
@@ -1394,6 +1399,7 @@ function showCreateWorkspaceWizard() {
 }
 
 const handleWizardCreate = async (config: WorkspaceConfig) => {
+  if (workspaceWizardCreating.value) return
   if (quickStartWizardResolve) {
     const resolve = quickStartWizardResolve
     const reject = quickStartWizardReject
@@ -1420,9 +1426,19 @@ const handleWizardCreate = async (config: WorkspaceConfig) => {
     return
   }
 
-  resetWorkspaceWizard()
-  const success = await newProject(config)
-  if (!success) return
+  if (config.designTool === 'frontend') resetWorkspaceWizard()
+  workspaceWizardError.value = ''
+  workspaceWizardCreating.value = true
+  try {
+    if (!(await newProject(config))) {
+      workspaceWizardError.value =
+        lastWorkspaceCreationError.value || 'Workspace creation failed.'
+      return
+    }
+    resetWorkspaceWizard()
+  } finally {
+    workspaceWizardCreating.value = false
+  }
 
   await syncProjectManagedWorkspace(config)
   if (config.designTool === 'frontend') {

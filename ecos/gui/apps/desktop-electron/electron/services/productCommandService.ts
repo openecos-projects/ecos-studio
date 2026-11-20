@@ -27,6 +27,7 @@ interface ProductCommandRuntime {
   ): Promise<unknown>
   defView?(request: EccWorkspaceDefViewRequest): Promise<unknown>
   retryFinalSnapshot(request: EccWorkspaceHandleRequest): Promise<boolean>
+  previewWorkspaceCreation?(request: EccWorkspaceCreateRequest): Promise<unknown>
   createWorkspace(request: EccWorkspaceCreateRequest): Promise<unknown>
   exportSignoff(request: EccWorkspaceExportSignoffRequest): Promise<unknown>
   openWorkspace(request: EccWorkspaceOpenRequest): Promise<unknown>
@@ -72,6 +73,9 @@ interface ProductCommandContext {
   isWorkspaceMutationBusy?(workspaceHandle: string): boolean
   /** Called after a successful in-place workspace update commits new facts. */
   invalidateWorkspace?(workspaceDirectory: string): void
+  prepareCreatePreview?(
+    request: EccWorkspaceCreateRequest,
+  ): Promise<EccWorkspaceCreateRequest>
   prepareCreate(request: EccWorkspaceCreateRequest): Promise<EccWorkspaceCreateRequest>
   runtime: ProductCommandRuntime
   trackCreateResult(result: unknown): void
@@ -108,6 +112,14 @@ export async function executeProductCommand(
     if (!context.failCreate) throw new Error('Workspace creation journal is unavailable.')
     await context.failCreate(request.payload.creationId, request.payload.issue)
     return { completed: false }
+  }
+  if (request.command === 'workspace.previewCreation') {
+    if (!context.prepareCreatePreview || !context.runtime.previewWorkspaceCreation) {
+      throw new Error('Workspace creation preview is unavailable.')
+    }
+    return await context.runtime.previewWorkspaceCreation(
+      await context.prepareCreatePreview(request.payload),
+    )
   }
   if (request.command === 'workspace.create') {
     const prepared = await context.prepareCreate(request.payload)
@@ -276,6 +288,7 @@ function readProductCommandRequest(value: unknown): ProductCommandRequest {
     throw new Error('allowStaleResources must be a boolean')
   }
   switch (value.command) {
+    case 'workspace.previewCreation':
     case 'workspace.create':
       requireString(payload, 'commandId')
       requireString(payload, 'targetDirectory')
