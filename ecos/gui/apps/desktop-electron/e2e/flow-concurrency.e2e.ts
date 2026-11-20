@@ -58,7 +58,7 @@ describe('product e2e: concurrent workspace flows', () => {
   }, 180_000)
 
   afterEach(async () => {
-    if (!launched) return
+    if (!launched || launched.page.isClosed()) return
     const { page } = launched
     const projection = await page.evaluate(() =>
       window.ecosDesktop.ecc.runtime.operationProjection(),
@@ -118,11 +118,13 @@ describe('product e2e: concurrent workspace flows', () => {
           })
           workspaces.push(workspace)
           await registerWorkspaceRoot(page, workspace.workspaceDir)
-          if (workspaces.length === 1 && scenario === 'finish-both') {
-            await openWorkspaceInUi(page, workspace)
-          } else {
+          if (suffix !== 'a' || scenario !== 'finish-both') {
             await registerWorkspaceInApp(page, workspace)
           }
+        }
+        if (scenario === 'finish-both') {
+          await registerWorkspaceRoot(page, workspaces[0].workspaceDir)
+          await openWorkspaceInUi(page, workspaces[0])
         }
 
         if (scenario !== 'simultaneous-start') {
@@ -337,14 +339,20 @@ describe('product e2e: concurrent workspace flows', () => {
         }
       } finally {
         await shot(`${scenario}-final`).catch(() => undefined)
-        const projection = await page.evaluate(() =>
-          window.ecosDesktop.ecc.runtime.operationProjection(),
-        )
+        const projection = await page
+          .evaluate(() => window.ecosDesktop.ecc.runtime.operationProjection())
+          .catch((error) => {
+            console.warn(`Could not save the ${scenario} operation projection:`, error)
+            return null
+          })
         await writeFile(
           join(outDir, `${scenario}-final.json`),
           JSON.stringify(projection, null, 2),
         )
-        for (const operation of [...projection.operations, ...projection.outcomes]) {
+        for (const operation of [
+          ...(projection?.operations ?? []),
+          ...(projection?.outcomes ?? []),
+        ]) {
           const workspace = workspaces.find(
             (item) => item.workspaceDir === operation.workspaceDirectory,
           )

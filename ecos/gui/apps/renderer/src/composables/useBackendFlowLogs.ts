@@ -1,13 +1,5 @@
-import { computed, onUnmounted, ref, shallowRef, watch } from 'vue'
-import type { DesignRuntimeEvent, EccRuntimeStepSnapshot } from '@ecos-studio/shared'
+import { computed, ref, shallowRef, watch } from 'vue'
 import { getWorkspaceResourceIndexApi } from '@/api/workspaceResources'
-import {
-  backendRuntimeEventKind,
-  backendRuntimeEventPayload,
-  backendRuntimeEventState,
-  backendRuntimeEventStep,
-  backendRuntimeEventTerminalState,
-} from '@/api/backendRuntimeEvents'
 import {
   readOptionalProjectTextFileChunk,
   readOptionalProjectTextFileTail,
@@ -16,7 +8,6 @@ import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
 import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
 import { useWorkspace } from './useWorkspace'
-import { isObsoleteBackendFlowStep } from './backendFlowProjection'
 
 export interface FlowLogSegment {
   stepName: string
@@ -40,11 +31,9 @@ const flowLogSegmentsState = ref<FlowLogSegment[]>([])
 const flowLogContentState = shallowRef<Record<string, string>>({})
 const flowLogStepNameState = ref('')
 const flowLogErrorState = ref<string | null>(null)
-const flowLogRerunAffectedStepsState = ref<string[]>([])
 const flowLogLoadingState = ref(false)
-const flowLogCursorByKey = new Map<string, number>()
 const fullContentLoads = new Map<string, Promise<boolean>>()
-const MAX_RUNTIME_LOG_CHARS = 128 * 1024
+const MAX_LIVE_LOG_CHARS = 128 * 1024
 const MAX_FILE_LOG_CHARS = 512 * 1024
 const LIVE_LOG_CHUNK_BYTES = 64 * 1024
 let activeWorkspacePath = ''
@@ -53,11 +42,6 @@ let loadGeneration = 0
 
 function segmentKey(segment: Pick<FlowLogSegment, 'stepName' | 'tool'>): string {
   return `${segment.stepName}\u001f${segment.tool}`
-}
-
-function normalizedPath(path: unknown): string {
-  if (typeof path !== 'string') return ''
-  return path.trim().replace(/\\/g, '/').replace(/\/$/, '').toLowerCase()
 }
 
 function formatLogSize(sizeBytes: number): string {
@@ -91,8 +75,8 @@ function appendContent(key: string, chunk: string): void {
   const content = `${flowLogContentState.value[key] ?? ''}${chunk}`
   setContent(
     key,
-    content.length > MAX_RUNTIME_LOG_CHARS
-      ? content.slice(content.length - MAX_RUNTIME_LOG_CHARS)
+    content.length > MAX_LIVE_LOG_CHARS
+      ? content.slice(content.length - MAX_LIVE_LOG_CHARS)
       : content,
   )
 }
@@ -110,9 +94,7 @@ function resetFlowLogState(): void {
   flowLogContentState.value = {}
   flowLogStepNameState.value = ''
   flowLogErrorState.value = null
-  flowLogRerunAffectedStepsState.value = []
   flowLogLoadingState.value = false
-  flowLogCursorByKey.clear()
   fullContentLoads.clear()
 }
 
@@ -120,83 +102,6 @@ export function resetSharedFlowLogWorkspaceState(): void {
   activeWorkspacePath = ''
   activeWorkspaceSessionId = ''
   resetFlowLogState()
-}
-
-export function prepareFlowLogSegmentsForRerun(stepNames: readonly string[]): void {
-  const affected = new Set(
-    stepNames.map((step) => step.trim().toLowerCase()).filter(Boolean),
-  )
-  if (affected.size === 0) return
-  flowLogSegmentsState.value = flowLogSegmentsState.value.filter((segment) => {
-    if (!affected.has(segment.stepName.trim().toLowerCase())) return true
-    const key = segmentKey(segment)
-    deleteContent(key)
-    flowLogCursorByKey.delete(key)
-    fullContentLoads.delete(key)
-    return false
-  })
-  if (affected.has(flowLogStepNameState.value.trim().toLowerCase())) {
-    flowLogStepNameState.value = ''
-  }
-}
-
-function sameSegment(segment: FlowLogSegment, stepName: string, tool: string): boolean {
-  return (
-    segment.stepName.trim().toLowerCase() === stepName.trim().toLowerCase() &&
-    (!tool ||
-      !segment.tool ||
-      segment.tool.trim().toLowerCase() === tool.trim().toLowerCase())
-  )
-}
-
-function upsertRuntimeSegment(input: {
-  stepName: string
-  tool: string
-  state: string
-  live: boolean
-  failed?: boolean
-  peakMemoryMb?: number | null
-  runtime?: string
-  startedAtMs?: number | null
-}): FlowLogSegment {
-  const index = flowLogSegmentsState.value.findIndex((segment) =>
-    sameSegment(segment, input.stepName, input.tool),
-  )
-  const previous = index >= 0 ? flowLogSegmentsState.value[index] : undefined
-  const next: FlowLogSegment = {
-    ...(previous ?? {
-      failed: false,
-      missing: false,
-      stepName: input.stepName,
-      tool: input.tool,
-    }),
-    failed: input.failed ?? false,
-    live: input.live,
-    missing: false,
-    peakMemoryMb: input.peakMemoryMb ?? previous?.peakMemoryMb,
-    runtime: input.runtime ?? previous?.runtime,
-    state: input.state,
-    stepName: input.stepName,
-    tool: input.tool || previous?.tool || '',
-  }
-  if (input.startedAtMs === null) {
-    delete next.startedAtMs
-  } else if (typeof input.startedAtMs === 'number') {
-    next.startedAtMs = input.startedAtMs
-    delete next.runtime
-  } else if (input.live && typeof next.startedAtMs !== 'number') {
-    next.startedAtMs = Date.now()
-  }
-  const segments = flowLogSegmentsState.value.map((segment, candidateIndex) =>
-    candidateIndex === index
-      ? next
-      : input.live && segment.live
-        ? { ...segment, live: false }
-        : segment,
-  )
-  if (index < 0) segments.push(next)
-  flowLogSegmentsState.value = segments
-  return next
 }
 
 function currentStepName(segments: readonly FlowLogSegment[]): string {
@@ -211,199 +116,21 @@ function isFailedState(state: string): boolean {
   return ['incomplete', 'invalid', 'failed', 'error'].includes(state.trim().toLowerCase())
 }
 
-function rerunPreparedForWorkspace(
-  event: DesignRuntimeEvent,
-  workspacePath: string,
-): string[] | null {
-  if (backendRuntimeEventKind(event) !== 'operation.rerun_prepared') return null
-  const payload = backendRuntimeEventPayload(event)
-  const eventWorkspace = normalizedPath(event.workspaceDirectory)
-  if (eventWorkspace && eventWorkspace !== normalizedPath(workspacePath)) return null
-  return Array.isArray(payload.affectedSteps)
-    ? payload.affectedSteps.filter((step): step is string => typeof step === 'string')
-    : []
-}
-
-function eventMatchesWorkspace(
-  event: DesignRuntimeEvent,
-  workspaceHandle: string,
-  workspacePath: string,
-): boolean {
-  if ('workspaceHandle' in event && event.workspaceHandle) {
-    return event.workspaceHandle === workspaceHandle
+function ledgerStartTime(info: Record<string, unknown>): number | undefined {
+  for (const marker of [info.execution, info.runtime_operation]) {
+    if (marker && typeof marker === 'object' && 'started_at' in marker) {
+      const seconds = marker.started_at
+      if (typeof seconds === 'number' && Number.isFinite(seconds)) return seconds * 1000
+    }
   }
-  const eventWorkspace = normalizedPath(event.workspaceDirectory)
-  return Boolean(eventWorkspace && eventWorkspace === normalizedPath(workspacePath))
 }
 
 export function useBackendFlowLogs() {
-  const { backendRuntimeEvents, currentProject, workspaceSession } = useWorkspace()
+  const { currentProject, resourceVersions, workspaceSession } = useWorkspace()
   const backgroundOperations = useBackgroundOperationStore()
-  const handledEventIds = new Set<string>()
-  const handledEventObjects = new WeakSet<object>()
-
   const currentWorkspaceFlowExecutionActive = computed(() =>
     isFlowExecutionActiveForWorkspace(currentProject.value?.path),
   )
-
-  function shouldProcess(event: DesignRuntimeEvent): boolean {
-    const eventId = event.type === 'runtime.protocol' ? event.event.eventId : undefined
-    if (typeof eventId === 'string' && eventId) {
-      if (handledEventIds.has(eventId)) return false
-      handledEventIds.add(eventId)
-      if (handledEventIds.size > 512) {
-        handledEventIds.delete(handledEventIds.values().next().value!)
-      }
-      return true
-    }
-    if (handledEventObjects.has(event)) return false
-    handledEventObjects.add(event)
-    return true
-  }
-
-  function processRuntimeEvent(event: DesignRuntimeEvent): void {
-    const workspacePath = currentProject.value?.path
-    if (
-      !workspacePath ||
-      !eventMatchesWorkspace(event, workspaceSession.value.workspaceId, workspacePath) ||
-      !shouldProcess(event)
-    )
-      return
-    const affected = rerunPreparedForWorkspace(event, workspacePath)
-    if (affected) {
-      flowLogRerunAffectedStepsState.value = affected
-      prepareFlowLogSegmentsForRerun(affected)
-      return
-    }
-    const record = backendRuntimeEventPayload(event)
-    const protocolType = backendRuntimeEventKind(event)
-    const terminalState = backendRuntimeEventTerminalState(event)
-    if (
-      terminalState &&
-      terminalState !== 'succeeded' &&
-      protocolType !== 'step.completed'
-    ) {
-      flowLogSegmentsState.value = flowLogSegmentsState.value.map((segment) => {
-        if (!segment.live) return segment
-        const next = { ...segment, live: false }
-        delete next.startedAtMs
-        return next
-      })
-      void refreshFlowLogs()
-      return
-    }
-    const stepName = backendRuntimeEventStep(event) ?? ''
-    const tool = typeof record.tool === 'string' ? record.tool : ''
-    if (!stepName || isObsoleteBackendFlowStep(stepName)) return
-
-    if (protocolType === 'step.started') {
-      const segment = upsertRuntimeSegment({
-        live: true,
-        startedAtMs: Date.now(),
-        state: backendRuntimeEventState(event) ?? 'Ongoing',
-        stepName,
-        tool,
-      })
-      const key = segmentKey(segment)
-      deleteContent(key)
-      flowLogCursorByKey.delete(key)
-      fullContentLoads.delete(key)
-      flowLogStepNameState.value = stepName
-      flowLogErrorState.value = null
-      return
-    }
-
-    if (protocolType === 'step.log' && typeof record.chunk === 'string') {
-      const segment = upsertRuntimeSegment({
-        live: true,
-        state: backendRuntimeEventState(event) ?? 'Ongoing',
-        stepName,
-        tool,
-      })
-      const key = segmentKey(segment)
-      const cursor =
-        typeof record.cursor === 'number' && Number.isFinite(record.cursor)
-          ? record.cursor
-          : null
-      if (cursor === null || cursor > (flowLogCursorByKey.get(key) ?? -1)) {
-        appendContent(key, record.chunk)
-        if (cursor !== null) flowLogCursorByKey.set(key, cursor)
-      }
-      flowLogStepNameState.value = stepName
-      flowLogErrorState.value = null
-      return
-    }
-
-    if (protocolType === 'step.completed') {
-      const state = backendRuntimeEventState(event) ?? 'Success'
-      const segment = upsertRuntimeSegment({
-        failed: isFailedState(state),
-        live: false,
-        startedAtMs: null,
-        state,
-        stepName,
-        tool,
-      })
-      const finalLog = typeof record.finalLog === 'string' ? record.finalLog : ''
-      const key = segmentKey(segment)
-      if (finalLog) setContent(key, finalLog)
-      flowLogCursorByKey.delete(key)
-      const index = flowLogSegmentsState.value.indexOf(segment)
-      if (index >= 0) {
-        flowLogSegmentsState.value[index] = {
-          ...segment,
-          contentComplete: false,
-          contentLoading: false,
-          totalSize: new TextEncoder().encode(finalLog).byteLength,
-          truncated: finalLog.length >= 64 * 1024,
-        }
-      }
-      flowLogStepNameState.value = stepName
-      flowLogErrorState.value = null
-      // ECC persists the final step.runtime to flow.json before emitting
-      // step.completed, so refresh to replace the live ticker's estimate.
-      void refreshFlowLogs()
-    }
-  }
-
-  function consumeRuntimeEvents(events: readonly DesignRuntimeEvent[]): void {
-    for (const event of events) processRuntimeEvent(event)
-  }
-
-  function consumeOperationFlow(steps: readonly EccRuntimeStepSnapshot[]): void {
-    const resetSteps = new Set(
-      steps
-        .filter((step) => step.state.trim().toLowerCase() === 'unstart')
-        .map((step) => step.name.trim().toLowerCase()),
-    )
-    if (resetSteps.size > 0) {
-      flowLogSegmentsState.value = flowLogSegmentsState.value.filter((segment) => {
-        if (!resetSteps.has(segment.stepName.trim().toLowerCase())) return true
-        const key = segmentKey(segment)
-        deleteContent(key)
-        flowLogCursorByKey.delete(key)
-        fullContentLoads.delete(key)
-        return false
-      })
-    }
-    for (const step of steps) {
-      if (step.state.trim().toLowerCase() === 'unstart') continue
-      const live = step.state.trim().toLowerCase() === 'ongoing'
-      upsertRuntimeSegment({
-        failed: isFailedState(step.state),
-        live,
-        peakMemoryMb: step.peakMemory,
-        runtime: step.runtime,
-        startedAtMs: live ? undefined : null,
-        state: step.state,
-        stepName: step.name,
-        tool: step.tool,
-      })
-    }
-    flowLogStepNameState.value = currentStepName(flowLogSegmentsState.value)
-    flowLogErrorState.value = null
-    void refreshFlowLogs()
-  }
 
   async function refreshFlowLogs(): Promise<void> {
     const generation = ++loadGeneration
@@ -421,41 +148,45 @@ export function useBackendFlowLogs() {
         flowLogSegmentsState.value.map((segment) => [segmentKey(segment), segment]),
       )
       const next = index.flow.steps.flatMap((step) => {
-        if (isObsoleteBackendFlowStep(step.name)) return []
-        if (['unstart'].includes(step.state.trim().toLowerCase())) return []
+        const state = step.state.trim().toLowerCase()
+        if (state === 'unstart') return []
         const logPath = step.resources.log.file?.path
-        const base: FlowLogSegment = {
-          failed: isFailedState(step.state),
-          missing: !logPath,
-          peakMemoryMb:
-            step.peakMemoryMb ??
-            (typeof step.info['peak memory (mb)'] === 'number'
-              ? step.info['peak memory (mb)']
-              : null),
-          runtime: step.runtime,
-          state: step.state,
-          stepName: step.name,
-          tool: step.tool,
-          ...(logPath ? { logPath } : {}),
+        const live = state === 'ongoing'
+        const key = segmentKey({ stepName: step.name, tool: step.tool })
+        const prior = existing.get(key)
+        const startedAtMs = live ? ledgerStartTime(step.info) : undefined
+        const sameAttempt =
+          prior?.logPath === logPath &&
+          (!live || (prior?.live && (!startedAtMs || prior.startedAtMs === startedAtMs)))
+        if (!sameAttempt) {
+          deleteContent(key)
+          fullContentLoads.delete(key)
         }
-        const prior = existing.get(segmentKey(base))
-        if (!prior) return [base]
-        const merged = {
-          ...prior,
-          ...base,
-          live: step.state.trim().toLowerCase() === 'ongoing',
-          logPath,
-        }
-        if (!merged.live) delete merged.startedAtMs
-        return [merged]
+        return [
+          {
+            ...(sameAttempt ? prior : undefined),
+            failed: isFailedState(step.state),
+            live,
+            missing: !logPath,
+            peakMemoryMb: step.peakMemoryMb,
+            runtime: step.runtime,
+            startedAtMs: live
+              ? (startedAtMs ??
+                (sameAttempt ? prior?.startedAtMs : undefined) ??
+                Date.now())
+              : undefined,
+            state: step.state,
+            stepName: step.name,
+            tool: step.tool,
+            logPath,
+          },
+        ]
       })
       const nextKeys = new Set(next.map(segmentKey))
-      for (const segment of existing.values()) {
-        if (!nextKeys.has(segmentKey(segment))) next.push(segment)
-      }
-      const alive = new Set(next.map(segmentKey))
-      for (const key of Object.keys(flowLogContentState.value)) {
-        if (!alive.has(key)) deleteContent(key)
+      for (const key of existing.keys()) {
+        if (nextKeys.has(key)) continue
+        deleteContent(key)
+        fullContentLoads.delete(key)
       }
       flowLogSegmentsState.value = next
       flowLogStepNameState.value = currentStepName(next)
@@ -470,106 +201,74 @@ export function useBackendFlowLogs() {
   async function ensureFlowLogSegmentContentLoaded(
     requested: FlowLogSegment,
   ): Promise<boolean> {
-    let segment = flowLogSegmentsState.value.find((candidate) =>
-      sameSegment(candidate, requested.stepName, requested.tool),
-    )
+    const key = segmentKey(requested)
+    const currentIndex = () =>
+      flowLogSegmentsState.value.findIndex((segment) => segmentKey(segment) === key)
+    let segment = flowLogSegmentsState.value[currentIndex()]
     if (!segment?.logPath) {
       await refreshFlowLogs()
-      segment = flowLogSegmentsState.value.find((candidate) =>
-        sameSegment(candidate, requested.stepName, requested.tool),
-      )
+      segment = flowLogSegmentsState.value[currentIndex()]
     }
     if (!segment?.logPath) return false
-    const key = segmentKey(segment)
-    if (segment.live) return await loadLiveSegmentContent(segment, key)
-    if (segment.contentComplete && key in flowLogContentState.value) return true
+    if (!segment.live && segment.contentComplete && key in flowLogContentState.value)
+      return true
     const inFlight = fullContentLoads.get(key)
     if (inFlight) return await inFlight
 
-    const load = (async () => {
-      const logPath = await resolveProjectPathAccess(segment!.logPath!)
-      if (!logPath) return false
-      const mark = (partial: Partial<FlowLogSegment>): void => {
-        const index = flowLogSegmentsState.value.findIndex((candidate) =>
-          sameSegment(candidate, requested.stepName, requested.tool),
-        )
-        if (index >= 0) {
-          flowLogSegmentsState.value[index] = {
-            ...flowLogSegmentsState.value[index]!,
-            ...partial,
-          }
-        }
-      }
-      mark({ contentLoading: true })
-      try {
-        const tail = await readOptionalProjectTextFileTail(logPath, MAX_FILE_LOG_CHARS)
-        if (!tail) {
-          mark({ contentLoading: false, missing: true })
-          return false
-        }
-        setContent(key, presentableLogTail(tail))
-        mark({
-          contentComplete: true,
-          contentLoading: false,
-          lastReadOffsetBytes: tail.sizeBytes,
-          missing: false,
-          totalSize: tail.sizeBytes,
-          truncated: tail.truncated,
-        })
-        return true
-      } catch (error) {
-        flowLogErrorState.value = error instanceof Error ? error.message : String(error)
-        mark({ contentLoading: false })
-        return false
-      }
-    })().finally(() => fullContentLoads.delete(key))
-    fullContentLoads.set(key, load)
-    return await load
-  }
+    const { logPath, live, lastReadOffsetBytes } = segment
+    const isCurrent = () => fullContentLoads.get(key) === load
+    const mark = (partial: Partial<FlowLogSegment>): void => {
+      const index = currentIndex()
+      const current = flowLogSegmentsState.value[index]
+      if (current && isCurrent())
+        flowLogSegmentsState.value[index] = { ...current, ...partial }
+    }
 
-  async function loadLiveSegmentContent(
-    requested: FlowLogSegment,
-    key: string,
-  ): Promise<boolean> {
-    const inFlight = fullContentLoads.get(key)
-    if (inFlight) return await inFlight
-    const load = (async () => {
-      const logPath = await resolveProjectPathAccess(requested.logPath!)
-      if (!logPath) return false
-      const mark = (partial: Partial<FlowLogSegment>): void => {
-        const index = flowLogSegmentsState.value.findIndex((candidate) =>
-          sameSegment(candidate, requested.stepName, requested.tool),
-        )
-        if (index >= 0) {
-          flowLogSegmentsState.value[index] = {
-            ...flowLogSegmentsState.value[index]!,
-            ...partial,
-          }
-        }
-      }
+    const load: Promise<boolean> = (async () => {
       try {
-        let offset = requested.lastReadOffsetBytes ?? 0
-        let chunk = await readOptionalProjectTextFileChunk(
-          logPath,
-          offset,
-          LIVE_LOG_CHUNK_BYTES,
-        )
-        if (!chunk) {
-          mark({ missing: true })
-          return false
-        }
-        if (chunk.sizeBytes < offset) {
-          offset = 0
-          setContent(key, '')
-          chunk = await readOptionalProjectTextFileChunk(
-            logPath,
-            offset,
-            LIVE_LOG_CHUNK_BYTES,
+        const allowedPath = await resolveProjectPathAccess(logPath)
+        if (!allowedPath || !isCurrent()) return false
+        if (!live) {
+          mark({ contentLoading: true })
+          const tail = await readOptionalProjectTextFileTail(
+            allowedPath,
+            MAX_FILE_LOG_CHARS,
           )
-          if (!chunk) {
+          if (!isCurrent()) return false
+          if (!tail) {
             mark({ missing: true })
             return false
           }
+          setContent(key, presentableLogTail(tail))
+          mark({
+            contentComplete: true,
+            lastReadOffsetBytes: tail.sizeBytes,
+            missing: false,
+            totalSize: tail.sizeBytes,
+            truncated: tail.truncated,
+          })
+          return true
+        }
+
+        const offset = lastReadOffsetBytes ?? 0
+        let chunk = await readOptionalProjectTextFileChunk(
+          allowedPath,
+          offset,
+          LIVE_LOG_CHUNK_BYTES,
+        )
+        if (!isCurrent()) return false
+        if (chunk && chunk.sizeBytes < offset) {
+          deleteContent(key)
+          chunk = await readOptionalProjectTextFileChunk(
+            allowedPath,
+            0,
+            LIVE_LOG_CHUNK_BYTES,
+          )
+          if (!isCurrent()) return false
+        }
+        if (!chunk) {
+          mark({ missing: true })
+          return false
         }
         appendContent(key, chunk.content)
         mark({
@@ -582,10 +281,16 @@ export function useBackendFlowLogs() {
         flowLogErrorState.value = null
         return true
       } catch (error) {
-        flowLogErrorState.value = error instanceof Error ? error.message : String(error)
+        if (isCurrent()) {
+          flowLogErrorState.value = error instanceof Error ? error.message : String(error)
+        }
         return false
       }
-    })().finally(() => fullContentLoads.delete(key))
+    })().finally(() => {
+      if (!isCurrent()) return
+      mark({ contentLoading: false })
+      fullContentLoads.delete(key)
+    })
     fullContentLoads.set(key, load)
     return await load
   }
@@ -593,7 +298,7 @@ export function useBackendFlowLogs() {
   watch(
     () => [currentProject.value?.path, workspaceSession.value.sessionId] as const,
     ([path, sessionId]) => {
-      const normalized = normalizedPath(path)
+      const normalized = path ?? ''
       if (normalized !== activeWorkspacePath || sessionId !== activeWorkspaceSessionId) {
         activeWorkspacePath = normalized
         activeWorkspaceSessionId = sessionId
@@ -603,36 +308,24 @@ export function useBackendFlowLogs() {
     },
     { immediate: true },
   )
-  watch(backendRuntimeEvents, (events) => consumeRuntimeEvents(events), {
-    deep: true,
-    flush: 'sync',
-    immediate: true,
-  })
   watch(
-    () =>
+    () => [
+      resourceVersions.value.logs,
       backgroundOperations.operations.find(
         (operation) => operation.workspaceHandle === workspaceSession.value.workspaceId,
-      )?.flow?.steps,
-    (steps, previousSteps) => {
-      if (steps) consumeOperationFlow(steps)
-      else if (previousSteps && currentProject.value?.path) void refreshFlowLogs()
+      )?.flow,
+    ],
+    () => {
+      if (currentProject.value?.path) void refreshFlowLogs()
     },
-    { deep: true, immediate: true },
   )
-
-  onUnmounted(() => {
-    handledEventIds.clear()
-  })
 
   return {
     currentWorkspaceFlowExecutionActive,
     ensureFlowLogSegmentContentLoaded,
-    ensureFlowLogsLoaded: refreshFlowLogs,
-    expandFlowLogSegment: ensureFlowLogSegmentContentLoaded,
     flowLogContentByKey: flowLogContentState,
     flowLogError: flowLogErrorState,
     flowLogLoading: flowLogLoadingState,
-    flowLogRerunAffectedSteps: flowLogRerunAffectedStepsState,
     flowLogSegments: flowLogSegmentsState,
     flowLogStepName: flowLogStepNameState,
     refreshFlowLogs,

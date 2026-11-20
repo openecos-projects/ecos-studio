@@ -9,43 +9,44 @@ export interface BlockedFlowStep {
 }
 
 export function terminalState(
-  flow: PersistedFlow,
+  flow: PersistedFlow | null,
   cancelled: boolean,
-  selectedStep?: string,
+  exit?: { code: number | null },
 ): EccRuntimeOperation['state'] {
   if (cancelled) return 'cancelled'
-  if (selectedStep) {
-    const step = flow.steps.find(({ name }) => name === selectedStep)
-    if (step?.state === 'Success' || step?.state === 'Skipped') return 'succeeded'
-    if (
-      step?.checklistBlocked ||
-      step?.state === 'Incomplete' ||
-      step?.state === 'Invalid'
+  if (exit) {
+    if (exit.code === null) return 'interrupted'
+    return exit.code === 0 ? 'succeeded' : 'failed'
+  }
+  // A run adopted from the terminal has no child exit status available.
+  const steps = flow?.steps ?? []
+  if (steps.some(({ state }) => state === 'Ongoing')) return 'interrupted'
+  if (
+    steps.some(
+      ({ name, state }) =>
+        state === 'Invalid' || (state === 'Incomplete' && !ADVISORY_STEPS.has(name)),
     )
-      return 'failed'
-    return 'interrupted'
-  }
-  // Advisory execution failures remain in the ledger; they do not fail the flow.
-  const states = flow.steps.map((step) =>
-    ADVISORY_STEPS.has(step.name) && step.state === 'Incomplete' ? 'Success' : step.state,
   )
-  if (states.some((state) => ['Failed', 'Error'].includes(state))) return 'failed'
+    return 'failed'
   if (
-    states.some((state) => ['Interrupted', 'Incomplete', 'Imcomplete'].includes(state))
-  ) {
-    return 'interrupted'
-  }
-  if (
-    states.length > 0 &&
-    states.every((state) => ['Success', 'Skipped', 'Unstart'].includes(state))
-  ) {
+    steps.length &&
+    steps.every(
+      ({ name, state }) =>
+        state === 'Success' ||
+        state === 'Skipped' ||
+        (state === 'Incomplete' && ADVISORY_STEPS.has(name)),
+    )
+  )
     return 'succeeded'
-  }
   return 'interrupted'
 }
 
-export function blockedFlowStep(flow: PersistedFlow): BlockedFlowStep | null {
-  for (const step of flow.steps) {
+export function blockedFlowStep(
+  flow: PersistedFlow,
+  selectedStep?: string,
+  fromStep?: string,
+): BlockedFlowStep | null {
+  for (const step of runSteps(flow, selectedStep, fromStep)) {
     if (!step.checklistBlocked) continue
     if (['Success', 'Skipped'].includes(step.state)) continue
     return {
@@ -56,11 +57,20 @@ export function blockedFlowStep(flow: PersistedFlow): BlockedFlowStep | null {
   return null
 }
 
-export function flowBlockOutcome(
+export function failedRunSteps(
   flow: PersistedFlow,
-  kind: string | undefined,
-  terminal: EccRuntimeOperation['state'],
-): BlockedFlowStep | null {
-  if (kind !== 'flow' || terminal === 'cancelled') return null
-  return blockedFlowStep(flow)
+  selectedStep?: string,
+  fromStep?: string,
+) {
+  return runSteps(flow, selectedStep, fromStep).filter(
+    ({ name, state }) =>
+      state === 'Invalid' ||
+      (state === 'Incomplete' && (selectedStep || !ADVISORY_STEPS.has(name))),
+  )
+}
+
+function runSteps(flow: PersistedFlow, selectedStep?: string, fromStep?: string) {
+  if (selectedStep) return flow.steps.filter(({ name }) => name === selectedStep)
+  const start = fromStep ? flow.steps.findIndex(({ name }) => name === fromStep) : 0
+  return start < 0 ? [] : flow.steps.slice(start)
 }

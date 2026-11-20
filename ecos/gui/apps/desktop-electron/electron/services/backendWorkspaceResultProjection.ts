@@ -17,6 +17,7 @@ export interface WorkspaceResultProjection {
 }
 
 function canonicalStepIdentity(stepId: string): string {
+  if (stepId.startsWith('lec@')) return stepId
   return (parseProjectManifestFlowStep(stepId) ?? stepId).trim().toLowerCase()
 }
 

@@ -1,3 +1,4 @@
+import { isObsoleteFlowStepName } from '@ecos-studio/shared'
 import type {
   DesignRuntimeEvent,
   EccRuntimeStepSnapshot,
@@ -56,17 +57,13 @@ function checklistStatusValue(
     : undefined
 }
 
-export function isObsoleteBackendFlowStep(value: string): boolean {
-  return value.toLowerCase().replace(/[\s_-]/g, '') === 'fixfanout'
-}
-
 export function projectRuntimeFlowSteps(
   runtimeSteps: readonly EccRuntimeStepSnapshot[],
   committed: readonly FlowStepSummary[] = [],
 ): FlowStepSummary[] {
   const committedById = new Map(committed.map((step) => [step.stepId, step]))
   return runtimeSteps.flatMap((step, order) => {
-    if (isObsoleteBackendFlowStep(step.name)) return []
+    if (isObsoleteFlowStepName(step.name)) return []
     const runtimeSeconds = parseRuntimeSeconds(step.runtime)
     return [
       {
@@ -108,7 +105,7 @@ export function projectBackendFlowSteps(
   const steps = committed
     .filter(
       (step) =>
-        !isObsoleteBackendFlowStep(step.stepId) && !isObsoleteBackendFlowStep(step.name),
+        !isObsoleteFlowStepName(step.stepId) && !isObsoleteFlowStepName(step.name),
     )
     .map((step) => ({ ...step }))
 
@@ -163,7 +160,7 @@ export function projectBackendFlowSteps(
           ? event.step
           : ''
     if (!stepName) continue
-    if (isObsoleteBackendFlowStep(stepName)) continue
+    if (isObsoleteFlowStepName(stepName)) continue
     const key = stepKey(stepName)
     let step = steps.find(
       (candidate) => stepKey(candidate.stepId) === key || stepKey(candidate.name) === key,

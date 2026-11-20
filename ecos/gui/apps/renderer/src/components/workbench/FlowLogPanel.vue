@@ -215,7 +215,7 @@ function selectSegmentForNode(): void {
   }
 
   selectionPinned.value = true
-  const matchingSegments = matchingFlowLogSegments(props.segments, node.label)
+  const matchingSegments = matchingFlowLogSegments(props.segments, node.id)
   const segment = matchingSegments.find((item) => item.live) ?? matchingSegments[0]
   if (!segment) {
     selectedKey.value = ''

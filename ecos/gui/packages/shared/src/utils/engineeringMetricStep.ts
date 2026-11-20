@@ -31,8 +31,7 @@ function text(value: unknown): string {
  * Step attribution for one flat Snapshot v6 metric record.
  *
  * ECC validates metric records per step and flattens them into the single
- * Snapshot `metrics` projection without a dedicated step field
- * (chipcompiler/engine/analysis.py `collect_workspace_projections`). The
+ * Snapshot `metrics` projection without a dedicated step field. The
  * owning step is still recoverable from fields the producer assigns per step,
  * checked here in order of authority:
  *
@@ -57,16 +56,15 @@ function text(value: unknown): string {
  */
 export function engineeringSnapshotMetricStep(
   metric: Record<string, unknown>,
-): ProjectManifestFlowStep | null {
+): ProjectManifestFlowStep | `lec@${string}` | null {
   const scope = text(metric.scope)
   if (scope) {
     const mapped = METRIC_SCOPE_STEPS[scope]
     if (mapped) return mapped
-    if (scope.endsWith('_execution')) {
-      const step = parseProjectManifestFlowStep(scope.slice(0, -'_execution'.length))
-      if (step) return step
-    }
-    const step = parseProjectManifestFlowStep(scope)
+    const stepName = scope.replace(/_execution$/, '')
+    const step = stepName.startsWith('lec@')
+      ? (stepName as `lec@${string}`)
+      : parseProjectManifestFlowStep(stepName)
     if (step) return step
   }
   const prefixed = METRIC_ID_PREFIX_STEPS[text(metric.id).split('_', 1)[0] ?? '']

@@ -1,4 +1,7 @@
-import type { EccWorkspaceRuntimeSnapshot } from '@ecos-studio/shared'
+import {
+  isObsoleteFlowStepName,
+  type EccWorkspaceRuntimeSnapshot,
+} from '@ecos-studio/shared'
 import type { WorkspaceConfig } from '@/types'
 import type { ProjectRouteContext } from '@/utils/projectManifestRegistration'
 import type { WorkspaceWizardInitialConfig } from '@/utils/workspaceNavigation'
@@ -57,7 +60,7 @@ export function workspaceReconfigureInitialConfig(
       .filter(Boolean)
   const steps = snapshot.flow.steps
     .map((step) => step.name)
-    .filter((step) => step && step.toLowerCase() !== 'fixfanout')
+    .filter((step) => step && !isObsoleteFlowStepName(step))
   const coreMargin = Array.isArray(parameters['floorplan.core_margin'])
     ? parameters['floorplan.core_margin'].filter(
         (value): value is number => typeof value === 'number',

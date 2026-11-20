@@ -1,10 +1,5 @@
 <template>
-  <WorkspaceWorkbench
-    flow-title="Flow status"
-    :loading="flowLoading"
-    :nodes="[]"
-    agent-only
-  >
+  <WorkspaceWorkbench>
     <template #left>
       <main
         class="home-dashboard"
@@ -211,8 +206,7 @@ import {
   qorScoreTone as getQorScoreTone,
 } from '@/components/home/qorComparisonData'
 import HomeQorComparisonDialog from '@/components/home/HomeQorComparisonDialog.vue'
-import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
-import { useBackendFlowLogs } from '@/composables/useBackendFlowLogs'
+import { isFlowExecutionActiveForWorkspace } from '@/composables/useFlowRunner'
 import { type HomeLayoutThumbnail } from '@/composables/useHomeSnapshots'
 import { useFlowInsights } from '@/composables/useFlowInsights'
 import { usePowerSummary } from '@/composables/usePowerSummary'
@@ -247,12 +241,10 @@ const staleRevision = computed(() => {
     ? (freshness.staleRevision ?? null)
     : null
 })
-const { isLoading: flowLoading } = useBackendFlowStages()
-const { currentWorkspaceFlowExecutionActive } = useBackendFlowLogs()
 const staleResultNotice = computed(() => {
   return workspaceResultFreshnessNotice(
     resultFreshness.value,
-    currentWorkspaceFlowExecutionActive.value,
+    isFlowExecutionActiveForWorkspace(currentProject.value?.path),
   )
 })
 const checklistItems = computed(() => {

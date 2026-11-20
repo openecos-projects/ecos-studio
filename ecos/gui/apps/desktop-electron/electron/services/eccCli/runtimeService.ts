@@ -1,8 +1,8 @@
 import { workspaceForkProbe, workspaceForkRequired } from '../cliSelfCheck'
 import { randomUUID } from 'node:crypto'
-import { lstat, mkdtemp, open, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { stringify as stringifyToml } from 'smol-toml'
 import type {
   EccBackgroundOperationLogResult,
@@ -41,8 +41,6 @@ import type {
   EccWorkspaceRefreshConfigResult,
   EccWorkspaceResetFlowResult,
   EccWorkspaceRuntimeSnapshot,
-  EccWorkspaceSpecValidationRequest,
-  EccWorkspaceSpecValidationResult,
   EccWorkspaceStepConfigurationReadRequest,
   EccWorkspaceStepConfigurationReadResult,
   EccWorkspaceStepConfigurationUpdateRequest,
@@ -54,7 +52,6 @@ import type {
   ProjectRuntimeProcessEntry,
 } from '@ecos-studio/shared'
 import { electronLogger } from '../logger'
-import { isPathWithinRoot } from '../pathScope'
 import { normalizeWorkspacePath } from '../workspacePath'
 import { readPersistedEngineeringSnapshot } from './engineeringSnapshotReader'
 import {
@@ -63,7 +60,8 @@ import {
   type EccCliProcessOptions,
 } from './cliProcess'
 import { parseEccLineRecords, parseJsonLiteral } from './lineRecords'
-import { flowBlockOutcome, terminalState } from './operationOutcome'
+import { blockedFlowStep, failedRunSteps, terminalState } from './operationOutcome'
+import { operationLogPath, readOperationLog, readRunFailure } from './operationLog'
 import {
   discoverProject,
   readProjectManifest,
@@ -71,6 +69,7 @@ import {
   workspaceDirectoryForId,
   workspaceEntryForDirectory,
   type PersistedFlow,
+  readStepWorkerFailure,
 } from './persistedState'
 import {
   watchWorkspaceOperationFiles,
@@ -90,6 +89,7 @@ interface WorkspaceSession {
 }
 
 interface TrackedOperation {
+  child?: { exit?: { code: number | null; signal: NodeJS.Signals | null } }
   operation: EccRuntimeOperation
   projectRoot: string
   registrationPending: boolean
@@ -359,12 +359,6 @@ export class EccCliRuntimeService {
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
-  }
-
-  async validateWorkspaceSpec(
-    _request: EccWorkspaceSpecValidationRequest,
-  ): Promise<EccWorkspaceSpecValidationResult> {
-    return { issues: [] }
   }
 
   async createWorkspace(
@@ -902,16 +896,21 @@ export class EccCliRuntimeService {
   async cancelOperation(request: EccRuntimeOperationRequest) {
     const tracked = this.requireOperation(request)
     tracked.requestedCancel = true
-    await this.cli.run([
-      'process',
-      'cancel',
-      '--project',
-      tracked.projectRoot,
-      '--workspace',
-      tracked.session.workspaceId,
-      '--run-id',
-      tracked.operation.operationId,
-    ])
+    try {
+      await this.cli.run([
+        'process',
+        'cancel',
+        '--project',
+        tracked.projectRoot,
+        '--workspace',
+        tracked.session.workspaceId,
+        '--run-id',
+        tracked.operation.operationId,
+      ])
+    } catch (error) {
+      tracked.requestedCancel = false
+      throw error
+    }
     tracked.operation = { ...tracked.operation, cancelRequested: true, updatedAt: now() }
     this.invalidate()
     return {
@@ -1032,26 +1031,10 @@ export class EccCliRuntimeService {
     request: EccRuntimeOperationRequest,
   ): Promise<EccBackgroundOperationLogResult> {
     const tracked = this.requireOperation(request)
-    const manifest = await readProjectManifest(tracked.projectRoot)
-    const path = await resolveOperationLogPath({
-      workspaceDirectory: tracked.session.directory,
-      operationId: tracked.operation.operationId,
-      entry: manifest.runtime_processes?.[tracked.session.workspaceId],
-    })
-    const info = await stat(path)
-    const maxBytes = 64 * 1024
-    const offset = Math.max(0, info.size - maxBytes)
-    const handle = await open(path, 'r')
-    try {
-      const buffer = Buffer.alloc(Math.min(info.size, maxBytes))
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset)
-      return {
-        content: buffer.subarray(0, bytesRead).toString('utf8'),
-        truncated: offset > 0,
-      }
-    } finally {
-      await handle.close()
-    }
+    return await readOperationLog(
+      tracked.session.directory,
+      tracked.operation.operationId,
+    )
   }
 
   isWorkspaceRuntimeActive(directory: string): boolean {
@@ -1175,6 +1158,7 @@ export class EccCliRuntimeService {
       this.runtimeId(),
       '--log-file',
       operationLogPath(runId),
+      '--plain',
       '--command-id',
       request.idempotencyKey,
       ...(kind === 'step' ? ['--only', step] : []),
@@ -1188,7 +1172,9 @@ export class EccCliRuntimeService {
       Boolean(request.rerun || fromStep),
     )
     if (kind === 'flow') operation.flowScope = fromStep ? { fromStep } : {}
+    const childState: NonNullable<TrackedOperation['child']> = {}
     const tracked: TrackedOperation = {
+      child: childState,
       operation,
       projectRoot: session.projectRoot,
       registrationPending: true,
@@ -1200,16 +1186,27 @@ export class EccCliRuntimeService {
       watcher: null,
     }
     this.operations.set(runId, tracked)
-    let childExited: { code: number | null; signal: NodeJS.Signals | null } | null = null
-    const child = await this.cli.spawnDetached(args, {
-      cwd: session.projectRoot,
-      logFile: join(session.directory, operationLogPath(runId)),
-    })
-    child.once('exit', (code, signal) => {
-      childExited = { code, signal }
-      tracked.registrationPending = false
-      void this.refreshOperation(tracked)
-    })
+    try {
+      const child = await this.cli.spawnDetached(args, {
+        cwd: session.projectRoot,
+        workspaceDirectory: session.directory,
+        runId,
+      })
+      const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+        childState.exit = { code, signal }
+        tracked.registrationPending = false
+        if (tracked.poller) void this.refreshOperation(tracked)
+      }
+      child.once('exit', onExit)
+      if (child.exitCode !== null || child.signalCode !== null) {
+        child.off('exit', onExit)
+        onExit(child.exitCode, child.signalCode)
+      }
+    } catch (error) {
+      this.operations.delete(runId)
+      this.invalidate()
+      throw error
+    }
     try {
       await waitFor(
         async () => {
@@ -1218,27 +1215,28 @@ export class EccCliRuntimeService {
           return registeredRunMatches(entry, runId, this.runtimeId())
         },
         HANDSHAKE_TIMEOUT_MS,
-        () => childExited !== null,
+        () => childState.exit !== undefined,
       )
       tracked.registrationPending = false
     } catch (error) {
-      if (childExited) {
-        this.operations.delete(runId)
-        throw codedError(
-          `ECC CLI exited before registering the run (status ${childExitStatus(childExited)}).`,
-          'ECC_RUN_START_FAILED',
+      if (!childState.exit) {
+        electronLogger.warn(
+          '[runtime] ECC CLI registration is still pending: %s',
+          error instanceof Error ? error.message : String(error),
         )
       }
-      electronLogger.warn(
-        '[runtime] ECC CLI registration is still pending after the startup deadline: %s',
-        error instanceof Error ? error.message : String(error),
-      )
+    }
+    if (childState.exit) {
+      await this.refreshOperation(tracked)
+      if (isTerminal(tracked.operation.state)) return { ...tracked.operation }
     }
     const watcher = this.watchOperation(tracked)
     tracked.watcher = watcher
     tracked.poller = this.pollOperation(tracked)
-    await watcher.ready
-    if (tracked.watcher === watcher) await this.refreshOperation(tracked)
+    void watcher.ready.then(() => {
+      if (tracked.watcher === watcher) return this.refreshOperation(tracked)
+    })
+    await this.refreshOperation(tracked)
     if (!tracked.operation.flow && !isTerminal(tracked.operation.state)) {
       this.invalidate()
       this.emitOperationEvent(tracked, 'operation.progress')
@@ -1270,7 +1268,11 @@ export class EccCliRuntimeService {
       return
     }
     const tracked: TrackedOperation = {
-      operation: operationSnapshot(session, entry.run_id, 'flow', '', false),
+      operation: {
+        ...operationSnapshot(session, entry.run_id, 'flow', '', false),
+        createdAt: entry.started_at,
+        origin: 'cli',
+      },
       projectRoot: session.projectRoot,
       registrationPending: false,
       requestedCancel: false,
@@ -1350,31 +1352,25 @@ export class EccCliRuntimeService {
   private async refreshOperation(tracked: TrackedOperation): Promise<void> {
     if (isTerminal(tracked.operation.state)) return
     const refreshSequence = ++tracked.refreshSequence
-    let manifest: ProjectManifest
-    let flow: PersistedFlow
-    try {
-      ;[manifest, flow] = await Promise.all([
-        readProjectManifest(tracked.projectRoot),
-        readWorkspaceFlow(tracked.session.directory),
-      ])
-    } catch {
-      return
-    }
+    const [manifest, flow] = await Promise.all([
+      readProjectManifest(tracked.projectRoot).catch(() => null),
+      readWorkspaceFlow(tracked.session.directory).catch(() => null),
+    ])
     if (
       refreshSequence !== tracked.refreshSequence ||
       isTerminal(tracked.operation.state)
     ) {
       return
     }
-    const current = manifest.runtime_processes?.[tracked.session.workspaceId]
-    const ongoing = flow.steps.find((step) => step.state === 'Ongoing')
+    const current = manifest?.runtime_processes?.[tracked.session.workspaceId]
+    const ongoing = flow?.steps.find((step) => step.state === 'Ongoing')
     const currentStep = ongoing?.name ?? tracked.operation.currentStep
     const currentTool = ongoing?.tool ?? tracked.operation.currentTool
     const projectionChanged =
       currentStep !== tracked.operation.currentStep ||
       currentTool !== tracked.operation.currentTool ||
-      !operationFlowMatches(tracked.operation.flow, flow)
-    if (projectionChanged) {
+      Boolean(flow && !operationFlowMatches(tracked.operation.flow, flow))
+    if (projectionChanged && flow) {
       tracked.operation = {
         ...tracked.operation,
         currentStep,
@@ -1391,29 +1387,85 @@ export class EccCliRuntimeService {
       this.emitOperationEvent(tracked, 'operation.progress')
       return
     }
-    if (tracked.registrationPending) return
+    if (tracked.registrationPending || (tracked.child && !tracked.child.exit)) return
+    if (!tracked.child && (!manifest || !flow)) return
     const selectedStep =
       tracked.operation.kind === 'step' ? tracked.operation.step : undefined
-    const terminal = terminalState(flow, tracked.requestedCancel, selectedStep)
-    const flowBlock = flowBlockOutcome(flow, tracked.operation.kind, terminal)
-    const blockedStep = selectedStep
-      ? flow.steps.find((step) => step.name === selectedStep && step.checklistBlocked)
-      : undefined
+    const exit = tracked.child?.exit
+    const terminal = terminalState(flow, tracked.requestedCancel, exit)
+    const log =
+      terminal === 'failed'
+        ? await readOperationLog(
+            tracked.session.directory,
+            tracked.operation.operationId,
+          ).catch(() => null)
+        : null
+    if (
+      refreshSequence !== tracked.refreshSequence ||
+      isTerminal(tracked.operation.state)
+    )
+      return
+    const failure = log ? readRunFailure(log.content) : undefined
+    const candidates =
+      terminal === 'failed' && !failure && flow
+        ? failedRunSteps(flow, selectedStep, tracked.operation.flowScope?.fromStep)
+        : []
+    let workerFailure: string | undefined
+    for (const step of candidates) {
+      workerFailure = await readStepWorkerFailure(
+        tracked.session.directory,
+        step,
+        tracked.operation.createdAt,
+      )
+      if (workerFailure) break
+    }
+    if (
+      refreshSequence !== tracked.refreshSequence ||
+      isTerminal(tracked.operation.state)
+    )
+      return
+    const blocked =
+      terminal === 'failed' && !failure && !workerFailure && flow
+        ? blockedFlowStep(flow, selectedStep, tracked.operation.flowScope?.fromStep)
+        : null
     tracked.operation = {
       ...tracked.operation,
       error:
         terminal === 'failed'
-          ? blockedStep
+          ? (failure ??
+            (workerFailure
+              ? { code: 'step_worker_failed', message: workerFailure }
+              : undefined) ??
+            (blocked
+              ? {
+                  code: 'step_blocked',
+                  message: `ECC blocked ${blocked.step}: ${blocked.failedItems.join(', ') || 'checklist gate'}.`,
+                }
+              : {
+                  code: 'flow_failed',
+                  message: `ECC ${candidates[0]?.name ?? (selectedStep || 'flow')} failed. See the run log.`,
+                }))
+          : terminal === 'interrupted'
             ? {
-                code: 'step_blocked',
-                message: `ECC blocked ${blockedStep.name}: ${blockedStep.checklistFailedItems?.join(', ') || 'checklist gate'}.`,
+                code: 'run_interrupted',
+                message: exit?.signal
+                  ? `ECC was interrupted by ${exit.signal}. See the run log.`
+                  : 'ECC execution was interrupted. See the run log.',
               }
-            : { code: 'flow_failed', message: 'ECC flow failed.' }
-          : null,
-      flow,
-      ...(flowBlock ? { flowBlock } : {}),
+            : null,
+      ...(flow ? { flow } : {}),
+      ...(blocked && !selectedStep ? { flowBlock: blocked } : {}),
       state: terminal,
       updatedAt: now(),
+    }
+    if (tracked.operation.error) {
+      electronLogger.warn(
+        '[runtime] ECC run %s ended in %s (%s): %s',
+        tracked.operation.operationId,
+        terminal,
+        tracked.operation.error.code,
+        tracked.operation.error.message,
+      )
     }
     await tracked.watcher?.close()
     tracked.watcher = null
@@ -1620,6 +1672,8 @@ export class EccCliRuntimeService {
       this.emit({
         ...base,
         code: tracked.operation.error?.code,
+        logFile: tracked.operation.logFile,
+        step: tracked.operation.step || tracked.operation.currentStep || undefined,
         message: tracked.operation.error?.message ?? 'ECC flow was interrupted.',
         type,
         workspaceRevision: tracked.session.workspaceRevision,
@@ -1656,9 +1710,6 @@ export async function declaredWorkspaceForDirectory(
   try {
     target = normalizeWorkspacePath(await realpath(directory))
   } catch {
-    // Automatic legacy migration can move runs/<id> between discovery and
-    // this comparison. The caller still has the stable Workspace ID and can
-    // resolve the manifest's newly canonical path.
     return null
   }
   for (const entry of manifest.workspaces) {
@@ -1690,6 +1741,7 @@ function operationSnapshot(
     kind,
     operationId,
     origin: 'gui',
+    logFile: join(session.directory, operationLogPath(operationId)),
     rerun,
     result: null,
     safeToStop: true,
@@ -2241,75 +2293,6 @@ export function workspaceParameterValue(
   return entry.default
 }
 
-function operationLogPath(runId: string): string {
-  return `log/${runId}.log`
-}
-
-/**
- * Resolve the log file for one operation. The registry log_path is advisory:
- * only trust it while it belongs to this exact run and resolves inside the
- * workspace without crossing symlinks; anything else falls back to the
- * run-id-derived default path (the Workspace-root log contract).
- */
-export async function resolveOperationLogPath(options: {
-  workspaceDirectory: string
-  operationId: string
-  entry: { log_path?: string; run_id: string } | null | undefined
-}): Promise<string> {
-  const fallback = resolve(
-    options.workspaceDirectory,
-    operationLogPath(options.operationId),
-  )
-  if (
-    options.entry &&
-    options.entry.run_id === options.operationId &&
-    typeof options.entry.log_path === 'string'
-  ) {
-    const authorized = await resolveContainedLogPath(
-      options.workspaceDirectory,
-      options.entry.log_path,
-    )
-    if (authorized) return authorized
-  }
-  return fallback
-}
-
-/**
- * Resolve a workspace-relative manifest path to a real file path that stays
- * inside the workspace directory. Returns null when the path is absolute,
- * traverses outside the workspace, or crosses a symlink (either itself or an
- * ancestor), so callers can fall back to an authorized default.
- */
-async function resolveContainedLogPath(
-  workspaceDirectory: string,
-  relativePath: string,
-): Promise<string | null> {
-  if (isAbsolute(relativePath)) return null
-  const root = resolve(workspaceDirectory)
-  const target = resolve(root, relativePath)
-  if (!isPathWithinRoot(target, root)) return null
-  let probe = target
-  // Reject symlinked targets or symlinked ancestors; the file may not exist
-  // yet while the nearest existing ancestor still must stay inside the root.
-  while (true) {
-    try {
-      const stats = await lstat(probe)
-      if (stats.isSymbolicLink()) return null
-      break
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return null
-    }
-    const parent = dirname(probe)
-    if (parent === probe) return null
-    probe = parent
-  }
-  const [resolvedProbe, resolvedRoot] = await Promise.all([
-    realpath(probe),
-    realpath(root),
-  ])
-  return isPathWithinRoot(resolvedProbe, resolvedRoot) ? target : null
-}
-
 function runtimeResourceId(runtimeId: string): string | null {
   if (!runtimeId.startsWith('tool:')) return null
   return runtimeId.split('@', 1)[0] ?? null
@@ -2512,11 +2495,4 @@ async function waitFor(
     await new Promise((resolveWait) => setTimeout(resolveWait, 50))
   }
   throw new Error('Timed out waiting for ECC CLI process registration.')
-}
-
-function childExitStatus(value: {
-  code: number | null
-  signal: NodeJS.Signals | null
-}): string | number {
-  return value.code ?? value.signal ?? 'unknown'
 }

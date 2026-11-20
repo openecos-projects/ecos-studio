@@ -1,4 +1,5 @@
 import {
+  engineeringSnapshotMetricStep,
   isObsoleteFlowStepName,
   projectManifestFlowSteps,
   parseProjectManifestFlowStep,
@@ -20,6 +21,7 @@ import { projectQorInputForWorkspace } from './workspaceQorAnalysis'
 const FLOW_STEPS = projectManifestFlowSteps
 
 function comparisonStepId(stepId: string): string | null {
+  if (stepId.startsWith('lec@')) return stepId
   const canonical = parseProjectManifestFlowStep(stepId)
   if (canonical) return canonical
   return isObsoleteFlowStepName(stepId) ? null : stepId
@@ -99,8 +101,15 @@ export function buildProjectComparisonSteps(
             : (normalizedFlowStates[workspace.workspace_id]?.[stepId] ??
               'not_applicable')) as ProjectStepComparison['workspaces'][number]['status'],
           metrics: (metricsByWorkspace.get(workspace.workspace_id) ?? []).filter(
-            (metric) =>
-              comparisonStepId(metric.step) === stepId && metric.stepRole !== 'hidden',
+            (metric) => {
+              const attributedStep = engineeringSnapshotMetricStep({
+                scope: metric.scope,
+              })
+              return (
+                comparisonStepId(attributedStep ?? metric.step) === stepId &&
+                metric.stepRole !== 'hidden'
+              )
+            },
           ),
         }
       }),

@@ -274,6 +274,11 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
         seenOutcomes.delete(seenOutcomes.values().next().value!)
       }
       notifications.addNotification({
+        ...(outcome.logFile &&
+        outcome.state !== 'succeeded' &&
+        outcome.state !== 'cancelled'
+          ? { logFile: outcome.logFile }
+          : {}),
         ...(outcome.flowBlock
           ? { detail: outcome.flowBlock.failedItems.join('\n') }
           : {}),

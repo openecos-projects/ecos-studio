@@ -63,6 +63,7 @@ function record(value: unknown): Record<string, unknown> | null {
 function coarseFlowStep(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
+  if (trimmed.startsWith('lec@')) return trimmed
   return (parseProjectManifestFlowStep(trimmed) ?? trimmed) || null
 }
 
@@ -244,7 +245,8 @@ function snapshotComparisonMetrics(
   if (!snapshot) return []
   const metricsByStep = new Map<ProjectManifestFlowStep, unknown[]>()
   for (const metric of snapshot.metrics) {
-    const step = engineeringSnapshotMetricStep(metric)
+    const attributedStep = engineeringSnapshotMetricStep(metric)
+    const step = attributedStep && parseProjectManifestFlowStep(attributedStep)
     if (!step) continue
     const stepMetrics = metricsByStep.get(step) ?? []
     stepMetrics.push(metric)

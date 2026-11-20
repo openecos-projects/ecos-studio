@@ -2,7 +2,6 @@ import {
   parseProjectManifestFlowStep,
   type BackendProjectActiveOperation,
   type BackendProjectComparison,
-  type ProjectManifestFlowStep,
   type ProjectStepStatus,
 } from '@ecos-studio/shared'
 import type {
@@ -41,9 +40,11 @@ export function projectWorkspaceFlowStatesWithRuntime(
 function runtimeProjectFlowStates(
   steps: readonly { name: string; state: string }[],
 ): ProjectWorkspaceFlowStateMap {
-  const grouped = new Map<ProjectManifestFlowStep, ProjectStepStatus[]>()
+  const grouped = new Map<string, ProjectStepStatus[]>()
   for (const step of steps) {
-    const projectStep = parseProjectManifestFlowStep(step.name)
+    const projectStep = step.name.startsWith('lec@')
+      ? step.name
+      : parseProjectManifestFlowStep(step.name)
     if (!projectStep) continue
     const states = grouped.get(projectStep) ?? []
     states.push(runtimeProjectStepStatus(step.state))

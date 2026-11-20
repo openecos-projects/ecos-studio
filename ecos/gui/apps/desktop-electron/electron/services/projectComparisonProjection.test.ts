@@ -38,4 +38,29 @@ describe('buildProjectComparisonSteps', () => {
       { workspaceId: 'ws-c', status: 'unavailable', metrics: [] },
     ])
   })
+  it('matches LEC metrics and states to their own anchors', () => {
+    const manifest = { workspaces: [{ workspace_id: 'ws-a' }] } as ProjectManifest
+    const inputs = [{ workspaceId: 'ws-a' }] as ProjectComparisonInput[]
+    const synth = { step: 'LEC', scope: 'lec@synthesis_execution', value: 2 }
+    const cts = { step: 'LEC', scope: 'lec@cts_execution', value: 3 }
+    const trend = {
+      workspaces: [{ workspaceId: 'ws-a', records: [synth, cts] }],
+    } as unknown as ProjectQorTrendSummary
+
+    const results = buildProjectComparisonSteps(manifest, inputs, trend, {
+      'ws-a': { 'lec@synthesis': 'success', 'lec@cts': 'failed' },
+    })
+    expect(results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stepId: 'lec@synthesis',
+          workspaces: [{ workspaceId: 'ws-a', status: 'success', metrics: [synth] }],
+        }),
+        expect.objectContaining({
+          stepId: 'lec@cts',
+          workspaces: [{ workspaceId: 'ws-a', status: 'failed', metrics: [cts] }],
+        }),
+      ]),
+    )
+  })
 })

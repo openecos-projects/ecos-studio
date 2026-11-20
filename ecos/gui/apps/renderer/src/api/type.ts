@@ -366,6 +366,7 @@ export function sameFlowStepName(left: string, right: string): boolean {
   const leftMeta = getStepMetadata(left)
   const rightMeta = getStepMetadata(right)
   if (leftMeta && rightMeta) return leftMeta.path === rightMeta.path
+  if (a.startsWith('lec@') || b.startsWith('lec@')) return false
   return sameProjectManifestFlowStep(a, b)
 }
 

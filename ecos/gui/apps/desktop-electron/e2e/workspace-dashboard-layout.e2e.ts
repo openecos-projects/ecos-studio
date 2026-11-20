@@ -1,10 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import type { Page } from 'playwright-core'
 import { launchE2EApp, repoRoot, resolveOutDir, type E2EApp } from './support/launch'
 import { prepareGcdProject } from './support/design'
 import { readFlowSteps } from './support/flow'
-import { setupBackendWorkspace } from './support/journey'
+import {
+  readOperationLog,
+  setupBackendWorkspace,
+  type WorkspaceJourney,
+} from './support/journey'
 import { createMilestoneShots } from './support/screenshots'
 
 async function readLayout(page: Page) {
@@ -68,6 +73,7 @@ function insideViewport(
 
 describe('workspace dashboard layout', () => {
   let launched: E2EApp | undefined
+  let workspace: WorkspaceJourney
   let shot: ReturnType<typeof createMilestoneShots>
 
   beforeAll(async () => {
@@ -75,7 +81,7 @@ describe('workspace dashboard layout', () => {
     const design = await prepareGcdProject(join(outDir, 'work'))
     launched = await launchE2EApp(outDir)
     shot = createMilestoneShots(launched.page, outDir)
-    await setupBackendWorkspace(launched.page, {
+    workspace = await setupBackendWorkspace(launched.page, {
       ...design,
       pdkRoot: process.env.ECOS_E2E_PDK_ROOT ?? join(repoRoot, 'pdk/icsprout55-pdk'),
     })
@@ -182,6 +188,64 @@ describe('workspace dashboard layout', () => {
     } finally {
       await shot(`dashboard-${width}x${height}`)
     }
+  })
+
+  it('reports a rejected run even when every step remains unstarted', async () => {
+    const page = launched!.page
+    const operation = (await page.evaluate(
+      (payload) =>
+        window.ecosDesktop.productCommands.execute({ command: 'workspace.run', payload }),
+      {
+        workspaceHandle: workspace.workspaceHandle,
+        expectedWorkspaceRevision: workspace.workspaceRevision + 100,
+        idempotencyKey: randomUUID(),
+      },
+    )) as { operationId: string }
+    await expect
+      .poll(async () => {
+        const projection = await page.evaluate(() =>
+          window.ecosDesktop.ecc.runtime.operationProjection(),
+        )
+        return projection.outcomes.find(
+          ({ operationId }) => operationId === operation.operationId,
+        )
+      })
+      .toMatchObject({ state: 'failed', error: { code: 'revision_conflict' } })
+    expect(
+      (await readFlowSteps(workspace.workspaceDir)).every(
+        (step) => step.state === 'Unstart',
+      ),
+    ).toBe(true)
+    expect(await readOperationLog(page, workspace, operation.operationId)).toContain(
+      'error=revision_conflict',
+    )
+  })
+
+  it('shows the STA worker failure and its run log in notifications', async () => {
+    const page = launched!.page
+    const card = page.locator('.flow-step-card[data-step="sta"]')
+    await card.getByRole('button', { name: /run sta/i }).click()
+    const run = page.getByRole('dialog', { name: 'Run STA', exact: true })
+    await run.getByRole('button', { name: 'Run current step', exact: true }).click()
+    await expect
+      .poll(() => card.getAttribute('data-status'), { timeout: 30_000 })
+      .toBe('failed')
+    await expect
+      .poll(() => card.locator('.step-failure').textContent())
+      .toMatch(/missing filled, parasitics/)
+    await run.getByRole('button', { name: 'Close', exact: true }).click()
+    await page.getByRole('button', { name: 'Open notifications' }).click()
+    const notifications = page.getByRole('dialog', { name: 'Notifications' })
+    const failure = notifications
+      .locator('.notification-item')
+      .filter({ hasText: /missing filled, parasitics/ })
+    await failure.waitFor()
+    await failure.getByText('View details').click()
+    await expect
+      .poll(() => failure.locator('code').textContent())
+      .toMatch(/Log: .*\/log\/.+\.log/)
+    await shot('sta-worker-failure')
+    await page.getByRole('button', { name: 'Open notifications' }).click()
   })
 
   it('keeps the same cards outside the canvas during zoom, pan, and fit', async () => {
@@ -306,6 +370,19 @@ describe('workspace dashboard layout', () => {
         ['macro_placement', 'Unstart'],
       ])
       await synthesis.getByRole('button', { name: 'Close', exact: true }).click()
+      await synthesisCard
+        .getByRole('button', { name: 'Synthesis log', exact: true })
+        .click()
+      const synthesisLog = page.getByRole('dialog', {
+        name: 'Synthesis — Log',
+        exact: true,
+      })
+      await expect
+        .poll(() =>
+          synthesisLog.getByRole('button', { name: 'Copy log', exact: true }).isEnabled(),
+        )
+        .toBe(true)
+      await synthesisLog.getByRole('button', { name: 'Close', exact: true }).click()
       await synthesisCard.screenshot({ path: join(outDir, 'synthesis-card-metrics.png') })
 
       const floorplan = await openRun('pre_floorplan', 'Pre Floorplan')

@@ -514,7 +514,7 @@ export interface BackendProjectActiveOperation {
   projectWorkspaceId: string
   rerun: boolean
   state: 'queued' | 'running'
-  step: FlowStep | null
+  step: FlowStep | `lec@${string}` | null
   updatedAt: number
   workspaceRevision: number
 }

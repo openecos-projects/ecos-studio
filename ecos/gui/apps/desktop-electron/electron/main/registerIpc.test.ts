@@ -295,7 +295,6 @@ function registerHandlers(
       updateWorkspaceConfiguration: vi.fn(),
       updateWorkspaceStepConfiguration: vi.fn(),
       updateWorkspace: vi.fn(),
-      validateWorkspaceSpec: vi.fn(),
       workspaceInfo: vi.fn(),
       workspaceSnapshot: vi.fn(),
       workspaceSession: vi.fn(),

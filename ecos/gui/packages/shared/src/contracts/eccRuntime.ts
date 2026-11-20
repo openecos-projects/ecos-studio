@@ -397,6 +397,7 @@ export interface EccRuntimeOperation {
   }
   interruptibility?: EccRuntimeInterruptibility
   kind: EccRuntimeOperationKind
+  logFile?: string
   operationId: string
   origin: 'gui' | 'cli'
   rerun: boolean

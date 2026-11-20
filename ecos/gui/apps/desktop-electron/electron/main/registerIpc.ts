@@ -51,7 +51,6 @@ import {
   type EccWorkspaceStepConfigurationReadResult,
   type EccWorkspaceStepOutputsResult,
   type EccWorkspaceStepConfigurationUpdateRequest,
-  type EccWorkspaceSpecValidationRequest,
   type EccWorkspaceUpdateRequest,
   type DesktopFileDialogOptions,
   type DesktopMenuEventId,
@@ -603,7 +602,6 @@ export interface DesktopBridgeServices {
       step?: string,
     ): Promise<EccWorkspaceStepOutputsResult>
     updateWorkspace(request: EccWorkspaceUpdateRequest): Promise<unknown>
-    validateWorkspaceSpec(request: EccWorkspaceSpecValidationRequest): Promise<unknown>
     workspaceInfo(request: EccWorkspaceInfoRequest): Promise<unknown>
     workspaceSnapshot(request: EccWorkspaceHandleRequest): Promise<unknown>
     workspaceSession(workspaceHandle: string): Promise<EccWorkspaceOpenResult>

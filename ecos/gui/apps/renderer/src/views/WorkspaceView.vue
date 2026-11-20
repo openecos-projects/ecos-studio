@@ -6,7 +6,7 @@ import WorkspaceWorkbench from '@/components/workbench/WorkspaceWorkbench.vue'
 import { useSubflow } from '@/composables/useSubflow'
 import { useRoute } from 'vue-router'
 
-const { currentStepTitle, isLoading } = useSubflow()
+const { currentStepTitle } = useSubflow()
 const route = useRoute()
 let isResizing = false
 
@@ -49,12 +49,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <WorkspaceWorkbench
-    :flow-title="currentStepTitle"
-    :loading="isLoading"
-    :nodes="[]"
-    agent-only
-  >
+  <WorkspaceWorkbench>
     <template #left>
       <section class="workspace-step-view">
         <header>

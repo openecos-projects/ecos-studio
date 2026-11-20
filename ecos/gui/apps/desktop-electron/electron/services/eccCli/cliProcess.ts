@@ -1,7 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { constants } from 'node:fs'
-import { mkdir, open } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { openOperationLog } from './operationLog'
 
 const DEFAULT_OUTPUT_LIMIT = 4 * 1024 * 1024
 
@@ -17,7 +15,6 @@ export interface EccCliProcessOptions {
 
 export interface EccCliRunOptions {
   cwd?: string
-  logFile?: string
   maxStderrBytes?: number
   maxStdoutBytes?: number
   stdin?: string | Uint8Array
@@ -104,36 +101,30 @@ export class EccCliProcess {
 
   async spawnDetached(
     args: readonly string[],
-    options: Pick<EccCliRunOptions, 'cwd' | 'logFile'> = {},
+    options: { cwd: string; workspaceDirectory: string; runId: string },
   ): Promise<ChildProcess> {
     const launch = await this.options.resolveLaunch()
     const env = await this.options.envProvider?.()
-    const logHandle = options.logFile ? await openDetachedLog(options.logFile) : undefined
+    const logHandle = await openOperationLog(
+      options.workspaceDirectory,
+      options.runId,
+      true,
+    )
     try {
       const child = spawn(launch.command, [...(launch.args ?? []), ...args], {
         cwd: options.cwd,
         detached: process.platform !== 'win32',
         env,
         shell: false,
-        stdio: logHandle ? ['ignore', logHandle.fd, logHandle.fd] : 'ignore',
+        stdio: ['ignore', logHandle.fd, logHandle.fd],
       })
       await childSpawned(child)
       child.unref()
       return child
     } finally {
-      await logHandle?.close()
+      await logHandle.close()
     }
   }
-}
-
-async function openDetachedLog(path: string) {
-  await mkdir(dirname(path), { mode: 0o700, recursive: true })
-  const noFollow = process.platform === 'win32' ? 0 : constants.O_NOFOLLOW
-  return await open(
-    path,
-    constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | noFollow,
-    0o600,
-  )
 }
 
 function collect(

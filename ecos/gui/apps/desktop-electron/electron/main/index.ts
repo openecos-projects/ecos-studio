@@ -5,6 +5,7 @@ import { runAfterAppReady } from './appReady'
 import { applyHeadlessDisplayHint, parseCliInvocation, runCliCommand } from './cliEntry'
 import { createMainWindow } from './createMainWindow'
 import { configureGpuMode } from './gpuMode'
+import { installProcessDiagnostics } from './processDiagnostics'
 import { registerIpc } from './registerIpc'
 import type { ShutdownCoordinator } from './shutdownCoordinator'
 import { createShutdownCoordinator } from './createShutdownCoordinator'
@@ -146,6 +147,7 @@ configureGpuMode({
 
 const { mainLogFile, sessionDirectory: logSessionDirectory } = prepareDesktopLogs()
 configureElectronLoggerFile(mainLogFile)
+installProcessDiagnostics(app)
 electronLogger.status('[desktop] Logs: %s', mainLogFile)
 electronLogger.status('[runtime] Runtime: ECC CLI + frontend RPC (ECC-FE only)')
 registerSurferProtocolSchemes(protocol)

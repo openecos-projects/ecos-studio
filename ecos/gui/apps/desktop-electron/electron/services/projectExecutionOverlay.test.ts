@@ -154,6 +154,21 @@ describe('ProjectExecutionOverlay', () => {
     ])
   })
 
+  it('keeps the identity of a running inserted LEC', () => {
+    const overlay = overlayFixture(
+      [activeOperation({ currentStep: 'lec@cts', step: 'lec@cts' })],
+      [
+        committedWorkspace({
+          stepStatuses: { 'lec@synthesis': 'success', 'lec@cts': 'unstart' },
+        }),
+      ],
+    )
+    const result = overlay.get(11, 'context-1')
+    expect(result.ok && result.data.operations).toEqual([
+      expect.objectContaining({ step: 'lec@cts' }),
+    ])
+  })
+
   it('rejects snapshots for other windows and notifies listeners on invalidate', () => {
     const listener = vi.fn()
     const overlay = overlayFixture([activeOperation()])

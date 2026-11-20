@@ -53,7 +53,7 @@ import {
 import { flowInsightsSection } from './backendWorkspaceFlowInsights'
 import { isPathWithinRoot } from './pathScope'
 import { projectWorkspaceResults } from './backendWorkspaceResultProjection'
-import { readWorkspaceFlowFile } from './eccCli/persistedState'
+import { readStepWorkerFailure, readWorkspaceFlowFile } from './eccCli/persistedState'
 import { matchWorkspaceFlowPlan } from './backendWorkspaceFlowPlan'
 
 interface BackendWorkspaceServiceOptions {
@@ -628,7 +628,12 @@ export class BackendWorkspaceService {
     }
     const resultProjection = snapshot?.ok ? projectWorkspaceResults(snapshot) : null
     const displaySnapshot = resultProjection?.snapshot ?? snapshot
-    const flow = flowSection(snapshot, liveFlow ?? undefined)
+    const failureMessages = new Map<string, string>()
+    for (const step of liveFlow?.steps ?? []) {
+      const message = await readStepWorkerFailure(workspaceRoot, step)
+      if (message) failureMessages.set(step.name, message)
+    }
+    const flow = flowSection(snapshot, liveFlow ?? undefined, failureMessages)
     if (flow.status === 'ready' && manifest && this.options.readProjectFlowPlan) {
       const steps = flow.data.steps
       const config = await stat(join(projectRoot, 'ecc.toml')).catch(() => null)

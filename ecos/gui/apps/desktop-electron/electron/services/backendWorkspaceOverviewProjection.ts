@@ -172,6 +172,7 @@ export function flowSection(
       tool?: string
     }>
   },
+  failureMessages?: ReadonlyMap<string, string>,
 ): ReadSection<WorkspaceFlowSummary> {
   if (!snapshot?.ok) {
     return {
@@ -196,6 +197,7 @@ export function flowSection(
         if (!step || typeof step.name !== 'string') return []
         if (isObsoleteFlowStepName(step.name)) return []
         const liveStep = liveSteps.get(step.name)
+        const failureMessage = failureMessages?.get(step.name)
         const category = liveStep?.category ?? step.category
         const inputStep =
           liveStep?.inputStep ?? step.input_step ?? record(step.info)?.input_step
@@ -222,6 +224,7 @@ export function flowSection(
             name: step.name,
             state: normalizeFlowState(String(liveStep?.state ?? step.state ?? '')),
             ...(toolId ? { toolId } : {}),
+            ...(failureMessage ? { failureMessage } : {}),
             ...(runtimeSeconds === null ? {} : { runtimeSeconds }),
             ...(peakMemoryMb === null ? {} : { peakMemoryMb }),
             ...(['passed', 'blocked', 'attention', 'unknown'].includes(checklistStatus)

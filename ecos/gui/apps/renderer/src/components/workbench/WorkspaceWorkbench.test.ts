@@ -57,61 +57,31 @@ describe('WorkspaceWorkbench Agent panel', () => {
     }
   })
 
-  it('hides the Agent panel when workspace visibility is turned off', async () => {
+  it('shows the Agent and removes its panel when workspace visibility is turned off', async () => {
     const store = useAgentShellStore()
     store.openWorkspaceAgent()
     const wrapper = mount(WorkspaceWorkbench, {
-      props: { flowTitle: 'Flow', nodes: [] },
+      slots: { left: '<div>Dashboard</div>' },
       global: {
         stubs: {
           Splitter: { template: '<div><slot /></div>' },
           SplitterPanel: { template: '<div><slot /></div>' },
-          FlowStatusStrip: {
-            template: '<div class="flow-status"><slot name="actions" /></div>',
-          },
-          FlowRunControl: { template: '<button />' },
-          ChatInspectorPanel: { template: '<div class="workspace-agent" />' },
-        },
-      },
-    })
-
-    expect(wrapper.find('.workspace-agent').exists()).toBe(true)
-    store.closeWorkspaceAgent()
-    await nextTick()
-
-    expect(wrapper.find('.workspace-agent').exists()).toBe(false)
-    expect(wrapper.find('.workspace-workbench-inspector').exists()).toBe(false)
-  })
-
-  it('removes the right panel in RTL mode when Agent is hidden', async () => {
-    const store = useAgentShellStore()
-    store.openWorkspaceAgent()
-    const wrapper = mount(WorkspaceWorkbench, {
-      props: { flowTitle: 'Flow', nodes: [], agentOnly: true },
-      slots: {
-        'right-log': '<div class="old-log">Old log</div>',
-        left: '<div>Dashboard</div>',
-      },
-      global: {
-        stubs: {
-          Splitter: { template: '<div><slot /></div>' },
-          SplitterPanel: { template: '<div><slot /></div>' },
-          FlowStatusStrip: { template: '<div class="flow-status" />' },
-          FlowRunControl: true,
           ChatInspectorPanel: {
-            props: ['hideGuiArtifacts'],
+            props: { hideGuiArtifacts: Boolean },
             template: '<div class="workspace-agent">{{ hideGuiArtifacts }}</div>',
           },
         },
       },
     })
-    expect(wrapper.find('.flow-status').exists()).toBe(false)
-    expect(wrapper.find('.old-log').exists()).toBe(false)
+
     expect(wrapper.get('.workspace-agent').text()).toBe('true')
     store.closeWorkspaceAgent()
     await nextTick()
+
     expect(wrapper.find('.workspace-agent').exists()).toBe(false)
+    expect(wrapper.find('.workspace-workbench-inspector').exists()).toBe(false)
     expect(wrapper.classes()).toContain('is-agent-hidden')
+    expect(wrapper.text()).toContain('Dashboard')
     wrapper.unmount()
   })
 })

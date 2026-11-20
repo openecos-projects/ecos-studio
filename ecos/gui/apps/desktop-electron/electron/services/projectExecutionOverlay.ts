@@ -111,9 +111,10 @@ function projectOperation(
   const ongoingStep = operation.flow?.steps.find((candidate) =>
     ['ongoing', 'running'].includes(candidate.state.trim().toLowerCase()),
   )
-  const step = parseProjectManifestFlowStep(
-    ongoingStep?.name || operation.currentStep || operation.step,
-  )
+  const rawStep = ongoingStep?.name || operation.currentStep || operation.step
+  const step = rawStep.startsWith('lec@')
+    ? (rawStep as `lec@${string}`)
+    : parseProjectManifestFlowStep(rawStep)
   const committedStep = step ? workspace.stepStatuses[step] : undefined
   return [
     {

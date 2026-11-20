@@ -42,7 +42,11 @@ describe('EccCliProcess', () => {
       }),
     })
     try {
-      await cli.spawnDetached([], { logFile })
+      await cli.spawnDetached([], {
+        cwd: directory,
+        workspaceDirectory: directory,
+        runId: 'run',
+      })
       const content = await waitForFile(logFile)
       expect(content).toContain('bootstrap-out')
       expect(content).toContain('bootstrap-error')

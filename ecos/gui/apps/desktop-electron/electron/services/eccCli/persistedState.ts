@@ -15,6 +15,8 @@ const ENOENT_RETRY_ATTEMPTS = 2
 const ENOENT_RETRY_DELAY_MS = 75
 
 export interface PersistedFlowStep {
+  attemptId?: string
+  attemptStartedAt?: number
   category?: 'PNR' | 'CHECKER'
   inputStep?: string
   directory: string
@@ -111,6 +113,13 @@ export function parseWorkspaceFlow(raw: unknown): PersistedFlow {
       throw new Error('Workspace flow step is invalid.')
     }
     const checklist = isRecord(value.checklist_status) ? value.checklist_status : null
+    const observation = isRecord(value.resource_observation)
+      ? value.resource_observation
+      : null
+    const startedAt =
+      typeof observation?.started_at === 'string'
+        ? Date.parse(observation.started_at)
+        : NaN
     const inputStep =
       value.input_step || (isRecord(value.info) ? value.info.input_step : null)
     const checklistBlocked =
@@ -124,6 +133,9 @@ export function parseWorkspaceFlow(raw: unknown): PersistedFlow {
           .slice(0, 64)
       : []
     return {
+      ...(typeof observation?.attempt_id === 'string' && Number.isFinite(startedAt)
+        ? { attemptId: observation.attempt_id, attemptStartedAt: startedAt }
+        : {}),
       ...(value.category === 'PNR' || value.category === 'CHECKER'
         ? { category: value.category }
         : {}),
@@ -144,6 +156,47 @@ export function parseWorkspaceFlow(raw: unknown): PersistedFlow {
     }
   })
   return { steps }
+}
+
+export async function readStepWorkerFailure(
+  workspace: string,
+  step: PersistedFlowStep,
+  runStartedAt?: number,
+): Promise<string | undefined> {
+  if (
+    (step.state !== 'Incomplete' && step.state !== 'Invalid') ||
+    !step.attemptId ||
+    step.attemptStartedAt === undefined ||
+    (runStartedAt !== undefined &&
+      step.attemptStartedAt < Math.floor(runStartedAt * 1000))
+  )
+    return
+  try {
+    const root = await realpath(workspace)
+    const log = join(root, step.directory, 'log')
+    if ((await realpath(log)) !== log) return
+    const result = await readBoundedJsonOnce(
+      join(log, 'step-worker.v1.json'),
+      FLOW_MAX_BYTES,
+    )
+    if (
+      !isRecord(result) ||
+      result.schema_version !== 1 ||
+      result.attempt_id !== step.attemptId ||
+      result.done !== true ||
+      result.ok !== false ||
+      typeof result.error !== 'string'
+    )
+      return
+    return (
+      result.error
+        .replace(/\p{Cc}/gu, ' ')
+        .trim()
+        .slice(0, 500) || undefined
+    )
+  } catch {
+    // A worker that never started or was killed may not have published a result.
+  }
 }
 
 export function workspaceEntryForDirectory(
@@ -188,7 +241,7 @@ async function readBoundedJson(path: string, maxBytes: number): Promise<unknown>
 }
 
 async function readBoundedJsonOnce(path: string, maxBytes: number): Promise<unknown> {
-  const flags = constants.O_NOFOLLOW ? constants.O_RDONLY | constants.O_NOFOLLOW : 'r'
+  const flags = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
   const handle = await open(path, flags)
   try {
     const info = await handle.stat()
