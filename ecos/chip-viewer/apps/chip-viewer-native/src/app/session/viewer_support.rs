@@ -72,8 +72,11 @@ pub(super) fn session_action_progress_title(
 }
 
 impl eframe::App for ChipViewerApp {
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+    fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
         if let ViewerState::Loaded(loaded) = &self.state {
+            if let Some(gl) = gl {
+                loaded.heatmap_composition.destroy(gl);
+            }
             loaded.cpu_scene_cache.destroy_glow();
         }
     }

@@ -424,6 +424,7 @@ impl CpuSceneCache {
         scene: Option<&Arc<CpuScene>>,
         painter: &egui::Painter,
         background: egui::Color32,
+        composition: Option<super::heatmap_composition::CachedComposition>,
     ) {
         if let Some(key) = &self.key {
             self.raster.paint_with_initial(
@@ -434,6 +435,7 @@ impl CpuSceneCache {
                 self.inbox.generation.load(Ordering::Relaxed),
                 painter,
                 background,
+                composition,
             );
         }
     }
@@ -455,6 +457,7 @@ impl CpuSceneCache {
             self.inbox.generation.load(Ordering::Relaxed),
             painter,
             background,
+            None,
         );
         true
     }
@@ -465,6 +468,16 @@ impl CpuSceneCache {
 
     pub(super) fn raster_ready(&self, scene: &CpuScene) -> bool {
         self.raster.is_ready(scene)
+    }
+
+    pub(super) fn has_exact_raster(&self, scene: &CpuScene) -> bool {
+        self.key.as_ref() == Some(scene.key())
+            && !self.raster.failed()
+            && self.raster.is_ready(scene)
+    }
+
+    pub(super) fn raster_key(&self) -> Option<&SceneKey> {
+        self.key.as_ref().filter(|_| !self.raster.failed())
     }
 
     pub(super) fn labels_ready(&self, scene: &CpuScene) -> bool {
@@ -540,6 +553,26 @@ impl CpuSceneCache {
 }
 
 impl SceneKey {
+    pub(super) fn pan_pixels_from(&self, source: &Self) -> Option<[i32; 2]> {
+        if !self.compatible(source)
+            || self.canvas != source.canvas
+            || self.zoom != source.zoom
+            || self.screen_size != source.screen_size
+            || self.selected != source.selected
+            || self.highlighted != source.highlighted
+        {
+            return None;
+        }
+        let delta = (self.pan - source.pan) * self.pixels_per_point;
+        delta
+            .is_finite()
+            .then(|| [delta.x.round() as i32, delta.y.round() as i32])
+    }
+
+    pub(super) fn pixels_per_point(&self) -> f32 {
+        self.pixels_per_point
+    }
+
     pub(super) fn screen_size(&self) -> [u32; 2] {
         self.screen_size
     }

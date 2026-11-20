@@ -882,13 +882,17 @@ pub fn build_gpu_instances(
     instances
 }
 
-pub struct HeatmapGpuResources(pub CanvasGpuResources);
+struct HeatmapGpuResources {
+    canvas: CanvasGpuResources,
+    // Only one map is active. A weak reference identifies its immutable
+    // instance allocation without retaining data from a closed map.
+    uploaded: std::sync::Weak<Vec<GpuShapeInstance>>,
+    bind_group: Option<wgpu::BindGroup>,
+}
 
 pub struct HeatmapGpuCallback {
     pub uniform: CanvasUniform,
     pub instances: std::sync::Arc<Vec<GpuShapeInstance>>,
-    pub buffer_key: GpuBufferKey,
-    pub frame_counter: u64,
     pub target_format: wgpu::TextureFormat,
 }
 
@@ -906,13 +910,17 @@ impl egui_wgpu::CallbackTrait for HeatmapGpuCallback {
         }
         if callback_resources.get::<HeatmapGpuResources>().is_none() {
             if let Some(res) = CanvasGpuResources::new(device, self.target_format) {
-                callback_resources.insert(HeatmapGpuResources(res));
+                callback_resources.insert(HeatmapGpuResources {
+                    canvas: res,
+                    uploaded: Default::default(),
+                    bind_group: None,
+                });
             }
         }
         let Some(resources_wrapper) = callback_resources.get_mut::<HeatmapGpuResources>() else {
             return Vec::new();
         };
-        let resources = &mut resources_wrapper.0;
+        let resources = &resources_wrapper.canvas;
 
         queue.write_buffer(
             &resources.uniform_buffer,
@@ -924,7 +932,8 @@ impl egui_wgpu::CallbackTrait for HeatmapGpuCallback {
             return Vec::new();
         }
 
-        if !resources.instance_buffers.contains_key(&self.buffer_key) {
+        let current = std::sync::Arc::downgrade(&self.instances);
+        if !current.ptr_eq(&resources_wrapper.uploaded) {
             let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Heatmap Instance Buffer"),
                 contents: bytemuck::cast_slice(&self.instances),
@@ -946,15 +955,8 @@ impl egui_wgpu::CallbackTrait for HeatmapGpuCallback {
                 ],
             });
 
-            resources.instance_buffers.insert(
-                self.buffer_key,
-                GpuBufferCacheEntry {
-                    _instance_buffer: buffer,
-                    bind_group,
-                    count: self.instances.len() as u32,
-                    last_used_frame: self.frame_counter,
-                },
-            );
+            resources_wrapper.bind_group = Some(bind_group);
+            resources_wrapper.uploaded = current;
         }
 
         Vec::new()
@@ -969,13 +971,7 @@ impl egui_wgpu::CallbackTrait for HeatmapGpuCallback {
         let Some(resources_wrapper) = callback_resources.get::<HeatmapGpuResources>() else {
             return;
         };
-        let resources = &resources_wrapper.0;
-
-        if let Some(entry) = resources.instance_buffers.get(&self.buffer_key) {
-            if entry.count == 0 {
-                return;
-            }
-
+        if let Some(bind_group) = &resources_wrapper.bind_group {
             let clip = info.clip_rect_in_pixels();
             let clip_min_x = clip.left_px.max(0) as u32;
             let clip_min_y = clip.top_px.max(0) as u32;
@@ -986,9 +982,9 @@ impl egui_wgpu::CallbackTrait for HeatmapGpuCallback {
                 render_pass.set_scissor_rect(clip_min_x, clip_min_y, clip_w, clip_h);
             }
 
-            render_pass.set_pipeline(&resources.pipeline);
-            render_pass.set_bind_group(0, &entry.bind_group, &[]);
-            render_pass.draw(0..6, 0..entry.count);
+            render_pass.set_pipeline(&resources_wrapper.canvas.pipeline);
+            render_pass.set_bind_group(0, bind_group, &[]);
+            render_pass.draw(0..6, 0..self.instances.len() as u32);
         }
     }
 }

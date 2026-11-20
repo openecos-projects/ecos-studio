@@ -2,6 +2,44 @@ use super::*;
 use crate::app::cpu_raster::{background, test_support::Presentation, CpuRasterCache};
 
 #[test]
+fn cached_heatmap_composition_preserves_alpha_order_and_live_markers() {
+    let fixture = Fixture::new();
+    let renderer = match offscreen::OffscreenRenderer::new("") {
+        Ok(renderer) => renderer,
+        Err(error) => {
+            assert!(
+                std::env::var_os("ECOS_REQUIRE_INTERACTION_EGL").is_none(),
+                "{error}"
+            );
+            return;
+        }
+    };
+    renderer.with_context(|gl| {
+        for scale in [1.0, 1.5, 2.0] {
+            fixture.ctx.set_pixels_per_point(scale);
+            let _ = fixture.ctx.run(egui::RawInput::default(), |_| {});
+            let mut request = fixture.request(1.0, scale);
+            request.key.screen_size = [321, 239];
+            request.key.canvas = egui::Rect::from_min_max(
+                egui::pos2(3.25, 5.5) / scale,
+                egui::pos2(318.75, 237.25) / scale,
+            );
+            let scene = builder::build_with_workers(&request, &|| true, 1)
+                .expect("the test scene should finish");
+            let presentation = Presentation::new(Arc::clone(gl), &request.key, fixture.ctx.clone());
+            let pans = [[-12, 0], [0, 21], [15, -9]].map(|delta| {
+                let mut key = request.key.clone();
+                key.pan = egui::vec2(delta[0] as f32, delta[1] as f32) / key.pixels_per_point;
+                (delta, key)
+            });
+            crate::app::heatmap_composition::check_composition(&scene, &pans, gl, |draw| {
+                presentation.paint_queued(draw, || {})
+            });
+        }
+    });
+}
+
+#[test]
 fn central_panel_clear_matches_original_frame_with_side_panels_and_content() {
     let fixture = Fixture::new();
     let renderer = match offscreen::OffscreenRenderer::new("") {

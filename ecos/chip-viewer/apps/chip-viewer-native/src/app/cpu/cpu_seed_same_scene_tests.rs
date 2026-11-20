@@ -123,6 +123,7 @@ fn real_seed_same_scene_ui_worker_original_byte_exact() {
                     seed.generation,
                     painter,
                     request.key.background,
+                    None,
                 );
             },
             || {},

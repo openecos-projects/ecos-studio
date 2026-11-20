@@ -152,6 +152,22 @@ impl HeatmapData {
         Some(((value - self.min) / range).clamp(0.0, 1.0) as f32)
     }
 
+    pub fn cell_color(
+        &self,
+        row: usize,
+        column: usize,
+        mode: ColormapMode,
+        threshold: f32,
+        invert: bool,
+    ) -> Option<egui::Color32> {
+        let value = self.normalized_value(row, column)?;
+        if (invert && value > threshold) || (!invert && value < threshold) {
+            return None;
+        }
+        let [r, g, b, _] = mode.sample(value);
+        Some(egui::Color32::from_rgb(r, g, b))
+    }
+
     pub fn top_peaks(&self, invert: bool) -> Vec<(usize, usize)> {
         let rows = self.rows();
         let cols = self.columns();

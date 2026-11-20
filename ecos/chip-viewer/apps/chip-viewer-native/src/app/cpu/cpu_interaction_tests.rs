@@ -55,7 +55,7 @@ fn presentation_uses_progress_published_after_ui_preparation_in_the_same_paint()
         let recorded = Arc::new(Mutex::new(None));
         let actual = presentation.paint_queued(
             |painter| {
-                cache.paint_glow(None, painter, egui::Color32::BLACK);
+                cache.paint_glow(None, painter, egui::Color32::BLACK, None);
                 assert!(!cache.raster_visible());
                 let recorded = Arc::clone(&recorded);
                 cache.raster.queue_stats(
@@ -108,7 +108,7 @@ fn queued_presentation_rejects_late_progress_for_a_different_camera_or_generatio
             let published_key = fixture.request(zoom, 1.0).key;
             let actual = presentation.paint_queued(
                 |painter| {
-                    cache.paint_glow(None, painter, egui::Color32::BLACK);
+                    cache.paint_glow(None, painter, egui::Color32::BLACK, None);
                     let recorded = Arc::clone(&recorded);
                     cache.raster.queue_stats(
                         painter,

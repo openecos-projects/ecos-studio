@@ -160,6 +160,7 @@ impl LoadedViewer {
             selected_map_item: None,
             previous_map_item: None,
             active_heatmap: None,
+            heatmap_composition: Default::default(),
             analysis_loader,
             analysis_load_error,
             analysis_tab_user_selected: false,
@@ -1580,48 +1581,22 @@ impl LoadedViewer {
         nearest_orthogonal_edge_snap(anchor, pointer, &rects, radius)
     }
 
-    fn paint_gpu_heatmap_overlay(&self, ui: &mut egui::Ui, canvas: egui::Rect, world: Rect32) {
+    fn paint_heatmap_overlay(&self, painter: &egui::Painter, canvas: egui::Rect, world: Rect32) {
         if self.analysis_tab != AnalysisTab::Map {
             return;
         }
         let Some(heatmap) = self.active_heatmap.as_ref() else {
             return;
         };
-        if heatmap.instances.is_empty() {
-            return;
-        }
-
         if !self.is_gpu_active() {
-            let painter = ui.painter();
-            for instance in heatmap.instances.iter() {
-                let rect = shape_screen_rect(
-                    Rect32 {
-                        lx: instance.rect_dbu[0],
-                        ly: instance.rect_dbu[1],
-                        hx: instance.rect_dbu[2],
-                        hy: instance.rect_dbu[3],
-                    },
-                    world,
-                    canvas,
-                    self.zoom,
-                    self.pan,
-                );
-                let visible = rect.intersect(canvas);
-                if visible.is_positive() {
-                    let rgba_bytes = instance.fill_rgba.to_le_bytes();
-                    let alpha = ((rgba_bytes[3] as f32) * heatmap.opacity).round() as u8;
-                    let color = egui::Color32::from_rgba_unmultiplied(
-                        rgba_bytes[0],
-                        rgba_bytes[1],
-                        rgba_bytes[2],
-                        alpha,
-                    );
-                    painter.rect_filled(visible, 0.0, color);
-                }
-            }
+            heatmap.paint_world_grid(painter, world, canvas, self.zoom, self.pan);
             return;
         }
 
+        let instances = heatmap.instances();
+        if instances.is_empty() {
+            return;
+        }
         let scale = world_to_screen_scale(world, canvas, self.zoom);
         let uniform = crate::canvas_gpu::CanvasUniform {
             world_center_dbu: [
@@ -1633,7 +1608,7 @@ impl LoadedViewer {
                 canvas.height() * 0.5 + self.pan.y,
             ],
             scale_px_per_dbu: scale,
-            pixels_per_point: ui.ctx().pixels_per_point(),
+            pixels_per_point: painter.ctx().pixels_per_point(),
             pattern_min_size_px: crate::canvas_gpu::PATTERN_MIN_SIZE_PX,
             min_shape_screen_size: crate::canvas_gpu::MIN_SHAPE_SCREEN_SIZE,
             screen_size_px: [canvas.width(), canvas.height()],
@@ -1645,17 +1620,6 @@ impl LoadedViewer {
             reserved: 0,
         };
 
-        // Dedicated cache key so the instance buffer is uploaded once per heatmap edit.
-        // opacity changes only modify `global_alpha` in uniform, preserving the cache.
-        let buffer_key = crate::canvas_gpu::GpuBufferKey {
-            geometry_epoch: self.geometry_epoch,
-            tile_x: i32::MIN,
-            tile_y: i32::MIN,
-            zoom_tier: 0,
-            layer_visibility_hash: heatmap.cached_hash,
-            object_visibility_bits: 0,
-        };
-
         let target_format = self
             .gpu_canvas
             .as_ref()
@@ -1664,14 +1628,11 @@ impl LoadedViewer {
 
         let callback = crate::canvas_gpu::HeatmapGpuCallback {
             uniform,
-            instances: std::sync::Arc::clone(&heatmap.instances),
-            buffer_key,
-            frame_counter: self.gpu_frame_counter,
+            instances: std::sync::Arc::clone(instances),
             target_format,
         };
 
-        ui.painter()
-            .add(egui_wgpu::Callback::new_paint_callback(canvas, callback));
+        painter.add(egui_wgpu::Callback::new_paint_callback(canvas, callback));
     }
 
     pub(super) fn canvas(&mut self, ui: &mut egui::Ui) {
@@ -1685,6 +1646,7 @@ impl LoadedViewer {
         let mut cpu_scene = None;
         let mut cpu_scene_pending = false;
         let mut cpu_scene_visible = false;
+        let mut composition = None;
         let mut gpu_scene_pending = false;
         let available = ui.available_size();
         let (response, frame_painter) =
@@ -2050,8 +2012,12 @@ impl LoadedViewer {
                 cpu_scene_pending = geometry_pending || labels_pending;
                 if geometry_pending {
                     if self.glow_rendering {
-                        self.cpu_scene_cache
-                            .paint_glow(cpu_scene.as_ref(), &painter, bg_color);
+                        self.cpu_scene_cache.paint_glow(
+                            cpu_scene.as_ref(),
+                            &painter,
+                            bg_color,
+                            None,
+                        );
                     }
                     cpu_scene_visible =
                         self.glow_rendering && self.cpu_scene_cache.raster_visible();
@@ -2070,8 +2036,12 @@ impl LoadedViewer {
                 } else if let Some(scene) = &cpu_scene {
                     overview_visible = false;
                     if self.glow_rendering {
-                        self.cpu_scene_cache
-                            .paint_glow(cpu_scene.as_ref(), &painter, bg_color);
+                        composition = self.paint_glow_scene(
+                            cpu_scene.as_ref(),
+                            &painter,
+                            bg_color,
+                            camera_activity,
+                        );
                         cpu_scene_visible = self.cpu_scene_cache.raster_visible();
                     } else {
                         scene.paint(&painter);
@@ -2301,8 +2271,12 @@ impl LoadedViewer {
                     } else {
                         cpu_scene = self.cpu_scene_cache.get_or_request(request);
                         if let Some(scene) = &cpu_scene {
-                            self.cpu_scene_cache
-                                .paint_glow(cpu_scene.as_ref(), &painter, bg_color);
+                            self.cpu_scene_cache.paint_glow(
+                                cpu_scene.as_ref(),
+                                &painter,
+                                bg_color,
+                                None,
+                            );
                             cpu_scene_visible = self.cpu_scene_cache.raster_visible();
                             cpu_scene_pending = !self.cpu_scene_cache.raster_ready(scene)
                                 || !self.cpu_scene_cache.labels_ready(scene);
@@ -2315,8 +2289,12 @@ impl LoadedViewer {
                 } else {
                     cpu_scene = self.cpu_scene_cache.get_or_request(request);
                     if self.glow_rendering {
-                        self.cpu_scene_cache
-                            .paint_glow(cpu_scene.as_ref(), &painter, bg_color);
+                        composition = self.paint_glow_scene(
+                            cpu_scene.as_ref(),
+                            &painter,
+                            bg_color,
+                            camera_activity,
+                        );
                         cpu_scene_visible = self.cpu_scene_cache.raster_visible();
                     }
                     if let Some(scene) = &cpu_scene {
@@ -2358,11 +2336,14 @@ impl LoadedViewer {
         // stacked over the whole die do not hide the density map. Skipping it
         // in the overview branch used to make the EGR maps do nothing at the
         // fit-to-die zoom where they matter most.
-        self.paint_gpu_heatmap_overlay(ui, canvas, world);
-
-        if !cache_cpu_overlays || overview_visible {
-            drawn += paint_parameterized_grid_overlay(
-                &painter,
+        let guides = self.unrouted_net_guides.get();
+        let paint_overlays = |painter: &egui::Painter| {
+            self.paint_heatmap_overlay(painter, canvas, world);
+            if cache_cpu_overlays && !overview_visible {
+                return 0;
+            }
+            let grid_count = paint_parameterized_grid_overlay(
+                painter,
                 self.db.grid_metadata(),
                 &self.layers,
                 self.object_visibility,
@@ -2373,17 +2354,50 @@ impl LoadedViewer {
                 self.zoom,
                 self.pan,
             );
-            if let Some(guides) = self.unrouted_net_guides.get() {
-                drawn += paint_unrouted_net_guides(
+            grid_count
+                + guides.map_or(0, |guides| {
+                    paint_unrouted_net_guides(
+                        painter,
+                        guides,
+                        self.object_visibility,
+                        viewport,
+                        world,
+                        canvas,
+                        self.zoom,
+                        self.pan,
+                    )
+                })
+        };
+        if let Some(heatmap_composition::Composition::Reused(overlay_count)) = composition {
+            drawn += overlay_count;
+        } else {
+            let pan_preview = self.active_heatmap.as_ref().and_then(|heatmap| {
+                if composition.is_some()
+                    || self.analysis_tab != AnalysisTab::Map
+                    || !self.glow_rendering
+                    || !(is_pan_interacting || (cpu_scene_pending && cpu_scene_visible))
+                {
+                    return None;
+                }
+                self.heatmap_composition.paint_pan(
                     &painter,
-                    guides,
-                    self.object_visibility,
-                    viewport,
-                    world,
-                    canvas,
-                    self.zoom,
-                    self.pan,
-                );
+                    self.cpu_scene_cache.raster_key()?,
+                    heatmap,
+                    guides.is_some(),
+                )
+            });
+            if let Some(preview) = pan_preview {
+                for strip in preview.exposed.into_iter().filter(egui::Rect::is_positive) {
+                    paint_overlays(&painter.with_clip_rect(strip));
+                }
+                drawn += preview.overlay_count;
+            } else {
+                let overlay_count = paint_overlays(&painter);
+                if let Some(heatmap_composition::Composition::Capture(key)) = composition {
+                    self.heatmap_composition
+                        .capture(&painter, key, overlay_count);
+                }
+                drawn += overlay_count;
             }
         }
 
@@ -2882,15 +2896,7 @@ impl LoadedViewer {
                             let (grid_rect, response) =
                                 ui.allocate_exact_size(grid_size, egui::Sense::click());
                             let painter = ui.painter_at(grid_rect);
-                            paint_heatmap_grid(
-                                &painter,
-                                grid_rect,
-                                &heatmap.data,
-                                selected_cell,
-                                heatmap.colormap_mode,
-                                heatmap.threshold,
-                                heatmap.invert_threshold,
-                            );
+                            paint_heatmap_grid(&painter, grid_rect, heatmap);
                             let hovered_cell = response.hover_pos().and_then(|pos| {
                                 interactive_heatmap_cell_at(pos, grid_rect, &heatmap.data)
                             });

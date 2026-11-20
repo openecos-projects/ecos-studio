@@ -61,7 +61,7 @@ fn initial_progress_ui_first_callback_draws_current_geometry_without_worker_or_r
             "test must have no worker bitmap"
         );
         let actual = presentation.paint_queued(
-            |painter| cache.paint_glow(None, painter, key.background),
+            |painter| cache.paint_glow(None, painter, key.background, None),
             || {},
         );
         for color in [[237, 61, 47, 255], [41, 211, 117, 255]] {
@@ -137,6 +137,7 @@ fn initial_progress_pending_selection_keeps_rich_equivalent_geometry() {
                     5,
                     painter,
                     next.background,
+                    None,
                 );
             },
             || {},
@@ -188,6 +189,7 @@ fn initial_progress_incompatible_anchor_cleanup_preserves_the_new_first_seed() {
                     7,
                     painter,
                     request.key.background,
+                    None,
                 );
             },
             || {},

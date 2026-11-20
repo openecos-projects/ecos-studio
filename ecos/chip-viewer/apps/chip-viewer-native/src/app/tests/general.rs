@@ -1599,6 +1599,136 @@ fn heatmap_pointer_ignores_cells_without_finite_data() {
 }
 
 #[test]
+fn heatmap_preview_reuses_colored_cells_across_resizing_and_selection() {
+    let directory = temp_snapshot_dir("heatmap-preview-redraw");
+    let values_path = directory.join("values.csv");
+    let layout_path = directory.join("layout.csv");
+    fs::write(&values_path, "0,1,2\n3,NaN,5\n").unwrap();
+    fs::write(
+        &layout_path,
+        "pixel_row,pixel_col,lx,ly,ux,uy\n0,0,0,0,1,1\n",
+    )
+    .unwrap();
+    let data = HeatmapData::load(&values_path, &layout_path).unwrap();
+    fs::remove_dir_all(directory).unwrap();
+
+    let ctx = egui::Context::default();
+    let mut heatmap = ActiveHeatmap::new("Preview".into(), data);
+    let draw = |heatmap: &ActiveHeatmap, size| {
+        ctx.run(egui::RawInput::default(), |ctx| {
+            let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+            let painter = ctx.layer_painter(egui::LayerId::background());
+            paint_heatmap_grid(&painter, rect, heatmap);
+        })
+    };
+    let first = draw(&heatmap, egui::vec2(15.0, 10.0));
+    heatmap.selected_cell = Some((0, 2));
+    heatmap.opacity = 0.1;
+    let next = draw(&heatmap, egui::vec2(18.0, 12.0));
+    let preview_id = |output: &egui::FullOutput| {
+        output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Mesh(mesh) => Some(mesh.texture_id),
+            _ => None,
+        })
+    };
+    let id = preview_id(&first).expect("preview cells should be drawn as one image");
+    assert_eq!(preview_id(&next), Some(id));
+    let (_, upload) = first
+        .textures_delta
+        .set
+        .iter()
+        .find(|(uploaded, _)| *uploaded == id)
+        .unwrap();
+    let egui::ImageData::Color(image) = &upload.image else {
+        panic!("expected a color image")
+    };
+    assert_eq!(image.size, [3, 2]);
+    assert_eq!(
+        image.pixels,
+        [Some(0.0), Some(0.2), Some(0.4), Some(0.6), None, Some(1.0)].map(|norm| {
+            norm.map_or(egui::Color32::TRANSPARENT, |norm| {
+                color32(heatmap.colormap_mode.sample(norm))
+            })
+        })
+    );
+    assert!(next.textures_delta.set.is_empty());
+
+    heatmap.set_threshold(0.5);
+    let filtered = draw(&heatmap, egui::vec2(18.0, 12.0));
+    let filtered_id = preview_id(&filtered).unwrap();
+    assert_ne!(filtered_id, id);
+    assert!(filtered.textures_delta.free.contains(&id));
+    let (_, upload) = filtered
+        .textures_delta
+        .set
+        .iter()
+        .find(|(uploaded, _)| *uploaded == filtered_id)
+        .unwrap();
+    let egui::ImageData::Color(image) = &upload.image else {
+        panic!("expected a color image")
+    };
+    assert_eq!(&image.pixels[..3], &[egui::Color32::TRANSPARENT; 3]);
+}
+
+#[test]
+fn heatmap_preview_splits_at_texture_limit_and_preserves_last_column() {
+    let ctx = egui::Context::default();
+    let limit = ctx.input(|i| i.max_texture_side);
+    let directory = temp_snapshot_dir("heatmap-preview-tiled");
+    let values_path = directory.join("values.csv");
+    let layout_path = directory.join("layout.csv");
+    fs::write(&values_path, format!("{}1\n", "0,".repeat(limit))).unwrap();
+    fs::write(
+        &layout_path,
+        "pixel_row,pixel_col,lx,ly,ux,uy\n0,0,0,0,1,1\n",
+    )
+    .unwrap();
+    let data = HeatmapData::load(&values_path, &layout_path).unwrap();
+    fs::remove_dir_all(directory).unwrap();
+    let heatmap = ActiveHeatmap::new("Wide".into(), data);
+
+    let output = ctx.run(egui::RawInput::default(), |ctx| {
+        let rect =
+            egui::Rect::from_min_size(egui::pos2(2.0, 4.0), egui::vec2((limit + 1) as f32, 5.0));
+        paint_heatmap_grid(
+            &ctx.layer_painter(egui::LayerId::background()),
+            rect,
+            &heatmap,
+        );
+    });
+    let meshes: Vec<_> = output
+        .shapes
+        .iter()
+        .filter_map(|s| match &s.shape {
+            egui::Shape::Mesh(mesh) => Some(mesh),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(meshes.len(), 2);
+    assert_eq!(
+        meshes[0].calc_bounds().right(),
+        meshes[1].calc_bounds().left()
+    );
+    assert_eq!(meshes[1].calc_bounds().width(), 1.0);
+    for (mesh, width, norm) in [(meshes[0], limit, 0.0), (meshes[1], 1, 1.0)] {
+        let (_, upload) = output
+            .textures_delta
+            .set
+            .iter()
+            .find(|(id, _)| *id == mesh.texture_id)
+            .unwrap();
+        let egui::ImageData::Color(image) = &upload.image else {
+            panic!("expected a color tile")
+        };
+        assert_eq!(image.size, [width, 1]);
+        assert!(image
+            .pixels
+            .iter()
+            .all(|pixel| *pixel == color32(heatmap.colormap_mode.sample(norm))));
+    }
+}
+
+#[test]
 fn heatmap_threshold_omits_sub_threshold_cells_for_transparency() {
     let directory = temp_snapshot_dir("heatmap-threshold-instances");
     let values_path = directory.join("values.csv");
@@ -1625,15 +1755,17 @@ fn heatmap_threshold_omits_sub_threshold_cells_for_transparency() {
     assert_eq!(data.peak_cell(true), Some((0, 0)));
 
     let mut active = ActiveHeatmap::new("Test".to_string(), data);
-    let hash_before = active.cached_hash;
+    let original = Arc::clone(active.instances());
+    active.opacity = 0.2;
+    active.selected_cell = Some((0, 0));
+    assert!(Arc::ptr_eq(active.instances(), &original));
     active.set_threshold(0.7);
-    assert_ne!(active.cached_hash, hash_before);
-    assert_eq!(active.instances.len(), 2);
-
-    let hash_before_inv = active.cached_hash;
+    let filtered = Arc::clone(active.instances());
+    assert!(!Arc::ptr_eq(&filtered, &original));
+    assert_eq!(filtered.len(), 2);
     active.set_invert_threshold(true);
-    assert_ne!(active.cached_hash, hash_before_inv);
-    assert_eq!(active.instances.len(), 2);
+    assert!(!Arc::ptr_eq(active.instances(), &filtered));
+    assert_eq!(active.instances().len(), 2);
 
     fs::remove_dir_all(directory).unwrap();
 }

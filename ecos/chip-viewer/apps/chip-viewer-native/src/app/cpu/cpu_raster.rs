@@ -2,6 +2,7 @@
 
 use super::cpu_scene::progress::{ProgressFrame, ProgressMailbox};
 use super::cpu_scene::{CpuScene, SceneKey};
+use super::heatmap_composition::CachedComposition;
 use super::*;
 use eframe::glow::{self, HasContext};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -74,6 +75,7 @@ impl CpuRasterCache {
         generation: u64,
         painter: &egui::Painter,
         background: egui::Color32,
+        composition: Option<CachedComposition>,
     ) {
         if self.failed.load(Ordering::Relaxed) {
             if let Some(scene) = scene {
@@ -90,6 +92,15 @@ impl CpuRasterCache {
             rect: painter.clip_rect(),
             callback: Arc::new(eframe::egui_glow::CallbackFn::new(move |info, parent| {
                 let started = Instant::now();
+                if let Some(composition) = &composition {
+                    if composition.present(parent.gl(), &info) {
+                        cache
+                            .paint_micros
+                            .store(started.elapsed().as_micros() as usize, Ordering::Relaxed);
+                        return;
+                    }
+                    ctx.request_repaint();
+                }
                 let mut trace = PresentTrace::enabled();
                 let mut resources = cache.resources.lock().unwrap();
                 trace.mark("resources_lock");

@@ -1,5 +1,9 @@
 use super::*;
 
+#[path = "popup_heatmap.rs"]
+mod popup_heatmap;
+pub(super) use popup_heatmap::PopupHeatmap;
+
 pub(super) fn loading_canvas(ui: &mut egui::Ui, loading: &LoadingViewer) {
     let available = ui.available_size();
     let (rect, _) = ui.allocate_exact_size(available, egui::Sense::hover());
@@ -155,42 +159,21 @@ pub(super) fn map_heatmap_layout(
 pub(super) fn paint_heatmap_grid(
     painter: &egui::Painter,
     rect: egui::Rect,
-    data: &HeatmapData,
-    selected_cell: Option<(usize, usize)>,
-    colormap_mode: ColormapMode,
-    threshold: f32,
-    invert_threshold: bool,
+    heatmap: &ActiveHeatmap,
 ) {
-    let rows = data.rows().max(1);
-    let columns = data.columns().max(1);
+    let rows = heatmap.data.rows().max(1);
+    let columns = heatmap.data.columns().max(1);
     let cell_width = rect.width() / columns as f32;
     let cell_height = rect.height() / rows as f32;
     painter.rect_filled(rect, 2.0, ecos_canvas());
-    for row in 0..rows {
-        for column in 0..columns {
-            let Some(normalized) = data.normalized_value(row, column) else {
-                continue;
-            };
-            let hidden = if !invert_threshold {
-                normalized < threshold
-            } else {
-                normalized > threshold
-            };
-            if hidden {
-                continue;
-            }
-            let cell = heatmap_cell_rect(rect, rows, columns, row, column);
-            let [r, g, b, _] = colormap_mode.sample(normalized);
-            painter.rect_filled(cell, 0.0, egui::Color32::from_rgb(r, g, b));
-        }
-    }
+    heatmap.paint_preview_cells(painter, rect);
     painter.rect_stroke(
         rect,
         2.0,
         egui::Stroke::new(1.0_f32, ecos_border()),
         egui::StrokeKind::Inside,
     );
-    if let Some((row, column)) = selected_cell {
+    if let Some((row, column)) = heatmap.selected_cell {
         if row < rows && column < columns {
             paint_heatmap_cell_outline(
                 painter,
@@ -1896,6 +1879,11 @@ pub(super) fn paint_unrouted_net_guides(
 ) -> usize {
     let selected =
         select_unrouted_net_guide_lines(guides, visibility, viewport, world, canvas, zoom, pan);
+    let clip = painter.clip_rect();
+    let cull = clip != canvas
+        && painter.ctx().tessellation_options(|options| {
+            options.coarse_tessellation_culling && !options.debug_ignore_clip_rects
+        });
     let mut drawn = 0usize;
     let mut painted_hub_for: Option<usize> = None;
     for (guide_index, pin_index) in selected {
@@ -1911,8 +1899,23 @@ pub(super) fn paint_unrouted_net_guides(
         }
         let endpoint =
             world_to_screen_point(guide.pin_centers[pin_index], world, canvas, zoom, pan);
-        if paint_dashed_line(painter, hub, endpoint, stroke, 8.0, 5.0) {
-            drawn += 1;
+        let mut segments = dash_segments(hub, endpoint, 8.0, 5.0).peekable();
+        drawn += usize::from(segments.peek().is_some());
+        if cull
+            && !screen_line_bounds(hub, endpoint)
+                .expand(stroke.width)
+                .intersects(clip)
+        {
+            continue;
+        }
+        for [begin, end] in segments {
+            if !cull
+                || screen_line_bounds(begin, end)
+                    .expand(stroke.width)
+                    .intersects(clip)
+            {
+                painter.line_segment([begin, end], stroke);
+            }
         }
     }
     drawn
@@ -1995,7 +1998,7 @@ pub(super) fn flyline_screen_span_px(
     screen.width().hypot(screen.height())
 }
 
-/// Segment count of [`dashed_line_segments`] without allocating.
+/// Segment count of a dashed line without allocating.
 pub(super) fn dashed_line_segment_count(
     begin: egui::Pos2,
     end: egui::Pos2,
@@ -2038,37 +2041,46 @@ pub(super) fn paint_dashed_line(
     dash_length: f32,
     gap_length: f32,
 ) -> bool {
-    let segments = dashed_line_segments(begin, end, dash_length, gap_length);
-    let painted = !segments.is_empty();
-    for (dash_begin, dash_end) in segments {
-        painter.line_segment([dash_begin, dash_end], stroke);
+    let mut segments = dash_segments(begin, end, dash_length, gap_length).peekable();
+    let painted = segments.peek().is_some();
+    for segment in segments {
+        painter.line_segment(segment, stroke);
     }
     painted
 }
 
+fn dash_segments(
+    begin: egui::Pos2,
+    end: egui::Pos2,
+    dash_length: f32,
+    gap_length: f32,
+) -> impl Iterator<Item = [egui::Pos2; 2]> {
+    let delta = end - begin;
+    let length = delta.length();
+    let dash_length = dash_length.max(1.0);
+    let step = (dash_length + gap_length.max(1.0)).max(2.0);
+    let direction = delta / length.max(0.5);
+    std::iter::successors((length > 0.5).then_some(0.0), move |offset| {
+        Some(offset + step)
+    })
+    .take(256)
+    .take_while(move |offset| *offset < length)
+    .map(move |offset| {
+        let dash_end = (offset + dash_length).min(length);
+        [begin + direction * offset, begin + direction * dash_end]
+    })
+}
+
+#[cfg(test)]
 pub(super) fn dashed_line_segments(
     begin: egui::Pos2,
     end: egui::Pos2,
     dash_length: f32,
     gap_length: f32,
 ) -> Vec<(egui::Pos2, egui::Pos2)> {
-    let delta = end - begin;
-    let length = delta.length();
-    if length <= 0.5 {
-        return Vec::new();
-    }
-
-    let dash_length = dash_length.max(1.0);
-    let step = (dash_length + gap_length.max(1.0)).max(2.0);
-    let direction = delta / length;
-    let mut segments = Vec::new();
-    let mut offset = 0.0f32;
-    while offset < length && segments.len() < 256 {
-        let dash_end = (offset + dash_length).min(length);
-        segments.push((begin + direction * offset, begin + direction * dash_end));
-        offset += step;
-    }
-    segments
+    dash_segments(begin, end, dash_length, gap_length)
+        .map(|[begin, end]| (begin, end))
+        .collect()
 }
 
 pub(super) fn screen_line_bounds(begin: egui::Pos2, end: egui::Pos2) -> egui::Rect {

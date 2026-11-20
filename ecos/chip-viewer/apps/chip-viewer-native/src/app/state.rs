@@ -221,6 +221,7 @@ struct LoadedViewer {
     selected_map_item: Option<PathBuf>,
     previous_map_item: Option<(crate::map_data::MapItem, Option<PathBuf>)>,
     active_heatmap: Option<ActiveHeatmap>,
+    heatmap_composition: heatmap_composition::HeatmapComposition,
     map_item_error: Option<String>,
     analysis_loader: Option<analysis_loader::AnalysisLoader>,
     analysis_load_error: Option<String>,
@@ -326,8 +327,21 @@ struct ActiveHeatmap {
     threshold: f32,
     invert_threshold: bool,
     opacity: f32,
-    instances: std::sync::Arc<Vec<crate::canvas_gpu::GpuShapeInstance>>,
-    cached_hash: u64,
+    popup: render_support::PopupHeatmap,
+    world: world_heatmap::WorldHeatmap,
+    colors_revision: Arc<()>,
+    instances: std::cell::OnceCell<std::sync::Arc<Vec<crate::canvas_gpu::GpuShapeInstance>>>,
+}
+
+fn heatmap_core_cell(rect: Rect32, pitch: Option<(i32, i32)>) -> bool {
+    let Some((px, py)) = pitch else { return true };
+    // The irregular boundary ring extends beyond the core. Allow the grid
+    // writer's rounding of interior cells within the existing 5% tolerance.
+    let within_pitch = |lo: i32, hi: i32, step: i32| {
+        let width = (i64::from(hi) - i64::from(lo)).abs();
+        (width - i64::from(step)).abs() * 20 <= i64::from(step)
+    };
+    within_pitch(rect.lx, rect.hx, px) && within_pitch(rect.ly, rect.hy, py)
 }
 
 fn build_heatmap_instances(
@@ -339,34 +353,15 @@ fn build_heatmap_instances(
     let pitch = data.core_pitch();
     let mut instances = Vec::new();
     for ((row, col), rect) in data.cells() {
-        // Skip the non-uniform boundary ring (cells mapped onto the die
-        // border); they are wider/taller than the core grid and visually
-        // "stretch" the overlay past the core on all sides.
-        if let Some((px, py)) = pitch {
-            let w = (rect.hx - rect.lx).abs();
-            let h = (rect.hy - rect.ly).abs();
-            // Core cells are highly uniform. Boundary cells deviate significantly.
-            // A 5% tolerance is enough to absorb 1-DBU rounding differences
-            // while safely dropping boundary cells (which deviate by ~25%+).
-            if (w - px).abs() * 20 > px || (h - py).abs() * 20 > py {
-                continue;
-            }
-        }
-        let Some(norm) = data.normalized_value(row, col) else {
-            continue;
-        };
-        let hidden = if !invert {
-            norm < threshold
-        } else {
-            norm > threshold
-        };
-        if hidden {
+        if !heatmap_core_cell(rect, pitch) {
             continue;
         }
-        let [r, g, b, _] = mode.sample(norm);
+        let Some(color) = data.cell_color(row, col, mode, threshold, invert) else {
+            continue;
+        };
         instances.push(crate::canvas_gpu::GpuShapeInstance {
             rect_dbu: [rect.lx, rect.ly, rect.hx, rect.hy],
-            fill_rgba: crate::canvas_gpu::pack_rgba_u32([r, g, b, 255]),
+            fill_rgba: crate::canvas_gpu::pack_rgba_u32(color.to_array()),
             frame_rgba: 0,               // no outline
             pattern_bits: (0 << 16) | 1, // shape_type=rect, pattern=solid
             line_width_px: 0.0,
@@ -376,29 +371,24 @@ fn build_heatmap_instances(
 }
 
 impl ActiveHeatmap {
-    fn refresh_hash(&mut self) {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.colormap_mode.hash(&mut hasher);
-        self.threshold.to_bits().hash(&mut hasher);
-        self.invert_threshold.hash(&mut hasher);
-        self.title.hash(&mut hasher);
-        self.instances.len().hash(&mut hasher);
-        if let Some(first) = self.instances.first() {
-            first.rect_dbu.hash(&mut hasher);
-        }
-        if let Some(last) = self.instances.last() {
-            last.rect_dbu.hash(&mut hasher);
-        }
-        self.cached_hash = hasher.finish();
+    fn invalidate_colors(&mut self) {
+        self.colors_revision = Arc::new(());
+        self.instances.take();
+        self.popup.invalidate_colors();
+        self.world.invalidate_colors();
+    }
+
+    fn instances(&self) -> &std::sync::Arc<Vec<crate::canvas_gpu::GpuShapeInstance>> {
+        self.instances.get_or_init(|| {
+            build_heatmap_instances(&self.data, self.colormap_mode, self.threshold, self.invert_threshold)
+        })
     }
 
     fn new(title: String, data: HeatmapData) -> Self {
         let colormap_mode = ColormapMode::default();
         let threshold = 0.0;
         let invert_threshold = false;
-        let instances = build_heatmap_instances(&data, colormap_mode, threshold, invert_threshold);
-        let mut self_obj = Self {
+        Self {
             title,
             data,
             selected_cell: None,
@@ -406,19 +396,17 @@ impl ActiveHeatmap {
             threshold,
             invert_threshold,
             opacity: 0.65,
-            instances,
-            cached_hash: 0,
-        };
-        self_obj.refresh_hash();
-        self_obj
+            world: Default::default(),
+            colors_revision: Arc::new(()),
+            popup: Default::default(),
+            instances: Default::default(),
+        }
     }
 
     fn set_colormap_mode(&mut self, mode: ColormapMode) {
         if self.colormap_mode != mode {
             self.colormap_mode = mode;
-            self.instances =
-                build_heatmap_instances(&self.data, mode, self.threshold, self.invert_threshold);
-            self.refresh_hash();
+            self.invalidate_colors();
         }
     }
 
@@ -426,26 +414,14 @@ impl ActiveHeatmap {
         let clamped = threshold.clamp(0.0, 1.0);
         if (self.threshold - clamped).abs() > 0.001 {
             self.threshold = clamped;
-            self.instances = build_heatmap_instances(
-                &self.data,
-                self.colormap_mode,
-                self.threshold,
-                self.invert_threshold,
-            );
-            self.refresh_hash();
+            self.invalidate_colors();
         }
     }
 
     fn set_invert_threshold(&mut self, invert: bool) {
         if self.invert_threshold != invert {
             self.invert_threshold = invert;
-            self.instances = build_heatmap_instances(
-                &self.data,
-                self.colormap_mode,
-                self.threshold,
-                self.invert_threshold,
-            );
-            self.refresh_hash();
+            self.invalidate_colors();
         }
     }
 }

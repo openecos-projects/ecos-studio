@@ -52,6 +52,8 @@ mod cpu_scene;
 mod gpu_overview;
 #[path = "app/render/gpu_tile_worker.rs"]
 mod gpu_tile_worker;
+#[path = "app/render/heatmap_composition.rs"]
+mod heatmap_composition;
 #[path = "app/labels/label_layout.rs"]
 mod label_layout;
 #[path = "app/analysis/lvs.rs"]
@@ -71,6 +73,8 @@ mod viewer;
 #[path = "app/session/viewer_support.rs"]
 mod viewer_support;
 mod wheel_camera;
+#[path = "app/render/world_heatmap.rs"]
+mod world_heatmap;
 #[cfg(test)]
 use analysis_overlays::{parse_antenna_json_text, parse_drc_json_text, parse_drc_statis_csv};
 use analysis_overlays::{
