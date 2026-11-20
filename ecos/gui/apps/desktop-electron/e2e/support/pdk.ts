@@ -1,12 +1,4 @@
-import {
-  copyFile,
-  link,
-  mkdir,
-  mkdtemp,
-  readFile,
-  realpath,
-  writeFile,
-} from 'node:fs/promises'
+import { copyFile, link, mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { execFile } from 'node:child_process'
@@ -27,25 +19,19 @@ export function prepareTestPdk(source: string): Promise<string> {
 
 async function createFixture(source: string): Promise<string> {
   const sourceRoot = await realpath(source)
-  let descriptor = JSON.parse(await readFile(join(sourceRoot, 'ecc-pdk.json'), 'utf8'))
   const root = await mkdtemp(join(tmpdir(), 'ecos-e2e-pdk-'))
-  if (descriptor.schema_version === 2) {
-    const binaryDirectory = process.env.ECOS_E2E_ECC_BIN_DIR
-    if (!binaryDirectory)
-      throw new Error('Schema 2 PDK fixtures require ECOS_E2E_ECC_BIN_DIR')
-    const state = await mkdtemp(join(tmpdir(), 'ecos-e2e-pdk-state-'))
-    const run = promisify(execFile)
-    const env = { ...process.env, ECC_PDK_INVENTORY: join(state, 'inventory.json') }
-    const binary = join(binaryDirectory, 'ecc')
-    await run(binary, ['pdk', 'configure', 'adopt', '--root', sourceRoot], { env })
-    const shown = await run(binary, ['pdk', 'configure', 'show', '--root', sourceRoot], {
-      env,
-      maxBuffer: 8 * 1024 * 1024,
-    })
-    // Copy the complete resolved resource set, including entries supplied by the
-    // matching ECC profile. Never mutate the vendor description to add tool policy.
-    descriptor = JSON.parse(shown.stdout).descriptor
-  }
+  const binaryDirectory = process.env.ECOS_E2E_ECC_BIN_DIR
+  if (!binaryDirectory) throw new Error('PDK fixtures require ECOS_E2E_ECC_BIN_DIR')
+  const state = await mkdtemp(join(tmpdir(), 'ecos-e2e-pdk-state-'))
+  const run = promisify(execFile)
+  const env = { ...process.env, ECC_PDK_INVENTORY: join(state, 'inventory.json') }
+  const binary = join(binaryDirectory, 'ecc')
+  await run(binary, ['pdk', 'configure', 'adopt', '--root', sourceRoot], { env })
+  const shown = await run(binary, ['pdk', 'configure', 'show', '--root', sourceRoot], {
+    env,
+    maxBuffer: 8 * 1024 * 1024,
+  })
+  const descriptor = JSON.parse(shown.stdout).descriptor
   for (const resource of Object.values(descriptor.resources) as Array<{ path: string }>) {
     const input = await realpath(resolve(sourceRoot, resource.path))
     const subpath = relative(sourceRoot, input)

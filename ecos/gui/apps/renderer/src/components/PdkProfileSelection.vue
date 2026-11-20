@@ -16,12 +16,12 @@
         </option>
       </select>
       <p class="text-sm">
-        ECC checks the selected PDK files before saving. Existing projects keep their
-        locked configuration. Synthetic EMIR models are for flow testing only.
+        ECC checks the selected PDK files before saving. New workspaces use the saved
+        configuration. Synthetic EMIR models are for flow testing only.
       </p>
       <label v-if="revision" class="my-2 flex gap-2 text-sm">
         <input v-model="replaceDefaults" type="checkbox" :disabled="disabled || busy" />
-        Replace the saved defaults for new projects, including my edits.
+        Replace the saved defaults for new workspaces, including my edits.
       </label>
       <button
         class="mt-2 rounded border px-3 py-2"

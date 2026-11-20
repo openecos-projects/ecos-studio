@@ -1998,7 +1998,7 @@ export function projectSettingsArgs(
     )
   ) {
     throw new Error(
-      'PDK resources belong to ecc-pdk.json. Configure a separate PDK profile before creating a project.',
+      'Edit the installation in ECC PDK configuration before creating a workspace.',
     )
   }
   // design.rtl is intentionally absent: RTL sources are imported into the

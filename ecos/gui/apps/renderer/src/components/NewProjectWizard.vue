@@ -1274,8 +1274,8 @@
                           >
                           <span
                             class="mt-1 block text-xs leading-5 text-(--text-secondary)"
-                            >Edit ECC-managed descriptions and tool adaptations. Existing
-                            projects keep their locked configuration.</span
+                            >Edit ECC-managed descriptions and tool adaptations. New
+                            workspaces use the saved configuration.</span
                           >
                         </span>
                       </button>

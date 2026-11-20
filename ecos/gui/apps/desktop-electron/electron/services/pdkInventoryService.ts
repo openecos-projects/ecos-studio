@@ -219,9 +219,6 @@ export class PdkInventoryService {
           binding.projectId === projectId && binding.projectRoot === projectRoot,
       )
       if (existing?.installationId) {
-        if (await stat(join(projectRoot, 'pdk.lock.json')).catch(() => null)) {
-          return publicBinding(existing)
-        }
         if (isDeepStrictEqual(existing.requirement, request.requirement)) {
           return publicBinding(existing)
         }
@@ -283,19 +280,6 @@ export class PdkInventoryService {
         (candidate) => candidate.id === request.installationId,
       )
       if (!installation) throw new Error('PDK Installation was not found')
-      const previous = inventory.bindings.find(
-        (binding) =>
-          binding.projectId === projectId && binding.projectRoot === projectRoot,
-      )
-      if (
-        previous?.installationId &&
-        previous.installationId !== installation.id &&
-        (await stat(join(projectRoot, 'pdk.lock.json')).catch(() => null))
-      ) {
-        throw new Error(
-          'Project PDK is immutable; copy the project to select another PDK',
-        )
-      }
       if (!installationSatisfiesRequirement(installation, request.requirement)) {
         throw new Error(
           `PDK Installation does not satisfy the Project Requirement (${describeRequirementMismatch(installation, request.requirement)})`,

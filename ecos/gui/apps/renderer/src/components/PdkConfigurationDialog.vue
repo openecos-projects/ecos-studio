@@ -228,9 +228,13 @@ function loadSection() {
   value.value = JSON.stringify(document.value[field.value] ?? {}, null, 2)
 }
 async function reload() {
-  const result = await command('show')
+  let result = await command('show')
+  if (!result.revision) {
+    await command('adopt')
+    result = await command('show')
+  }
   document.value = result.descriptor as Record<string, unknown>
-  revision.value = String(result.revision)
+  revision.value = typeof result.revision === 'string' ? result.revision : ''
   configurationPath.value = typeof result.path === 'string' ? result.path : ''
   initialized.value = true
   loadSection()

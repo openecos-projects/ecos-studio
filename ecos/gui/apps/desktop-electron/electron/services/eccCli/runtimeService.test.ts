@@ -216,7 +216,7 @@ describe('ECC CLI workspace command planning', () => {
   it('rejects resource overrides that bypass the immutable PDK profile', () => {
     const input = request({ eccPdkConfig: { overrides: { lefs: ['/other.lef'] } } })
     expect(() => projectSettingsArgs(input)).toThrow(
-      'PDK resources belong to ecc-pdk.json',
+      'Edit the installation in ECC PDK configuration',
     )
   })
 
