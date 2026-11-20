@@ -57,6 +57,26 @@ describe('matchWorkspaceFlowPlan', () => {
     ])
   })
 
+  it('reads explicit design inputs from the selected workspace only', () => {
+    const ledger = steps
+      .slice(1)
+      .map((step) => (step.stepId === 'sta' ? { ...step, inputStep: 'drc' } : step))
+    const records = [
+      { record: 'workspace_flow', workspace_id: 'trimmed' },
+      { ...plan[2], stage: 1, needs: { filled: null }, design_source: null },
+      { ...plan[3], stage: 1, needs: { filled: null }, design_source: null },
+      { ...plan[4], stage: 2, design_source: 'drc' },
+    ]
+    expect(matchWorkspaceFlowPlan(records, ledger, 'trimmed')).toEqual([
+      { stage: 1, inputProducers: { filled: null }, designSource: null },
+      { stage: 1, inputProducers: { filled: null }, designSource: null },
+      { stage: 2, inputProducers: { parasitics: 'rcx' }, designSource: 'drc' },
+    ])
+    expect(matchWorkspaceFlowPlan(records, ledger, 'other')).toBeUndefined()
+    records[3] = { ...plan[4], stage: 2, design_source: 'rcx' }
+    expect(matchWorkspaceFlowPlan(records, ledger, 'trimmed')).toBeUndefined()
+  })
+
   it('rejects project plans that conflict with the workspace ledger', () => {
     expect(matchWorkspaceFlowPlan(plan, steps.slice(1))).toBeUndefined()
     expect(

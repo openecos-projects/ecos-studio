@@ -147,6 +147,15 @@ describe('workspace dashboard layout', () => {
     const dialog = page.getByRole('dialog', { name: 'Run STA', exact: true })
     await dialog.getByText('parasitics', { exact: true }).waitFor()
     expect(await dialog.getByText('RCX', { exact: true }).count()).toBe(1)
+    if (process.env.ECOS_E2E_WORKSPACE_FLOW_PLAN === '1') {
+      await dialog.getByText('Design input', { exact: true }).waitFor()
+      expect(
+        await dialog
+          .getByText('Design input', { exact: true })
+          .locator('+ dd')
+          .textContent(),
+      ).toBe('Filler')
+    }
     await dialog.getByRole('button', { name: 'Run current step', exact: true }).waitFor()
     await dialog.getByRole('button', { name: 'Run from this step', exact: true }).click()
     const confirmation = page.getByRole('dialog', {

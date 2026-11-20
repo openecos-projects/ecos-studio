@@ -57,7 +57,7 @@ import { readStepWorkerFailure, readWorkspaceFlowFile } from './eccCli/persisted
 import { matchWorkspaceFlowPlan } from './backendWorkspaceFlowPlan'
 
 interface BackendWorkspaceServiceOptions {
-  readProjectFlowPlan?: (projectRoot: string) => Promise<unknown>
+  readWorkspaceFlowPlan?: (projectRoot: string, workspaceId: string) => Promise<unknown>
   workspaceRootProvider: {
     getProjectRoot(): Promise<string>
   }
@@ -634,17 +634,32 @@ export class BackendWorkspaceService {
       if (message) failureMessages.set(step.name, message)
     }
     const flow = flowSection(snapshot, liveFlow ?? undefined, failureMessages)
-    if (flow.status === 'ready' && manifest && this.options.readProjectFlowPlan) {
+    const workspaceEntry = manifest?.workspaces.find((entry) =>
+      pathsEqual(entry.workspace_path, workspaceRoot),
+    )
+    if (flow.status === 'ready' && workspaceEntry && this.options.readWorkspaceFlowPlan) {
       const steps = flow.data.steps
       const config = await stat(join(projectRoot, 'ecc.toml')).catch(() => null)
       const key = JSON.stringify([
         workspaceRoot,
+        workspaceEntry.workspace_id,
         config && [config.ino, config.mtimeMs, config.ctimeMs, config.size],
-        steps.map(({ stepId, toolId, inputStep }) => [stepId, toolId, inputStep]),
+        steps.map(({ stepId, toolId, category, inputStep, state }) => [
+          stepId,
+          toolId,
+          category,
+          inputStep,
+          state === 'skipped',
+        ]),
       ])
       if (context.flowPlan?.key !== key) {
-        const plan = await this.options.readProjectFlowPlan(projectRoot).catch(() => null)
-        context.flowPlan = { key, steps: matchWorkspaceFlowPlan(plan, steps) }
+        const plan = await this.options
+          .readWorkspaceFlowPlan(projectRoot, workspaceEntry.workspace_id)
+          .catch(() => null)
+        context.flowPlan = {
+          key,
+          steps: matchWorkspaceFlowPlan(plan, steps, workspaceEntry.workspace_id),
+        }
       }
       const plan = context.flowPlan.steps
       if (plan)

@@ -324,12 +324,19 @@ const selectedInputs = computed(() => {
   const step = selectedStep.value
   if (!step) return []
   if (step.inputProducers) {
-    return Object.entries(step.inputProducers).map(([input, source]) => [
+    const stepLabel = (id: string) =>
+      steps.value.find((candidate) => candidate.id === id)?.label ?? id
+    const inputs = Object.entries(step.inputProducers).map(([input, source]) => [
       input,
-      source
-        ? (steps.value.find((candidate) => candidate.id === source)?.label ?? source)
-        : 'No upstream step',
+      source ? stepLabel(source) : 'No upstream step',
     ])
+    if (step.designSource !== undefined) {
+      inputs.unshift([
+        'Design input',
+        step.designSource ? stepLabel(step.designSource) : 'Workspace origin',
+      ])
+    }
+    return inputs
   }
   return step.inputStep ? [['Input step', step.inputStep]] : []
 })

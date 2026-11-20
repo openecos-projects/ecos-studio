@@ -64,6 +64,7 @@ export interface FlowStepSummary {
   stepId: string
   stage?: number
   inputProducers?: Record<string, string | null>
+  designSource?: string | null
   failureMessage?: string
   category?: 'PNR' | 'CHECKER'
   inputStep?: string

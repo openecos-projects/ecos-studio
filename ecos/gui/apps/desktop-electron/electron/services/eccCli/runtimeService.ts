@@ -333,7 +333,24 @@ export class EccCliRuntimeService {
     return this.catalog
   }
 
-  async readProjectFlowPlan(projectRoot: string): Promise<unknown> {
+  async readWorkspaceFlowPlan(
+    projectRoot: string,
+    workspaceId: string,
+  ): Promise<unknown> {
+    try {
+      const { stdout } = await this.cli.run(
+        ['flow', 'workspace', workspaceId, '--project', projectRoot, '--json'],
+        { cwd: projectRoot, timeoutMs: 5_000 },
+      )
+      return JSON.parse(stdout)
+    } catch (error) {
+      // Until the pinned runtime includes "flow workspace", use a verified matching project plan.
+      if (
+        !(error instanceof EccCliCommandError) ||
+        !error.stderr.includes("No such command 'workspace'")
+      )
+        throw error
+    }
     const args = ['flow', 'status', '--project', projectRoot, '--json']
     try {
       const { stdout } = await this.cli.run(args, { cwd: projectRoot, timeoutMs: 5_000 })

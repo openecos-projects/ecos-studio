@@ -14,6 +14,7 @@ export type StepCheckState = 'passed' | 'blocked' | 'warning' | 'unavailable'
 export interface DashboardFlowStep extends FlowStatusNode {
   stage?: number
   inputProducers?: FlowStepSummary['inputProducers']
+  designSource?: string | null
   failureMessage?: string
   inputStep?: string
   tool?: string
@@ -54,6 +55,7 @@ export function dashboardFlowSteps(
         id: step.stepId,
         ...(step.stage !== undefined ? { stage: step.stage } : {}),
         ...(step.inputProducers ? { inputProducers: step.inputProducers } : {}),
+        ...(step.designSource !== undefined ? { designSource: step.designSource } : {}),
         ...(step.failureMessage ? { failureMessage: step.failureMessage } : {}),
         ...(step.inputStep ? { inputStep: step.inputStep } : {}),
         ...(step.toolId ? { tool: step.toolId } : {}),
