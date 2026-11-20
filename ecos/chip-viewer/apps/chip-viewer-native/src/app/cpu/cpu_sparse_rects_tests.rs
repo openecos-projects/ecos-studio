@@ -156,6 +156,12 @@ fn sparse_stream_preserves_each_command_prefix_labels_overlays_and_cancellation(
     let Some(mut renderer) = coverage_blend_tests::renderer() else {
         return;
     };
+    if !renderer.with_context(|gl| sparse_rects::certified_profile(gl)) {
+        eprintln!(
+            "Sparse stream EGL profile is not certified; skipping this profile-specific oracle"
+        );
+        return;
+    }
     let mut fixture = Fixture::new();
     fs::write(
         fixture.path.join("geometry.grids.txt"),
