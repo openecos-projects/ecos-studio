@@ -578,10 +578,7 @@ export {
   projectAnalysisArtifactPolicy,
   projectManagementFrontendWorkspaceStepAnalysisSpecs,
   projectManagementFrontendWorkspaceSummaryPaths,
-  projectManagementStaTimingIssuesPath,
   projectManagementWorkspaceStepAnalysisSpecs,
-  projectManagementWorkspaceSummaryPaths,
-  projectManagementWorkspaceSummaryPathsFor,
 } from './utils/projectManagementSummary.ts'
 export type {
   ProjectAnalysisArtifactKind,

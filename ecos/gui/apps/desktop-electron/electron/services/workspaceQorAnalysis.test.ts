@@ -95,7 +95,7 @@ function engineeringSnapshot(metricValue: number): EccEngineeringSnapshot {
     metrics: [metric],
     parameters: {},
     qorSnapshotExtension: qorSnapshotExtension(),
-    schemaVersion: 6,
+    schemaVersion: 7,
     signoffAssessment: { groups: [], risks: [], status: 'ready' },
     timingPreview: { issueCount: 0, issues: [], issuesTruncated: false },
     workspaceId: 'ecc-workspace',
@@ -243,21 +243,21 @@ describe('analyzeWorkspaceQor', () => {
         availability: 'available',
         kind: 'qor_metrics',
         name: 'qor_metrics.json',
-        stepId: 'route',
+        stepId: 'routing',
       },
       {
         artifactId: 'route-summary',
         availability: 'available',
         kind: 'qor_summary',
         name: 'qor_summary.json',
-        stepId: 'route',
+        stepId: 'routing',
       },
       {
         artifactId: 'route-hotspots',
         availability: 'available',
         kind: 'qor_hotspots',
         name: 'qor_hotspots.json',
-        stepId: 'route',
+        stepId: 'routing',
       },
     ]
     const manifest = {
@@ -330,7 +330,7 @@ describe('analyzeWorkspaceQor', () => {
       metrics: [metric],
       parameters: {},
       qorSnapshotExtension: qorSnapshotExtension(),
-      schemaVersion: 6,
+      schemaVersion: 7,
       signoffAssessment: { groups: [], risks: [], status: 'ready' },
       timingPreview: { issueCount: 0, issues: [], issuesTruncated: false },
       workspaceId: 'ecc-current',
@@ -433,7 +433,7 @@ describe('analyzeWorkspaceQor', () => {
         'utf-8',
       ),
     ) as Record<string, unknown>
-    const validated = validateEngineeringSnapshot(fixture)
+    const validated = validateEngineeringSnapshot({ ...fixture, schemaVersion: 7 })
     expect(validated.ok).toBe(true)
     if (!validated.ok) return
 

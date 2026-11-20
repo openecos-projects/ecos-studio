@@ -6,43 +6,40 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, Stri
 
 
 class ECCStepName(StrEnum):
-    """Canonical ECC flow step catalog.
+    """Steps in ECC’s rtl2gds chain, in ledger order."""
 
-    The order matches the flow ECC actually writes to ``home/flow.json``:
-    the floorplan phase runs as the three sub-steps ``preFloorplan,
-    macroPlacement, postFloorplan`` sharing the ``Floorplan`` configuration,
-    followed by ``preplace, place, diff_sizing`` in the placement phase,
-    and after ``route`` the tail runs ``filler, lvs, drc, antennaCheck,
-    postRouteLec, RCX, sta, powerAnalysis, emir``. Isolated floorplan-geometry candidates still target
-    the RPC-level ``Floorplan`` step name.
-
-    The Electron counterpart is `ECC_FLOW_STEPS`
-    (ecos/gui/packages/shared/src/contracts/eccFlowSteps.ts) — keep entries and
-    order identical; the joint contract lives in `ecos/agent/docs/ecc-agent-rpc.md`.
-    """
-
-    SYNTHESIS = "Synthesis"
-    LEC = "lec"
-    PRE_FLOORPLAN = "preFloorplan"
-    MACRO_PLACEMENT = "macroPlacement"
-    POST_FLOORPLAN = "postFloorplan"
+    SYNTHESIS = "synthesis"
+    PRE_FLOORPLAN = "pre_floorplan"
+    MACRO_PLACEMENT = "macro_placement"
+    POST_FLOORPLAN = "post_floorplan"
     PREPLACE = "preplace"
-    PLACEMENT = "place"
+    PLACEMENT = "placement"
+    DIFF_OPT = "diff_opt"
     DIFF_SIZING = "diff_sizing"
-    CTS = "CTS"
+    CTS = "cts"
     LEGALIZATION = "legalization"
-    TIMING_OPT = "Timing optimization"
-    ROUTING = "route"
+    TIMING_OPT = "timing_optimization"
+    ROUTING = "routing"
     FILLER = "filler"
     LVS = "lvs"
     DRC = "drc"
-    ANTENNA_CHECK = "antennaCheck"
-    POST_ROUTE_LEC = "postRouteLec"
-    RCX = "RCX"
+    ANTENNA_CHECK = "antenna_check"
+    POST_ROUTE_LEC = "post_route_lec"
+    RCX = "rcx"
     STA = "sta"
-    POWER_ANALYSIS = "powerAnalysis"
+    POWER_ANALYSIS = "power_analysis"
     EMIR = "emir"
-    HARDEN = "Harden"
+    HARDEN = "harden"
+
+
+def knowledge_phase(step: ECCStepName) -> str:
+    if step in (ECCStepName.PRE_FLOORPLAN, ECCStepName.MACRO_PLACEMENT, ECCStepName.POST_FLOORPLAN):
+        return "floorplan"
+    if step == ECCStepName.PLACEMENT:
+        return "place"
+    if step == ECCStepName.ROUTING:
+        return "route"
+    return step.value
 
 
 _KNOB_ID = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")

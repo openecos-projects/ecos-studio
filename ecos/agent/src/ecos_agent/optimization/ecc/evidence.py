@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -15,7 +16,7 @@ from ecos_agent.optimization.execution import (
     CandidateExecutionEvidence,
 )
 from ecos_agent.optimization.parameters.contracts import MaterializationRef, ParameterApplicationReceipt
-from ecos_agent.workspace.parameters import PARAMS_TOML, read_workspace_parameters
+from ecos_agent.workspace.parameters import PARAMS_TOML
 
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
@@ -278,9 +279,7 @@ def _validate_materialization_files(
         before_path = _safe_path(candidate, str(expected_snapshot["before_ref"]))
         after_path = _safe_path(candidate, str(expected_snapshot["after_ref"]))
         if materialization.config_ref == PARAMS_TOML:
-            config_ref, config_payload = read_workspace_parameters(candidate)
-            if config_ref != materialization.config_ref:
-                raise ValueError("materialized parameter config does not match")
+            config_payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
         else:
             config_payload = _read_json_object(config_path)
         written_value = _nested_json_value(config_payload, config_json_path)
@@ -297,12 +296,14 @@ def _validate_materialization_files(
         raise OptimizationEccAdapterError(
             "application receipt materialization file hash does not match"
         )
-    if "random_seed" in config_payload:
-        # The seed the receipt claims must be the seed the candidate config
-        # actually ran with; a divergence silently confounds every incumbent
-        # comparison against the baseline run.
+    if receipt.materialization.target_step == "placement":
         seed = receipt.context.get("seed")
-        if type(seed) is not int or config_payload["random_seed"] != seed:
+        seed_path = ("params", "step_params", "placement", "place.random_seed")
+        try:
+            stored_seed = _nested_json_value(config_payload, seed_path)
+        except (KeyError, ValueError, IndexError) as exc:
+            raise OptimizationEccAdapterError("application receipt materialization seed is missing") from exc
+        if type(seed) is not int or type(stored_seed) is not int or stored_seed != seed:
             raise OptimizationEccAdapterError(
                 "application receipt materialization seed does not match"
             )

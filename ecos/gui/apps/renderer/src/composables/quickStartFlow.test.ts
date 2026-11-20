@@ -9,7 +9,7 @@ import { runQuickStartFlow } from './quickStartFlow'
 function operation(state: EccRuntimeOperation['state'] = 'running'): EccRuntimeOperation {
   return {
     createdAt: 0,
-    currentStep: 'Harden',
+    currentStep: 'harden',
     currentTool: 'ecc',
     error: null,
     kind: 'flow',
@@ -90,16 +90,16 @@ describe('Quick Start flow narration', () => {
   it('subscribes before launch, scopes and deduplicates stage events, and waits for terminal evidence', async () => {
     const { options, emit, unsubscribe, waitForOperation } = fixture()
     options.start.mockImplementation(async () => {
-      emit(stage('step.started', 'CTS'))
-      emit(stage('step.started', 'CTS'))
-      emit(stage('step.started', 'route', 'Success', 'other-operation'))
+      emit(stage('step.started', 'cts'))
+      emit(stage('step.started', 'cts'))
+      emit(stage('step.started', 'routing', 'Success', 'other-operation'))
       return operation()
     })
     waitForOperation.mockImplementation(async () => {
       expect(options.onStarted).toHaveBeenCalledOnce()
-      emit(stage('step.completed', 'CTS'))
-      emit(stage('step.started', 'Timing optimization'))
-      emit(stage('step.completed', 'Timing optimization'))
+      emit(stage('step.completed', 'cts'))
+      emit(stage('step.started', 'timing_optimization'))
+      emit(stage('step.completed', 'timing_optimization'))
       return operation('succeeded')
     })
     const result = await runQuickStartFlow(options)
@@ -109,10 +109,10 @@ describe('Quick Start flow narration', () => {
       state: 'succeeded',
     })
     expect(options.narrate.mock.calls.flat()).toEqual([
-      '正在进行 CTS（时钟树综合）：构建时钟分配网络，控制时钟偏斜和延迟。',
-      'CTS（时钟树综合）执行完成。',
-      '正在进行 Timing optimization（时序优化）：调整单元尺寸以改善时序，并对调整后的布局进行合法化。',
-      'Timing optimization（时序优化）执行完成。',
+      '正在进行 cts（时钟树综合）：构建时钟分配网络，控制时钟偏斜和延迟。',
+      'cts（时钟树综合）执行完成。',
+      '正在进行 timing_optimization（时序优化）：调整单元尺寸以改善时序，并对调整后的布局进行合法化。',
+      'timing_optimization（时序优化）执行完成。',
     ])
     expect(waitForOperation).toHaveBeenCalledWith({
       workspaceHandle: 'handle-1',
@@ -126,14 +126,14 @@ describe('Quick Start flow narration', () => {
     async (state) => {
       const { options, emit, waitForOperation, unsubscribe } = fixture()
       waitForOperation.mockImplementation(async () => {
-        emit(stage('step.completed', 'Synthesis', 'Skipped'))
-        emit(stage('step.completed', 'route', 'Imcomplete'))
+        emit(stage('step.completed', 'synthesis', 'Skipped'))
+        emit(stage('step.completed', 'routing', 'Imcomplete'))
         return operation(state)
       })
       expect((await runQuickStartFlow(options)).state).toBe(state)
       expect(options.narrate.mock.calls.flat()).toEqual([
-        'Synthesis（逻辑综合）复用已有结果，本次未重新执行。',
-        'route（布线）未成功完成。',
+        'synthesis（逻辑综合）复用已有结果，本次未重新执行。',
+        'routing（布线）未成功完成。',
       ])
       expect(unsubscribe).toHaveBeenCalledOnce()
     },
@@ -142,7 +142,7 @@ describe('Quick Start flow narration', () => {
   it('ignores other workspaces and removes subscriptions when launch fails', async () => {
     const { options, emit, unsubscribe } = fixture()
     options.start.mockImplementation(async () => {
-      emit({ ...stage('step.started', 'CTS'), workspaceDirectory: '/runs/other' })
+      emit({ ...stage('step.started', 'cts'), workspaceDirectory: '/runs/other' })
       throw new Error('launch failed')
     })
     await expect(runQuickStartFlow(options)).rejects.toThrow('launch failed')

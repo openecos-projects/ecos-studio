@@ -16,7 +16,7 @@ function readResult(
     snapshot: {
       cause: 'flow_step.success',
       parameters: {},
-      schemaVersion: 6 as const,
+      schemaVersion: 7 as const,
       workspaceId: 'workspace-1',
       workspaceRevision: revision,
       ...(stalePredecessor ? { stalePredecessor } : {}),

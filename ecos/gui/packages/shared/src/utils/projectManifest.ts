@@ -76,6 +76,7 @@ export type ProjectManifestWorkspaceStatus =
   | 'archived'
 
 export interface ProjectManifestBaseDesign {
+  frequency_mhz?: number
   frontend_design_kind?: FrontendDesignKind
   filelist?: string
   pdk?: string
@@ -165,11 +166,6 @@ export interface ProjectManifest {
     reason: string
   } | null
   runtime_processes?: Record<string, ProjectRuntimeProcessEntry>
-  /** Transient compatibility state; never persisted by ECC. */
-  project_migration?: {
-    status: 'legacy-readonly'
-    reason: string
-  }
 }
 
 export interface ProjectRuntimeProcessEntry {

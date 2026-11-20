@@ -160,15 +160,6 @@
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
-<a id="parameter.floorplan.macro_placer_mode"></a>
-## parameter.floorplan.macro_placer_mode
-
-**Meaning:** The macro-placement input mode (`auto` or `file`).
-
-**Role:** The pre-floorplan runner forces `auto` with an empty file path; the post-floorplan runner forces `file` with the workspace macro-location Tcl, making the macro-placement step's result the fixed macro input.
-
-**Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
-
 <a id="parameter.floorplan.pdn_generator_connect_layers"></a>
 ## parameter.floorplan.pdn_generator_connect_layers
 

@@ -9,8 +9,14 @@ from pathlib import Path
 from ecos_agent.optimization.runtime import OptimizationRuntimeError
 
 
-def ecc_rpc_serve_executable() -> Path:
-    """Resolve the canonical `ecc` executable for offline `ecc rpc serve` clients."""
+def ecc_cli_executable() -> Path:
+    """Resolve the same external runtime override used by Studio."""
+    override = os.environ.get("ECOS_ECC_BIN_DIR")
+    if override:
+        path = Path(override) / "ecc"
+        if path.is_file() and os.access(path, os.X_OK):
+            return path.resolve()
+        raise OptimizationRuntimeError(f"ECC executable is unavailable in {override}")
     resolved = shutil.which("ecc")
     if resolved:
         path = Path(resolved).resolve()
@@ -25,4 +31,4 @@ def ecc_rpc_serve_executable() -> Path:
         path = repo_root / relative
         if path.is_file() and os.access(path, os.X_OK):
             return path.resolve()
-    raise OptimizationRuntimeError("ECC RPC executable is unavailable")
+    raise OptimizationRuntimeError("ECC CLI executable is unavailable")

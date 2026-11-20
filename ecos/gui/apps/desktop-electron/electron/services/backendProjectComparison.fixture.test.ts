@@ -26,16 +26,17 @@ describe('representativeProjectComparisonFixture', () => {
         steps: projectManifestFlowSteps.map((name) => ({ name, state: 'Success' })),
       })
       expect(snapshot.metrics).toHaveLength(251)
-      const declaredArtifacts = projectManagementWorkspaceStepAnalysisSpecs.flatMap(
-        (spec) =>
-          [spec.metricsPath, spec.summaryPath, spec.hotspotsPath].map(
-            (reference) => [spec.eccStepIds[0], reference] as const,
-          ),
-      )
-      for (const [stepId, reference] of declaredArtifacts) {
-        expect(snapshot.artifacts).toContainEqual(
-          expect.objectContaining({ availability: 'available', reference, stepId }),
-        )
+      for (const spec of projectManagementWorkspaceStepAnalysisSpecs) {
+        for (const kind of ['qor_metrics', 'qor_summary', 'qor_hotspots']) {
+          expect(snapshot.artifacts).toContainEqual(
+            expect.objectContaining({
+              availability: 'available',
+              kind,
+              stepId: spec.eccStepIds[0],
+              reference: expect.stringContaining(`/analysis/${kind}.json`),
+            }),
+          )
+        }
       }
       expect(snapshot.metrics[0]).toMatchObject({
         analysis_group: expect.any(String),

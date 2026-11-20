@@ -101,26 +101,26 @@ describe('workspace desktop bridge', () => {
       rtl_list: ['/rtl/top.v'],
       sdc: '/constraints/top.sdc',
       flow_config: {
-        start_step: 'Synthesis',
-        end_step: 'Harden',
+        start_step: 'synthesis',
+        end_step: 'harden',
         steps: [
-          'Synthesis',
+          'synthesis',
           'lec',
-          'preFloorplan',
-          'macroPlacement',
-          'postFloorplan',
-          'place',
-          'CTS',
+          'pre_floorplan',
+          'macro_placement',
+          'post_floorplan',
+          'placement',
+          'cts',
           'legalization',
-          'Timing optimization',
-          'route',
+          'timing_optimization',
+          'routing',
           'filler',
-          'RCX',
+          'rcx',
           'sta',
           'lvs',
-          'postRouteLec',
+          'post_route_lec',
           'drc',
-          'Harden',
+          'harden',
         ],
       },
     })
@@ -148,8 +148,8 @@ describe('workspace desktop bridge', () => {
             design: expect.objectContaining({ name: 'demo', topModule: 'top' }),
             flow: {
               flowId: 'rtl2gds',
-              fromStepId: 'Synthesis',
-              throughStepId: 'Harden',
+              fromStepId: 'synthesis',
+              throughStepId: 'harden',
             },
             parameters: {
               'cts.max_fanout': 20,
@@ -158,8 +158,8 @@ describe('workspace desktop bridge', () => {
               'floorplan.core_margin': [0, 0],
               'floorplan.core_util': 0.5,
               'floorplan.die_builder.mode': 'die_util',
-              'place.target_density': 0.6,
-              'place.target_overflow': 0.1,
+              'placement:place.target_density': 0.6,
+              'placement:place.stop_overflow': 0.1,
             },
           }),
         }),
@@ -206,8 +206,8 @@ describe('workspace desktop bridge', () => {
       'floorplan.die_builder.mode': 'die_util',
       'floorplan.core_margin': [2, 2],
       'cts.max_fanout': 20,
-      'place.target_density': 0.4,
-      'place.target_overflow': 0.1,
+      'placement:place.target_density': 0.4,
+      'placement:place.stop_overflow': 0.1,
     })
   })
 
@@ -273,18 +273,18 @@ describe('workspace desktop bridge', () => {
         design_input_mode: 'post_synthesis',
         flow_config: {
           start_step: 'legalization',
-          end_step: 'Harden',
+          end_step: 'harden',
           steps: [
             'legalization',
-            'Timing optimization',
-            'route',
+            'timing_optimization',
+            'routing',
             'filler',
-            'RCX',
+            'rcx',
             'sta',
             'lvs',
-            'postRouteLec',
+            'post_route_lec',
             'drc',
-            'Harden',
+            'harden',
           ],
         },
         origin_def: '/source/CTS_ecc/output/gcd_CTS.def.gz',
@@ -316,7 +316,7 @@ describe('workspace desktop bridge', () => {
       flow: {
         flowId: 'rtl2gds',
         fromStepId: 'legalization',
-        throughStepId: 'Harden',
+        throughStepId: 'harden',
       },
     })
     expect(options.workspaceSpec.parameters).toEqual({ 'sta.max_parallel_corners': 1 })
@@ -327,7 +327,7 @@ describe('workspace desktop bridge', () => {
     const options = backendWorkspaceOptions(
       {
         directory: '/workspace/synth',
-        flow_config: { start_step: '', end_step: '', steps: ['Synthesis'] },
+        flow_config: { start_step: '', end_step: '', steps: ['synthesis'] },
         origin_def: '',
         origin_verilog: '/rtl/top.v',
         parameters: { design: 'demo', top_module: 'top' },
@@ -342,8 +342,8 @@ describe('workspace desktop bridge', () => {
       design: { clockPort: 'clk' },
       flow: {
         flowId: 'syn_sta',
-        fromStepId: 'Synthesis',
-        throughStepId: 'Synthesis',
+        fromStepId: 'synthesis',
+        throughStepId: 'synthesis',
       },
     })
   })

@@ -45,7 +45,7 @@ class _FakeRetriever:
 def _observation() -> StageObservation:
     return StageObservation(
         observation_id="observation-place",
-        stage="place",
+        stage="placement",
         evidence_manifest_sha256=HASH,
         metrics={"place_lutrudy_utilization_max": 0.88},
         budget=BudgetSnapshot(budget=EpisodeBudget.from_reference_rerun(11.0)),

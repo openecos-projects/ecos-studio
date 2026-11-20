@@ -33,7 +33,7 @@ function engineeringSnapshot(): EccPersistedEngineeringSnapshot {
     hotspotPreview: { hotspotCount: 0, hotspots: [], hotspotsTruncated: false },
     metrics: [],
     parameters: {},
-    schemaVersion: 6,
+    schemaVersion: 7,
     signoffAssessment: { status: 'ready', groups: [], risks: [] },
     timingPreview: { issueCount: 0, issues: [], issuesTruncated: false },
     workspaceId: 'engineering-workspace',
@@ -365,39 +365,6 @@ describe('ProjectManagementReadService', () => {
     await expect(service.readManifest(emptyRoot)).resolves.toBeNull()
     expect(load).not.toHaveBeenCalled()
     await expect(readdir(emptyRoot)).resolves.toEqual([])
-  })
-
-  it('still delegates legacy runs layouts to the manifest reader', async () => {
-    const legacyRoot = await mkdtemp(join(tmpdir(), 'ecos-project-management-legacy-'))
-    temporaryDirectories.push(legacyRoot)
-    await mkdir(join(legacyRoot, 'runs', 'ws_0001'), { recursive: true })
-    const manifest = projectManifestForPresentation(
-      {
-        schema_version: 1,
-        project_id: 'proj_legacy',
-        name: 'legacy',
-        design_name: 'legacy',
-        description: '',
-        root_path: legacyRoot,
-        created_at: '2026-08-09T00:00:00.000Z',
-        updated_at: '2026-08-09T00:00:00.000Z',
-        objectives: { primary: 'timing', directions: {} },
-        base_design: { parameters: {}, rtl_list: [] },
-        workspaces: [],
-        mpc: null,
-        best_workspace: null,
-        qor_baseline: null,
-      } as EccProjectManifest,
-      legacyRoot,
-    )
-    const load = vi.fn().mockResolvedValue(manifest)
-    const service = new ProjectManagementReadService({
-      discover: async () => null,
-      load,
-    })
-
-    await expect(service.readManifest(legacyRoot)).resolves.toBe(manifest)
-    expect(load).toHaveBeenCalledWith(legacyRoot)
   })
 
   it('requires a valid manifest before listing project root entries', async () => {

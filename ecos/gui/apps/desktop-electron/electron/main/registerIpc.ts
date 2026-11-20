@@ -116,7 +116,7 @@ import {
 } from '@ecos-studio/shared'
 import type { AgentProviderRuntime } from '../services/agent/agentProviderContract'
 import {
-  AGENT_STEP_OPTION_STEPS,
+  agentStepOptionSteps,
   readAgentWorkspaceParameterValues,
 } from '../services/agent/agentWorkspaceParameterUpdates'
 import { recordAgentOperationAssociation } from '../services/agent/agentOperationAssociations'
@@ -1277,7 +1277,7 @@ export function registerIpc(
     }
     const stepConfigurations: Record<string, Record<string, unknown>> = {}
     await Promise.all(
-      AGENT_STEP_OPTION_STEPS.map(async (step) => {
+      agentStepOptionSteps().map(async (step) => {
         try {
           const result = await services.eccRuntimeService.readWorkspaceStepConfiguration({
             step,
@@ -1292,12 +1292,25 @@ export function registerIpc(
         }
       }),
     )
+    const projectedParameters = isRecord(workspaceSpec.parameters)
+      ? { ...workspaceSpec.parameters }
+      : {}
+    const parameters = isRecord(snapshot.parameters) ? snapshot.parameters : {}
+    if (parameters.frequency_max !== undefined)
+      projectedParameters['design.frequency_mhz'] = parameters.frequency_max
+    if (isRecord(parameters.step_params)) {
+      for (const [step, stored] of Object.entries(parameters.step_params)) {
+        if (!isRecord(stored)) continue
+        for (const [name, value] of Object.entries(stored))
+          projectedParameters[`${step}:${name}`] = value
+      }
+    }
     const design = isRecord(workspaceSpec.design) ? workspaceSpec.design : null
     return {
       workspaceHandle,
       workspaceRevision: Number(workspaceRevision),
       workspaceParameterValues: readAgentWorkspaceParameterValues(
-        workspaceSpec,
+        projectedParameters,
         stepConfigurations,
       ),
       ...(typeof design?.name === 'string' && design.name
@@ -1901,7 +1914,23 @@ export function registerIpc(
       throw new Error('Workspace rerun source is not bound to this window.')
     }
     pendingWorkspaceReruns.delete(token)
-    const prepared = await prepareWorkspaceRerun(pending.contract)
+    requireBackendMutationAllowed(event)
+    const contract = pending.contract
+    const prepared = await prepareWorkspaceRerun(contract, async () => {
+      const workspaceHandle = workspaceHandleForSender(event.sender, sourceWorkspace)
+      if (!workspaceHandle) throw new Error('Workspace rerun source is not open.')
+      const derived = await services.eccRuntimeService.deriveWorkspace({
+        workspaceHandle,
+        directory: contract.source_workspace,
+        targetDirectory: contract.target_workspace,
+        resetFromStep: contract.target_step,
+        commandId: contract.rerun_id,
+      })
+      await services.eccRuntimeService.releaseWorkspace({
+        workspaceHandle: derived.workspaceHandle,
+      })
+      return { directory: derived.directory }
+    })
     const executionToken = randomUUID()
     pendingWorkspaceRerunExecutions.set(executionToken, pending)
     return { ...prepared, executionToken }

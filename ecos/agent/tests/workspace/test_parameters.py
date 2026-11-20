@@ -45,30 +45,6 @@ aspect_ratio = 1.0
     }
 
 
-def test_workspace_parameters_normalizes_legacy_json(tmp_path: Path) -> None:
-    home = tmp_path / "home"
-    home.mkdir()
-    (home / "parameters.json").write_text(
-        json.dumps(
-            {
-                "Design": "gcd",
-                "PDK Root": "/pdk",
-                "Core": {"Utilitization": 0.3, "Aspect ratio": 1.0},
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    reference, parameters = read_workspace_parameters(tmp_path)
-
-    assert reference == "home/parameters.json"
-    assert parameters == {
-        "design": "gcd",
-        "pdk_root": "/pdk",
-        "core": {"utilitization": 0.3, "aspect_ratio": 1.0},
-    }
-
-
 def test_workspace_parameters_rejects_preferred_toml_symlink(
     tmp_path: Path,
 ) -> None:

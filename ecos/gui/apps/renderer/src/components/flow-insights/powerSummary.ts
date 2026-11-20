@@ -37,4 +37,4 @@ export function parsePowerSummaryStep(value: unknown): PowerSummaryModel | null 
   }
 }
 
-export const POWER_SUMMARY_STEP_PATH = 'powerAnalysis_ecc/feature/powerAnalysis.step.json'
+export const POWER_SUMMARY_STEP_PATH = 'feature/power_analysis.step.json'

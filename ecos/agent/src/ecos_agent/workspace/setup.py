@@ -293,8 +293,8 @@ def workspace_setup_contract(
     proposal = resolve_gui_workspace_setup(proposal)
     inputs = _validated_workspace_inputs(inputs)
     _validate_workspace_proposal(proposal, inputs)
-    start_index = GUI_WORKSPACE_FLOW_STEPS.index(proposal.flow_start or "Synthesis")
-    end_index = GUI_WORKSPACE_FLOW_STEPS.index(proposal.flow_end or "Harden")
+    start_index = GUI_WORKSPACE_FLOW_STEPS.index(proposal.flow_start or "synthesis")
+    end_index = GUI_WORKSPACE_FLOW_STEPS.index(proposal.flow_end or "harden")
     if start_index > end_index:
         raise ValueError("workspace flow start must not follow its end")
     workspace_directory = _workspace_directory(inputs, proposal)

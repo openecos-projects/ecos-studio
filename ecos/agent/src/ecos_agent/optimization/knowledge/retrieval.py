@@ -9,7 +9,7 @@ from typing import Iterable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from ecos_agent.ecc_contracts import ECCStepName
+from ecos_agent.ecc_contracts import ECCStepName, knowledge_phase
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.knowledge.retriever import (
     GlobalKnowledgeRetriever,
@@ -129,7 +129,7 @@ class OptimizationRetrievalResult:
             for channel in self.channels
         ):
             return ()
-        stage = self.request.current_stage.value.casefold()
+        stage = knowledge_phase(self.request.current_stage)
         return tuple(
             sorted(
                 (

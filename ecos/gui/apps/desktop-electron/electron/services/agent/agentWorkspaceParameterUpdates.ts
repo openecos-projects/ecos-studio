@@ -18,6 +18,7 @@ type ValueKind =
 type Knob = {
   kind: ValueKind
   parameter: string
+  step?: string
   range?: readonly [number, number]
   transform?: (value: ParameterValue) => ParameterValue
 }
@@ -29,6 +30,7 @@ const workspace = (
 ): Knob => ({
   kind,
   parameter: id,
+  ...(id.startsWith('place.') ? { step: 'placement' } : {}),
   range,
 })
 const numericString = (
@@ -61,15 +63,11 @@ const builtinKnobs: Record<string, Knob> = {
     'floorplan.die_builder.die_size.height_micron',
     'positive',
   ),
-  'floorplan.global_right_padding': workspace('place.global_right_padding', 'integer', [
-    0,
-    Infinity,
-  ]),
   'place.target_density': workspace('place.target_density', 'number', [0.1, 0.95]),
-  'place.target_overflow': workspace('place.target_overflow', 'number', [0, 1]),
+  'place.target_overflow': workspace('place.stop_overflow', 'number', [0, 1]),
   'place.cell_padding_x': workspace('place.cell_padding_x', 'integer', [0, Infinity]),
   'place.routability_opt': {
-    ...workspace('place.routability_opt', 'boolean'),
+    ...workspace('place.routability_opt_flag', 'boolean'),
     transform: (value) => (value ? 1 : 0),
   },
   'cts.max_fanout': workspace('cts.max_fanout', 'integer'),
@@ -94,18 +92,6 @@ const builtinKnobs: Record<string, Knob> = {
     transform: (value) => (value ? '1' : '0'),
   },
 }
-
-/**
- * ECC flow steps whose Step Options can override the Agent knob table. Derived
- * from the knob domains: floorplan knobs live on preFloorplan, place knobs on
- * place, cts knobs on CTS, and route knobs on route.
- */
-export const AGENT_STEP_OPTION_STEPS: readonly string[] = [
-  'preFloorplan',
-  'place',
-  'CTS',
-  'route',
-]
 
 function catalogValueKind(type: unknown): ValueKind | null {
   if (typeof type !== 'string') return null
@@ -154,10 +140,18 @@ function knobFromCatalogEntry(
   if (!specKey) return null
   // Known knobs keep their GUI-side value shaping (ranges, transforms).
   const builtin = builtinKnobs[knobId]
-  if (builtin) return { ...builtin, parameter: specKey }
+  const applies = entry.appliesTo ?? entry.applies
+  const step =
+    specKey.startsWith('place.') &&
+    typeof applies === 'string' &&
+    /^[a-z][a-z_]*$/.test(applies)
+      ? applies
+      : undefined
+  if (builtin) return { ...builtin, parameter: specKey, step: step ?? builtin.step }
   const kind = catalogValueKind(entry.type)
   if (!kind) return null
   const knob = workspace(specKey, kind, catalogRange(entry))
+  if (step) knob.step = step
   if (kind === 'boolean') {
     return { ...knob, transform: (value) => (value ? 1 : 0) }
   }
@@ -222,30 +216,37 @@ function validValue(value: ParameterValue, knob: Knob): boolean {
   return !knob.range || (value >= knob.range[0] && value <= knob.range[1])
 }
 
+function knobStep(id: string, knob: Knob): string {
+  if (knob.step) return knob.step
+  if (id.startsWith('design.')) return 'synthesis'
+  if (id.startsWith('route.')) return 'routing'
+  if (id.startsWith('cts.')) return 'cts'
+  return 'pre_floorplan'
+}
+
+export function agentStepOptionSteps(): string[] {
+  return [
+    ...new Set(
+      Object.entries(resolveAgentWorkspaceKnobs()).map(([id, knob]) =>
+        knobStep(id, knob),
+      ),
+    ),
+  ]
+}
+
 export function readAgentWorkspaceParameterValues(
-  workspaceSpec: Record<string, unknown>,
+  projectedParameters: Record<string, unknown>,
   stepConfigurations: Record<string, Record<string, unknown>>,
 ): Record<string, ParameterValue> {
-  const parameters =
-    workspaceSpec.parameters &&
-    typeof workspaceSpec.parameters === 'object' &&
-    !Array.isArray(workspaceSpec.parameters)
-      ? (workspaceSpec.parameters as Record<string, unknown>)
-      : {}
-  // Step Options are step-specific values keyed by ECC parameter name; they
-  // win over the workspace-wide projection for the same parameter.
-  const stepValues: Record<string, unknown> = {}
-  for (const configuration of Object.values(stepConfigurations)) {
-    for (const [parameter, value] of Object.entries(configuration)) {
-      stepValues[parameter] = value
-    }
-  }
   const result: Record<string, ParameterValue> = {}
   const knobs = resolveAgentWorkspaceKnobs()
   for (const [knobId, knob] of Object.entries(knobs)) {
     const canonicalId = LEGACY_KNOB_ALIASES[knobId]
     if (canonicalId && knobs[canonicalId]) continue
-    const value = stepValues[knob.parameter] ?? parameters[knob.parameter]
+    const key = knob.step ? `${knob.step}:${knob.parameter}` : knob.parameter
+    const value =
+      stepConfigurations[knobStep(knobId, knob)]?.[knob.parameter] ??
+      projectedParameters[key]
     let normalized = value
     if (
       knob.kind === 'boolean' &&
@@ -290,7 +291,8 @@ export function deriveAgentWorkspaceParameterUpdates(
     const knob = knobs[item.knob_id]
     if (!knob || !validValue(item.value, knob)) return null
     const value = knob.transform?.(item.value) ?? item.value
-    const previous = valuesByParameter.get(knob.parameter)
+    const key = knob.step ? `${knob.step}:${knob.parameter}` : knob.parameter
+    const previous = valuesByParameter.get(key)
     const conflicting =
       previous !== undefined &&
       (Array.isArray(previous) || Array.isArray(value)
@@ -300,8 +302,8 @@ export function deriveAgentWorkspaceParameterUpdates(
           previous.some((item, index) => !Object.is(item, value[index]))
         : !Object.is(previous, value))
     if (conflicting) return null
-    valuesByParameter.set(knob.parameter, value)
-    workspaceParameters[knob.parameter] = Array.isArray(value) ? [...value] : value
+    valuesByParameter.set(key, value)
+    workspaceParameters[key] = Array.isArray(value) ? [...value] : value
   }
   return {
     workspace_parameters: workspaceParameters,

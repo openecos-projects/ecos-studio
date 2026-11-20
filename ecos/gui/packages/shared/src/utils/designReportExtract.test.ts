@@ -11,18 +11,18 @@ import {
 describe('designReportExtract', () => {
   describe('helper functions', () => {
     it('canonicalizes various stage name spellings', () => {
+      expect(canonicalizeStageName('power_analysis')).toBe('Power')
       expect(canonicalizeStageName('synthesis')).toBe('Synth')
-      expect(canonicalizeStageName('Synthesis_yosys')).toBe('Synth')
-      expect(canonicalizeStageName('Floorplan_ecc')).toBe('Floor')
-      expect(canonicalizeStageName('place_dreamplace')).toBe('Place')
-      expect(canonicalizeStageName('CTS_ecc')).toBe('CTS')
-      expect(canonicalizeStageName('Timing optimization')).toBe('Sizer')
-      expect(canonicalizeStageName('timing_optimization_sizer')).toBe('Sizer')
-      expect(canonicalizeStageName('route_ecc')).toBe('Route')
-      expect(canonicalizeStageName('drc_ecc')).toBe('DRC')
-      expect(canonicalizeStageName('lvs_ecc')).toBe('LVS')
-      expect(canonicalizeStageName('sta_ecc')).toBe('STA')
-      expect(canonicalizeStageName('Harden_ecc')).toBe('Harden')
+      expect(canonicalizeStageName('post_floorplan')).toBe('Floor')
+      expect(canonicalizeStageName('placement')).toBe('Place')
+      expect(canonicalizeStageName('cts')).toBe('CTS')
+      expect(canonicalizeStageName('timing_optimization')).toBe('Sizer')
+      expect(canonicalizeStageName('lec@placement')).toBe('lec@placement')
+      expect(canonicalizeStageName('routing')).toBe('Route')
+      expect(canonicalizeStageName('drc')).toBe('DRC')
+      expect(canonicalizeStageName('lvs')).toBe('LVS')
+      expect(canonicalizeStageName('sta')).toBe('STA')
+      expect(canonicalizeStageName('harden')).toBe('Harden')
       expect(canonicalizeStageName('CustomStep')).toBe('CustomStep')
     })
 
@@ -110,70 +110,70 @@ Summary                  16.882        0.0       0     321MHz      0.256        
           timestamp: '2026-08-25T12:00:00Z',
           steps: [
             {
-              name: 'Synthesis_yosys',
+              name: 'synthesis',
               tool: 'Yosys',
               state: 'Success',
               runtime: '0:0:30',
               'peak memory (mb)': 120,
             },
             {
-              name: 'Floorplan_ecc',
+              name: 'post_floorplan',
               tool: 'OpenROAD',
               state: 'Success',
               runtime: '0:0:15',
               'peak memory (mb)': 200,
             },
             {
-              name: 'place_dreamplace',
+              name: 'placement',
               tool: 'DreamPlace',
               state: 'Success',
               runtime: '0:1:00',
               'peak memory (mb)': 450,
             },
             {
-              name: 'CTS_ecc',
+              name: 'cts',
               tool: 'OpenROAD',
               state: 'Success',
               runtime: '0:0:45',
               'peak memory (mb)': 310,
             },
             {
-              name: 'Timing optimization',
+              name: 'timing_optimization',
               tool: 'sizer',
               state: 'Success',
               runtime: '0:0:10',
               'peak memory (mb)': 330,
             },
             {
-              name: 'route_ecc',
+              name: 'routing',
               tool: 'OpenROAD',
               state: 'Success',
               runtime: '0:2:30',
               'peak memory (mb)': 600,
             },
             {
-              name: 'sta_ecc',
+              name: 'sta',
               tool: 'OpenSTA',
               state: 'Success',
               runtime: '0:0:20',
               'peak memory (mb)': 280,
             },
             {
-              name: 'drc_ecc',
+              name: 'drc',
               tool: 'KLayout',
               state: 'Success',
               runtime: '0:0:10',
               'peak memory (mb)': 150,
             },
             {
-              name: 'lvs_ecc',
+              name: 'lvs',
               tool: 'Netgen',
               state: 'Success',
               runtime: '0:0:10',
               'peak memory (mb)': 140,
             },
             {
-              name: 'Harden_ecc',
+              name: 'harden',
               tool: 'OpenROAD',
               state: 'Success',
               runtime: '0:0:40',

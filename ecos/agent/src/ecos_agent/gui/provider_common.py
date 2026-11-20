@@ -28,6 +28,7 @@ from ecos_agent.knowledge.contracts import SourceSearchProposal, StageRoutingPro
 from ecos_agent.workspace.contracts import (
     GuiWorkspaceSetupProposal,
 )
+from ecos_agent.workspace.step_directories import step_directory
 from ecos_agent.workspace.parameters import (
     WorkspaceParametersError,
     read_workspace_parameters,
@@ -319,16 +320,15 @@ def _design_id_for_workspace(workspace: str) -> str | None:
     design = payload.get("design")
     if isinstance(design, str) and design.strip():
         return design.strip()
-    # Prefer known ECC output locations; avoid full-tree rglob on large workspaces.
-    for pattern in (
-        "place_dreamplace/output/*_place.*",
-        "*/output/*_place.*",
-    ):
-        for path in root.glob(pattern):
-            name = path.name
-            marker = "_place."
-            if marker in name:
-                return name.split(marker, 1)[0]
+    try:
+        directory = step_directory(root, "placement")
+    except (OSError, ValueError, KeyError):
+        directory = None
+    if directory:
+        output = root / directory / "output"
+        if output.resolve().is_relative_to(root.resolve()):
+            for path in sorted(output.glob("*_placement.def.gz")):
+                return path.name.removesuffix("_placement.def.gz")
     dirname = root.name.strip()
     return dirname or None
 

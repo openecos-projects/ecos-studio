@@ -134,8 +134,8 @@ def test_summary_discloses_outline_and_advanced_settings():
 
 def test_fixed_geometry_does_not_consume_preserve_budget_before_drc_binding():
     objective = freeze("keep area fixed; reduce wirelength preserving DRC and power",
-                       preserve=("die_area", "sta_typical_dynamic_power"))
-    assert objective.preserve_metrics == ("drc_count", "sta_typical_dynamic_power")
+                       preserve=("die_area", "power_analysis_dynamic_uw"))
+    assert objective.preserve_metrics == ("drc_count", "power_analysis_dynamic_uw")
 
 
 def test_fixed_cell_area_does_not_freeze_outline():

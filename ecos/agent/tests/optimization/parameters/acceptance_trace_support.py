@@ -61,7 +61,7 @@ def write_trace(
     scope = build_task_memory_scope(
         workspace_manifest_sha256=HASH,
         design_id="design-a",
-        checkpoint_id="place",
+        checkpoint_id="placement",
         episode_id=episode_root.name,
         objective_contract_sha256=HASH,
     )

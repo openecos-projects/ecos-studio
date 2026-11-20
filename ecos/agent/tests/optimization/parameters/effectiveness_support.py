@@ -23,7 +23,7 @@ def domain_context(**updates: object) -> dict[str, object]:
         "sdc_sha256": HASH,
         "pdk_sha256": HASH,
         "parent_lineage_sha256": HASH,
-        "stage": "place",
+        "stage": "placement",
         "backend": "ecc",
         "ecc_revision": "0.1.0-alpha.11",
         "tool_revision": card.tool.revision,
@@ -121,7 +121,7 @@ def routability_false_receipt() -> ParameterApplicationReceipt:
             revision=card.tool.revision,
             source_sha256=card.tool.source_sha256,
         ),
-        context={"stage": "place", "lattice_version": "ecos.optimization_lattice.v1"},
+        context={"stage": "placement", "lattice_version": "ecos.optimization_lattice.v1"},
         requested={
             "knob_id": "place.routability_opt",
             "value": False,

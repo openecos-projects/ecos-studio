@@ -139,7 +139,7 @@ def test_p2_cross_stage_actions_need_their_own_stage_evidence(tmp_path):
     )
     result = with_evidence.plan(
         _observation(), _retrieval(), CURRENT_VALUES,
-        stage_observations={"Floorplan": floorplan_observation},
+        stage_observations={"floorplan": floorplan_observation},
     )
     assert result.state == OptimizationEpisodeState.AWAITING_EXECUTION
     context = with_evidence.planner.contexts[-1]
@@ -149,7 +149,7 @@ def test_p2_cross_stage_actions_need_their_own_stage_evidence(tmp_path):
     assert [
         entry["stage"]
         for entry in controller_stage_entries(context)
-    ] == ["place", "Floorplan"]
+    ] == ["placement", "floorplan"]
 
 
 def controller_stage_entries(context):

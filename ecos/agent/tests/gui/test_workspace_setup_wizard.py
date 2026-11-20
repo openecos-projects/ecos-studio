@@ -197,15 +197,15 @@ def test_existing_project_branch_requires_project_json_and_uses_workspace_name(
         "label": "Run all steps",
     }
     assert [option["label"] for option in flow_end_choice["options"][1:6]] == [
-        "Synthesis",
-        "lec",
-        "preFloorplan",
-        "macroPlacement",
-        "postFloorplan",
+        "synthesis",
+        "pre_floorplan",
+        "macro_placement",
+        "post_floorplan",
+        "preplace",
     ]
-    assert flow_end_choice["options"][-1]["label"] == "Harden"
+    assert flow_end_choice["options"][-1]["label"] == "harden"
 
-    _send(provider, session_id, "6")
+    _send(provider, session_id, "5")
     assert provider.sessions[session_id].phase == "workspace_rtl"
     assert provider.sessions[session_id].workspace_setup.flow_end == "preplace"
 
@@ -472,8 +472,8 @@ def test_workspace_setup_contract_carries_project_mpc_snapshot(tmp_path: Path) -
             design_name="gcd",
             top_module="gcd",
             clock_name="clk",
-            flow_start="Synthesis",
-            flow_end="Harden",
+            flow_start="synthesis",
+            flow_end="harden",
         ),
         WorkspaceInputs(
             project_root=str(tmp_path),
@@ -496,8 +496,8 @@ def test_workspace_setup_contract_carries_project_mpc_snapshot(tmp_path: Path) -
             design_name="gcd",
             top_module="gcd",
             clock_name="clk",
-            flow_start="Synthesis",
-            flow_end="Harden",
+            flow_start="synthesis",
+            flow_end="harden",
         ),
         WorkspaceInputs(
             project_root=str(tmp_path),

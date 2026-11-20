@@ -67,7 +67,7 @@ function detail(): WorkspaceStepDetail {
           direction: 'lower_is_better',
           scope: 'workspace',
           corner: null,
-          analysis_group: 'place',
+          analysis_group: 'placement',
           rating: { gate: false, score: false, trend: true },
           project_role: 'trend',
           step_role: 'primary',
@@ -155,7 +155,7 @@ describe('StepDashboard committed Snapshot rendering', () => {
     expect(dashboardSource).toMatch(/\.data-highlights\s*{[^}]*align-content: start/s)
   })
 
-  it.each(['preFloorplan', 'macroPlacement'])(
+  it.each(['pre_floorplan', 'macro_placement'])(
     'opens the macro placement edit session from %s geometry',
     async (step) => {
       const layoutDetail = detail()
@@ -212,9 +212,9 @@ describe('StepDashboard committed Snapshot rendering', () => {
   it('warns when macro staging falls back to move-only mode', async () => {
     const preFloorplanDetail = detail()
     preFloorplanDetail.step = {
-      stepId: 'preFloorplan',
+      stepId: 'pre_floorplan',
       order: 0,
-      name: 'preFloorplan',
+      name: 'pre_floorplan',
       state: 'succeeded',
     }
     preFloorplanDetail.artifacts.push({
@@ -222,10 +222,10 @@ describe('StepDashboard committed Snapshot rendering', () => {
       availability: 'available',
       kind: 'layout_geometry',
       name: 'gcd_preFloorplan',
-      stepId: 'preFloorplan',
+      stepId: 'pre_floorplan',
     })
     testState.dashboard = {
-      currentStep: ref('preFloorplan'),
+      currentStep: ref('pre_floorplan'),
       data: ref(snapshotStepDashboardData(preFloorplanDetail)),
       error: ref(null),
       loadTimingCorner: vi.fn(),

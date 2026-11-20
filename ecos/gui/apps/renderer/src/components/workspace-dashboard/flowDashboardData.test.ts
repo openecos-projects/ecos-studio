@@ -5,7 +5,7 @@ import { dashboardFlowSteps, stepCheckState } from './flowDashboardData'
 function finding(state: string, blocked = false): ChecklistFinding {
   return {
     id: 'check',
-    step: 'place',
+    step: 'placement',
     title: 'Placement',
     summary: '',
     category: 'gate',
@@ -20,7 +20,7 @@ describe('dashboard flow data', () => {
       [
         { stepId: 'sta', name: 'STA', order: 2, state: 'succeeded' },
         {
-          stepId: 'place',
+          stepId: 'placement',
           name: 'Place',
           order: 1,
           state: 'running',
@@ -31,7 +31,7 @@ describe('dashboard flow data', () => {
       [finding('failed', true)],
       [],
     )
-    expect(steps.map((step) => step.id)).toEqual(['place', 'sta'])
+    expect(steps.map((step) => step.id)).toEqual(['placement', 'sta'])
     expect(steps[0]).toMatchObject({
       status: 'running',
       checkState: 'blocked',
@@ -51,9 +51,9 @@ describe('dashboard flow data', () => {
   it('offers preFloorplan geometry as the macro-placement fallback before its own run', () => {
     const steps = dashboardFlowSteps(
       [
-        { stepId: 'preFloorplan', name: 'Pre Floorplan', order: 0, state: 'succeeded' },
+        { stepId: 'pre_floorplan', name: 'Pre Floorplan', order: 0, state: 'succeeded' },
         {
-          stepId: 'macroPlacement',
+          stepId: 'macro_placement',
           name: 'Macro Placement',
           order: 1,
           state: 'not-started',
@@ -65,7 +65,7 @@ describe('dashboard flow data', () => {
           id: 'preFloorplan-image',
           kind: 'layout',
           label: 'Pre Floorplan',
-          step: 'preFloorplan',
+          step: 'pre_floorplan',
           url: 'blob:preFloorplan',
           hasGeometry: true,
           availability: 'available',
@@ -75,12 +75,12 @@ describe('dashboard flow data', () => {
     )
 
     expect(steps[0]).toMatchObject({
-      id: 'preFloorplan',
+      id: 'pre_floorplan',
       thumbnail: { id: 'preFloorplan-image' },
       macroPlacementSource: null,
     })
     expect(steps[1]).toMatchObject({
-      id: 'macroPlacement',
+      id: 'macro_placement',
       status: 'queued',
       thumbnail: null,
       macroPlacementSource: { id: 'preFloorplan-image' },
@@ -103,14 +103,14 @@ describe('dashboard flow data', () => {
 
   it('matches checklist and layout by canonical step identity, not list position', () => {
     const steps = dashboardFlowSteps(
-      [{ stepId: 'place', name: 'place', order: 0, state: 'succeeded' }],
+      [{ stepId: 'placement', name: 'placement', order: 0, state: 'succeeded' }],
       [finding('pass')],
       [
         {
           id: 'place-image',
           kind: 'layout',
           label: 'Place',
-          step: 'place',
+          step: 'placement',
           url: 'blob:place',
           hasGeometry: true,
           availability: 'available',

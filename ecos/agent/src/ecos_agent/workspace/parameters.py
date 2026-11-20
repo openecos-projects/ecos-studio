@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
-import re
 import tomllib
+
 from pathlib import Path
 from typing import Any
 
-PARAMETERS_JSON = "home/parameters.json"
+from ecos_agent.workspace.step_directories import step_directory
+
 PARAMS_TOML = "home/params.toml"
 DREAMPLACE_CONFIG = "config/dreamplace_ecc.json"
 _DESIGN_SECTION_KEYS = {
@@ -22,10 +23,6 @@ _PDK_SECTION_KEYS = {
     "pdk_root": "root",
     "pdk_config": "config",
 }
-_UNIT_SUFFIX = re.compile(r"\[[^\]]*\]")
-_NON_ALNUM = re.compile(r"[^a-z0-9]+")
-
-
 class WorkspaceParametersError(ValueError):
     """Workspace parameter evidence is missing, unsafe, or malformed."""
 
@@ -33,8 +30,6 @@ class WorkspaceParametersError(ValueError):
 def read_workspace_parameters(root: Path) -> tuple[str, dict[str, Any]]:
     if _path_present(root, PARAMS_TOML):
         return PARAMS_TOML, _read_params_toml(root, PARAMS_TOML)
-    if _path_present(root, PARAMETERS_JSON):
-        return PARAMETERS_JSON, _normalize_mapping(_read_json(root, PARAMETERS_JSON))
     raise WorkspaceParametersError("workspace parameter evidence is unavailable")
 
 
@@ -44,11 +39,12 @@ def read_workspace_dreamplace_seed(root: Path) -> int:
     Candidate reruns must hold this value fixed; substituting an episode-level
     seed silently changes a variable the baseline never held.
     """
-    if not _path_present(root, DREAMPLACE_CONFIG):
+    config = f"{step_directory(root, 'placement')}/{DREAMPLACE_CONFIG}"
+    if not _path_present(root, config):
         raise WorkspaceParametersError(
             "workspace DREAMPlace seed evidence is unavailable"
         )
-    path = _safe_file(root, DREAMPLACE_CONFIG)
+    path = _safe_file(root, config)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         seed = payload["random_seed"]
@@ -86,7 +82,7 @@ def _read_params_toml(root: Path, relative_path: str) -> dict[str, Any]:
             raise WorkspaceParametersError(
                 f"workspace parameter [{section_name}] is invalid"
             )
-    result = _normalize_mapping(payload.get("params") or {})
+    result = dict(payload.get("params") or {})
     for mapping, section_name in (
         (_DESIGN_SECTION_KEYS, "design"),
         (_PDK_SECTION_KEYS, "pdk"),
@@ -97,26 +93,6 @@ def _read_params_toml(root: Path, relative_path: str) -> dict[str, Any]:
             if value is not None and (not isinstance(value, str) or value.strip()):
                 result[parameter_key] = value
     return result
-
-
-def _normalize_mapping(payload: dict[object, Any]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in payload.items():
-        canonical = _NON_ALNUM.sub(
-            "_", _UNIT_SUFFIX.sub("", str(key)).strip().lower()
-        ).strip("_")
-        if canonical in result and str(key) == canonical:
-            continue
-        result[canonical] = _normalize_value(value)
-    return result
-
-
-def _normalize_value(value: Any) -> Any:
-    if isinstance(value, dict):
-        return _normalize_mapping(value)
-    if isinstance(value, list):
-        return [_normalize_value(item) for item in value]
-    return value
 
 
 def _safe_file(root: Path, relative_path: str) -> Path:

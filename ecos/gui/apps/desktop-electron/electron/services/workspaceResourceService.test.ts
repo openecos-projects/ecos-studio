@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import type { WorkspaceResourceFile } from '@ecos-studio/shared'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WorkspaceResourceService } from './workspaceResourceService'
@@ -35,6 +35,24 @@ function provider(root: string): ProjectScopeProviderDouble {
 }
 
 async function writeJson(path: string, data: unknown): Promise<void> {
+  if (
+    basename(path) === 'flow.json' &&
+    data &&
+    typeof data === 'object' &&
+    'steps' in data &&
+    Array.isArray(data.steps)
+  ) {
+    data = {
+      ...data,
+      schema_version: 3,
+      steps: data.steps.map((step) => ({
+        ...step,
+        directory:
+          step.directory ??
+          `${step.tool === 'sizer' ? step.name.toLowerCase().replaceAll(' ', '_') : step.name}_${step.tool}`,
+      })),
+    }
+  }
   await writeFile(path, JSON.stringify(data, null, 2), 'utf8')
 }
 
@@ -631,7 +649,7 @@ describe('WorkspaceResourceService', () => {
   })
 
   it.each([
-    ['Timing optimization', []],
+    ['timing_optimization', []],
     ['Signoff', []],
     ['lvs', ['drc_default_config.json', 'flow_config.json']],
     ['Harden', ['sta_ecc.json']],

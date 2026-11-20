@@ -1,5 +1,5 @@
-export const LVS_STEP_PATH = 'lvs_ecc/feature/lvs.step.json'
-export const ANTENNA_STEP_PATH = 'antennaCheck_ecc/feature/antennaCheck.step.json'
+export const LVS_STEP_PATH = 'feature/lvs.step.json'
+export const ANTENNA_STEP_PATH = 'feature/antenna_check.step.json'
 
 const HIDDEN_FIELDS = new Set(['run', 'constraints'])
 const ACRONYMS = new Set([

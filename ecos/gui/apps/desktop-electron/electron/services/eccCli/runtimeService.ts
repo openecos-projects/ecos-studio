@@ -1,6 +1,7 @@
+import { workspaceForkProbe, workspaceForkRequired } from '../cliSelfCheck'
 import { randomUUID } from 'node:crypto'
-import { lstat, open, readdir, realpath, stat } from 'node:fs/promises'
-import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path'
+import { lstat, open, realpath, stat } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import type {
   EccBackgroundOperationLogResult,
   EccBackgroundOperationProjection,
@@ -55,12 +56,6 @@ import { isPathWithinRoot } from '../pathScope'
 import { normalizeWorkspacePath } from '../workspacePath'
 import { readPersistedEngineeringSnapshot } from './engineeringSnapshotReader'
 import {
-  findLegacyWorkspaceReference,
-  hasLegacyRunsLayout,
-  projectNeedsCliMigration,
-  readLegacyProjectManifest,
-} from './legacyMigration'
-import {
   EccCliCommandError,
   EccCliProcess,
   type EccCliProcessOptions,
@@ -113,8 +108,6 @@ export class EccCliRuntimeService {
   private readonly sessions = new Map<string, WorkspaceSession>()
   private readonly handleByDirectory = new Map<string, string>()
   private readonly knownProjectRoots = new Set<string>()
-  private readonly projectMigrations = new Map<string, Promise<void>>()
-  private readonly legacyReadOnlyRoots = new Set<string>()
   private readonly operations = new Map<string, TrackedOperation>()
   private readonly defViewsInFlight = new Set<string>()
   private readonly outcomes: EccRuntimeOperation[] = []
@@ -173,38 +166,15 @@ export class EccCliRuntimeService {
 
   async readProjectManifest(projectRoot: string): Promise<ProjectManifest> {
     const root = await realpath(projectRoot)
-    try {
-      const manifest = await readProjectManifest(root)
-      this.knownProjectRoots.add(root)
-      return manifest
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      // Only projects without an index need the existing one-time migration.
-      return await this.loadProjectManifest(root)
-    }
+    const manifest = await readProjectManifest(root)
+    this.knownProjectRoots.add(root)
+    return manifest
   }
 
-  async loadProjectManifest(
-    projectRoot: string,
-    forceLegacyRunsMigration = false,
-  ): Promise<ProjectManifest> {
+  async loadProjectManifest(projectRoot: string): Promise<ProjectManifest> {
     await this.ensureContract()
     const root = await realpath(projectRoot)
     this.knownProjectRoots.add(root)
-    try {
-      await this.migrateLegacyProjectIfNeeded(root, forceLegacyRunsMigration)
-    } catch (error) {
-      const fallback = await readLegacyProjectManifest(
-        root,
-        error instanceof Error ? error.message : String(error),
-      )
-      if (fallback) {
-        this.legacyReadOnlyRoots.add(root)
-        return fallback
-      }
-      throw error
-    }
-    this.legacyReadOnlyRoots.delete(root)
     await this.reconcileProject(root, '--no-wait')
     return await readProjectManifest(root)
   }
@@ -221,47 +191,10 @@ export class EccCliRuntimeService {
       })
   }
 
-  private async migrateLegacyProjectIfNeeded(
-    projectRoot: string,
-    forceLegacyRunsMigration = false,
-  ): Promise<void> {
-    if (!forceLegacyRunsMigration && !(await projectNeedsCliMigration(projectRoot)))
-      return
-    const existing = this.projectMigrations.get(projectRoot)
-    if (existing) return await existing
-
-    const migration = this.cli
-      .run(['migrate', '--project', projectRoot, '--yes', '--plain'], {
-        cwd: projectRoot,
-      })
-      .then(() => undefined)
-      .finally(() => {
-        this.projectMigrations.delete(projectRoot)
-      })
-    this.projectMigrations.set(projectRoot, migration)
-    await migration
-  }
-
   async discoverProject(directory: string) {
-    let target = resolve(directory)
-    try {
-      target = await realpath(directory)
-    } catch {
-      // A legacy workspace is moved by migration, so its requested path may
-      // disappear before discovery is retried.
-    }
-    const discovered = await discoverProject(target, [...this.knownProjectRoots])
+    const discovered = await discoverProject(directory, [...this.knownProjectRoots])
     if (discovered) this.knownProjectRoots.add(discovered.projectRoot)
-    if (discovered) return discovered
-
-    const legacyWorkspace = await findLegacyWorkspaceReference(target)
-    const legacyRoot =
-      legacyWorkspace?.projectRoot ??
-      ((await hasLegacyRunsLayout(target)) ? target : null)
-    if (!legacyRoot) return null
-    const manifest = await this.loadProjectManifest(legacyRoot, true)
-    this.knownProjectRoots.add(legacyRoot)
-    return { projectId: manifest.project_id, projectRoot: legacyRoot }
+    return discovered
   }
 
   async readWorkspaceBindingRequirement(
@@ -287,7 +220,6 @@ export class EccCliRuntimeService {
   ): Promise<void> {
     await this.ensureContract()
     const root = await realpath(projectRoot)
-    this.assertProjectWritable(root)
     await this.cli.run(
       [
         'project',
@@ -307,7 +239,6 @@ export class EccCliRuntimeService {
   ): Promise<EccProjectManifest> {
     await this.ensureContract()
     const root = resolve(projectRoot)
-    this.assertProjectWritable(root)
     const requested = mutation as Record<string, unknown>
     const type = requireString(requested.type)
     if (type === 'create') {
@@ -414,7 +345,6 @@ export class EccCliRuntimeService {
     const initArgs = projectInitArgs(request, requestedProjectRoot)
     if (initArgs) await this.cli.run(initArgs)
     const projectRoot = await realpath(requestedProjectRoot)
-    this.assertProjectWritable(projectRoot)
     await stat(join(projectRoot, 'project.json')).catch((error) => {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         throw new Error('Workspace creation requires an initialized Project.')
@@ -432,35 +362,16 @@ export class EccCliRuntimeService {
 
   async openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
     await this.ensureContract()
-    const requestedDirectory = normalizeWorkspacePath(resolve(request.directory))
-    const legacyWorkspace = await findLegacyWorkspaceReference(requestedDirectory)
-    let directory = requestedDirectory
-    try {
-      directory = normalizeWorkspacePath(await realpath(requestedDirectory))
-    } catch (error) {
-      if (!legacyWorkspace || (error as NodeJS.ErrnoException).code !== 'ENOENT')
-        throw error
-    }
+    const directory = normalizeWorkspacePath(await realpath(request.directory))
     const existingHandle = this.handleByDirectory.get(directory)
     if (existingHandle)
       return { ...(await this.workspaceSession(existingHandle)), reused: true }
     const discovered = await this.discoverProject(directory)
     if (!discovered) throw new Error('Workspace is not declared by a Project Manifest.')
-    const manifest = await this.loadProjectManifest(
-      discovered.projectRoot,
-      legacyWorkspace?.projectRoot === discovered.projectRoot,
-    )
+    const manifest = await this.loadProjectManifest(discovered.projectRoot)
     const declared = await declaredWorkspaceForDirectory(manifest, directory)
-    const entry =
-      declared?.entry ??
-      (legacyWorkspace?.projectRoot === discovered.projectRoot
-        ? (manifest.workspaces.find(
-            (workspace) => workspace.workspace_id === legacyWorkspace.workspaceId,
-          ) ?? null)
-        : null)
-    if (!entry) throw new Error('Project Manifest does not declare this Workspace.')
-    directory =
-      declared?.directory ?? normalizeWorkspacePath(await realpath(entry.workspace_path))
+    if (!declared) throw new Error('Project Manifest does not declare this Workspace.')
+    const entry = declared.entry
     const snapshot = await readPersistedEngineeringSnapshot(directory, entry.workspace_id)
     const session: WorkspaceSession = {
       directory,
@@ -525,7 +436,6 @@ export class EccCliRuntimeService {
 
     const projectSettings = projectSettingsArgs(request)
     if (projectSettings.length) {
-      this.assertProjectWritable(session.projectRoot)
       await this.cli.run(
         [
           'project',
@@ -614,7 +524,6 @@ export class EccCliRuntimeService {
     workspaceHandle: string
   }): Promise<EccWorkspaceUpdateResult> {
     const session = this.requireSession(request.workspaceHandle)
-    this.assertProjectWritable(session.projectRoot)
     await this.cli.run(
       [
         'macro',
@@ -745,25 +654,16 @@ export class EccCliRuntimeService {
     request: EccWorkspaceRefreshConfigRequest,
   ): Promise<EccWorkspaceRefreshConfigResult> {
     const session = this.requireSession(request.workspaceHandle)
-    const refresh = () =>
-      this.runWorkspaceMutation(
-        session,
-        workspaceRefreshArgs({
-          commandId: randomUUID(),
-          expectedWorkspaceRevision: request.expectedWorkspaceRevision,
-          force: request.force,
-          projectRoot: session.projectRoot,
-          workspaceId: session.workspaceId,
-        }),
-      )
-    try {
-      await refresh()
-    } catch (error) {
-      const rtlImport = await legacyOriginRtlImportArgs(error, session)
-      if (!rtlImport) throw error
-      await this.runWorkspaceMutation(session, rtlImport)
-      await refresh()
-    }
+    await this.runWorkspaceMutation(
+      session,
+      workspaceRefreshArgs({
+        commandId: randomUUID(),
+        expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+        force: request.force,
+        projectRoot: session.projectRoot,
+        workspaceId: session.workspaceId,
+      }),
+    )
     return {
       directory: session.directory,
       refreshed: true,
@@ -793,7 +693,6 @@ export class EccCliRuntimeService {
 
   async defView(request: EccWorkspaceDefViewRequest): Promise<EccWorkspaceDefViewResult> {
     const session = this.requireSession(request.workspaceHandle)
-    this.assertProjectWritable(session.projectRoot)
     const workspaceKey = normalizeWorkspacePath(session.directory)
     if (this.defViewsInFlight.has(workspaceKey)) {
       throw codedError(
@@ -969,7 +868,6 @@ export class EccCliRuntimeService {
 
   async cancelOperation(request: EccRuntimeOperationRequest) {
     const tracked = this.requireOperation(request)
-    this.assertProjectWritable(tracked.projectRoot)
     tracked.requestedCancel = true
     await this.cli.run([
       'process',
@@ -1021,9 +919,39 @@ export class EccCliRuntimeService {
   }
 
   async deriveWorkspace(
-    _request: EccWorkspaceDeriveRequest & { workspaceHandle: string },
+    request: EccWorkspaceDeriveRequest & { workspaceHandle: string },
   ): Promise<EccWorkspaceDeriveResult> {
-    throw new Error('Workspace derive requires the ECC RPC runtime.')
+    const session = this.requireSession(request.workspaceHandle)
+    const target = resolve(request.targetDirectory)
+    const id = basename(target)
+    if (
+      resolve(request.directory) !== session.directory ||
+      dirname(target) !== session.projectRoot ||
+      target === session.directory ||
+      !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(id)
+    ) {
+      throw new Error('Invalid fork source or target directory.')
+    }
+    await this.cli.run(
+      [
+        'workspace',
+        'fork',
+        session.workspaceId,
+        id,
+        '--project',
+        session.projectRoot,
+        ...(request.resetFromStep ? ['--from', request.resetFromStep] : []),
+        '--command-id',
+        request.commandId || randomUUID(),
+        '--no-wait',
+      ],
+      { cwd: session.projectRoot },
+    )
+    const opened = await this.openWorkspace({ directory: target })
+    return {
+      ...opened,
+      workspaceRevision: this.requireSession(opened.workspaceHandle).workspaceRevision,
+    }
   }
 
   operationProjection(): EccBackgroundOperationProjection {
@@ -1174,7 +1102,6 @@ export class EccCliRuntimeService {
   ): Promise<EccRuntimeOperation> {
     await this.ensureContract()
     const session = this.requireSession(request.workspaceHandle)
-    this.assertProjectWritable(session.projectRoot)
     if (this.isWorkspaceRuntimeActive(session.directory)) {
       throw codedError('Workspace already has an active ECC run.', 'WORKSPACE_BUSY')
     }
@@ -1416,13 +1343,23 @@ export class EccCliRuntimeService {
       return
     }
     if (tracked.registrationPending) return
-    const terminal = terminalState(flow, tracked.requestedCancel)
+    const selectedStep =
+      tracked.operation.kind === 'step' ? tracked.operation.step : undefined
+    const terminal = terminalState(flow, tracked.requestedCancel, selectedStep)
     const flowBlock = flowBlockOutcome(flow, tracked.operation.kind, terminal)
+    const blockedStep = selectedStep
+      ? flow.steps.find((step) => step.name === selectedStep && step.checklistBlocked)
+      : undefined
     tracked.operation = {
       ...tracked.operation,
       error:
         terminal === 'failed'
-          ? { code: 'flow_failed', message: 'ECC flow failed.' }
+          ? blockedStep
+            ? {
+                code: 'step_blocked',
+                message: `ECC blocked ${blockedStep.name}: ${blockedStep.checklistFailedItems?.join(', ') || 'checklist gate'}.`,
+              }
+            : { code: 'flow_failed', message: 'ECC flow failed.' }
           : null,
       flow,
       ...(flowBlock ? { flowBlock } : {}),
@@ -1505,16 +1442,15 @@ export class EccCliRuntimeService {
       '--no-wait',
       ...(step ? ['--step', step] : []),
       ...(commitStepOutput ? ['--commit-step-output'] : []),
-      ...Object.entries(parameters).flatMap(([key, value]) => [
-        '--set',
-        `${key}=${encodeCliValue(value)}`,
-      ]),
+      ...Object.entries(parameters).flatMap(([key, value]) => {
+        const name = step && key.startsWith('place.') ? `${step}:${key}` : key
+        return ['--set', `${name}=${encodeCliValue(value)}`]
+      }),
     ]
     await this.runWorkspaceMutation(session, args)
   }
 
   private async runWorkspaceMutation(session: WorkspaceSession, args: string[]) {
-    this.assertProjectWritable(session.projectRoot)
     await this.cli.run(args, { cwd: session.projectRoot })
     await this.refreshSessionRevision(session)
   }
@@ -1525,14 +1461,6 @@ export class EccCliRuntimeService {
       session.workspaceId,
     )
     session.workspaceRevision = snapshot.workspaceRevision
-  }
-
-  private assertProjectWritable(projectRoot: string): void {
-    if (this.legacyReadOnlyRoots.has(resolve(projectRoot))) {
-      throw new Error(
-        'This legacy project is read-only until ECC migration succeeds. Retry migration after fixing the reported issue.',
-      )
-    }
   }
 
   private operationsForSession(workspaceHandle: string) {
@@ -1565,7 +1493,7 @@ export class EccCliRuntimeService {
     this.contractCheck ??= Promise.resolve()
       .then(() => assertEccCliPlatformSupported())
       .then(() => this.cli.run(['version', '--json']))
-      .then(({ stdout }) => {
+      .then(async ({ stdout }) => {
         const value = JSON.parse(stdout)
         if (
           !isRecord(value) ||
@@ -1577,6 +1505,12 @@ export class EccCliRuntimeService {
             'Installed ECC does not support CLI contract 1.',
             'ECC_CLI_INCOMPATIBLE',
           )
+        }
+        try {
+          await this.cli.run([...workspaceForkProbe])
+        } catch (error) {
+          if (!(error instanceof EccCliCommandError)) throw error
+          throw codedError(workspaceForkRequired, 'ECC_CLI_INCOMPATIBLE')
         }
         const version = typeof value.ecc === 'string' ? value.ecc : 'unknown'
         this.contractRuntimeId = `tool:ecc@${version}`
@@ -1728,6 +1662,9 @@ export function operationFlowMatches(
     return (
       candidate !== undefined &&
       step.name === candidate.name &&
+      step.directory === candidate.directory &&
+      step.category === candidate.category &&
+      step.inputStep === candidate.inputStep &&
       step.tool === candidate.tool &&
       step.state === candidate.state &&
       step.runtime === candidate.runtime &&
@@ -2093,7 +2030,7 @@ export function workspaceCreateCommands(
     return [
       [
         'workspace',
-        'derive',
+        'fork',
         request.deriveFrom.workspaceId,
         workspaceId,
         '--project',
@@ -2188,41 +2125,6 @@ export function workspaceDefViewArgs(options: {
     resolve(options.defPath),
     '--plain',
   ]
-}
-
-const ORIGIN_RTL_SUFFIXES = new Set(['.v', '.sv', '.svh', '.vh'])
-
-/**
- * Legacy projects predate project-level `design.rtl`: their RTL sources only
- * exist inside the workspace `origin/` directory, so `ecc workspace refresh`
- * fails its step-input preflight with `step_input_missing`. Recover by
- * importing those origin sources into the project through `ecc rtl import`
- * (ECC remains the only writer of project configuration), then the caller
- * retries the refresh.
- */
-async function legacyOriginRtlImportArgs(
-  error: unknown,
-  session: WorkspaceSession,
-): Promise<string[] | null> {
-  if (
-    !(error instanceof EccCliCommandError) ||
-    error.code !== 'step_input_missing' ||
-    !error.message.includes('requires design.rtl')
-  ) {
-    return null
-  }
-  const originDirectory = join(session.directory, 'origin')
-  let entries: string[]
-  try {
-    entries = await readdir(originDirectory)
-  } catch {
-    return null
-  }
-  const verilog = entries
-    .filter((name) => ORIGIN_RTL_SUFFIXES.has(extname(name).toLowerCase()))
-    .map((name) => join(originDirectory, name))
-    .sort()
-  return rtlImportArgs(session.projectRoot, { verilog })
 }
 
 function parameterArgs(value: unknown): string[] {

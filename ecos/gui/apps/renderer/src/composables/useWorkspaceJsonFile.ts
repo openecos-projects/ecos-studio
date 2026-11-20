@@ -7,6 +7,7 @@ export function useWorkspaceJsonFile<T>(
   path: string,
   parse: (value: unknown) => T | null,
   invalidMessage: string,
+  stepId?: string,
 ) {
   const { currentProject } = useWorkspace()
   const session = useBackendWorkspaceSession()
@@ -25,7 +26,12 @@ export function useWorkspaceJsonFile<T>(
   async function load(): Promise<void> {
     const projectPath = currentProject.value?.path
     const version = ++requestVersion
-    if (!projectPath) {
+    const flow = session.projection.data?.flow
+    const directory =
+      flow?.status === 'ready' || flow?.status === 'partial'
+        ? flow.data.steps.find((step) => step.name === stepId)?.directory
+        : undefined
+    if (!projectPath || (stepId && !directory)) {
       data.value = null
       loading.value = false
       error.value = null
@@ -35,7 +41,10 @@ export function useWorkspaceJsonFile<T>(
     loading.value = true
     error.value = null
     try {
-      const text = await readOptionalProjectTextFile(path, { projectPath })
+      const text = await readOptionalProjectTextFile(
+        stepId ? `${directory}/${path}` : path,
+        { projectPath },
+      )
       if (version !== requestVersion) return
       if (!text) {
         data.value = null

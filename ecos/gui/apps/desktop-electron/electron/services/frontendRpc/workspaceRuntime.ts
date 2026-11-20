@@ -751,6 +751,7 @@ export class EccWorkspaceRuntime {
     return await readPersistedEngineeringSnapshot(
       session.directory,
       session.eccWorkspaceId ?? undefined,
+      6,
     )
   }
 
@@ -763,7 +764,7 @@ export class EccWorkspaceRuntime {
       'workspace.engineering_snapshot',
       workspaceId ? { workspaceId } : {},
     )
-    const validated = validateEngineeringSnapshot(snapshot, workspaceId ?? undefined)
+    const validated = validateEngineeringSnapshot(snapshot, workspaceId ?? undefined, 6)
     if (!validated.ok) throw new Error(validated.issue.code)
     const { artifacts, flow, metrics, signoff } = validated.sections
     if (artifacts.status !== 'ready') throw new Error(artifacts.issues[0]?.code)

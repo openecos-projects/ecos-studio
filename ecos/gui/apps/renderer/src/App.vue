@@ -761,8 +761,8 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal, onNarration) => 
           pdk_config_mode: 'default',
           pdk_config: { mode: 'default', tech_lef: [], cell_lef: [], liberty: [] },
           flow_config: {
-            start_step: 'Synthesis',
-            end_step: 'Harden',
+            start_step: 'synthesis',
+            end_step: 'harden',
             // Full ECC flow catalog, identical to the agent wizard's default
             // range (product decision 2026-09-13, see ecos/agent/docs/diff.md #7).
             steps: [...ECC_FLOW_STEPS],
@@ -1584,7 +1584,7 @@ async function buildReconfigureWizardInitialConfig(
     getPathLeafName(workspacePath)
   const originInputs = await scanWorkspaceOriginDesignInputs(workspacePath)
   const rtlList =
-    flowConfig.start_step === 'Synthesis'
+    flowConfig.start_step === 'synthesis'
       ? await existingWorkspaceFiles(workspacePath, [
           ...originInputs.rtlFiles,
           `origin/${designName}.v`,
@@ -1598,7 +1598,7 @@ async function buildReconfigureWizardInitialConfig(
         ])
       : []
   const filelist =
-    flowConfig.start_step === 'Synthesis'
+    flowConfig.start_step === 'synthesis'
       ? await firstExistingWorkspaceFile(workspacePath, [
           ...originInputs.filelists,
           'origin/filelist',
@@ -1607,7 +1607,7 @@ async function buildReconfigureWizardInitialConfig(
         ])
       : ''
   const originDef =
-    flowConfig.start_step === 'Synthesis'
+    flowConfig.start_step === 'synthesis'
       ? ''
       : await firstExistingWorkspaceFile(workspacePath, [
           ...originInputs.defFiles,
@@ -1617,7 +1617,7 @@ async function buildReconfigureWizardInitialConfig(
           optionalString(dbInput?.def_path),
         ])
   const originVerilog =
-    flowConfig.start_step === 'Synthesis'
+    flowConfig.start_step === 'synthesis'
       ? ''
       : await firstExistingWorkspaceFile(workspacePath, [
           ...originInputs.verilogFiles,
@@ -1655,7 +1655,7 @@ async function buildReconfigureWizardInitialConfig(
     origin_verilog: originVerilog,
     rtl_list: rtlList,
     filelist,
-    design_input_mode: flowConfig.start_step === 'Synthesis' ? 'rtl' : 'post_synthesis',
+    design_input_mode: flowConfig.start_step === 'synthesis' ? 'rtl' : 'post_synthesis',
     sdc,
     pdk_config_mode: pdkConfig.mode,
     pdk_config: pdkConfig,
@@ -1761,7 +1761,7 @@ function normalizeWorkspaceFlowConfig(
         })
         .filter((step): step is string => step.trim() !== '')
     : []
-  const normalizedSteps = steps.length > 0 ? steps : ['Synthesis', 'Harden']
+  const normalizedSteps = steps.length > 0 ? steps : ['synthesis', 'harden']
 
   return {
     start_step: normalizedSteps[0],

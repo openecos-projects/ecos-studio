@@ -708,7 +708,18 @@ export class CliInstallerService {
     // re-acquired by the drift check. A passing recorded self-check is not
     // required here so status() can surface self-check failures.
     const loaded = await readInstallRecord(versionDir, this.platform)
-    return 'record' in loaded ? loaded.record : null
+    if (!('record' in loaded)) return null
+    const record = loaded.record
+    if (!record.selfCheck.ok || record.checkedWorkspaceFork) return record
+    // Older install receipts only tested --version. Validate the existing binary in place.
+    const binaries = join(versionDir, 'binaries')
+    const selfCheck = await runSelfCheck(
+      this.spawnImpl,
+      join(binaries, executableNameFor(this.platform)),
+      await this.envWriter.buildRuntimeEnv(binaries),
+      this.selfCheckTimeoutMs,
+    )
+    return { ...record, selfCheck }
   }
 
   private async resolveCurrentVersionDir(): Promise<string | null> {

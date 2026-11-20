@@ -24,7 +24,7 @@ def _corner_row(metric_id: str, corner: str, value: float, unit: str = "ns"):
         category="corner_robustness",
         role="report",
         direction="higher_is_better",
-        source_refs=(f"sta_ecc/feature/{corner}/qor_summary.json",),
+        source_refs=(f"19_sta_ecc/feature/{corner}/qor_summary.json",),
         corner=corner,
     )
 
@@ -78,8 +78,8 @@ def test_noise_profile_excludes_telemetry_and_keeps_corner_keys() -> None:
     # Cross-corner spread stays per corner instead of collapsing into drift.
     assert epsilon["sta_setup_wns@MAX_125/Cworst"] == 0.0
     assert epsilon["sta_setup_wns@MIN_m40/Cbest"] == 0.0
-    assert epsilon["sta_typical_leakage_power"] == 0.0
-    assert profile["reference"]["sta_typical_leakage_power"] == 0.4
+    assert epsilon["power_analysis_leakage_uw"] == 0.0
+    assert profile["reference"]["power_analysis_leakage_uw"] == 0.4
 
 
 def test_noise_profile_reports_true_qor_drift_per_key() -> None:

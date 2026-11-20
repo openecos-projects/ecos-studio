@@ -13,43 +13,43 @@ from ecos_agent.workspace.setup import (
 
 def test_workspace_setup_and_rerun_share_the_default_post_route_order() -> None:
     expected = (
-        "route",
+        "routing",
         "filler",
         "lvs",
         "drc",
-        "antennaCheck",
-        "postRouteLec",
-        "RCX",
+        "antenna_check",
+        "post_route_lec",
+        "rcx",
         "sta",
-        "powerAnalysis",
+        "power_analysis",
         "emir",
-        "Harden",
+        "harden",
     )
-    assert GUI_WORKSPACE_FLOW_STEPS[GUI_WORKSPACE_FLOW_STEPS.index("route") :] == expected
+    assert GUI_WORKSPACE_FLOW_STEPS[GUI_WORKSPACE_FLOW_STEPS.index("routing") :] == expected
     rerun_steps = tuple(step.value for step in ECCStepName)
-    assert rerun_steps[rerun_steps.index("route") :] == expected
+    assert rerun_steps[rerun_steps.index("routing") :] == expected
 
 
 @pytest.mark.parametrize(
     ("end_step", "expected_steps"),
     [
-        ("lvs", ["route", "filler", "lvs"]),
+        ("lvs", ["routing", "filler", "lvs"]),
         (
-            "postRouteLec",
-            ["route", "filler", "lvs", "drc", "antennaCheck", "postRouteLec"],
+            "post_route_lec",
+            ["routing", "filler", "lvs", "drc", "antenna_check", "post_route_lec"],
         ),
         (
-            "powerAnalysis",
+            "power_analysis",
             [
-                "route",
+                "routing",
                 "filler",
                 "lvs",
                 "drc",
-                "antennaCheck",
-                "postRouteLec",
-                "RCX",
+                "antenna_check",
+                "post_route_lec",
+                "rcx",
                 "sta",
-                "powerAnalysis",
+                "power_analysis",
             ],
         ),
     ],
@@ -66,7 +66,7 @@ def test_workspace_setup_contract_uses_contiguous_post_route_ranges(
             "workspace_name": "signoff",
             "design_name": "gcd",
             "top_module": "gcd",
-            "flow_start": "route",
+            "flow_start": "routing",
             "flow_end": end_step,
         }
     )
@@ -75,7 +75,7 @@ def test_workspace_setup_contract_uses_contiguous_post_route_ranges(
     contract = workspace_setup_contract(proposal, inputs, "en", "setup-signoff")
 
     assert contract["flow_config"] == {
-        "start_step": "route",
+        "start_step": "routing",
         "end_step": end_step,
         "steps": expected_steps,
     }

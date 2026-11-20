@@ -243,12 +243,12 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(
                 {
                     "steps": [
                         {
-                            "name": "place",
+                            "name": "placement",
                             "runtime": "0:0:2",
                             "peak memory (mb)": 64.0,
                         },
                         {
-                            "name": "Harden",
+                            "name": "harden",
                             "runtime": "0:0:1",
                             "peak memory (mb)": 32.0,
                         },

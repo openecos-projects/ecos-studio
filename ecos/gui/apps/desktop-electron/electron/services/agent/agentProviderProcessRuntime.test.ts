@@ -1643,7 +1643,7 @@ describe('AgentProviderProcessRuntime', () => {
         end_step: 'place',
         source_flow_json_sha256: 'a'.repeat(64),
         source_stage_artifact_sha256: 'b'.repeat(64),
-        workspace_parameters: { 'place.target_density': 0.55 },
+        workspace_parameters: { 'placement:place.target_density': 0.55 },
         step_configurations: [],
       }),
     })

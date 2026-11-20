@@ -27,7 +27,10 @@ function fixtureText(name: string): string {
         'Run these tests from the ECOS Studio monorepo with the ecc/ submodule checked out.',
     )
   }
-  return readFileSync(resolve(FIXTURE_ROOT, name), 'utf8')
+  // ECC's published section fixtures still use the v6 envelope.
+  const fixture = JSON.parse(readFileSync(resolve(FIXTURE_ROOT, name), 'utf8'))
+  if (fixture.schemaVersion === 6) fixture.schemaVersion = 7
+  return JSON.stringify(fixture)
 }
 
 describe('readPersistedEngineeringSnapshot', () => {
@@ -54,7 +57,7 @@ describe('readPersistedEngineeringSnapshot', () => {
       'workspace-fixture-v6',
     )
 
-    expect(snapshot.schemaVersion).toBe(6)
+    expect(snapshot.schemaVersion).toBe(7)
     expect(snapshot.workspaceId).toBe('workspace-fixture-v6')
     expect(snapshot.cause).toBe('workspace.created')
     expect(snapshot.metrics.length).toBeGreaterThan(0)
@@ -95,7 +98,7 @@ describe('readPersistedEngineeringSnapshot', () => {
     expect(snapshot).not.toHaveProperty('unknownProjection')
   })
 
-  it.each([4, 6])(
+  it.each([7])(
     'accepts v%s snapshots without optional workspace configuration',
     async (schemaVersion) => {
       const snapshot = JSON.parse(fixtureText('v6-valid.json'))

@@ -8,6 +8,7 @@ import re
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Iterator, Literal
 
@@ -25,6 +26,7 @@ from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization.contracts import (
     BudgetSnapshot,
     HistoryReference,
+    ObjectiveMetric,
     OptimizationTaskMemoryReference,
     OptimizationOutcomeKind,
     PlanningProviderEvidence,
@@ -73,6 +75,21 @@ class OptimizationArtifactManifestError(OptimizationLedgerError):
 
 class _LedgerModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class _ArchivedPowerMetric(StrEnum):
+    TYPICAL_DYNAMIC = "sta_typical_dynamic_power"
+    TYPICAL_LEAKAGE = "sta_typical_leakage_power"
+    WORST_DYNAMIC = "sta_worst_dynamic_power"
+    WORST_LEAKAGE = "sta_worst_leakage_power"
+
+
+class _ArchivedActiveObjective(ActiveOptimizationObjective):
+    original_primary_metric: ObjectiveMetric | _ArchivedPowerMetric
+    active_primary_metric: ObjectiveMetric | _ArchivedPowerMetric
+    active_preserve_metrics: tuple[ObjectiveMetric | _ArchivedPowerMetric, ...] = Field(
+        max_length=2
+    )
 
 
 class OptimizationArtifactEntry(_LedgerModel):
@@ -131,11 +148,13 @@ class OptimizationInterventionStart(_LedgerModel):
     objective_alignment_sha256: str | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
-    active_objective: ActiveOptimizationObjective | None = Field(
+    active_objective: ActiveOptimizationObjective | _ArchivedActiveObjective | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
     proposal_action: ProposalAction | None = None
     requested: RequestedKnobValue | None = None
+    # Keep the defaults of v2 rows that omitted these fields. Current
+    # executions record their step IDs explicitly.
     target_step: str = "place"
     end_step: str = "Harden"
     execution_scope: str = "full_flow"
@@ -194,7 +213,7 @@ class OptimizationInterventionStart(_LedgerModel):
             raise ValueError("ledger active objective alignment does not match")
         if (
             not self.target_step
-            or self.end_step != "Harden"
+            or self.end_step not in {"Harden", "harden"}
             or self.execution_scope != "full_flow"
         ):
             raise ValueError("ledger execution contract is invalid")
@@ -217,14 +236,14 @@ class OptimizationTerminalOutcome(_LedgerModel):
     materialization_receipt_sha256: str | None = None
     parameter_application_receipt_id: str | None = None
     incumbent_decision: IncumbentDecision | None = None
-    decisive_metric: SelectionMetric | None = None
+    decisive_metric: SelectionMetric | _ArchivedPowerMetric | None = None
     objective_alignment_sha256: str | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
-    active_objective: ActiveOptimizationObjective | None = Field(
+    active_objective: ActiveOptimizationObjective | _ArchivedActiveObjective | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
-    next_active_objective: ActiveOptimizationObjective | None = Field(
+    next_active_objective: ActiveOptimizationObjective | _ArchivedActiveObjective | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
     recovery_transition: str | None = Field(
@@ -335,7 +354,7 @@ class OptimizationTerminalOutcome(_LedgerModel):
                 raise ValueError("terminal materialization receipt hash does not match")
         if (
             not self.target_step
-            or self.end_step != "Harden"
+            or self.end_step not in {"Harden", "harden"}
             or self.execution_scope != "full_flow"
         ):
             raise ValueError("terminal execution contract is invalid")

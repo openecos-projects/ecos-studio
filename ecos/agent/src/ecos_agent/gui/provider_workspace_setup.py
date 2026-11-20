@@ -265,7 +265,7 @@ class ProviderWorkspaceSetupMixin:
                 pass
         if bootstrap.flow_end:
             self._update_workspace_setup(
-                session, flow_start="Synthesis", flow_end=bootstrap.flow_end
+                session, flow_start="synthesis", flow_end=bootstrap.flow_end
             )
             flow_end_explicit = True
         if session.workspace_setup.design_name:
@@ -283,7 +283,7 @@ class ProviderWorkspaceSetupMixin:
 
     def _select_flow_end(self, session: _Session, message: str) -> None:
         if message == "0":
-            end_step = "Harden"
+            end_step = "harden"
         else:
             end_step = numbered_choice(message, tuple(_flow_steps()))
         if end_step is None:
@@ -291,7 +291,7 @@ class ProviderWorkspaceSetupMixin:
             self._emit(session, "message", flow_end_prompt(session.language))
             self._emit_phase_choice(session)
             return
-        self._update_workspace_setup(session, flow_start="Synthesis", flow_end=end_step)
+        self._update_workspace_setup(session, flow_start="synthesis", flow_end=end_step)
         session.phase = "workspace_rtl"
         self._emit(session, "message", rtl_prompt(session.language, _recommended_path(session, "rtl")))
         self._emit_phase_choice(session)

@@ -25,15 +25,27 @@ export function parseVersionFromSelfCheckDetail(detail: string | null): string |
   return match ? match[0] : null
 }
 
-/**
- * Run `<executable> --version` with the given env and capture whether the
- * bundle binary is usable on this host. Never rejects: environmental
- * failures (missing nix-ld, broken loaders) come back as a failed check
- * with the captured output.
- */
-export function runSelfCheck(
+// The release version is shared by builds on both sides of ECC #380.
+export const workspaceForkProbe = ['workspace', 'fork', '--help'] as const
+export const workspaceForkRequired =
+  'This Studio build requires ECC with workspace fork and step workers. Install the ECC #380 runtime or select it with ECOS_ECC_BIN_DIR.'
+
+export async function runSelfCheck(
   spawnImpl: CliSpawnLike,
   executable: string,
+  env: NodeJS.ProcessEnv,
+  timeoutMs: number,
+): Promise<CliInstallSelfCheck> {
+  const version = await probe(spawnImpl, executable, ['--version'], env, timeoutMs)
+  if (!version.ok) return version
+  const fork = await probe(spawnImpl, executable, workspaceForkProbe, env, timeoutMs)
+  return fork.ok ? version : { ok: false, detail: workspaceForkRequired }
+}
+
+function probe(
+  spawnImpl: CliSpawnLike,
+  executable: string,
+  args: readonly string[],
   env: NodeJS.ProcessEnv,
   timeoutMs: number,
 ): Promise<CliInstallSelfCheck> {
@@ -45,7 +57,7 @@ export function runSelfCheck(
       resolve(result)
     }
     try {
-      const child = spawnImpl(executable, ['--version'], {
+      const child = spawnImpl(executable, args, {
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: timeoutMs,

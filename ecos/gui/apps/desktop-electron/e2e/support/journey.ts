@@ -218,7 +218,10 @@ export async function openWorkspaceInUi(page: Page, ws: WorkspaceJourney): Promi
   await page.evaluate(() => {
     window.location.hash = '#/projects'
   })
-  const openButton = page.locator('button[aria-label^="Open workspace"]').first()
+  const openButton = page.getByRole('button', {
+    name: `Open workspace ${basename(ws.workspaceDir)}`,
+    exact: true,
+  })
   await openButton.waitFor({ state: 'visible', timeout: 60_000 })
   await openButton.click()
   await page.waitForFunction(

@@ -89,7 +89,7 @@ def test_budget_reports_remaining_wall_time() -> None:
 def test_stage_observation_is_typed_and_carries_remaining_budget() -> None:
     observation = StageObservation(
         observation_id="observation-1",
-        stage="place",
+        stage="placement",
         evidence_manifest_sha256=HASH,
         metrics={"place_lutrudy_utilization_max": 0.88},
         requested_knobs=[RequestedKnobValue(knob_id="place.cell_padding_x", value=2)],
@@ -175,10 +175,8 @@ def test_natural_language_objective_is_frozen_with_required_signoff_gates() -> N
         ObjectiveMetric.STA_SETUP_TNS,
         ObjectiveMetric.STA_HOLD_WNS,
         ObjectiveMetric.STA_HOLD_TNS,
-        ObjectiveMetric.STA_TYPICAL_DYNAMIC_POWER,
-        ObjectiveMetric.STA_TYPICAL_LEAKAGE_POWER,
-        ObjectiveMetric.STA_WORST_DYNAMIC_POWER,
-        ObjectiveMetric.STA_WORST_LEAKAGE_POWER,
+        ObjectiveMetric.POWER_ANALYSIS_DYNAMIC_UW,
+        ObjectiveMetric.POWER_ANALYSIS_LEAKAGE_UW,
         ObjectiveMetric.GUI_OVERALL_QOR_SCORE,
     ],
 )
@@ -237,7 +235,7 @@ def test_drc_binding_preserves_explicit_route_metric_and_rejects_other_overflow(
             "reduce wirelength while preserving DRC, standard cell area and power",
             OptimizationObjectiveProposal(
                 primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
-                preserve_metrics=(ObjectiveMetric.STA_STANDARD_CELL_AREA, ObjectiveMetric.STA_WORST_DYNAMIC_POWER),
+                preserve_metrics=(ObjectiveMetric.STA_STANDARD_CELL_AREA, ObjectiveMetric.POWER_ANALYSIS_DYNAMIC_UW),
                 rationale_summary="Do not silently drop independent constraints.",
             ),
         )

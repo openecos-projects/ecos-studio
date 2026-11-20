@@ -19,12 +19,12 @@ def test_rerun_uses_the_open_gui_workspace_as_the_default_source(tmp_path: Path)
     flow = workspace / "home" / "flow.json"
     flow.parent.mkdir(parents=True)
     flow.write_text(
-        '{"steps": [{"name": "place", "tool": "dreamplace", "state": "Success"}]}',
+        '{"steps": [{"name": "placement", "directory": "06_placement_dreamplace", "tool": "dreamplace", "state": "Success"}]}',
         encoding="utf-8",
     )
-    output = workspace / "place_dreamplace" / "output"
+    output = workspace / "06_placement_dreamplace" / "output"
     output.mkdir(parents=True)
-    (output / "gcd_place.def.gz").write_bytes(b"def")
+    (output / "gcd_placement.def.gz").write_bytes(b"def")
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(emit=events.append)
 
@@ -50,7 +50,7 @@ def test_rerun_uses_the_open_gui_workspace_as_the_default_source(tmp_path: Path)
     assert provider.sessions[session_id].phase == "rerun_stage"
     stage_choice = _last_event(events, "interaction")["interaction"]
     assert stage_choice["title"] == "Start stage"
-    assert [option["label"] for option in stage_choice["options"]] == ["place"]
+    assert [option["label"] for option in stage_choice["options"]] == ["placement"]
 
 
 def test_rerun_skips_empty_parameter_table_for_timing_opt(tmp_path: Path) -> None:
@@ -58,14 +58,14 @@ def test_rerun_skips_empty_parameter_table_for_timing_opt(tmp_path: Path) -> Non
     flow = workspace / "home" / "flow.json"
     flow.parent.mkdir(parents=True)
     flow.write_text(
-        '{"steps": [{"name": "Timing optimization", "tool": "sizer", "state": "Success"}]}',
+        '{"steps": [{"name": "timing_optimization", "directory": "11_timing_optimization_sizer", "tool": "sizer", "state": "Success"}]}',
         encoding="utf-8",
     )
-    output = workspace / "timing_optimization_sizer" / "output"
+    output = workspace / "11_timing_optimization_sizer" / "output"
     output.mkdir(parents=True)
     (output / "gcd_timing_optimization.def.gz").write_bytes(b"def")
-    (workspace / "home" / "parameters.json").write_text(
-        '{"Design": "gcd"}', encoding="utf-8"
+    (workspace / "home" / "params.toml").write_text(
+        '[design]\nname = "gcd"\n', encoding="utf-8"
     )
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(emit=events.append)
@@ -78,7 +78,7 @@ def test_rerun_skips_empty_parameter_table_for_timing_opt(tmp_path: Path) -> Non
 
     session = provider.sessions[session_id]
     assert session.phase == "rerun_scope"
-    assert session.rerun_stage == "Timing optimization"
+    assert session.rerun_stage == "timing_optimization"
     assert session.rerun_parameter_patch == []
     assert any(
         event["type"] == "message"
@@ -98,12 +98,12 @@ def test_workspace_mode_rerun_uses_bound_directory_without_design_prompt(
     flow = workspace / "home" / "flow.json"
     flow.parent.mkdir(parents=True)
     flow.write_text(
-        '{"steps": [{"name": "place", "tool": "dreamplace", "state": "Success"}]}',
+        '{"steps": [{"name": "placement", "directory": "06_placement_dreamplace", "tool": "dreamplace", "state": "Success"}]}',
         encoding="utf-8",
     )
-    output = workspace / "place_dreamplace" / "output"
+    output = workspace / "06_placement_dreamplace" / "output"
     output.mkdir(parents=True)
-    (output / "gcd_place.def.gz").write_bytes(b"def")
+    (output / "gcd_placement.def.gz").write_bytes(b"def")
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(emit=events.append)
 
@@ -122,14 +122,14 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
     flow = workspace / "home" / "flow.json"
     flow.parent.mkdir(parents=True)
     flow.write_text(
-        '{"steps": [{"name": "place", "tool": "dreamplace", "state": "Success"}]}',
+        '{"steps": [{"name": "placement", "directory": "06_placement_dreamplace", "tool": "dreamplace", "state": "Success"}]}',
         encoding="utf-8",
     )
-    output = workspace / "place_dreamplace" / "output"
+    output = workspace / "06_placement_dreamplace" / "output"
     output.mkdir(parents=True)
-    (output / "gcd_place.def.gz").write_bytes(b"def")
-    config = workspace / "config"
-    config.mkdir()
+    (output / "gcd_placement.def.gz").write_bytes(b"def")
+    config = workspace / "06_placement_dreamplace/config"
+    config.mkdir(parents=True)
     (config / "dreamplace_ecc.json").write_text(
         '{"target_density": 0.2, "routability_opt_flag": true, "stop_overflow": 0.0}',
         encoding="utf-8",
@@ -193,7 +193,7 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
     assert contract["contract"]["workspace_rerun"] == rerun
     assert rerun["schema_version"] == "flow-agent.workspace_rerun_contract.v1"
     assert rerun["execution_scope"] == "full_flow"
-    assert rerun["end_step"] == "Harden"
+    assert rerun["end_step"] == "placement"
     assert parser_contexts[0]["natural_language_request"] == (
         "set place.routability_opt to 0,set target_overflow to 0.1"
     )
@@ -204,15 +204,15 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
     ]
     assert rerun["writes"] == [
         {
-            "file": "home/parameters.json",
-            "json_path": ["Routability opt flag"],
+            "file": "home/params.toml",
+            "json_path": ["params", "step_params", "placement", "place.routability_opt_flag"],
             "knob_id": "place.routability_opt",
             "surface": "parameters",
             "value": 0,
         },
         {
-            "file": "home/parameters.json",
-            "json_path": ["Target overflow"],
+            "file": "home/params.toml",
+            "json_path": ["params", "step_params", "placement", "place.stop_overflow"],
             "knob_id": "place.target_overflow",
             "surface": "parameters",
             "value": 0.1,
@@ -222,7 +222,7 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
     _send(
         provider,
         session_id,
-        "workspace_rerun_result:" + json.dumps({"rerun_id": "gcd_rerun_place", "status": "succeeded", "error": ""}),
+        "workspace_rerun_result:" + json.dumps({"rerun_id": "gcd_rerun_placement", "status": "succeeded", "error": ""}),
     )
 
     assert provider.sessions[session_id].phase == "operation"
@@ -418,7 +418,7 @@ def test_workspace_creation_harden_result_starts_signoff_inspection(tmp_path: Pa
                 "setup_id": "setup-1",
                 "status": "succeeded",
                 "error": "",
-                "end_step": "Harden",
+                "end_step": "harden",
                 "workspace": str(workspace),
             }
         ),
@@ -446,7 +446,7 @@ def test_workspace_creation_binds_runtime_context_to_the_original_home_session(t
         "workspaceRevision": 9,
         "message": "workspace_create_result:" + json.dumps({
             "setup_id": "setup-1", "status": "succeeded", "error": "",
-            "end_step": "Harden", "workspace": str(workspace),
+            "end_step": "harden", "workspace": str(workspace),
         }),
     })
 
@@ -609,18 +609,18 @@ def test_invalid_choice_and_creation_failed_copy_point_to_cards() -> None:
 def test_rerun_allocates_a_numbered_target_when_the_default_exists(tmp_path: Path) -> None:
     workspace = tmp_path / "gcd"
     workspace.mkdir()
-    (tmp_path / "gcd_rerun_place").mkdir()
+    (tmp_path / "gcd_rerun_placement").mkdir()
     source = GuiWorkspaceRerunSource(
         workspace_path=workspace,
         design_id="gcd",
         flow_json_sha256="0" * 64,
         end_step=ECCStepName.PLACEMENT,
-        allowed_stages=("place",),
-        stage_artifact_ref={"place": "place_dreamplace/output/gcd_place.def.gz"},
-        stage_artifact_sha256={"place": "1" * 64},
+        allowed_stages=("placement",),
+        stage_artifact_ref={"placement": "06_placement_dreamplace/output/gcd_placement.def.gz"},
+        stage_artifact_sha256={"placement": "1" * 64},
     )
 
-    contract = GuiWorkspaceRerunResolver(tmp_path).freeze(source, "place", [], "single_step")
+    contract = GuiWorkspaceRerunResolver(tmp_path).freeze(source, "placement", [], "single_step")
 
-    assert contract.target_workspace == str(tmp_path / "gcd_rerun_place_0001")
-    assert contract.rerun_id == "gcd_rerun_place_0001"
+    assert contract.target_workspace == str(tmp_path / "gcd_rerun_placement_0001")
+    assert contract.rerun_id == "gcd_rerun_placement_0001"

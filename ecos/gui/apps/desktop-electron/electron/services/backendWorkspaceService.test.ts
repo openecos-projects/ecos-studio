@@ -93,7 +93,7 @@ function engineeringSnapshot(index = resourceIndex()): EccEngineeringSnapshot {
       power: { totalUw: null, budgetUw: null, sourceKind: null, corner: null },
       artifactIds: [],
     },
-    schemaVersion: 6,
+    schemaVersion: 7,
     signoffAssessment: { groups: [], risks: [], status: 'ready' },
     timingPreview: { issueCount: 0, issues: [], issuesTruncated: false },
     workspaceId: 'ecc-workspace-a',

@@ -71,7 +71,7 @@
               class="flow-edges"
               :width="graphWidth"
               :height="graphHeight"
-              aria-label="Flow dependencies"
+              aria-label="Flow execution order"
             >
               <defs>
                 <marker
@@ -111,7 +111,7 @@
               v-if="signoffPosition"
               class="positioned-step"
               :style="{ left: `${signoffPosition.x}px`, top: `${signoffPosition.y}px` }"
-              :eligible="checksPassed && steps[steps.length - 1]?.status === 'succeeded'"
+              :eligible="steps[steps.length - 1]?.status === 'succeeded'"
             />
           </div>
         </div>
@@ -149,14 +149,7 @@
       :draggable="false"
       @update:visible="closeDetails"
     >
-      <p
-        v-if="selectedStep && isFinalizationStep(selectedStep) && !checksPassed"
-        role="status"
-      >
-        Harden and Signoff require mandatory verification steps and their checklists to
-        pass.
-      </p>
-      <div v-else-if="selectedStep && detailKind === 'run'" class="step-run-action">
+      <div v-if="selectedStep && detailKind === 'run'" class="step-run-action">
         <span
           >Run {{ selectedStep.label }} using the current workspace configuration.</span
         >
@@ -173,7 +166,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import Dialog from 'primevue/dialog'
-import { sameFlowStepName } from '@/api/type'
 import FlowRunControl from '@/components/workbench/FlowRunControl.vue'
 import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
 import {
@@ -250,20 +242,6 @@ const { surfaceSize, canvasOffset, fitToViewport } = useCenteredFlowViewport(
 const selectedStep = computed(
   () => steps.value.find((step) => step.id === selectedId.value) ?? null,
 )
-const checksPassed = computed(() =>
-  ['lvs', 'drc', 'postRouteLec', 'RCX', 'sta', 'powerAnalysis'].every((id) =>
-    steps.value.some(
-      (step) =>
-        sameFlowStepName(step.id, id) &&
-        step.status === 'succeeded' &&
-        step.checkState === 'passed',
-    ),
-  ),
-)
-
-function isFinalizationStep(step: DashboardFlowStep): boolean {
-  return sameFlowStepName(step.id, 'Harden') || sameFlowStepName(step.id, 'Signoff')
-}
 function edgePath(edge: FlowEdge): string {
   const from = positions.value.get(edge.from)!
   const to = positions.value.get(edge.to)!

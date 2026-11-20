@@ -44,24 +44,24 @@ from ecos_agent.workspace.parameters import WorkspaceParametersError
 from tests.optimization.controller.support import _eligible_terminal
 
 _STAGES = (
-    "Synthesis",
-    "preFloorplan",
-    "macroPlacement",
-    "postFloorplan",
+    "synthesis",
+    "pre_floorplan",
+    "macro_placement",
+    "post_floorplan",
     "preplace",
-    "place",
+    "placement",
     "diff_sizing",
-    "CTS",
+    "cts",
     "legalization",
-    "Timing optimization",
-    "route",
+    "timing_optimization",
+    "routing",
     "filler",
     "lvs",
     "drc",
-    "RCX",
+    "rcx",
     "sta",
-    "powerAnalysis",
-    "Harden",
+    "power_analysis",
+    "harden",
 )
 _HASH = "sha256:" + "a" * 64
 
@@ -134,7 +134,7 @@ def test_advisory_analysis_does_not_gate_runtime_evidence(tmp_path: Path, state:
     payload = json.loads(path.read_text())
     payload["steps"].extend(
         {"name": name, "state": state, "runtime": "0:0:2"}
-        for name in ("antennaCheck", "emir")
+        for name in ("antenna_check", "emir")
     )
     path.write_text(json.dumps(payload))
     assert _optimization_rerun_runtime_seconds(tmp_path) == sum(range(18)) + (
@@ -143,7 +143,7 @@ def test_advisory_analysis_does_not_gate_runtime_evidence(tmp_path: Path, state:
 
 
 def test_optimization_runtime_fails_closed_on_incomplete_stage(tmp_path: Path) -> None:
-    _write_flow(tmp_path, states={"place": "Ongoing"})
+    _write_flow(tmp_path, states={"placement": "Ongoing"})
 
     with pytest.raises(OptimizationRuntimeError, match="flow completion evidence"):
         _optimization_rerun_runtime_seconds(tmp_path)
@@ -215,23 +215,15 @@ def test_design_id_comes_from_workspace_parameters_and_fails_closed(
         _design_id(tmp_path)
 
 
-def test_design_id_supports_legacy_parameters_json(tmp_path: Path) -> None:
-    (tmp_path / "home").mkdir()
-    (tmp_path / "home" / "parameters.json").write_text(
-        json.dumps({"Design": "legacy_core"}), encoding="utf-8"
-    )
-
-    assert _design_id(tmp_path) == "legacy_core"
-
-
 def test_current_values_read_the_seven_runtime_knob_surfaces(tmp_path: Path) -> None:
     (tmp_path / "home").mkdir()
-    (tmp_path / "config").mkdir()
+    (tmp_path / "home/flow.json").write_text(json.dumps({"schema_version": 3, "steps": [{"name": "placement", "directory": "06_placement_dreamplace"}]}))
+    (tmp_path / "06_placement_dreamplace/config").mkdir(parents=True)
     (tmp_path / "home" / "params.toml").write_text(
         "[params.core]\nutilitization = 0.6\naspect_ratio = 1.33\n",
         encoding="utf-8",
     )
-    (tmp_path / "config" / "dreamplace_ecc.json").write_text(
+    (tmp_path / "06_placement_dreamplace/config/dreamplace_ecc.json").write_text(
         json.dumps(
             {
                 "target_density": 0.65,
@@ -243,7 +235,7 @@ def test_current_values_read_the_seven_runtime_knob_surfaces(tmp_path: Path) -> 
         ),
         encoding="utf-8",
     )
-    place_log = tmp_path / "place_dreamplace/log/place.log"
+    place_log = tmp_path / "06_placement_dreamplace/log/place.log"
     place_log.parent.mkdir(parents=True)
     place_log.write_text(
         "[INFO] parameters = {'target_density': 0.65, 'cell_padding_x': 400}\n"
@@ -291,7 +283,7 @@ def test_runner_observes_policy_stage_from_the_current_incumbent(
     controller = SimpleNamespace(
         incumbent_candidate_root_ref=".agent/candidates/candidate-1",
         budget=budget,
-        planning_stage=lambda _observation, values: "place",
+        planning_stage=lambda _observation, values: "placement",
     )
     runner = _assemble_runner(
         runtime=SimpleNamespace(episode_id="episode-1", objective=None),
@@ -305,7 +297,7 @@ def test_runner_observes_policy_stage_from_the_current_incumbent(
     runner._observation_supplier(budget)
     runner._observation_supplier(budget.model_copy(update={"consumed_candidates": 1}))
 
-    assert calls == [(incumbent, "place"), (incumbent, "place")]
+    assert calls == [(incumbent, "placement"), (incumbent, "placement")]
 
 
 def test_incumbent_workspace_resolves_only_registered_candidate_roots(
@@ -343,6 +335,7 @@ def test_parent_manifest_binds_terminal_evidence(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / "home").mkdir()
+    (tmp_path / "home/flow.json").write_text(json.dumps({"schema_version": 3, "steps": [{"name": "placement", "directory": "06_placement_dreamplace"}]}))
     (tmp_path / "home" / "params.toml").write_text(
         '[params]\ndesign = "tiny"\n', encoding="utf-8"
     )
@@ -380,7 +373,7 @@ def _execution_context_workspace(tmp_path: Path) -> tuple[Path, Path, Path]:
         f'[design]\nname = "design-a"\n[pdk]\nroot = "{pdk}"\n',
         encoding="utf-8",
     )
-    (tmp_path / "home" / "flow.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "home/flow.json").write_text(json.dumps({"schema_version": 3, "steps": [{"name": "placement", "directory": "06_placement_dreamplace"}]}))
     return rtl, filelist, origin
 
 
@@ -388,8 +381,8 @@ def test_execution_context_matches_ecc_design_hash_for_multiple_inputs(
     tmp_path: Path,
 ) -> None:
     rtl, filelist, origin = _execution_context_workspace(tmp_path)
-    (tmp_path / "config").mkdir()
-    (tmp_path / "config" / "dreamplace_ecc.json").write_text(
+    (tmp_path / "06_placement_dreamplace/config").mkdir(parents=True)
+    (tmp_path / "06_placement_dreamplace/config/dreamplace_ecc.json").write_text(
         json.dumps({"target_density": 0.45, "random_seed": 3000}),
         encoding="utf-8",
     )
@@ -428,8 +421,8 @@ def test_execution_context_seed_fails_closed_without_workspace_baseline(
     with pytest.raises(WorkspaceParametersError, match="DREAMPlace seed"):
         _optimization_execution_context(tmp_path, 200, _HASH, "ecc-test-revision")
 
-    config = tmp_path / "config"
-    config.mkdir()
+    config = tmp_path / "06_placement_dreamplace/config"
+    config.mkdir(parents=True)
     (config / "dreamplace_ecc.json").write_text(
         json.dumps({"random_seed": "3000"}), encoding="utf-8"
     )
@@ -466,8 +459,8 @@ def test_execution_adapter_fingerprints_workspace_input_modes(
                 + f"\n[params]\nfile_list = {json.dumps(reference)}\n",
                 encoding="utf-8",
             )
-    (tmp_path / "config").mkdir()
-    (tmp_path / "config" / "dreamplace_ecc.json").write_text(
+    (tmp_path / "06_placement_dreamplace/config").mkdir(parents=True)
+    (tmp_path / "06_placement_dreamplace/config/dreamplace_ecc.json").write_text(
         json.dumps({"random_seed": 3000}), encoding="utf-8"
     )
     host_calls = []
@@ -526,8 +519,8 @@ def test_execution_context_rejects_unavailable_declared_filelist(
         params.read_text(encoding="utf-8") + f"\n[params]\nfile_list = {json.dumps(reference)}\n",
         encoding="utf-8",
     )
-    (tmp_path / "config").mkdir()
-    (tmp_path / "config" / "dreamplace_ecc.json").write_text(
+    (tmp_path / "06_placement_dreamplace/config").mkdir(parents=True)
+    (tmp_path / "06_placement_dreamplace/config/dreamplace_ecc.json").write_text(
         json.dumps({"random_seed": 3000}), encoding="utf-8"
     )
 
@@ -703,8 +696,8 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "home").mkdir()
-    (workspace / "home" / "parameters.json").write_text(
-        json.dumps({"Design": "design-a"}), encoding="utf-8"
+    (workspace / "home" / "params.toml").write_text(
+        '[design]\nname = "design-a"\n', encoding="utf-8"
     )
     rpc = _FakeRpc(Path("ecc"))
     monkeypatch.setattr(

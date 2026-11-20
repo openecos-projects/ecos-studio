@@ -20,11 +20,15 @@ export function useWorkspaceCreationModel(options: {
   projectPresetParameters: () => Record<string, unknown>
 }) {
   const model = ref<WorkspaceCreationModel | null>(null)
+  const isLoading = ref(false)
+  const loadError = ref('')
   let generation = 0
 
   async function refresh(): Promise<void> {
     if (options.designTool() === 'frontend') return
     const requestGeneration = ++generation
+    isLoading.value = true
+    loadError.value = ''
     try {
       const request: WorkspaceCreationModelRequest = {
         flowId: options.flowId(),
@@ -41,13 +45,20 @@ export function useWorkspaceCreationModel(options: {
       if (requestGeneration !== generation) return
       model.value = next
     } catch (error) {
+      if (requestGeneration !== generation) return
       console.warn(
         'Failed to load the ECC workspace creation model; flow steps and the parameter catalog are unavailable.',
         error,
       )
-      if (requestGeneration === generation) model.value = null
+      model.value = null
+      loadError.value =
+        error instanceof Error && error.message
+          ? error.message
+          : 'Could not load the ECC flow definition.'
+    } finally {
+      if (requestGeneration === generation) isLoading.value = false
     }
   }
 
-  return { model, refresh }
+  return { model, isLoading, loadError, refresh }
 }

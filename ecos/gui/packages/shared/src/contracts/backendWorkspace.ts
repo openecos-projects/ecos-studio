@@ -62,6 +62,9 @@ export type FlowStepState =
 
 export interface FlowStepSummary {
   stepId: string
+  category?: 'PNR' | 'CHECKER'
+  inputStep?: string
+  directory?: string
   order: number
   name: string
   state: FlowStepState

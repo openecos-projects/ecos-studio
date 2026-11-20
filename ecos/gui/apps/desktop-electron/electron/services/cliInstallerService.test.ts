@@ -228,6 +228,18 @@ describe('CliInstallerService', () => {
     expect(events.at(-1)).toMatchObject({ phase: 'done', progress: 1 })
   })
 
+  it('rejects a registry bundle that reports the expected version but lacks workspace fork', async () => {
+    let calls = 0
+    const { dataDir, service } = createService({
+      spawnResult: () =>
+        ++calls === 1
+          ? { code: 0, output: STUB_VERSION }
+          : { code: 2, output: 'No such command: fork' },
+    })
+    await expect(service.ensureBundle()).rejects.toThrow('workspace fork')
+    expect(existsSync(join(dataDir, 'current'))).toBe(false)
+  })
+
   it('downloads from the registry when the packaged bundle is absent', async () => {
     const { dataDir, service, resourceManager } = createService({
       resourcesPath: '',

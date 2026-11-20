@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from ecos_agent.ecc_contracts import ECCStepName
+from ecos_agent.workspace.step_directories import step_directories
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization.contracts import (
     ROUTABILITY_OBJECTIVE_ORDER,
@@ -40,9 +41,7 @@ from ecos_agent.optimization.metrics.contracts import (
 from ecos_agent.optimization.metrics.extraction import (
     OptimizationObservationError,
     _corner_metric,
-    _power_summary_metric,
     _required_payload_number,
-    _worst_power_metric,
     build_area_metrics,
     build_cost_metrics,
     build_eligibility_metrics,
@@ -64,35 +63,16 @@ from ecos_agent.optimization.parameter_config import (
 
 _METRIC_ID = re.compile(r"^[a-z][a-z0-9_]*$")
 _DESIGN_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
-_STAGE_DIRECTORIES = {
-    ECCStepName.SYNTHESIS: "Synthesis_yosys",
-    ECCStepName.PRE_FLOORPLAN: "preFloorplan_ecc",
-    ECCStepName.MACRO_PLACEMENT: "macroPlacement_dreamplace",
-    ECCStepName.POST_FLOORPLAN: "postFloorplan_ecc",
-    ECCStepName.PREPLACE: "preplace_sizer",
-    ECCStepName.PLACEMENT: "place_dreamplace",
-    ECCStepName.DIFF_SIZING: "diff_sizing_dreamplace",
-    ECCStepName.CTS: "CTS_ecc",
-    ECCStepName.LEGALIZATION: "legalization_dreamplace",
-    ECCStepName.TIMING_OPT: "timing_optimization_sizer",
-    ECCStepName.ROUTING: "route_ecc",
-    ECCStepName.DRC: "drc_ecc",
-    ECCStepName.LVS: "lvs_ecc",
-    ECCStepName.FILLER: "filler_ecc",
-    ECCStepName.RCX: "RCX_ecc",
-    ECCStepName.STA: "sta_ecc",
-    ECCStepName.HARDEN: "Harden_ecc",
-}
 _PLACE_STATE_EVIDENCE_FILES = {
-    "overflow_map": "place_dreamplace/feature/egr_congestion_map/place_egr_union_overflow.csv",
-    "egr_or_rudy_map": "place_dreamplace/feature/RUDY_map/place_rudy_union.csv",
-    "cell_density_map": "place_dreamplace/feature/density_map/place_allcell_density.csv",
-    "net_density_map": "place_dreamplace/feature/density_map/place_allnet_density.csv",
-    "pin_density_map": "place_dreamplace/feature/density_map/place_allcell_pin_density.csv",
-    "macro_density_map": "place_dreamplace/feature/density_map/place_macro_density.csv",
+    "overflow_map": "feature/egr_congestion_map/placement_egr_union_overflow.csv",
+    "egr_or_rudy_map": "feature/RUDY_map/placement_rudy_union.csv",
+    "cell_density_map": "feature/density_map/placement_allcell_density.csv",
+    "net_density_map": "feature/density_map/placement_allnet_density.csv",
+    "pin_density_map": "feature/density_map/placement_allcell_pin_density.csv",
+    "macro_density_map": "feature/density_map/placement_macro_density.csv",
 }
 _TERMINAL_METRICS = ROUTABILITY_OBJECTIVE_ORDER
-_CTS_FEATURE_FILE = "CTS_ecc/feature/CTS.step.json"
+_CTS_FEATURE_FILE = "cts/feature/cts.step.json"
 _AREA_EVIDENCE_STEPS = (ECCStepName.SYNTHESIS, ECCStepName.POST_FLOORPLAN)
 _TERMINAL_FLOW_STEPS = (
     ECCStepName.PLACEMENT,
@@ -108,15 +88,15 @@ _TERMINAL_FLOW_STEPS = (
     ECCStepName.HARDEN,
 )
 _TERMINAL_QOR_FILES = tuple(
-    f"{_STAGE_DIRECTORIES[stage]}/analysis/qor_metrics.json"
+    f"{stage.value}/analysis/qor_metrics.json"
     for stage in _TERMINAL_FLOW_STEPS
 )
 _ALL_TERMINAL_QOR_FILES = tuple(
-    f"{_STAGE_DIRECTORIES[stage]}/analysis/qor_metrics.json"
+    f"{stage.value}/analysis/qor_metrics.json"
     for stage in (*_AREA_EVIDENCE_STEPS, *_TERMINAL_FLOW_STEPS)
 )
 _REQUIRED_TERMINAL_QOR_FILES = tuple(
-    f"{_STAGE_DIRECTORIES[stage]}/analysis/qor_metrics.json"
+    f"{stage.value}/analysis/qor_metrics.json"
     for stage in (
         *_AREA_EVIDENCE_STEPS,
         ECCStepName.ROUTING,
@@ -130,12 +110,12 @@ _REQUIRED_TERMINAL_QOR_FILES = tuple(
 _TERMINAL_FILES = (
     "home/flow.json",
     *_REQUIRED_TERMINAL_QOR_FILES,
-    "drc_ecc/checklist.json",
-    "lvs_ecc/checklist.json",
-    "RCX_ecc/checklist.json",
-    "sta_ecc/checklist.json",
-    "sta_ecc/feature/sta.step.json",
-    "Harden_ecc/checklist.json",
+    "drc/checklist.json",
+    "lvs/checklist.json",
+    "rcx/checklist.json",
+    "sta/checklist.json",
+    "sta/feature/sta.step.json",
+    "harden/checklist.json",
 )
 
 
@@ -151,13 +131,15 @@ def build_stage_observation(
     flow = _read_json(root, "home/flow.json")
     _require_successful_stage(flow, canonical_stage)
     parameters_ref, _parameters = read_workspace_parameters(root)
-    metrics_path = f"{_STAGE_DIRECTORIES[canonical_stage]}/analysis/qor_metrics.json"
+    directories = step_directories(flow)
+    directory = directories[canonical_stage]
+    metrics_path = f"{directory}/analysis/qor_metrics.json"
     metrics_payload = _read_json(root, metrics_path)
     metrics = _qor_metrics(metrics_payload)
-    hotspots_path = f"{_STAGE_DIRECTORIES[canonical_stage]}/analysis/qor_hotspots.json"
+    hotspots_path = f"{directory}/analysis/qor_hotspots.json"
     state_evidence = (
         *_hotspot_state_evidence(root, hotspots_path),
-        *_place_map_state_evidence(root, canonical_stage),
+        *_place_map_state_evidence(root, canonical_stage, directory),
         *floorplan_mode_state_evidence(root, canonical_stage),
         *placement_convergence_state_evidence(root),
     )
@@ -230,7 +212,7 @@ def _hotspot_state_evidence(
 
 
 def _place_map_state_evidence(
-    root: Path, stage: ECCStepName
+    root: Path, stage: ECCStepName, directory: str
 ) -> tuple[StageEvidenceFeature, ...]:
     if stage != ECCStepName.PLACEMENT:
         return ()
@@ -241,7 +223,8 @@ def _place_map_state_evidence(
             evidence_sha256=file_sha256(_workspace_path(root, relative_path)),
             evidence_ref=relative_path,
         )
-        for feature_id, relative_path in _PLACE_STATE_EVIDENCE_FILES.items()
+        for feature_id, suffix in _PLACE_STATE_EVIDENCE_FILES.items()
+        for relative_path in [directory + "/" + suffix]
         if _is_file(root, relative_path)
     )
 
@@ -249,54 +232,70 @@ def _place_map_state_evidence(
 def build_terminal_observation(workspace_root: Path) -> TerminalObservation:
     """Build the fixed terminal optimization observation without running ECC."""
     root = _workspace_root(workspace_root)
-    files = {path: _read_json(root, path) for path in _TERMINAL_FILES}
-    parameters_ref, parameters = read_workspace_parameters(root)
-    flow = files["home/flow.json"]
+    flow = _read_json(root, "home/flow.json")
+    directories = step_directories(flow)
+
+    def artifact_ref(key: str) -> str:
+        stage, _, suffix = key.partition("/")
+        if stage in directories:
+            return f"{directories[stage]}/{suffix}"
+        return key
+
     for stage in (*_AREA_EVIDENCE_STEPS, *_TERMINAL_FLOW_STEPS):
         _require_successful_stage(flow, stage)
+    files = {key: _read_json(root, artifact_ref(key)) for key in _TERMINAL_FILES}
+    parameters_ref, parameters = read_workspace_parameters(root)
     qor_payloads = {path: files[path] for path in _REQUIRED_TERMINAL_QOR_FILES}
     metrics_by_path = {
         path: _qor_metrics(payload) for path, payload in qor_payloads.items()
     }
     for path in _TERMINAL_QOR_FILES:
-        if path not in metrics_by_path and _is_file(root, path):
-            payload = _read_json(root, path)
+        if path not in metrics_by_path and path.split("/")[0] in directories and _is_file(root, artifact_ref(path)):
+            payload = _read_json(root, artifact_ref(path))
             qor_payloads[path] = payload
             metrics_by_path[path] = _qor_metrics(payload)
-    route_metrics = metrics_by_path["route_ecc/analysis/qor_metrics.json"]
+    route_metrics = metrics_by_path["routing/analysis/qor_metrics.json"]
     terminal_metrics = {
         metric: _required_metric(route_metrics, metric.value) for metric in _TERMINAL_METRICS
     }
-    sta_metrics = metrics_by_path["sta_ecc/analysis/qor_metrics.json"]
+    sta_metrics = metrics_by_path["sta/analysis/qor_metrics.json"]
     timing_guardrail = {
         metric: _required_timing_metric(sta_metrics, metric.value)
         for metric in TIMING_GUARDRAIL_ORDER
     }
-    harden_metrics = metrics_by_path["Harden_ecc/analysis/qor_metrics.json"]
-    output_paths = harden_output_paths(parameters)
+    harden_metrics = metrics_by_path["harden/analysis/qor_metrics.json"]
+    output_paths = harden_output_paths(parameters, directories["harden"])
     has_mpc = mpc_configured(parameters)
     complete_outputs = all(_is_nonempty_file(root, path) for path in output_paths)
     missing_artifacts = harden_metrics.get("harden_artifact_missing_count")
     harden_complete = complete_outputs and missing_artifacts == 0
     evaluation, corner_ids, corner_paths, evaluation_complete = _evaluation_metrics(
-        root,
+        root, directories["sta"],
         metrics_by_path,
         qor_payloads,
-        files["sta_ecc/feature/sta.step.json"],
+        files["sta/feature/sta.step.json"],
         timing_guardrail,
-        _read_json(root, _CTS_FEATURE_FILE) if _is_file(root, _CTS_FEATURE_FILE) else None,
+        _read_json(root, artifact_ref(_CTS_FEATURE_FILE)) if _is_file(root, artifact_ref(_CTS_FEATURE_FILE)) else None,
         parameters,
     )
-    geometry = read_terminal_geometry(root)
+    power_metrics = ()
+    power_ref = None
+    if any(step["name"] == "power_analysis" and step["state"] == "Success" for step in flow["steps"]):
+        reference = f'{directories["power_analysis"]}/feature/power_summary.json'
+        if _is_file(root, reference):
+            power_ref = reference
+            power_metrics = _power_metrics(_read_json(root, power_ref), power_ref)
+    geometry = read_terminal_geometry(root, directories["filler"])
     manifest_paths = (
         *_TERMINAL_FILES,
         parameters_ref,
         *(path for path in metrics_by_path if path not in _REQUIRED_TERMINAL_QOR_FILES),
         *corner_paths,
+        *((power_ref,) if power_ref else ()),
         *(geometry.evidence_refs if geometry is not None else ()),
         *(path for path in output_paths if _is_file(root, path)),
     )
-    manifest = build_optimization_artifact_manifest(root, manifest_paths)
+    manifest = build_optimization_artifact_manifest(root, tuple(artifact_ref(path) for path in manifest_paths))
     return TerminalObservation(
         schema_version="ecos.terminal_observation.v3",
         observation_id="terminal-Harden",
@@ -305,31 +304,31 @@ def build_terminal_observation(workspace_root: Path) -> TerminalObservation:
         evidence_valid=True,
         harden_artifacts_complete=harden_complete,
         signoff_gates=SignoffGates(
-            drc_clean=_checklist_gate(files["drc_ecc/checklist.json"], "quality.drc.clean"),
-            lvs_clean=_checklist_gate(files["lvs_ecc/checklist.json"], "quality.lvs.clean"),
+            drc_clean=_checklist_gate(files["drc/checklist.json"], "quality.drc.clean"),
+            lvs_clean=_checklist_gate(files["lvs/checklist.json"], "quality.lvs.clean"),
             rcx_corner_coverage=_checklist_gate(
-                files["RCX_ecc/checklist.json"], "quality.rcx.corner_coverage"
+                files["rcx/checklist.json"], "quality.rcx.corner_coverage"
             ),
             rcx_spef_parse_health=_checklist_gate(
-                files["RCX_ecc/checklist.json"], "quality.rcx.spef_parse_health"
+                files["rcx/checklist.json"], "quality.rcx.spef_parse_health"
             ),
             sta_setup_closed=_checklist_gate(
-                files["sta_ecc/checklist.json"], "quality.sta.setup_closed"
+                files["sta/checklist.json"], "quality.sta.setup_closed"
             ),
             sta_hold_closed=_checklist_gate(
-                files["sta_ecc/checklist.json"], "quality.sta.hold_closed"
+                files["sta/checklist.json"], "quality.sta.hold_closed"
             ),
             mpc_minimum_area=_optional_mpc_gate(
-                files["Harden_ecc/checklist.json"], "quality.mpc.minimum_area", has_mpc
+                files["harden/checklist.json"], "quality.mpc.minimum_area", has_mpc
             ),
             mpc_maximum_area=_optional_mpc_gate(
-                files["Harden_ecc/checklist.json"], "quality.mpc.maximum_area", has_mpc
+                files["harden/checklist.json"], "quality.mpc.maximum_area", has_mpc
             ),
         ),
         metrics=terminal_metrics,
         timing_guardrail=timing_guardrail,
-        evaluation_metrics=evaluation,
-        evaluation_metrics_complete=evaluation_complete,
+        evaluation_metrics=tuple(metric.model_copy(update={"source_refs": tuple(artifact_ref(ref) for ref in metric.source_refs)}) for metric in (*evaluation, *power_metrics)),
+        evaluation_metrics_complete=evaluation_complete and bool(power_metrics),
         sta_corner_ids=corner_ids,
         sta_corner_set_sha256=canonical_sha256({"corners": corner_ids}),
         consistency_violations=consistency_violations(metrics_by_path),
@@ -372,7 +371,7 @@ def build_candidate_terminal_observation(
     harden_refs = dict(
         zip(
             ("harden_gds", "harden_lef", "harden_lib"),
-            harden_output_paths(parameters),
+            harden_output_paths(parameters, step_directories(_read_json(candidate_root, "home/flow.json"))["harden"]),
             strict=True,
         )
     )
@@ -410,7 +409,7 @@ def build_candidate_terminal_observation(
 
 
 def _evaluation_metrics(
-    root: Path,
+    root: Path, sta_directory: str,
     metrics_by_path: dict[str, dict[str, float]],
     qor_payloads: dict[str, dict[str, object]],
     sta_step: dict[str, Any],
@@ -419,10 +418,10 @@ def _evaluation_metrics(
     parameters: dict[str, Any],
 ) -> tuple[tuple[TerminalEvaluationMetric, ...], tuple[str, ...], tuple[str, ...], bool]:
     corner_metrics, ppa_metrics, corner_ids, corner_paths, complete = _sta_corner_metrics(
-        root, metrics_by_path["sta_ecc/analysis/qor_metrics.json"], sta_step
+        root, sta_directory, metrics_by_path["sta/analysis/qor_metrics.json"], sta_step
     )
     routing_metrics, routing_complete = build_routing_diagnostics(
-        metrics_by_path["route_ecc/analysis/qor_metrics.json"]
+        metrics_by_path["routing/analysis/qor_metrics.json"]
     )
     area_metrics = build_area_metrics(metrics_by_path)
     cost_metrics, cost_complete = build_cost_metrics(metrics_by_path, _TERMINAL_QOR_FILES)
@@ -490,7 +489,7 @@ def _evaluation_metrics(
 
 
 def _sta_corner_metrics(
-    root: Path, sta_metrics: dict[str, float], sta_step: dict[str, Any]
+    root: Path, sta_directory: str, sta_metrics: dict[str, float], sta_step: dict[str, Any]
 ) -> tuple[
     tuple[TerminalEvaluationMetric, ...],
     tuple[TerminalEvaluationMetric, ...],
@@ -498,7 +497,7 @@ def _sta_corner_metrics(
     tuple[str, ...],
     bool,
 ]:
-    rows, evidence_paths = _read_sta_corner_rows(root)
+    rows, evidence_paths = _read_sta_corner_rows(root, sta_directory)
     discovered_ids = tuple(row["corner"] for row in rows)
     corner_ids = _configured_sta_corner_ids(sta_step)
     expected = int(required_nonnegative_metric(sta_metrics, "sta_expected_corner_count"))
@@ -506,14 +505,13 @@ def _sta_corner_metrics(
         raise OptimizationObservationError(
             "terminal STA corner evidence does not match configured corners"
         )
-    complete = all(row["power"] is not None for row in rows)
     corner_metrics = tuple(
         metric
         for row in rows
         for metric in _corner_metric_records(row)
     )
-    ppa_metrics, ppa_complete = _ppa_metric_records(rows, complete)
-    return corner_metrics, ppa_metrics, corner_ids, evidence_paths, complete and ppa_complete
+    ppa_metrics = _sta_area_metrics(rows)
+    return corner_metrics, ppa_metrics, corner_ids, evidence_paths, bool(ppa_metrics)
 
 
 def _configured_sta_corner_ids(sta_step: dict[str, Any]) -> tuple[str, ...]:
@@ -535,9 +533,9 @@ def _configured_sta_corner_ids(sta_step: dict[str, Any]) -> tuple[str, ...]:
 
 
 def _read_sta_corner_rows(
-    root: Path,
+    root: Path, sta_directory: str,
 ) -> tuple[tuple[dict[str, Any], ...], tuple[str, ...]]:
-    feature_root = root / "sta_ecc/feature"
+    feature_root = _workspace_path(root, f"{sta_directory}/feature")
     if not feature_root.is_dir() or feature_root.is_symlink():
         return (), ()
     rows: list[dict[str, Any]] = []
@@ -549,20 +547,18 @@ def _read_sta_corner_rows(
             if not rc_dir.is_dir() or rc_dir.is_symlink():
                 continue
             corner = f"{process_dir.name}/{rc_dir.name}"
-            qor_ref = f"sta_ecc/feature/{corner}/qor_summary.json"
+            qor_ref = f"{sta_directory}/feature/{corner}/qor_summary.json"
             if not _is_file(root, qor_ref):
                 continue
-            power_ref = f"sta_ecc/feature/{corner}/power_summary.json"
-            power = _read_json(root, power_ref) if _is_file(root, power_ref) else None
-            rows.append({"corner": corner, "qor": _read_json(root, qor_ref), "power": power})
-            paths.extend((qor_ref, power_ref) if power is not None else (qor_ref,))
+            rows.append({"corner": corner, "qor": _read_json(root, qor_ref)})
+            paths.append(qor_ref)
     return tuple(rows), tuple(paths)
 
 
 def _corner_metric_records(row: dict[str, Any]) -> tuple[TerminalEvaluationMetric, ...]:
     corner = row["corner"]
     qor = row["qor"]
-    qor_ref = f"sta_ecc/feature/{corner}/qor_summary.json"
+    qor_ref = f"sta/feature/{corner}/qor_summary.json"
     records = [
         _corner_metric(qor, ("summary", "setup", "wns"), "sta_setup_wns", "ns", corner, qor_ref),
         _corner_metric(qor, ("summary", "setup", "tns"), "sta_setup_tns", "ns", corner, qor_ref),
@@ -593,38 +589,28 @@ def _corner_metric_records(row: dict[str, Any]) -> tuple[TerminalEvaluationMetri
             qor_ref,
         ),
     ]
-    power = row["power"]
-    if power is not None:
-        power_ref = f"sta_ecc/feature/{corner}/power_summary.json"
-        for source_id, metric_id in (
-            ("internal_uw", "sta_internal_power"),
-            ("switching_uw", "sta_switching_power"),
-            ("dynamic_uw", "sta_dynamic_power"),
-            ("leakage_uw", "sta_leakage_power"),
-        ):
-            records.append(
-                metric_record(
-                    metric_id,
-                    _required_payload_number(power, (source_id,), nonnegative=True),
-                    "uW",
-                    EvaluationMetricCategory.CORNER_ROBUSTNESS,
-                    EvaluationMetricRole.REPORT,
-                    EvaluationMetricDirection.LOWER_IS_BETTER,
-                    (power_ref,),
-                    corner,
-                )
-            )
     return tuple(records)
 
 
-def _ppa_metric_records(
-    rows: tuple[dict[str, Any], ...], complete: bool
-) -> tuple[tuple[TerminalEvaluationMetric, ...], bool]:
+def _power_metrics(summary: dict[str, Any], reference: str) -> tuple[TerminalEvaluationMetric, ...]:
+    if summary.get("schema_version") != 1:
+        raise OptimizationObservationError("power analysis summary schema is invalid")
+    return tuple(
+        metric_record(
+            f"power_analysis_{field}", _required_payload_number(summary, (field,), nonnegative=True),
+            "uW", EvaluationMetricCategory.PPA, EvaluationMetricRole.REPORT,
+            EvaluationMetricDirection.LOWER_IS_BETTER, (reference,),
+        )
+        for field in ("internal_uw", "switching_uw", "dynamic_uw", "leakage_uw")
+    )
+
+
+def _sta_area_metrics(rows: tuple[dict[str, Any], ...]) -> tuple[TerminalEvaluationMetric, ...]:
     typical = next((row for row in rows if row["corner"] == "TYP_25/TYPICAL"), None)
-    if typical is None or typical["power"] is None:
-        return (), False
-    qor_ref = "sta_ecc/feature/TYP_25/TYPICAL/qor_summary.json"
-    records = [
+    if typical is None:
+        return ()
+    qor_ref = "sta/feature/TYP_25/TYPICAL/qor_summary.json"
+    return (
         metric_record(
             "sta_standard_cell_area",
             _required_payload_number(
@@ -636,17 +622,7 @@ def _ppa_metric_records(
             EvaluationMetricDirection.LOWER_IS_BETTER,
             (qor_ref,),
         ),
-        _power_summary_metric(typical, "dynamic_uw", "sta_typical_dynamic_power"),
-        _power_summary_metric(typical, "leakage_uw", "sta_typical_leakage_power"),
-    ]
-    if complete:
-        records.extend(
-            (
-                _worst_power_metric(rows, "dynamic_uw", "sta_worst_dynamic_power"),
-                _worst_power_metric(rows, "leakage_uw", "sta_worst_leakage_power"),
-            )
-        )
-    return tuple(records), complete
+    )
 
 
 def _workspace_root(workspace_root: Path) -> Path:

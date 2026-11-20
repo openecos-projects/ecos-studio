@@ -50,8 +50,8 @@ def test_adapter_starts_only_fixed_full_flow_candidate_rerun() -> None:
             "candidate.rerun",
             {
                 "workspaceId": "workspace-1",
-                "targetStep": "place",
-                "endStep": "Harden",
+                "targetStep": "placement",
+                "endStep": "harden",
                 "candidateId": "candidate-0c4c4b249d945101-intervention-1",
                 "patch": [{"knob_id": "place.target_density", "value": 0.65}],
                 "executionScope": "full_flow",
@@ -134,10 +134,10 @@ def test_adapter_rejects_ecc_revision_drift_before_candidate_execution() -> None
 @pytest.mark.parametrize(
     "knob_id,value,direction,target_step",
     [
-        ("floorplan.core_util", 0.6, StrategyDirection.INCREASE, "Floorplan"),
-        ("floorplan.aspect_ratio", 1.33, StrategyDirection.INCREASE, "Floorplan"),
-        ("place.target_overflow", 0.08, StrategyDirection.DECREASE, "place"),
-        ("place.density_weight", 0.001, StrategyDirection.INCREASE, "place"),
+        ("floorplan.core_util", 0.6, StrategyDirection.INCREASE, "floorplan"),
+        ("floorplan.aspect_ratio", 1.33, StrategyDirection.INCREASE, "floorplan"),
+        ("place.target_overflow", 0.08, StrategyDirection.DECREASE, "placement"),
+        ("place.density_weight", 0.001, StrategyDirection.INCREASE, "placement"),
     ],
 )
 def test_adapter_routes_each_knob_from_its_own_stage(
@@ -155,10 +155,10 @@ def test_adapter_routes_each_knob_from_its_own_stage(
 
     candidate_call = _candidate_call(rpc)
     assert candidate_call[1]["targetStep"] == target_step
-    assert candidate_call[1]["endStep"] == "Harden"
+    assert candidate_call[1]["endStep"] == "harden"
     assert candidate_call[1]["patch"] == [{"knob_id": knob_id, "value": value}]
     assert candidate_call[1].get("floorplanMode") == (
-        "die_util" if target_step == "Floorplan" else None
+        "die_util" if target_step == "floorplan" else None
     )
 
 

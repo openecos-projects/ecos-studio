@@ -12,7 +12,7 @@ OWNER = struct.Struct('<BBH4xQIIIII4x')
 
 
 def write_snapshot(root: Path, *, die=(0, 0, 1000, 1000), core=(100, 100, 900, 900), dbu=1000):
-    directory = root / 'filler_ecc/output/geometry'
+    directory = root / '13_filler_ecc/output/geometry'
     directory.mkdir(parents=True, exist_ok=True)
     for name, kind, record, values in (
         ('shapes', 2, SHAPE, [SHAPE.pack(i + 1, 1, 0, 3, 1, 0, i, 0, 0, 0, *bbox) for i, bbox in enumerate((die, core))]),
@@ -26,13 +26,13 @@ def write_snapshot(root: Path, *, die=(0, 0, 1000, 1000), core=(100, 100, 900, 9
 
 def test_actual_geometry_and_evidence_hash(tmp_path):
     directory = write_snapshot(tmp_path)
-    geometry = read_terminal_geometry(tmp_path)
+    geometry = read_terminal_geometry(tmp_path, "13_filler_ecc")
     assert geometry.die_bbox == (0, 0, 1000, 1000)
     assert geometry.core_bbox == (100, 100, 900, 900)
     assert geometry.dbu_per_micron == 1000
     assert len(geometry.evidence_refs) == 3
     (directory / 'geometry.manifest').write_text((directory / 'geometry.manifest').read_text() + 'design_name=changed\n')
-    changed = read_terminal_geometry(tmp_path)
+    changed = read_terminal_geometry(tmp_path, "13_filler_ecc")
     assert geometry.evidence_sha256 != changed.evidence_sha256
     validate_fixed_geometry(geometry, changed)
 
@@ -40,14 +40,14 @@ def test_actual_geometry_and_evidence_hash(tmp_path):
 @pytest.mark.parametrize('kwargs', [dict(die=(0, 0, 500, 2000)), dict(die=(1, 0, 1001, 1000)), dict(core=(101, 100, 901, 900)), dict(dbu=2000)])
 def test_shape_translation_core_and_units_changes_rejected(tmp_path, kwargs):
     write_snapshot(tmp_path)
-    original = read_terminal_geometry(tmp_path)
+    original = read_terminal_geometry(tmp_path, "13_filler_ecc")
     write_snapshot(tmp_path, **kwargs)
     with pytest.raises(ValueError, match='geometry'):
-        validate_fixed_geometry(original, read_terminal_geometry(tmp_path))
+        validate_fixed_geometry(original, read_terminal_geometry(tmp_path, "13_filler_ecc"))
 
 
 def test_missing_geometry_never_satisfies_fixed_policy(tmp_path):
-    assert read_terminal_geometry(tmp_path) is None
+    assert read_terminal_geometry(tmp_path, "13_filler_ecc") is None
     with pytest.raises(ValueError, match='missing'):
         validate_fixed_geometry(None, None)
 
@@ -76,7 +76,7 @@ def test_invalid_or_unsafe_evidence_rejected(tmp_path, mutation):
     else:
         write_snapshot(tmp_path, core=(100, 100, 1200, 900))
     with pytest.raises(ValueError):
-        read_terminal_geometry(tmp_path)
+        read_terminal_geometry(tmp_path, "13_filler_ecc")
 
 
 from tests.optimization.observation_support import frozen_workspace

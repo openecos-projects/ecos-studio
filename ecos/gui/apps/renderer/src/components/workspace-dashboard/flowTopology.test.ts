@@ -6,29 +6,32 @@ import {
 } from './flowTopology'
 
 const ids = [
-  'Synthesis',
-  'preFloorplan',
+  'synthesis',
+  'pre_floorplan',
   'filler',
   'lvs',
   'drc',
-  'antennaCheck',
-  'postRouteLec',
-  'RCX',
+  'antenna_check',
+  'post_route_lec',
+  'rcx',
   'sta',
-  'powerAnalysis',
+  'power_analysis',
   'emir',
-  'Harden',
+  'harden',
   'Signoff',
 ]
-const steps = ids.map((id) => ({ id }))
+const steps = ids.map((id, index) => ({
+  id,
+  category: index >= 3 && index <= 10 ? ('CHECKER' as const) : ('PNR' as const),
+}))
 
 describe('workspace flow topology', () => {
   it('adds a distinct delivery milestone only when the runtime ends at Harden', () => {
     const runtime = steps.filter((step) => step.id !== 'Signoff')
     const result = withSignoffMilestone(buildFlowTopology(runtime), runtime)
-    expect(result.edges).toContainEqual({ from: 'Harden', to: SIGNOFF_MILESTONE_ID })
+    expect(result.edges).toContainEqual({ from: 'harden', to: SIGNOFF_MILESTONE_ID })
     expect(result.nodes).toHaveLength(runtime.length + 1)
-    const harden = result.nodes.find((node) => node.id === 'Harden')!
+    const harden = result.nodes.find((node) => node.id === 'harden')!
     expect(result.nodes.find((node) => node.id === SIGNOFF_MILESTONE_ID)).toEqual({
       id: SIGNOFF_MILESTONE_ID,
       column: harden.column + 1,
@@ -39,32 +42,31 @@ describe('workspace flow topology', () => {
     const empty = buildFlowTopology([])
     expect(withSignoffMilestone(empty, [])).toBe(empty)
   })
-  it('forks six verification branches and joins every tail before Harden', () => {
+  it('groups parallel checks into execution waves and waits for RCX before power analysis', () => {
     const topology = buildFlowTopology(steps)
-    expect(topology.rows).toBe(6)
+    expect(topology.rows).toBe(5)
     expect(topology.nodes.map((node) => node.id).sort()).toEqual([...ids].sort())
     expect(
       topology.edges.filter((edge) => edge.from === 'filler').map((edge) => edge.to),
-    ).toEqual(['lvs', 'drc', 'antennaCheck', 'postRouteLec', 'RCX', 'powerAnalysis'])
-    expect(
-      topology.edges.filter((edge) => edge.to === 'Harden').map((edge) => edge.from),
-    ).toEqual(['lvs', 'drc', 'antennaCheck', 'postRouteLec', 'sta', 'emir'])
-    const drc = topology.nodes.find((node) => node.id === 'drc')!
-    const antenna = topology.nodes.find((node) => node.id === 'antennaCheck')!
-    expect(antenna).toMatchObject({ column: drc.column, row: drc.row + 1 })
-    expect(topology.edges).not.toContainEqual({ from: 'drc', to: 'antennaCheck' })
-    expect(topology.edges).toContainEqual({ from: 'powerAnalysis', to: 'emir' })
-    expect(topology.edges).toContainEqual({ from: 'RCX', to: 'sta' })
-    expect(topology.edges).toContainEqual({ from: 'Harden', to: 'Signoff' })
-    const firstBranch = topology.nodes.find((node) => node.id === 'lvs')!
-    const lastBranch = topology.nodes.find((node) => node.id === 'powerAnalysis')!
-    const filler = topology.nodes.find((node) => node.id === 'filler')!
-    expect(filler.row).toBe((firstBranch.row + lastBranch.row) / 2)
-    expect(topology.nodes.find((node) => node.id === 'Harden')!.row).toBe(filler.row)
-    const extraction = topology.nodes.find((node) => node.id === 'RCX')!
+    ).toEqual(['lvs', 'drc', 'antenna_check', 'post_route_lec', 'rcx'])
+    expect(topology.edges).not.toContainEqual({ from: 'drc', to: 'antenna_check' })
+    expect(topology.edges).toContainEqual({ from: 'power_analysis', to: 'emir' })
+    expect(topology.edges).toContainEqual({ from: 'rcx', to: 'power_analysis' })
+    expect(topology.edges).toContainEqual({ from: 'rcx', to: 'sta' })
+    expect(topology.edges).toContainEqual({ from: 'emir', to: 'harden' })
+    const extraction = topology.nodes.find((node) => node.id === 'rcx')!
     const timing = topology.nodes.find((node) => node.id === 'sta')!
-    expect(extraction.row).toBe(timing.row)
     expect(timing.column).toBe(extraction.column + 1)
+    expect(topology.nodes.find((node) => node.id === 'power_analysis')!.column).toBe(
+      timing.column,
+    )
+  })
+
+  it('preserves parallel checks when the workspace ends at RCX', () => {
+    const topology = buildFlowTopology(steps.slice(2, 8))
+    expect(topology.columns).toBe(2)
+    expect(topology.rows).toBe(5)
+    expect(topology.edges).toHaveLength(5)
   })
 
   it('keeps unknown steps and omits absent verification steps', () => {

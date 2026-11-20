@@ -10,7 +10,7 @@ const densityWrite = (
   overrides: Partial<DesktopAgentWorkspaceParameterWrite> = {},
 ): DesktopAgentWorkspaceParameterWrite => ({
   file: 'home/params.toml',
-  json_path: ['target_density'],
+  json_path: ['params', 'step_params', 'placement', 'place.target_density'],
   knob_id: 'place.target_density',
   surface: 'parameters',
   value: 0.55,
@@ -87,7 +87,12 @@ describe('parameterWritesMatchPatch', () => {
         [
           {
             file: 'home/params.toml',
-            json_path: ['routability_opt_flag'],
+            json_path: [
+              'params',
+              'step_params',
+              'placement',
+              'place.routability_opt_flag',
+            ],
             knob_id: 'place.routability_opt',
             surface: 'parameters',
             value: 1,
@@ -97,31 +102,14 @@ describe('parameterWritesMatchPatch', () => {
     ).toBe(true)
   })
 
-  it('accepts the canonical TOML die_area utilization path', () => {
+  it('accepts the canonical workspace utilization path', () => {
     expect(
       parameterWritesMatchPatch(
         [{ knob_id: 'floorplan.utilitization', value: 0.7 }],
         [
           {
             file: 'home/params.toml',
-            json_path: ['die_area', 'utilitization'],
-            knob_id: 'floorplan.utilitization',
-            surface: 'parameters',
-            value: 0.7,
-          },
-        ],
-      ),
-    ).toBe(true)
-  })
-
-  it('accepts a nested table path whose parent is a known parameter table', () => {
-    expect(
-      parameterWritesMatchPatch(
-        [{ knob_id: 'floorplan.utilitization', value: 0.7 }],
-        [
-          {
-            file: 'home/parameters.json',
-            json_path: ['Core', 'Utilitization'],
+            json_path: ['params', 'core', 'utilitization'],
             knob_id: 'floorplan.utilitization',
             surface: 'parameters',
             value: 0.7,
@@ -146,7 +134,7 @@ describe('parameterWritesMatchPatch', () => {
         [{ knob_id: 'place.target_density', value: 0.55 }],
         [
           densityWrite({
-            file: 'config/dreamplace_ecc.json',
+            file: 'config/cts_ecc.json',
             json_path: ['density_weight'],
           }),
         ],
@@ -154,7 +142,7 @@ describe('parameterWritesMatchPatch', () => {
     ).toBe(false)
   })
 
-  it('rejects duplicate logical targets across workspace-config aliases', () => {
+  it('rejects a second knob writing to an unrelated parameter', () => {
     expect(
       parameterWritesMatchPatch(
         [
@@ -164,7 +152,7 @@ describe('parameterWritesMatchPatch', () => {
         [
           densityWrite(),
           densityWrite({
-            file: 'home/parameters.json',
+            file: 'home/params.toml',
             json_path: ['Target density'],
             knob_id: 'place.target_overflow',
             value: 0.1,
@@ -180,12 +168,11 @@ describe('parameterWritesMatchPatch', () => {
 })
 
 describe('canonicalParameterWriteKey', () => {
-  it('folds alias files and display-key path segments together', () => {
-    expect(canonicalParameterWriteKey(densityWrite())).toBe(
+  it('includes the step when comparing parameter paths', () => {
+    expect(canonicalParameterWriteKey(densityWrite())).not.toBe(
       canonicalParameterWriteKey(
         densityWrite({
-          file: 'home/parameters.json',
-          json_path: ['Target density'],
+          json_path: ['params', 'step_params', 'diff_opt', 'place.target_density'],
         }),
       ),
     )

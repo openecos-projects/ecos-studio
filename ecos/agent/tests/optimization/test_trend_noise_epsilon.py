@@ -25,8 +25,8 @@ from ecos_agent.optimization.knowledge.compiler_runtime import (
 def _observation_with_metric(metric_id: str, value: float) -> StageObservation:
     return StageObservation(
         observation_id="observation-place",
-        stage="place",
-        evidence_manifest_sha256=canonical_sha256({"observation": "place"}),
+        stage="placement",
+        evidence_manifest_sha256=canonical_sha256({"observation": "placement"}),
         metrics={metric_id: value},
         budget=BudgetSnapshot(budget=EpisodeBudget.from_reference_rerun(11.0)),
     )

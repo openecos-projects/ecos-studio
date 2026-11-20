@@ -311,32 +311,52 @@ async function createCompletedWorkspaceFixture(root: string): Promise<void> {
   })
 
   await writeJson('home/flow.json', {
+    schema_version: 3,
     steps: [
-      'Synthesis',
-      'preFloorplan',
-      'macroPlacement',
-      'postFloorplan',
-      'place',
-      'CTS',
-      'legalization',
-      'Timing optimization',
-      'route',
-      'drc',
-      'lvs',
-      'filler',
-      'RCX',
-      'sta',
-      'Harden',
-    ].map((name) => ({ name, state: 'Success' })),
+      { name: 'synthesis', tool: 'yosys', directory: '01_synthesis_yosys' },
+      { name: 'pre_floorplan', tool: 'ecc', directory: '02_pre_floorplan_ecc' },
+      {
+        name: 'macro_placement',
+        tool: 'dreamplace',
+        directory: '03_macro_placement_dreamplace',
+      },
+      { name: 'post_floorplan', tool: 'ecc', directory: '04_post_floorplan_ecc' },
+      { name: 'placement', tool: 'dreamplace', directory: '05_placement_dreamplace' },
+      { name: 'cts', tool: 'ecc', directory: '06_cts_ecc' },
+      {
+        name: 'legalization',
+        tool: 'dreamplace',
+        directory: '07_legalization_dreamplace',
+      },
+      {
+        name: 'timing_optimization',
+        tool: 'sizer',
+        directory: '08_timing_optimization_sizer',
+      },
+      { name: 'routing', tool: 'ecc', directory: '09_routing_ecc' },
+      { name: 'filler', tool: 'ecc', directory: '10_filler_ecc' },
+      { name: 'lvs', tool: 'ecc', directory: '11_lvs_ecc' },
+      { name: 'drc', tool: 'ecc', directory: '12_drc_ecc' },
+      { name: 'rcx', tool: 'ecc', directory: '13_rcx_ecc' },
+      { name: 'sta', tool: 'ecc', directory: '14_sta_ecc' },
+      { name: 'power_analysis', tool: 'ecc', directory: '15_power_analysis_ecc' },
+      { name: 'harden', tool: 'ecc', directory: '16_harden_ecc' },
+    ].map((step) => ({ ...step, state: 'Success' })),
   })
-  await writeJson('home/parameters.json', {
-    Design: 'tiny',
-    'Target density': 0.2,
-    'Cell padding x': 300,
-    'Routability opt flag': 1,
-  })
+  await writeFile(
+    join(root, 'home/params.toml'),
+    [
+      'schema_version = 4',
+      '[design]',
+      'name = "tiny"',
+      '[params.step_params.placement]',
+      '"place.target_density" = 0.2',
+      '"place.cell_padding_x" = 300',
+      '"place.routability_opt_flag" = 1',
+    ].join('\n'),
+  )
   await writeJson(
-    'Synthesis_yosys/analysis/qor_metrics.json',
+    '01_synthesis_yosys/analysis/qor_metrics.json',
     metrics(
       ['synthesis_cell_area', 1200],
       ['runtime_seconds', 0.5],
@@ -344,7 +364,7 @@ async function createCompletedWorkspaceFixture(root: string): Promise<void> {
     ),
   )
   await writeJson(
-    'postFloorplan_ecc/analysis/qor_metrics.json',
+    '04_post_floorplan_ecc/analysis/qor_metrics.json',
     metrics(
       ['die_area', 3000],
       ['core_area', 2500],
@@ -353,7 +373,7 @@ async function createCompletedWorkspaceFixture(root: string): Promise<void> {
     ),
   )
   await writeJson(
-    'place_dreamplace/analysis/qor_metrics.json',
+    '05_placement_dreamplace/analysis/qor_metrics.json',
     metrics(
       ['place_hpwl', 4315],
       ['place_grwl', 3812],
@@ -367,27 +387,27 @@ async function createCompletedWorkspaceFixture(root: string): Promise<void> {
       ['peak_memory_mb', 100],
     ),
   )
-  await writeJson('CTS_ecc/feature/CTS.step.json', {
-    CTS: {
+  await writeJson('06_cts_ecc/feature/cts.step.json', {
+    cts: {
       total_clock_wirelength: 950,
       clock_path_max_buffer: 4,
       clock_path_min_buffer: 4,
     },
   })
   await writeJson(
-    'CTS_ecc/analysis/qor_metrics.json',
+    '06_cts_ecc/analysis/qor_metrics.json',
     metrics(['runtime_seconds', 2], ['peak_memory_mb', 200]),
   )
   await writeJson(
-    'legalization_dreamplace/analysis/qor_metrics.json',
+    '07_legalization_dreamplace/analysis/qor_metrics.json',
     metrics(['runtime_seconds', 3], ['peak_memory_mb', 0]),
   )
   await writeJson(
-    'timing_optimization_sizer/analysis/qor_metrics.json',
+    '08_timing_optimization_sizer/analysis/qor_metrics.json',
     metrics(['runtime_seconds', 3.5], ['peak_memory_mb', 0]),
   )
   await writeJson(
-    'route_ecc/analysis/qor_metrics.json',
+    '09_routing_ecc/analysis/qor_metrics.json',
     metrics(
       ['route_dr_total_violation_count', 0],
       ['route_dr_total_wirelength', 9999],
@@ -400,19 +420,19 @@ async function createCompletedWorkspaceFixture(root: string): Promise<void> {
     ),
   )
   await writeJson(
-    'drc_ecc/analysis/qor_metrics.json',
+    '12_drc_ecc/analysis/qor_metrics.json',
     metrics(['drc_count', 0], ['runtime_seconds', 5], ['peak_memory_mb', 100]),
   )
   await writeJson(
-    'lvs_ecc/analysis/qor_metrics.json',
+    '11_lvs_ecc/analysis/qor_metrics.json',
     metrics(['lvs_count', 0], ['runtime_seconds', 6], ['peak_memory_mb', 150]),
   )
   await writeJson(
-    'filler_ecc/analysis/qor_metrics.json',
+    '10_filler_ecc/analysis/qor_metrics.json',
     metrics(['runtime_seconds', 7], ['peak_memory_mb', 0]),
   )
   await writeJson(
-    'RCX_ecc/analysis/qor_metrics.json',
+    '13_rcx_ecc/analysis/qor_metrics.json',
     metrics(
       ['rcx_expected_corner_count', 3],
       ['rcx_spef_file_count', 3],
@@ -423,7 +443,7 @@ async function createCompletedWorkspaceFixture(root: string): Promise<void> {
     ),
   )
   await writeJson(
-    'sta_ecc/analysis/qor_metrics.json',
+    '14_sta_ecc/analysis/qor_metrics.json',
     metrics(
       ['sta_setup_violation_count', 0],
       ['sta_hold_violation_count', 0],
@@ -439,7 +459,7 @@ async function createCompletedWorkspaceFixture(root: string): Promise<void> {
     ),
   )
   await writeJson(
-    'Harden_ecc/analysis/qor_metrics.json',
+    '16_harden_ecc/analysis/qor_metrics.json',
     metrics(
       ['harden_artifact_missing_count', 0],
       ['runtime_seconds', 10],
@@ -452,11 +472,8 @@ async function createCompletedWorkspaceFixture(root: string): Promise<void> {
     'ML_125/RCworst': [8.9, 0.1, 964, 103.3, 89.1],
     'TYP_25/TYPICAL': [8.5, 0.14, 672, 66.8, 0.267],
   }
-  for (const [
-    corner,
-    [setupWns, holdWns, frequency, dynamicUw, leakageUw],
-  ] of Object.entries(corners)) {
-    const featureRoot = `sta_ecc/feature/${corner}`
+  for (const [corner, [setupWns, holdWns, frequency]] of Object.entries(corners)) {
+    const featureRoot = `14_sta_ecc/feature/${corner}`
     await writeJson(`${featureRoot}/qor_summary.json`, {
       summary: {
         setup: { wns: setupWns, tns: 0, nvp: 0, frequency_mhz: frequency },
@@ -464,16 +481,16 @@ async function createCompletedWorkspaceFixture(root: string): Promise<void> {
       },
       design_statistics: { cella: 1140 },
     })
-    await writeJson(`${featureRoot}/power_summary.json`, {
-      schema_version: 1,
-      internal_uw: dynamicUw - 10,
-      switching_uw: 10,
-      dynamic_uw: dynamicUw,
-      leakage_uw: leakageUw,
-    })
   }
+  await writeJson('15_power_analysis_ecc/feature/power_summary.json', {
+    schema_version: 1,
+    internal_uw: 56.8,
+    switching_uw: 10,
+    dynamic_uw: 66.8,
+    leakage_uw: 0.267,
+  })
   const configuredCorners = Object.keys(corners).sort()
-  await writeJson('sta_ecc/feature/sta.step.json', {
+  await writeJson('14_sta_ecc/feature/sta.step.json', {
     sta: {
       expected_corner_count: configuredCorners.length,
       loaded_corners: configuredCorners,
@@ -482,29 +499,29 @@ async function createCompletedWorkspaceFixture(root: string): Promise<void> {
       },
     },
   })
-  await writeJson('drc_ecc/checklist.json', checklist(['quality.drc.clean', 'pass']))
-  await writeJson('lvs_ecc/checklist.json', checklist(['quality.lvs.clean', 'pass']))
+  await writeJson('12_drc_ecc/checklist.json', checklist(['quality.drc.clean', 'pass']))
+  await writeJson('11_lvs_ecc/checklist.json', checklist(['quality.lvs.clean', 'pass']))
   await writeJson(
-    'filler_ecc/checklist.json',
+    '10_filler_ecc/checklist.json',
     checklist(['quality.filler.complete', 'pass']),
   )
   await writeJson(
-    'RCX_ecc/checklist.json',
+    '13_rcx_ecc/checklist.json',
     checklist(
       ['quality.rcx.corner_coverage', 'pass'],
       ['quality.rcx.spef_parse_health', 'pass'],
     ),
   )
   await writeJson(
-    'sta_ecc/checklist.json',
+    '14_sta_ecc/checklist.json',
     checklist(['quality.sta.setup_closed', 'pass'], ['quality.sta.hold_closed', 'pass']),
   )
   await writeJson(
-    'Harden_ecc/checklist.json',
+    '16_harden_ecc/checklist.json',
     checklist(['quality.mpc.minimum_area', 'pass'], ['quality.mpc.maximum_area', 'pass']),
   )
   for (const suffix of ['gds', 'lef', 'lib']) {
-    const output = join(root, 'Harden_ecc', 'output', `tiny_Harden.${suffix}`)
+    const output = join(root, '16_harden_ecc', 'output', `tiny_harden.${suffix}`)
     await mkdir(dirname(output), { recursive: true })
     await writeFile(output, suffix, 'utf8')
   }
@@ -512,7 +529,7 @@ async function createCompletedWorkspaceFixture(root: string): Promise<void> {
 }
 
 async function writeGeometrySnapshot(root: string): Promise<void> {
-  const geometryRoot = join(root, 'filler_ecc', 'output', 'geometry')
+  const geometryRoot = join(root, '10_filler_ecc', 'output', 'geometry')
   const headerSize = 56
   const shapeRecordSize = 56
   const ownerRecordSize = 40

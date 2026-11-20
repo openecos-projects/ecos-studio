@@ -11,7 +11,7 @@ from ecos_agent.optimization.execution import CANDIDATE_END_STEP
 # (candidates always start from an existing synthesized workspace) and
 # postRouteLec (skipped inside isolated candidate reruns).
 _CANDIDATE_SKIPPED_STAGES = frozenset(
-    {ECCStepName.SYNTHESIS, ECCStepName.LEC, ECCStepName.POST_ROUTE_LEC}
+    {ECCStepName.SYNTHESIS, ECCStepName.DIFF_OPT, ECCStepName.POST_ROUTE_LEC}
 )
 _ADVISORY_STAGES = frozenset({ECCStepName.ANTENNA_CHECK.value, ECCStepName.EMIR.value})
 _OPTIMIZATION_RERUN_STAGES = tuple(

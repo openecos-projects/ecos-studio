@@ -304,6 +304,7 @@ def test_materialization_evidence_reads_canonical_workspace_parameters_toml(tmp_
     materialization = native["materialization"]
     materialization.update(
         {
+            "target_step": "post_floorplan",
             "config_ref": "home/params.toml",
             "config_before_sha256": file_sha256(before),
             "config_after_sha256": file_sha256(config),
@@ -338,7 +339,7 @@ def test_materialization_evidence_reads_canonical_workspace_parameters_toml(tmp_
         ],
     }
 
-    _validate_materialization_files(candidate, payload, receipt, ("core", "utilitization"))
+    _validate_materialization_files(candidate, payload, receipt, ("params", "core", "utilitization"))
 
 
 def test_materialization_rejects_config_seed_diverging_from_receipt(
@@ -346,13 +347,13 @@ def test_materialization_rejects_config_seed_diverging_from_receipt(
 ) -> None:
     native, _evidence, _paths = _write_candidate_evidence(tmp_path)
     candidate = tmp_path / native["materialization"]["candidate_ref"]
-    config = candidate / "config/dreamplace_ecc.json"
+    config = candidate / "home/params.toml"
 
     def _receipt_with_config_seed(seed: int) -> ParameterApplicationReceipt:
         after = candidate / native["materialization"]["after_snapshot_ref"]
         for path in (config, after):
             path.write_text(
-                json.dumps({"target_density": 0.65, "random_seed": seed}),
+                f'[params.step_params.placement]\n"place.target_density" = 0.65\n"place.random_seed" = {seed}\n',
                 encoding="utf-8",
             )
         materialization = native["materialization"]
@@ -368,7 +369,7 @@ def test_materialization_rejects_config_seed_diverging_from_receipt(
         return {
             "configs": [
                 {
-                    "config_key": "dreamplace",
+                    "config_key": "parameters",
                     "ref": materialization.config_ref,
                     "before_sha256": materialization.config_before_sha256,
                     "after_sha256": materialization.config_after_sha256,
@@ -376,7 +377,7 @@ def test_materialization_rejects_config_seed_diverging_from_receipt(
             ],
             "snapshots": [
                 {
-                    "config_key": "dreamplace",
+                    "config_key": "parameters",
                     "before_ref": materialization.before_snapshot_ref,
                     "before_sha256": materialization.before_snapshot_sha256,
                     "after_ref": materialization.after_snapshot_ref,
@@ -387,7 +388,7 @@ def test_materialization_rejects_config_seed_diverging_from_receipt(
 
     matching = _receipt_with_config_seed(17)
     _validate_materialization_files(
-        candidate, _payload(matching), matching, ("target_density",)
+        candidate, _payload(matching), matching, ("params", "step_params", "placement", "place.target_density")
     )
 
     diverging = _receipt_with_config_seed(3000)
@@ -395,7 +396,7 @@ def test_materialization_rejects_config_seed_diverging_from_receipt(
         OptimizationEccAdapterError, match="materialization seed does not match"
     ):
         _validate_materialization_files(
-            candidate, _payload(diverging), diverging, ("target_density",)
+            candidate, _payload(diverging), diverging, ("params", "step_params", "placement", "place.target_density")
         )
 
 
@@ -443,8 +444,8 @@ def test_materialization_numeric_representation_preserves_requested_domain(
         candidate.name,
         knob_id,
         requested,
-        "place",
-        "config/dreamplace_ecc.json",
+        "placement",
+        "home/params.toml",
     )
 
 
@@ -667,7 +668,7 @@ def test_adapter_rejects_terminal_execution_contract_drift() -> None:
             "state": "succeeded",
             "result": {
                 "targetStep": "Floorplan",
-                "endStep": "Harden",
+                "endStep": "harden",
                 "executionScope": "full_flow",
             },
         },

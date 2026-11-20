@@ -72,9 +72,7 @@
               </span>
               <span class="background-task-copy">
                 <strong>{{ taskLabel(operation.workspaceDirectory) }}</strong>
-                <span>{{
-                  operation.currentStep || operation.step || 'Preparing Flow'
-                }}</span>
+                <span>{{ operationStepLabel(operation) || 'Preparing Flow' }}</span>
               </span>
               <span class="background-task-meta">
                 <span>{{
@@ -184,6 +182,7 @@
 </template>
 
 <script setup lang="ts">
+import { operationStepLabel } from '@/utils/operationStepLabel'
 import type {
   DesktopAgentOptimizationEpisodeState,
   DesktopAgentOptimizationEpisodeSummary,

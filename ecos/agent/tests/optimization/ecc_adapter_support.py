@@ -155,7 +155,7 @@ def _native_receipt_payload(
         },
         "context": {
             "run_id": Path(candidate_ref).name,
-            "stage": "place",
+            "stage": "placement",
             "lattice_version": "ecos.optimization_lattice.v1",
             "context_sha256": HASH,
             "parameter_card_sha256": card_hash(card),
@@ -175,7 +175,7 @@ def _native_receipt_payload(
             "candidate_ref": candidate_ref,
             "parent_ref": parent_ref,
             "workspace_ref": candidate_ref,
-            "target_step": "place",
+            "target_step": "placement",
             "config_ref": config["ref"],
             "config_before_sha256": config["before_sha256"],
             "config_after_sha256": config["after_sha256"],
@@ -212,40 +212,39 @@ def _write_candidate_evidence(
     candidate_ref = ".agent/candidates/candidate-0c4c4b249d945101-intervention-1"
     candidate = root / candidate_ref
     analysis = candidate / "analysis"
-    config_path = candidate / "config/dreamplace_ecc.json"
+    config_path = candidate / "home/params.toml"
     before_path = (
         analysis
-        / "candidate_config_snapshots.v1/candidate-0c4c4b249d945101-intervention-1/dreamplace.before.json"
+        / "candidate_config_snapshots.v1/candidate-0c4c4b249d945101-intervention-1/parameters.before.json"
     )
-    after_path = before_path.with_name("dreamplace.after.json")
-    for path, payload in (
-        (config_path, {"target_density": 0.65, "random_seed": 17}),
-        (before_path, {"target_density": 0.6}),
-        (after_path, {"target_density": 0.65, "random_seed": 17}),
-    ):
+    after_path = before_path.with_name("parameters.after.json")
+    for path, density in ((config_path, 0.65), (before_path, 0.6), (after_path, 0.65)):
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload), encoding="utf-8")
+        path.write_text(
+            f'schema_version = 4\n[params.step_params.placement]\n"place.target_density" = {density}\n"place.random_seed" = 17\n',
+            encoding="utf-8",
+        )
     patch = [{"knob_id": "place.target_density", "value": 0.65}]
     materialization = {
         "schema": "ecc.workspace.candidate_materialization.v1",
         "schema_version": 1,
         "candidate_id": candidate.name,
-        "target_step": "place",
-        "target": {"step": "place"},
+        "target_step": "placement",
+        "target": {"step": "placement"},
         "registry_sha256": HASH,
         "patch": patch,
         "patch_sha256": canonical_sha256(patch),
         "configs": [
             {
-                "config_key": "dreamplace",
-                "ref": "config/dreamplace_ecc.json",
+                "config_key": "parameters",
+                "ref": "home/params.toml",
                 "before_sha256": file_sha256(before_path),
                 "after_sha256": file_sha256(config_path),
             }
         ],
         "snapshots": [
             {
-                "config_key": "dreamplace",
+                "config_key": "parameters",
                 "before_ref": before_path.relative_to(candidate).as_posix(),
                 "before_sha256": file_sha256(before_path),
                 "after_ref": after_path.relative_to(candidate).as_posix(),
@@ -271,8 +270,8 @@ def _write_candidate_evidence(
             "parent_candidate_root_ref": None,
             "candidate_flow_sha256": HASH,
             "candidate_state_sha256": HASH,
-            "target_step": "place",
-            "end_step": "Harden",
+            "target_step": "placement",
+            "end_step": "harden",
             "execution_scope": "full_flow",
             "terminal_state": "succeeded",
         }
@@ -303,8 +302,8 @@ def _write_candidate_evidence(
         "candidate_flow_sha256": HASH,
         "candidate_state_sha256": HASH,
         "terminal_state": terminal_state,
-        "target_step": "place",
-        "end_step": "Harden",
+        "target_step": "placement",
+        "end_step": "harden",
         "execution_scope": "full_flow",
         "artifacts": {
             "candidate_materialization": {
@@ -318,8 +317,8 @@ def _write_candidate_evidence(
         "candidateRootRef": candidate_ref,
         "candidateManifestRef": manifest.relative_to(root).as_posix(),
         "candidateManifestSha256": file_sha256(manifest),
-        "targetStep": "place",
-        "endStep": "Harden",
+        "targetStep": "placement",
+        "endStep": "harden",
         "executionScope": "full_flow",
         "parameterApplicationReceiptRef": receipt_path.relative_to(root).as_posix(),
         "parameterApplicationReceiptSha256": file_sha256(receipt_path),

@@ -165,6 +165,8 @@ export function flowSection(
     steps: ReadonlyArray<{
       name: string
       state: string
+      category?: 'PNR' | 'CHECKER'
+      inputStep?: string
       runtime?: string
       peakMemory?: number
       tool?: string
@@ -194,6 +196,9 @@ export function flowSection(
         if (!step || typeof step.name !== 'string') return []
         if (isObsoleteFlowStepName(step.name)) return []
         const liveStep = liveSteps.get(step.name)
+        const category = liveStep?.category ?? step.category
+        const inputStep =
+          liveStep?.inputStep ?? step.input_step ?? record(step.info)?.input_step
         const toolId = liveStep?.tool ?? (typeof step.tool === 'string' ? step.tool : '')
         const runtimeSeconds = parseRuntimeSeconds(
           String(liveStep?.runtime ?? step.runtime ?? ''),
@@ -210,6 +215,9 @@ export function flowSection(
         return [
           {
             stepId: step.name,
+            ...(category === 'PNR' || category === 'CHECKER' ? { category } : {}),
+            ...(typeof inputStep === 'string' && inputStep ? { inputStep } : {}),
+            ...(typeof step.directory === 'string' ? { directory: step.directory } : {}),
             order,
             name: step.name,
             state: normalizeFlowState(String(liveStep?.state ?? step.state ?? '')),

@@ -12,18 +12,17 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
-from ecos_agent.workspace.contracts import GUI_WORKSPACE_FLOW_STEPS
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization.contracts import (
     TerminalObservation,
 )
-from ecos_agent.optimization.ecc.rpc_client import EccContentLengthRpcClient
+from ecos_agent.workspace.step_directories import step_directory
 from ecos_agent.optimization.experiments.equal_budget import (
     validate_design_manifest,
 )
 from ecos_agent.optimization.observations import build_terminal_observation
 from ecos_agent.optimization.observation_contracts import deterministic_noise_profile
-from ecos_agent.optimization.experiments.offline_runtime import ecc_rpc_serve_executable
+from ecos_agent.optimization.experiments.offline_runtime import ecc_cli_executable
 from ecos_agent.optimization.runtime import (
     _optimization_rerun_runtime_seconds,
 )
@@ -33,8 +32,6 @@ from ecos_agent.workspace.parameters import (
 )
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
-_SETUP_METHODS = frozenset({"workspace.create", "operation.start_flow"})
-_TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
 # Adaptive replay protocol: two replays establish epsilon when bitwise
 # identical; the third only runs when drift appears and needs bounding.
 _DEFAULT_REPLAYS = 3
@@ -185,65 +182,51 @@ def _ensure_workspace(
     workspace: Path,
     timeout: float,
 ) -> TerminalObservation:
+    project = workspace.with_name(f"{workspace.name}.project")
+    run_args = ["run", "--project", str(project), "--workspace", str(workspace.resolve())]
     if (workspace / "home/flow.json").is_file():
-        if _workspace_flow_succeeded(workspace):
-            _verify_workspace_inputs(manifest, design, workspace)
-            return _terminal_observation(workspace)
-        _verify_workspace_binding(manifest, design, workspace)
-        client = EccContentLengthRpcClient(ecc_rpc_serve_executable())
-        try:
-            workspace_id = client.open_workspace(workspace)
-            _run_canonical_flow(client, workspace_id, design.design_id, timeout)
-        finally:
-            client.close()
         _verify_workspace_inputs(manifest, design, workspace)
-        return _terminal_observation(workspace)
-    if workspace.exists():
-        raise ValueError("incomplete Phase 8 workspace already exists")
-    client = EccContentLengthRpcClient(ecc_rpc_serve_executable())
-    try:
-        request = _workspace_request(manifest, design, workspace)
-        created = _setup_request(client, "workspace.create", request, 120.0)
-        workspace_id = created.get("workspaceId")
-        if not isinstance(workspace_id, str) or not _ID.fullmatch(workspace_id):
-            raise ValueError("Phase 8 workspace id is invalid")
-        _run_canonical_flow(client, workspace_id, design.design_id, timeout)
-    finally:
-        client.close()
-    _verify_workspace_inputs(manifest, design, workspace)
+        if _workspace_flow_succeeded(workspace):
+            _verify_workspace_parameters(manifest, design, workspace)
+            return _terminal_observation(workspace)
+        if not (project / "project.json").is_file():
+            raise ValueError(f"Experiment project is unavailable: {project}")
+    else:
+        if workspace.exists():
+            raise ValueError("incomplete Phase 8 workspace already exists")
+        if not (project / "project.json").is_file():
+            _run_ecc(["init", str(project), "--design-name", design.design_id], timeout)
+        settings = {
+            "design.rtl": json.dumps([str(design.filelist.resolve())]),
+            "design.top": design.top_module, "design.clock_port": design.clock_name,
+            "design.frequency_mhz": manifest.baseline["frequency_mhz"],
+            "design.sdc": str(design.sdc.resolve()),
+            "pdk.name": manifest.pdk_name, "pdk.root": str(manifest.pdk_root.resolve()),
+            "flow.preset": "rtl2gds",
+        }
+        _run_ecc(["project", "apply", "--project", str(project), *_set_args(settings)], timeout)
+        run_args.extend(_set_args(_baseline_parameters(manifest)))
+    _run_ecc(run_args, timeout)
+    _verify_workspace_binding(manifest, design, workspace)
     return _terminal_observation(workspace)
+
+
+def _set_args(values: dict) -> list[str]:
+    return [arg for key, value in values.items() for arg in ("--set", f"{key}={value}")]
+
+
+def _run_ecc(args: list[str], timeout: float) -> None:
+    subprocess.run([str(ecc_cli_executable()), *args, "--plain"], check=True, timeout=timeout)
 
 
 def _workspace_flow_succeeded(workspace: Path) -> bool:
     flow = _workspace_json(workspace, "home/flow.json")
     steps = flow.get("steps")
-    if not isinstance(steps, list) or [
-        item.get("name") for item in steps if isinstance(item, dict)
-    ] != list(GUI_WORKSPACE_FLOW_STEPS):
+    if not isinstance(steps, list) or not steps or steps[-1].get("name") != "harden":
         raise ValueError("Phase 8 workspace flow is invalid")
-    return all(item.get("state") == "Success" for item in steps)
-
-
-def _run_canonical_flow(
-    client: EccContentLengthRpcClient,
-    workspace_id: str,
-    design_id: str,
-    timeout: float,
-) -> None:
-    operation = _setup_request(
-        client,
-        "operation.start_flow",
-        {
-            "workspaceId": workspace_id,
-            "rerun": False,
-            "origin": "gui",
-            "idempotencyKey": f"phase8.{design_id}.canonical",
-        },
-        30.0,
+    return steps[-1].get("state") == "Success" and all(
+        step.get("state") in {"Success", "Skipped"} for step in steps
     )
-    terminal = _wait_operation(client, operation, timeout)
-    if terminal.get("state") != "succeeded":
-        raise ValueError("Phase 8 canonical flow failed")
 
 
 def _terminal_observation(workspace: Path) -> TerminalObservation:
@@ -263,7 +246,7 @@ def _verify_workspace_binding(
 def _verify_workspace_inputs(
     manifest: ExperimentManifest, design: DesignSpec, workspace: Path
 ) -> None:
-    filelist = _workspace_file(workspace, Path("origin/filelist.f"))
+    filelist = _workspace_file(workspace, Path("origin") / design.filelist.name)
     sdc = _workspace_file(workspace, Path("origin") / design.sdc.name)
     refs = _filelist_refs(filelist)
     rtl = tuple(_workspace_file(workspace, Path("origin") / ref) for ref in refs)
@@ -292,7 +275,8 @@ def _verify_workspace_parameters(
         _parameters_ref, parameters = read_workspace_parameters(workspace)
     except WorkspaceParametersError as exc:
         raise ValueError("Phase 8 workspace parameters are invalid") from exc
-    dreamplace = _workspace_json(workspace, "config/dreamplace_ecc.json")
+    placement = step_directory(workspace, "placement")
+    dreamplace = _workspace_json(workspace, f"{placement}/config/dreamplace_ecc.json")
     cts = _workspace_json(workspace, "config/cts_ecc.json")
     floorplan = _workspace_json(workspace, "config/floorplan_ecc.json")
     baseline = manifest.baseline
@@ -346,42 +330,17 @@ def _workspace_file(workspace: Path, relative: Path) -> Path:
     return resolved
 
 
-def _workspace_request(
-    manifest: ExperimentManifest, design: DesignSpec, workspace: Path
-) -> dict[str, object]:
+def _baseline_parameters(manifest: ExperimentManifest) -> dict[str, object]:
     baseline = manifest.baseline
-    site_width = _site_width_dbu_from_pdk(manifest.pdk_root)
     return {
-        "directory": str(workspace),
-        "filelist": str(design.filelist),
-        "flowConfig": {
-            "start_step": "Synthesis",
-            "end_step": "Harden",
-            "steps": list(GUI_WORKSPACE_FLOW_STEPS),
-        },
-        "originDef": "",
-        "originVerilog": "",
-        "parameters": {
-            "Clock": design.clock_name,
-            "Design": design.design_id,
-            "Top module": design.top_module,
-            "Frequency max [MHz]": baseline["frequency_mhz"],
-            "Max fanout": baseline["max_fanout"],
-            "Target density": baseline["target_density"],
-            "Target overflow": baseline["target_overflow"],
-            "Cell padding x": baseline["cell_padding_sites"] * site_width,
-            "Routability opt flag": int(bool(baseline["routability_opt"])),
-            "Density weight": baseline["density_weight"],
-            "Core": {
-                "Utilitization": baseline["core_utilization"],
-                "Aspect ratio": baseline["core_aspect_ratio"],
-            },
-        },
-        "pdk": manifest.pdk_name,
-        "pdkJson": None,
-        "pdkRoot": str(manifest.pdk_root),
-        "rtlList": [str(path) for path in design.rtl_list],
-        "sdc": str(design.sdc),
+        "cts.max_fanout": baseline["max_fanout"],
+        "floorplan.core_util": baseline["core_utilization"],
+        "floorplan.aspect_ratio": baseline["core_aspect_ratio"],
+        "placement:place.target_density": baseline["target_density"],
+        "placement:place.stop_overflow": baseline["target_overflow"],
+        "placement:place.cell_padding_x": baseline["cell_padding_sites"] * _site_width_dbu_from_pdk(manifest.pdk_root),
+        "placement:place.routability_opt_flag": int(bool(baseline["routability_opt"])),
+        "placement:place.density_weight": baseline["density_weight"],
     }
 
 
@@ -417,10 +376,8 @@ def _calibrate(
             observation, runtime = _run_default_replay(
                 manifest,
                 design,
-                workspace,
                 replay_root,
                 timeout,
-                index,
             )
         if not isinstance(runtime, (int, float)) or runtime <= 0:
             raise ValueError("Phase 8 default replay runtime is invalid")
@@ -492,7 +449,7 @@ def _noise_context_payload(
     manifest: ExperimentManifest, workspace: Path
 ) -> dict[str, object]:
     repo_root = Path(__file__).resolve().parents[6]
-    ecc_executable = ecc_rpc_serve_executable()
+    ecc_executable = ecc_cli_executable()
     # Design inputs enter through workspace/origin/ (the exact bytes the
     # canonical flow consumed); `design` itself needs no separate entry.
     return {
@@ -542,46 +499,14 @@ def _replays_drift(observations: list[TerminalObservation]) -> bool:
 def _run_default_replay(
     manifest: ExperimentManifest,
     design: DesignSpec,
-    workspace: Path,
     output: Path,
     timeout: float,
-    index: int,
 ) -> tuple[TerminalObservation, float]:
     output.mkdir(parents=True, exist_ok=True)
     replay_workspace = output / "workspace"
-    if not replay_workspace.exists():
-        shutil.copytree(
-            workspace,
-            replay_workspace,
-            ignore=shutil.ignore_patterns(".agent"),
-        )
-    _verify_workspace_inputs(manifest, design, replay_workspace)
-    terminal_path = output / "flow-terminal-result.v1.json"
-    terminal = (
-        json.loads(terminal_path.read_text(encoding="utf-8"))
-        if terminal_path.is_file()
-        else None
-    )
     started = time.monotonic()
-    if not isinstance(terminal, dict) or terminal.get("state") != "succeeded":
-        client = EccContentLengthRpcClient(ecc_rpc_serve_executable())
-        request = {
-            "workspaceId": client.open_workspace(replay_workspace),
-            "rerun": True,
-            "origin": "gui",
-            "idempotencyKey": f"phase8.{design.design_id}.default-replay-{index}",
-        }
-        _write_json(output / "flow-start-request.v1.json", request)
-        try:
-            operation = _setup_request(client, "operation.start_flow", request, 30.0)
-            terminal = _wait_operation(client, operation, timeout)
-        finally:
-            client.close()
-        _write_json(terminal_path, terminal)
-    if terminal.get("state") != "succeeded":
-        raise ValueError("Phase 8 default replay failed")
-    _verify_workspace_inputs(manifest, design, replay_workspace)
-    observation = _terminal_observation(replay_workspace)
+    observation = _ensure_workspace(manifest, design, replay_workspace, timeout)
+    _write_json(output / "flow-terminal-result.v1.json", {"state": "succeeded"})
     runtime = _optimization_rerun_runtime_seconds(replay_workspace)
     _write_json(output / "terminal-observation.v1.json", observation.model_dump(mode="json"))
     _write_json(
@@ -592,33 +517,6 @@ def _run_default_replay(
         },
     )
     return observation, runtime
-
-
-def _setup_request(
-    client: EccContentLengthRpcClient,
-    method: str,
-    params: dict[str, object],
-    timeout: float,
-) -> dict[str, object]:
-    if method not in _SETUP_METHODS:
-        raise ValueError("Phase 8 setup RPC method is not allowed")
-    return client._request(method, params, timeout_seconds=timeout)
-
-
-def _wait_operation(
-    client: EccContentLengthRpcClient,
-    operation: dict[str, object],
-    timeout: float,
-) -> dict[str, object]:
-    if operation.get("state") in _TERMINAL_STATES:
-        return operation
-    operation_id = operation.get("operationId")
-    if not isinstance(operation_id, str) or not _ID.fullmatch(operation_id):
-        raise ValueError("Phase 8 operation id is invalid")
-    terminal = client.wait_for_terminal(operation_id, timeout)
-    if terminal is None:
-        raise ValueError("Phase 8 operation timed out")
-    return terminal
 
 
 def _site_width_dbu_from_pdk(pdk_root: Path) -> int:

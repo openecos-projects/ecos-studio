@@ -27,11 +27,11 @@ def read_workspace_parameters(root: Path) -> tuple[str, dict[str, Any]]:
         raise OptimizationObservationError(str(exc)) from exc
 
 
-def harden_output_paths(parameters: dict[str, Any]) -> tuple[str, str, str]:
+def harden_output_paths(parameters: dict[str, Any], directory: str) -> tuple[str, str, str]:
     design = parameters.get("design")
     if not isinstance(design, str) or not _DESIGN_ID.fullmatch(design):
         raise OptimizationObservationError("workspace design identifier is invalid")
-    prefix = f"Harden_ecc/output/{design}_Harden"
+    prefix = f"{directory}/output/{design}_harden"
     return (f"{prefix}.gds", f"{prefix}.lef", f"{prefix}.lib")
 
 

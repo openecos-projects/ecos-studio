@@ -128,7 +128,7 @@ def _load_card_entry(
             "parameter card lattice does not match the frozen contract"
         )
     spec = knob_spec(knob_id)
-    target = spec.evidence_target
+    target = spec.write_target
     expected_type, expected_unit = _EXPECTED_SURFACES[card.knob_id]
     bounds = RequestedValueBounds(
         type={"bool": "boolean", "int": "integer", "float": "number"}[expected_type],

@@ -1,115 +1,61 @@
 export const projectManagementWorkspaceStepAnalysisSpecs = [
   {
     step: 'Synth',
-    eccStepIds: ['Synthesis'],
-    metricsPath: 'Synthesis_yosys/analysis/qor_metrics.json',
-    summaryPath: 'Synthesis_yosys/analysis/qor_summary.json',
-    hotspotsPath: 'Synthesis_yosys/analysis/qor_hotspots.json',
+    eccStepIds: ['synthesis'],
   },
   {
     step: 'Floor',
-    eccStepIds: ['postFloorplan', 'preFloorplan', 'macroPlacement'],
-    metricsPath: 'postFloorplan_ecc/analysis/qor_metrics.json',
-    summaryPath: 'postFloorplan_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'postFloorplan_ecc/analysis/qor_hotspots.json',
+    eccStepIds: ['post_floorplan', 'pre_floorplan', 'macro_placement'],
   },
   {
     step: 'Place',
-    eccStepIds: ['place', 'preplace', 'diff_sizing'],
-    metricsPath: 'place_dreamplace/analysis/qor_metrics.json',
-    summaryPath: 'place_dreamplace/analysis/qor_summary.json',
-    hotspotsPath: 'place_dreamplace/analysis/qor_hotspots.json',
+    eccStepIds: ['placement', 'preplace', 'diff_sizing'],
   },
   {
     step: 'CTS',
-    eccStepIds: ['CTS'],
-    metricsPath: 'CTS_ecc/analysis/qor_metrics.json',
-    summaryPath: 'CTS_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'CTS_ecc/analysis/qor_hotspots.json',
+    eccStepIds: ['cts'],
   },
   {
     step: 'Legal',
     eccStepIds: ['legalization'],
-    metricsPath: 'legalization_dreamplace/analysis/qor_metrics.json',
-    summaryPath: 'legalization_dreamplace/analysis/qor_summary.json',
-    hotspotsPath: 'legalization_dreamplace/analysis/qor_hotspots.json',
   },
   {
     step: 'Timing Opt',
-    eccStepIds: ['Timing optimization'],
-    metricsPath: 'timing_optimization_sizer/analysis/qor_metrics.json',
-    summaryPath: 'timing_optimization_sizer/analysis/qor_summary.json',
-    hotspotsPath: 'timing_optimization_sizer/analysis/qor_hotspots.json',
+    eccStepIds: ['timing_optimization'],
   },
   {
     step: 'Route',
-    eccStepIds: ['route'],
-    metricsPath: 'route_ecc/analysis/qor_metrics.json',
-    summaryPath: 'route_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'route_ecc/analysis/qor_hotspots.json',
+    eccStepIds: ['routing'],
   },
   {
     step: 'Filler',
     eccStepIds: ['filler'],
-    metricsPath: 'filler_ecc/analysis/qor_metrics.json',
-    summaryPath: 'filler_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'filler_ecc/analysis/qor_hotspots.json',
   },
   {
     step: 'LVS',
     eccStepIds: ['lvs'],
-    metricsPath: 'lvs_ecc/analysis/qor_metrics.json',
-    summaryPath: 'lvs_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'lvs_ecc/analysis/qor_hotspots.json',
   },
   {
     step: 'DRC',
     eccStepIds: ['drc'],
-    metricsPath: 'drc_ecc/analysis/qor_metrics.json',
-    summaryPath: 'drc_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'drc_ecc/analysis/qor_hotspots.json',
   },
   {
     step: 'RCX',
-    eccStepIds: ['RCX'],
-    metricsPath: 'RCX_ecc/analysis/qor_metrics.json',
-    summaryPath: 'RCX_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'RCX_ecc/analysis/qor_hotspots.json',
+    eccStepIds: ['rcx'],
   },
   {
     step: 'STA',
     eccStepIds: ['sta'],
-    metricsPath: 'sta_ecc/analysis/qor_metrics.json',
-    summaryPath: 'sta_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'sta_ecc/analysis/qor_hotspots.json',
   },
   {
     step: 'Power Analysis',
-    eccStepIds: ['powerAnalysis'],
-    metricsPath: 'powerAnalysis_ecc/analysis/qor_metrics.json',
-    summaryPath: 'powerAnalysis_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'powerAnalysis_ecc/analysis/qor_hotspots.json',
+    eccStepIds: ['power_analysis'],
   },
   {
     step: 'Harden',
-    eccStepIds: ['Harden'],
-    metricsPath: 'Harden_ecc/analysis/qor_metrics.json',
-    summaryPath: 'Harden_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'Harden_ecc/analysis/qor_hotspots.json',
+    eccStepIds: ['harden'],
   },
 ] as const
-
-export const projectManagementStaTimingIssuesPath =
-  'sta_ecc/analysis/sta_timing_issues.json'
-
-export const projectManagementWorkspaceSummaryPaths = [
-  ...projectManagementWorkspaceStepAnalysisSpecs.flatMap((spec) => [
-    spec.metricsPath,
-    spec.summaryPath,
-    spec.hotspotsPath,
-  ]),
-  projectManagementStaTimingIssuesPath,
-]
 
 export const projectManagementFrontendWorkspaceStepAnalysisSpecs = [
   {
@@ -158,14 +104,6 @@ export const projectManagementFrontendWorkspaceSummaryPaths = [
     spec.hotspotsPath,
   ]),
 ]
-
-export function projectManagementWorkspaceSummaryPathsFor(
-  projectType: 'backend' | 'frontend',
-): readonly string[] {
-  return projectType === 'frontend'
-    ? projectManagementFrontendWorkspaceSummaryPaths
-    : projectManagementWorkspaceSummaryPaths
-}
 
 export type ProjectAnalysisArtifactKind =
   | 'qor_metrics'

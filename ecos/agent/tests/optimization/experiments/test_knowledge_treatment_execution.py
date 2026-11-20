@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+from ecos_agent.workspace.contracts import GUI_WORKSPACE_FLOW_STEPS
+
 import pytest
 
 from ecos_agent.hashing import canonical_sha256
@@ -86,7 +88,7 @@ def test_phase8_runner_rejects_unsupported_filelist_entry(tmp_path) -> None:
         runner._filelist_refs(filelist)
 
 
-def test_phase8_runner_uses_gui_origin_for_canonical_flow(tmp_path, monkeypatch) -> None:
+def test_phase8_runner_uses_step_scoped_cli_for_canonical_flow(tmp_path, monkeypatch) -> None:
     runner = _load_experiment_execution()
     tech = tmp_path / "pdk/prtech/techLEF/N551P6M_ecos.lef"
     tech.parent.mkdir(parents=True)
@@ -117,29 +119,15 @@ def test_phase8_runner_uses_gui_origin_for_canonical_flow(tmp_path, monkeypatch)
     manifest = runner.ExperimentManifest(HASH, (design,), baseline, "ics55", tech.parents[2])
     calls = []
 
-    class FakeClient:
-        def __init__(self, *_args, **_kwargs) -> None:
-            pass
-
-        def _request(self, method, params, *, timeout_seconds):
-            calls.append((method, params, timeout_seconds))
-            if method == "workspace.create":
-                return {"workspaceId": "workspace"}
-            return {"operationId": "flow", "state": "succeeded"}
-
-        def close(self) -> None:
-            pass
-
-    monkeypatch.setattr(runner, "EccContentLengthRpcClient", FakeClient)
-    monkeypatch.setattr(runner, "ecc_rpc_serve_executable", lambda: tmp_path / "ecc")
+    monkeypatch.setattr(runner, "_run_ecc", lambda args, timeout: calls.append(args))
     monkeypatch.setattr(runner, "_verify_workspace_binding", lambda *_args: None)
     monkeypatch.setattr(runner, "_verify_workspace_inputs", lambda *_args: None)
     monkeypatch.setattr(runner, "build_terminal_observation", lambda _workspace: _terminal_observation())
 
     runner._ensure_workspace(manifest, design, tmp_path / "workspace", 1.0)
 
-    start = next(params for method, params, _ in calls if method == "operation.start_flow")
-    assert start["origin"] == "gui"
+    assert [call[0] for call in calls] == ["init", "project", "run"]
+    assert f"placement:place.stop_overflow={baseline['target_overflow']}" in calls[2]
 
 
 def test_phase8_runner_resumes_created_unstarted_workspace(
@@ -153,7 +141,7 @@ def test_phase8_runner_resumes_created_unstarted_workspace(
             {
                 "steps": [
                     {"name": name, "state": "Unstart"}
-                    for name in runner.GUI_WORKSPACE_FLOW_STEPS
+                    for name in GUI_WORKSPACE_FLOW_STEPS
                 ]
             }
         ),
@@ -162,30 +150,22 @@ def test_phase8_runner_resumes_created_unstarted_workspace(
     calls = []
     started = False
 
-    class FakeClient:
-        def __init__(self, *_args, **_kwargs) -> None:
-            pass
+    project = workspace.with_name(f"{workspace.name}.project")
+    project.mkdir()
+    (project / "project.json").write_text("{}")
 
-        def open_workspace(self, directory):
-            calls.append(("workspace.open", directory, None))
-            return "workspace"
-
-        def _request(self, method, params, *, timeout_seconds):
-            nonlocal started
-            calls.append((method, params, timeout_seconds))
-            started = True
-            return {"operationId": "flow", "state": "succeeded"}
-
-        def close(self) -> None:
-            pass
+    def run_ecc(args, timeout):
+        nonlocal started
+        calls.append(args)
+        started = True
 
     manifest = object()
     design = runner.DesignSpec(
         "design", "top", "clk", tmp_path / "filelist.f", (), tmp_path / "design.sdc"
     )
     observation = _terminal_observation()
-    monkeypatch.setattr(runner, "EccContentLengthRpcClient", FakeClient)
-    monkeypatch.setattr(runner, "ecc_rpc_serve_executable", lambda: tmp_path / "ecc")
+    monkeypatch.setattr(runner, "_run_ecc", run_ecc)
+    monkeypatch.setattr(runner, "ecc_cli_executable", lambda: tmp_path / "ecc")
     monkeypatch.setattr(runner, "_verify_workspace_binding", lambda *_args: None)
     monkeypatch.setattr(runner, "_verify_workspace_inputs", lambda *_args: None)
     monkeypatch.setattr(
@@ -197,9 +177,7 @@ def test_phase8_runner_resumes_created_unstarted_workspace(
     )
 
     assert runner._ensure_workspace(manifest, design, workspace, 1.0) == observation
-    assert calls[0] == ("workspace.open", workspace, None)
-    assert calls[1][0] == "operation.start_flow"
-    assert calls[1][1]["rerun"] is False
+    assert calls == [["run", "--project", str(project), "--workspace", str(workspace.resolve())]]
 
 
 def _canonical_workspace(tmp_path) -> Path:
@@ -211,7 +189,7 @@ def _canonical_workspace(tmp_path) -> Path:
             {
                 "steps": [
                     {"name": name, "state": "Success"}
-                    for name in runner.GUI_WORKSPACE_FLOW_STEPS
+                    for name in GUI_WORKSPACE_FLOW_STEPS
                 ]
             }
         ),
@@ -240,23 +218,11 @@ def _calibration_manifest(tmp_path, density_weight: float = 0.00085):
     return manifest, design
 
 
-def _replay_client(calls: list) -> type:
-    class FakeClient:
-        def __init__(self, *_args, **_kwargs) -> None:
-            pass
-
-        def open_workspace(self, directory):
-            calls.append(("workspace.open", directory, None))
-            return "workspace"
-
-        def _request(self, method, params, *, timeout_seconds):
-            calls.append((method, params, timeout_seconds))
-            return {"operationId": "flow", "state": "succeeded"}
-
-        def close(self) -> None:
-            pass
-
-    return FakeClient
+def _replay_runner(calls, observation_for):
+    def run(_manifest, _design, workspace, _timeout):
+        calls.append(workspace)
+        return observation_for(workspace)
+    return run
 
 
 def _patch_calibration(
@@ -267,7 +233,7 @@ def _patch_calibration(
 ) -> None:
     runner = _load_experiment_execution()
     (tmp_path / "ecc").write_bytes(b"ecc-agent-rpc")
-    monkeypatch.setattr(runner, "ecc_rpc_serve_executable", lambda: tmp_path / "ecc")
+    monkeypatch.setattr(runner, "ecc_cli_executable", lambda: tmp_path / "ecc")
     monkeypatch.setattr(runner, "_verify_workspace_binding", lambda *_args: None)
     monkeypatch.setattr(runner, "_verify_workspace_inputs", lambda *_args: None)
     monkeypatch.setattr(
@@ -287,7 +253,7 @@ def test_phase8_calibration_stops_after_two_identical_replays(
     observation = _terminal_observation()
     calls: list = []
     _patch_calibration(monkeypatch, tmp_path, lambda _workspace: observation)
-    monkeypatch.setattr(runner, "EccContentLengthRpcClient", _replay_client(calls))
+    monkeypatch.setattr(runner, "_ensure_workspace", _replay_runner(calls, runner.build_terminal_observation))
 
     reference, runtime, _epsilon = runner._calibrate(
         manifest,
@@ -298,19 +264,17 @@ def test_phase8_calibration_stops_after_two_identical_replays(
         1.0,
     )
 
-    starts = [params for method, params, _ in calls if method == "operation.start_flow"]
     assert reference == observation
     assert runtime == 12.0
-    assert len(starts) == 2
-    assert all(item["rerun"] is True for item in starts)
-    assert all(item["origin"] == "gui" for item in starts)
+    assert len(calls) == 2
+    assert len(set(calls)) == 2
     context = json.loads(
         (tmp_path / "calibration" / "noise-context.v1.json").read_text(encoding="utf-8")
     )
     assert context["schema_version"] == "ecos.noise_context.v1"
     assert context["fingerprint"].startswith("sha256:")
     assert context["context"]["baseline"] == {"density_weight": 0.00085}
-    assert context["context"]["flow_steps"] == list(runner.GUI_WORKSPACE_FLOW_STEPS)
+    assert context["context"]["flow_steps"] == list(GUI_WORKSPACE_FLOW_STEPS)
 
 
 def test_phase8_calibration_runs_third_replay_when_drift_appears(
@@ -330,7 +294,7 @@ def test_phase8_calibration_runs_third_replay_when_drift_appears(
 
     calls: list = []
     _patch_calibration(monkeypatch, tmp_path, observation_for)
-    monkeypatch.setattr(runner, "EccContentLengthRpcClient", _replay_client(calls))
+    monkeypatch.setattr(runner, "_ensure_workspace", _replay_runner(calls, runner.build_terminal_observation))
 
     runner._calibrate(
         manifest,
@@ -341,8 +305,7 @@ def test_phase8_calibration_runs_third_replay_when_drift_appears(
         1.0,
     )
 
-    starts = [params for method, params, _ in calls if method == "operation.start_flow"]
-    assert len(starts) == 3
+    assert len(calls) == 3
 
 
 def test_phase8_calibration_reuses_cached_replays_for_unchanged_context(
@@ -354,14 +317,14 @@ def test_phase8_calibration_reuses_cached_replays_for_unchanged_context(
     observation = _terminal_observation()
     calls: list = []
     _patch_calibration(monkeypatch, tmp_path, lambda _workspace: observation)
-    monkeypatch.setattr(runner, "EccContentLengthRpcClient", _replay_client(calls))
+    monkeypatch.setattr(runner, "_ensure_workspace", _replay_runner(calls, runner.build_terminal_observation))
     calibration = tmp_path / "calibration"
 
     runner._calibrate(manifest, design, workspace, observation, calibration, 1.0)
-    assert len([item for item in calls if item[0] == "operation.start_flow"]) == 2
+    assert len(calls) == 2
 
     replay_calls: list = []
-    monkeypatch.setattr(runner, "EccContentLengthRpcClient", _replay_client(replay_calls))
+    monkeypatch.setattr(runner, "_ensure_workspace", _replay_runner(replay_calls, runner.build_terminal_observation))
     reference, runtime, _epsilon = runner._calibrate(
         manifest, design, workspace, observation, calibration, 1.0
     )
@@ -382,7 +345,7 @@ def test_phase8_calibration_invalidates_replays_when_context_changes(
     observation = _terminal_observation()
     calls: list = []
     _patch_calibration(monkeypatch, tmp_path, lambda _workspace: observation)
-    monkeypatch.setattr(runner, "EccContentLengthRpcClient", _replay_client(calls))
+    monkeypatch.setattr(runner, "_ensure_workspace", _replay_runner(calls, runner.build_terminal_observation))
     calibration = tmp_path / "calibration"
 
     runner._calibrate(manifest, design, workspace, observation, calibration, 1.0)
@@ -390,8 +353,7 @@ def test_phase8_calibration_invalidates_replays_when_context_changes(
         changed_manifest, design, workspace, observation, calibration, 1.0
     )
 
-    starts = [params for method, params, _ in calls if method == "operation.start_flow"]
-    assert len(starts) == 4
+    assert len(calls) == 4
     assert list(calibration.glob("stale-default-replay-*")) != []
     assert len(list(calibration.glob("default-replay-*"))) == 2
     context = json.loads(

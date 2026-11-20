@@ -269,7 +269,7 @@ function declaredArtifacts(
     if (artifact?.availability === 'available') {
       artifacts.push({ kind, reference: artifact.reference, stepId: artifact.stepId })
     } else if (artifact?.required ?? policyRequired.has(kind)) {
-      missing.push({ kind, reference: artifact?.reference ?? specPath(spec, kind) })
+      missing.push({ kind, reference: artifact?.reference ?? kind })
     }
   }
   return { data: artifacts, missing }
@@ -298,16 +298,6 @@ interface DeclaredFindingsArtifact {
   kind: FindingsArtifactKind
   reference: string
   stepId: string
-}
-
-function specPath(
-  spec: (typeof projectManagementWorkspaceStepAnalysisSpecs)[number],
-  kind: FindingsArtifactKind,
-): string {
-  if (kind === 'qor_metrics') return spec.metricsPath
-  if (kind === 'qor_summary') return spec.summaryPath
-  if (kind === 'qor_hotspots') return spec.hotspotsPath
-  return 'sta_ecc/analysis/sta_timing_issues.json'
 }
 
 function rehydrateDetails(

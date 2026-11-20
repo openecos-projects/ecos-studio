@@ -37,30 +37,31 @@ export enum FrontendStepEnum {
 export enum StepEnum {
   RTL2GDS = 'RTL2GDS',
   INIT = 'Init',
-  SYNTHESIS = 'Synthesis',
+  SYNTHESIS = 'synthesis',
   FLOORPLAN = 'Floorplan',
-  PRE_FLOORPLAN = 'preFloorplan',
-  MACRO_PLACEMENT = 'macroPlacement',
-  POST_FLOORPLAN = 'postFloorplan',
+  PRE_FLOORPLAN = 'pre_floorplan',
+  MACRO_PLACEMENT = 'macro_placement',
+  POST_FLOORPLAN = 'post_floorplan',
   PREPLACE = 'preplace',
-  PLACEMENT = 'place',
+  PLACEMENT = 'placement',
+  DIFF_OPT = 'diff_opt',
   DIFF_SIZING = 'diff_sizing',
-  CTS = 'CTS',
-  TIMING_OPT = 'Timing optimization',
+  CTS = 'cts',
+  TIMING_OPT = 'timing_optimization',
   LEGALIZATION = 'legalization',
-  ROUTING = 'route',
+  ROUTING = 'routing',
   FILLER = 'filler',
-  LEC = 'lec',
-  POST_ROUTE_LEC = 'postRouteLec',
+  LEC = 'lec@synthesis',
+  POST_ROUTE_LEC = 'post_route_lec',
   GDS = 'GDS',
   SIGNOFF = 'Signoff',
-  HARDEN = 'Harden',
+  HARDEN = 'harden',
   STA = 'sta',
-  POWER_ANALYSIS = 'powerAnalysis',
+  POWER_ANALYSIS = 'power_analysis',
   DRC = 'drc',
-  ANTENNA_CHECK = 'antennaCheck',
+  ANTENNA_CHECK = 'antenna_check',
   LVS = 'lvs',
-  RCX = 'RCX',
+  RCX = 'rcx',
   ABSTRACT_LEF = 'Abstract lef',
   EMIR = 'emir',
 }
@@ -157,6 +158,14 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
     showInSidebar: true,
     group: 'run',
   },
+  [StepEnum.DIFF_OPT.toLowerCase()]: {
+    label: 'Diff Opt',
+    icon: 'ri-focus-2-line',
+    path: StepEnum.DIFF_OPT,
+    showInSidebar: false,
+    group: 'run',
+  },
+
   [StepEnum.DIFF_SIZING.toLowerCase()]: {
     label: 'Diff Sizing',
     icon: 'ri-focus-2-line',
@@ -332,6 +341,12 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
  * @param stepName flow.json 中的 step.name、路由 path，或侧栏显示 label
  */
 export function getStepMetadata(stepName: string): StepMetadata | undefined {
+  if (stepName.startsWith('lec@'))
+    return {
+      ...STEP_METADATA[StepEnum.LEC]!,
+      label: `LEC (${stepName.slice(4)})`,
+      path: stepName,
+    }
   const key = stepName.trim().toLowerCase()
   if (!key) return undefined
   return (
@@ -372,9 +387,7 @@ const STEP_TOOL_LABELS: Record<string, string> = {
   ecc: 'ECC',
   dreamplace: 'DreamPlace',
   yosys: 'Yosys',
-  yosys_lec: 'Yosys LEC',
   kepler_formal: 'Kepler Formal',
-  lec_dual: 'Dual LEC',
   klayout: 'KLayout',
   sizer: 'Sizer',
 }

@@ -113,7 +113,7 @@ function engineeringSnapshot(
     hotspotPreview: { hotspotCount: 0, hotspots: [], hotspotsTruncated: false },
     metrics: [],
     parameters: {},
-    schemaVersion: 6,
+    schemaVersion: 7,
     signoffAssessment,
     timingPreview: { issueCount: 0, issues: [], issuesTruncated: false },
     workspaceId: 'workspace-1',

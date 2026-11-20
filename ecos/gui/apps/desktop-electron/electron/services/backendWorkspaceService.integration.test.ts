@@ -53,7 +53,7 @@ function snapshot(workspaceId: string, revision: number, value: number) {
       'Top module': 'gcd',
       'Max fanout': 32,
     },
-    schemaVersion: 6,
+    schemaVersion: 7,
     signoffAssessment: { status: 'ready', groups: [], risks: [] },
     timingPreview: { issueCount: 0, issues: [], issuesTruncated: false },
     workspaceId,

@@ -6,7 +6,7 @@
   >
     <header>Signoff</header>
     <i class="ri-shield-check-line" aria-hidden="true" />
-    <strong>{{ eligible ? 'Ready for review' : 'Waiting for verification' }}</strong>
+    <strong>{{ eligible ? 'Review available' : 'Waiting for Harden' }}</strong>
     <p>Delivery review, not a runtime step</p>
     <button type="button" :disabled="!eligible" @click="void exportSignoffPackage()">
       Review &amp; export

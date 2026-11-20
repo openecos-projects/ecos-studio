@@ -105,6 +105,19 @@
                 : 'overflow-y-auto p-6 md:p-8'
             "
           >
+            <div
+              v-if="currentStep >= 4 && workspaceCreationModelError"
+              class="mx-auto mt-8 mb-5 max-w-5xl rounded-lg border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300"
+            >
+              <p role="alert">{{ workspaceCreationModelError }}</p>
+              <button
+                type="button"
+                class="mt-2 cursor-pointer rounded-md border border-current px-3 py-1 font-semibold"
+                @click="refreshWorkspaceCreationModel"
+              >
+                Retry
+              </button>
+            </div>
             <Transition name="fade-slide" mode="out-in">
               <div
                 v-if="currentStep === 1"
@@ -508,7 +521,11 @@
                       >
                       <select
                         v-if="canChooseFlowStartStep"
+                        aria-label="Start Step"
                         :value="flowStartStep"
+                        :disabled="
+                          isLoadingWorkspaceCreationModel || flowStepOptions.length === 0
+                        "
                         class="mt-1 w-full cursor-pointer rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-2.5 py-1.5 text-sm font-semibold text-(--text-primary) transition-colors duration-200 outline-none focus:border-(--accent-color)"
                         @change="selectFlowStartStep"
                       >
@@ -556,13 +573,24 @@
                   </p>
 
                   <p
-                    v-if="flowStepOptions.length === 0"
+                    v-if="isLoadingWorkspaceCreationModel"
+                    class="rounded-lg border border-(--border-color) bg-(--bg-primary)/60 px-4 py-3 text-xs text-(--text-secondary)"
+                  >
+                    Loading ECC flow steps…
+                  </p>
+                  <p
+                    v-else-if="
+                      flowStepOptions.length === 0 && !workspaceCreationModelError
+                    "
                     class="rounded-lg border border-(--border-color) bg-(--bg-primary)/60 px-4 py-3 text-xs text-(--text-secondary)"
                   >
                     Flow steps are unavailable: the ECC runtime did not provide a flow
                     definition. Check the runtime logs and reopen this wizard.
                   </p>
-                  <div v-else class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                  <div
+                    v-else-if="flowStepOptions.length"
+                    class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
+                  >
                     <div
                       v-for="(step, index) in flowStepOptions"
                       :key="step.name"
@@ -650,7 +678,7 @@
                         </button>
 
                         <div
-                          v-if="step.name === 'CTS' && isFlowStepRunnable(step.name)"
+                          v-if="step.name === 'cts' && isFlowStepRunnable(step.name)"
                           class="mt-4 border-t border-(--border-color)/70 pt-3"
                           @click.stop
                         >
@@ -698,7 +726,7 @@
 
                         <div
                           v-if="
-                            step.name === 'macroPlacement' &&
+                            step.name === 'macro_placement' &&
                             isFlowStepRunnable(step.name)
                           "
                           class="mt-4 border-t border-(--border-color)/70 pt-3"
@@ -1712,7 +1740,7 @@
                 @click="nextStep"
               >
                 Continue
-                <i class="ri-arrow-right-line"></i>
+                <i class="ri-arrow-right-line" aria-hidden="true"></i>
               </button>
               <button
                 v-else-if="currentStep === steps.length"
@@ -1721,8 +1749,12 @@
                 :disabled="!canProceed || isCreating"
                 @click="createWorkspace"
               >
-                <i v-if="isCreating" class="ri-loader-4-line animate-spin"></i>
-                <i v-else class="ri-rocket-line"></i>
+                <i
+                  v-if="isCreating"
+                  class="ri-loader-4-line animate-spin"
+                  aria-hidden="true"
+                ></i>
+                <i v-else class="ri-rocket-line" aria-hidden="true"></i>
                 {{ isCreating ? 'Creating Workspace...' : 'Create Workspace' }}
               </button>
             </div>
@@ -1805,50 +1837,6 @@ type ProjectMode = 'select' | 'create'
  * stays `string`; persisted values are validated via normalizeFlowStepName. */
 type FlowStepName = string
 
-/**
- * Name normalization for persisted flow step values; the alias values are the
- * canonical ECC step ids. The authoritative chain itself always comes from
- * ECC discovery — no static chain copy is kept here.
- */
-const FLOW_STEP_NAME_ALIASES: Record<string, FlowStepName> = {
-  synth: 'Synthesis',
-  synthesis: 'Synthesis',
-  lec: 'lec',
-  // Legacy configs persist 'Floorplan' for the whole floorplan phase; its
-  // entry point in the canonical chain is preFloorplan.
-  floor: 'preFloorplan',
-  floorplan: 'preFloorplan',
-  prefloorplan: 'preFloorplan',
-  macro: 'macroPlacement',
-  macroplace: 'macroPlacement',
-  macroplacement: 'macroPlacement',
-  postfloorplan: 'postFloorplan',
-  place: 'place',
-  placement: 'place',
-  cts: 'CTS',
-  legal: 'legalization',
-  legalization: 'legalization',
-  sizer: 'Timing optimization',
-  timingopt: 'Timing optimization',
-  timingoptimization: 'Timing optimization',
-  route: 'route',
-  routing: 'route',
-  drc: 'drc',
-  antenna: 'antennaCheck',
-  antennacheck: 'antennaCheck',
-  lvs: 'lvs',
-  filler: 'filler',
-  postlec: 'postRouteLec',
-  postroutelec: 'postRouteLec',
-  rcx: 'RCX',
-  sta: 'sta',
-  poweranalysis: 'powerAnalysis',
-  emir: 'emir',
-  harden: 'Harden',
-}
-const KNOWN_FLOW_STEP_NAMES: ReadonlySet<string> = new Set(
-  Object.values(FLOW_STEP_NAME_ALIASES),
-)
 const NO_FLOW_STEP_NAMES: ReadonlySet<string> = new Set()
 type DesignInputKey = 'rtl' | 'filelist' | 'def' | 'verilog' | 'sdc'
 type PdkResourceKey = 'tech_lef' | 'cell_lef' | 'liberty'
@@ -1940,27 +1928,31 @@ const initialDesignInputFingerprint = designInputFingerprint({
     ...(props.initialConfig?.source_config?.rtl_list ?? []),
   ].filter(Boolean),
   startsFromSynthesis:
-    (props.initialConfig?.flow_config?.start_step ?? 'Synthesis') === 'Synthesis',
+    (props.initialConfig?.flow_config?.start_step ?? 'synthesis') === 'synthesis',
 })
-const { model: workspaceCreationModel, refresh: refreshWorkspaceCreationModel } =
-  useWorkspaceCreationModel({
-    designTool: () => props.initialConfig?.designTool,
-    flowId: () => {
-      const flowId = discoveredFlowDefinition.value?.flowId
-      return typeof flowId === 'string' ? flowId : 'rtl2gds'
-    },
-    inputMode: () => (startsFromSynthesis.value ? 'rtl' : 'postSynthesis'),
-    mpc: () => projectMpc.value as Record<string, unknown> | null,
-    pdk: () =>
-      config.value.pdk
-        ? {
-            familyId: config.value.pdk,
-            mode: pdkConfigMode.value,
-            version: selectedPdk.value?.version ?? null,
-          }
-        : null,
-    projectPresetParameters: () => projectPresetParameters.value,
-  })
+const {
+  model: workspaceCreationModel,
+  isLoading: isLoadingWorkspaceCreationModel,
+  loadError: workspaceCreationModelError,
+  refresh: refreshWorkspaceCreationModel,
+} = useWorkspaceCreationModel({
+  designTool: () => props.initialConfig?.designTool,
+  flowId: () => {
+    const flowId = discoveredFlowDefinition.value?.flowId
+    return typeof flowId === 'string' ? flowId : 'rtl2gds'
+  },
+  inputMode: () => (startsFromSynthesis.value ? 'rtl' : 'postSynthesis'),
+  mpc: () => projectMpc.value as Record<string, unknown> | null,
+  pdk: () =>
+    config.value.pdk
+      ? {
+          familyId: config.value.pdk,
+          mode: pdkConfigMode.value,
+          version: selectedPdk.value?.version ?? null,
+        }
+      : null,
+  projectPresetParameters: () => projectPresetParameters.value,
+})
 const designFileError = ref('')
 const initialRtlFiles = uniquePaths([
   ...(props.initialConfig?.rtl_list ?? []),
@@ -1986,33 +1978,37 @@ const designNameTouched = ref(
 )
 
 function wizardFlowId(): string {
-  return flowEndStep.value === 'Harden'
+  return flowEndStep.value === 'harden'
     ? 'harden'
-    : flowEndStep.value === 'sta' || flowEndStep.value === 'RCX'
+    : flowEndStep.value === 'sta' || flowEndStep.value === 'rcx'
       ? 'rcx'
       : 'rtl2gds'
 }
 
 function isFlowStepStartDisabled(stepName: FlowStepName) {
-  return isFlowStepLocked(stepName) || FLOW_START_DISABLED_STEPS.has(stepName)
+  return (
+    isFlowStepLocked(stepName) ||
+    stepName.startsWith('lec@') ||
+    FLOW_START_DISABLED_STEPS.has(stepName)
+  )
 }
 
 function normalizeFlowStartStep(value: unknown, fallback: FlowStepName): FlowStepName {
   const step = normalizeFlowStepName(value, fallback)
-  return FLOW_START_DISABLED_STEPS.has(step) ? fallback : step
+  return step.startsWith('lec@') || FLOW_START_DISABLED_STEPS.has(step) ? fallback : step
 }
 const flowStartStep = ref<FlowStepName>(
   normalizeFlowStartStep(
     props.initialConfig?.flow_config?.start_step ??
       props.initialConfig?.parameters?.start_step,
-    'Synthesis',
+    'synthesis',
   ),
 )
 const flowEndStep = ref<FlowStepName>(
   normalizeFlowStepName(
     props.initialConfig?.flow_config?.end_step ??
       props.initialConfig?.parameters?.end_step,
-    'Harden',
+    'harden',
   ),
 )
 const activeDesignInputType = ref<DesignInputKey>(
@@ -2262,7 +2258,7 @@ function createInitialConfig(
       ...initialConfig?.parameters,
     }),
     origin_def:
-      startStep === 'Synthesis' || startStep === 'preFloorplan'
+      startStep === 'synthesis' || startStep === 'pre_floorplan'
         ? ''
         : (initialConfig?.origin_def ?? source_config?.origin_def ?? ''),
     origin_verilog: initialConfig?.origin_verilog ?? source_config?.origin_verilog ?? '',
@@ -2272,7 +2268,7 @@ function createInitialConfig(
         ? [...source_config.rtl_list]
         : [],
     filelist: initialConfig?.filelist ?? source_config?.filelist ?? filelistPath.value,
-    design_input_mode: startStep === 'Synthesis' ? 'rtl' : 'post_synthesis',
+    design_input_mode: startStep === 'synthesis' ? 'rtl' : 'post_synthesis',
     sdc: initialConfig?.sdc ?? source_config?.sdc ?? sdcPath.value,
     pdk_config_mode:
       initialConfig?.pdk_config_mode ??
@@ -2380,8 +2376,8 @@ const SYSTEM_PARAMETER_DEFAULTS: Record<string, number> = {
 }
 
 function initialDesignInputType(startStep: FlowStepName): DesignInputKey {
-  if (startStep === 'preFloorplan') return 'verilog'
-  if (startStep !== 'Synthesis') return 'def'
+  if (startStep === 'pre_floorplan') return 'verilog'
+  if (startStep !== 'synthesis') return 'def'
   // The RTL/filelist selection moved to the Import RTL step; synthesis entry
   // only offers workspace-level SDC here.
   return 'sdc'
@@ -2424,11 +2420,6 @@ function resolveProjectRelativePath(projectRoot: string, path: string): string {
 function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStepName {
   const candidate = String(value ?? '').trim()
   if (!candidate) return fallback
-  const alias = FLOW_STEP_NAME_ALIASES[candidate.toLowerCase().replace(/[_\-\s]+/g, '')]
-  if (alias) return alias
-  if (KNOWN_FLOW_STEP_NAMES.has(candidate)) return candidate
-  // ECC discovery is authoritative. Preserve an unrecognized persisted value
-  // until the discovered chain arrives, then reset it if the chain omits it.
   return candidate
 }
 
@@ -2545,8 +2536,11 @@ const flowStepsBeforeStart = computed<ReadonlySet<string>>(() => {
 const runnableFlowSteps = computed(() =>
   selectedFlowSteps.value.filter((name) => !defaultSkippedFlowStepNames.value.has(name)),
 )
-const startsFromSynthesis = computed(() => flowStartStep.value === 'Synthesis')
-const startsFromPreFloorplan = computed(() => flowStartStep.value === 'preFloorplan')
+const flowSetupReady = computed(
+  () => !isLoadingWorkspaceCreationModel.value && selectedFlowSteps.value.length > 0,
+)
+const startsFromSynthesis = computed(() => flowStartStep.value === 'synthesis')
+const startsFromPreFloorplan = computed(() => flowStartStep.value === 'pre_floorplan')
 const hasSelectedPdkConfig = computed(
   () =>
     isPdkEligible(selectedPdk.value) &&
@@ -2819,7 +2813,7 @@ const canProceed = computed(() => {
         !workspaceLocationError.value
       )
     case 4:
-      return selectedFlowSteps.value.length > 0
+      return flowSetupReady.value
     case 5:
       return designFilesReady()
     case 6:
@@ -3080,9 +3074,10 @@ async function applyProjectDefaultsForProject(projectRoot: string) {
     await applyProjectManifestDefaults(manifest)
   }
   projectMpc.value = manifest?.mpc ?? null
-  projectPresetParameters.value = isRecord(manifest?.base_design.parameters)
-    ? { ...manifest.base_design.parameters }
-    : {}
+  projectPresetParameters.value =
+    typeof manifest?.base_design.frequency_mhz === 'number'
+      ? { 'design.frequency_mhz': manifest.base_design.frequency_mhz }
+      : {}
   isLoadingProjectManifest.value = false
   void refreshWorkspaceCreationModel()
   syncWorkspaceConfig()
@@ -3499,7 +3494,7 @@ function selectFlowStartStep(event: Event) {
 }
 
 function applyFlowStartStep(stepName: FlowStepName) {
-  if (FLOW_START_DISABLED_STEPS.has(stepName)) return
+  if (stepName.startsWith('lec@') || FLOW_START_DISABLED_STEPS.has(stepName)) return
   const index = flowStepOptions.value.findIndex((step) => step.name === stepName)
   if (index < 0) return
 
@@ -4089,6 +4084,7 @@ function updatePdkResourceSelection(files: string[]) {
 }
 
 function specReady() {
+  if (!flowSetupReady.value) return false
   const params = config.value.parameters
   const hasCoreFields =
     String(params.design || '').trim() !== '' &&

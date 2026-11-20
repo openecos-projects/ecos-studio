@@ -311,7 +311,7 @@ class TerminalObservation(_ContractModel):
                 for metric in AREA_OBJECTIVE_ORDER
             ),
             *(
-                (metric, "uW", EvaluationMetricCategory.PPA, False)
+                (metric, "uW", EvaluationMetricCategory.PPA, True)
                 for metric in POWER_OBJECTIVE_ORDER
             ),
             (

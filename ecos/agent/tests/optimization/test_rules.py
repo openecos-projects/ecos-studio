@@ -266,7 +266,7 @@ def test_legacy_terminal_observation_rejects_v3_metrics() -> None:
             "category": "eligibility",
             "role": "gate",
             "direction": "exact",
-            "source_refs": ["drc_ecc/analysis/qor_metrics.json"],
+            "source_refs": ["15_drc_ecc/analysis/qor_metrics.json"],
         }
     ]
 
@@ -553,7 +553,7 @@ def _tiebreak_terminal(
                 record("sta_expected_corner_count", 1.0, "count", "exact", "eligibility"),
                 record("sta_corner_count", 1.0, "count", "exact", "eligibility"),
                 record(
-                    "sta_typical_dynamic_power", dynamic_power, "uW", "lower_is_better"
+                    "power_analysis_dynamic_uw", dynamic_power, "uW", "lower_is_better"
                 ),
                 record("die_area", die_area, "um^2", "lower_is_better"),
                 record("sta_frequency", frequency, "MHz", "higher_is_better"),
@@ -573,7 +573,7 @@ def test_comparator_tiebreak_prefers_lower_dynamic_power() -> None:
     )
 
     assert comparison.decision == IncumbentDecision.CANDIDATE_BETTER
-    assert comparison.decisive_metric == ObjectiveMetric.STA_TYPICAL_DYNAMIC_POWER
+    assert comparison.decisive_metric == ObjectiveMetric.POWER_ANALYSIS_DYNAMIC_UW
 
 
 def test_comparator_tiebreak_prefers_smaller_die_area_after_power() -> None:

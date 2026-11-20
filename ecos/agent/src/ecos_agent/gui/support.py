@@ -417,15 +417,15 @@ def _workspace_rerun_execution_contract(
             if contract.execution_scope == "single_step"
             else (
                 f"从所选阶段重跑，并继续到标准流程终点"
-                f"（{contract.end_step.value}）"
+                f"（{contract.end_step}）"
             )
         )
         fields = [
             {"label": "Design", "value": contract.design_id},
             {"label": "源 workspace", "value": contract.source_workspace},
             {"label": "目标 workspace", "value": contract.target_workspace},
-            {"label": "起始阶段", "value": contract.target_step.value},
-            {"label": "终点阶段", "value": contract.end_step.value},
+            {"label": "起始阶段", "value": contract.target_step},
+            {"label": "终点阶段", "value": contract.end_step},
             {"label": "执行范围", "value": scope},
             *parameter_fields,
             {"label": "确认", "value": "required"},
@@ -437,15 +437,15 @@ def _workspace_rerun_execution_contract(
             if contract.execution_scope == "single_step"
             else (
                 "rerun from the selected stage through the standard flow end "
-                f"({contract.end_step.value})"
+                f"({contract.end_step})"
             )
         )
         fields = [
             {"label": "Design", "value": contract.design_id},
             {"label": "Source workspace", "value": contract.source_workspace},
             {"label": "Target workspace", "value": contract.target_workspace},
-            {"label": "Start stage", "value": contract.target_step.value},
-            {"label": "End stage", "value": contract.end_step.value},
+            {"label": "Start stage", "value": contract.target_step},
+            {"label": "End stage", "value": contract.end_step},
             {"label": "Execution scope", "value": scope},
             *parameter_fields,
             {"label": "Confirmation", "value": "required"},

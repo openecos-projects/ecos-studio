@@ -236,6 +236,7 @@ describe('createEccRuntimeEnv', () => {
       appPath: fixture.appPath,
       cwd: fixture.appPath,
       env: {
+        XDG_DATA_HOME: fixture.repoRoot,
         ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
         PATH: '/usr/bin',
       },
@@ -282,6 +283,7 @@ describe('createEccRuntimeEnv', () => {
       appPath: fixture.appPath,
       cwd: fixture.appPath,
       env: {
+        XDG_DATA_HOME: fixture.repoRoot,
         ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
         LD_LIBRARY_PATH: '/usr/local/lib',
         PATH: '/usr/bin',
@@ -364,6 +366,7 @@ describe('createEccRuntimeEnv', () => {
       appPath: fixture.appPath,
       cwd: fixture.appPath,
       env: {
+        XDG_DATA_HOME: fixture.repoRoot,
         ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
         PATH: '/usr/bin',
       },

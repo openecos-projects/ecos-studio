@@ -1,3 +1,4 @@
+import { parseProjectManifestFlowStep } from './flowStepRegistry.ts'
 import type {
   ClockMetrics,
   CongestionMetrics,
@@ -86,59 +87,13 @@ export function formatDuration(seconds: number | null): string | null {
   return `${secs}s`
 }
 
-const STAGE_CANONICAL_NAMES: Record<string, string> = {
-  synthesis: 'Synth',
-  synth: 'Synth',
-  synthesis_yosys: 'Synth',
-  yosys: 'Synth',
-  floorplan: 'Floor',
-  floor: 'Floor',
-  floorplan_ecc: 'Floor',
-  macro_placement: 'Floor',
-  placement: 'Place',
-  place: 'Place',
-  place_dreamplace: 'Place',
-  dreamplace: 'Place',
-  global_placement: 'Place',
-  detailed_placement: 'Place',
-  cts: 'CTS',
-  cts_ecc: 'CTS',
-  legalization: 'Legal',
-  legal: 'Legal',
-  legalization_dreamplace: 'Legal',
-  'timing optimization': 'Sizer',
-  timing_optimization: 'Sizer',
-  timing_optimization_sizer: 'Sizer',
-  sizer: 'Sizer',
-  routing: 'Route',
-  route: 'Route',
-  route_ecc: 'Route',
-  global_route: 'Route',
-  detail_route: 'Route',
-  drc: 'DRC',
-  drc_ecc: 'DRC',
-  lvs: 'LVS',
-  lvs_ecc: 'LVS',
-  filler: 'Filler',
-  filler_ecc: 'Filler',
-  rcx: 'RCX',
-  rcx_ecc: 'RCX',
-  sta: 'STA',
-  sta_ecc: 'STA',
-  sta_signoff: 'STA',
-  signoff: 'STA',
-  post_route_sta: 'STA',
-  sta_corner: 'STA',
-  power: 'Power',
-  power_ecc: 'Power',
-  sta_power: 'Power',
-  harden: 'Harden',
-  harden_ecc: 'Harden',
-}
-
 export function canonicalizeStageName(name: string): string {
-  const normalized = name.trim().toLowerCase()
-  return STAGE_CANONICAL_NAMES[normalized] || name.trim()
+  const step = name.trim()
+  if (step.startsWith('lec@')) return step
+  const stage = parseProjectManifestFlowStep(step)
+  if (stage === 'Timing Opt') return 'Sizer'
+  if (stage === 'Power Analysis') return 'Power'
+  return stage ?? step
 }
 
 export interface ParsedPowerMetrics {
@@ -1054,7 +1009,6 @@ export function extractDesignReportData(
   const multiCornerTiming: CornerTimingRecord[] = []
   const allCornersSources: Array<Record<string, unknown> | undefined> = [
     normalizedStepMetrics['STA']?.corners as Record<string, unknown> | undefined,
-    normalizedStepMetrics['sta_ecc']?.corners as Record<string, unknown> | undefined,
     normalizedStepMetrics['Synth']?.corners as Record<string, unknown> | undefined,
     input.staCornerReports ?? undefined,
   ]
@@ -1589,7 +1543,7 @@ export function extractDesignReportData(
         (st: unknown) =>
           isRecord(st) &&
           typeof st.name === 'string' &&
-          /^(Route|route_ecc|Harden|Harden_ecc)$/i.test(st.name) &&
+          ['Route', 'Harden'].includes(canonicalizeStageName(st.name)) &&
           /^(Success|Complete)$/i.test(String(st.state)),
       )
     if (isRouteSuccess || (routedWirelengthUm !== null && routedWirelengthUm > 0)) {

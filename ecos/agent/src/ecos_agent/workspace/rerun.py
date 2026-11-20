@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+import tomllib
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ecos_agent.ecc_contracts import ECCParameterPatch, ECCParameterPatchItem, ECCStepName
+from ecos_agent.workspace.step_directories import step_directory
 from ecos_agent.hashing import file_sha256
 from ecos_agent.workspace.knob_registry import (
     BOOLEAN_KNOBS,
@@ -26,7 +28,10 @@ from ecos_agent.workspace.authorization import (
 
 
 _STEP_NAMES = {step.value: step for step in ECCStepName}
-_STEP_INDEX = {step: index for index, step in enumerate(_STEP_NAMES)}
+_STEPS = list(ECCStepName)
+_STEP_INDEX = {step.value: index * 2 for index, step in enumerate(_STEPS)}
+for _anchor in _STEPS[:_STEPS.index(ECCStepName.FILLER)]:
+    _STEP_INDEX[f"lec@{_anchor.value}"] = _STEP_INDEX[_anchor.value] + 1
 _RERUN_SCOPES = ("single_step", "full_flow")
 # Last entry of ECCStepName is the catalog terminus (today Harden; grows with the enum).
 _CATALOG_END_STEP = list(ECCStepName)[-1]
@@ -40,7 +45,7 @@ class GuiWorkspaceRerunSource:
     workspace_path: Path
     design_id: str
     flow_json_sha256: str
-    end_step: ECCStepName
+    end_step: str
     allowed_stages: tuple[str, ...]
     stage_artifact_ref: dict[str, str]
     stage_artifact_sha256: dict[str, str]
@@ -67,8 +72,8 @@ class GuiWorkspaceRerunContract(BaseModel):
     target_workspace: str
     rerun_id: str
     design_id: str
-    target_step: ECCStepName
-    end_step: ECCStepName
+    target_step: str
+    end_step: str
     execution_scope: Literal["single_step", "full_flow"]
     source_flow_json_sha256: str
     source_stage_artifact: str
@@ -94,8 +99,10 @@ class GuiWorkspaceRerunContract(BaseModel):
 
     @model_validator(mode="after")
     def validate_execution_range(self) -> "GuiWorkspaceRerunContract":
-        target_index = _STEP_INDEX[self.target_step.value]
-        end_index = _STEP_INDEX[self.end_step.value]
+        if self.target_step not in _STEP_INDEX or self.end_step not in _STEP_INDEX:
+            raise ValueError("unknown rerun step")
+        target_index = _STEP_INDEX[self.target_step]
+        end_index = _STEP_INDEX[self.end_step]
         if end_index < target_index:
             raise ValueError("rerun end step precedes the target step")
         if self.execution_scope == "single_step" and self.end_step != self.target_step:
@@ -193,11 +200,11 @@ class GuiWorkspaceRerunResolver:
             target_workspace=str(target),
             rerun_id=target.name,
             design_id=source.design_id,
-            target_step=_STEP_NAMES[target_step],
+            target_step=target_step,
             end_step=(
-                _STEP_NAMES[target_step]
+                target_step
                 if execution_scope == "single_step"
-                else _CATALOG_END_STEP
+                else source.end_step
             ),
             execution_scope=execution_scope,
             source_flow_json_sha256=source.flow_json_sha256,
@@ -211,7 +218,7 @@ class GuiWorkspaceRerunResolver:
     def _next_rerun_target(source_workspace: Path, target_step: str) -> Path:
         # Step names may contain spaces, but rerun ids must stay path-safe for
         # the Electron-side contract validation.
-        step_slug = "_".join(target_step.lower().split())
+        step_slug = target_step.replace("@", "_")
         base = source_workspace.with_name(f"{source_workspace.name}_rerun_{step_slug}")
         for index in range(10_000):
             target = base if index == 0 else base.with_name(f"{base.name}_{index:04d}")
@@ -236,6 +243,8 @@ class GuiWorkspaceRerunResolver:
         """
         step = _STEP_NAMES.get(target_step)
         if step is None:
+            if target_step in _STEP_INDEX:
+                return ()
             raise ValueError("rerun stage is invalid")
         values = []
         for knob_id in sorted(authorized_knobs_for_step(step)):
@@ -270,38 +279,38 @@ class GuiWorkspaceRerunResolver:
             if not isinstance(record, dict) or record.get("state") != "Success":
                 continue
             step, tool = record.get("name"), record.get("tool")
-            if not isinstance(step, str) or step not in _STEP_NAMES or not isinstance(tool, str):
+            if not isinstance(step, str) or step not in _STEP_INDEX or not isinstance(tool, str):
                 continue
             try:
-                stages[step] = self._stage_output(source, design_id, step, tool)
+                stages[step] = self._stage_output(source, design_id, step, tool, record.get("directory"))
             except ValueError:
                 continue
         return stages
 
     @staticmethod
-    def _flow_end_step(flow: dict[str, object]) -> ECCStepName:
+    def _flow_end_step(flow: dict[str, object]) -> str:
         """Source workspace's configured last step (may be short of the catalog end)."""
         for record in reversed(flow["steps"]):
             if not isinstance(record, dict):
                 continue
             step = record.get("name")
-            if isinstance(step, str) and step in _STEP_NAMES:
-                return _STEP_NAMES[step]
+            if isinstance(step, str) and step in _STEP_INDEX:
+                return step
         raise ValueError("workspace flow has no supported end step")
 
     @staticmethod
-    def _stage_output(source: Path, design_id: str, step: str, tool: str) -> Path:
+    def _stage_output(source: Path, design_id: str, step: str, tool: str, directory: object) -> Path:
         if not _TOOL_NAME.fullmatch(tool):
             raise ValueError(f"completed stage {step} has an invalid tool")
-        # Sizer publishes underscored lowercase directory and file stems.
-        stem = "_".join(step.split()).lower() if tool == "sizer" else step
-        stage_dir = f"{stem}_sizer" if tool == "sizer" else f"{step}_{tool}"
-        output_dir = source / stage_dir / "output"
+        if not isinstance(directory, str) or not re.fullmatch(r"[a-zA-Z0-9_@.-]+", directory) or directory in {".", ".."}:
+            raise ValueError(f"completed stage {step} has an invalid directory")
+        stem = step
+        output_dir = source / directory / "output"
         try:
             output_dir.resolve().relative_to(source)
         except ValueError as exc:
             raise ValueError(f"completed stage {step} output escapes workspace") from exc
-        if tool == "yosys_lec":
+        if tool == "kepler_formal":
             # LEC stages publish an equivalence result JSON instead of layout outputs.
             result = output_dir / f"{design_id}_{stem}_result.json"
             if result.is_file() and not result.is_symlink():
@@ -335,14 +344,15 @@ _MISSING = object()
 
 
 def _current_parameter_value(workspace: Path, knob_id: str) -> object:
-    """Read a knob so contracts can show a real old value.
-
-    Prefers the ECC-canonical step config, falling back to parameters.json: step
-    configs are only generated once a flow has run, but a knob is tunable before
-    that.
-    """
+    """Read an explicit workspace parameter before the step's generated default."""
     spec = knob_spec(knob_id)
-    for target in (spec.read_target, spec.write_target):
+    for target in dict.fromkeys((spec.write_target, spec.read_target)):
+        if target.file == "config/dreamplace_ecc.json":
+            try:
+                directory = step_directory(workspace, spec.step)
+            except (OSError, KeyError, ValueError):
+                continue
+            target = replace(target, file=f"{directory}/{target.file}")
         value = _read_target_value(workspace, target)
         if value is not _MISSING:
             return value
@@ -355,7 +365,8 @@ def _read_target_value(workspace: Path, target: KnobTarget) -> object:
         config_path.resolve().relative_to(workspace)
         if config_path.is_symlink() or not config_path.is_file():
             return _MISSING
-        config = json.loads(config_path.read_text(encoding="utf-8"))
+        content = config_path.read_text(encoding="utf-8")
+        config = tomllib.loads(content) if config_path.suffix == ".toml" else json.loads(content)
     except (OSError, ValueError):
         return _MISSING
     current: object = config

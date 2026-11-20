@@ -19,6 +19,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export async function readPersistedEngineeringSnapshot(
   directory: string,
   expectedWorkspaceId?: string,
+  expectedVersion: 6 | 7 = 7,
 ): Promise<EccPersistedEngineeringSnapshot> {
   const path = join(directory, 'home', 'engineering-snapshot.json')
   let content: string
@@ -42,8 +43,23 @@ export async function readPersistedEngineeringSnapshot(
     throw new Error('ENGINEERING_SNAPSHOT_INVALID')
   }
   if (!isRecord(parsed)) throw new Error('ENGINEERING_SNAPSHOT_INVALID')
-  const validated = validateEngineeringSnapshot(parsed, expectedWorkspaceId)
-  if (!validated.ok) throw new Error(validated.issue.code)
+  const validated = validateEngineeringSnapshot(
+    parsed,
+    expectedWorkspaceId,
+    expectedVersion,
+  )
+  if (!validated.ok) {
+    if (
+      validated.issue.code === 'ENGINEERING_SNAPSHOT_SCHEMA_UNSUPPORTED' &&
+      typeof parsed.schemaVersion === 'number' &&
+      parsed.schemaVersion < expectedVersion
+    ) {
+      throw new Error(
+        `ENGINEERING_SNAPSHOT_SCHEMA_UNSUPPORTED: this workspace uses snapshot v${parsed.schemaVersion}. Create a new workspace with the current runtime.`,
+      )
+    }
+    throw new Error(validated.issue.code)
+  }
   const configuration: Pick<
     EccPersistedEngineeringSnapshot,
     'workspaceSpec' | 'workspaceBindings'

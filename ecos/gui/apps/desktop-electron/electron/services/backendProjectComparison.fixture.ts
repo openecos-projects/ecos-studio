@@ -1,5 +1,4 @@
 import {
-  projectManagementStaTimingIssuesPath,
   projectManagementWorkspaceStepAnalysisSpecs,
   projectManifestFlowSteps,
   qorScalarStatusForScore,
@@ -100,14 +99,13 @@ function engineeringSnapshot(
       stepId,
     })
   }
-  for (const spec of projectManagementWorkspaceStepAnalysisSpecs) {
+  for (const [index, spec] of projectManagementWorkspaceStepAnalysisSpecs.entries()) {
     const stepId = spec.eccStepIds[0]
-    analysisFile(stepId, 'qor_metrics', spec.metricsPath)
-    analysisFile(stepId, 'qor_summary', spec.summaryPath)
-    analysisFile(stepId, 'qor_hotspots', spec.hotspotsPath)
-    if (spec.step === 'STA') {
-      analysisFile(stepId, 'sta_timing_issues', projectManagementStaTimingIssuesPath)
-    }
+    const directory = `${String(index + 1).padStart(2, '0')}_${stepId}`
+    const kinds = ['qor_metrics', 'qor_summary', 'qor_hotspots']
+    if (spec.step === 'STA') kinds.push('sta_timing_issues')
+    for (const kind of kinds)
+      analysisFile(stepId, kind, `${directory}/analysis/${kind}.json`)
   }
   const metrics = projectManifestFlowSteps.flatMap((step, stepIndex) =>
     stepMetrics(step, stepIndex, score > 80),
@@ -181,7 +179,7 @@ function engineeringSnapshot(
       power: { totalUw: null, budgetUw: null, sourceKind: null, corner: null },
       artifactIds: [],
     },
-    schemaVersion: 6,
+    schemaVersion: 7,
     signoffAssessment: { groups: [], risks: [], status: 'ready' },
     timingPreview: { issues: [], issueCount: 0, issuesTruncated: false },
     workspaceId,

@@ -5,17 +5,8 @@ which on-disk surface owns it, and how its value is constrained. Both the read
 path (contract "current value") and the write path (GUI execution target)
 resolve through this registry, so the two can never drift.
 
-Two surfaces exist in an ECOS workspace and ECC keeps them in sync:
-
-- ``parameters`` -- ``home/parameters.json``, the ICS55 flat template. It is the
-  authoritative source; ``refresh_config`` regenerates step configs from it.
-- ``step_config`` -- ``config/*.json`` per-tool configuration, mirroring the ECC
-  candidate registry's ``config_key`` / ``json_path``. ``sync_config`` pushes a
-  change here back into ``parameters`` and then refreshes.
-
-A knob may exist on one surface or both. GUI reads and writes retain their
-workspace contract, while ``evidence_target`` binds receipts to the file that
-the ECC Agent candidate materializer actually changed.
+ECC stores workspace overrides in home/params.toml. Each DreamPlace worker
+resolves its own tool config in its ledger-recorded step directory.
 """
 
 from __future__ import annotations
@@ -28,13 +19,12 @@ from ecos_agent.ecc_contracts import ECCParameterPatchItem, ECCStepName
 
 KnobSurface = Literal["parameters", "step_config"]
 
-PARAMETERS_FILE = "home/parameters.json"
 PARAMS_TOML_FILE = "home/params.toml"
 DREAMPLACE_FILE = "config/dreamplace_ecc.json"
 CTS_FILE = "config/cts_ecc.json"
-ROUTE_FILE = "config/route_ecc.json"
+ROUTE_FILE = "config/routing_ecc.json"
 
-WRITABLE_FILES = frozenset({PARAMETERS_FILE, DREAMPLACE_FILE, CTS_FILE, ROUTE_FILE})
+WRITABLE_FILES = frozenset({PARAMS_TOML_FILE, DREAMPLACE_FILE, CTS_FILE, ROUTE_FILE})
 
 
 @dataclass(frozen=True)
@@ -55,9 +45,8 @@ class KnobSpec:
     kind: str
     config: KnobTarget | None = None
     parameters: KnobTarget | None = None
-    evidence: KnobTarget | None = None
     bounds: tuple[float, float] | None = None
-    # parameters.json stores some flags as 0/1 rather than JSON booleans.
+    # The DreamPlace config stores its routability flag as an integer.
     store_boolean_as_int: bool = False
 
     @property
@@ -74,15 +63,6 @@ class KnobSpec:
         assert target is not None
         return target
 
-    @property
-    def evidence_target(self) -> KnobTarget:
-        """Canonical surface hashed by ECC Agent candidate receipts."""
-        return self.evidence or self.read_target
-
-
-def _parameters(*json_path: str | int) -> KnobTarget:
-    return KnobTarget(surface="parameters", file=PARAMETERS_FILE, json_path=json_path)
-
 
 def _params_toml(*json_path: str | int) -> KnobTarget:
     return KnobTarget(surface="parameters", file=PARAMS_TOML_FILE, json_path=json_path)
@@ -90,6 +70,10 @@ def _params_toml(*json_path: str | int) -> KnobTarget:
 
 def _dreamplace(key: str) -> KnobTarget:
     return KnobTarget(surface="step_config", file=DREAMPLACE_FILE, json_path=(key,))
+
+
+def _placement_parameter(field: str) -> KnobTarget:
+    return _params_toml("params", "step_params", "placement", f"place.{field}")
 
 
 def _cts(key: str) -> KnobTarget:
@@ -102,58 +86,50 @@ def _route(key: str) -> KnobTarget:
 
 _SPECS: tuple[KnobSpec, ...] = (
     # -- Synthesis: global design intent -------------------------------------
-    KnobSpec("design.clock", ECCStepName.SYNTHESIS, "string", parameters=_parameters("Clock")),
+    KnobSpec("design.clock", ECCStepName.SYNTHESIS, "string", parameters=_params_toml("design", "clock_port")),
     KnobSpec(
         "design.frequency_max",
         ECCStepName.SYNTHESIS,
         "positive_number",
-        parameters=_parameters("Frequency max [MHz]"),
+        parameters=_params_toml("design", "frequency_mhz"),
     ),
     # -- Floorplan: die and core geometry ------------------------------------
     KnobSpec(
         "floorplan.utilitization",
         ECCStepName.POST_FLOORPLAN,
         "ranged",
-        parameters=_parameters("Core", "Utilitization"),
-        evidence=_params_toml("core", "utilitization"),
+        parameters=_params_toml("params", "core", "utilitization"),
         bounds=(0.01, 1.0),
     ),
     KnobSpec(
         "floorplan.aspect_ratio",
         ECCStepName.POST_FLOORPLAN,
         "positive_number",
-        parameters=_parameters("Core", "Aspect ratio"),
-        evidence=_params_toml("core", "aspect_ratio"),
+        parameters=_params_toml("params", "core", "aspect_ratio"),
     ),
     KnobSpec(
         "floorplan.margin_x",
         ECCStepName.POST_FLOORPLAN,
         "number",
-        parameters=_parameters("Core", "Margin", 0),
+        parameters=_params_toml("params", "core", "margin", 0),
     ),
     KnobSpec(
         "floorplan.margin_y",
         ECCStepName.POST_FLOORPLAN,
         "number",
-        parameters=_parameters("Core", "Margin", 1),
+        parameters=_params_toml("params", "core", "margin", 1),
     ),
     KnobSpec(
         "floorplan.die_width",
         ECCStepName.POST_FLOORPLAN,
         "positive_number",
-        parameters=_parameters("Die", "Size", 0),
+        parameters=_params_toml("params", "die", "size", 0),
     ),
     KnobSpec(
         "floorplan.die_height",
         ECCStepName.POST_FLOORPLAN,
         "positive_number",
-        parameters=_parameters("Die", "Size", 1),
-    ),
-    KnobSpec(
-        "floorplan.global_right_padding",
-        ECCStepName.POST_FLOORPLAN,
-        "zero_based_integer",
-        parameters=_parameters("Global right padding"),
+        parameters=_params_toml("params", "die", "size", 1),
     ),
     # -- Placement -----------------------------------------------------------
     KnobSpec(
@@ -161,7 +137,7 @@ _SPECS: tuple[KnobSpec, ...] = (
         ECCStepName.PLACEMENT,
         "ranged",
         config=_dreamplace("target_density"),
-        parameters=_parameters("Target density"),
+        parameters=_placement_parameter("target_density"),
         bounds=(0.1, 0.95),
     ),
     KnobSpec(
@@ -169,7 +145,7 @@ _SPECS: tuple[KnobSpec, ...] = (
         ECCStepName.PLACEMENT,
         "ranged",
         config=_dreamplace("stop_overflow"),
-        parameters=_parameters("Target overflow"),
+        parameters=_placement_parameter("stop_overflow"),
         bounds=(0.0, 1.0),
     ),
     KnobSpec(
@@ -177,28 +153,37 @@ _SPECS: tuple[KnobSpec, ...] = (
         ECCStepName.PLACEMENT,
         "zero_based_integer",
         config=_dreamplace("cell_padding_x"),
-        parameters=_parameters("Cell padding x"),
+        parameters=_placement_parameter("cell_padding_x"),
     ),
     KnobSpec(
         "place.routability_opt",
         ECCStepName.PLACEMENT,
         "boolean",
         config=_dreamplace("routability_opt_flag"),
-        parameters=_parameters("Routability opt flag"),
+        parameters=_placement_parameter("routability_opt_flag"),
         store_boolean_as_int=True,
     ),
     KnobSpec(
-        "place.density_weight", ECCStepName.PLACEMENT, "number", config=_dreamplace("density_weight")
+        "place.density_weight",
+        ECCStepName.PLACEMENT,
+        "number",
+        config=_dreamplace("density_weight"),
+        parameters=_placement_parameter("density_weight")
     ),
     KnobSpec(
         "place.gp_noise_ratio",
         ECCStepName.PLACEMENT,
         "ranged",
         config=_dreamplace("gp_noise_ratio"),
+        parameters=_placement_parameter("gp_noise_ratio"),
         bounds=(0.0, 1.0),
     ),
     KnobSpec(
-        "place.num_threads", ECCStepName.PLACEMENT, "integer", config=_dreamplace("num_threads")
+        "place.num_threads",
+        ECCStepName.PLACEMENT,
+        "integer",
+        config=_dreamplace("num_threads"),
+        parameters=_placement_parameter("num_threads")
     ),
     # -- Clock tree synthesis ------------------------------------------------
     KnobSpec(
@@ -223,7 +208,6 @@ _SPECS: tuple[KnobSpec, ...] = (
         ECCStepName.CTS,
         "integer",
         config=_cts("max_fanout"),
-        parameters=_parameters("Max fanout"),
     ),
     KnobSpec("cts.routing_layer", ECCStepName.CTS, "int_list", config=_cts("routing_layer")),
     KnobSpec("cts.buffer_type", ECCStepName.CTS, "str_list", config=_cts("buffer_type")),
@@ -260,57 +244,18 @@ _SPECS: tuple[KnobSpec, ...] = (
         "boolean",
         config=_cts("enable_sink_clustering"),
     ),
-    # -- Legalization --------------------------------------------------------
-    KnobSpec(
-        "legalization.cell_padding_x",
-        ECCStepName.LEGALIZATION,
-        "zero_based_integer",
-        config=_dreamplace("cell_padding_x"),
-    ),
-    KnobSpec(
-        "legalization.bndry_padding_x",
-        ECCStepName.LEGALIZATION,
-        "integer",
-        config=_dreamplace("bndry_padding_x"),
-    ),
-    KnobSpec(
-        "legalization.bndry_padding_y",
-        ECCStepName.LEGALIZATION,
-        "integer",
-        config=_dreamplace("bndry_padding_y"),
-    ),
-    KnobSpec(
-        "legalization.detailed_place_flag",
-        ECCStepName.LEGALIZATION,
-        "boolean",
-        config=_dreamplace("detailed_place_flag"),
-    ),
-    KnobSpec(
-        "legalization.num_threads",
-        ECCStepName.LEGALIZATION,
-        "integer",
-        config=_dreamplace("num_threads"),
-    ),
-    KnobSpec(
-        "legalization.deterministic",
-        ECCStepName.LEGALIZATION,
-        "boolean",
-        config=_dreamplace("deterministic_flag"),
-    ),
     # -- Routing -------------------------------------------------------------
     KnobSpec(
         "route.bottom_layer",
         ECCStepName.ROUTING,
         "string",
         config=_route("-bottom_routing_layer"),
-        parameters=_parameters("Bottom layer"),
     ),
     KnobSpec(
         "route.top_layer",
         ECCStepName.ROUTING,
         "string",
         config=_route("-top_routing_layer"),
-        parameters=_parameters("Top layer"),
     ),
     KnobSpec(
         "route.thread_number", ECCStepName.ROUTING, "integer", config=_route("-thread_number")
@@ -359,7 +304,8 @@ def resolve_write(item: ECCParameterPatchItem) -> dict[str, object]:
     Emitting the resolved target with the contract keeps the knob mapping in one
     place; the GUI executes the instruction instead of holding its own table.
     """
-    target = knob_spec(item.knob_id).write_target
+    spec = knob_spec(item.knob_id)
+    target = spec.write_target
     return {
         "knob_id": item.knob_id,
         "value": storage_value(item),

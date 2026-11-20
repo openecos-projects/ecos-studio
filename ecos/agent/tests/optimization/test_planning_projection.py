@@ -48,15 +48,12 @@ from ecos_agent.optimization.planning import (
 
 HASH = "sha256:" + "a" * 64
 # The observed per-corner scale of a real terminal observation: 24 unscoped
-# entries plus 15 STA metric ids across 13 corners.
+# entries plus timing metric ids across 13 corners.
 _FULL_CORNERS = tuple(f"corner-{index:02d}" for index in range(13))
 _CORNERED_STA_IDS = (
     "sta_setup_violation_count", "sta_hold_violation_count",
     "sta_setup_wns", "sta_setup_tns", "sta_hold_wns", "sta_hold_tns",
-    "sta_frequency", "sta_internal_power", "sta_leakage_power",
-    "sta_dynamic_power", "sta_switching_power", "sta_typical_dynamic_power",
-    "sta_typical_leakage_power", "sta_worst_dynamic_power",
-    "sta_worst_leakage_power",
+    "sta_frequency",
 )
 _UNSCOPED_IDS = (
     "drc_count", "lvs_count", "rcx_expected_corner_count", "rcx_spef_file_count",
@@ -64,7 +61,8 @@ _UNSCOPED_IDS = (
     "sta_corner_count", "sta_expected_corner_count", "sta_missing_corner_count",
     "sta_setup_violation_count", "sta_hold_violation_count",
     "harden_artifact_missing_count", "gui_overall_qor_score",
-) + _CORNERED_STA_IDS[:0] + tuple(f"unscoped_report_{index}" for index in range(11))
+    "power_analysis_dynamic_uw", "power_analysis_leakage_uw",
+) + tuple(f"unscoped_report_{index}" for index in range(9))
 
 
 def _metric(
@@ -247,7 +245,7 @@ def test_history_payload_renders_projection_and_keeps_outcome_binding():
     assert payload["terminal_observation"]["sta_corner_count"] == 13
     # 171 evaluation metrics collapse to 24 unscoped values plus 15 worst
     # corners; per-corner entries never reach the planner payload.
-    assert len(payload["terminal_observation"]["worst_corner_metrics"]) == 15
+    assert len(payload["terminal_observation"]["worst_corner_metrics"]) == len(_CORNERED_STA_IDS)
     assert "evaluation_metrics" not in payload["terminal_observation"]
 
 

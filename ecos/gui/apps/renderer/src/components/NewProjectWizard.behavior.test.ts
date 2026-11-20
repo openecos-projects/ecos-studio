@@ -18,24 +18,24 @@ const wizardMocks = vi.hoisted(() => {
   // Mirrors the live ECC rtl2gds discovery payload
   // (ecc chipcompiler/engine/workspace_spec.py describe_workspace_spec).
   const rtl2gdsStepIds = [
-    'Synthesis',
+    'synthesis',
     'lec',
-    'preFloorplan',
-    'macroPlacement',
-    'postFloorplan',
-    'place',
-    'CTS',
+    'pre_floorplan',
+    'macro_placement',
+    'post_floorplan',
+    'placement',
+    'cts',
     'legalization',
-    'Timing optimization',
-    'route',
+    'timing_optimization',
+    'routing',
     'filler',
-    'RCX',
+    'rcx',
     'sta',
-    'powerAnalysis',
+    'power_analysis',
     'lvs',
-    'postRouteLec',
+    'post_route_lec',
     'drc',
-    'Harden',
+    'harden',
   ]
   const defaultWorkspaceCreationModel = () => ({
     controls: {
@@ -49,7 +49,7 @@ const wizardMocks = vi.hoisted(() => {
         {
           flowId: 'rtl2gds',
           stepIds: rtl2gdsStepIds,
-          skippableStepIds: ['lec', 'Timing optimization', 'postRouteLec'],
+          skippableStepIds: ['lec', 'timing_optimization', 'post_route_lec'],
           defaultSkippedStepIds: ['lec'],
         },
       ],
@@ -197,7 +197,7 @@ describe('NewProjectWizard behavior', () => {
         initialConfig: {
           directory: '/projects/gcd/ws_0001',
           rtl_list: ['/resources/gcd/gcd.v'],
-          flow_config: { start_step: 'Synthesis', end_step: 'Harden', steps: [] },
+          flow_config: { start_step: 'synthesis', end_step: 'harden', steps: [] },
           project_context: projectContext,
         },
       },
@@ -1547,14 +1547,14 @@ describe('NewProjectWizard behavior', () => {
     ).toEqual(Array.from({ length: 13 }, (_, index) => String(index + 1)))
     await parallelCorners.setValue('13')
     expect((parallelCorners.element as HTMLSelectElement).value).toBe('13')
-    expect(wizard.flowStartStep).toBe('Synthesis')
-    await startSelect.setValue('CTS')
+    expect(wizard.flowStartStep).toBe('synthesis')
+    await startSelect.setValue('cts')
     await flushPromises()
 
-    expect(wizard.flowStartStep).toBe('CTS')
-    expect(wizard.selectedFlowSteps[0]).toBe('CTS')
-    expect(wizard.isFlowStepSelected('Synthesis')).toBe(false)
-    expect(wizard.isFlowStepSelected('CTS')).toBe(true)
+    expect(wizard.flowStartStep).toBe('cts')
+    expect(wizard.selectedFlowSteps[0]).toBe('cts')
+    expect(wizard.isFlowStepSelected('synthesis')).toBe(false)
+    expect(wizard.isFlowStepSelected('cts')).toBe(true)
     const checkboxState = () =>
       Object.fromEntries(
         wrapper
@@ -1564,7 +1564,7 @@ describe('NewProjectWizard behavior', () => {
             (card.get('input[type="checkbox"]').element as HTMLInputElement).checked,
           ]),
       )
-    expect(checkboxState()).toMatchObject({ Synthesis: false, CTS: true })
+    expect(checkboxState()).toMatchObject({ synthesis: false, cts: true })
 
     const legalizationCheckbox = wrapper.get(
       '[data-flow-step-card="legalization"] input[type="checkbox"]',
@@ -1575,15 +1575,15 @@ describe('NewProjectWizard behavior', () => {
     expect(wizard.flowEndStep).toBe('legalization')
     expect((legalizationCheckbox.element as HTMLInputElement).checked).toBe(true)
 
-    await startSelect.setValue('Timing optimization')
+    await startSelect.setValue('timing_optimization')
     await flushPromises()
-    expect(wizard.flowStartStep).toBe('Timing optimization')
-    expect(wizard.flowEndStep).toBe('Timing optimization')
-    expect(wizard.selectedFlowSteps).toEqual(['Timing optimization'])
+    expect(wizard.flowStartStep).toBe('timing_optimization')
+    expect(wizard.flowEndStep).toBe('timing_optimization')
+    expect(wizard.selectedFlowSteps).toEqual(['timing_optimization'])
     expect(checkboxState()).toMatchObject({
-      CTS: false,
+      cts: false,
       legalization: false,
-      'Timing optimization': true,
+      timing_optimization: true,
     })
     wrapper.unmount()
   })
@@ -1612,7 +1612,7 @@ describe('NewProjectWizard behavior', () => {
     wizard.currentStep = 4
     await flushPromises()
 
-    const ctsCard = wrapper.get('[data-flow-step-card="CTS"]')
+    const ctsCard = wrapper.get('[data-flow-step-card="cts"]')
     const clockTree = ctsCard.get('#cts-clock-tree-visualization')
     expect(ctsCard.text()).toContain('Clock-tree visualization')
     expect((clockTree.element as HTMLInputElement).checked).toBe(false)
@@ -1625,15 +1625,15 @@ describe('NewProjectWizard behavior', () => {
     await parallelCorners.setValue('5')
     expect(wizard.config.parameters.sta_max_parallel_corners).toBe(5)
 
-    await wrapper.get('[data-flow-step-card="postFloorplan"] button').trigger('click')
+    await wrapper.get('[data-flow-step-card="post_floorplan"] button').trigger('click')
     await flushPromises()
     expect(wrapper.find('#cts-clock-tree-visualization').exists()).toBe(false)
     expect(wrapper.find('#sta-max-parallel-corners').exists()).toBe(false)
 
-    await wrapper.get('[data-flow-step-card="CTS"] button').trigger('click')
+    await wrapper.get('[data-flow-step-card="cts"] button').trigger('click')
     await flushPromises()
     expect(
-      wrapper.find('[data-flow-step-card="CTS"] #cts-clock-tree-visualization').exists(),
+      wrapper.find('[data-flow-step-card="cts"] #cts-clock-tree-visualization').exists(),
     ).toBe(true)
     expect(wrapper.find('#sta-max-parallel-corners').exists()).toBe(false)
 
@@ -1671,7 +1671,7 @@ describe('NewProjectWizard behavior', () => {
     wizard.currentStep = 4
     await flushPromises()
 
-    const macroCard = wrapper.get('[data-flow-step-card="macroPlacement"]')
+    const macroCard = wrapper.get('[data-flow-step-card="macro_placement"]')
     const manualPlacement = macroCard.get('#macro-manual-placement')
     expect(macroCard.text()).toContain('Manual macro placement')
     expect((manualPlacement.element as HTMLInputElement).checked).toBe(false)
@@ -1679,15 +1679,15 @@ describe('NewProjectWizard behavior', () => {
     await manualPlacement.setValue(true)
     expect(wizard.config.parameters.manual_macro_placement).toBe(true)
 
-    await wrapper.get('[data-flow-step-card="preFloorplan"] button').trigger('click')
+    await wrapper.get('[data-flow-step-card="pre_floorplan"] button').trigger('click')
     await flushPromises()
     expect(wrapper.find('#macro-manual-placement').exists()).toBe(false)
 
-    await wrapper.get('[data-flow-step-card="macroPlacement"] button').trigger('click')
+    await wrapper.get('[data-flow-step-card="macro_placement"] button').trigger('click')
     await flushPromises()
     expect(
       (
-        wrapper.get('[data-flow-step-card="macroPlacement"] #macro-manual-placement')
+        wrapper.get('[data-flow-step-card="macro_placement"] #macro-manual-placement')
           .element as HTMLInputElement
       ).checked,
     ).toBe(true)
@@ -1697,12 +1697,12 @@ describe('NewProjectWizard behavior', () => {
   it('starts the flow range at a discovered start step and disables earlier cards', async () => {
     const model = wizardMocks.defaultWorkspaceCreationModel()
     model.discovery.flowDefinitions[0]!.stepIds = [
-      'Synthesis',
-      'preFloorplan',
+      'synthesis',
+      'pre_floorplan',
       'preplace',
-      'place',
-      'CTS',
-      'Harden',
+      'placement',
+      'cts',
+      'harden',
     ]
     wizardMocks.getWorkspaceCreationModel.mockResolvedValue(model)
     const wrapper = mount(NewProjectWizard, {
@@ -1730,12 +1730,12 @@ describe('NewProjectWizard behavior', () => {
     await flushPromises()
 
     expect(wizard.flowStartStep).toBe('preplace')
-    expect(wizard.flowEndStep).toBe('Harden')
-    expect(wizard.selectedFlowSteps).toEqual(['preplace', 'place', 'CTS', 'Harden'])
-    expect(wizard.isFlowStepSelected('Synthesis')).toBe(false)
+    expect(wizard.flowEndStep).toBe('harden')
+    expect(wizard.selectedFlowSteps).toEqual(['preplace', 'placement', 'cts', 'harden'])
+    expect(wizard.isFlowStepSelected('synthesis')).toBe(false)
     expect(
       (
-        wrapper.get('[data-flow-step-card="Synthesis"] input[type="checkbox"]')
+        wrapper.get('[data-flow-step-card="synthesis"] input[type="checkbox"]')
           .element as HTMLInputElement
       ).checked,
     ).toBe(false)
@@ -1746,13 +1746,13 @@ describe('NewProjectWizard behavior', () => {
       ).checked,
     ).toBe(true)
     expect(
-      wrapper.get('[data-flow-step-card="Synthesis"] button').attributes('disabled'),
+      wrapper.get('[data-flow-step-card="synthesis"] button').attributes('disabled'),
     ).toBeDefined()
     expect(
       wrapper.get('[data-flow-step-card="preplace"] button').attributes('disabled'),
     ).toBeUndefined()
 
-    await wrapper.get('[data-flow-step-card="Synthesis"]').trigger('click')
+    await wrapper.get('[data-flow-step-card="synthesis"]').trigger('click')
     expect(wizard.flowStartStep).toBe('preplace')
     wrapper.unmount()
     wizardMocks.getWorkspaceCreationModel.mockResolvedValue(
@@ -1763,19 +1763,19 @@ describe('NewProjectWizard behavior', () => {
   it('restores a persisted start step from ECC discovery', async () => {
     const model = wizardMocks.defaultWorkspaceCreationModel()
     model.discovery.flowDefinitions[0]!.stepIds = [
-      'Synthesis',
-      'preFloorplan',
+      'synthesis',
+      'pre_floorplan',
       'preplace',
-      'place',
-      'CTS',
-      'Harden',
+      'placement',
+      'cts',
+      'harden',
     ]
     wizardMocks.getWorkspaceCreationModel.mockResolvedValue(model)
     const wrapper = mount(NewProjectWizard, {
       props: {
         initialConfig: {
           standaloneWorkspace: true,
-          flow_config: { start_step: 'preplace', end_step: 'Harden', steps: [] },
+          flow_config: { start_step: 'preplace', end_step: 'harden', steps: [] },
         },
       },
       global: {
@@ -1846,6 +1846,46 @@ describe('NewProjectWizard behavior', () => {
     )
   })
 
+  it('shows a discovery failure and restores flow steps after retry', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const message = 'Install the ECC #380 runtime with workspace fork and step workers.'
+    wizardMocks.getWorkspaceCreationModel.mockRejectedValue(new Error(message))
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { standaloneWorkspace: true } },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    try {
+      const wizard = wrapper.vm as unknown as { currentStep: number }
+      wizard.currentStep = 4
+      await flushPromises()
+      expect(wrapper.get('[role="alert"]').text()).toBe(message)
+      expect(wrapper.get('select[aria-label="Start Step"]').attributes()).toHaveProperty(
+        'disabled',
+      )
+      expect(wrapper.text()).not.toContain('did not provide a flow definition')
+
+      wizardMocks.getWorkspaceCreationModel.mockResolvedValue(
+        wizardMocks.defaultWorkspaceCreationModel(),
+      )
+      await wrapper.get('[role="alert"] + button').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+      expect(wrapper.find('option[value="synthesis"]').exists()).toBe(true)
+    } finally {
+      warning.mockRestore()
+      wrapper.unmount()
+      wizardMocks.getWorkspaceCreationModel.mockResolvedValue(
+        wizardMocks.defaultWorkspaceCreationModel(),
+      )
+    }
+  })
+
   it('leaves flow steps unavailable when discovery has no flow definitions', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     wizardMocks.getWorkspaceCreationModel.mockResolvedValue({
@@ -1879,7 +1919,7 @@ describe('NewProjectWizard behavior', () => {
 
     expect(wizard.flowStepOptions).toEqual([])
     expect(wrapper.text()).toContain('Flow steps are unavailable')
-    expect(wrapper.text()).not.toContain('preFloorplan')
+    expect(wrapper.text()).not.toContain('pre_floorplan')
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('no usable flow definition'),
     )
@@ -1902,13 +1942,13 @@ describe('NewProjectWizard behavior', () => {
         flowDefinitions: [
           {
             flowId: 'rtl2gds',
-            stepIds: ['Synthesis', 'preFloorplan', 'macroPlacement', 'Harden'],
+            stepIds: ['synthesis', 'pre_floorplan', 'macro_placement', 'harden'],
             skippableStepIds: [],
             defaultSkippedStepIds: [],
           },
           {
             flowId: 'harden',
-            stepIds: ['Synthesis', 'customStep', 'Harden'],
+            stepIds: ['synthesis', 'customStep', 'harden'],
             skippableStepIds: [],
             defaultSkippedStepIds: [],
           },
@@ -1936,9 +1976,9 @@ describe('NewProjectWizard behavior', () => {
     await flushPromises()
 
     expect(wizard.flowStepOptions.map((step) => step.name)).toEqual([
-      'Synthesis',
+      'synthesis',
       'customStep',
-      'Harden',
+      'harden',
     ])
     expect(wrapper.text()).toContain('customStep step.')
     wrapper.unmount()
@@ -1960,13 +2000,13 @@ describe('NewProjectWizard behavior', () => {
           {
             flowId: 'rtl2gds',
             stepIds: [
-              'Synthesis',
+              'synthesis',
               'lec',
-              'preFloorplan',
-              'Timing optimization',
-              'Harden',
+              'pre_floorplan',
+              'timing_optimization',
+              'harden',
             ],
-            skippableStepIds: ['lec', 'Timing optimization'],
+            skippableStepIds: ['lec', 'timing_optimization'],
             defaultSkippedStepIds: ['lec'],
           },
         ],
@@ -1994,13 +2034,13 @@ describe('NewProjectWizard behavior', () => {
     wizard.currentStep = 4
     await flushPromises()
 
-    expect([...wizard.skippableFlowStepNames]).toEqual(['lec', 'Timing optimization'])
+    expect([...wizard.skippableFlowStepNames]).toEqual(['lec', 'timing_optimization'])
     expect([...wizard.defaultSkippedFlowStepNames]).toEqual(['lec'])
     expect(wizard.runnableFlowSteps).toEqual([
-      'Synthesis',
-      'preFloorplan',
-      'Timing optimization',
-      'Harden',
+      'synthesis',
+      'pre_floorplan',
+      'timing_optimization',
+      'harden',
     ])
     const cards = wrapper.findAll('[data-flow-step-card]')
     const skippedCards = cards.filter((card) => card.text().includes('Skipped'))
@@ -2011,7 +2051,7 @@ describe('NewProjectWizard behavior', () => {
     expect((lecCheckbox.element as HTMLInputElement).checked).toBe(false)
     const skippableCards = cards.filter((card) => card.text().includes('Skippable'))
     expect(skippableCards).toHaveLength(1)
-    expect(skippableCards[0].text()).toContain('Timing optimization')
+    expect(skippableCards[0].text()).toContain('timing_optimization')
     const skippableCheckbox = skippableCards[0].find('input[type="checkbox"]')
     expect((skippableCheckbox.element as HTMLInputElement).checked).toBe(true)
     wrapper.unmount()
@@ -2032,7 +2072,7 @@ describe('NewProjectWizard behavior', () => {
         flowDefinitions: [
           {
             flowId: 'rtl2gds',
-            stepIds: ['Synthesis', 'preFloorplan', 'place', 'sta'],
+            stepIds: ['synthesis', 'pre_floorplan', 'placement', 'sta'],
             skippableStepIds: [],
             defaultSkippedStepIds: [],
           },
@@ -2060,50 +2100,20 @@ describe('NewProjectWizard behavior', () => {
     wizard.currentStep = 4
     await flushPromises()
 
-    // Default end step 'Harden' is absent from the discovered chain, so the
+    // Default end step 'harden' is absent from the discovered chain, so the
     // boundary resets to the last discovered step.
     expect(wizard.flowStepOptions.map((step) => step.name)).toEqual([
-      'Synthesis',
-      'preFloorplan',
-      'place',
+      'synthesis',
+      'pre_floorplan',
+      'placement',
       'sta',
     ])
     expect(wizard.flowEndStep).toBe('sta')
-    expect(wrapper.text()).toContain('preFloorplan')
+    expect(wrapper.text()).toContain('pre_floorplan')
     wrapper.unmount()
     wizardMocks.getWorkspaceCreationModel.mockResolvedValue(
       wizardMocks.defaultWorkspaceCreationModel(),
     )
-  })
-
-  it("maps a persisted 'Floorplan' start step to preFloorplan", async () => {
-    const wrapper = mount(NewProjectWizard, {
-      props: {
-        initialConfig: {
-          standaloneWorkspace: true,
-          flow_config: { start_step: 'Floorplan', end_step: 'Harden', steps: [] },
-        },
-      },
-      global: {
-        stubs: {
-          DesignFileTransfer: true,
-          PdkResourcePickerDialog: true,
-          ...primevueStubs,
-        },
-      },
-    })
-    await flushPromises()
-    const wizard = wrapper.vm as unknown as {
-      currentStep: number
-      flowStartStep: string
-      selectedFlowSteps: string[]
-    }
-    wizard.currentStep = 4
-    await flushPromises()
-
-    expect(wizard.flowStartStep).toBe('preFloorplan')
-    expect(wizard.selectedFlowSteps[0]).toBe('preFloorplan')
-    wrapper.unmount()
   })
 })
 
@@ -2174,7 +2184,7 @@ describe('workspace wizard project type routing', () => {
       await flushPromises()
       expect(frontend.find('h2')?.text()).toBe('Verification Setup')
       expect(wrapper.text()).not.toContain('Flow Setup')
-      expect(wrapper.text()).not.toContain('preFloorplan')
+      expect(wrapper.text()).not.toContain('pre_floorplan')
       wrapper.unmount()
     },
   )
@@ -2377,7 +2387,7 @@ describe('workspace wizard project type routing', () => {
       await flushPromises()
     }
     expect(wrapper.findComponent(FrontendProjectWizard).exists()).toBe(false)
-    expect(wrapper.text()).toContain('preFloorplan')
+    expect(wrapper.text()).toContain('pre_floorplan')
     wrapper.unmount()
   })
 })

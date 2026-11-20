@@ -61,6 +61,48 @@
 
 **Role:** It selects a predefined joint schedule and validates its required parameter combination.
 
+<a id="parameter.dreamplace.joint_alternating_outer_rounds"></a>
+## parameter.dreamplace.joint_alternating_outer_rounds
+
+**Meaning:** Outer rounds for the discrete alternating sizing/buffering profile.
+
+**Role:** Sets how many times the flow repeats its sizing and buffering blocks.
+
+<a id="parameter.dreamplace.joint_alternating_sizing_rounds"></a>
+## parameter.dreamplace.joint_alternating_sizing_rounds
+
+**Meaning:** Discrete sizing rounds before each candidate buffering round.
+
+**Role:** Bounds the number of discrete sizing passes before buffer selection.
+
+<a id="parameter.dreamplace.joint_alternating_sizing_shared_budget_percent"></a>
+## parameter.dreamplace.joint_alternating_sizing_shared_budget_percent
+
+**Meaning:** Shared sizing budget percentage for the alternating profile.
+
+**Role:** Limits the fraction of cells resized per round.
+
+<a id="parameter.dreamplace.joint_alternating_buffering_rounds"></a>
+## parameter.dreamplace.joint_alternating_buffering_rounds
+
+**Meaning:** Candidate buffering rounds after each sizing block.
+
+**Role:** Controls how often buffer candidates are selected after each sizing block.
+
+<a id="parameter.dreamplace.joint_alternating_buffering_selection_fraction"></a>
+## parameter.dreamplace.joint_alternating_buffering_selection_fraction
+
+**Meaning:** Fraction of eligible nets selected by each candidate buffering round.
+
+**Role:** Limits the eligible nets considered for buffer insertion.
+
+<a id="parameter.dreamplace.joint_alternating_buffer_commit_policy"></a>
+## parameter.dreamplace.joint_alternating_buffer_commit_policy
+
+**Meaning:** Physical buffer commit policy for the alternating profile.
+
+**Role:** Selects when candidate buffers become physical instances.
+
 <a id="parameter.dreamplace.buffering_fixed_buffer_master"></a>
 ## parameter.dreamplace.buffering_fixed_buffer_master
 
@@ -817,12 +859,33 @@
 
 **Role:** It bounds continuous sizing before discrete refinement; zero disables the continuous phase.
 
+<a id="parameter.dreamplace.diff_sizing_terminal_gr_sta_enabled"></a>
+## parameter.dreamplace.diff_sizing_terminal_gr_sta_enabled
+
+**Meaning:** Diff sizing terminal gr sta enabled.
+
+**Role:** Requests a final global-route timing measurement after standalone sizing.
+
 <a id="parameter.dreamplace.diff_sizing_coefficients"></a>
 ## parameter.dreamplace.diff_sizing_coefficients
 
 **Meaning:** The differential-sizing WNS, TNS, capacitance, and slew coefficients.
 
 **Role:** It weights the continuous sizing objective in the standalone diff-sizing profile.
+
+<a id="parameter.dreamplace.diff_sizing_timing_rc_mode"></a>
+## parameter.dreamplace.diff_sizing_timing_rc_mode
+
+**Meaning:** Standalone diff_sizing timing RC source; placement uses the placement parasitics and gr uses the frozen GR snapshot.
+
+**Role:** Selects the placement estimate or global-routing snapshot used to time sizing changes.
+
+<a id="parameter.dreamplace.diff_sizing_optimization_flows"></a>
+## parameter.dreamplace.diff_sizing_optimization_flows
+
+**Meaning:** Ordered standalone diff_sizing phases: [action, rounds, [wns, tns, slew, cap], selection_percent]; action is quad, up, or down and percent is in (0, 100]; null selects a quad phase; ECC defaults to 50 rounds with diff_sizing_coefficients and a shared 1% budget per round.
+
+**Role:** Controls the action, rounds, timing weights and selection budget for each sizing phase.
 
 <a id="parameter.dreamplace.timing_placement_carrier"></a>
 ## parameter.dreamplace.timing_placement_carrier
@@ -929,6 +992,27 @@
 
 **Role:** It selects automatic, mixed, LUT-only, or surrogate-only timing evaluation.
 
+<a id="parameter.dreamplace.timing_action_gradient_mode"></a>
+## parameter.dreamplace.timing_action_gradient_mode
+
+**Meaning:** Discrete sizing gradient mode; default lut_action, off is the legacy path.
+
+**Role:** Selects how the optimizer scores discrete cell-sizing actions.
+
+<a id="parameter.dreamplace.timing_sizing_action"></a>
+## parameter.dreamplace.timing_sizing_action
+
+**Meaning:** Action family for placement sizing windows and diff_opt sizing: up | down | quad; explicit diff_sizing phase masks take precedence.
+
+**Role:** Restricts the sizing directions available to the optimizer.
+
+<a id="parameter.dreamplace.timing_action_score_objective"></a>
+## parameter.dreamplace.timing_action_score_objective
+
+**Meaning:** Objective differentiated for the local LUT action score; loss uses diff_sizing_coefficients, tns/wns select a single timing metric.
+
+**Role:** Selects the timing objective whose gradient ranks candidate actions.
+
 <a id="parameter.dreamplace.timing_topology_refresh_interval"></a>
 ## parameter.dreamplace.timing_topology_refresh_interval
 
@@ -964,12 +1048,47 @@
 
 **Role:** It controls how closely smooth aggregation approaches hard maxima and minima.
 
+<a id="parameter.dreamplace.timing_metric_scope"></a>
+## parameter.dreamplace.timing_metric_scope
+
+**Meaning:** Max timing checks used by placement WNS/TNS: setup_only or setup_plus_recovery.
+
+**Role:** Selects which maximum-delay checks contribute to reported slack.
+
+<a id="parameter.dreamplace.timing_propagation_device"></a>
+## parameter.dreamplace.timing_propagation_device
+
+**Meaning:** TimingPropagation device: inherit the placement device, or explicitly use cpu/cuda.
+
+**Role:** Selects the execution device for timing propagation.
+
 <a id="parameter.dreamplace.timing_grad_balance_target_ratio"></a>
 ## parameter.dreamplace.timing_grad_balance_target_ratio
 
 **Meaning:** The target timing-to-wirelength gradient balance.
 
 **Role:** It balances weighted timing and wirelength gradient norms; zero disables automatic balancing.
+
+<a id="parameter.dreamplace.timing_grad_balance_reset_on_restart"></a>
+## parameter.dreamplace.timing_grad_balance_reset_on_restart
+
+**Meaning:** Reset and reinitialize the timing-gradient balance weight after each inflation/GP restart; 0 preserves the current weight.
+
+**Role:** Controls whether timing gradient calibration survives a placement restart.
+
+<a id="parameter.dreamplace.diff_optimization_mode"></a>
+## parameter.dreamplace.diff_optimization_mode
+
+**Meaning:** Diff optimization mode.
+
+**Role:** Selects the optimization mode for the diff_opt stage.
+
+<a id="parameter.dreamplace.diff_optimization_flows"></a>
+## parameter.dreamplace.diff_optimization_flows
+
+**Meaning:** Diff optimization flows.
+
+**Role:** Sets the execution order, round counts and objective weights for the sizing and buffering phases.
 
 <a id="parameter.dreamplace.placement_sizing_mode"></a>
 ## parameter.dreamplace.placement_sizing_mode
@@ -1019,6 +1138,20 @@
 **Meaning:** The enhanced inflation-controller switch.
 
 **Role:** It enables the enhanced outer-loop inflation schedule.
+
+<a id="parameter.dreamplace.inflation_density_weight_scale"></a>
+## parameter.dreamplace.inflation_density_weight_scale
+
+**Meaning:** Positive scale for the Xplace-style density-weight restart ratio after inflation; the default 0.001 keeps the restarted density force small, 1.0 uses the normalized gradient ratio directly, and 0.1 reproduces the historical DreamPlace post-restart scale.
+
+**Role:** Scales the density penalty when placement restarts after area inflation.
+
+<a id="parameter.dreamplace.inflation_filler_consumption_mode"></a>
+## parameter.dreamplace.inflation_filler_consumption_mode
+
+**Meaning:** How routability inflation consumes filler: filler_first subtracts the inflation area from filler before raising target density, proportional shrinks filler and non-filler whitespace together, capacity_only preserves the legacy limit-only shrink.
+
+**Role:** Determines how much filler area remains after routability inflation.
 
 <a id="parameter.dreamplace.enhanced_inflation_replay_best_round_flag"></a>
 ## parameter.dreamplace.enhanced_inflation_replay_best_round_flag
@@ -1075,6 +1208,27 @@
 **Meaning:** The buffering representation.
 
 **Role:** It selects the `segment` or `candidate` buffering lane and its matching defaults.
+
+<a id="parameter.dreamplace.buffering_candidate_strategy"></a>
+## parameter.dreamplace.buffering_candidate_strategy
+
+**Meaning:** Buffering candidate strategy.
+
+**Role:** Selects the buffer candidate generation strategy.
+
+<a id="parameter.dreamplace.buffering_candidate_drive_type_mode"></a>
+## parameter.dreamplace.buffering_candidate_drive_type_mode
+
+**Meaning:** Candidate discrete buffer type selection, single_fixed | four_strength_table.
+
+**Role:** Selects a fixed buffer or a table of drive strengths during buffer selection.
+
+<a id="parameter.dreamplace.buffering_candidate_drive_strength_table"></a>
+## parameter.dreamplace.buffering_candidate_drive_strength_table
+
+**Meaning:** External four-buffer drive-strength table used by typed discrete candidate buffering.
+
+**Role:** Supplies the table of available buffer drive strengths.
 
 <a id="parameter.dreamplace.buffering_segment_strategy"></a>
 ## parameter.dreamplace.buffering_segment_strategy
@@ -1215,3 +1369,10 @@
 **Meaning:** The maximum adaptive L-shape gradient ratio.
 
 **Role:** It caps the routability gradient target during optimization.
+
+<a id="parameter.dreamplace.l_shape_weight_max_multiplier"></a>
+## parameter.dreamplace.l_shape_weight_max_multiplier
+
+**Meaning:** Maximum adaptive L-shape weight as a multiple of the first calibrated weight in each calibration epoch; 0 disables the relative cap.
+
+**Role:** Caps the adaptive L-shape penalty relative to its first calibrated weight.

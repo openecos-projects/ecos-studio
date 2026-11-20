@@ -12,6 +12,9 @@ import {
 export type StepCheckState = 'passed' | 'blocked' | 'warning' | 'unavailable'
 
 export interface DashboardFlowStep extends FlowStatusNode {
+  category?: FlowStepSummary['category']
+  inputStep?: string
+  tool?: string
   path: string
   checklist: ChecklistFinding[]
   checkState: StepCheckState
@@ -47,6 +50,9 @@ export function dashboardFlowSteps(
       const metadata = getStepMetadata(step.stepId)
       return {
         id: step.stepId,
+        ...(step.category ? { category: step.category } : {}),
+        ...(step.inputStep ? { inputStep: step.inputStep } : {}),
+        ...(step.toolId ? { tool: step.toolId } : {}),
         path: metadata?.path ?? step.stepId,
         label: metadata?.label ?? step.name,
         status: flowNodeStatus(step.state),

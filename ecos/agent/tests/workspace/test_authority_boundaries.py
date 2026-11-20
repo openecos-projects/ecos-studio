@@ -12,28 +12,28 @@ from ecos_agent.workspace.rerun import GuiWorkspaceRerunResolver, GuiWorkspaceRe
 def test_gui_workspace_flow_steps_are_the_ecc_catalog_in_order() -> None:
     assert GUI_WORKSPACE_FLOW_STEPS == tuple(step.value for step in ECCStepName)
     assert GUI_WORKSPACE_FLOW_STEPS == (
-        "Synthesis",
-        "lec",
-        "preFloorplan",
-        "macroPlacement",
-        "postFloorplan",
+        "synthesis",
+        "pre_floorplan",
+        "macro_placement",
+        "post_floorplan",
         "preplace",
-        "place",
+        "placement",
+        "diff_opt",
         "diff_sizing",
-        "CTS",
+        "cts",
         "legalization",
-        "Timing optimization",
-        "route",
+        "timing_optimization",
+        "routing",
         "filler",
         "lvs",
         "drc",
-        "antennaCheck",
-        "postRouteLec",
-        "RCX",
+        "antenna_check",
+        "post_route_lec",
+        "rcx",
         "sta",
-        "powerAnalysis",
+        "power_analysis",
         "emir",
-        "Harden",
+        "harden",
     )
 
 
@@ -57,29 +57,29 @@ def test_public_patch_validation_preserves_workspace_rerun_contract(tmp_path: Pa
         design_id="gcd",
         flow_json_sha256="0" * 64,
         end_step=ECCStepName.HARDEN,
-        allowed_stages=("place",),
-        stage_artifact_ref={"place": "place_dreamplace/output/gcd_place.def.gz"},
-        stage_artifact_sha256={"place": "1" * 64},
+        allowed_stages=("placement",),
+        stage_artifact_ref={"placement": "06_placement_dreamplace/output/gcd_placement.def.gz"},
+        stage_artifact_sha256={"placement": "1" * 64},
     )
     items = [{"knob_id": "place.target_density", "value": 0.7}]
 
-    patch = GuiWorkspaceRerunResolver.validate_patch("place", items)
+    patch = GuiWorkspaceRerunResolver.validate_patch("placement", items)
     contract = GuiWorkspaceRerunResolver(tmp_path).freeze(
-        source, "place", items, "full_flow"
+        source, "placement", items, "full_flow"
     )
 
     assert isinstance(patch, ECCParameterPatch)
     assert contract.model_dump(mode="json") == {
         "schema_version": "flow-agent.workspace_rerun_contract.v1",
         "source_workspace": str(workspace),
-        "target_workspace": str(tmp_path / "gcd_rerun_place"),
-        "rerun_id": "gcd_rerun_place",
+        "target_workspace": str(tmp_path / "gcd_rerun_placement"),
+        "rerun_id": "gcd_rerun_placement",
         "design_id": "gcd",
-        "target_step": "place",
-        "end_step": "Harden",
+        "target_step": "placement",
+        "end_step": "harden",
         "execution_scope": "full_flow",
         "source_flow_json_sha256": "0" * 64,
-        "source_stage_artifact": "place_dreamplace/output/gcd_place.def.gz",
+        "source_stage_artifact": "06_placement_dreamplace/output/gcd_placement.def.gz",
         "source_stage_artifact_sha256": "1" * 64,
         "parameter_patch": [{"knob_id": "place.target_density", "value": 0.7}],
         "writes": [
@@ -87,8 +87,8 @@ def test_public_patch_validation_preserves_workspace_rerun_contract(tmp_path: Pa
                 "knob_id": "place.target_density",
                 "value": 0.7,
                 "surface": "parameters",
-                "file": "home/parameters.json",
-                "json_path": ["Target density"],
+                "file": "home/params.toml",
+                "json_path": ["params", "step_params", "placement", "place.target_density"],
             }
         ],
         "requires_gui_review": True,
@@ -98,5 +98,5 @@ def test_public_patch_validation_preserves_workspace_rerun_contract(tmp_path: Pa
 def test_core_util_alias_remains_unauthorized_for_workspace_rerun() -> None:
     with pytest.raises(ValueError, match="not authorized"):
         GuiWorkspaceRerunResolver.validate_patch(
-            "postFloorplan", [{"knob_id": "floorplan.core_util", "value": 0.7}]
+            "post_floorplan", [{"knob_id": "floorplan.core_util", "value": 0.7}]
         )

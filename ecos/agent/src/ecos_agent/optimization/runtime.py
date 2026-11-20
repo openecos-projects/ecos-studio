@@ -19,6 +19,7 @@ from pydantic import (
     field_validator,
 )
 
+from ecos_agent.workspace.step_directories import step_directory
 from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization.contracts import (
@@ -151,7 +152,7 @@ def create_optimization_runner(
         )
     episode_id = runtime.episode_id
     objective = runtime.objective
-    checkpoint_id = "place"
+    checkpoint_id = "placement"
     knowledge_case_pool_root = _knowledge_case_pool_root(
         runtime.knowledge_case_pool_root
     )
@@ -287,7 +288,7 @@ def _recover_or_create_controller(
     memory_store.ensure_episode_scope(ledger_root)
     return OptimizationEpisodeController(
         episode_id=runtime.episode_id,
-        checkpoint_id="place",
+        checkpoint_id="placement",
         mode=runtime.agent_mode,
         budget=budget,
         planner=planner,
@@ -488,7 +489,7 @@ def _parent_manifest_sha256(workspace: Path, terminal: TerminalObservation) -> s
         (
             "home/flow.json",
             parameters_ref,
-            "place_dreamplace/analysis/qor_metrics.json",
+            f"{step_directory(workspace, 'placement')}/analysis/qor_metrics.json",
         ),
     )
     return canonical_sha256(
@@ -687,7 +688,7 @@ def _current_values(
     try:
         parameters = _runtime_parameters(workspace)[1]
         dreamplace = json.loads(
-            (workspace / "config" / "dreamplace_ecc.json").read_text(encoding="utf-8")
+            (workspace / step_directory(workspace, "placement") / "config" / "dreamplace_ecc.json").read_text(encoding="utf-8")
         )
         values = {
             "place.target_density": dreamplace["target_density"],

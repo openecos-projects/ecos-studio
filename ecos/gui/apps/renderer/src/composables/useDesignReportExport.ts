@@ -6,7 +6,6 @@ import {
   joinLocalPath,
   parsePowerRpt,
   parseQorSummaryRpt,
-  projectManagementWorkspaceStepAnalysisSpecs,
   type DesignReportData,
   type DesignReportExportOptions,
   type DesignReportFormat,
@@ -238,7 +237,7 @@ export function useDesignReportExport({
 
       if (isBackend && !runtimeSnapshot) {
         flow = await readWorkspaceJson('home/flow.json')
-        parameters = await readWorkspaceJson('home/parameters.json')
+        parameters = await readWorkspaceParametersResourceApi().catch(() => null)
         projectMetadata =
           (await readWorkspaceJson('home/pdk.json')) ||
           (await readWorkspaceJson('config/pdk.json')) ||
@@ -280,7 +279,7 @@ export function useDesignReportExport({
         currentProject.value?.name ||
         'gcd'
 
-      // v6 snapshots carry no inlined analysis payloads; backend workspaces use
+      // Snapshots carry no inlined step reports; backend workspaces use
       // the same bounded artifact-path scanning as frontend workspaces below.
       const stepMetrics: Record<string, unknown> = {}
       const stepSummaries: Record<string, unknown> = {}
@@ -587,27 +586,11 @@ export function useDesignReportExport({
         }),
       )
 
-      // 5. Fallback standard predefined analysis specs
-      await Promise.all(
-        projectManagementWorkspaceStepAnalysisSpecs.map(async (spec) => {
-          if (!stepMetrics[spec.step]) {
-            const m = await readWorkspaceJson(spec.metricsPath)
-            if (m) stepMetrics[spec.step] = m
-          }
-          if (!stepSummaries[spec.step]) {
-            const s = await readWorkspaceJson(spec.summaryPath)
-            if (s) stepSummaries[spec.step] = s
-          }
-          if (!stepHotspots[spec.step]) {
-            const h = await readWorkspaceJson(spec.hotspotsPath)
-            if (h) stepHotspots[spec.step] = h
-          }
-        }),
-      )
-
-      // 6. STA timing issues
-      let staTimingIssues: Record<string, unknown> | null = null
-      staTimingIssues = await readWorkspaceJson('sta_ecc/analysis/sta_timing_issues.json')
+      const sta = stepList.find((entry: { name?: string }) => entry?.name === 'sta')
+      const staTimingIssues =
+        typeof sta?.directory === 'string'
+          ? await readWorkspaceJson(`${sta.directory}/analysis/sta_timing_issues.json`)
+          : null
 
       if (unmounted || generation !== loadGeneration) return
 

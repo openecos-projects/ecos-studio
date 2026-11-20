@@ -343,18 +343,11 @@ export interface DesktopAgentWorkspaceSignoffContract {
   workspace: string
 }
 
-/**
- * Workspace files the Agent may write a parameter into. The workspace
- * configuration (`home/params.toml`, or `home/parameters.json` when that is
- * the on-disk format) is authoritative; ECC regenerates the `config/*.json`
- * step configs from it.
- */
+/** Files referenced by the Agent's parameter write proposals. */
 export const desktopAgentParameterWriteFiles = [
   'home/params.toml',
-  'home/parameters.json',
-  'config/dreamplace_ecc.json',
   'config/cts_ecc.json',
-  'config/route_ecc.json',
+  'config/routing_ecc.json',
 ] as const
 
 export type DesktopAgentParameterWriteFile =

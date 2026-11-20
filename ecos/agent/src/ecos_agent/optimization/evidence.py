@@ -64,10 +64,8 @@ METRIC_NATURES: dict[str, MetricNature] = {
     "sta_setup_tns": MetricNature.DIRECT,
     "sta_hold_wns": MetricNature.DIRECT,
     "sta_hold_tns": MetricNature.DIRECT,
-    "sta_typical_dynamic_power": MetricNature.ESTIMATED,
-    "sta_typical_leakage_power": MetricNature.ESTIMATED,
-    "sta_worst_dynamic_power": MetricNature.ESTIMATED,
-    "sta_worst_leakage_power": MetricNature.ESTIMATED,
+    "power_analysis_dynamic_uw": MetricNature.ESTIMATED,
+    "power_analysis_leakage_uw": MetricNature.ESTIMATED,
     "sta_frequency": MetricNature.DIRECT,
     "gui_overall_qor_score": MetricNature.DERIVED,
 }
@@ -84,9 +82,9 @@ PRESERVE_FORBIDDEN_NATURES = frozenset({MetricNature.DERIVED})
 def preserve_metric_is_forbidden(metric: "ObjectiveMetric") -> bool:
     return METRIC_NATURES[metric.value] in PRESERVE_FORBIDDEN_NATURES
 
-_PLACE_QOR = "place_dreamplace/analysis/qor_metrics.json"
-_ROUTE_QOR = "route_ecc/analysis/qor_metrics.json"
-_STA_QOR = "sta_ecc/analysis/qor_metrics.json"
+_PLACE_QOR = "placement/analysis/qor_metrics.json"
+_ROUTE_QOR = "routing/analysis/qor_metrics.json"
+_STA_QOR = "sta/analysis/qor_metrics.json"
 
 #: Document defaults: tau_guardband = 0.05*Tclk, tau_over_provision =
 #: 0.20*Tclk, tau_timing_fail = 0.20*Tclk (section 7.2).

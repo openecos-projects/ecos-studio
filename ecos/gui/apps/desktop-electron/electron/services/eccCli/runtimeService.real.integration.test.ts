@@ -1,10 +1,9 @@
 import type { EccRuntimeOperation, EccWorkspaceCreateRequest } from '@ecos-studio/shared'
 import { randomUUID } from 'node:crypto'
-import { access, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { EccCliRuntimeService } from './runtimeService'
-import { projectNeedsCliMigration } from './legacyMigration'
 
 const enabled = process.env.ECOS_REAL_ECC_INTEGRATION === '1'
 const describeReal = enabled ? describe : describe.skip
@@ -101,12 +100,16 @@ describeReal('ECC CLI runtime real integration', () => {
       )?.value,
     ).toBe(125)
 
+    const configuration = await service.readWorkspaceConfiguration(workspaceRoot)
     const managedRefresh = await service.updateWorkspace({
       commandId: randomUUID(),
       expectedWorkspaceRevision: updatedRevision,
-      workspaceBindings: request.workspaceBindings,
+      workspaceBindings: configuration.workspaceBindings,
       workspaceHandle: created.workspaceHandle,
-      workspaceSpec: request.workspaceSpec,
+      workspaceSpec: {
+        ...request.workspaceSpec,
+        inputs: configuration.workspaceSpec.inputs,
+      },
     })
     const managedRevision = requiredRevision(managedRefresh)
     expect(managedRevision).toBeGreaterThan(updatedRevision)
@@ -127,6 +130,27 @@ describeReal('ECC CLI runtime real integration', () => {
     })
     await expectSucceeded(service, created.workspaceHandle, stepOperation)
     current = await service.workspaceSession(created.workspaceHandle)
+
+    const forked = await service.deriveWorkspace({
+      directory: workspaceRoot,
+      targetDirectory: join(projectRoot, 'reviewed-rerun'),
+      resetFromStep: 'synthesis',
+      workspaceHandle: created.workspaceHandle,
+    })
+    const original = await service.workspaceSnapshot({
+      workspaceHandle: created.workspaceHandle,
+    })
+    const fork = await service.workspaceSnapshot({
+      workspaceHandle: forked.workspaceHandle,
+    })
+    expect(original.flow.steps[0]?.state).toBe('Success')
+    expect(fork.flow.steps[0]?.state).toBe('Unstart')
+    await service.closeWorkspace({ workspaceHandle: forked.workspaceHandle })
+    await service.mutateProjectManifest(projectRoot, {
+      deleteDirectory: true,
+      type: 'delete-workspace',
+      workspaceId: 'reviewed-rerun',
+    })
 
     const revisionBeforeReset = requiredRevision(current)
     const reset = await service.resetFlow({
@@ -156,34 +180,11 @@ describeReal('ECC CLI runtime real integration', () => {
     await service.closeWorkspace({ workspaceHandle: created.workspaceHandle })
     await service.shutdown()
 
-    const legacyRoot = join(projectRoot, 'runs', 'ws_0001')
-    await mkdir(join(projectRoot, 'runs'), { recursive: true })
-    await rename(workspaceRoot, legacyRoot)
-    const manifestPath = join(projectRoot, 'project.json')
-    const legacyManifest = JSON.parse(await readFile(manifestPath, 'utf8'))
-    legacyManifest.root_path = '/legacy/location/project'
-    legacyManifest.workspaces[0].workspace_path = 'runs/ws_0001'
-    await writeFile(manifestPath, `${JSON.stringify(legacyManifest, null, 2)}\n`)
-    expect(await projectNeedsCliMigration(projectRoot)).toBe(true)
-
     const restarted = createService(wrapper)
     services.push(restarted)
-    const migrated = await restarted.openWorkspace({ directory: legacyRoot })
-    expect(migrated).toMatchObject({
+    expect(await restarted.openWorkspace({ directory: workspaceRoot })).toMatchObject({
       directory: workspaceRoot,
       workspaceId: 'ws_0001',
-    })
-    await expect(access(legacyRoot)).rejects.toThrow(/ENOENT/)
-    await access(workspaceRoot)
-    const migratedManifest = await restarted.loadProjectManifest(projectRoot)
-    expect(migratedManifest).toMatchObject({
-      root_path: projectRoot,
-      workspaces: [
-        expect.objectContaining({
-          workspace_id: 'ws_0001',
-          workspace_path: workspaceRoot,
-        }),
-      ],
     })
   }, 240_000)
 })

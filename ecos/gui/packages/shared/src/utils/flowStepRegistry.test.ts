@@ -19,18 +19,18 @@ describe('flow step registry', () => {
 
   it('mirrors the default ECC post-route sequence', () => {
     const names = flowStepRegistry.flatMap((step) => step.eccNames)
-    expect(names.slice(names.indexOf('route'))).toEqual([
-      'route',
+    expect(names.slice(names.indexOf('routing'))).toEqual([
+      'routing',
       'filler',
       'lvs',
       'drc',
-      'antennaCheck',
-      'postRouteLec',
-      'RCX',
+      'antenna_check',
+      'post_route_lec',
+      'rcx',
       'sta',
-      'powerAnalysis',
+      'power_analysis',
       'emir',
-      'Harden',
+      'harden',
     ])
   })
 
@@ -107,19 +107,19 @@ describe('flow step registry', () => {
     expect(flowStepDefinition('LVS').metricScopes).toEqual(['final_lvs'])
     expect(flowStepDefinition('Harden').metricScopes).toEqual(['final_delivery'])
     expect(flowStepDefinition('Floor').eccNames).toEqual([
-      'preFloorplan',
-      'macroPlacement',
-      'postFloorplan',
+      'pre_floorplan',
+      'macro_placement',
+      'post_floorplan',
     ])
     expect(flowStepDefinition('Place')).toMatchObject({
-      eccNames: ['preplace', 'place', 'diff_sizing'],
-      qorProducerEccNames: ['place', 'preplace', 'diff_sizing'],
-      layoutEccNames: ['place'],
+      eccNames: ['preplace', 'placement', 'diff_opt', 'diff_sizing'],
+      qorProducerEccNames: ['placement', 'preplace', 'diff_sizing'],
+      layoutEccNames: ['placement'],
     })
     expect(flowStepDefinition('Floor').qorProducerEccNames).toEqual([
-      'postFloorplan',
-      'preFloorplan',
-      'macroPlacement',
+      'post_floorplan',
+      'pre_floorplan',
+      'macro_placement',
     ])
     expect(flowStepDefinition('LEC').tool).toBe('kepler_formal')
     expect(flowStepDefinition('Post-route LEC').tool).toBe('kepler_formal')

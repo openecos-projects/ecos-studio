@@ -63,32 +63,31 @@ export function useBackendFlowStages() {
   })
   const projectedSteps = computed(() => {
     const revision = session.projection.data?.revision
+    const workspacePath = currentProject.value?.path
     const operation =
-      revision?.status === 'ready'
+      workspacePath && revision?.status === 'ready'
         ? backgroundOperations.operationForWorkspace(
+            workspacePath,
             revision.data.workspaceId,
-            revision.data.workspaceRevision,
           )
         : undefined
+    if (operation?.flow) {
+      return projectRuntimeFlowSteps(operation.flow.steps, committedSteps.value)
+    }
     const steps = projectBackendFlowSteps(
-      operation?.flow
-        ? projectRuntimeFlowSteps(operation.flow.steps)
-        : committedSteps.value,
+      committedSteps.value,
       backendRuntimeEvents.value,
     )
     const operationStep = operation?.currentStep || operation?.step
     if (operationStep) {
       const key = operationStep.trim().toLowerCase()
-      for (const step of steps) {
-        if (step.state === 'running') step.state = 'not-started'
-      }
       const activeStep = steps.find(
         (step) =>
           step.stepId.trim().toLowerCase() === key ||
           step.name.trim().toLowerCase() === key ||
           (getStepMetadata(step.stepId)?.path ?? '').toLowerCase() === key,
       )
-      if (activeStep) {
+      if (activeStep && !steps.some((step) => step.state === 'running')) {
         activeStep.state = 'running'
         if (operation.currentTool) activeStep.toolId = operation.currentTool
       }

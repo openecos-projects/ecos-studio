@@ -55,7 +55,7 @@ def write_candidate(
     actual_value: int | float | bool | None = 0.65,
     requested_unit: str = "ratio",
     written_unit: str = "ratio",
-    config_key: str = "dreamplace",
+    config_key: str = "parameters",
     config_field: str = "target_density",
     observation_payload: dict | None = None,
     status: str = "effective",
@@ -70,13 +70,16 @@ def write_candidate(
     runtime_path = analysis / "parameter_runtime_report.v2.json"
     manifest_path = analysis / "candidate_workspace.v1.json"
     replay_path = analysis / "candidate_execution_receipt.v1.json"
-    config_path = candidate_root / "config/dreamplace_ecc.json"
-    before_snapshot_path = analysis / "snapshots/dreamplace_ecc.before.json"
-    after_snapshot_path = analysis / "snapshots/dreamplace_ecc.after.json"
+    config_path = candidate_root / "home/params.toml"
+    before_snapshot_path = analysis / "snapshots/parameters.before.json"
+    after_snapshot_path = analysis / "snapshots/parameters.after.json"
     written = requested_value if written_value is None else written_value
-    write_json(before_snapshot_path, {config_field: 0})
-    write_json(after_snapshot_path, {config_field: written})
-    write_json(config_path, {config_field: written})
+    for path, value in ((before_snapshot_path, 0), (after_snapshot_path, written), (config_path, written)):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            f'schema_version = 4\n[params.step_params.placement]\n"place.{config_field}" = {value}\n"place.random_seed" = 17\n',
+            encoding="utf-8",
+        )
     patch = [{"knob_id": knob.value, "value": written}]
     patch_sha256 = canonical_sha256(patch)
     before_sha256 = file_sha256(before_snapshot_path)
@@ -85,14 +88,14 @@ def write_candidate(
         "schema": "ecc.workspace.candidate_materialization.v1",
         "schema_version": 1,
         "candidate_id": candidate_id,
-        "target_step": "place",
-        "target": {"step": "place"},
+        "target_step": "placement",
+        "target": {"step": "placement"},
         "registry_sha256": HASH,
         "patch": patch,
         "patch_sha256": patch_sha256,
         "configs": [
             {
-                "ref": "config/dreamplace_ecc.json",
+                "ref": "home/params.toml",
                 "config_key": config_key,
                 "before_sha256": before_sha256,
                 "after_sha256": after_sha256,
@@ -101,9 +104,9 @@ def write_candidate(
         "snapshots": [
             {
                 "config_key": config_key,
-                "before_ref": "analysis/snapshots/dreamplace_ecc.before.json",
+                "before_ref": "analysis/snapshots/parameters.before.json",
                 "before_sha256": before_sha256,
-                "after_ref": "analysis/snapshots/dreamplace_ecc.after.json",
+                "after_ref": "analysis/snapshots/parameters.after.json",
                 "after_sha256": after_sha256,
             }
         ],
@@ -132,9 +135,10 @@ def write_candidate(
         "tool": parameter_card.tool.model_dump(mode="json"),
         "context": {
             "run_id": candidate_id,
-            "stage": "place",
+            "stage": "placement",
             "lattice_version": "ecos.optimization_lattice.v1",
             "site_width_dbu": 2000,
+            "seed": 17,
             "ecc_revision": "ecc-test-revision",
             "parameter_card_sha256": card_hash(parameter_card),
             "context_sha256": HASH,
@@ -152,13 +156,13 @@ def write_candidate(
             "candidate_ref": candidate_ref,
             "parent_ref": None,
             "workspace_ref": candidate_ref,
-            "target_step": "place",
-            "config_ref": "config/dreamplace_ecc.json",
+            "target_step": "placement",
+            "config_ref": "home/params.toml",
             "config_before_sha256": before_sha256,
             "config_after_sha256": after_sha256,
-            "before_snapshot_ref": "analysis/snapshots/dreamplace_ecc.before.json",
+            "before_snapshot_ref": "analysis/snapshots/parameters.before.json",
             "before_snapshot_sha256": before_sha256,
-            "after_snapshot_ref": "analysis/snapshots/dreamplace_ecc.after.json",
+            "after_snapshot_ref": "analysis/snapshots/parameters.after.json",
             "after_snapshot_sha256": after_sha256,
             "written_value": written,
             "unit": written_unit,
@@ -183,8 +187,8 @@ def write_candidate(
         "parent_state_sha256": HASH,
         "parent_manifest_ref": None,
         "parent_manifest_sha256": None,
-        "target_step": "place",
-        "end_step": "Harden",
+        "target_step": "placement",
+        "end_step": "harden",
         "execution_scope": "full_flow",
         "terminal_state": "succeeded",
         "candidate_flow_sha256": "sha256:" + "c" * 64,
@@ -212,8 +216,8 @@ def write_candidate(
         "parent_candidate_root_ref": None,
         "parent_flow_sha256": HASH,
         "parent_state_sha256": HASH,
-        "target_step": "place",
-        "end_step": "Harden",
+        "target_step": "placement",
+        "end_step": "harden",
         "execution_scope": "full_flow",
         "candidate_manifest_sha256": file_sha256(manifest_path),
     }

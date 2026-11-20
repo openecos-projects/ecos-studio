@@ -210,7 +210,7 @@ def test_floorplan_cards_bind_canonical_workspace_parameters(
     card = load_parameter_cards()[knob]
 
     assert card.surface.file == "home/params.toml"
-    assert card.surface.json_path == json_path
+    assert card.surface.json_path == ("params", *json_path)
 
 
 def test_dreamplace_cards_bind_typed_runtime_semantics_to_native_sources() -> None:

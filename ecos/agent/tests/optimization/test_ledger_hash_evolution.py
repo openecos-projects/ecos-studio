@@ -184,6 +184,36 @@ def test_ledger_entry_verifies_older_record_shapes(tmp_path: Path) -> None:
     assert len(ledger.verify().entries) == 1
 
 
+def test_outcome_ledger_preserves_old_step_and_power_ids(tmp_path: Path) -> None:
+    ledger = OptimizationLedger(tmp_path / "episode")
+    start = _start().model_dump(mode="json", exclude_unset=True)
+    terminal = _terminal().model_dump(mode="json", exclude_unset=True)
+    terminal.update(
+        target_step="place",
+        end_step="Harden",
+        incumbent_decision="incumbent_retained",
+        decisive_metric="sta_typical_dynamic_power",
+    )
+    lines = []
+    previous = None
+    for sequence, payload in enumerate((start, terminal), start=1):
+        record = {
+            "schema_version": "ecos.optimization_ledger_entry.v2",
+            "sequence": sequence,
+            "previous_entry_sha256": previous,
+            "payload": payload,
+        }
+        lines.append(_canonical_line(record, record))
+        previous = canonical_sha256(record)
+    original = b"\n".join(lines) + b"\n"
+    ledger.ledger_path.write_bytes(original)
+    replay = ledger.verify()
+    assert replay.chain_head_sha256 == previous
+    assert replay.terminal_outcomes[0].end_step == "Harden"
+    assert replay.terminal_outcomes[0].decisive_metric == "sta_typical_dynamic_power"
+    assert ledger.ledger_path.read_bytes() == original
+
+
 def test_decision_audit_verifies_record_missing_optional_keys(tmp_path: Path) -> None:
     audit = OptimizationDecisionAudit(tmp_path / "episode")
     record = {

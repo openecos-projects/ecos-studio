@@ -60,19 +60,15 @@ class ObjectiveMetric(StrEnum):
     STA_SETUP_TNS = "sta_setup_tns"
     STA_HOLD_WNS = "sta_hold_wns"
     STA_HOLD_TNS = "sta_hold_tns"
-    STA_TYPICAL_DYNAMIC_POWER = "sta_typical_dynamic_power"
-    STA_TYPICAL_LEAKAGE_POWER = "sta_typical_leakage_power"
-    STA_WORST_DYNAMIC_POWER = "sta_worst_dynamic_power"
-    STA_WORST_LEAKAGE_POWER = "sta_worst_leakage_power"
+    POWER_ANALYSIS_DYNAMIC_UW = "power_analysis_dynamic_uw"
+    POWER_ANALYSIS_LEAKAGE_UW = "power_analysis_leakage_uw"
     STA_FREQUENCY = "sta_frequency"
     GUI_OVERALL_QOR_SCORE = "gui_overall_qor_score"
 
 
 class PowerMetric(StrEnum):
-    STA_TYPICAL_DYNAMIC_POWER = "sta_typical_dynamic_power"
-    STA_TYPICAL_LEAKAGE_POWER = "sta_typical_leakage_power"
-    STA_WORST_DYNAMIC_POWER = "sta_worst_dynamic_power"
-    STA_WORST_LEAKAGE_POWER = "sta_worst_leakage_power"
+    POWER_ANALYSIS_DYNAMIC_UW = "power_analysis_dynamic_uw"
+    POWER_ANALYSIS_LEAKAGE_UW = "power_analysis_leakage_uw"
 
 
 class TimingMetric(StrEnum):

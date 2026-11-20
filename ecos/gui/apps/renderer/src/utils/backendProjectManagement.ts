@@ -116,13 +116,6 @@ export interface ProjectBranchLink {
   toStep: FlowStep
 }
 
-export interface ProjectComparisonParameterDiff {
-  workspaceId: string
-  name: string
-  from: string | undefined
-  to: string | undefined
-}
-
 export interface ProjectComparisonMetricDiff {
   metric: string
   fromWorkspaceId: string
@@ -135,7 +128,6 @@ export interface ProjectComparisonSummary {
   bestWorkspaceId: string
   bestReason: string
   riskLabels: string[]
-  parameterDiffs: ProjectComparisonParameterDiff[]
   metricDiffs: ProjectComparisonMetricDiff[]
 }
 
@@ -733,7 +725,6 @@ function buildV3ComparisonSummary(
         qorTrendSummary.risks.flatMap((risk) => (risk.message ? [risk.message] : [])),
       ),
     ).slice(0, 8),
-    parameterDiffs: buildParameterDiffs(workspaces),
     metricDiffs: [],
   }
 }
@@ -1304,35 +1295,6 @@ function detailHintForStep(step: FlowStep): string {
     Harden: 'Open workspace Harden for final artifact details.',
   }
   return hints[step]
-}
-
-function buildParameterDiffs(
-  workspaces: ProjectManifestWorkspace[],
-): ProjectComparisonParameterDiff[] {
-  return workspaces.flatMap((workspace) =>
-    Object.entries(workspace.parameter_patch ?? {}).map(([name, patch]) => {
-      const values = parameterPatchValues(patch)
-      return {
-        workspaceId: workspace.workspace_id,
-        name,
-        from: diffValueLabel(values.from),
-        to: diffValueLabel(values.to),
-      }
-    }),
-  )
-}
-
-function parameterPatchValues(patch: unknown): { from: unknown; to: unknown } {
-  if (patch && typeof patch === 'object' && ('from' in patch || 'to' in patch)) {
-    const record = patch as { from?: unknown; to?: unknown }
-    return { from: record.from, to: record.to }
-  }
-  return { from: undefined, to: patch }
-}
-
-function diffValueLabel(value: unknown): string | undefined {
-  if (value === undefined || value === null) return undefined
-  return String(value)
 }
 
 export function isCompletedStepStatus(status: ProjectStepStatus): boolean {

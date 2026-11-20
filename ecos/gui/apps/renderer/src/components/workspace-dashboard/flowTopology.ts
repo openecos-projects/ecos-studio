@@ -2,6 +2,10 @@ import { sameFlowStepName } from '@/api/type'
 
 export interface TopologyStep {
   id: string
+  category?: 'PNR' | 'CHECKER'
+  inputStep?: string
+  status?: string
+  tool?: string
 }
 
 export interface FlowPosition {
@@ -31,7 +35,7 @@ export function withSignoffMilestone(
   const finalStep = steps[steps.length - 1]
   if (
     !finalStep ||
-    !sameFlowStepName(finalStep.id, 'Harden') ||
+    !sameFlowStepName(finalStep.id, 'harden') ||
     steps.some((step) => step.id.toLowerCase() === 'signoff')
   )
     return topology
@@ -49,60 +53,53 @@ export function withSignoffMilestone(
 }
 
 export function buildFlowTopology(steps: readonly TopologyStep[]): FlowTopology {
-  const nodes: FlowPosition[] = []
-  const edges: FlowEdge[] = []
-  const fillerIndex = steps.findIndex((step) => sameFlowStepName(step.id, 'filler'))
-  const hardenIndex = steps.findIndex((step) => sameFlowStepName(step.id, 'Harden'))
-  const addChain = (chain: readonly TopologyStep[], column: number, row: number) => {
-    chain.forEach((step, index) => {
-      nodes.push({ id: step.id, column: column + index, row })
-      if (index > 0) edges.push({ from: chain[index - 1].id, to: step.id })
-    })
-  }
-  if (fillerIndex < 0 || hardenIndex <= fillerIndex + 1) {
-    addChain(steps, 0, 0)
-    return { nodes, edges, columns: steps.length, rows: 1 }
-  }
-
-  const groups = [
-    ['lvs'],
-    ['drc'],
-    ['antennaCheck'],
-    ['postRouteLec'],
-    ['RCX', 'sta'],
-    ['powerAnalysis', 'emir'],
-  ]
-  const branches: TopologyStep[][] = []
-  const checks = steps.slice(fillerIndex + 1, hardenIndex)
-  if (
-    checks.some(
-      (step) =>
-        !groups.some((group) => group.some((name) => sameFlowStepName(step.id, name))),
+  const waves: TopologyStep[][] = []
+  let filler: string | undefined
+  let previousOutput: string | undefined
+  for (const step of steps) {
+    const wave = waves[waves.length - 1]
+    const input = step.inputStep ?? filler ?? previousOutput
+    // The CHECKER steps in ECC #380 publish two kinds of downstream data.
+    // Match analysis_wave_end on the selected ledger, including its input chain.
+    const waitsForWave = wave?.some(
+      ({ id }) =>
+        id === input ||
+        (id === 'rcx' && ['sta', 'power_analysis', 'emir'].includes(step.id)) ||
+        (id === 'power_analysis' && step.id === 'emir'),
     )
-  ) {
-    addChain(steps, 0, 0)
-    return { nodes, edges, columns: steps.length, rows: 1 }
+    if (
+      step.category === 'CHECKER' &&
+      wave?.[0]?.category === 'CHECKER' &&
+      !waitsForWave
+    ) {
+      wave.push(step)
+    } else {
+      waves.push([step])
+    }
+    if (step.id === 'filler') filler = step.id
+    if (
+      step.status !== 'skipped' &&
+      step.tool !== 'kepler_formal' &&
+      !['antenna_check', 'emir'].includes(step.id)
+    ) {
+      previousOutput = step.id
+    }
   }
-  for (const group of groups) {
-    const branch = group.flatMap((name) =>
-      checks.filter((step) => sameFlowStepName(step.id, name)),
-    )
-    if (branch.length) branches.push(branch)
-  }
-  const centerRow = (branches.length - 1) / 2
-  const branchColumn = fillerIndex + 1
-  const joinColumn = branchColumn + Math.max(...branches.map((branch) => branch.length))
-  addChain(steps.slice(0, fillerIndex + 1), 0, centerRow)
-  branches.forEach((branch, row) => {
-    addChain(branch, branchColumn, row)
-    edges.push({ from: steps[fillerIndex].id, to: branch[0].id })
-    edges.push({ from: branch[branch.length - 1].id, to: steps[hardenIndex].id })
-  })
-  addChain(steps.slice(hardenIndex), joinColumn, centerRow)
+  const rows = Math.max(1, ...waves.map((wave) => wave.length))
   return {
-    nodes,
-    edges,
-    columns: joinColumn + steps.length - hardenIndex,
-    rows: branches.length,
+    nodes: waves.flatMap((wave, column) =>
+      wave.map((step, index) => ({
+        id: step.id,
+        column,
+        row: (rows - wave.length) / 2 + index,
+      })),
+    ),
+    edges: waves.flatMap((wave, column) =>
+      wave.flatMap(({ id }) =>
+        (waves[column + 1] ?? []).map(({ id: next }) => ({ from: id, to: next })),
+      ),
+    ),
+    columns: waves.length,
+    rows,
   }
 }

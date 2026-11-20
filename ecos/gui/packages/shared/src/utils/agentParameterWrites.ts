@@ -4,53 +4,22 @@ import {
   type DesktopAgentWorkspaceRerunParameterPatch,
 } from '../contracts/desktopAgent.ts'
 import { hasSafeJsonPath } from './jsonPath.ts'
-import { normalizeParameterKey } from './parameterKeys.ts'
 
-const PARAMETER_SURFACE_FILES = ['home/params.toml', 'home/parameters.json'] as const
-const STEP_CONFIG_FILE_BY_KNOB_PREFIX: Record<string, string> = {
-  place: 'config/dreamplace_ecc.json',
-  legalization: 'config/dreamplace_ecc.json',
-  cts: 'config/cts_ecc.json',
-  route: 'config/route_ecc.json',
+const workspacePaths: Record<string, (string | number)[]> = {
+  'design.clock': ['design', 'clock_port'],
+  'design.frequency_max': ['design', 'frequency_mhz'],
+  'floorplan.utilitization': ['params', 'core', 'utilitization'],
+  'floorplan.aspect_ratio': ['params', 'core', 'aspect_ratio'],
+  'floorplan.margin_x': ['params', 'core', 'margin', 0],
+  'floorplan.margin_y': ['params', 'core', 'margin', 1],
+  'floorplan.die_width': ['params', 'die', 'size', 0],
+  'floorplan.die_height': ['params', 'die', 'size', 1],
 }
 
-/**
- * Extra canonical parameter-surface paths beyond the flat knob leaf.
- * `floorplan.utilitization` is stored under Core in JSON workspaces.
- */
-const NESTED_PARAMETER_KNOB_PATHS: Record<string, readonly (readonly string[])[]> = {
-  'floorplan.utilitization': [
-    ['core', 'utilitization'],
-    ['die_area', 'utilitization'],
-  ],
-}
-
-/**
- * Parameter-surface leaves that do not match the knob's last segment.
- * `place.routability_opt` is stored as `routability_opt_flag` in the
- * workspace config and as `routability_opt` in the DreamPlace step config.
- */
-const PARAMETER_SURFACE_KNOB_LEAVES: Record<string, readonly string[]> = {
-  'place.routability_opt': ['routability_opt_flag'],
-}
-
-/**
- * Canonical identity of a resolved write: both workspace-config aliases
- * (`home/params.toml` and `home/parameters.json`) materialize onto whichever
- * config actually exists, so they must collide. String path segments are
- * folded through the ecc mechanical key rule so display-key and snake_case
- * spellings of the same leaf also collide.
- */
 export function canonicalParameterWriteKey(
   write: DesktopAgentWorkspaceParameterWrite,
 ): string {
-  const file = (PARAMETER_SURFACE_FILES as readonly string[]).includes(write.file)
-    ? 'home/workspace-config'
-    : write.file
-  const path = write.json_path.map((segment) =>
-    typeof segment === 'string' ? normalizeParameterKey(segment) : segment,
-  )
-  return `${file}:${JSON.stringify(path)}`
+  return JSON.stringify([write.file, ...write.json_path])
 }
 
 /**
@@ -75,8 +44,7 @@ export function parameterWritesMatchPatch(
       writeKnobs.has(write.knob_id) ||
       writePaths.has(pathKey) ||
       !(desktopAgentParameterWriteFiles as readonly string[]).includes(write.file) ||
-      (PARAMETER_SURFACE_FILES as readonly string[]).includes(write.file) !==
-        (write.surface === 'parameters') ||
+      (write.file === 'home/params.toml') !== (write.surface === 'parameters') ||
       !hasSafeJsonPath(write.json_path) ||
       !writePathMatchesKnob(write) ||
       !writeValueMatchesPatch(write, patchItem)
@@ -89,56 +57,33 @@ export function parameterWritesMatchPatch(
   })
 }
 
-/**
- * Each advertised knob may only land on an explicit (surface, file, path)
- * combination. `place.target_density` is the flat leaf on the workspace
- * config; it is not `core.target_density`, and a step-config knob may not
- * target a different tool's config file.
- */
 function writePathMatchesKnob(write: DesktopAgentWorkspaceParameterWrite): boolean {
-  const canonicalPath = write.json_path.map((segment) =>
-    typeof segment === 'string' ? normalizeParameterKey(segment) : segment,
-  )
-  if (canonicalPath.some((segment) => typeof segment !== 'string')) return false
-  return allowedWriteLocations(write.knob_id).some(
-    (location) =>
-      location.surface === write.surface &&
-      (location.files as readonly string[]).includes(write.file) &&
-      JSON.stringify(location.path) === JSON.stringify(canonicalPath),
-  )
-}
-
-function allowedWriteLocations(knobId: string): Array<{
-  files: readonly string[]
-  path: readonly string[]
-  surface: DesktopAgentWorkspaceParameterWrite['surface']
-}> {
-  const parts = knobId.split('.')
-  const prefix = parts[0]
-  const leaf = parts[parts.length - 1]
-  if (!prefix || !leaf) return []
-  const parameterLeaves = PARAMETER_SURFACE_KNOB_LEAVES[knobId] ?? [leaf]
-  const locations: Array<{
-    files: readonly string[]
-    path: readonly string[]
-    surface: DesktopAgentWorkspaceParameterWrite['surface']
-  }> = parameterLeaves.map((parameterLeaf) => ({
-    files: PARAMETER_SURFACE_FILES,
-    path: [parameterLeaf],
-    surface: 'parameters',
-  }))
-  for (const nested of NESTED_PARAMETER_KNOB_PATHS[knobId] ?? []) {
-    locations.push({
-      files: PARAMETER_SURFACE_FILES,
-      path: nested,
-      surface: 'parameters',
-    })
+  const [domain, field] = write.knob_id.split('.')
+  let expected: (string | number)[] | undefined
+  if (write.file === 'home/params.toml') {
+    if (domain === 'place') {
+      const name =
+        field === 'target_overflow'
+          ? 'stop_overflow'
+          : field === 'routability_opt'
+            ? 'routability_opt_flag'
+            : field
+      expected = ['params', 'step_params', 'placement', `place.${name}`]
+    } else {
+      expected = workspacePaths[write.knob_id]
+    }
+  } else if (domain === 'cts' && write.file === 'config/cts_ecc.json' && field) {
+    expected = [field]
+  } else if (domain === 'route' && write.file === 'config/routing_ecc.json' && field) {
+    const routingField =
+      field === 'bottom_layer'
+        ? 'bottom_routing_layer'
+        : field === 'top_layer'
+          ? 'top_routing_layer'
+          : field
+    expected = ['RT', `-${routingField}`]
   }
-  const stepFile = STEP_CONFIG_FILE_BY_KNOB_PREFIX[prefix]
-  if (stepFile) {
-    locations.push({ files: [stepFile], path: [leaf], surface: 'step_config' })
-  }
-  return locations
+  return !!expected && JSON.stringify(expected) === JSON.stringify(write.json_path)
 }
 
 function writeValueMatchesPatch(

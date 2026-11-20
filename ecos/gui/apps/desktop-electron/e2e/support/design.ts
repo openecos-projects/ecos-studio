@@ -94,7 +94,16 @@ export async function prepareDesignProject(
 
   const parameters: Record<string, unknown> = {}
   for (const [section, values] of Object.entries(toml.params ?? {})) {
-    if (values !== null && typeof values === 'object') {
+    if (section === 'step' && values && typeof values === 'object') {
+      for (const [step, groups] of Object.entries(values)) {
+        for (const [group, entries] of Object.entries(
+          groups as Record<string, Record<string, unknown>>,
+        )) {
+          for (const [key, value] of Object.entries(entries))
+            parameters[`${step}:${group}.${key}`] = value
+        }
+      }
+    } else if (values !== null && typeof values === 'object') {
       for (const [key, value] of Object.entries(values as Record<string, unknown>)) {
         parameters[`${section}.${key}`] = value
       }
@@ -139,7 +148,7 @@ export async function prepareGcdProject(workRoot: string): Promise<E2EDesign> {
     parameters: {
       'floorplan.core_util': 0.6,
       'cts.max_fanout': 20,
-      'place.target_density': 0.2,
+      'placement:place.target_density': 0.2,
     },
   }
 }

@@ -24,14 +24,14 @@ function thumbnail(
 }
 
 describe('layout thumbnail actions', () => {
-  it.each(['preFloorplan', 'macroPlacement', 'Macro Placement'])(
+  it.each(['pre_floorplan', 'macro_placement', 'Macro Placement'])(
     'opens macro-placement choices from %s',
     (step) => {
       expect(isMacroPlacementLayoutStep(step)).toBe(true)
     },
   )
 
-  it.each(['postFloorplan', 'place', 'route'])(
+  it.each(['post_floorplan', 'placement', 'routing'])(
     'keeps %s read-only from the flow diagram',
     (step) => {
       expect(isMacroPlacementLayoutStep(step)).toBe(false)
@@ -39,25 +39,25 @@ describe('layout thumbnail actions', () => {
   )
 
   it('requires an available layout with geometry before opening Chip Viewer', () => {
-    expect(isUsableLayoutThumbnail(thumbnail('preFloorplan'))).toBe(true)
+    expect(isUsableLayoutThumbnail(thumbnail('pre_floorplan'))).toBe(true)
     expect(isUsableLayoutThumbnail(null)).toBe(false)
-    expect(isUsableLayoutThumbnail(thumbnail('preFloorplan', { url: null }))).toBe(false)
+    expect(isUsableLayoutThumbnail(thumbnail('pre_floorplan', { url: null }))).toBe(false)
     expect(
-      isUsableLayoutThumbnail(thumbnail('preFloorplan', { hasGeometry: false })),
+      isUsableLayoutThumbnail(thumbnail('pre_floorplan', { hasGeometry: false })),
     ).toBe(false)
     expect(
-      isUsableLayoutThumbnail(thumbnail('preFloorplan', { availability: 'stale' })),
+      isUsableLayoutThumbnail(thumbnail('pre_floorplan', { availability: 'stale' })),
     ).toBe(false)
   })
 
   it('uses preFloorplan geometry as the macro-placement source', () => {
-    const preFloorplan = thumbnail('preFloorplan')
-    const macroPlacement = thumbnail('macroPlacement')
+    const preFloorplan = thumbnail('pre_floorplan')
+    const macroPlacement = thumbnail('macro_placement')
 
     expect(
-      macroPlacementSourceThumbnail('macroPlacement', [preFloorplan, macroPlacement]),
+      macroPlacementSourceThumbnail('macro_placement', [preFloorplan, macroPlacement]),
     ).toBe(preFloorplan)
-    expect(macroPlacementSourceThumbnail('preFloorplan', [preFloorplan])).toBeNull()
-    expect(macroPlacementSourceThumbnail('macroPlacement', [])).toBeNull()
+    expect(macroPlacementSourceThumbnail('pre_floorplan', [preFloorplan])).toBeNull()
+    expect(macroPlacementSourceThumbnail('macro_placement', [])).toBeNull()
   })
 })

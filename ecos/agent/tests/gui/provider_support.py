@@ -113,28 +113,29 @@ def workspace_with_timing_opt_and_place(tmp_path: Path) -> Path:
         json.dumps(
             {
                 "steps": [
-                    {"name": "place", "tool": "dreamplace", "state": "Success"},
-                    {"name": "Timing optimization", "tool": "sizer", "state": "Success"},
+                    {"name": "placement", "directory": "06_placement_dreamplace", "tool": "dreamplace", "state": "Success"},
+                    {"name": "timing_optimization", "directory": "11_timing_optimization_sizer", "tool": "sizer", "state": "Success"},
                 ]
             }
         ),
         encoding="utf-8",
     )
     for step, tool, artifact_step, suffix in (
-        ("place", "dreamplace", "place", ".def.gz"),
-        ("Timing optimization", "sizer", "timing_optimization", ".def.gz"),
+        ("placement", "dreamplace", "placement", ".def.gz"),
+        ("timing_optimization", "sizer", "timing_optimization", ".def.gz"),
     ):
-        output = workspace / f"{artifact_step}_{tool}" / "output"
+        directory = {"placement": "06_placement_dreamplace", "timing_optimization": "11_timing_optimization_sizer"}[step]
+        output = workspace / directory / "output"
         output.mkdir(parents=True)
         (output / f"gcd_{artifact_step}{suffix}").write_bytes(b"def")
-    config = workspace / "config"
+    config = workspace / "06_placement_dreamplace" / "config"
     config.mkdir()
     (config / "dreamplace_ecc.json").write_text(
         '{"target_density": 0.55, "routability_opt_flag": true, "stop_overflow": 0.1}',
         encoding="utf-8",
     )
-    (workspace / "home" / "parameters.json").write_text(
-        '{"Design": "gcd", "Target density": 0.55}',
+    (workspace / "home" / "params.toml").write_text(
+        '[design]\nname = "gcd"\n[params.step_params.placement]\n"place.target_density" = 0.55\n',
         encoding="utf-8",
     )
     return workspace

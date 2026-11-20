@@ -1195,26 +1195,22 @@ describe('registerIpc', () => {
       }),
     )
     services.eccRuntimeService.workspaceSnapshot.mockImplementation(async () => ({
-      configuration: {
-        workspaceSpec: {
-          design: { name: 'gcd' },
-          parameters: {
-            'place.target_density': 0.4,
-            'cts.skew_bound': '0.08',
-          },
-        },
-      },
+      configuration: { workspaceSpec: { design: { name: 'gcd' } } },
       directory: '/runs/gcd',
+      parameters: {
+        frequency_max: 120,
+        step_params: { placement: { 'place.stop_overflow': 0.2 } },
+      },
       engineeringSnapshot: { workspaceRevision: currentRevision },
     }))
     services.eccRuntimeService.readWorkspaceStepConfiguration.mockImplementation(
       async (request: { step: string }) =>
-        request.step === 'place'
+        request.step === 'placement'
           ? {
               parameters: [{ param: 'place.target_density', value: 0.55 }],
               status: 'available',
-              step: 'place',
-              stepId: 'place',
+              step: 'placement',
+              stepId: 'placement',
               workspaceId: 'workspace-1',
               workspaceRevision: currentRevision,
             }
@@ -1247,15 +1243,15 @@ describe('registerIpc', () => {
         workspaceDesignId: 'gcd',
         workspaceRevision: 4,
         workspaceParameterValues: expect.objectContaining({
-          // The place Step Option overrides the workspace-wide value.
           'place.target_density': 0.55,
-          'cts.skew_bound': 0.08,
+          'design.frequency_max': 120,
+          'place.target_overflow': 0.2,
         }),
       }),
     )
     expect(
       services.eccRuntimeService.readWorkspaceStepConfiguration,
-    ).toHaveBeenCalledWith({ step: 'place', workspaceHandle: 'workspace-1' })
+    ).toHaveBeenCalledWith({ step: 'placement', workspaceHandle: 'workspace-1' })
 
     currentRevision = 5
     await handlers.get(desktopApiIpcChannels.agentSendMessage)?.(
@@ -1820,7 +1816,7 @@ describe('registerIpc', () => {
     await expect(
       prepare?.({ sender: owner }, { token: forwarded.workspaceRerunToken }),
     ).resolves.toMatchObject({ directory: contract.target_workspace })
-    expect(prepareWorkspaceRerunMock).toHaveBeenCalledWith(contract)
+    expect(prepareWorkspaceRerunMock).toHaveBeenCalledWith(contract, expect.any(Function))
   })
 
   it('executes a prepared rerun through the target workspace handle owned by its window', async () => {

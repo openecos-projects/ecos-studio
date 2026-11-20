@@ -320,18 +320,18 @@ def build_eligibility_metrics(
     metrics_by_path: dict[str, dict[str, float]],
 ) -> tuple[TerminalEvaluationMetric, ...]:
     specifications = (
-        ("drc_ecc/analysis/qor_metrics.json", "drc_count"),
-        ("lvs_ecc/analysis/qor_metrics.json", "lvs_count"),
-        ("RCX_ecc/analysis/qor_metrics.json", "rcx_expected_corner_count"),
-        ("RCX_ecc/analysis/qor_metrics.json", "rcx_spef_file_count"),
-        ("RCX_ecc/analysis/qor_metrics.json", "rcx_missing_corner_count"),
-        ("RCX_ecc/analysis/qor_metrics.json", "rcx_spef_parse_failure_count"),
-        ("sta_ecc/analysis/qor_metrics.json", "sta_corner_count"),
-        ("sta_ecc/analysis/qor_metrics.json", "sta_expected_corner_count"),
-        ("sta_ecc/analysis/qor_metrics.json", "sta_missing_corner_count"),
-        ("sta_ecc/analysis/qor_metrics.json", "sta_setup_violation_count"),
-        ("sta_ecc/analysis/qor_metrics.json", "sta_hold_violation_count"),
-        ("Harden_ecc/analysis/qor_metrics.json", "harden_artifact_missing_count"),
+        ("drc/analysis/qor_metrics.json", "drc_count"),
+        ("lvs/analysis/qor_metrics.json", "lvs_count"),
+        ("rcx/analysis/qor_metrics.json", "rcx_expected_corner_count"),
+        ("rcx/analysis/qor_metrics.json", "rcx_spef_file_count"),
+        ("rcx/analysis/qor_metrics.json", "rcx_missing_corner_count"),
+        ("rcx/analysis/qor_metrics.json", "rcx_spef_parse_failure_count"),
+        ("sta/analysis/qor_metrics.json", "sta_corner_count"),
+        ("sta/analysis/qor_metrics.json", "sta_expected_corner_count"),
+        ("sta/analysis/qor_metrics.json", "sta_missing_corner_count"),
+        ("sta/analysis/qor_metrics.json", "sta_setup_violation_count"),
+        ("sta/analysis/qor_metrics.json", "sta_hold_violation_count"),
+        ("harden/analysis/qor_metrics.json", "harden_artifact_missing_count"),
     )
     return tuple(
         metric_record(
@@ -350,7 +350,7 @@ def build_eligibility_metrics(
 def build_routing_diagnostics(
     route_metrics: dict[str, float],
 ) -> tuple[tuple[TerminalEvaluationMetric, ...], bool]:
-    source = "route_ecc/analysis/qor_metrics.json"
+    source = "routing/analysis/qor_metrics.json"
     metric_ids = ("route_via_count", "route_dr_total_patch_count")
     records = tuple(
         metric_record(
@@ -380,23 +380,23 @@ def build_interconnect_length_metrics(
     scored directly (section 6.3 canonical bundles score the inflation
     factors instead).
     """
-    place = metrics_by_path.get("place_dreamplace/analysis/qor_metrics.json", {})
-    cts = cts_feature.get("CTS", {}) if isinstance(cts_feature, dict) else {}
+    place = metrics_by_path.get("placement/analysis/qor_metrics.json", {})
+    cts = cts_feature.get("cts", {}) if isinstance(cts_feature, dict) else {}
     specifications = (
         (
             "place_hpwl",
             optional_nonnegative_metric(place, "place_hpwl"),
-            "place_dreamplace/analysis/qor_metrics.json",
+            "placement/analysis/qor_metrics.json",
         ),
         (
             "place_grwl",
             optional_nonnegative_metric(place, "place_grwl"),
-            "place_dreamplace/analysis/qor_metrics.json",
+            "placement/analysis/qor_metrics.json",
         ),
         (
             "total_clock_wirelength",
             optional_nonnegative_metric(cts, "total_clock_wirelength"),
-            "CTS_ecc/feature/CTS.step.json",
+            "cts/feature/cts.step.json",
         ),
     )
     records = []
@@ -445,10 +445,10 @@ def build_qphys_metrics(
         timing_quality,
     )
 
-    place = metrics_by_path.get("place_dreamplace/analysis/qor_metrics.json", {})
-    route = metrics_by_path.get("route_ecc/analysis/qor_metrics.json", {})
-    sta = metrics_by_path.get("sta_ecc/analysis/qor_metrics.json", {})
-    harden = metrics_by_path.get("Harden_ecc/analysis/qor_metrics.json", {})
+    place = metrics_by_path.get("placement/analysis/qor_metrics.json", {})
+    route = metrics_by_path.get("routing/analysis/qor_metrics.json", {})
+    sta = metrics_by_path.get("sta/analysis/qor_metrics.json", {})
+    harden = metrics_by_path.get("harden/analysis/qor_metrics.json", {})
     hpwl = place.get("place_hpwl")
     rwl = route.get("route_wirelength")
     inflation_total = (
@@ -465,7 +465,7 @@ def build_qphys_metrics(
         tclk_ns = timing_period_ns(frequency_max_mhz, None, None)
     setup_ws = timing_guardrail["sta_setup_wns"]
     hold_ws = timing_guardrail["sta_hold_wns"]
-    cts = cts_feature.get("CTS", {}) if isinstance(cts_feature, dict) else {}
+    cts = cts_feature.get("cts", {}) if isinstance(cts_feature, dict) else {}
     max_buffer = cts.get("clock_path_max_buffer")
     min_buffer = cts.get("clock_path_min_buffer")
     imbalance = (
@@ -492,10 +492,10 @@ def build_qphys_metrics(
     }
     failed_gates = (
         _gate_count_failed(
-            metrics_by_path.get("drc_ecc/analysis/qor_metrics.json", {}), "drc_count"
+            metrics_by_path.get("drc/analysis/qor_metrics.json", {}), "drc_count"
         ),
         _gate_count_failed(
-            metrics_by_path.get("lvs_ecc/analysis/qor_metrics.json", {}), "lvs_count"
+            metrics_by_path.get("lvs/analysis/qor_metrics.json", {}), "lvs_count"
         ),
         setup_ws < 0,
         hold_ws < 0,
@@ -508,12 +508,12 @@ def build_qphys_metrics(
         or sta.get("sta_hold_wns") is None
         or sta.get("sta_setup_violation_count") is None
         or sta.get("sta_hold_violation_count") is None
-        or metrics_by_path.get("drc_ecc/analysis/qor_metrics.json", {}).get("drc_count")
+        or metrics_by_path.get("drc/analysis/qor_metrics.json", {}).get("drc_count")
         is None
-        or metrics_by_path.get("lvs_ecc/analysis/qor_metrics.json", {}).get("lvs_count")
+        or metrics_by_path.get("lvs/analysis/qor_metrics.json", {}).get("lvs_count")
         is None
         or metrics_by_path.get(
-            "Harden_ecc/analysis/qor_metrics.json", {}
+            "harden/analysis/qor_metrics.json", {}
         ).get("harden_artifact_missing_count")
         is None
     )
@@ -524,9 +524,9 @@ def build_qphys_metrics(
         # score; an active physical failure still vetoes to exactly 0.0.
         summary = None
     sources = (
-        "place_dreamplace/analysis/qor_metrics.json",
-        "route_ecc/analysis/qor_metrics.json",
-        "sta_ecc/analysis/qor_metrics.json",
+        "placement/analysis/qor_metrics.json",
+        "routing/analysis/qor_metrics.json",
+        "sta/analysis/qor_metrics.json",
     )
     records = []
     for dimension, score in scores.items():
@@ -577,9 +577,9 @@ def build_area_metrics(
     metrics_by_path: dict[str, dict[str, float]],
 ) -> tuple[TerminalEvaluationMetric, ...]:
     specifications = (
-        ("Synthesis_yosys/analysis/qor_metrics.json", "synthesis_cell_area"),
-        ("postFloorplan_ecc/analysis/qor_metrics.json", "die_area"),
-        ("postFloorplan_ecc/analysis/qor_metrics.json", "core_area"),
+        ("synthesis/analysis/qor_metrics.json", "synthesis_cell_area"),
+        ("post_floorplan/analysis/qor_metrics.json", "die_area"),
+        ("post_floorplan/analysis/qor_metrics.json", "core_area"),
     )
     return tuple(
         metric_record(
@@ -724,33 +724,6 @@ def _required_payload_number(
     if nonnegative and number < 0:
         raise OptimizationObservationError("terminal metric payload is invalid")
     return number
-
-
-def _power_summary_metric(
-    row: dict[str, Any], source_id: str, metric_id: str
-) -> TerminalEvaluationMetric:
-    corner = row["corner"]
-    return metric_record(
-        metric_id,
-        _required_payload_number(row["power"], (source_id,), nonnegative=True),
-        "uW",
-        EvaluationMetricCategory.PPA,
-        EvaluationMetricRole.REPORT,
-        EvaluationMetricDirection.LOWER_IS_BETTER,
-        (f"sta_ecc/feature/{corner}/power_summary.json",),
-        corner,
-    )
-
-
-def _worst_power_metric(
-    rows: tuple[dict[str, Any], ...], source_id: str, metric_id: str
-) -> TerminalEvaluationMetric:
-    worst = max(
-        rows,
-        key=lambda row: _required_payload_number(row["power"], (source_id,), nonnegative=True),
-    )
-    metric = _power_summary_metric(worst, source_id, metric_id)
-    return metric.model_copy(update={"corner": worst["corner"]})
 
 
 def _corner_metric(

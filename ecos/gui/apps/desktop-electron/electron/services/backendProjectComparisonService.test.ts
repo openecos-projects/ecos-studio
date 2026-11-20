@@ -118,7 +118,7 @@ function engineeringSnapshot(
     hotspotPreview: { hotspotCount: 0, hotspots: [], hotspotsTruncated: false },
     metrics: [metric],
     parameters: {},
-    schemaVersion: 6,
+    schemaVersion: 7,
     signoffAssessment: { groups: [], risks: [], status: 'ready' },
     timingPreview: { issueCount: 0, issues: [], issuesTruncated: false },
     workspaceId: workspacePath,
@@ -948,15 +948,15 @@ describe('BackendProjectComparisonService', () => {
         (artifact: { reference: string }) => artifact.reference,
       ),
     ).toEqual([
-      'route_ecc/analysis/qor_metrics.json',
-      'route_ecc/analysis/qor_summary.json',
-      'route_ecc/analysis/qor_hotspots.json',
+      '07_routing/analysis/qor_metrics.json',
+      '07_routing/analysis/qor_summary.json',
+      '07_routing/analysis/qor_hotspots.json',
     ])
 
     readVerifiedArtifacts.mockResolvedValueOnce({
       ok: false,
       code: 'FINDINGS_READ_FAILED',
-      reference: 'route_ecc/analysis/qor_metrics.json',
+      reference: '07_routing/analysis/qor_metrics.json',
     })
     await expect(
       service.getStepFindings(11, {
@@ -975,7 +975,7 @@ describe('BackendProjectComparisonService', () => {
     readVerifiedArtifacts.mockResolvedValueOnce({
       ok: false,
       code: 'FINDINGS_READ_FAILED',
-      reference: 'route_ecc/analysis/qor_metrics.json',
+      reference: '07_routing/analysis/qor_metrics.json',
     })
     await expect(
       service.getStepFindings(11, {
@@ -986,7 +986,7 @@ describe('BackendProjectComparisonService', () => {
     ).resolves.toEqual({
       ok: false,
       code: 'FINDINGS_READ_FAILED',
-      detail: 'route_ecc/analysis/qor_metrics.json',
+      detail: '07_routing/analysis/qor_metrics.json',
     })
   })
 
@@ -1120,9 +1120,9 @@ describe('BackendProjectComparisonService', () => {
     const readVerifiedArtifacts = vi.fn().mockResolvedValue({
       ok: true,
       texts: {
-        'route_ecc/analysis/qor_metrics.json': metricsText,
-        'route_ecc/analysis/qor_summary.json': summaryText,
-        'route_ecc/analysis/qor_hotspots.json': hotspotsText,
+        '07_routing/analysis/qor_metrics.json': metricsText,
+        '07_routing/analysis/qor_summary.json': summaryText,
+        '07_routing/analysis/qor_hotspots.json': hotspotsText,
       },
     })
     const service = new BackendProjectComparisonService(
@@ -1183,7 +1183,7 @@ describe('BackendProjectComparisonService', () => {
       issues: [
         {
           code: 'ARTIFACT_REFERENCE_MISSING',
-          reference: 'route_ecc/analysis/qor_hotspots.json',
+          reference: '07_routing/analysis/qor_hotspots.json',
         },
       ],
     })
@@ -1215,7 +1215,7 @@ describe('BackendProjectComparisonService', () => {
         artifactIssues: [
           {
             code: 'ARTIFACT_REFERENCE_MISSING',
-            reference: 'route_ecc/analysis/qor_hotspots.json',
+            reference: '07_routing/analysis/qor_hotspots.json',
           },
         ],
       },
@@ -1283,7 +1283,7 @@ describe('BackendProjectComparisonService', () => {
       ['STA', 'sta_timing_issues'],
     ] as const) {
       const fixture = representativeProjectComparisonFixture()
-      const producerStepId = stepId === 'Route' ? 'route' : 'sta'
+      const producerStepId = stepId === 'Route' ? 'routing' : 'sta'
       const artifact = fixture.engineeringSnapshots.ws_0001!.artifacts.find(
         (candidate) => candidate.stepId === producerStepId && candidate.kind === kind,
       )
@@ -1337,7 +1337,7 @@ describe('BackendProjectComparisonService', () => {
   it('keeps an optional hotspot omission out of Step Findings artifact issues', async () => {
     const fixture = representativeProjectComparisonFixture()
     const artifact = fixture.engineeringSnapshots.ws_0001!.artifacts.find(
-      (candidate) => candidate.stepId === 'route' && candidate.kind === 'qor_hotspots',
+      (candidate) => candidate.stepId === 'routing' && candidate.kind === 'qor_hotspots',
     )
     if (!artifact) throw new Error('missing Route qor_hotspots artifact')
     artifact.availability = 'missing'
@@ -1376,7 +1376,7 @@ describe('BackendProjectComparisonService', () => {
   it('keeps projection metrics visible when the step metrics artifact is missing', async () => {
     const fixture = representativeProjectComparisonFixture()
     const artifact = fixture.engineeringSnapshots.ws_0001!.artifacts.find(
-      (candidate) => candidate.stepId === 'route' && candidate.kind === 'qor_metrics',
+      (candidate) => candidate.stepId === 'routing' && candidate.kind === 'qor_metrics',
     )
     if (!artifact) throw new Error('missing Route qor_metrics artifact')
     artifact.availability = 'missing'

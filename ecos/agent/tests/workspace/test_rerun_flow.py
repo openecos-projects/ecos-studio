@@ -18,7 +18,7 @@ def _rerun_contract(tmp_path: Path) -> GuiWorkspaceRerunContract:
         end_step=ECCStepName.HARDEN,
         execution_scope="full_flow",
         source_flow_json_sha256="0" * 64,
-        source_stage_artifact="place_tool/output/gcd_place.def.gz",
+        source_stage_artifact="place_tool/output/gcd_placement.def.gz",
         source_stage_artifact_sha256="1" * 64,
     )
 

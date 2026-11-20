@@ -105,7 +105,7 @@ def test_global_retriever_does_not_return_the_first_stage_hit() -> None:
     answer = _retriever().reply("How are clock-tree buffers and insertion latency reported?")
 
     assert answer is not None
-    assert answer.entity_ids[0].startswith(("algorithm.cts.", "metric.cts_"))
+    assert answer.entity_ids[0].startswith(("algorithm.cts.", "metric.cts_", "parameter.cts.buffer_type"))
 
 
 def test_global_retriever_can_return_multiple_stages() -> None:

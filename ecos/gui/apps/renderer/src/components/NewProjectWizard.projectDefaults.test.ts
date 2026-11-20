@@ -35,7 +35,7 @@ vi.mock('@/platform/desktop', () => ({
     workspaceCreationModel: {
       get: async () => ({
         discovery: {
-          flowDefinitions: [{ flowId: 'rtl2gds', stepIds: ['Synthesis', 'Harden'] }],
+          flowDefinitions: [{ flowId: 'rtl2gds', stepIds: ['synthesis', 'harden'] }],
         },
         parameters: [],
         pdkInstallations: [],
@@ -118,7 +118,7 @@ async function createProjectWithWorkspace(mode: 'rtl' | 'filelist') {
     hotspotPreview: { hotspotCount: 0, hotspots: [], hotspotsTruncated: false },
     metrics: [],
     parameters: {},
-    schemaVersion: 6,
+    schemaVersion: 7,
     signoffAssessment: { status: 'ready', groups: [], risks: [] },
     timingPreview: { issueCount: 0, issues: [], issuesTruncated: false },
     workspaceId: 'ws_0001',

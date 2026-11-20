@@ -143,12 +143,12 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
     shutdownStatus.value = idleShutdownStatus()
   }
 
-  function operationForWorkspace(workspaceId: string, workspaceRevision?: number) {
+  function operationForWorkspace(workspaceDirectory: string, workspaceId: string) {
+    const directory = normalizeProjectRoot(workspaceDirectory)
     return operations.value.find(
       (operation) =>
         operation.workspaceId === workspaceId &&
-        (workspaceRevision === undefined ||
-          operation.workspaceRevision === workspaceRevision),
+        normalizeProjectRoot(operation.workspaceDirectory) === directory,
     )
   }
 

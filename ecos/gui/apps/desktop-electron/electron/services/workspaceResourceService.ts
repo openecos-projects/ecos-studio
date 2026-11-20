@@ -31,6 +31,7 @@ interface WorkspaceResourceServiceOptions {
 }
 
 interface FlowStepInput {
+  directory: string
   name: string
   tool: string
   state: string
@@ -217,7 +218,7 @@ export class WorkspaceResourceService {
     errors: string[],
   ): Promise<WorkspaceStepResource> {
     const tool = step.tool || 'unknown'
-    const directory = join(root, workspaceStepDirectoryName(step.name, tool))
+    const directory = join(root, step.directory)
     const resources = createEmptyBuckets()
     const toolKey = tool.toLowerCase()
 
@@ -722,16 +723,6 @@ function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values))
 }
 
-function workspaceStepDirectoryName(stepName: string, tool: string): string {
-  // Workaround for Sizer step directory name
-  // Perhaps we should establish some conventions for naming folder paths
-  // during the creation of the ecc tool directory to better unify these paths.
-  if (tool.toLowerCase() === 'sizer') {
-    return `${stepName.trim().split(/\s+/).join('_').toLowerCase()}_sizer`
-  }
-  return `${stepName}_${tool}`
-}
-
 function workspaceStepFileName(stepName: string, tool: string): string {
   if (tool.toLowerCase() === 'sizer') {
     return stepName.trim().split(/\s+/).join('_').toLowerCase()
@@ -1022,7 +1013,19 @@ function readFlowStep(value: unknown): FlowStepInput | null {
   const name = typeof value.name === 'string' ? value.name : ''
   if (!name) return null
 
+  const tool = typeof value.tool === 'string' ? value.tool : ''
+  const directory = isFrontendTool(tool.toLowerCase())
+    ? `${name}_${tool}`
+    : value.directory
+  if (
+    typeof directory !== 'string' ||
+    !/^[a-zA-Z0-9_@.-]+$/.test(directory) ||
+    directory === '.' ||
+    directory === '..'
+  )
+    throw new Error('Invalid flow step directory.')
   return {
+    directory,
     name,
     tool: typeof value.tool === 'string' ? value.tool : 'unknown',
     state: typeof value.state === 'string' ? value.state : '',

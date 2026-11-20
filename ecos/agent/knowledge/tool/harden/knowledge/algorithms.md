@@ -32,7 +32,7 @@
 
 **Input and state:** The selected Liberty, SDC, SPEF, STA configuration, design name, and output directory initialize native STA for timing-model extraction.
 
-**Algorithm:** `extractLib()` builds and propagates the timing graph, analyzes timing, then `TimingCharacterizer::characterize()` writes the derived model. The wrapper locates the generated analysis-mode LIB and copies it to the Harden output.
+**Algorithm:** `extractLib()` builds and propagates the timing graph, analyzes timing, then the model extractor builds the block timing arcs. The wrapper locates the generated analysis-mode LIB and copies it to the Harden output.
 
 **Failure boundary:** Missing or ambiguous generated source LIB raises an error; an empty generated model receives only the implementation's minimal fallback library shell.
 

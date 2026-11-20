@@ -180,7 +180,7 @@ export function backendWorkspaceOptions(
   const flowId =
     selectedSteps.size === 1 && selectedSteps.has('defview')
       ? 'defview'
-      : selectedSteps.size === 1 && selectedSteps.has('Synthesis')
+      : selectedSteps.size === 1 && selectedSteps.has('synthesis')
         ? 'syn_sta'
         : 'rtl2gds'
   // Mirrors ECC's applicability aliases (ecc/chipcompiler/engine/workspace_spec.py
@@ -190,13 +190,13 @@ export function backendWorkspaceOptions(
     normalizedSteps.size === 0 || aliases.some((alias) => normalizedSteps.has(alias))
   const synthesisApplies = parameterApplies(['synthesis'])
   const floorplanApplies = parameterApplies([
-    'prefloorplan',
-    'macroplacement',
-    'postfloorplan',
+    'pre_floorplan',
+    'macro_placement',
+    'post_floorplan',
   ])
   const ctsApplies = parameterApplies(['cts'])
-  const placementApplies = parameterApplies(['placement', 'place', 'macroplacement'])
-  const macroPlacementApplies = parameterApplies(['macroplacement'])
+  const placementApplies = parameterApplies(['placement'])
+  const macroPlacementApplies = parameterApplies(['macro_placement'])
   const mpc = config.mpc as ProjectManifestMpc | null | undefined
   const projectContext = config.project_context
 
@@ -332,11 +332,11 @@ export function backendWorkspaceOptions(
           : {}),
         ...(placementApplies
           ? {
-              [specKey('target_density', 'place.target_density')]: numberValue(
+              ['placement:place.target_density']: numberValue(
                 parameters.target_density,
                 0.2,
               ),
-              [specKey('target_overflow', 'place.target_overflow')]: numberValue(
+              ['placement:place.stop_overflow']: numberValue(
                 parameters.target_overflow,
                 0.1,
               ),

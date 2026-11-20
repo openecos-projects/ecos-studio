@@ -37,9 +37,9 @@ def test_every_knob_observes_only_valid_flow_steps() -> None:
 
 
 def test_floorplan_target_observes_the_post_floorplan_step() -> None:
-    assert candidate_target_step(OptimizationKnob.FLOORPLAN_CORE_UTIL) == "Floorplan"
-    assert candidate_observation_stage("Floorplan") == "postFloorplan"
-    assert candidate_observation_stage("place") == "place"
+    assert candidate_target_step(OptimizationKnob.FLOORPLAN_CORE_UTIL) == "floorplan"
+    assert candidate_observation_stage("floorplan") == "post_floorplan"
+    assert candidate_observation_stage("placement") == "placement"
 
 
 def test_agent_catalog_matches_the_gui_flow_steps() -> None:

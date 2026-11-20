@@ -480,10 +480,7 @@ onMounted(() => {
       <i :class="isLoading ? 'ri-loader-4-line spin' : 'ri-database-2-line'"></i>
       <h2>{{ isLoading ? 'Loading Tech Library' : 'No Tech Library Available' }}</h2>
       <p>
-        {{
-          error ||
-          'Expected a view package such as gcd_view or place_dreamplace/output/gcd_place_view.'
-        }}
+        {{ error || 'Select the view package directory exported by ECC.' }}
       </p>
     </main>
   </div>

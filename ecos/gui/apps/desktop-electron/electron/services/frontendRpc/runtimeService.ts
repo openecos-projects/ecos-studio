@@ -636,7 +636,7 @@ export class EccRpcRuntimeService {
   ): Promise<EccEngineeringSnapshot> {
     const key = normalizeWorkspacePath(directory)
     if (hasPersistedWorkspace(key)) {
-      return await readPersistedEngineeringSnapshot(key)
+      return await readPersistedEngineeringSnapshot(key, undefined, 6)
     }
     const workspaceHandle = [...this.handleToDirectory].find(
       ([, candidateDirectory]) => candidateDirectory === key,

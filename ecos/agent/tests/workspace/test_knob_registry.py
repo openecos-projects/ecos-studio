@@ -42,31 +42,12 @@ def _workspace_without_completed_stages(root: Path) -> Path:
     home = workspace / "home"
     home.mkdir(parents=True)
     (home / "flow.json").write_text(
-        json.dumps({"steps": [{"name": "place", "tool": "dreamplace", "state": "Pending"}]}),
+        json.dumps({"steps": [{"name": "placement", "directory": "06_placement_dreamplace", "tool": "dreamplace", "state": "Pending"}]}),
         encoding="utf-8",
     )
-    (home / "parameters.json").write_text(
-        json.dumps(
-            {
-                "Design": "gcd",
-                "Clock": "clk",
-                "Frequency max [MHz]": 100,
-                "Max fanout": 20,
-                "Target density": 0.55,
-                "Target overflow": 0.1,
-                "Cell padding x": 600,
-                "Routability opt flag": 1,
-                "Global right padding": 0,
-                "Bottom layer": "MET2",
-                "Top layer": "MET5",
-                "Die": {"Size": [100.0, 120.0]},
-                "Core": {
-                    "Utilitization": 0.4,
-                    "Margin": [2.0, 2.0],
-                    "Aspect ratio": 1.0,
-                },
-            }
-        ),
+    (home / "params.toml").write_text(
+        'schema_version = 4\n[design]\nname = "gcd"\nclock_port = "clk"\nfrequency_mhz = 100\n'
+        '[params.step_params.placement]\n"place.target_density" = 0.55\n',
         encoding="utf-8",
     )
     return workspace
@@ -85,12 +66,10 @@ def test_every_step_with_knobs_is_a_real_ecc_step() -> None:
 
 
 def test_parameters_surface_wins_over_the_derived_step_config() -> None:
-    # ECC regenerates step configs from parameters.json, so a knob present in
-    # both surfaces must be written to parameters.json.
     spec = knob_spec("place.target_density")
     assert spec.read_target.file == "config/dreamplace_ecc.json"
-    assert spec.write_target.file == "home/parameters.json"
-    assert spec.write_target.json_path == ("Target density",)
+    assert spec.write_target.file == "home/params.toml"
+    assert spec.write_target.json_path == ("params", "step_params", "placement", "place.target_density")
 
 
 def test_step_config_only_knobs_write_to_their_tool_config() -> None:
@@ -105,8 +84,8 @@ def test_resolve_write_emits_a_complete_execution_instruction() -> None:
         "knob_id": "floorplan.die_width",
         "value": 250.0,
         "surface": "parameters",
-        "file": "home/parameters.json",
-        "json_path": ["Die", "Size", 0],
+        "file": "home/params.toml",
+        "json_path": ["params", "die", "size", 0],
     }
 
 
@@ -182,7 +161,7 @@ def test_floorplan_geometry_is_outside_the_gui_rerun_surface(tmp_path: Path) -> 
 
     with pytest.raises(ValueError, match="not authorized"):
         GuiWorkspaceRerunResolver.validate_patch(
-            "postFloorplan", [{"knob_id": "floorplan.die_width", "value": 250.0}]
+            "post_floorplan", [{"knob_id": "floorplan.die_width", "value": 250.0}]
         )
 
 
@@ -214,7 +193,7 @@ def test_parameter_update_contract_carries_resolved_writes(tmp_path: Path) -> No
             "knob_id": "place.target_density",
             "value": 0.7,
             "surface": "parameters",
-            "file": "home/parameters.json",
-            "json_path": ["Target density"],
+            "file": "home/params.toml",
+            "json_path": ["params", "step_params", "placement", "place.target_density"],
         }
     ]

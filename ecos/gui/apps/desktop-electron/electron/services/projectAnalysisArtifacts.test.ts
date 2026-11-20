@@ -27,12 +27,12 @@ describe('projectAnalysisArtifacts', () => {
   it('resolves grouped Floor artifacts per kind instead of requiring one producer', () => {
     const artifacts = [
       artifact(
-        'postFloorplan',
+        'post_floorplan',
         'qor_metrics',
         'postFloorplan_ecc/analysis/qor_metrics.json',
       ),
       artifact(
-        'preFloorplan',
+        'pre_floorplan',
         'qor_summary',
         'preFloorplan_ecc/analysis/qor_summary.json',
       ),
@@ -53,7 +53,7 @@ describe('projectAnalysisArtifacts', () => {
   it('keeps an unavailable preferred artifact from masking a later available producer', () => {
     const artifacts = [
       artifact(
-        'place',
+        'placement',
         'qor_summary',
         'place_dreamplace/analysis/qor_summary.json',
         'missing',
@@ -68,10 +68,10 @@ describe('projectAnalysisArtifacts', () => {
 
   it('uses the ECC artifact requirement instead of the local step policy', () => {
     const artifacts = [
-      artifact('Synthesis', 'qor_metrics', 'Synthesis_yosys/analysis/qor_metrics.json'),
-      artifact('Synthesis', 'qor_summary', 'Synthesis_yosys/analysis/qor_summary.json'),
+      artifact('synthesis', 'qor_metrics', 'Synthesis_yosys/analysis/qor_metrics.json'),
+      artifact('synthesis', 'qor_summary', 'Synthesis_yosys/analysis/qor_summary.json'),
       artifact(
-        'Synthesis',
+        'synthesis',
         'qor_hotspots',
         'Synthesis_yosys/analysis/qor_hotspots.json',
         'missing',

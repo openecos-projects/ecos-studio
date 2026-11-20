@@ -522,7 +522,7 @@ class ControllerContextMixin:
         return (
             candidate_observation_stage(candidate_target_step(actions[0].knob_id))
             if actions
-            else "place"
+            else "placement"
         )
 
     def planning_stages(self, observation, current_values):

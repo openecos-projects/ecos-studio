@@ -9,6 +9,7 @@ export function usePowerSummary() {
     POWER_SUMMARY_STEP_PATH,
     parsePowerSummaryStep,
     'Power analysis result is invalid.',
+    'power_analysis',
   )
   return { summary: data, loading, error, refresh }
 }

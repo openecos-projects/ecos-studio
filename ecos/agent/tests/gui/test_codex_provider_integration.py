@@ -675,14 +675,14 @@ def test_rerun_fails_closed_when_mock_codex_times_out(tmp_path: Path) -> None:
     flow = workspace / "home" / "flow.json"
     flow.parent.mkdir(parents=True)
     flow.write_text(
-        '{"steps": [{"name": "place", "tool": "dreamplace", "state": "Success"}]}',
+        '{"steps": [{"name": "placement", "directory": "06_placement_dreamplace", "tool": "dreamplace", "state": "Success"}]}',
         encoding="utf-8",
     )
-    output = workspace / "place_dreamplace" / "output"
+    output = workspace / "06_placement_dreamplace" / "output"
     output.mkdir(parents=True)
-    (output / "gcd_place.def.gz").write_bytes(b"def")
-    config = workspace / "config"
-    config.mkdir()
+    (output / "gcd_placement.def.gz").write_bytes(b"def")
+    config = workspace / "06_placement_dreamplace/config"
+    config.mkdir(parents=True)
     (config / "dreamplace_ecc.json").write_text('{"target_density": 0.2}', encoding="utf-8")
     events: list[dict[str, object]] = []
 

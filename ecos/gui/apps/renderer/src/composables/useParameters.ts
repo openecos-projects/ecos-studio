@@ -38,7 +38,6 @@ export interface ParametersData {
   'Max fanout': number
   'Target density': number
   'Target overflow': number
-  'Global right padding': number
   'Cell padding x': number
   'Routability opt flag': number
   Clock: string
@@ -109,7 +108,6 @@ export interface ConfigData {
   maxFanout: number
   targetDensity: number
   targetOverflow: number
-  globalRightPadding: number
   cellPaddingX: number
   routabilityOptFlag: boolean
   clock: string
@@ -148,7 +146,6 @@ function getDefaultConfig(): ConfigData {
     maxFanout: 20,
     targetDensity: 0.3,
     targetOverflow: 0.1,
-    globalRightPadding: 0,
     cellPaddingX: 600,
     routabilityOptFlag: true,
     clock: '',
@@ -257,8 +254,20 @@ export function parametersHaveChipIdentity(
   return Number.isFinite(area) && area > 0
 }
 
+function isParametersRecord(
+  value: unknown,
+): value is ParametersData & Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
 function normalizeParametersData(raw: ParameterRecord | ParametersData): ParametersData {
   const record = raw as ParameterRecord
+  const stepParams: ParameterRecord = isParametersRecord(record.step_params)
+    ? record.step_params
+    : {}
+  const placement: ParameterRecord = isParametersRecord(stepParams.placement)
+    ? stepParams.placement
+    : {}
   const dreamplace =
     record.dreamplace &&
     typeof record.dreamplace === 'object' &&
@@ -279,29 +288,30 @@ function normalizeParametersData(raw: ParameterRecord | ParametersData): Paramet
     Core: normalizeCore(record.Core ?? record.core),
     'Max fanout': Number(record['Max fanout'] ?? record.max_fanout ?? 20),
     'Target density': Number(
-      dreamplace.target_density ??
+      placement['place.target_density'] ??
+        dreamplace.target_density ??
         record['Target density'] ??
         record.target_density ??
         0.3,
     ),
     'Target overflow': Number(
-      dreamplace.stop_overflow ??
+      placement['place.stop_overflow'] ??
+        dreamplace.stop_overflow ??
         dreamplace.target_overflow ??
         record['Target overflow'] ??
         record.target_overflow ??
         0.1,
     ),
-    'Global right padding': Number(
-      record['Global right padding'] ?? record.global_right_padding ?? 0,
-    ),
     'Cell padding x': Number(
-      dreamplace.cell_padding_x ??
+      placement['place.cell_padding_x'] ??
+        dreamplace.cell_padding_x ??
         record['Cell padding x'] ??
         record.cell_padding_x ??
         600,
     ),
     'Routability opt flag': Number(
-      dreamplace.routability_opt_flag ??
+      placement['place.routability_opt_flag'] ??
+        dreamplace.routability_opt_flag ??
         record['Routability opt flag'] ??
         record.routability_opt_flag ??
         1,
@@ -384,7 +394,6 @@ export function transformParametersToConfig(data: ParametersData): ConfigData {
     maxFanout: data['Max fanout'] ?? 20,
     targetDensity: data['Target density'] ?? 0.3,
     targetOverflow: data['Target overflow'] ?? 0.1,
-    globalRightPadding: data['Global right padding'] ?? 0,
     cellPaddingX: data['Cell padding x'] ?? 600,
     routabilityOptFlag: !!data['Routability opt flag'],
     clock: data.Clock || '',
@@ -435,7 +444,6 @@ export function transformConfigToParameters(config: ConfigData): ParametersData 
     'Max fanout': config.maxFanout,
     'Target density': config.targetDensity,
     'Target overflow': config.targetOverflow,
-    'Global right padding': config.globalRightPadding,
     'Cell padding x': config.cellPaddingX,
     'Routability opt flag': config.routabilityOptFlag ? 1 : 0,
     Clock: config.clock,
@@ -616,12 +624,6 @@ export function useParameters() {
 
   function applyParametersFileContent(fileContent: string): void {
     applyParametersData(parseParametersData(fileContent))
-  }
-
-  function isParametersRecord(
-    value: unknown,
-  ): value is ParametersData & Record<string, unknown> {
-    return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
   }
 
   function applyParametersData(

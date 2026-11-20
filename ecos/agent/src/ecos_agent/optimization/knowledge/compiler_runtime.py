@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 
-from ecos_agent.ecc_contracts import ECCStepName
+from ecos_agent.ecc_contracts import ECCStepName, knowledge_phase
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.knowledge.bundle import KnowledgeBundle
 from ecos_agent.optimization.contracts import (
@@ -354,7 +354,7 @@ def _match_claim(
             set(state.preserve_metrics) & set(claim.objectives)
         ):
             return KnowledgeApplicability.BLOCKED, ("objective_mismatch",)
-    if state.current_stage.value.casefold() not in {
+    if knowledge_phase(state.current_stage) not in {
         stage.casefold() for stage in claim.stages
     }:
         return KnowledgeApplicability.BLOCKED, ("incompatible_stage",)

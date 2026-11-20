@@ -180,7 +180,7 @@ def _objective() -> OptimizationObjectiveContract:
 def _observation() -> StageObservation:
     return StageObservation(
         observation_id="observation-place",
-        stage="place",
+        stage="placement",
         evidence_manifest_sha256=HASH,
         metrics={"place_lutrudy_utilization_max": 0.88},
         budget=_budget(),
@@ -193,7 +193,7 @@ def _retrieval() -> OptimizationRetrievalResult:
     )
     request = OptimizationRetrievalRequest(
         task_id="task-1",
-        current_stage="place",
+        current_stage="placement",
         observed_metric_ids=("place_lutrudy_utilization_max",),
     )
     channel = KnowledgeChannelResult(
@@ -361,7 +361,7 @@ def _native_receipt(
         "terminal_execution_contract_sha256": canonical_sha256(
             {
                 "target_step": card.stage,
-                "end_step": "Harden",
+                "end_step": "harden",
                 "execution_scope": "full_flow",
             }
         ),
@@ -423,7 +423,7 @@ def _geometry() -> GeometrySnapshot:
     return GeometrySnapshot(
         dbu_per_micron=1000, die_bbox=(0, 0, 1000, 1000),
         core_bbox=(100, 100, 900, 900),
-        evidence_refs=("filler_ecc/output/geometry/geometry.manifest",), evidence_sha256=HASH,
+        evidence_refs=("13_filler_ecc/output/geometry/geometry.manifest",), evidence_sha256=HASH,
     )
 
 

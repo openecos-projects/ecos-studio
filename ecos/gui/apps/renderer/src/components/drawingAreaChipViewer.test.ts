@@ -46,7 +46,7 @@ describe('drawing area chip viewer launch logic', () => {
         chipViewerEditBusy: false,
         isDesktopRuntime: true,
         projectPath: '/work/gcd',
-        step: 'route',
+        step: 'routing',
       }),
     ).toBe(true)
 
@@ -56,7 +56,7 @@ describe('drawing area chip viewer launch logic', () => {
         chipViewerEditBusy: false,
         isDesktopRuntime: true,
         projectPath: '/work/gcd',
-        step: 'route',
+        step: 'routing',
       }),
     ).toBe(false)
     expect(
@@ -65,7 +65,7 @@ describe('drawing area chip viewer launch logic', () => {
         chipViewerEditBusy: true,
         isDesktopRuntime: true,
         projectPath: '/work/gcd',
-        step: 'route',
+        step: 'routing',
       }),
     ).toBe(false)
   })
@@ -76,15 +76,15 @@ describe('drawing area chip viewer launch logic', () => {
       projectPath: '/work/gcd',
       step: 'Floorplan',
     })
-    expect(buildChipViewerOpenRequest('/work/gcd', 'route', 'edit')).toEqual({
+    expect(buildChipViewerOpenRequest('/work/gcd', 'routing', 'edit')).toEqual({
       mode: 'edit',
       projectPath: '/work/gcd',
-      step: 'route',
+      step: 'routing',
     })
     expect(buildChipViewerOpenRequest('/work/gcd', 'Macro Placement', 'edit')).toEqual({
       mode: 'edit',
       projectPath: '/work/gcd',
-      step: 'macroPlacement',
+      step: 'macro_placement',
     })
   })
 

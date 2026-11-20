@@ -1572,7 +1572,7 @@ function readAgentRunStatus(value: unknown): DesktopAgentEvent['status'] | null 
 // Step IDs are dynamic (flow.json is authoritative, e.g. iPW power flows);
 // this parser only checks shape. Range/membership validation against the
 // workspace's own flow.json happens fail-closed in prepareWorkspaceRerun.
-const rerunStepPattern = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,127}$/
+const rerunStepPattern = /^[a-zA-Z0-9][a-zA-Z0-9_@ -]{0,127}$/
 
 function readWorkspaceRerunContract(
   value: unknown,

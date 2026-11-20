@@ -17,7 +17,7 @@ from ecos_agent.optimization.parameters.contracts import ParameterApplicationRec
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 
-CANDIDATE_END_STEP = "Harden"
+CANDIDATE_END_STEP = "harden"
 CANDIDATE_EXECUTION_SCOPE = "full_flow"
 
 
@@ -31,29 +31,29 @@ class CandidateExecutionBusy(RuntimeError):
     """
 
 _CANDIDATE_TARGET_STEPS = {
-    OptimizationKnob.FLOORPLAN_CORE_UTIL: "Floorplan",
-    OptimizationKnob.FLOORPLAN_ASPECT_RATIO: "Floorplan",
-    OptimizationKnob.TARGET_DENSITY: "place",
-    OptimizationKnob.TARGET_OVERFLOW: "place",
-    OptimizationKnob.CELL_PADDING_X: "place",
-    OptimizationKnob.ROUTABILITY_OPT: "place",
-    OptimizationKnob.DENSITY_WEIGHT: "place",
+    OptimizationKnob.FLOORPLAN_CORE_UTIL: "floorplan",
+    OptimizationKnob.FLOORPLAN_ASPECT_RATIO: "floorplan",
+    OptimizationKnob.TARGET_DENSITY: "placement",
+    OptimizationKnob.TARGET_OVERFLOW: "placement",
+    OptimizationKnob.CELL_PADDING_X: "placement",
+    OptimizationKnob.ROUTABILITY_OPT: "placement",
+    OptimizationKnob.DENSITY_WEIGHT: "placement",
 }
 
-# RPC candidates target the "Floorplan" step name, but the flow ledger and the
+# RPC candidates target the "floorplan" step name, but the flow ledger and the
 # stage observations use the sub-step names the floorplan phase runs as.
-_FLOORPLAN_EVIDENCE_STAGES = frozenset({"preFloorplan", "macroPlacement", "postFloorplan"})
+_FLOORPLAN_EVIDENCE_STAGES = frozenset({"pre_floorplan", "macro_placement", "post_floorplan"})
 
 
 def candidate_target_step(knob_id: OptimizationKnob) -> str:
     return _CANDIDATE_TARGET_STEPS[knob_id]
 
 
-# "Floorplan" is an RPC-level target only (ECC keeps it as the shared floorplan
+# "floorplan" is an RPC-level target only (ECC keeps it as the shared floorplan
 # configuration key, not a flow step). Its observable evidence lives on the
 # postFloorplan sub-step alone: preFloorplan and macroPlacement are zero-length
 # configuration steps whose analysis directories stay empty.
-_CANDIDATE_OBSERVATION_STAGE = {"Floorplan": "postFloorplan"}
+_CANDIDATE_OBSERVATION_STAGE = {"floorplan": "post_floorplan"}
 
 
 def candidate_observation_stage(target: str) -> str:
@@ -68,7 +68,7 @@ def knob_has_stage_evidence(
     target = candidate_target_step(knob_id)
     if target in stage_evidence:
         return True
-    return target == "Floorplan" and bool(stage_evidence & _FLOORPLAN_EVIDENCE_STAGES)
+    return target == "floorplan" and bool(stage_evidence & _FLOORPLAN_EVIDENCE_STAGES)
 
 
 @dataclass(frozen=True)

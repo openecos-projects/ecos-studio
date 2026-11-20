@@ -85,8 +85,8 @@ def test_production_runtime_opens_host_adapter_without_spawning_ecc(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "home").mkdir()
-    (workspace / "home" / "parameters.json").write_text(
-        '{"Design": "design-a"}', encoding="utf-8"
+    (workspace / "home" / "params.toml").write_text(
+        '[design]\nname = "design-a"\n', encoding="utf-8"
     )
     host = _FakeHost()
     monkeypatch.setattr(
@@ -165,8 +165,8 @@ def test_host_adapter_starts_candidate_rerun_through_product_command() -> None:
             "workspaceHandle": "handle-1",
             "expectedWorkspaceRevision": 4,
             "candidateId": "candidate-0c4c4b249d945101-intervention-1",
-            "targetStep": "place",
-            "endStep": "Harden",
+            "targetStep": "placement",
+            "endStep": "harden",
             "patch": [{"knob_id": "place.target_density", "value": 0.65}],
             "executionScope": "full_flow",
             "idempotencyKey": "episode-1.intervention-1",

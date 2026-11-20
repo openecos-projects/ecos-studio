@@ -32,7 +32,10 @@ function fixtureText(name: string): string {
         'Run these tests from the ECOS Studio monorepo with the ecc/ submodule checked out.',
     )
   }
-  return readFileSync(resolve(FIXTURE_ROOT, name), 'utf8')
+  // ECC's published section fixtures still use the v6 envelope.
+  const fixture = JSON.parse(readFileSync(resolve(FIXTURE_ROOT, name), 'utf8'))
+  if (fixture.schemaVersion === 6) fixture.schemaVersion = 7
+  return JSON.stringify(fixture)
 }
 
 function fixtureSnapshot(): Record<string, unknown> {
@@ -264,7 +267,7 @@ describe('Engineering Snapshot v6 envelope', () => {
     expect(validated.ok && validated.sections.artifacts.status).toBe('ready')
   })
 
-  it.each([5, 7, 0, -1])(
+  it.each([4, 5, 6, 8, 0, -1])(
     'fails closed with rebuild semantics for unsupported schemaVersion %s',
     (schemaVersion) => {
       expect(

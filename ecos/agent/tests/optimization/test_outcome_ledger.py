@@ -262,7 +262,7 @@ def test_terminal_outcome_rejects_removed_receipt_field() -> None:
 def test_ledger_rejects_terminal_execution_contract_drift(tmp_path) -> None:
     ledger = OptimizationLedger(tmp_path / "episode")
     ledger.append_start(_start().model_copy(update={"target_step": "Floorplan"}))
-    ledger.append_terminal(_terminal().model_copy(update={"target_step": "place"}))
+    ledger.append_terminal(_terminal().model_copy(update={"target_step": "placement"}))
 
     with pytest.raises(OptimizationLedgerIntegrityError, match="execution contract"):
         ledger.verify()

@@ -19,7 +19,7 @@ from .support import (
 def geometry():
     return GeometrySnapshot(dbu_per_micron=1000, die_bbox=(0, 0, 1000, 1000),
                             core_bbox=(100, 100, 900, 900),
-                            evidence_refs=("filler_ecc/output/geometry/geometry.manifest",),
+                            evidence_refs=("13_filler_ecc/output/geometry/geometry.manifest",),
                             evidence_sha256=HASH)
 
 
@@ -51,7 +51,7 @@ def test_fixed_task_exposes_every_permitted_layer_with_advisory_priority(tmp_pat
     }
     assert context.parameter_policy["active_layer"] == "physical"
     assert context.parameter_policy["layer_priority_is_advisory"] is True
-    assert instance.planning_stage(_observation(), CURRENT_VALUES) == "place"
+    assert instance.planning_stage(_observation(), CURRENT_VALUES) == "placement"
 
 
 def test_area_task_recommends_floorplan_and_keeps_increase_only_policy(tmp_path):
@@ -59,7 +59,7 @@ def test_area_task_recommends_floorplan_and_keeps_increase_only_policy(tmp_path)
                           planner=_FakeCodex(lambda ctx: _proposal(ctx, knob_id="floorplan.core_util", requested_value=0.7)))
     # planning_stage returns an observable flow step; the RPC-level "Floorplan"
     # target maps to the postFloorplan sub-step holding the floorplan evidence.
-    assert instance.planning_stage(_observation(), CURRENT_VALUES) == "postFloorplan"
+    assert instance.planning_stage(_observation(), CURRENT_VALUES) == "post_floorplan"
     observation = _observation().model_copy(update={"stage": ECCStepName.POST_FLOORPLAN})
     result = instance.plan(observation, _retrieval(), CURRENT_VALUES)
     assert result.requested.knob_id == "floorplan.core_util"

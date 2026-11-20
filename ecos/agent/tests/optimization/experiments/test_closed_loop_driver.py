@@ -139,7 +139,7 @@ def test_metric_comparison_reports_reference_best_and_noise() -> None:
     epsilon = {
         "route_wirelength": 0.1,
         "sta_frequency": 0.0,
-        "sta_typical_leakage_power": 0.05,
+        "power_analysis_leakage_uw": 0.05,
         "qor_summary_balanced": 1.0,
     }
 
@@ -155,7 +155,7 @@ def test_metric_comparison_reports_reference_best_and_noise() -> None:
         "beyond_noise": True,
     }
     assert rows["sta_frequency"]["beyond_noise"] is True
-    assert rows["sta_typical_leakage_power"]["beyond_noise"] is False
+    assert rows["power_analysis_leakage_uw"]["beyond_noise"] is False
     assert rows["route_la_total_overflow"]["epsilon"] is None
     assert rows["route_la_total_overflow"]["beyond_noise"] is None
     assert rows["gui_overall_qor_score"]["best"] is None

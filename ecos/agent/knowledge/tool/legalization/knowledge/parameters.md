@@ -124,6 +124,33 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.buffering_candidate_drive_strength_table"></a>
+## parameter.legalization.buffering_candidate_drive_strength_table
+
+**Meaning:** External four-buffer drive-strength table used by typed discrete candidate buffering.
+
+**Role:** Supplies the table of available buffer drive strengths.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.buffering_candidate_drive_type_mode"></a>
+## parameter.legalization.buffering_candidate_drive_type_mode
+
+**Meaning:** Candidate discrete buffer type selection, single_fixed | four_strength_table.
+
+**Role:** Selects a fixed buffer or a table of drive strengths during buffer selection.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.buffering_candidate_strategy"></a>
+## parameter.legalization.buffering_candidate_strategy
+
+**Meaning:** Buffering candidate strategy.
+
+**Role:** Selects the buffer candidate generation strategy.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.buffering_continuous_relaxed_optimization"></a>
 ## parameter.legalization.buffering_continuous_relaxed_optimization
 
@@ -358,6 +385,24 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.diff_optimization_flows"></a>
+## parameter.legalization.diff_optimization_flows
+
+**Meaning:** Diff optimization flows.
+
+**Role:** Sets the execution order, round counts and objective weights for the sizing and buffering phases.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.diff_optimization_mode"></a>
+## parameter.legalization.diff_optimization_mode
+
+**Meaning:** Diff optimization mode.
+
+**Role:** Selects the optimization mode for the diff_opt stage.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.diff_sizing_coefficients_cap"></a>
 ## parameter.legalization.diff_sizing_coefficients_cap
 
@@ -400,6 +445,33 @@
 **Meaning:** The number of continuous differential-sizing steps.
 
 **Role:** It bounds continuous sizing before discrete refinement; zero disables the continuous phase.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.diff_sizing_optimization_flows"></a>
+## parameter.legalization.diff_sizing_optimization_flows
+
+**Meaning:** Ordered standalone diff_sizing phases: [action, rounds, [wns, tns, slew, cap], selection_percent]; action is quad, up, or down and percent is in (0, 100]; null selects a quad phase; ECC defaults to 50 rounds with diff_sizing_coefficients and a shared 1% budget per round.
+
+**Role:** Controls the action, rounds, timing weights and selection budget for each sizing phase.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.diff_sizing_terminal_gr_sta_enabled"></a>
+## parameter.legalization.diff_sizing_terminal_gr_sta_enabled
+
+**Meaning:** Diff sizing terminal gr sta enabled.
+
+**Role:** Requests a final global-route timing measurement after standalone sizing.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.diff_sizing_timing_rc_mode"></a>
+## parameter.legalization.diff_sizing_timing_rc_mode
+
+**Meaning:** Standalone diff_sizing timing RC source; placement uses the placement parasitics and gr uses the frozen GR snapshot.
+
+**Role:** Selects the placement estimate or global-routing snapshot used to time sizing changes.
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
@@ -682,6 +754,24 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.inflation_density_weight_scale"></a>
+## parameter.legalization.inflation_density_weight_scale
+
+**Meaning:** Positive scale for the Xplace-style density-weight restart ratio after inflation; the default 0.001 keeps the restarted density force small, 1.0 uses the normalized gradient ratio directly, and 0.1 reproduces the historical DreamPlace post-restart scale.
+
+**Role:** Scales the density penalty when placement restarts after area inflation.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.inflation_filler_consumption_mode"></a>
+## parameter.legalization.inflation_filler_consumption_mode
+
+**Meaning:** How routability inflation consumes filler: filler_first subtracts the inflation area from filler before raising target density, proportional shrinks filler and non-filler whitespace together, capacity_only preserves the legacy limit-only shrink.
+
+**Role:** Determines how much filler area remains after routability inflation.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.inflation_min_interval"></a>
 ## parameter.legalization.inflation_min_interval
 
@@ -706,6 +796,60 @@
 **Meaning:** The Y percentage of the initial location.
 
 **Role:** It defines the Y coordinate of random-center initialization relative to the layout boundary.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.joint_alternating_buffer_commit_policy"></a>
+## parameter.legalization.joint_alternating_buffer_commit_policy
+
+**Meaning:** Physical buffer commit policy for the alternating profile.
+
+**Role:** Selects when candidate buffers become physical instances.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.joint_alternating_buffering_rounds"></a>
+## parameter.legalization.joint_alternating_buffering_rounds
+
+**Meaning:** Candidate buffering rounds after each sizing block.
+
+**Role:** Controls how often buffer candidates are selected after each sizing block.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.joint_alternating_buffering_selection_fraction"></a>
+## parameter.legalization.joint_alternating_buffering_selection_fraction
+
+**Meaning:** Fraction of eligible nets selected by each candidate buffering round.
+
+**Role:** Limits the eligible nets considered for buffer insertion.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.joint_alternating_outer_rounds"></a>
+## parameter.legalization.joint_alternating_outer_rounds
+
+**Meaning:** Outer rounds for the discrete alternating sizing/buffering profile.
+
+**Role:** Sets how many times the flow repeats its sizing and buffering blocks.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.joint_alternating_sizing_rounds"></a>
+## parameter.legalization.joint_alternating_sizing_rounds
+
+**Meaning:** Discrete sizing rounds before each candidate buffering round.
+
+**Role:** Bounds the number of discrete sizing passes before buffer selection.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.joint_alternating_sizing_shared_budget_percent"></a>
+## parameter.legalization.joint_alternating_sizing_shared_budget_percent
+
+**Meaning:** Shared sizing budget percentage for the alternating profile.
+
+**Role:** Limits the fraction of cells resized per round.
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
@@ -823,6 +967,15 @@
 **Meaning:** The L-shape GGR-topology switch.
 
 **Role:** It uses a GGR-exported topology pack instead of refreshing diff-side FLUTE topology.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.l_shape_weight_max_multiplier"></a>
+## parameter.legalization.l_shape_weight_max_multiplier
+
+**Meaning:** Maximum adaptive L-shape weight as a multiple of the first calibrated weight in each calibration epoch; 0 disables the relative cap.
+
+**Role:** Caps the adaptive L-shape penalty relative to its first calibrated weight.
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
@@ -1348,6 +1501,24 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.timing_action_gradient_mode"></a>
+## parameter.legalization.timing_action_gradient_mode
+
+**Meaning:** Discrete sizing gradient mode; default lut_action, off is the legacy path.
+
+**Role:** Selects how the optimizer scores discrete cell-sizing actions.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_action_score_objective"></a>
+## parameter.legalization.timing_action_score_objective
+
+**Meaning:** Objective differentiated for the local LUT action score; loss uses diff_sizing_coefficients, tns/wns select a single timing metric.
+
+**Role:** Selects the timing objective whose gradient ranks candidate actions.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.timing_aggregation_mode"></a>
 ## parameter.legalization.timing_aggregation_mode
 
@@ -1384,12 +1555,30 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.timing_grad_balance_reset_on_restart"></a>
+## parameter.legalization.timing_grad_balance_reset_on_restart
+
+**Meaning:** Reset and reinitialize the timing-gradient balance weight after each inflation/GP restart; 0 preserves the current weight.
+
+**Role:** Controls whether timing gradient calibration survives a placement restart.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.timing_grad_balance_target_ratio"></a>
 ## parameter.legalization.timing_grad_balance_target_ratio
 
 **Meaning:** The target timing-to-wirelength gradient balance.
 
 **Role:** It balances weighted timing and wirelength gradient norms; zero disables automatic balancing.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_metric_scope"></a>
+## parameter.legalization.timing_metric_scope
+
+**Meaning:** Max timing checks used by placement WNS/TNS: setup_only or setup_plus_recovery.
+
+**Role:** Selects which maximum-delay checks contribute to reported slack.
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
@@ -1528,12 +1717,30 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.timing_propagation_device"></a>
+## parameter.legalization.timing_propagation_device
+
+**Meaning:** TimingPropagation device: inherit the placement device, or explicitly use cpu/cuda.
+
+**Role:** Selects the execution device for timing propagation.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.timing_rc_mode"></a>
 ## parameter.legalization.timing_rc_mode
 
 **Meaning:** The timing-parasitics source.
 
 **Role:** It selects placement estimates or global-route parasitics, which require native ECC CPU sizing or STA.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.timing_sizing_action"></a>
+## parameter.legalization.timing_sizing_action
+
+**Meaning:** Action family for placement sizing windows and diff_opt sizing: up | down | quad; explicit diff_sizing phase masks take precedence.
+
+**Role:** Restricts the sizing directions available to the optimizer.
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 

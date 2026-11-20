@@ -21,12 +21,13 @@ async function writeFlow(value: unknown): Promise<string> {
 }
 
 describe('readWorkspaceFlow', () => {
-  it('accepts schema 1 with dynamic and unknown step IDs', async () => {
+  it('accepts schema 3 with dynamic and unknown step IDs', async () => {
     const root = await writeFlow({
-      schema_version: 1,
+      schema_version: 3,
       steps: [
         {
           name: 'futureIpwPowerStep',
+          directory: '03_futureIpwPowerStep_ipw',
           tool: 'ipw',
           state: 'Ongoing',
           runtime: '00:00:03',
@@ -38,6 +39,7 @@ describe('readWorkspaceFlow', () => {
       steps: [
         {
           name: 'futureIpwPowerStep',
+          directory: '03_futureIpwPowerStep_ipw',
           peakMemory: 42.5,
           runtime: '00:00:03',
           state: 'Ongoing',
@@ -49,10 +51,11 @@ describe('readWorkspaceFlow', () => {
 
   it('retains checklist blocks that stop a required flow step', async () => {
     const root = await writeFlow({
-      schema_version: 1,
+      schema_version: 3,
       steps: [
         {
           name: 'Harden',
+          directory: '21_harden_ecc',
           state: 'Unstart',
           checklist_status: {
             status: 'blocked',
@@ -68,6 +71,7 @@ describe('readWorkspaceFlow', () => {
           checklistBlocked: true,
           checklistFailedItems: ['prerequisite:sta'],
           name: 'Harden',
+          directory: '21_harden_ecc',
           peakMemory: 0,
           runtime: '',
           state: 'Unstart',
@@ -79,14 +83,14 @@ describe('readWorkspaceFlow', () => {
 
   it('rejects missing and unsupported schema versions', async () => {
     const missing = await writeFlow({ steps: [] })
-    const future = await writeFlow({ schema_version: 2, steps: [] })
+    const future = await writeFlow({ schema_version: 4, steps: [] })
     await expect(readWorkspaceFlow(missing)).rejects.toThrow('Workspace flow is invalid')
     await expect(readWorkspaceFlow(future)).rejects.toThrow('Workspace flow is invalid')
   })
 
   it('rejects malformed numeric facts without fixing them in the GUI', async () => {
     const root = await writeFlow({
-      schema_version: 1,
+      schema_version: 3,
       steps: [
         {
           name: 'route',
@@ -101,11 +105,13 @@ describe('readWorkspaceFlow', () => {
   })
 
   it('retries across an atomic flow.json replacement racing the read', async () => {
-    const root = await writeFlow({ schema_version: 1, steps: [] })
+    const root = await writeFlow({ schema_version: 3, steps: [] })
     const flowPath = join(root, 'home', 'flow.json')
     const replacement = JSON.stringify({
-      schema_version: 1,
-      steps: [{ name: 'route', state: 'Ongoing', tool: 'ecc' }],
+      schema_version: 3,
+      steps: [
+        { name: 'routing', directory: '10_routing_ecc', state: 'Ongoing', tool: 'ecc' },
+      ],
     })
     // Simulate the ECC publish (temp file + rename) landing between the
     // unlink and the read's retry window.
@@ -119,22 +125,29 @@ describe('readWorkspaceFlow', () => {
 
     await expect(readWorkspaceFlow(root)).resolves.toEqual({
       steps: [
-        { name: 'route', peakMemory: 0, runtime: '', state: 'Ongoing', tool: 'ecc' },
+        {
+          name: 'routing',
+          directory: '10_routing_ecc',
+          peakMemory: 0,
+          runtime: '',
+          state: 'Ongoing',
+          tool: 'ecc',
+        },
       ],
     })
     await publish
   })
 
   it('gives up with ENOENT when the flow file stays missing', async () => {
-    const root = await writeFlow({ schema_version: 1, steps: [] })
+    const root = await writeFlow({ schema_version: 3, steps: [] })
     await rm(join(root, 'home', 'flow.json'))
     await expect(readWorkspaceFlow(root)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('does not follow a flow file symlink while opening it', async () => {
-    const root = await writeFlow({ schema_version: 1, steps: [] })
+    const root = await writeFlow({ schema_version: 3, steps: [] })
     const outside = await writeFlow({
-      schema_version: 1,
+      schema_version: 3,
       steps: [{ name: 'outside', state: 'Success' }],
     })
     await rm(join(root, 'home', 'flow.json'))

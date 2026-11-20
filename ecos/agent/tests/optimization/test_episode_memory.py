@@ -128,7 +128,7 @@ def _parameter_application_receipt(value: int) -> ParameterApplicationReceipt:
         "receipt_id": f"parameter-receipt-padding-{value}",
         "tool": card.tool,
         "context": {
-            "stage": "place",
+            "stage": "placement",
             "lattice_version": "ecos.optimization_lattice.v1",
             "parameter_card_sha256": card_hash(card),
         },
@@ -192,7 +192,7 @@ def _scope(
     return build_task_memory_scope(
         workspace_manifest_sha256=workspace_sha256,
         design_id=design_id,
-        checkpoint_id="place",
+        checkpoint_id="placement",
         episode_id=episode_id,
         objective_contract_sha256=objective.contract_sha256,
     )
@@ -586,7 +586,7 @@ def test_task_memory_requires_eligible_v3_terminal_observation(tmp_path: Path) -
     (
         {
             "context": {
-                "stage": "route",
+                "stage": "routing",
                 "parameter_card_sha256": card_hash(
                     load_parameter_cards()["place.cell_padding_x"]
                 ),

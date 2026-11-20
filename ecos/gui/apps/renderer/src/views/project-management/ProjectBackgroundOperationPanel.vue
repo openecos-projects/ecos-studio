@@ -10,7 +10,7 @@
         {{ stateText }}
       </span>
       <strong class="operation-step">{{
-        operation?.currentStep || operation?.step || 'Workspace finalization'
+        operationStepLabel(operation) || 'Workspace finalization'
       }}</strong>
       <span class="operation-kind">{{
         operation?.kind === 'step' ? 'Step run' : 'Full Flow'
@@ -68,6 +68,7 @@
 </template>
 
 <script setup lang="ts">
+import { operationStepLabel } from '@/utils/operationStepLabel'
 import { storeToRefs } from 'pinia'
 import { computed, ref } from 'vue'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'

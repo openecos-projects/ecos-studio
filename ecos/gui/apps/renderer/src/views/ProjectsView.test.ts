@@ -1016,7 +1016,7 @@ describe('ProjectsView background lifecycle integration', () => {
         sdc: null,
         steps: [
           stepEntry('Synthesis', 'Success', { verilog: true }),
-          stepEntry('lec', 'Skipped'),
+          stepEntry('lec@synthesis', 'Skipped'),
           stepEntry('Floorplan', 'Incomplete', { verilog: true, def: true }),
           stepEntry('place', 'Unstart', { verilog: true, def: true }),
           stepEntry('CTS', 'Success', { def: true }),

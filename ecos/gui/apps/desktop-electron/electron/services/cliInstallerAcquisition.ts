@@ -23,7 +23,7 @@ import {
   readInstallRecord,
   resolveContainedSymlinkDir,
 } from './cliInstallerArtifacts'
-import { runSelfCheck, type CliSpawnLike } from './cliSelfCheck'
+import { runSelfCheck, workspaceForkRequired, type CliSpawnLike } from './cliSelfCheck'
 import { electronLogger } from './logger'
 
 export interface AcquisitionProgressEvent {
@@ -234,9 +234,12 @@ async function acquireBundleInto(
     await ctx.buildRuntimeEnv(stagingBinaries),
     ctx.selfCheckTimeoutMs,
   )
+  if (!selfCheck.ok && selfCheck.detail === workspaceForkRequired)
+    throw new Error(workspaceForkRequired)
   const versionDirName = `${ctx.expectedVersion}-${sha256.slice(0, 8)}`
   const record: CliBundleInstallRecord = {
     version: ctx.expectedVersion,
+    checkedWorkspaceFork: selfCheck.ok,
     sha256,
     source: packagedDir ? 'bundled' : 'downloaded',
     installedAt: ctx.now().toISOString(),
@@ -284,7 +287,11 @@ async function finalizeStagedBundle(
   }
   if (containedVersionDir) {
     const existing = await readInstallRecord(containedVersionDir, ctx.platform)
-    if ('record' in existing && existing.record.selfCheck.ok) {
+    if (
+      'record' in existing &&
+      existing.record.selfCheck.ok &&
+      existing.record.checkedWorkspaceFork
+    ) {
       await rm(stagingDir, { force: true, recursive: true })
       await ctx.writeEnvFile(versionDir, join(versionDir, 'binaries'))
       electronLogger.info(

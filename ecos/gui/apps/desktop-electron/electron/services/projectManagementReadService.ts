@@ -13,7 +13,6 @@ import type {
   ProjectManifest,
 } from '@ecos-studio/shared'
 import { projectManagementFrontendWorkspaceSummaryPaths } from '@ecos-studio/shared'
-import { hasLegacyRunsLayout } from './eccCli/legacyMigration'
 import { isPathWithinRoot } from './pathScope'
 
 const PROJECT_MANIFEST_MAX_BYTES = 512 * 1024
@@ -199,17 +198,7 @@ export class ProjectManagementReadService {
       join(root, 'project.json'),
       PROJECT_MANIFEST_MAX_BYTES,
     )
-    if (!content) {
-      // Only legacy runs/ layouts need the ECC runtime's migration path. Calling
-      // load() for a virgin directory creates .manifest.lock and makes the
-      // directory ineligible for the subsequent project-init operation.
-      if (!(await hasLegacyRunsLayout(root))) return null
-      try {
-        return await this.projectManifestReader.load(root)
-      } catch {
-        return null
-      }
-    }
+    if (!content) return null
     const manifest = await this.projectManifestReader.load(root)
     if (manifest.project_type === 'frontend' || !this.readWorkspaceConfiguration)
       return manifest

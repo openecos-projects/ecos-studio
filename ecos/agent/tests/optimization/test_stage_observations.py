@@ -26,12 +26,12 @@ def test_stage_observation_reads_only_the_fixed_stage_artifacts(
     frozen_workspace: Path,
 ) -> None:
     _write_json(
-        frozen_workspace / "place_dreamplace/analysis/qor_hotspots.json",
+        frozen_workspace / "06_placement_dreamplace/analysis/qor_hotspots.json",
         {
             "schema_version": 3,
             "analysis_revision": "quality-gates-v4",
             "tool": "dreamplace",
-            "step": "place",
+            "step": "placement",
             "design": "tiny",
             "hotspots": [
                 {
@@ -53,11 +53,11 @@ def test_stage_observation_reads_only_the_fixed_stage_artifacts(
     )
     observation = build_stage_observation(
         frozen_workspace,
-        "place",
+        "placement",
         budget=_budget(),
     )
 
-    assert observation.observation_id == "stage-place"
+    assert observation.observation_id == "stage-placement"
     assert observation.metrics == {
         "place_hpwl": 4315.0,
         "place_grwl": 3812.0,
@@ -71,7 +71,7 @@ def test_stage_observation_reads_only_the_fixed_stage_artifacts(
         "peak_memory_mb": 100.0,
     }
     artifact_sha256 = file_sha256(
-        frozen_workspace / "place_dreamplace/analysis/qor_hotspots.json"
+        frozen_workspace / "06_placement_dreamplace/analysis/qor_hotspots.json"
     )
     expected_hotspots = [
         {
@@ -96,11 +96,11 @@ def test_stage_observation_reads_only_the_fixed_stage_artifacts(
             "evidence_sha256": canonical_sha256(
                 {
                     "artifact_sha256": artifact_sha256,
-                    "evidence_ref": "place_dreamplace/analysis/qor_hotspots.json#/hotspots/0",
+                    "evidence_ref": "06_placement_dreamplace/analysis/qor_hotspots.json#/hotspots/0",
                     "hotspot": expected_hotspots[0],
                 }
             ),
-            "evidence_ref": "place_dreamplace/analysis/qor_hotspots.json#/hotspots/0",
+            "evidence_ref": "06_placement_dreamplace/analysis/qor_hotspots.json#/hotspots/0",
         },
         {
             "feature_id": "place_lutrudy_utilization_max_hotspot_1",
@@ -108,17 +108,17 @@ def test_stage_observation_reads_only_the_fixed_stage_artifacts(
             "evidence_sha256": canonical_sha256(
                 {
                     "artifact_sha256": artifact_sha256,
-                    "evidence_ref": "place_dreamplace/analysis/qor_hotspots.json#/hotspots/1",
+                    "evidence_ref": "06_placement_dreamplace/analysis/qor_hotspots.json#/hotspots/1",
                     "hotspot": expected_hotspots[1],
                 }
             ),
-            "evidence_ref": "place_dreamplace/analysis/qor_hotspots.json#/hotspots/1",
+            "evidence_ref": "06_placement_dreamplace/analysis/qor_hotspots.json#/hotspots/1",
         },
     ]
     assert observation.requested_knobs == ()
     assert observation.budget.remaining_candidates == 19
 
-    repeated = build_stage_observation(frozen_workspace, "place", budget=_budget())
+    repeated = build_stage_observation(frozen_workspace, "placement", budget=_budget())
     assert repeated.evidence_manifest_sha256 == observation.evidence_manifest_sha256
 
 
@@ -126,19 +126,19 @@ def test_stage_observation_publishes_hash_bound_place_map_availability(
     frozen_workspace: Path,
 ) -> None:
     evidence_files = {
-        "overflow_map": "place_dreamplace/feature/egr_congestion_map/place_egr_union_overflow.csv",
-        "egr_or_rudy_map": "place_dreamplace/feature/RUDY_map/place_rudy_union.csv",
-        "cell_density_map": "place_dreamplace/feature/density_map/place_allcell_density.csv",
-        "net_density_map": "place_dreamplace/feature/density_map/place_allnet_density.csv",
-        "pin_density_map": "place_dreamplace/feature/density_map/place_allcell_pin_density.csv",
-        "macro_density_map": "place_dreamplace/feature/density_map/place_macro_density.csv",
+        "overflow_map": "06_placement_dreamplace/feature/egr_congestion_map/placement_egr_union_overflow.csv",
+        "egr_or_rudy_map": "06_placement_dreamplace/feature/RUDY_map/placement_rudy_union.csv",
+        "cell_density_map": "06_placement_dreamplace/feature/density_map/placement_allcell_density.csv",
+        "net_density_map": "06_placement_dreamplace/feature/density_map/placement_allnet_density.csv",
+        "pin_density_map": "06_placement_dreamplace/feature/density_map/placement_allcell_pin_density.csv",
+        "macro_density_map": "06_placement_dreamplace/feature/density_map/placement_macro_density.csv",
     }
     for relative_path in evidence_files.values():
         path = frozen_workspace / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("0,1\n", encoding="utf-8")
 
-    observation = build_stage_observation(frozen_workspace, "place", budget=_budget())
+    observation = build_stage_observation(frozen_workspace, "placement", budget=_budget())
     features = {item.feature_id: item for item in observation.state_evidence}
 
     for feature_id, relative_path in evidence_files.items():
@@ -154,23 +154,23 @@ def test_stage_observation_rejects_incomplete_and_unsafe_workspace_evidence(
 ) -> None:
     flow_path = frozen_workspace / "home/flow.json"
     flow = json.loads(flow_path.read_text(encoding="utf-8"))
-    place_step = next(item for item in flow["steps"] if item["name"] == "place")
+    place_step = next(item for item in flow["steps"] if item["name"] == "placement")
     place_step["state"] = "Running"
     _write_json(flow_path, flow)
 
     with pytest.raises(OptimizationObservationError, match="not successful"):
-        build_stage_observation(frozen_workspace, "place", budget=_budget())
+        build_stage_observation(frozen_workspace, "placement", budget=_budget())
 
     place_step["state"] = "Success"
     _write_json(flow_path, flow)
     external = tmp_path / "external.json"
     _write_json(external, _metrics(("place_lutrudy_utilization_max", 0.88)))
-    metrics_path = frozen_workspace / "place_dreamplace/analysis/qor_metrics.json"
+    metrics_path = frozen_workspace / "06_placement_dreamplace/analysis/qor_metrics.json"
     metrics_path.unlink()
     metrics_path.symlink_to(external)
 
     with pytest.raises(OptimizationObservationError, match="unsafe"):
-        build_stage_observation(frozen_workspace, "place", budget=_budget())
+        build_stage_observation(frozen_workspace, "placement", budget=_budget())
 
 
 @pytest.mark.parametrize("mode,expected", [("die_util", True), ("die_size", False)])
@@ -179,7 +179,7 @@ def test_floorplan_mode_is_configuration_evidence_not_parameter_effectiveness(
 ) -> None:
     relative = "config/floorplan_ecc.json"
     _write_json(frozen_workspace / relative, {"die_builder": {"mode": mode}})
-    observation = build_stage_observation(frozen_workspace, "postFloorplan", budget=_budget())
+    observation = build_stage_observation(frozen_workspace, "post_floorplan", budget=_budget())
     feature = next(item for item in observation.state_evidence if item.feature_id == "floorplan_die_util_mode")
     assert feature.value is expected
     assert feature.evidence_ref == relative
@@ -187,7 +187,7 @@ def test_floorplan_mode_is_configuration_evidence_not_parameter_effectiveness(
 
 
 def test_absent_floorplan_mode_remains_unknown(frozen_workspace: Path) -> None:
-    observation = build_stage_observation(frozen_workspace, "postFloorplan", budget=_budget())
+    observation = build_stage_observation(frozen_workspace, "post_floorplan", budget=_budget())
     assert not any(item.feature_id == "floorplan_die_util_mode" for item in observation.state_evidence)
 
 
@@ -202,7 +202,7 @@ def test_convergence_evidence_is_hash_bound_and_stage_independent(frozen_workspa
     })
     expected = type(final) in (int, float) and 0 <= final < float("inf")
     evidence = []
-    for stage in ("place", "postFloorplan"):
+    for stage in ("placement", "post_floorplan"):
         observation = build_stage_observation(frozen_workspace, stage, budget=_budget())
         features = [item for item in observation.state_evidence
                     if item.feature_id == "place_final_density_overflow"]
@@ -229,6 +229,6 @@ def test_convergence_report_requires_placement_observation(frozen_workspace, fie
     }
     payload[field] = value
     _write_json(frozen_workspace / "analysis/parameter_runtime_report.v2.json", payload)
-    observation = build_stage_observation(frozen_workspace, "place", budget=_budget())
+    observation = build_stage_observation(frozen_workspace, "placement", budget=_budget())
     assert not any(item.feature_id == "place_final_density_overflow"
                    for item in observation.state_evidence)

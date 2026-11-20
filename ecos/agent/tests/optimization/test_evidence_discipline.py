@@ -27,17 +27,17 @@ from tests.optimization.observation_support import (
 
 def _metrics_by_path(**overrides: dict[str, float]) -> dict[str, dict[str, float]]:
     base = {
-        "place_dreamplace/analysis/qor_metrics.json": {
+        "placement/analysis/qor_metrics.json": {
             "place_hpwl": 3143.52,
             "place_grwl": 3812.0,
             "net_count": 1420.0,
         },
-        "route_ecc/analysis/qor_metrics.json": {
+        "routing/analysis/qor_metrics.json": {
             "route_wirelength": 4315.53,
             "route_via_count": 1705.0,
             "net_count": 1420.0,
         },
-        "sta_ecc/analysis/qor_metrics.json": {
+        "sta/analysis/qor_metrics.json": {
             "sta_setup_wns": 0.2,
             "sta_setup_violation_count": 0.0,
             "sta_hold_wns": 0.1,
@@ -57,7 +57,7 @@ class TestConsistencyViolations:
         violations = consistency_violations(
             _metrics_by_path(
                 **{
-                    "route_ecc/analysis/qor_metrics.json": {
+                    "routing/analysis/qor_metrics.json": {
                         "route_wirelength": 3000.0,
                     }
                 }
@@ -69,7 +69,7 @@ class TestConsistencyViolations:
         violations = consistency_violations(
             _metrics_by_path(
                 **{
-                    "route_ecc/analysis/qor_metrics.json": {
+                    "routing/analysis/qor_metrics.json": {
                         "route_wirelength": 3000.0,
                         "net_count": 1422.0,
                     }
@@ -82,7 +82,7 @@ class TestConsistencyViolations:
         violations = consistency_violations(
             _metrics_by_path(
                 **{
-                    "sta_ecc/analysis/qor_metrics.json": {
+                    "sta/analysis/qor_metrics.json": {
                         "sta_setup_wns": 0.05,
                         "sta_setup_violation_count": 3.0,
                     }
@@ -95,7 +95,7 @@ class TestConsistencyViolations:
         violations = consistency_violations(
             _metrics_by_path(
                 **{
-                    "sta_ecc/analysis/qor_metrics.json": {
+                    "sta/analysis/qor_metrics.json": {
                         "sta_setup_wns": -0.25,
                         "sta_setup_violation_count": 4.0,
                     }
@@ -108,7 +108,7 @@ class TestConsistencyViolations:
         violations = consistency_violations(
             _metrics_by_path(
                 **{
-                    "route_ecc/analysis/qor_metrics.json": {
+                    "routing/analysis/qor_metrics.json": {
                         "route_wirelength": 0.0,
                     }
                 }
@@ -132,19 +132,19 @@ class TestInterconnectInflation:
         # Baseline invariance: every record cites the same workspace stages.
         for record in records:
             assert set(record.source_refs) == {
-                "place_dreamplace/analysis/qor_metrics.json",
-                "route_ecc/analysis/qor_metrics.json",
+                "placement/analysis/qor_metrics.json",
+                "routing/analysis/qor_metrics.json",
             }
 
     def test_missing_place_operands_suppress_the_ratios(self) -> None:
         metrics = _metrics_by_path()
-        del metrics["place_dreamplace/analysis/qor_metrics.json"]
+        del metrics["placement/analysis/qor_metrics.json"]
         assert interconnect_inflation_metrics(metrics) == ()
 
     def test_non_positive_denominator_suppresses_the_ratios(self) -> None:
         metrics = _metrics_by_path(
             **{
-                "place_dreamplace/analysis/qor_metrics.json": {
+                "placement/analysis/qor_metrics.json": {
                     "place_hpwl": 0.0,
                     "place_grwl": 3812.0,
                 }
@@ -235,7 +235,7 @@ class TestWorkspaceIntegration:
         self, frozen_workspace: Path
     ) -> None:
         _write_json(
-            frozen_workspace / "place_dreamplace/analysis/qor_metrics.json",
+            frozen_workspace / "06_placement_dreamplace/analysis/qor_metrics.json",
             _metrics(
                 ("place_lutrudy_utilization_max", 0.88),
                 ("place_total_wirelength", 123.0),
@@ -263,7 +263,7 @@ class TestWorkspaceIntegration:
         self, frozen_workspace: Path
     ) -> None:
         _write_json(
-            frozen_workspace / "place_dreamplace/analysis/qor_metrics.json",
+            frozen_workspace / "06_placement_dreamplace/analysis/qor_metrics.json",
             _metrics(
                 ("place_lutrudy_utilization_max", 0.88),
                 ("place_total_wirelength", 123.0),
@@ -285,13 +285,13 @@ class TestWorkspaceIntegration:
     def test_physical_failures_are_not_misread_as_evidence_gaps(
         self, frozen_workspace: Path
     ) -> None:
-        drc_path = frozen_workspace / "drc_ecc/analysis/qor_metrics.json"
+        drc_path = frozen_workspace / "15_drc_ecc/analysis/qor_metrics.json"
         payload = json.loads(drc_path.read_text(encoding="utf-8"))
         for item in payload["metrics"]:
             if item["id"] == "drc_count":
                 item["value"] = 9
         drc_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
-        checklist = frozen_workspace / "drc_ecc/checklist.json"
+        checklist = frozen_workspace / "15_drc_ecc/checklist.json"
         checklist.write_text(
             json.dumps(
                 {

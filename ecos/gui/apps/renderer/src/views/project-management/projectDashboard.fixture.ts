@@ -238,7 +238,6 @@ export function projectFixture(
       bestWorkspaceId: 'ws_b',
       bestReason: 'Highest eligible QoR score: 74.2',
       riskLabels: [],
-      parameterDiffs: [],
       metricDiffs: [],
     },
     ...overrides,

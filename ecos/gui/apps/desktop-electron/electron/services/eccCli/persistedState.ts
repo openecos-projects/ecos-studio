@@ -15,6 +15,9 @@ const ENOENT_RETRY_ATTEMPTS = 2
 const ENOENT_RETRY_DELAY_MS = 75
 
 export interface PersistedFlowStep {
+  category?: 'PNR' | 'CHECKER'
+  inputStep?: string
+  directory: string
   checklistBlocked?: boolean
   checklistFailedItems?: string[]
   name: string
@@ -71,21 +74,28 @@ export async function readWorkspaceFlow(directory: string): Promise<PersistedFlo
 }
 
 export async function readWorkspaceFlowFile(path: string): Promise<PersistedFlow> {
-  const raw = await readBoundedJson(path, FLOW_MAX_BYTES)
+  return parseWorkspaceFlow(await readBoundedJson(path, FLOW_MAX_BYTES))
+}
+
+export function parseWorkspaceFlow(raw: unknown): PersistedFlow {
   if (
     !isRecord(raw) ||
-    raw.schema_version !== 1 ||
+    raw.schema_version !== 3 ||
     !Array.isArray(raw.steps) ||
     raw.steps.length > 4096
   ) {
     throw new Error('Workspace flow is invalid.')
   }
-  const steps = raw.steps.map((value) => {
+  const steps = raw.steps.map((value): PersistedFlowStep => {
     if (
       !isRecord(value) ||
       typeof value.name !== 'string' ||
       !value.name ||
       value.name.length > 256 ||
+      typeof value.directory !== 'string' ||
+      !/^[A-Za-z0-9_@.-]+$/.test(value.directory) ||
+      value.directory === '.' ||
+      value.directory === '..' ||
       typeof value.state !== 'string' ||
       !value.state ||
       value.state.length > 64 ||
@@ -101,6 +111,8 @@ export async function readWorkspaceFlowFile(path: string): Promise<PersistedFlow
       throw new Error('Workspace flow step is invalid.')
     }
     const checklist = isRecord(value.checklist_status) ? value.checklist_status : null
+    const inputStep =
+      value.input_step || (isRecord(value.info) ? value.info.input_step : null)
     const checklistBlocked =
       checklist?.status === 'blocked' || checklist?.blocked === true
     const checklistFailedItems = Array.isArray(checklist?.failed_items)
@@ -112,12 +124,17 @@ export async function readWorkspaceFlowFile(path: string): Promise<PersistedFlow
           .slice(0, 64)
       : []
     return {
+      ...(value.category === 'PNR' || value.category === 'CHECKER'
+        ? { category: value.category }
+        : {}),
+      ...(typeof inputStep === 'string' && inputStep ? { inputStep } : {}),
       ...(checklistBlocked
         ? {
             checklistBlocked: true,
             ...(checklistFailedItems.length ? { checklistFailedItems } : {}),
           }
         : {}),
+      directory: value.directory,
       name: value.name,
       peakMemory:
         typeof value['peak memory (mb)'] === 'number' ? value['peak memory (mb)'] : 0,

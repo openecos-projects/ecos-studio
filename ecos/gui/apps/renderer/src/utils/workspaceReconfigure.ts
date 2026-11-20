@@ -36,7 +36,7 @@ export function workspaceReconfigureInitialConfig(
   const design = record(spec.design)
   const pdk = record(spec.pdk)
   const flow = record(spec.flow)
-  const parameters = record(spec.parameters)
+  const parameters = record(snapshot.parameters)
   const inputBindings = record(bindings.inputs)
   const pdkBindings = record(bindings.pdk)
   const inputs = records(spec.inputs)
@@ -63,6 +63,7 @@ export function workspaceReconfigureInitialConfig(
         (value): value is number => typeof value === 'number',
       )
     : []
+  const placement = record(record(parameters.step_params).placement)
   const dieWidth = number(parameters['floorplan.die_builder.die_size.width_micron']) ?? 0
   const dieHeight =
     number(parameters['floorplan.die_builder.die_size.height_micron']) ?? 0
@@ -87,8 +88,12 @@ export function workspaceReconfigureInitialConfig(
       utilization: number(parameters['floorplan.core_util']),
       margin: coreMargin[0],
       max_fanout: number(parameters['cts.max_fanout']),
-      target_density: number(parameters['place.target_density']),
-      target_overflow: number(parameters['place.target_overflow']),
+      target_density: number(
+        placement['place.target_density'] ?? parameters['place.target_density'],
+      ),
+      target_overflow: number(
+        placement['place.stop_overflow'] ?? parameters['place.stop_overflow'],
+      ),
       manual_macro_placement: parameters['macro.manual_placement'] === true,
     } as WorkspaceConfig['parameters'],
     origin_def: pathForInputRole('def'),
@@ -106,8 +111,8 @@ export function workspaceReconfigureInitialConfig(
     },
     pdk_json: '',
     flow_config: {
-      start_step: text(flow.fromStepId) || steps[0] || 'Synthesis',
-      end_step: text(flow.throughStepId) || steps[steps.length - 1] || 'Harden',
+      start_step: text(flow.fromStepId) || steps[0] || 'synthesis',
+      end_step: text(flow.throughStepId) || steps[steps.length - 1] || 'harden',
       steps,
     },
     project_context: projectContext

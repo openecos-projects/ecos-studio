@@ -25,10 +25,10 @@ const state = vi.hoisted(() => ({
           data: {
             steps: [
               {
-                name: 'Synthesis',
+                name: 'synthesis',
                 order: 0,
                 state: 'not-started' as const,
-                stepId: 'Synthesis',
+                stepId: 'synthesis',
               },
               {
                 name: 'Floorplan',
@@ -42,7 +42,12 @@ const state = vi.hoisted(() => ({
                 state: 'not-started' as const,
                 stepId: 'fixFanout',
               },
-              { name: 'place', order: 3, state: 'not-started' as const, stepId: 'place' },
+              {
+                name: 'placement',
+                order: 3,
+                state: 'not-started' as const,
+                stepId: 'placement',
+              },
             ],
           },
         },
@@ -113,7 +118,7 @@ describe('useBackendFlowStages runtime projection', () => {
     ).toEqual([expect.objectContaining({ label: 'Synthesis' })])
 
     state.backendRuntimeEvents!.value.push(
-      runtimeEvent('step.started', { state: 'Ongoing', step: 'place' }),
+      runtimeEvent('step.started', { state: 'Ongoing', step: 'placement' }),
     )
 
     expect(
@@ -125,8 +130,8 @@ describe('useBackendFlowStages runtime projection', () => {
     const flow = useBackendFlowStages()
     flow.setFirstRunStepOngoing()
     state.backendRuntimeEvents!.value.push(
-      runtimeEvent('step.started', { state: 'running', step: 'Synthesis' }),
-      runtimeEvent('operation.failed', { step: 'Synthesis' }),
+      runtimeEvent('step.started', { state: 'running', step: 'synthesis' }),
+      runtimeEvent('operation.failed', { step: 'synthesis' }),
     )
 
     expect(flow.dynamicFlowStages.value[0]).toMatchObject({
@@ -140,8 +145,8 @@ describe('useBackendFlowStages runtime projection', () => {
     const flow = useBackendFlowStages()
     flow.setFirstRunStepOngoing()
     state.backendRuntimeEvents!.value.push(
-      runtimeEvent('step.started', { state: 'running', step: 'Synthesis' }),
-      runtimeEvent('operation.failed', { step: 'Synthesis' }),
+      runtimeEvent('step.started', { state: 'running', step: 'synthesis' }),
+      runtimeEvent('operation.failed', { step: 'synthesis' }),
     )
     expect(flow.hasOngoingRunStage.value).toBe(false)
 
@@ -162,24 +167,31 @@ describe('useBackendFlowStages runtime projection', () => {
     state.operation = {
       cancelRequested: false,
       createdAt: 1,
-      currentStep: 'place',
+      currentStep: 'placement',
       currentTool: 'openroad',
       error: null,
       flow: {
         steps: [
           {
-            name: 'Synthesis',
+            name: 'synthesis',
             peakMemory: 68.3,
             runtime: '0:0:19',
             state: 'Success',
             tool: 'yosys',
           },
           {
-            name: 'place',
+            name: 'placement',
             peakMemory: 0,
             runtime: '',
             state: 'Ongoing',
             tool: 'openroad',
+          },
+          {
+            name: 'drc',
+            peakMemory: 0,
+            runtime: '',
+            state: 'Ongoing',
+            tool: 'ecc',
           },
         ],
       },
@@ -189,7 +201,7 @@ describe('useBackendFlowStages runtime projection', () => {
       rerun: false,
       result: null,
       state: 'running',
-      step: 'place',
+      step: 'placement',
       updatedAt: 2,
       workspaceDirectory: '/project/ws-a',
       workspaceHandle: 'handle-a',
@@ -201,7 +213,10 @@ describe('useBackendFlowStages runtime projection', () => {
 
     expect(
       flow.dynamicFlowStages.value.filter((step) => step.state === 'Ongoing'),
-    ).toEqual([expect.objectContaining({ label: 'Place', tool: 'openroad' })])
+    ).toEqual([
+      expect.objectContaining({ label: 'Place', tool: 'openroad' }),
+      expect.objectContaining({ label: 'DRC', tool: 'ecc' }),
+    ])
     expect(flow.dynamicFlowStages.value[0]).toMatchObject({
       label: 'Synthesis',
       'peak memory (mb)': 68.3,
@@ -213,22 +228,22 @@ describe('useBackendFlowStages runtime projection', () => {
   it('keeps the three ECC Floorplan stages as separate sidebar entries', () => {
     state.session.projection.data.flow.data.steps = [
       {
-        name: 'preFloorplan',
+        name: 'pre_floorplan',
         order: 2,
         state: 'not-started',
-        stepId: 'preFloorplan',
+        stepId: 'pre_floorplan',
       },
       {
-        name: 'macroPlacement',
+        name: 'macro_placement',
         order: 3,
         state: 'not-started',
-        stepId: 'macroPlacement',
+        stepId: 'macro_placement',
       },
       {
-        name: 'postFloorplan',
+        name: 'post_floorplan',
         order: 4,
         state: 'not-started',
-        stepId: 'postFloorplan',
+        stepId: 'post_floorplan',
       },
     ]
 
@@ -237,9 +252,9 @@ describe('useBackendFlowStages runtime projection', () => {
     expect(
       flow.dynamicFlowStages.value.map((stage) => [stage.path, stage.label]),
     ).toEqual([
-      ['preFloorplan', 'Pre Floorplan'],
-      ['macroPlacement', 'Macro Placement'],
-      ['postFloorplan', 'Post Floorplan'],
+      ['pre_floorplan', 'Pre Floorplan'],
+      ['macro_placement', 'Macro Placement'],
+      ['post_floorplan', 'Post Floorplan'],
     ])
   })
 })

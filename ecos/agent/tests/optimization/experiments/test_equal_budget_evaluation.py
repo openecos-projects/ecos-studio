@@ -392,8 +392,8 @@ def _terminal_observation() -> TerminalObservation:
     ]
     for metric_id, value, unit in (
         ("sta_standard_cell_area", 12.0, "um^2"),
-        ("sta_typical_dynamic_power", 2.5, "uW"),
-        ("sta_typical_leakage_power", 0.4, "uW"),
+        ("power_analysis_dynamic_uw", 2.5, "uW"),
+        ("power_analysis_leakage_uw", 0.4, "uW"),
         ("sta_frequency", 100.0, "MHz"),
     ):
         evaluation.append(

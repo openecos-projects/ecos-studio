@@ -1,7 +1,7 @@
 import type { EccRuntimeOperation } from '@ecos-studio/shared'
 import type { PersistedFlow } from './persistedState'
 
-const ADVISORY_STEPS = new Set(['antennaCheck', 'emir'])
+const ADVISORY_STEPS = new Set(['antenna_check', 'emir'])
 
 export interface BlockedFlowStep {
   failedItems: string[]
@@ -11,13 +11,23 @@ export interface BlockedFlowStep {
 export function terminalState(
   flow: PersistedFlow,
   cancelled: boolean,
+  selectedStep?: string,
 ): EccRuntimeOperation['state'] {
   if (cancelled) return 'cancelled'
+  if (selectedStep) {
+    const step = flow.steps.find(({ name }) => name === selectedStep)
+    if (step?.state === 'Success' || step?.state === 'Skipped') return 'succeeded'
+    if (
+      step?.checklistBlocked ||
+      step?.state === 'Incomplete' ||
+      step?.state === 'Invalid'
+    )
+      return 'failed'
+    return 'interrupted'
+  }
   // Advisory execution failures remain in the ledger; they do not fail the flow.
   const states = flow.steps.map((step) =>
-    ADVISORY_STEPS.has(step.name) && ['Incomplete', 'Imcomplete'].includes(step.state)
-      ? 'Success'
-      : step.state,
+    ADVISORY_STEPS.has(step.name) && step.state === 'Incomplete' ? 'Success' : step.state,
   )
   if (states.some((state) => ['Failed', 'Error'].includes(state))) return 'failed'
   if (

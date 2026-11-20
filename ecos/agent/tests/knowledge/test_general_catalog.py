@@ -204,17 +204,17 @@ def test_wirelength_bindings_expose_only_the_authorized_place_knobs() -> None:
         {
             "direction": "increase",
             "knob_id": "place.target_density",
-            "step": "place",
+            "step": "placement",
         },
         {
             "direction": "decrease",
             "knob_id": "place.cell_padding_x",
-            "step": "place",
+            "step": "placement",
         },
         {
             "direction": "set_false",
             "knob_id": "place.routability_opt",
-            "step": "place",
+            "step": "placement",
         },
     ]
     for intent in wirelength_intents - {"reduce_excessive_place_spreading"}:

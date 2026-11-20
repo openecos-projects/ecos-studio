@@ -371,7 +371,6 @@ describe('ProjectAnalysisPanel workspace comparison', () => {
         bestWorkspaceId: 'ws_b',
         bestReason: '',
         riskLabels: [],
-        parameterDiffs: [],
         metricDiffs: [],
       },
       dashboardSummary: dashboardSummaryFixture({ workspaceCount: workspaceIds.length }),

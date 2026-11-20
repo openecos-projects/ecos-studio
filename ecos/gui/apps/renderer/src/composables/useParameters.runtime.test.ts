@@ -121,7 +121,6 @@ function parametersJson(overrides: Record<string, unknown> = {}): string {
     'Max fanout': 20,
     'Target density': 0.3,
     'Target overflow': 0.1,
-    'Global right padding': 0,
     'Cell padding x': 600,
     'Routability opt flag': 1,
     Clock: 'clk',
@@ -354,7 +353,12 @@ describe('useParameters desktop bridge integration', () => {
     currentProject.value = { path: '/workspace/demo', designTool: 'backend' }
     workspaceSession.value = { workspaceId: 'workspace-demo' }
     getWorkspaceRuntimeSnapshotApi.mockResolvedValue({
-      parameters: workspaceSnapshotParameters(),
+      parameters: workspaceSnapshotParameters({
+        step_params: {
+          placement: { 'place.stop_overflow': 0.15 },
+          diff_opt: { 'place.stop_overflow': 0.33 },
+        },
+      }),
     })
     const lifecycle = useWorkspaceLifecycle()
     lifecycle.activateSession(lifecycle.currentSessionId.value, {
@@ -365,7 +369,9 @@ describe('useParameters desktop bridge integration', () => {
     const parameters = useParameters()
     await vi.waitFor(() => expect(parameters.config.design).toBe('demo'))
 
+    expect(parameters.config.targetOverflow).toBe(0.15)
     parameters.config.frequencyMax = 250
+    parameters.config.targetOverflow = 0.12
     await expect(parameters.saveParameters()).resolves.toBe(true)
 
     expect(executeProductCommand).toHaveBeenCalledWith({
@@ -374,7 +380,10 @@ describe('useParameters desktop bridge integration', () => {
         commandId: expect.any(String),
         configuration: {
           design: {},
-          parameters: { 'design.frequency_mhz': 250 },
+          parameters: {
+            'design.frequency_mhz': 250,
+            'placement:place.stop_overflow': 0.12,
+          },
           pdk: {},
         },
         expectedWorkspaceRevision: 1,
@@ -405,7 +414,6 @@ describe('useParameters desktop bridge integration', () => {
           'Max fanout': 20,
           'Target density': 0.3,
           'Target overflow': 0.1,
-          'Global right padding': 0,
           'Cell padding x': 600,
           'Routability opt flag': 1,
           Clock: 'clk',
@@ -432,7 +440,6 @@ describe('useParameters desktop bridge integration', () => {
           'Max fanout': 20,
           'Target density': 0.3,
           'Target overflow': 0.1,
-          'Global right padding': 0,
           'Cell padding x': 600,
           'Routability opt flag': 1,
           Clock: 'clk',
@@ -497,7 +504,6 @@ describe('useParameters desktop bridge integration', () => {
           'Max fanout': 20,
           'Target density': 0.3,
           'Target overflow': 0.1,
-          'Global right padding': 0,
           'Cell padding x': 600,
           'Routability opt flag': 1,
           Clock: 'clk',
@@ -524,7 +530,6 @@ describe('useParameters desktop bridge integration', () => {
           'Max fanout': 20,
           'Target density': 0.3,
           'Target overflow': 0.1,
-          'Global right padding': 0,
           'Cell padding x': 600,
           'Routability opt flag': 1,
           Clock: 'clk',
@@ -809,7 +814,6 @@ describe('useParameters desktop bridge integration', () => {
         'Max fanout': 20,
         'Target density': 0.3,
         'Target overflow': 0.1,
-        'Global right padding': 0,
         'Cell padding x': 600,
         'Routability opt flag': 1,
         Clock: 'clk',
@@ -861,7 +865,6 @@ describe('useParameters desktop bridge integration', () => {
         'Max fanout': 20,
         'Target density': 0.3,
         'Target overflow': 0.1,
-        'Global right padding': 0,
         'Cell padding x': 600,
         'Routability opt flag': 1,
         Clock: 'clk',
@@ -910,7 +913,6 @@ describe('useParameters desktop bridge integration', () => {
         'Max fanout': 20,
         'Target density': 0.3,
         'Target overflow': 0.1,
-        'Global right padding': 0,
         'Cell padding x': 600,
         'Routability opt flag': 1,
         Clock: 'clk',
@@ -964,7 +966,6 @@ describe('useParameters desktop bridge integration', () => {
         'Max fanout': 20,
         'Target density': 0.3,
         'Target overflow': 0.1,
-        'Global right padding': 0,
         'Cell padding x': 600,
         'Routability opt flag': 1,
         Clock: 'clk',
@@ -1055,7 +1056,6 @@ describe('useParameters desktop bridge integration', () => {
         'Max fanout': 20,
         'Target density': 0.3,
         'Target overflow': 0.1,
-        'Global right padding': 0,
         'Cell padding x': 600,
         'Routability opt flag': 1,
         Clock: 'clk',
@@ -1109,7 +1109,6 @@ describe('useParameters desktop bridge integration', () => {
         'Max fanout': 20,
         'Target density': 0.3,
         'Target overflow': 0.1,
-        'Global right padding': 0,
         'Cell padding x': 600,
         'Routability opt flag': 1,
         Clock: 'clk',
@@ -1184,7 +1183,6 @@ describe('useParameters desktop bridge integration', () => {
         'Max fanout': 20,
         'Target density': 0.3,
         'Target overflow': 0.1,
-        'Global right padding': 0,
         'Cell padding x': 600,
         'Routability opt flag': 1,
         Clock: 'clk',
@@ -1251,7 +1249,6 @@ describe('useParameters desktop bridge integration', () => {
           'Max fanout': 20,
           'Target density': 0.3,
           'Target overflow': 0.1,
-          'Global right padding': 0,
           'Cell padding x': 600,
           'Routability opt flag': 1,
           Clock: 'clk',
@@ -1278,7 +1275,6 @@ describe('useParameters desktop bridge integration', () => {
           'Max fanout': 24,
           'Target density': 0.4,
           'Target overflow': 0.1,
-          'Global right padding': 0,
           'Cell padding x': 600,
           'Routability opt flag': 1,
           Clock: 'clk',
@@ -1363,7 +1359,6 @@ describe('useParameters desktop bridge integration', () => {
         'Max fanout': 20,
         'Target density': 0.3,
         'Target overflow': 0.1,
-        'Global right padding': 0,
         'Cell padding x': 600,
         'Routability opt flag': 1,
         Clock: 'clk',
@@ -1451,7 +1446,6 @@ describe('useParameters desktop bridge integration', () => {
         'Max fanout': 20,
         'Target density': 0.3,
         'Target overflow': 0.1,
-        'Global right padding': 0,
         'Cell padding x': 600,
         'Routability opt flag': 1,
         Clock: 'clk',
@@ -1532,7 +1526,6 @@ describe('useParameters desktop bridge integration', () => {
         'Max fanout': 20,
         'Target density': 0.3,
         'Target overflow': 0.1,
-        'Global right padding': 0,
         'Cell padding x': 600,
         'Routability opt flag': 1,
         Clock: 'clk',
@@ -1605,7 +1598,6 @@ describe('useParameters desktop bridge integration', () => {
         'Max fanout': 20,
         'Target density': 0.3,
         'Target overflow': 0.1,
-        'Global right padding': 0,
         'Cell padding x': 600,
         'Routability opt flag': 1,
         Clock: 'clk',
@@ -1673,7 +1665,6 @@ describe('useParameters desktop bridge integration', () => {
           'Max fanout': 20,
           'Target density': 0.3,
           'Target overflow': 0.1,
-          'Global right padding': 0,
           'Cell padding x': 600,
           'Routability opt flag': 1,
           Clock: 'clk',
@@ -1725,7 +1716,6 @@ describe('useParameters desktop bridge integration', () => {
         'Max fanout': 20,
         'Target density': 0.3,
         'Target overflow': 0.1,
-        'Global right padding': 0,
         'Cell padding x': 600,
         'Routability opt flag': 1,
         Clock: 'clk',
@@ -1761,7 +1751,6 @@ describe('useParameters desktop bridge integration', () => {
           'Max fanout': 20,
           'Target density': 0.3,
           'Target overflow': 0.1,
-          'Global right padding': 0,
           'Cell padding x': 600,
           'Routability opt flag': 1,
           Clock: 'clk',
@@ -1788,7 +1777,6 @@ describe('useParameters desktop bridge integration', () => {
           'Max fanout': 24,
           'Target density': 0.4,
           'Target overflow': 0.1,
-          'Global right padding': 0,
           'Cell padding x': 600,
           'Routability opt flag': 1,
           Clock: 'clk2',
@@ -1861,7 +1849,6 @@ describe('useParameters desktop bridge integration', () => {
         'Max fanout': 20,
         'Target density': 0.3,
         'Target overflow': 0.1,
-        'Global right padding': 0,
         'Cell padding x': 600,
         'Routability opt flag': 1,
         Clock: 'clk',
@@ -1943,7 +1930,6 @@ describe('useParameters desktop bridge integration', () => {
         'Max fanout': 20,
         'Target density': 0.3,
         'Target overflow': 0.1,
-        'Global right padding': 0,
         'Cell padding x': 600,
         'Routability opt flag': 1,
         Clock: 'clk',

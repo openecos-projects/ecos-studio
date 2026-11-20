@@ -163,7 +163,7 @@ STAGES = (
         "The ECC runner loads the design and invokes the iRT pipeline through `run_routing`; timing-driven routing is self-contained in iRT, which builds its own timing engine from the shared database configuration, so the runner performs no Python-side STA initialization around routing. It saves the resulting design and geometry snapshot, then runs analysis and checklist generation. The wrapper marks the routing subflow successful without inspecting the native routing return value.",
         "The step cannot execute without an ECC database instance. iRT initialization, pin access, planar/layer/track/detailed routing, or violation reporting can fail while the wrapper still records progress; timing awareness is decided inside iRT from its own configuration, so timing data must not be assumed from route completion alone.",
         "ECC collects database net wirelength and via counts plus route feature facts; the GUI exposes detailed-route patch, via, violation, wirelength, demand, and overflow records when available.",
-        "ecc/chipcompiler/tools/ecc/configs/route_ecc.json",
+        "ecc/chipcompiler/tools/ecc/configs/routing_ecc.json",
     ),
     Stage(
         "drc",

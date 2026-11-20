@@ -7,15 +7,23 @@ function step(
   state: string,
   checklist?: Pick<PersistedFlowStep, 'checklistBlocked' | 'checklistFailedItems'>,
 ): PersistedFlowStep {
-  return { name, state, peakMemory: 0, runtime: '', tool: 'ecc', ...checklist }
+  return {
+    name,
+    directory: `01_${name}_ecc`,
+    state,
+    peakMemory: 0,
+    runtime: '',
+    tool: 'ecc',
+    ...checklist,
+  }
 }
 
 describe('ECC operation outcome', () => {
-  it.each(['antennaCheck', 'emir'])(
+  it.each(['antenna_check', 'emir'])(
     'completes the flow after an incomplete %s without changing its execution state',
     (name) => {
       const flow: PersistedFlow = {
-        steps: [step(name, 'Incomplete'), step('Harden', 'Success')],
+        steps: [step(name, 'Incomplete'), step('harden', 'Success')],
       }
       expect(terminalState(flow, false)).toBe('succeeded')
       expect(flow.steps[0]?.state).toBe('Incomplete')
@@ -64,6 +72,8 @@ describe('ECC operation outcome', () => {
       failedItems: ['prerequisite:sta'],
       step: 'Harden',
     })
+    expect(terminalState(flow, false, 'Harden')).toBe('failed')
+    expect(terminalState(flow, false, 'sta')).toBe('succeeded')
   })
   it('reports the manual macro placement gate blocking an interrupted flow', () => {
     const flow: PersistedFlow = {

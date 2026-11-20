@@ -300,7 +300,7 @@ class ProviderWorkspaceRerunMixin:
                 session,
                 "message",
                 rerun_no_parameters_prompt(
-                    session.language, catalog_end_step().value
+                    session.language, session.rerun_discovery.source.end_step if session.rerun_discovery else catalog_end_step().value
                 ),
             )
             self._emit_phase_choice(session)
@@ -379,7 +379,7 @@ class ProviderWorkspaceRerunMixin:
         self._emit(
             session,
             "message",
-            rerun_scope_prompt(session.language, catalog_end_step().value),
+            rerun_scope_prompt(session.language, session.rerun_discovery.source.end_step if session.rerun_discovery else catalog_end_step().value),
         )
         self._emit_phase_choice(session)
 
@@ -391,7 +391,7 @@ class ProviderWorkspaceRerunMixin:
             self._emit(
                 session,
                 "message",
-                rerun_scope_prompt(session.language, catalog_end_step().value),
+                rerun_scope_prompt(session.language, session.rerun_discovery.source.end_step if session.rerun_discovery else catalog_end_step().value),
             )
             self._emit_phase_choice(session)
             return

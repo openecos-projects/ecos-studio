@@ -151,10 +151,10 @@ def test_acceptance_rejects_unavailable_or_tampered_materialization_files(
     paths = write_candidate(workspace)
     candidate_root = paths["manifest"].parents[1]
     if mutation == "missing_config":
-        (candidate_root / "config/dreamplace_ecc.json").unlink()
+        (candidate_root / "home/params.toml").unlink()
     else:
         write_json(
-            candidate_root / "analysis/snapshots/dreamplace_ecc.after.json",
+            candidate_root / "analysis/snapshots/parameters.after.json",
             {"target_density": 0.7},
         )
     observation = terminal()

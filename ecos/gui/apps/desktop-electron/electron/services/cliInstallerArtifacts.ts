@@ -20,6 +20,7 @@ export interface CliBundleInstallRecord {
   sha256: string
   source: CliManagedInstallSource
   installedAt: string
+  checkedWorkspaceFork?: boolean
   selfCheck: CliInstallSelfCheck
 }
 
@@ -166,6 +167,7 @@ export function parseInstallRecord(raw: unknown): CliBundleInstallRecord | null 
     return null
   }
   return {
+    ...(record.checkedWorkspaceFork === true ? { checkedWorkspaceFork: true } : {}),
     version: record.version,
     sha256: record.sha256,
     source: record.source,

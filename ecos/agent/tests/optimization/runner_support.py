@@ -293,7 +293,7 @@ def _native_receipt(
         "receipt_id": f"parameter-receipt-{knob_id.replace('.', '-')}-{value}",
         "tool": card.tool,
         "context": {
-            "stage": "place",
+            "stage": "placement",
             "parameter_card_sha256": card_hash(
                 load_parameter_cards()[OptimizationKnob(knob_id)]
             ),
@@ -379,7 +379,7 @@ def _proposal(
 def _observation(budget: BudgetSnapshot) -> StageObservation:
     return StageObservation(
         observation_id=f"observation-{budget.consumed_candidates + 1}",
-        stage="place",
+        stage="placement",
         evidence_manifest_sha256=_HASH,
         metrics={"place_lutrudy_utilization_max": 0.88},
         budget=budget,
@@ -416,7 +416,7 @@ def _retrieval(
 def _terminal_observation(
     observation: StageObservation, receipt: CandidateExecutionReceipt
 ) -> TerminalObservation:
-    assert observation.stage == "place"
+    assert observation.stage == "placement"
     eligibility = tuple(
         TerminalEvaluationMetric(
             metric_id=metric_id,

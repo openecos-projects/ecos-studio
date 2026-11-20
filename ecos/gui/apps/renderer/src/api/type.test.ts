@@ -13,28 +13,28 @@ import {
 describe('sameFlowStepName', () => {
   it('treats Sizer display labels as the Timing optimization flow step', () => {
     expect(getStepMetadata('Sizer')?.path).toBe(StepEnum.TIMING_OPT)
-    expect(sameFlowStepName('Sizer', 'Timing optimization')).toBe(true)
+    expect(sameFlowStepName('Sizer', 'timing_optimization')).toBe(true)
     expect(sameFlowStepName('timing optimization', StepEnum.TIMING_OPT)).toBe(true)
-    expect(sameFlowStepName('Sizer', 'CTS')).toBe(false)
+    expect(sameFlowStepName('Sizer', 'cts')).toBe(false)
   })
 
   it('treats LEC display labels as their flow steps without cross-matching', () => {
     expect(getStepMetadata('Post-Route LEC')?.path).toBe(StepEnum.POST_ROUTE_LEC)
     expect(getStepMetadata('LEC')?.path).toBe(StepEnum.LEC)
-    expect(sameFlowStepName('Post-Route LEC', 'postRouteLec')).toBe(true)
+    expect(sameFlowStepName('Post-Route LEC', 'post_route_lec')).toBe(true)
     expect(sameFlowStepName('LEC', StepEnum.LEC)).toBe(true)
     expect(sameFlowStepName('Post-Route LEC', 'lec')).toBe(false)
     expect(sameFlowStepName('LEC', StepEnum.POST_ROUTE_LEC)).toBe(false)
   })
 
   it('treats catalog applies names as the same flow step as workspace paths', () => {
-    expect(sameFlowStepName('placement', 'place')).toBe(true)
-    expect(sameFlowStepName('routing', 'route')).toBe(true)
-    expect(sameFlowStepName('synthesis', 'Synthesis')).toBe(true)
+    expect(sameFlowStepName('placement', 'placement')).toBe(true)
+    expect(sameFlowStepName('routing', 'routing')).toBe(true)
+    expect(sameFlowStepName('synthesis', 'synthesis')).toBe(true)
     expect(sameFlowStepName('floorplan', 'Floorplan')).toBe(true)
-    expect(sameFlowStepName('floorplan', 'preFloorplan')).toBe(false)
-    expect(sameFlowStepName('all', 'Synthesis')).toBe(false)
-    expect(sameFlowStepName('pdk', 'place')).toBe(false)
+    expect(sameFlowStepName('floorplan', 'pre_floorplan')).toBe(false)
+    expect(sameFlowStepName('all', 'synthesis')).toBe(false)
+    expect(sameFlowStepName('pdk', 'placement')).toBe(false)
   })
 
   it('maps the shared floorplan catalog onto the persisted preFloorplan step', () => {
@@ -47,15 +47,15 @@ describe('sameFlowStepName', () => {
   })
 
   it('keeps the staged Floorplan labels distinct while preserving their canonical paths', () => {
-    expect(getStepMetadata('preFloorplan')).toMatchObject({
+    expect(getStepMetadata('pre_floorplan')).toMatchObject({
       label: 'Pre Floorplan',
       path: StepEnum.PRE_FLOORPLAN,
     })
-    expect(getStepMetadata('macroPlacement')).toMatchObject({
+    expect(getStepMetadata('macro_placement')).toMatchObject({
       label: 'Macro Placement',
       path: StepEnum.MACRO_PLACEMENT,
     })
-    expect(getStepMetadata('postFloorplan')).toMatchObject({
+    expect(getStepMetadata('post_floorplan')).toMatchObject({
       label: 'Post Floorplan',
       path: StepEnum.POST_FLOORPLAN,
     })
@@ -71,8 +71,8 @@ describe('sameFlowStepName', () => {
 
 describe('formatStepToolName', () => {
   it('labels the Yosys LEC tool and falls back to the raw tool name', () => {
-    expect(formatStepToolName('yosys_lec')).toBe('Yosys LEC')
-    expect(formatStepToolName('YOSYS_LEC')).toBe('Yosys LEC')
+    expect(formatStepToolName('kepler_formal')).toBe('Kepler Formal')
+    expect(formatStepToolName('KEPLER_FORMAL')).toBe('Kepler Formal')
     expect(formatStepToolName('unknown_tool')).toBe('unknown_tool')
     expect(formatStepToolName('')).toBe('')
   })
@@ -108,6 +108,8 @@ describe('step metadata ↔ flow step registry consistency', () => {
   })
 
   it('derives flow-start-disabled steps from the registry', () => {
-    expect([...FLOW_START_DISABLED_STEPS].sort()).toEqual(['lec', 'postRouteLec'].sort())
+    expect([...FLOW_START_DISABLED_STEPS].sort()).toEqual(
+      ['lec@synthesis', 'post_route_lec'].sort(),
+    )
   })
 })

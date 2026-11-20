@@ -107,17 +107,23 @@ describe('useDesignReportExport', () => {
         artifacts: [],
         cause: 'workspace.created',
         checklist: { items: [] },
-        flow: { steps: [] },
+        flow: {
+          steps: [
+            { name: 'sta', directory: '19_sta_ecc', state: 'Success', tool: 'ecc' },
+          ],
+        },
         hotspotPreview: { hotspotCount: 0, hotspots: [], hotspotsTruncated: false },
         metrics: [],
         parameters: {},
-        schemaVersion: 6,
+        schemaVersion: 7,
         signoffAssessment: { groups: [], risks: [], status: 'ready' },
         timingPreview: { issueCount: 0, issues: [], issuesTruncated: false },
         workspaceId: 'workspace-1',
         workspaceRevision: 1,
       },
-      flow: { steps: [] },
+      flow: {
+        steps: [{ name: 'sta', directory: '19_sta_ecc', state: 'Success', tool: 'ecc' }],
+      },
       parameters: { Design: 'gcd', PDK: 'ic55' },
     })
     mockRequestProjectPathAccess.mockImplementation(async (p: string) => p)
@@ -155,7 +161,7 @@ describe('useDesignReportExport', () => {
     })
     expect(mockReadFlow).not.toHaveBeenCalled()
     expect(mockReadParameters).not.toHaveBeenCalled()
-    // v6 snapshots carry no inlined analysis payloads; backend workspaces scan
+    // Snapshots carry no inlined step reports; backend workspaces scan
     // the same bounded artifact paths inside the workspace instead.
     expect(mockRequestProjectPathAccess).toHaveBeenCalled()
     const requestedPaths = mockRequestProjectPathAccess.mock.calls.map(
@@ -175,10 +181,12 @@ describe('useDesignReportExport', () => {
     }
     mockReadOptionalProjectTextFile.mockImplementation(async (path: string) => {
       if (path.endsWith('/home/flow.json')) {
-        return JSON.stringify({ steps: [{ name: 'Synthesis', state: 'Success' }] })
-      }
-      if (path.endsWith('/home/parameters.json')) {
-        return JSON.stringify({ Design: 'gcd', CLOCK_PERIOD: 10 })
+        return JSON.stringify({
+          schema_version: 3,
+          steps: [
+            { name: 'synthesis', directory: '01_synthesis_yosys', state: 'Success' },
+          ],
+        })
       }
       return null
     })
@@ -194,6 +202,7 @@ describe('useDesignReportExport', () => {
 
     expect(composable.error.value).toBe('')
     expect(composable.reportData.value?.design.designName).toBe('gcd_run')
+    expect(mockReadParameters).toHaveBeenCalled()
     expect(mockRuntimeSnapshot).not.toHaveBeenCalled()
     expect(mockReadOptionalProjectTextFile).toHaveBeenCalledWith(
       '/projects/gcd/ws_001/home/flow.json',
@@ -209,7 +218,12 @@ describe('useDesignReportExport', () => {
     mockRuntimeSnapshot.mockRejectedValue(new Error('runtime unavailable'))
     mockReadOptionalProjectTextFile.mockImplementation(async (path: string) => {
       if (path.endsWith('/home/flow.json')) {
-        return JSON.stringify({ steps: [{ name: 'Synthesis', state: 'Success' }] })
+        return JSON.stringify({
+          schema_version: 3,
+          steps: [
+            { name: 'synthesis', directory: '01_synthesis_yosys', state: 'Success' },
+          ],
+        })
       }
       return null
     })
@@ -297,9 +311,13 @@ describe('useDesignReportExport', () => {
     currentProject.value = {
       path: workspacePath,
       name: 'gcd_run',
-      designTool: 'frontend',
+      designTool: 'backend',
     }
-    const composable = useDesignReportExport({ currentProject, showToast })
+    const composable = useDesignReportExport({
+      currentProject,
+      showToast,
+      workspaceSession: ref({ state: 'active', workspaceId: 'workspace-1' }),
+    })
 
     composable.openDesignReportExport()
     await vi.waitFor(() => expect(composable.loading.value).toBe(false))
@@ -308,7 +326,7 @@ describe('useDesignReportExport', () => {
       ([path]) => path as string,
     )
     expect(requestedPaths).toContain(
-      `${workspacePath}/sta_ecc/analysis/sta_timing_issues.json`,
+      `${workspacePath}/19_sta_ecc/analysis/sta_timing_issues.json`,
     )
     expect(requestedPaths.every((path) => path.startsWith(`${workspacePath}/`))).toBe(
       true,

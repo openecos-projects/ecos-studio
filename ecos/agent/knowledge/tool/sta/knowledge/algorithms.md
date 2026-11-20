@@ -32,7 +32,7 @@
 
 **Input and state:** The graph's topological timing order, arcs, cell delays, net parasitics, and clock state define propagation.
 
-**Algorithm:** `TimingPropagator` traverses timing order, propagating slew, delay, arrival, and path state while skipping disabled arcs and sequential clock sinks. Clock propagation establishes timing references before data propagation.
+**Algorithm:** Data propagation traverses timing order, propagating slew, delay, arrival, and path state while skipping disabled arcs and sequential clock sinks. Clock propagation establishes timing references before data propagation.
 
 **Stop and output:** The finite graph order determines completion; propagated state becomes the input to required-time and violation analysis.
 

@@ -39,9 +39,10 @@ GENERAL_KNOWLEDGE_METRICS = tuple(GENERAL_SOURCE_PATHS)
 _ALLOWED_STAGES = {stage.slug for stage in STAGES}
 # ECC sub-step name (casefolded) -> knowledge phase slug covering it.
 _KNOWLEDGE_PHASE = {
-    "prefloorplan": "floorplan",
-    "macroplacement": "floorplan",
-    "postfloorplan": "floorplan",
+    "placement": "place",
+    "pre_floorplan": "floorplan",
+    "macro_placement": "floorplan",
+    "post_floorplan": "floorplan",
 }
 _CONTRACT_DIRECTION = {
     "increase": "increase",

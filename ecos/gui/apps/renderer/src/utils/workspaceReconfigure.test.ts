@@ -14,11 +14,6 @@ describe('workspaceReconfigureInitialConfig', () => {
               { inputId: 'rtl-main', role: 'rtl' },
               { inputId: 'constraints', role: 'sdc' },
             ],
-            parameters: {
-              'design.frequency_mhz': 250,
-              'floorplan.core_margin': [3, 4],
-              'macro.manual_placement': true,
-            },
             pdk: {
               familyId: 'ics55',
               mode: 'manual',
@@ -64,7 +59,11 @@ describe('workspaceReconfigureInitialConfig', () => {
         },
         lastEventId: 'event-1',
         operations: [],
-        parameters: {},
+        parameters: {
+          'design.frequency_mhz': 250,
+          'floorplan.core_margin': [3, 4],
+          'macro.manual_placement': true,
+        },
         workspaceHandle: 'workspace-1',
       },
       '/ws',

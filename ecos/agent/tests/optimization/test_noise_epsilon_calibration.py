@@ -39,7 +39,7 @@ def _write_artifact(workspace: Path, epsilon: dict[str, float]) -> None:
 
 
 def test_load_trend_noise_epsilon_reads_workspace_artifact(tmp_path: Path) -> None:
-    corner_key = "sta_worst_leakage_power@N551P6M_tt_025"
+    corner_key = "sta_setup_wns@N551P6M_tt_025"
     _write_artifact(tmp_path, {"route_wirelength": 1.5, corner_key: 0.2})
 
     assert _load_trend_noise_epsilon(tmp_path) == {

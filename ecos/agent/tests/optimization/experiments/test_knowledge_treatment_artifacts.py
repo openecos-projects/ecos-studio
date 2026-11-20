@@ -326,7 +326,9 @@ root = "{pdk}"
 """.strip(),
         encoding="utf-8",
     )
-    (workspace / "config/dreamplace_ecc.json").write_text(
+    (workspace / "home/flow.json").write_text(json.dumps({"steps": [{"name": "placement", "directory": "06_placement_dreamplace"}]}))
+    (workspace / "06_placement_dreamplace/config").mkdir(parents=True)
+    (workspace / "06_placement_dreamplace/config/dreamplace_ecc.json").write_text(
         json.dumps(
             {
                 "target_density": 0.2,

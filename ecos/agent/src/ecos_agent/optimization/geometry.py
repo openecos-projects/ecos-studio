@@ -18,7 +18,6 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, m
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization.metrics.contracts import safe_relative_ref
 
-_MANIFEST = 'filler_ecc/output/geometry/geometry.manifest'
 _HEADER = struct.Struct('<QIIHHIQQQQ')
 _SHAPE = struct.Struct('<QIHBBH2xIQII4i')
 _OWNER_SIZE = 40
@@ -74,15 +73,16 @@ def _checked_records(stack: ExitStack, path: Path, kind: int, record_size: int):
     return data, count
 
 
-def read_terminal_geometry(workspace_root: Path) -> GeometrySnapshot | None:
+def read_terminal_geometry(workspace_root: Path, directory: str) -> GeometrySnapshot | None:
     """Missing legacy snapshots return None; present unsafe/invalid evidence fails."""
     # Reuse the terminal reader's workspace boundary without creating an import cycle.
     from ecos_agent.optimization.observations import _is_file, _safe_file, _workspace_root
 
     root = _workspace_root(workspace_root)
-    if not _is_file(root, _MANIFEST):
+    manifest_ref = f"{directory}/output/geometry/geometry.manifest"
+    if not _is_file(root, manifest_ref):
         return None
-    manifest_path = _safe_file(root, _MANIFEST)
+    manifest_path = _safe_file(root, manifest_ref)
     if manifest_path.stat().st_size > 65536:
         raise ValueError('geometry manifest is too large')
     entries: dict[str, str] = {}
@@ -96,13 +96,13 @@ def read_terminal_geometry(workspace_root: Path) -> GeometrySnapshot | None:
     for key in ('dbu_per_micron', 'shape_count', 'owner_count'):
         if not re.fullmatch(r'[1-9][0-9]*', entries.get(key, '')):
             raise ValueError('geometry manifest counts or units are invalid')
-    refs = [_MANIFEST]
+    refs = [manifest_ref]
     paths = []
     for key in ('shapes', 'owners'):
         relative = entries.get(key, '')
         if not safe_relative_ref(relative):
             raise ValueError('geometry binary reference is unsafe')
-        ref = f'{Path(_MANIFEST).parent.as_posix()}/{relative}'
+        ref = f'{Path(manifest_ref).parent.as_posix()}/{relative}'
         paths.append(_safe_file(root, ref))
         refs.append(ref)
     bounds = {}

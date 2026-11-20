@@ -16,7 +16,7 @@ def _metric(**updates: object) -> TerminalEvaluationMetric:
         "category": "corner_robustness",
         "role": "report",
         "direction": "higher_is_better",
-        "source_refs": ("sta_ecc/feature/MAX_125/Cworst/qor_summary.json",),
+        "source_refs": ("19_sta_ecc/feature/MAX_125/Cworst/qor_summary.json",),
         "corner": "MAX_125/Cworst",
     }
     return TerminalEvaluationMetric.model_validate({**payload, **updates})

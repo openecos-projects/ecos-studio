@@ -38,17 +38,17 @@ def test_controller_reexports_shared_optimization_contracts() -> None:
 
 
 def test_candidate_execution_contract_is_centralized() -> None:
-    assert CANDIDATE_END_STEP == "Harden"
+    assert CANDIDATE_END_STEP == "harden"
     assert CANDIDATE_EXECUTION_SCOPE == "full_flow"
     assert {
         knob: candidate_target_step(knob)
         for knob in OptimizationKnob
     } == {
-        OptimizationKnob.FLOORPLAN_CORE_UTIL: "Floorplan",
-        OptimizationKnob.FLOORPLAN_ASPECT_RATIO: "Floorplan",
-        OptimizationKnob.TARGET_DENSITY: "place",
-        OptimizationKnob.TARGET_OVERFLOW: "place",
-        OptimizationKnob.CELL_PADDING_X: "place",
-        OptimizationKnob.ROUTABILITY_OPT: "place",
-        OptimizationKnob.DENSITY_WEIGHT: "place",
+        OptimizationKnob.FLOORPLAN_CORE_UTIL: "floorplan",
+        OptimizationKnob.FLOORPLAN_ASPECT_RATIO: "floorplan",
+        OptimizationKnob.TARGET_DENSITY: "placement",
+        OptimizationKnob.TARGET_OVERFLOW: "placement",
+        OptimizationKnob.CELL_PADDING_X: "placement",
+        OptimizationKnob.ROUTABILITY_OPT: "placement",
+        OptimizationKnob.DENSITY_WEIGHT: "placement",
     }

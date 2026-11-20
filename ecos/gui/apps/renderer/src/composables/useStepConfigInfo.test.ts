@@ -37,7 +37,7 @@ import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 
 function available(
   values: Record<string, unknown>,
-  step = 'preFloorplan',
+  step = 'pre_floorplan',
   types: Record<string, string> = {},
 ) {
   return {
@@ -101,7 +101,7 @@ describe('useStepConfigInfo', () => {
     expect(result.workspaceRevision.value).toBe(1)
     expect(result.isEmpty.value).toBe(false)
     expect(testState.readWorkspaceStepConfigurationApi).toHaveBeenCalledWith({
-      step: 'preFloorplan',
+      step: 'pre_floorplan',
       workspaceHandle: 'workspace-demo',
     })
     expect(result.stepConfigParameterDescriptions.value).toEqual({
@@ -114,7 +114,7 @@ describe('useStepConfigInfo', () => {
 
   it('keeps parameter types for numeric editor steps', async () => {
     testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
-      available({ 'floorplan.core_util': 1 }, 'preFloorplan', {
+      available({ 'floorplan.core_util': 1 }, 'pre_floorplan', {
         'floorplan.core_util': 'float',
       }),
     )
@@ -153,7 +153,7 @@ describe('useStepConfigInfo', () => {
 
     await vi.waitFor(() => expect(result.stepConfigDraft.value).not.toBeNull())
     expect(testState.readWorkspaceStepConfigurationApi).toHaveBeenCalledWith({
-      step: 'preFloorplan',
+      step: 'pre_floorplan',
       workspaceHandle: 'workspace-restored',
     })
   })
@@ -177,7 +177,7 @@ describe('useStepConfigInfo', () => {
 
   it('rejects a response for another Flow Step', async () => {
     testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
-      available({ 'cts.max_fanout': 32 }, 'CTS'),
+      available({ 'cts.max_fanout': 32 }, 'cts'),
     )
 
     const result = scope.run(() => useStepConfigInfo())!
@@ -192,7 +192,7 @@ describe('useStepConfigInfo', () => {
     testState.readWorkspaceStepConfigurationApi.mockResolvedValue({
       reason: 'step_configuration_unavailable',
       status: 'missing',
-      step: 'Synthesis',
+      step: 'synthesis',
       workspaceId: 'workspace-demo',
       workspaceRevision: 1,
     })
@@ -225,7 +225,7 @@ describe('useStepConfigInfo', () => {
     testState.readWorkspaceStepConfigurationApi.mockResolvedValue({
       ...available(
         { 'design.frequency_mhz': 200, 'geometry.clock_tree': true },
-        'Synthesis',
+        'synthesis',
       ),
       parameters: [
         {
@@ -280,7 +280,7 @@ describe('useStepConfigInfo', () => {
       commandId: expect.any(String),
       expectedWorkspaceRevision: 1,
       parameters: { 'floorplan.ifp.thread_number': 8 },
-      stepId: 'preFloorplan',
+      stepId: 'pre_floorplan',
       workspaceHandle: 'workspace-demo',
     })
     expect(useWorkspaceLifecycle().session.value.workspaceRevision).toBe(2)
@@ -308,7 +308,7 @@ describe('useStepConfigInfo', () => {
       return {
         ...available(
           { 'cts.skew_bound': 0.08, 'cts.max_fanout': revision === 1 ? 32 : 24 },
-          'CTS',
+          'cts',
         ),
         workspaceRevision: revision,
       }
@@ -324,7 +324,7 @@ describe('useStepConfigInfo', () => {
       commandId: expect.any(String),
       expectedWorkspaceRevision: 1,
       parameters: { 'cts.max_fanout': 24 },
-      stepId: 'CTS',
+      stepId: 'cts',
       workspaceHandle: 'workspace-demo',
     })
     expect(testState.readWorkspaceStepConfigurationApi.mock.calls.length).toBeGreaterThan(
@@ -350,7 +350,7 @@ describe('useStepConfigInfo', () => {
   it('keeps the editor dirty when a Step Parameter update fails', async () => {
     testState.route.path = '/workspace/CTS'
     testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
-      available({ 'cts.skew_bound': 0.08, 'cts.max_fanout': 32 }, 'CTS'),
+      available({ 'cts.skew_bound': 0.08, 'cts.max_fanout': 32 }, 'cts'),
     )
     testState.updateWorkspaceStepConfigurationApi.mockRejectedValue(
       new Error('ECC rejected CTS parameters'),

@@ -651,10 +651,8 @@ def test_optimization_objective_parser_sends_only_bounded_request(
         "sta_setup_tns",
         "sta_hold_wns",
         "sta_hold_tns",
-        "sta_typical_dynamic_power",
-        "sta_typical_leakage_power",
-        "sta_worst_dynamic_power",
-        "sta_worst_leakage_power",
+        "power_analysis_dynamic_uw",
+        "power_analysis_leakage_uw",
         "gui_overall_qor_score",
     } <= set(objective_metrics)
 

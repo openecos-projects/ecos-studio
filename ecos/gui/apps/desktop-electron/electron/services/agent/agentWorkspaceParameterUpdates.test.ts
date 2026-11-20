@@ -25,7 +25,7 @@ const CATALOG_DISCOVERY = {
       range: [0.01, 1],
     },
     {
-      id: 'place.routability_opt',
+      id: 'place.routability_opt_flag',
       knob_id: 'place.routability_opt',
       type: 'boolean',
     },
@@ -53,13 +53,11 @@ describe('Agent Workspace parameter mapping', () => {
   it('reads logical values only from ECC canonical domain projections', () => {
     const values = readAgentWorkspaceParameterValues(
       {
-        parameters: {
-          'design.frequency_mhz': 200,
-          'place.target_density': 0.4,
-          'place.routability_opt': 0,
-          'cts.skew_bound': 0.08,
-          'route.RT.-thread_number': 8,
-        },
+        'design.frequency_mhz': 200,
+        'placement:place.target_density': 0.4,
+        'placement:place.routability_opt_flag': 0,
+        'cts.skew_bound': 0.08,
+        'route.RT.-thread_number': 8,
       },
       {},
     )
@@ -76,14 +74,12 @@ describe('Agent Workspace parameter mapping', () => {
   it('lets Backend Step Options override the workspace-wide knob values', () => {
     const values = readAgentWorkspaceParameterValues(
       {
-        parameters: {
-          'place.target_density': 0.4,
-          'cts.skew_bound': '0.08',
-        },
+        'placement:place.target_density': 0.4,
+        'cts.skew_bound': '0.08',
       },
       {
-        place: { 'place.target_density': 0.55 },
-        CTS: { 'cts.skew_bound': '0.12' },
+        placement: { 'place.target_density': 0.55 },
+        cts: { 'cts.skew_bound': '0.12' },
       },
     )
 
@@ -102,7 +98,7 @@ describe('Agent Workspace parameter mapping', () => {
       ]),
     ).toEqual({
       workspace_parameters: {
-        'place.routability_opt': 0,
+        'placement:place.routability_opt_flag': 0,
         'cts.skew_bound': '0.08',
         'route.RT.-thread_number': '8',
       },
@@ -164,6 +160,42 @@ describe('catalog-driven Agent Workspace knob table', () => {
     })
   })
 
+  it('keeps independent step values when two knobs bind the same parameter', () => {
+    rememberWorkspaceParameterCatalog({
+      parameterCatalog: [
+        {
+          id: 'place.timing_sizing_action',
+          knob_id: 'place.sizing_action',
+          type: 'str',
+          appliesTo: 'placement',
+        },
+        {
+          id: 'place.timing_sizing_action',
+          knob_id: 'diff_opt.sizing_action',
+          type: 'str',
+          appliesTo: 'diff_opt',
+        },
+      ],
+    })
+    const patch = [
+      { knob_id: 'place.sizing_action', value: 'up' },
+      { knob_id: 'diff_opt.sizing_action', value: 'down' },
+    ]
+    expect(deriveAgentWorkspaceParameterUpdates(patch)?.workspace_parameters).toEqual({
+      'placement:place.timing_sizing_action': 'up',
+      'diff_opt:place.timing_sizing_action': 'down',
+    })
+    expect(
+      readAgentWorkspaceParameterValues(
+        {},
+        {
+          placement: { 'place.timing_sizing_action': 'up' },
+          diff_opt: { 'place.timing_sizing_action': 'down' },
+        },
+      ),
+    ).toEqual(Object.fromEntries(patch.map((item) => [item.knob_id, item.value])))
+  })
+
   it('rejects conflicting canonical and legacy values for one parameter', () => {
     rememberWorkspaceParameterCatalog(CATALOG_DISCOVERY)
 
@@ -186,7 +218,7 @@ describe('catalog-driven Agent Workspace knob table', () => {
     ).toEqual({
       workspace_parameters: {
         'floorplan.core_util': 0.7,
-        'place.routability_opt': 1,
+        'placement:place.routability_opt_flag': 1,
       },
       step_configurations: [],
     })
@@ -208,11 +240,9 @@ describe('catalog-driven Agent Workspace knob table', () => {
 
     const values = readAgentWorkspaceParameterValues(
       {
-        parameters: {
-          'design.frequency_mhz': 120,
-          'floorplan.core_util': 0.55,
-          'place.routability_opt': 1,
-        },
+        'design.frequency_mhz': 120,
+        'floorplan.core_util': 0.55,
+        'placement:place.routability_opt_flag': 1,
       },
       {},
     )

@@ -176,7 +176,7 @@ class EccCandidateRerunAdapter:
                     "executionScope": CANDIDATE_EXECUTION_SCOPE,
                 }
             )
-            if params["targetStep"] == "Floorplan":
+            if params["targetStep"] == "floorplan":
                 params["floorplanMode"] = "die_util"
             if parent_candidate_root_ref is not None:
                 params["parentCandidateRootRef"] = parent_candidate_root_ref

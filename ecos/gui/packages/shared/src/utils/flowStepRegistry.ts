@@ -81,7 +81,7 @@ export interface FlowStepDefinition {
 export const flowStepRegistry: readonly FlowStepDefinition[] = [
   {
     id: 'Synth',
-    eccNames: ['Synthesis'],
+    eccNames: ['synthesis'],
     label: 'Synthesis',
     aliases: [],
     metricScopes: ['synthesis'],
@@ -91,7 +91,7 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
   },
   {
     id: 'LEC',
-    eccNames: ['lec'],
+    eccNames: ['lec@synthesis'],
     label: 'LEC',
     aliases: [],
     metricScopes: ['lec'],
@@ -103,12 +103,12 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
   {
     id: 'Floor',
     // One canonical step spans the three persisted floorplan-phase steps.
-    eccNames: ['preFloorplan', 'macroPlacement', 'postFloorplan'],
+    eccNames: ['pre_floorplan', 'macro_placement', 'post_floorplan'],
     label: 'Floorplan',
     aliases: ['macro', 'macroplace'],
-    metricScopes: ['prefloorplan', 'macroplacement', 'postfloorplan', 'floorplan'],
+    metricScopes: ['pre_floorplan', 'macro_placement', 'post_floorplan'],
     metricIdPrefixes: [],
-    qorProducerEccNames: ['postFloorplan', 'preFloorplan', 'macroPlacement'],
+    qorProducerEccNames: ['post_floorplan', 'pre_floorplan', 'macro_placement'],
     qorScored: true,
     // preFloorplan/postFloorplan run on ecc; macroPlacement runs on dreamplace.
     tool: 'ecc',
@@ -116,20 +116,20 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
   },
   {
     id: 'Place',
-    eccNames: ['preplace', 'place', 'diff_sizing'],
+    eccNames: ['preplace', 'placement', 'diff_opt', 'diff_sizing'],
     label: 'Place',
     aliases: ['placement'],
     metricScopes: ['placement'],
     metricIdPrefixes: ['place'],
-    qorProducerEccNames: ['place', 'preplace', 'diff_sizing'],
+    qorProducerEccNames: ['placement', 'preplace', 'diff_sizing'],
     qorScored: true,
     tool: 'dreamplace',
     layout: true,
-    layoutEccNames: ['place'],
+    layoutEccNames: ['placement'],
   },
   {
     id: 'CTS',
-    eccNames: ['CTS'],
+    eccNames: ['cts'],
     label: 'CTS',
     aliases: [],
     metricScopes: ['cts'],
@@ -151,7 +151,7 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
   },
   {
     id: 'Timing Opt',
-    eccNames: ['Timing optimization'],
+    eccNames: ['timing_optimization'],
     label: 'Timing Optimization',
     aliases: [],
     metricScopes: ['timing_optimization'],
@@ -162,7 +162,7 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
   },
   {
     id: 'Route',
-    eccNames: ['route'],
+    eccNames: ['routing'],
     label: 'Route',
     aliases: ['routing'],
     metricScopes: ['final_route'],
@@ -208,10 +208,10 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
   },
   {
     id: 'Antenna Check',
-    eccNames: ['antennaCheck'],
+    eccNames: ['antenna_check'],
     label: 'Antenna Check',
     aliases: ['antenna', 'antenna check'],
-    metricScopes: ['antennacheck'],
+    metricScopes: ['antenna_check'],
     metricIdPrefixes: [],
     tool: 'ecc',
     reportOnly: true,
@@ -219,10 +219,10 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
   },
   {
     id: 'Post-route LEC',
-    eccNames: ['postRouteLec'],
+    eccNames: ['post_route_lec'],
     label: 'Post-route LEC',
     aliases: ['postlec'],
-    metricScopes: ['postroutelec'],
+    metricScopes: ['post_route_lec'],
     metricIdPrefixes: [],
     tool: 'kepler_formal',
     skippable: true,
@@ -232,7 +232,7 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
   },
   {
     id: 'RCX',
-    eccNames: ['RCX'],
+    eccNames: ['rcx'],
     label: 'RCX',
     aliases: [],
     metricScopes: ['signoff_rcx'],
@@ -257,10 +257,10 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
   },
   {
     id: 'Power Analysis',
-    eccNames: ['powerAnalysis'],
+    eccNames: ['power_analysis'],
     label: 'Power Analysis',
     aliases: [],
-    metricScopes: ['poweranalysis'],
+    metricScopes: ['power_analysis'],
     metricIdPrefixes: [],
     tool: 'ecc',
   },
@@ -277,7 +277,7 @@ export const flowStepRegistry: readonly FlowStepDefinition[] = [
   },
   {
     id: 'Harden',
-    eccNames: ['Harden'],
+    eccNames: ['harden'],
     label: 'Harden',
     aliases: ['gds', 'signoff'],
     metricScopes: ['final_delivery'],
@@ -332,6 +332,8 @@ export function flowStepLabel(id: ProjectManifestFlowStep): string {
 export function parseProjectManifestFlowStep(
   step: ProjectManifestFlowStep | string,
 ): ProjectManifestFlowStep | null {
+  if (typeof step !== 'string') return null
+  if (step.startsWith('lec@')) return 'LEC'
   if ((flowStepCanonicalIds as readonly string[]).includes(step)) {
     return step as ProjectManifestFlowStep
   }

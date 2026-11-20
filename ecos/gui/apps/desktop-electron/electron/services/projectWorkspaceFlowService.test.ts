@@ -67,7 +67,10 @@ async function fixture(
 async function saveFlow(root: string, id: string, state: string) {
   await writeFile(
     join(root, id, 'home', 'flow.json'),
-    JSON.stringify({ schema_version: 1, steps: [{ name: 'Synthesis', state }] }),
+    JSON.stringify({
+      schema_version: 3,
+      steps: [{ name: 'synthesis', directory: '01_synthesis_yosys', state }],
+    }),
   )
 }
 
@@ -105,17 +108,17 @@ describe('ProjectWorkspaceFlowService', () => {
     const { root, service, watchers, processIsAlive } = await fixture()
     const request = { projects: [{ projectRoot: root, workspaceIds: ['ws_1'] }] }
     expect(await service.watch(1, request)).toEqual({
-      [root]: { ws_1: { steps: { Synthesis: 'success' }, running: false } },
+      [root]: { ws_1: { steps: { synthesis: 'success' }, running: false } },
     })
     expect(watchers[0]!.reconcile).toHaveBeenCalledWith(root, [join(root, 'ws_1')])
     await saveFlow(root, 'ws_1', 'Incomplete')
     await writeFile(join(root, 'ws_2', 'home', 'flow.json'), 'invalid hidden data')
     expect((await service.watch(1, request))[root]!.ws_1!.steps).toEqual({
-      Synthesis: 'success',
+      synthesis: 'success',
     })
     watchers[0]!.callbacks.onSnapshotChanged(join(root, 'ws_1'))
     expect(await service.watch(1, request)).toEqual({
-      [root]: { ws_1: { steps: { Synthesis: 'failed' }, running: false } },
+      [root]: { ws_1: { steps: { synthesis: 'failed' }, running: false } },
     })
     expect(processIsAlive).not.toHaveBeenCalled()
   })
@@ -137,7 +140,7 @@ describe('ProjectWorkspaceFlowService', () => {
     await vi.advanceTimersByTimeAsync(500)
 
     await expect(result).resolves.toEqual({
-      [root]: { ws_1: { steps: { Synthesis: 'success' }, running: false } },
+      [root]: { ws_1: { steps: { synthesis: 'success' }, running: false } },
     })
   })
 
@@ -149,7 +152,7 @@ describe('ProjectWorkspaceFlowService', () => {
     expect(watchers[0]!.close).toHaveBeenCalledOnce()
     await saveFlow(root, 'ws_1', 'Unstart')
     expect((await service.watch(1, request))[root]!.ws_1!.steps).toEqual({
-      Synthesis: 'unstart',
+      synthesis: 'unstart',
     })
   })
 
@@ -158,11 +161,19 @@ describe('ProjectWorkspaceFlowService', () => {
     await writeFile(
       join(root, 'ws_1', 'home', 'flow.json'),
       JSON.stringify({
-        schema_version: 1,
+        schema_version: 3,
         steps: [
-          { name: 'preFloorplan', state: 'Success' },
-          { name: 'macroPlacement', state: 'Success' },
-          { name: 'postFloorplan', state: 'Unstart' },
+          { name: 'pre_floorplan', directory: '02_pre_floorplan_ecc', state: 'Success' },
+          {
+            name: 'macro_placement',
+            directory: '03_macro_placement_dreamplace',
+            state: 'Success',
+          },
+          {
+            name: 'post_floorplan',
+            directory: '04_post_floorplan_ecc',
+            state: 'Unstart',
+          },
         ],
       }),
     )
@@ -174,9 +185,9 @@ describe('ProjectWorkspaceFlowService', () => {
       [root]: {
         ws_1: {
           steps: {
-            preFloorplan: 'success',
-            macroPlacement: 'success',
-            postFloorplan: 'unstart',
+            pre_floorplan: 'success',
+            macro_placement: 'success',
+            post_floorplan: 'unstart',
           },
           running: false,
         },
@@ -196,7 +207,7 @@ describe('ProjectWorkspaceFlowService', () => {
     service.clearWindow(1)
     registerProcess(project, root)
     expect((await service.watch(1, request))[root]!.ws_1).toEqual({
-      steps: { Synthesis: 'running' },
+      steps: { synthesis: 'running' },
       running: true,
     })
     expect(processIsAlive).toHaveBeenCalledWith(root, 'ws_1', 'run-1')
@@ -215,7 +226,7 @@ describe('ProjectWorkspaceFlowService', () => {
         })
       )[root]!.ws_1,
     ).toEqual({
-      steps: { Synthesis: 'success' },
+      steps: { synthesis: 'success' },
       running: false,
     })
   })
@@ -257,7 +268,7 @@ describe('ProjectWorkspaceFlowService', () => {
     })
     await vi.advanceTimersByTimeAsync(5000)
     expect((await service.watch(1, request))[root]!.ws_1).toEqual({
-      steps: { Synthesis: 'running' },
+      steps: { synthesis: 'running' },
       running: true,
     })
   })
@@ -333,7 +344,7 @@ describe('ProjectWorkspaceFlowService', () => {
     await saveFlow(root, 'ws_1', 'Success')
     await vi.advanceTimersByTimeAsync(5000)
     expect((await service.watch(1, request))[root]!.ws_1).toEqual({
-      steps: { Synthesis: 'success' },
+      steps: { synthesis: 'success' },
       running: false,
     })
     expect(processIsAlive).not.toHaveBeenCalled()

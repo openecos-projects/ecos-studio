@@ -411,7 +411,7 @@ def test_controller_accepts_llm_selected_non_first_knob(
             update={
                 "claims": (
                     retrieval.support_catalog.claims[0].model_copy(
-                        update={"stages": ("postFloorplan",), "state_predicates": ()}
+                        update={"stages": ("floorplan",), "state_predicates": ()}
                     ),
                 )
             }

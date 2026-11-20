@@ -11,18 +11,18 @@ const testState = vi.hoisted(() => ({
 vi.mock('@/composables/useBackendFlowStages', () => ({
   useBackendFlowStages: () => ({
     dynamicFlowStages: ref([
-      { label: 'Synthesis', path: 'Synthesis', icon: 'synth', tool: 'yosys' },
-      { label: 'Pre Floorplan', path: 'preFloorplan', icon: 'floorplan', tool: 'ecc' },
+      { label: 'synthesis', path: 'synthesis', icon: 'synth', tool: 'yosys' },
+      { label: 'Pre Floorplan', path: 'pre_floorplan', icon: 'floorplan', tool: 'ecc' },
       {
         label: 'Macro Placement',
-        path: 'macroPlacement',
+        path: 'macro_placement',
         icon: 'macro',
         tool: 'dreamplace',
       },
-      { label: 'Post Floorplan', path: 'postFloorplan', icon: 'floorplan', tool: 'ecc' },
-      { label: 'Place', path: 'place', icon: 'place', tool: 'dreamplace' },
-      { label: 'CTS', path: 'CTS', icon: 'cts', tool: 'ecc' },
-      { label: 'Route', path: 'route', icon: 'route', tool: 'ecc' },
+      { label: 'Post Floorplan', path: 'post_floorplan', icon: 'floorplan', tool: 'ecc' },
+      { label: 'Place', path: 'placement', icon: 'placement', tool: 'dreamplace' },
+      { label: 'cts', path: 'cts', icon: 'cts', tool: 'ecc' },
+      { label: 'Route', path: 'routing', icon: 'routing', tool: 'ecc' },
       { label: 'Legalization', path: 'legalization', icon: 'legal', tool: 'dreamplace' },
       { label: 'DRC', path: 'drc', icon: 'drc', tool: 'ecc' },
     ]),
@@ -72,10 +72,10 @@ describe('WorkspaceStepConfigDialog', () => {
     expect(
       wrapper.findAll('.workspace-step-config-list button').map((item) => item.text()),
     ).toEqual([
-      'SynthesisYosys · 2 params',
+      'synthesisYosys · 2 params',
       'FloorplanECC · 2 params',
       'PlaceDreamPlace · 1 param',
-      'CTSECC · 1 param',
+      'ctsECC · 1 param',
       'RouteECC · 1 param',
     ])
     expect(wrapper.text()).not.toContain('DRC')

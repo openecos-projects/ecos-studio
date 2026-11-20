@@ -116,7 +116,7 @@ class TestMetricNatures:
 
     def test_power_is_estimated_and_composites_are_derived(self) -> None:
         assert (
-            METRIC_NATURES[ObjectiveMetric.STA_TYPICAL_DYNAMIC_POWER]
+            METRIC_NATURES[ObjectiveMetric.POWER_ANALYSIS_DYNAMIC_UW]
             == MetricNature.ESTIMATED
         )
         assert (
@@ -191,7 +191,7 @@ class TestPlannerProjectionDiscipline:
     def test_dimension_scores_surface_the_gui_breakdown(
         self, frozen_workspace: Path
     ) -> None:
-        path = frozen_workspace / "route_ecc/analysis/qor_metrics.json"
+        path = frozen_workspace / "12_routing_ecc/analysis/qor_metrics.json"
         payload = json.loads(path.read_text(encoding="utf-8"))
         for item in payload["metrics"]:
             item.update(

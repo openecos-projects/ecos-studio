@@ -126,13 +126,13 @@ def test_missing_primary_metric_is_evidence_limited() -> None:
     )
 
     power_record = TerminalEvaluationMetric(
-        metric_id="sta_typical_dynamic_power",
+        metric_id="power_analysis_dynamic_uw",
         value=105.2,
         unit="uW",
         category=EvaluationMetricCategory.PPA,
         role=EvaluationMetricRole.REPORT,
         direction=EvaluationMetricDirection.LOWER_IS_BETTER,
-        source_refs=("sta_ecc/feature/TYP_25/TYPICAL/power_summary.json",),
+        source_refs=("19_sta_ecc/feature/TYP_25/TYPICAL/power_summary.json",),
     )
     incumbent = _v3_candidate().model_copy(
         update={"evaluation_metrics": (*_v3_candidate().evaluation_metrics, power_record)}
@@ -140,7 +140,7 @@ def test_missing_primary_metric_is_evidence_limited() -> None:
     semantic = freeze_optimization_objective(
         "reduce dynamic power",
         OptimizationObjectiveProposal(
-            primary_metric=ObjectiveMetric.STA_TYPICAL_DYNAMIC_POWER,
+            primary_metric=ObjectiveMetric.POWER_ANALYSIS_DYNAMIC_UW,
             rationale_summary="Reduce signoff dynamic power.",
         ),
     )
@@ -152,7 +152,7 @@ def test_missing_primary_metric_is_evidence_limited() -> None:
     )
     assert classification.comparison.decision == IncumbentDecision.EVIDENCE_LIMITED
     assert classification.comparison.decisive_metric == (
-        ObjectiveMetric.STA_TYPICAL_DYNAMIC_POWER
+        ObjectiveMetric.POWER_ANALYSIS_DYNAMIC_UW
     )
 
 
@@ -225,8 +225,8 @@ def test_ledger_accepts_evidence_limited_under_evidence_invalid(
             "candidate_manifest_sha256": "sha256:" + "a" * 64,
             "incumbent_decision": IncumbentDecision.EVIDENCE_LIMITED.value,
             "outcome_details_sha256": "sha256:" + "c" * 64,
-            "target_step": "place",
-            "end_step": "Harden",
+            "target_step": "placement",
+            "end_step": "harden",
             "execution_scope": "full_flow",
         }
     )

@@ -177,8 +177,8 @@ def build_candidate_trace(
             float(reference_observation.objective_metrics[objective_metric]),
         ),
         area=_evaluation_value(evaluation, "sta_standard_cell_area"),
-        dynamic_power=_evaluation_value(evaluation, "sta_typical_dynamic_power"),
-        leakage_power=_evaluation_value(evaluation, "sta_typical_leakage_power"),
+        dynamic_power=_evaluation_value(evaluation, "power_analysis_dynamic_uw"),
+        leakage_power=_evaluation_value(evaluation, "power_analysis_leakage_uw"),
         frequency=_evaluation_value(evaluation, "sta_frequency"),
         drc=_evaluation_value(evaluation, "drc_count"),
         timing=(

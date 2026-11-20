@@ -60,7 +60,7 @@ def _domain() -> EffectiveDomainSnapshot:
 def _observation() -> StageObservation:
     return StageObservation(
         observation_id="observation-place",
-        stage="place",
+        stage="placement",
         evidence_manifest_sha256=HASH,
         metrics={"route_la_total_overflow": 12.0},
         budget=BudgetSnapshot(budget=EpisodeBudget.from_reference_rerun(11.0)),
@@ -95,7 +95,7 @@ def _planning_context(*, with_view: bool = True):
         {
             "context_ref": {
                 "episode_id": "offline-pilot-gcd",
-                "checkpoint_id": "place",
+                "checkpoint_id": "placement",
                 "input_sha256": HASH,
             },
             "observation_ref": {

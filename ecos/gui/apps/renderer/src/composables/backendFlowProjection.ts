@@ -62,18 +62,24 @@ export function isObsoleteBackendFlowStep(value: string): boolean {
 
 export function projectRuntimeFlowSteps(
   runtimeSteps: readonly EccRuntimeStepSnapshot[],
+  committed: readonly FlowStepSummary[] = [],
 ): FlowStepSummary[] {
+  const committedById = new Map(committed.map((step) => [step.stepId, step]))
   return runtimeSteps.flatMap((step, order) => {
     if (isObsoleteBackendFlowStep(step.name)) return []
     const runtimeSeconds = parseRuntimeSeconds(step.runtime)
     return [
       {
+        ...committedById.get(step.name),
         name: step.name,
         order,
         peakMemoryMb: step.peakMemory,
         ...(runtimeSeconds === null ? {} : { runtimeSeconds }),
         state: normalizeState(step.state, 'unknown'),
         stepId: step.name,
+        ...(step.category ? { category: step.category } : {}),
+        ...(step.inputStep ? { inputStep: step.inputStep } : {}),
+        ...(step.directory ? { directory: step.directory } : {}),
         ...(step.tool ? { toolId: step.tool } : {}),
         ...(() => {
           const checklistStatus =
@@ -158,11 +164,6 @@ export function projectBackendFlowSteps(
           : ''
     if (!stepName) continue
     if (isObsoleteBackendFlowStep(stepName)) continue
-    if (started) {
-      for (const step of steps) {
-        if (step.state === 'running') step.state = 'not-started'
-      }
-    }
     const key = stepKey(stepName)
     let step = steps.find(
       (candidate) => stepKey(candidate.stepId) === key || stepKey(candidate.name) === key,

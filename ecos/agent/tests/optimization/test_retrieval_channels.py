@@ -48,7 +48,7 @@ class _RecordingRetriever:
 def test_optimization_retrieval_uses_fixed_query_inputs_and_independent_channels(
     frozen_workspace: Path,
 ) -> None:
-    observation = build_stage_observation(frozen_workspace, "place", budget=_budget())
+    observation = build_stage_observation(frozen_workspace, "placement", budget=_budget())
     request = build_optimization_retrieval_request(
         task_id="task-1",
         observation=observation,
@@ -95,7 +95,7 @@ def test_optimization_retrieval_uses_fixed_query_inputs_and_independent_channels
 def test_optimization_retrieval_deduplicates_channel_evidence(
     frozen_workspace: Path,
 ) -> None:
-    observation = build_stage_observation(frozen_workspace, "place", budget=_budget())
+    observation = build_stage_observation(frozen_workspace, "placement", budget=_budget())
     request = build_optimization_retrieval_request(
         task_id="task-1",
         observation=observation,
@@ -115,7 +115,7 @@ def test_optimization_retrieval_deduplicates_channel_evidence(
 def test_default_optimization_retrieval_keeps_tool_and_general_knowledge_separate(
     frozen_workspace: Path,
 ) -> None:
-    observation = build_stage_observation(frozen_workspace, "place", budget=_budget())
+    observation = build_stage_observation(frozen_workspace, "placement", budget=_budget())
     request = build_optimization_retrieval_request(
         task_id="task-1",
         observation=observation,
