@@ -479,6 +479,7 @@ export interface EccBackgroundOperationInvalidatedEvent {
 export interface EccBackgroundOperationLogResult {
   content: string
   truncated: boolean
+  diagnostics?: string
 }
 
 export interface EccRuntimeStartFlowRequest extends EccWorkspaceMutationRequest {
@@ -552,6 +553,7 @@ export interface EccCandidateResumeRequest extends EccWorkspaceMutationRequest {
 }
 
 export interface EccRuntimeOperationRequest extends EccWorkspaceHandleRequest {
+  includeDiagnostics?: boolean
   operationId: string
 }
 

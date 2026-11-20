@@ -279,6 +279,7 @@ function getDesktopServices() {
     },
   })
   eccRuntimeService = new EccCliRuntimeService({
+    mainLogFile,
     envProvider: runtimeEnvProvider,
     resolveLaunch: async () => {
       const executable = resolveDurableEccExecutable(eccRuntimeOptions)

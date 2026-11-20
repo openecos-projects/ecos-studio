@@ -99,6 +99,8 @@ export function registerBackgroundLifecycleIpc(options: {
       !isRecord(value) ||
       typeof value.workspaceHandle !== 'string' ||
       typeof value.operationId !== 'string' ||
+      (value.includeDiagnostics !== undefined &&
+        typeof value.includeDiagnostics !== 'boolean') ||
       !options.ownsWorkspaceHandle(event.sender, value.workspaceHandle)
     ) {
       throw new Error('Operation log request does not own this Workspace handle.')

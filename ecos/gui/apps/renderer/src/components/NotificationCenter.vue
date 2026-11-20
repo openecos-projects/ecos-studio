@@ -48,6 +48,8 @@
         </div>
       </header>
 
+      <span class="sr-only" role="status">{{ exportStatus?.message }}</span>
+
       <div v-if="!notifications.length" class="notification-empty">
         <i class="ri-checkbox-circle-line" aria-hidden="true" />
         <span>No notifications</span>
@@ -91,6 +93,18 @@
               <summary>View details</summary>
               <pre v-if="notification.detail">{{ notification.detail }}</pre>
               <code v-if="notification.logFile">Log: {{ notification.logFile }}</code>
+              <button
+                v-if="notification.diagnostics"
+                type="button"
+                class="notification-agent-action"
+                :disabled="Boolean(exporting)"
+                @click.stop="exportDiagnostics(notification.id, notification.diagnostics)"
+              >
+                Save run diagnostics
+              </button>
+              <p v-if="exportStatus?.id === notification.id">
+                {{ exportStatus.message }}
+              </p>
             </details>
           </div>
           <button
@@ -109,11 +123,44 @@
 </template>
 
 <script setup lang="ts">
+import type { EccRuntimeOperationRequest } from '@ecos-studio/shared'
+import { getDesktopApi } from '@/platform/desktop'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
   useNotificationStore,
   type AppNotificationSeverity,
 } from '@/stores/notificationStore'
+
+const exporting = ref('')
+const exportStatus = ref<{ id: string; message: string } | null>(null)
+
+async function exportDiagnostics(id: string, request: EccRuntimeOperationRequest) {
+  if (exporting.value) return
+  exporting.value = id
+  exportStatus.value = null
+  try {
+    const api = getDesktopApi()
+    const result = await api.ecc.runtime?.operationLog({
+      ...request,
+      includeDiagnostics: true,
+    })
+    if (!result?.diagnostics) throw new Error('Run diagnostics are unavailable.')
+    const saved = await api.dialog.saveFile({
+      title: 'Save run diagnostics',
+      defaultPath: `ecc-run-${request.operationId}.txt`,
+      filters: [{ name: 'Text', extensions: ['txt'] }],
+      content: result.diagnostics,
+    })
+    if (saved) exportStatus.value = { id, message: 'Run diagnostics saved.' }
+  } catch (error) {
+    exportStatus.value = {
+      id,
+      message: error instanceof Error ? error.message : String(error),
+    }
+  } finally {
+    exporting.value = ''
+  }
+}
 
 const open = ref(false)
 const root = ref<HTMLElement | null>(null)

@@ -277,12 +277,21 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
         ...(outcome.logFile &&
         outcome.state !== 'succeeded' &&
         outcome.state !== 'cancelled'
-          ? { logFile: outcome.logFile }
+          ? {
+              logFile: outcome.logFile,
+              diagnostics: {
+                operationId: outcome.operationId,
+                workspaceHandle: outcome.workspaceHandle,
+              },
+            }
           : {}),
         ...(outcome.flowBlock
           ? { detail: outcome.flowBlock.failedItems.join('\n') }
           : {}),
-        key: `runtime-outcome:${key}`,
+        key:
+          outcome.logFile && ['failed', 'interrupted'].includes(outcome.state)
+            ? outcome.operationId
+            : `runtime-outcome:${key}`,
         message: outcomeMessage(outcome),
         severity: outcome.flowBlock
           ? 'warn'

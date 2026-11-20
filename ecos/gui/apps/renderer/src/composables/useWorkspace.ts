@@ -1725,6 +1725,14 @@ export function useWorkspace() {
               ? 'The step was marked Incomplete and was not rerun automatically.'
               : 'Review the step log before rerunning.'),
           logFile: failure.logFile,
+          ...(failure.logFile && failure.operationId
+            ? {
+                diagnostics: {
+                  operationId: failure.operationId,
+                  workspaceHandle: workspaceId,
+                },
+              }
+            : {}),
         })
       },
       onInvalidate: (step) => {

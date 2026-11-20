@@ -69,10 +69,7 @@ export interface E2EBridge {
         workspaceHandle: string
         operationId: string
       }): Promise<unknown>
-      operationLog(request: {
-        workspaceHandle: string
-        operationId: string
-      }): Promise<{ content: string }>
+      operationLog: NonNullable<DesktopApi['ecc']['runtime']>['operationLog']
     }
   }
 }

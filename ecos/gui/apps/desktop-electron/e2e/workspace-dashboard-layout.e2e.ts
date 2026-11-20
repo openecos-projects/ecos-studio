@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Page } from 'playwright-core'
 import { launchE2EApp, repoRoot, resolveOutDir, type E2EApp } from './support/launch'
@@ -244,7 +245,76 @@ describe('workspace dashboard layout', () => {
     await expect
       .poll(() => failure.locator('code').textContent())
       .toMatch(/Log: .*\/log\/.+\.log/)
+    await failure.getByRole('button', { name: 'Save run diagnostics' }).waitFor()
+    const firstRun = await page.evaluate(async () => {
+      const runtime = window.ecosDesktop.ecc.runtime
+      const projection = await runtime.operationProjection()
+      const operation = projection.outcomes.find(
+        ({ error }) => error?.code === 'step_worker_failed',
+      )
+      if (!operation) return
+      const request = {
+        workspaceHandle: operation.workspaceHandle,
+        operationId: operation.operationId,
+        includeDiagnostics: true,
+      }
+      return { request, report: (await runtime.operationLog(request)).diagnostics }
+    })
+    expect(firstRun?.report).toContain('missing filled, parasitics')
+    const firstAttempt = firstRun?.report?.match(
+      /Failed worker attempts\s+sta \(([^)]+)\)/,
+    )?.[1]
+    expect(firstAttempt).toBeTruthy()
+    expect(firstRun?.report).toMatch(
+      /Studio session log entries for this run\s+.*ECC run/,
+    )
     await shot('sta-worker-failure')
+    await page.getByRole('button', { name: 'Open notifications' }).click()
+
+    const rerunId = await page.evaluate(async ({ workspaceHandle }) => {
+      const runtime = window.ecosDesktop.ecc.runtime
+      const snapshot = (await runtime.snapshot({ workspaceHandle })) as {
+        engineeringSnapshot: { workspaceRevision: number }
+      }
+      const rerun = (await window.ecosDesktop.productCommands.execute({
+        command: 'workspace.runStep',
+        payload: {
+          workspaceHandle,
+          expectedWorkspaceRevision: snapshot.engineeringSnapshot.workspaceRevision,
+          idempotencyKey: crypto.randomUUID(),
+          step: 'sta',
+          rerun: true,
+        },
+      })) as { operationId: string }
+      await runtime.waitForOperation({ workspaceHandle, operationId: rerun.operationId })
+      return rerun.operationId
+    }, firstRun!.request)
+    expect(rerunId).not.toBe(firstRun!.request.operationId)
+    await expect
+      .poll(
+        async () =>
+          (await readFlowSteps(workspace.workspaceDir)).find(({ name }) => name === 'sta')
+            ?.state,
+      )
+      .toBe('Incomplete')
+
+    const savePath = join(launched!.outDir, 'sta-first-run.txt')
+    await launched!.app.evaluate(({ dialog }, filePath) => {
+      dialog.showSaveDialog = async () => ({ canceled: false, filePath })
+    }, savePath)
+    await page.getByRole('button', { name: 'Open notifications' }).click()
+    const firstFailure = notifications.locator('.notification-item').filter({
+      has: page.locator('code', { hasText: firstRun!.request.operationId }),
+    })
+    const exportButton = firstFailure.getByRole('button', {
+      name: 'Save run diagnostics',
+    })
+    if (!(await exportButton.isVisible()))
+      await firstFailure.getByText('View details').click()
+    await exportButton.click()
+    await expect
+      .poll(() => readFile(savePath, 'utf8').catch(() => ''))
+      .toBe(firstRun!.report)
     await page.getByRole('button', { name: 'Open notifications' }).click()
   })
 

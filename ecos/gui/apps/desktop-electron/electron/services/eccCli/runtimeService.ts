@@ -61,6 +61,7 @@ import {
 } from './cliProcess'
 import { parseEccLineRecords, parseJsonLiteral } from './lineRecords'
 import { blockedFlowStep, failedRunSteps, terminalState } from './operationOutcome'
+import { buildOperationDiagnostics } from './operationDiagnostics'
 import { operationLogPath, readOperationLog, readRunFailure } from './operationLog'
 import {
   discoverProject,
@@ -102,6 +103,7 @@ interface TrackedOperation {
 }
 
 export interface EccCliRuntimeServiceOptions extends EccCliProcessOptions {
+  mainLogFile?: string
   runtimeId?: string | (() => string)
 }
 
@@ -113,6 +115,7 @@ export class EccCliRuntimeService {
   private readonly operations = new Map<string, TrackedOperation>()
   private readonly defViewsInFlight = new Set<string>()
   private readonly outcomes: EccRuntimeOperation[] = []
+  private readonly diagnostics = new Map<string, EccBackgroundOperationLogResult>()
   private readonly eventListeners = new Set<(event: EccRuntimeEvent) => void>()
   private readonly projectionListeners = new Set<(generation: number) => void>()
   private readonly releasedListeners = new Set<(workspaceHandle: string) => void>()
@@ -1031,10 +1034,14 @@ export class EccCliRuntimeService {
     request: EccRuntimeOperationRequest,
   ): Promise<EccBackgroundOperationLogResult> {
     const tracked = this.requireOperation(request)
-    return await readOperationLog(
-      tracked.session.directory,
-      tracked.operation.operationId,
-    )
+    const { operation, session } = tracked
+    if (request.includeDiagnostics) {
+      const diagnostics = this.diagnostics.get(operation.operationId)
+      if (!diagnostics)
+        throw new Error('Run diagnostics are unavailable for this operation.')
+      return diagnostics
+    }
+    return await readOperationLog(session.directory, operation.operationId)
   }
 
   isWorkspaceRuntimeActive(directory: string): boolean {
@@ -1393,13 +1400,13 @@ export class EccCliRuntimeService {
       tracked.operation.kind === 'step' ? tracked.operation.step : undefined
     const exit = tracked.child?.exit
     const terminal = terminalState(flow, tracked.requestedCancel, exit)
-    const log =
-      terminal === 'failed'
-        ? await readOperationLog(
-            tracked.session.directory,
-            tracked.operation.operationId,
-          ).catch(() => null)
-        : null
+    const captureDiagnostics = terminal === 'failed' || terminal === 'interrupted'
+    const log = captureDiagnostics
+      ? await readOperationLog(
+          tracked.session.directory,
+          tracked.operation.operationId,
+        ).catch(() => null)
+      : null
     if (
       refreshSequence !== tracked.refreshSequence ||
       isTerminal(tracked.operation.state)
@@ -1407,17 +1414,22 @@ export class EccCliRuntimeService {
       return
     const failure = log ? readRunFailure(log.content) : undefined
     const candidates =
-      terminal === 'failed' && !failure && flow
+      captureDiagnostics && flow
         ? failedRunSteps(flow, selectedStep, tracked.operation.flowScope?.fromStep)
         : []
     let workerFailure: string | undefined
+    const workers: string[] = []
     for (const step of candidates) {
-      workerFailure = await readStepWorkerFailure(
+      const message = await readStepWorkerFailure(
         tracked.session.directory,
         step,
         tracked.operation.createdAt,
       )
-      if (workerFailure) break
+      if (!message) continue
+      workerFailure ??= message
+      workers.push(`${step.name} (${step.attemptId})
+${message}`)
+      if (workers.length === 64) break
     }
     if (
       refreshSequence !== tracked.refreshSequence ||
@@ -1471,8 +1483,21 @@ export class EccCliRuntimeService {
     tracked.watcher = null
     if (tracked.poller) clearInterval(tracked.poller)
     tracked.poller = null
+    if (captureDiagnostics) {
+      this.diagnostics.set(
+        tracked.operation.operationId,
+        await buildOperationDiagnostics(
+          tracked.operation,
+          log,
+          workers,
+          this.options.mainLogFile,
+        ),
+      )
+    }
     this.outcomes.unshift({ ...tracked.operation })
-    this.outcomes.splice(64)
+    for (const outcome of this.outcomes.splice(64)) {
+      this.diagnostics.delete(outcome.operationId)
+    }
     for (const resolveWait of tracked.waiters.splice(0))
       resolveWait({ ...tracked.operation })
     await this.refreshSessionRevision(tracked.session).catch(() => undefined)

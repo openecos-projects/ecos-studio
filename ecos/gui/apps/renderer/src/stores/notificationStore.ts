@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue'
+import type { EccRuntimeOperationRequest } from '@ecos-studio/shared'
 
 export type AppNotificationSeverity = 'error' | 'warn' | 'info'
 
@@ -10,6 +11,7 @@ export interface AppNotification {
   message: string
   detail?: string
   logFile?: string
+  diagnostics?: EccRuntimeOperationRequest
   key?: string
   createdAt: number
   read: boolean
@@ -37,11 +39,18 @@ function addNotification(
 
   const duplicate = notifications.value.find(
     (item) =>
+      (!item.diagnostics ||
+        !input.diagnostics ||
+        item.diagnostics.operationId === input.diagnostics.operationId) &&
       item.severity === input.severity &&
       item.message === message &&
       Date.now() - item.createdAt < 5000,
   )
-  if (duplicate) return
+  if (duplicate) {
+    if (input.diagnostics && !duplicate.diagnostics)
+      duplicate.diagnostics = input.diagnostics
+    return
+  }
 
   notifications.value.unshift({
     ...input,
