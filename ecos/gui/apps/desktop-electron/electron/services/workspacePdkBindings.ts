@@ -172,13 +172,14 @@ export async function prepareWorkspaceOpenBinding(
       requirement: pdkRequirement,
     })
     const mpcBinding = await resolveMpcBinding(dependencies, bindingRequirement?.mpc)
+    const version = installation.dataVersion ?? installation.version
     return {
       directory,
       workspaceBindings: {
         inputs: {},
         pdk: {
           root: installation.root,
-          ...(installation.version ? { version: installation.version } : {}),
+          ...(version ? { version } : {}),
           ...manualPdkFiles(pdk, pdkRequirement, installation.root),
         },
         ...(mpcBinding ? { mpc: { template: mpcBinding.template } } : {}),

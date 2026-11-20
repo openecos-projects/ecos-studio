@@ -47,7 +47,7 @@ describe('PdkInventoryService', () => {
     service.setConfigurationService({
       configure: async ({ action }) =>
         action === 'resolve'
-          ? { content_digest: 'a'.repeat(64) }
+          ? { content_digest: 'a'.repeat(64), data_version: 'ics55-v2' }
           : action === 'show'
             ? {
                 resolved_resources: Object.fromEntries([
@@ -71,6 +71,8 @@ describe('PdkInventoryService', () => {
     })
     expect(installation).toMatchObject({
       readiness: 'ready',
+      version: 'ics55-v2',
+      dataVersion: 'ics55-v2',
       defaultResources: {
         techLef: join(pdkRoot, tech),
         cellLefs: cellLefs.map((file) => join(pdkRoot, file)),

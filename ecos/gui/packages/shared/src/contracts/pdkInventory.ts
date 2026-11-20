@@ -8,6 +8,8 @@ export interface PdkInstallationRecord {
   version: string | null
   root: string
   ownership: PdkOwnership
+  /** Identifier published in the installed PDK root VERSION file. */
+  dataVersion?: string
   registrySha256: string | null
   contentDigest?: string
   pdkDigest?: string

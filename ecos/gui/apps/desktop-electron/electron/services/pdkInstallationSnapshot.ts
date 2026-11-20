@@ -77,6 +77,8 @@ export async function snapshotInstallation(
         supportsEccDefaults: false,
       }
     }
+    const dataVersion =
+      typeof context.data_version === 'string' ? context.data_version : undefined
     const resources = Object.values(
       description.resolved_resources as Record<string, { role: string; path: string }>,
     )
@@ -89,6 +91,11 @@ export async function snapshotInstallation(
       .map((item) => item.path)
     return {
       ...installation,
+      ...(dataVersion ? { dataVersion } : {}),
+      version:
+        installation.ownership === 'imported' && dataVersion
+          ? dataVersion
+          : installation.version,
       readiness: 'ready',
       contentDigest: digest,
       ...(typeof context.pdk_digest === 'string'
@@ -125,6 +132,8 @@ export function configurationIdentity(
   snapshot: PdkInstallationSnapshot,
 ): Partial<PdkInstallationRecord> {
   return {
+    version: snapshot.version,
+    ...(snapshot.dataVersion ? { dataVersion: snapshot.dataVersion } : {}),
     contentDigest: snapshot.contentDigest,
     pdkDigest: snapshot.pdkDigest,
     adaptationDigest: snapshot.adaptationDigest,

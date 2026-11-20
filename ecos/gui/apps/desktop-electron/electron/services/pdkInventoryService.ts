@@ -579,7 +579,9 @@ function installationSatisfiesRequirement(
 ): boolean {
   return (
     installation.familyId === requiredText(requirement.familyId, 'PDK Family ID') &&
-    (!requirement.version || installation.version === requirement.version)
+    (!requirement.version ||
+      installation.dataVersion === requirement.version ||
+      installation.version === requirement.version)
   )
 }
 
