@@ -7,7 +7,7 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
-import { lstat, mkdir, readdir, realpath, stat, writeFile } from 'node:fs/promises'
+import { mkdir, realpath, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
   desktopApiEventChannels,
@@ -544,6 +544,10 @@ export interface DesktopBridgeServices {
   }
   eccRuntimeService: {
     cancelOperation(request: EccRuntimeOperationRequest): Promise<unknown>
+    stopOptimizationCandidates(
+      workspaceHandle: string,
+      episodePrefix: string,
+    ): Promise<void>
     candidateCapabilities(request: EccCandidateCapabilitiesRequest): Promise<unknown>
     candidateRerun(request: EccCandidateRerunRequest): Promise<unknown>
     candidateResume(request: EccCandidateResumeRequest): Promise<unknown>
@@ -1380,82 +1384,29 @@ export function registerIpc(
     if (context.workspaceRevision !== episode.parentWorkspaceRevision) {
       throw new Error('Optimization Parent Revision changed; Stop needs attention.')
     }
-    const candidatesRoot = join(parent, '.agent', 'candidates')
-    let candidates: string[] = []
-    try {
-      if (!(await lstat(candidatesRoot)).isDirectory()) {
-        throw new Error('Optimization candidate directory is not a directory.')
-      }
-      const prefix = `candidate-${createHash('sha256').update(episode.episodeId).digest('hex').slice(0, 16)}-`
-      candidates = (await readdir(candidatesRoot)).filter((name) =>
-        name.startsWith(prefix),
-      )
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
-    const workspaces = [{ directory: parent, handle: context.workspaceHandle }]
-    for (const name of candidates) {
-      const directory = join(candidatesRoot, name)
-      if (!(await lstat(directory)).isDirectory()) {
-        throw new Error(
-          'Optimization candidate evidence is incomplete; Parent remains guarded.',
-        )
-      }
-      const opened = await services.eccRuntimeService.openWorkspace({ directory })
-      const handle = workspaceHandleFromResult(opened)
-      if (!handle) throw new Error('Optimization candidate ECC handle is unavailable.')
-      workspaces.push({ directory, handle })
-    }
-    for (const workspace of workspaces) {
-      const snapshot = await services.eccRuntimeService.workspaceSnapshot({
-        workspaceHandle: workspace.handle,
-      })
-      if (
-        !isRecord(snapshot) ||
-        typeof snapshot.directory !== 'string' ||
-        !Array.isArray(snapshot.operations)
-      ) {
-        throw new Error('ECC Operation evidence is unavailable; Parent remains guarded.')
-      }
-      if (
-        normalizeWorkspacePath(snapshot.directory) !==
-        normalizeWorkspacePath(workspace.directory)
-      ) {
-        throw new Error('Optimization ECC Operation evidence has a different Workspace.')
-      }
-      for (const operation of snapshot.operations) {
-        if (
+    const snapshot = await services.eccRuntimeService.workspaceSnapshot({
+      workspaceHandle: context.workspaceHandle,
+    })
+    if (
+      !isRecord(snapshot) ||
+      typeof snapshot.directory !== 'string' ||
+      normalizeWorkspacePath(snapshot.directory) !== normalizeWorkspacePath(parent) ||
+      !Array.isArray(snapshot.operations) ||
+      snapshot.operations.some(
+        (operation) =>
           !isRecord(operation) ||
-          typeof operation.operationId !== 'string' ||
-          typeof operation.state !== 'string'
-        ) {
-          throw new Error('ECC Operation evidence is invalid; Parent remains guarded.')
-        }
-        if (['succeeded', 'failed', 'cancelled', 'interrupted'].includes(operation.state))
-          continue
-        if (workspace.directory === parent) {
-          throw new Error('Parent has an active ECC Operation; Parent remains guarded.')
-        }
-        const request = {
-          workspaceHandle: workspace.handle,
-          operationId: operation.operationId,
-        }
-        await services.eccRuntimeService.cancelOperation(request)
-        let terminal = false
-        for (let attempt = 0; attempt < 40; attempt += 1) {
-          const status = await services.eccRuntimeService.operationStatus(request)
-          if (
-            ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(status.state)
-          ) {
-            terminal = true
-            break
-          }
-          await new Promise((done) => setTimeout(done, 250))
-        }
-        if (!terminal)
-          throw new Error('ECC Operation has not stopped; Parent remains guarded.')
-      }
+          !['succeeded', 'failed', 'cancelled', 'interrupted'].includes(
+            String(operation.state),
+          ),
+      )
+    ) {
+      throw new Error('Parent ECC Operation evidence is unavailable or active.')
     }
+    const prefix = `candidate-${createHash('sha256').update(episode.episodeId).digest('hex').slice(0, 16)}-`
+    await services.eccRuntimeService.stopOptimizationCandidates(
+      context.workspaceHandle,
+      prefix,
+    )
   })
 
   const deliverDirectoryScopedEvent = (

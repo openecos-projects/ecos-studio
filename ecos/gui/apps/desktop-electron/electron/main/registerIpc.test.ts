@@ -249,6 +249,7 @@ function registerHandlers(
     eccRuntimeService: {
       cancelOperation: vi.fn(),
       candidateCapabilities: vi.fn(),
+      stopOptimizationCandidates: vi.fn(),
       candidateRerun: vi.fn(),
       candidateResume: vi.fn(),
       cancelOperationLegacy: vi.fn(),

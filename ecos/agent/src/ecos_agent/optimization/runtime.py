@@ -523,10 +523,14 @@ def _optimization_execution_context(
             (".v", ".sv", ".vh", ".svh", ".vhd", ".vhdl")
         )
     )
-    for key, files in (
-        ("rtl_sha256", rtl_files),
-        ("sdc_sha256", sorted(origin.glob("*.sdc"))),
-    ):
+    timing_files = sorted(
+        path for path in origin.rglob("*")
+        if path.is_file() and (
+            path.suffix == ".sdc"
+            or (path.suffix == ".tcl" and path.parent.name in {"pre_CTS", "post_CTS"})
+        )
+    )
+    for key, files in (("rtl_sha256", rtl_files), ("sdc_sha256", timing_files)):
         if not files:
             raise OptimizationRuntimeError(f"optimization {key} input is unavailable")
         hashes = [file_sha256(path) for path in files]

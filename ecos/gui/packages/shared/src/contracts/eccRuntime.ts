@@ -372,7 +372,11 @@ export interface EccFlowRunStepResult {
   step: string
 }
 
-export type EccRuntimeOperationKind = 'flow' | 'step'
+export type EccRuntimeOperationKind =
+  | 'flow'
+  | 'step'
+  | 'candidate_rerun'
+  | 'candidate_resume'
 export type EccRuntimeOperationState =
   | 'queued'
   | 'running'

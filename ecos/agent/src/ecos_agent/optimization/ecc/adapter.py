@@ -363,6 +363,13 @@ class EccCandidateRerunAdapter:
         }
         if all(value is None for value in values.values()):
             return None
+        if response.get("state") in {"failed", "cancelled"} and (
+            values["candidate_manifest_ref"] is None
+            and values["candidate_manifest_sha256"] is None
+        ):
+            # An early failure can identify its candidate without producing
+            # the manifest required to treat the directory as evidence.
+            return None
         required = tuple(
             values[key]
             for key in (

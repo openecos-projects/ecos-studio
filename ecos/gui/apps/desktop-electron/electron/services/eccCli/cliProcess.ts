@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { createInterface } from 'node:readline'
 import { openOperationLog } from './operationLog'
 
 const DEFAULT_OUTPUT_LIMIT = 4 * 1024 * 1024
@@ -18,6 +19,8 @@ export interface EccCliRunOptions {
   maxStderrBytes?: number
   maxStdoutBytes?: number
   stdin?: string | Uint8Array
+  signal?: AbortSignal
+  onStdoutLine?: (line: string) => void
   timeoutMs?: number
 }
 
@@ -71,6 +74,13 @@ export class EccCliProcess {
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
+    const terminate = () => {
+      child.kill('SIGTERM')
+    }
+    options.signal?.addEventListener('abort', terminate, { once: true })
+    if (options.signal?.aborted) terminate()
+    const lines = options.onStdoutLine ? createInterface({ input: child.stdout }) : null
+    if (options.onStdoutLine) lines?.on('line', options.onStdoutLine)
     const stdout = collect(
       child,
       'stdout',
@@ -85,6 +95,7 @@ export class EccCliProcess {
       options.timeoutMs && options.timeoutMs > 0
         ? setTimeout(() => child.kill('SIGTERM'), options.timeoutMs)
         : null
+    child.stdin.on('error', () => undefined) // The child may exit before reading its input.
     if (options.stdin === undefined) child.stdin.end()
     else child.stdin.end(options.stdin)
     try {
@@ -96,6 +107,8 @@ export class EccCliProcess {
       return result
     } finally {
       if (timeout) clearTimeout(timeout)
+      options.signal?.removeEventListener('abort', terminate)
+      lines?.close()
     }
   }
 
@@ -155,7 +168,7 @@ function collect(
 function childExit(child: ChildProcess): Promise<number> {
   return new Promise((resolve, reject) => {
     child.once('error', reject)
-    child.once('exit', (code, signal) => {
+    child.once('close', (code, signal) => {
       if (code !== null) resolve(code)
       else reject(new Error(`ECC CLI terminated by ${signal ?? 'an unknown signal'}`))
     })

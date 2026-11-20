@@ -510,8 +510,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
           desktopServices.eccRuntimeService.candidateResume(request),
         cancelOperation: (request) =>
           desktopServices.eccRuntimeService.cancelOperation(request),
-        hello: () =>
-          desktopServices.eccRuntimeService.callRuntime('rpc.hello', { version: 1 }),
+        hello: () => desktopServices.eccRuntimeService.candidateRuntimeVersion(),
         openWorkspace: (request) =>
           desktopServices.eccRuntimeService.openWorkspace(request),
         operationStatus: (request) =>

@@ -6,6 +6,7 @@
 import type {
   DesktopApi,
   EccBackgroundOperationProjection,
+  EccRuntimeOperation,
   ProjectManifest,
   ProjectWorkspaceFlows,
   ProjectWorkspaceFlowsRequest,
@@ -47,6 +48,7 @@ export interface E2EBridge {
   }
   runtime: {
     workspace: {
+      open: DesktopApi['runtime']['workspace']['open']
       create(request: {
         designTool: 'frontend'
         payload: Record<string, unknown> & { directory: string }
@@ -68,7 +70,7 @@ export interface E2EBridge {
       waitForOperation(request: {
         workspaceHandle: string
         operationId: string
-      }): Promise<unknown>
+      }): Promise<EccRuntimeOperation>
       operationLog: NonNullable<DesktopApi['ecc']['runtime']>['operationLog']
     }
   }

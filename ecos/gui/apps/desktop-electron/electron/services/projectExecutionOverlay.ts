@@ -95,6 +95,7 @@ function projectOperation(
   operation: EccRuntimeOperation,
   workspaces: Map<string, CommittedProjectWorkspace>,
 ): BackendProjectActiveOperation[] {
+  if (operation.kind !== 'flow' && operation.kind !== 'step') return []
   if (operation.state !== 'queued' && operation.state !== 'running') return []
   const workspace = workspaces.get(operation.workspaceId)
   if (!workspace) return []

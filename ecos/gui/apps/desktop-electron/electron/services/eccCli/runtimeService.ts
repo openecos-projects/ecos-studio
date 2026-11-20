@@ -62,6 +62,7 @@ import {
 } from './cliProcess'
 import { parseEccLineRecords, parseJsonLiteral } from './lineRecords'
 import { blockedFlowStep, failedRunSteps, terminalState } from './operationOutcome'
+import { CandidateOperations } from './candidateOperations'
 import { buildOperationDiagnostics } from './operationDiagnostics'
 import { operationLogPath, readOperationLog, readRunFailure } from './operationLog'
 import {
@@ -110,6 +111,7 @@ export interface EccCliRuntimeServiceOptions extends EccCliProcessOptions {
 
 export class EccCliRuntimeService {
   private readonly cli: EccCliProcess
+  private readonly candidates: CandidateOperations
   private readonly sessions = new Map<string, WorkspaceSession>()
   private readonly handleByDirectory = new Map<string, string>()
   private readonly knownProjectRoots = new Set<string>()
@@ -127,6 +129,7 @@ export class EccCliRuntimeService {
 
   constructor(private readonly options: EccCliRuntimeServiceOptions) {
     this.cli = new EccCliProcess(options)
+    this.candidates = new CandidateOperations(this.cli)
   }
 
   /** Compatibility bridge for the project doctor IPC surface. The operation
@@ -973,11 +976,15 @@ export class EccCliRuntimeService {
   }
 
   operationStatus(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation> {
+    if (this.candidates.has(request.operationId)) {
+      return Promise.resolve(this.candidates.status(request))
+    }
     const tracked = this.requireOperation(request)
     return Promise.resolve({ ...tracked.operation })
   }
 
   waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation> {
+    if (this.candidates.has(request.operationId)) return this.candidates.wait(request)
     const tracked = this.requireOperation(request)
     if (isTerminal(tracked.operation.state))
       return Promise.resolve({ ...tracked.operation })
@@ -985,6 +992,7 @@ export class EccCliRuntimeService {
   }
 
   async cancelOperation(request: EccRuntimeOperationRequest) {
+    if (this.candidates.has(request.operationId)) return this.candidates.cancel(request)
     const tracked = this.requireOperation(request)
     tracked.requestedCancel = true
     try {
@@ -1025,20 +1033,39 @@ export class EccCliRuntimeService {
     return { cancelled: true, operationId: tracked.operation.operationId }
   }
 
-  // Candidate optimization operations are only exposed by the ECC RPC
-  // runtime; the CLI runtime has no counterpart, so fail closed here.
-  async candidateCapabilities(
-    _request: EccCandidateCapabilitiesRequest,
-  ): Promise<unknown> {
-    throw new Error('Candidate capabilities require the ECC RPC runtime.')
+  async candidateRuntimeVersion() {
+    await this.ensureContract()
+    return this.candidates.version()
   }
 
-  async candidateRerun(_request: EccCandidateRerunRequest): Promise<unknown> {
-    throw new Error('Candidate rerun requires the ECC RPC runtime.')
+  async candidateCapabilities(request: EccCandidateCapabilitiesRequest) {
+    await this.ensureContract()
+    return this.candidates.capabilities(this.requireSession(request.workspaceHandle))
   }
 
-  async candidateResume(_request: EccCandidateResumeRequest): Promise<unknown> {
-    throw new Error('Candidate resume requires the ECC RPC runtime.')
+  async candidateRerun(request: EccCandidateRerunRequest) {
+    await this.ensureContract()
+    return this.candidates.start(
+      'rerun',
+      this.requireSession(request.workspaceHandle),
+      request,
+    )
+  }
+
+  async stopOptimizationCandidates(workspaceHandle: string, episodePrefix: string) {
+    return await this.candidates.stopCandidates(
+      this.requireSession(workspaceHandle),
+      episodePrefix,
+    )
+  }
+
+  async candidateResume(request: EccCandidateResumeRequest) {
+    await this.ensureContract()
+    return this.candidates.start(
+      'resume',
+      this.requireSession(request.workspaceHandle),
+      request,
+    )
   }
 
   async deriveWorkspace(
@@ -1145,8 +1172,11 @@ export class EccCliRuntimeService {
   }
 
   hasActiveOperations(): boolean {
-    return [...this.operations.values()].some(
-      (tracked) => !isTerminal(tracked.operation.state),
+    return (
+      this.candidates.hasActive() ||
+      [...this.operations.values()].some(
+        (tracked) => !isTerminal(tracked.operation.state),
+      )
     )
   }
 
@@ -1178,11 +1208,11 @@ export class EccCliRuntimeService {
   }
 
   hasPendingRuntimeWork(): boolean {
-    return false
+    return this.candidates.hasActive()
   }
 
   waitForIdle(): Promise<void> {
-    return Promise.resolve()
+    return this.candidates.waitForIdle()
   }
 
   async flushPendingState(): Promise<void> {
@@ -1190,6 +1220,7 @@ export class EccCliRuntimeService {
   }
 
   async shutdown() {
+    await this.candidates.shutdown()
     for (const tracked of this.operations.values()) {
       if (tracked.poller) clearInterval(tracked.poller)
       tracked.poller = null
