@@ -130,6 +130,10 @@ const defaultSpawnProcess: SpawnProcess = (file, args, options) =>
 interface ChipViewerBinaries {
   eccPath: string
   viewerPath: string
+  developmentBuild?: {
+    file: string
+    args: string[]
+  }
 }
 
 interface LayoutEditRuntime {
@@ -262,6 +266,7 @@ export interface ChipViewerServiceOptions {
 }
 
 interface SnapshotInputs {
+  antennaDataPath?: string
   dbPath: string
   defPath: string
   drcStatisPath?: string
@@ -713,6 +718,10 @@ export class ChipViewerService {
   onWorkspaceRevisionChanged?: ChipViewerServiceOptions['onWorkspaceRevisionChanged']
   private readonly editBridgeWatchers = new Map<string, DirectoryWatcher>()
   private readonly layoutEditContexts = new Map<string, LayoutEditContext>()
+  private readonly openingViewers = new Map<
+    string,
+    { mode: ChipViewerMode; promise: Promise<ChipViewerOpenResult> }
+  >()
   private readonly openViewerCounts = new Map<string, number>()
   private readonly processedEditCommands = new Set<string>()
   private nextEditBridgeId = 1
@@ -753,6 +762,31 @@ export class ChipViewerService {
   async open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult> {
     const projectPath = normalizeLocalPath(request.projectPath)
     const mode = normalizeChipViewerMode(request.mode)
+    const key = this.viewerKey(projectPath, request.step)
+    const opening = this.openingViewers.get(key)
+    if (opening) {
+      if (opening.mode !== mode) {
+        return Promise.reject(
+          new Error(`Chip Viewer is already opening this step in ${opening.mode} mode.`),
+        )
+      }
+      return opening.promise
+    }
+
+    const promise = this.openOnce(request, projectPath, mode)
+    this.openingViewers.set(key, { mode, promise })
+    void promise.then(
+      () => this.openingViewers.delete(key),
+      () => this.openingViewers.delete(key),
+    )
+    return promise
+  }
+
+  private async openOnce(
+    request: ChipViewerOpenRequest,
+    projectPath: string,
+    mode: ChipViewerMode,
+  ): Promise<ChipViewerOpenResult> {
     const defView = isDefViewStep(request.step)
     if (defView && mode === 'edit') {
       throw new Error('DEF View is read-only and cannot be opened in edit mode.')
@@ -762,6 +796,7 @@ export class ChipViewerService {
       : await this.resolveSnapshotInputs(projectPath, request.step)
     await this.requireSavedGeometry(snapshotInputs, request.step)
     const binaries = this.resolveBinaries()
+    await this.buildDevelopmentViewer(binaries)
 
     let viewerManifestPath = snapshotInputs.manifestPath
     let editCommandDirectory: string | undefined
@@ -812,6 +847,9 @@ export class ChipViewerService {
     const viewerArgs = ['--manifest', viewerManifestPath, '--mode', mode]
     if (snapshotInputs.drcStatisPath) {
       viewerArgs.push('--drc-statis', snapshotInputs.drcStatisPath)
+    }
+    if (snapshotInputs.antennaDataPath) {
+      viewerArgs.push('--antenna-data', snapshotInputs.antennaDataPath)
     }
     if (snapshotInputs.mapRootPath) {
       viewerArgs.push('--map-root', snapshotInputs.mapRootPath)
@@ -885,10 +923,9 @@ export class ChipViewerService {
   async isOpen(request: ChipViewerOpenRequest): Promise<ChipViewerOpenStatus> {
     const saving =
       (this.savingProjectPaths.get(normalizeLocalPath(request.projectPath)) ?? 0) > 0
+    const key = this.viewerKey(request.projectPath, request.step)
     return {
-      open:
-        (this.openViewerCounts.get(this.viewerKey(request.projectPath, request.step)) ??
-          0) > 0,
+      open: this.openingViewers.has(key) || (this.openViewerCounts.get(key) ?? 0) > 0,
       ...(saving ? { saving: true } : {}),
     }
   }
@@ -975,11 +1012,18 @@ export class ChipViewerService {
 
     const outputDirectory = dirname(defPath)
     const workspaceStepDirectory = dirname(outputDirectory)
+    const workspaceDirectory = dirname(workspaceStepDirectory)
     const geometryDir = join(outputDirectory, 'geometry')
     // Geometry is atomically replaced by ECC flow step runs. Keep the live
     // command/result transport outside that published artifact tree.
     const editDirectory = join(workspaceStepDirectory, '.chip-viewer', 'layout-edit')
     const drcStatisPath = join(workspaceStepDirectory, 'analysis', 'drc_statis.csv')
+    const antennaDataPath = join(
+      workspaceDirectory,
+      'antennaCheck_ecc',
+      'feature',
+      'antennaCheck.step.json',
+    )
     const mapRootPath = join(workspaceStepDirectory, 'feature')
     const isDrcStep = isDrcWorkspaceStep(step, stepLabel, workspaceStepDirectory)
     const lvsDataPath = join(workspaceStepDirectory, 'feature', 'lvs.step.json')
@@ -988,6 +1032,7 @@ export class ChipViewerService {
     const isStaStep = isStaWorkspaceStep(step, stepLabel, workspaceStepDirectory)
 
     return {
+      antennaDataPath: this.fileExists(antennaDataPath) ? antennaDataPath : undefined,
       dbPath,
       defPath,
       drcStatisPath:
@@ -1975,6 +2020,17 @@ export class ChipViewerService {
     return this.resolveDevBinaries()
   }
 
+  private async buildDevelopmentViewer(binaries: ChipViewerBinaries): Promise<void> {
+    if (!binaries.developmentBuild) return
+
+    try {
+      await this.execFile(binaries.developmentBuild.file, binaries.developmentBuild.args)
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      throw new Error(`Chip Viewer development build failed: ${detail}`)
+    }
+  }
+
   private resolvePackagedBinaries(): PackagedBinaryResolution {
     const binaryDir = this.resourcesPath ? join(this.resourcesPath, 'binaries') : ''
     const eccPath = join(binaryDir, executableName('ecc', this.platform))
@@ -2045,6 +2101,10 @@ export class ChipViewerService {
     return {
       eccPath: eccWrapperPath,
       viewerPath: viewerWrapperPath,
+      developmentBuild: {
+        file: viewerWrapperPath,
+        args: ['--build-only'],
+      },
     }
   }
 
