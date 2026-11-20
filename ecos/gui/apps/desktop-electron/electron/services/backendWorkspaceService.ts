@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import {
@@ -53,8 +54,10 @@ import { flowInsightsSection } from './backendWorkspaceFlowInsights'
 import { isPathWithinRoot } from './pathScope'
 import { projectWorkspaceResults } from './backendWorkspaceResultProjection'
 import { readWorkspaceFlowFile } from './eccCli/persistedState'
+import { matchWorkspaceFlowPlan } from './backendWorkspaceFlowPlan'
 
 interface BackendWorkspaceServiceOptions {
+  readProjectFlowPlan?: (projectRoot: string) => Promise<unknown>
   workspaceRootProvider: {
     getProjectRoot(): Promise<string>
   }
@@ -83,6 +86,10 @@ interface WorkspaceContext {
   watchedRoots?: string[]
   watcher?: ProjectComparisonFileWatcher
   flowInsights?: ReadSection<WorkspaceFlowInsightsSummary>
+  flowPlan?: {
+    key: string
+    steps: ReturnType<typeof matchWorkspaceFlowPlan>
+  }
   windowId: number
 }
 
@@ -209,6 +216,8 @@ export class BackendWorkspaceService {
 
   async refreshOverview(): Promise<BackendWorkspaceOverviewResult> {
     const windowId = requireWindowScopeId()
+    const context = this.contexts.get(windowId)
+    if (context?.flowPlan && !context.flowPlan.steps) context.flowPlan = undefined
     this.invalidateWindow(windowId, false)
     return await this.getOverview()
   }
@@ -620,6 +629,22 @@ export class BackendWorkspaceService {
     const resultProjection = snapshot?.ok ? projectWorkspaceResults(snapshot) : null
     const displaySnapshot = resultProjection?.snapshot ?? snapshot
     const flow = flowSection(snapshot, liveFlow ?? undefined)
+    if (flow.status === 'ready' && manifest && this.options.readProjectFlowPlan) {
+      const steps = flow.data.steps
+      const config = await stat(join(projectRoot, 'ecc.toml')).catch(() => null)
+      const key = JSON.stringify([
+        workspaceRoot,
+        config && [config.ino, config.mtimeMs, config.ctimeMs, config.size],
+        steps.map(({ stepId, toolId, inputStep }) => [stepId, toolId, inputStep]),
+      ])
+      if (context.flowPlan?.key !== key) {
+        const plan = await this.options.readProjectFlowPlan(projectRoot).catch(() => null)
+        context.flowPlan = { key, steps: matchWorkspaceFlowPlan(plan, steps) }
+      }
+      const plan = context.flowPlan.steps
+      if (plan)
+        flow.data.steps = steps.map((step, index) => ({ ...step, ...plan[index] }))
+    }
     const checklist = checklistSection(displaySnapshot, flow)
     const qor = await this.readQor(workspaceRoot, manifest, displaySnapshot)
     const flowInsights = flowInsightsSection(snapshot, flow, qor.qor)
@@ -841,7 +866,7 @@ export class BackendWorkspaceService {
     context.watchKey = watchKey
     context.watchedRoots = snapshotRoots
     void Promise.all([
-      watcher.startProject(dirname(workspaceRoot)),
+      watcher.startProject(dirname(workspaceRoot), ['project.json', 'ecc.toml']),
       watcher.reconcile(dirname(workspaceRoot), snapshotRoots),
     ]).catch((error) => {
       if (context.watcher === watcher) {

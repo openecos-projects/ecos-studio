@@ -1,30 +1,48 @@
 <template>
-  <div class="flow-run-control">
+  <div class="flow-run-control" :class="{ 'flow-step-actions': showStepActions }">
     <button
       type="button"
-      class="flow-run-icon-button flow-run-start-button"
+      :class="
+        showStepActions
+          ? 'flow-run-dialog-button is-primary'
+          : 'flow-run-icon-button flow-run-start-button'
+      "
       :aria-busy="flowRunControlBusy"
       :disabled="flowRunControlDisabled"
       :title="runButtonLabel"
+      :aria-label="runButtonLabel"
       @click="handleRunRequest"
     >
       <i
         :class="flowRunControlBusy ? 'ri-loader-4-line animate-spin' : 'ri-play-fill'"
         aria-hidden="true"
       />
+      <span v-if="showStepActions">{{ runButtonLabel }}</span>
+    </button>
+    <button
+      v-if="showStepActions && props.step"
+      type="button"
+      class="flow-run-dialog-button"
+      :disabled="flowRunControlDisabled"
+      @click="requestFromStep"
+    >
+      Run from this step
     </button>
   </div>
 
   <Dialog
     v-model:visible="rerunConfirmationVisible"
     modal
-    :header="`Run ${runTargetLabel} again?`"
+    :header="runFromStep ? 'Run from this step?' : `Run ${runTargetLabel} again?`"
     :style="{ width: 'min(420px, calc(100vw - 32px))' }"
     :draggable="false"
   >
     <p class="flow-run-dialog-copy">
-      {{ runTargetLabel }} has already finished. Running it again will replace its current
-      execution results.
+      {{
+        runFromStep
+          ? `Run ${runTargetLabel} and the later steps in this workspace. This replaces any existing results for those steps.`
+          : `Running ${runTargetLabel} again will replace its current execution results.`
+      }}
     </p>
     <div class="flow-run-dialog-actions">
       <button
@@ -39,7 +57,7 @@
         class="flow-run-dialog-button is-primary"
         @click="confirmRerun"
       >
-        Run again
+        {{ runFromStep ? 'Run from this step' : 'Run again' }}
       </button>
     </div>
   </Dialog>
@@ -48,6 +66,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Dialog from 'primevue/dialog'
+import { getStepMetadata } from '@/api/type'
 import { useCurrentStage } from '@/composables/useCurrentStage'
 import { useFlowRunner } from '@/composables/useFlowRunner'
 import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
@@ -57,9 +76,14 @@ import { getDesktopApi } from '@/platform/desktop'
 import { useOptimizationEpisodeStore } from '@/stores/optimizationEpisodeStore'
 import { flowNodeStatus, type FlowNodeStatus } from './flowStatus'
 
-const props = defineProps<{ step?: string; status?: FlowNodeStatus }>()
+const props = defineProps<{
+  step?: string
+  status?: FlowNodeStatus
+  showStepActions?: boolean
+}>()
 
 const rerunConfirmationVisible = ref(false)
+const runFromStep = ref(false)
 const preparingRerun = ref(false)
 const { currentStage } = useCurrentStage()
 const { isRunning, runFlow, runAllFlow } = useFlowRunner()
@@ -96,7 +120,9 @@ const flowRunControlDisabled = computed(
 const targetStep = computed(() => props.step ?? currentStage.value)
 const isHomeStage = computed(() => !props.step && currentStage.value === 'home')
 const runTargetLabel = computed(
-  () => props.step ?? (isHomeStage.value ? 'the full flow' : 'this step'),
+  () =>
+    (props.step && (getStepMetadata(props.step)?.label ?? props.step)) ||
+    (isHomeStage.value ? 'the full flow' : 'this step'),
 )
 const runButtonLabel = computed(() =>
   parentRunGuarded.value
@@ -157,6 +183,7 @@ onBeforeUnmount(() => {
 
 async function handleRunRequest(): Promise<void> {
   if (flowRunControlDisabled.value) return
+  runFromStep.value = false
   if (needsRerunConfirmation.value) {
     rerunConfirmationVisible.value = true
     return
@@ -164,8 +191,20 @@ async function handleRunRequest(): Promise<void> {
   await executeRun(false)
 }
 
+function requestFromStep(): void {
+  if (flowRunControlDisabled.value) return
+  runFromStep.value = true
+  rerunConfirmationVisible.value = true
+}
+
 async function confirmRerun(): Promise<void> {
   rerunConfirmationVisible.value = false
+  if (runFromStep.value && props.step) {
+    if (flowRunControlDisabled.value) return
+    setRunStepOngoingByPath(props.step)
+    await runAllFlow({ fromStep: props.step })
+    return
+  }
   await executeRun(true)
 }
 
@@ -233,6 +272,17 @@ async function canRerunCurrentStep(): Promise<boolean> {
 <style scoped>
 .flow-run-control {
   display: flex;
+}
+.flow-step-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.flow-step-actions .is-primary i {
+  margin-inline-end: 4px;
+}
+.flow-step-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .flow-run-icon-button {

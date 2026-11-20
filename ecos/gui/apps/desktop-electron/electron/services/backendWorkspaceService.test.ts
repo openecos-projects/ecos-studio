@@ -3146,7 +3146,10 @@ describe('BackendWorkspaceService', () => {
     const listener = vi.fn()
     service.onInvalidated(listener)
 
-    expect(watcher.startProject).toHaveBeenCalledWith('/project')
+    expect(watcher.startProject).toHaveBeenCalledWith('/project', [
+      'project.json',
+      'ecc.toml',
+    ])
     expect(watcher.reconcile).toHaveBeenCalledWith('/project', [
       '/project/ws-a',
       '/project/ws-base',

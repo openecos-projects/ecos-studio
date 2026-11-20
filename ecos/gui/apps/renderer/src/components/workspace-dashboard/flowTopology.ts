@@ -2,10 +2,7 @@ import { sameFlowStepName } from '@/api/type'
 
 export interface TopologyStep {
   id: string
-  category?: 'PNR' | 'CHECKER'
-  inputStep?: string
-  status?: string
-  tool?: string
+  stage?: number
 }
 
 export interface FlowPosition {
@@ -24,6 +21,7 @@ export interface FlowTopology {
   edges: FlowEdge[]
   columns: number
   rows: number
+  parallelGroups: Array<{ stage: number; stepIds: string[] }>
 }
 
 export const SIGNOFF_MILESTONE_ID = 'signoff-package-review'
@@ -54,35 +52,13 @@ export function withSignoffMilestone(
 
 export function buildFlowTopology(steps: readonly TopologyStep[]): FlowTopology {
   const waves: TopologyStep[][] = []
-  let filler: string | undefined
-  let previousOutput: string | undefined
+  const hasPlan = steps.every((step) => step.stage !== undefined)
   for (const step of steps) {
     const wave = waves[waves.length - 1]
-    const input = step.inputStep ?? filler ?? previousOutput
-    // The CHECKER steps in ECC #380 publish two kinds of downstream data.
-    // Match analysis_wave_end on the selected ledger, including its input chain.
-    const waitsForWave = wave?.some(
-      ({ id }) =>
-        id === input ||
-        (id === 'rcx' && ['sta', 'power_analysis', 'emir'].includes(step.id)) ||
-        (id === 'power_analysis' && step.id === 'emir'),
-    )
-    if (
-      step.category === 'CHECKER' &&
-      wave?.[0]?.category === 'CHECKER' &&
-      !waitsForWave
-    ) {
+    if (hasPlan && wave && wave[0]?.stage === step.stage) {
       wave.push(step)
     } else {
       waves.push([step])
-    }
-    if (step.id === 'filler') filler = step.id
-    if (
-      step.status !== 'skipped' &&
-      step.tool !== 'kepler_formal' &&
-      !['antenna_check', 'emir'].includes(step.id)
-    ) {
-      previousOutput = step.id
     }
   }
   const rows = Math.max(1, ...waves.map((wave) => wave.length))
@@ -94,10 +70,16 @@ export function buildFlowTopology(steps: readonly TopologyStep[]): FlowTopology 
         row: (rows - wave.length) / 2 + index,
       })),
     ),
-    edges: waves.flatMap((wave, column) =>
-      wave.flatMap(({ id }) =>
-        (waves[column + 1] ?? []).map(({ id: next }) => ({ from: id, to: next })),
-      ),
+    edges: waves.flatMap((wave, column) => {
+      const next = waves[column + 1]
+      return wave.length === 1 && next?.length === 1
+        ? [{ from: wave[0]!.id, to: next[0]!.id }]
+        : []
+    }),
+    parallelGroups: waves.flatMap((wave) =>
+      wave.length > 1
+        ? [{ stage: wave[0]!.stage!, stepIds: wave.map((step) => step.id) }]
+        : [],
     ),
     columns: waves.length,
     rows,

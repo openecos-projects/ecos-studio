@@ -4,6 +4,7 @@
     :data-step="step.id"
     :data-status="step.status"
     :data-check-state="step.checkState"
+    :data-stage="step.stage"
   >
     <header :title="step.label">{{ step.label }}</header>
     <div class="step-resources">
@@ -11,8 +12,8 @@
         type="button"
         class="step-state"
         :class="`is-${step.status}`"
-        :title="`${statusLabel(step.status)} — run ${step.label}`"
-        :aria-label="`${statusLabel(step.status)} — run ${step.label}`"
+        :title="`${executionLabel} — run ${step.label}`"
+        :aria-label="`${executionLabel} — run ${step.label}`"
         :disabled="step.status === 'running'"
         @click="$emit('run', step)"
       >
@@ -23,6 +24,7 @@
           ]"
           aria-hidden="true"
         />
+        <span class="step-execution-state">{{ executionLabel }}</span>
       </button>
       <dl>
         <div>
@@ -35,6 +37,9 @@
         </div>
       </dl>
     </div>
+    <p v-if="step.status === 'failed'" class="step-failure" :title="step.failureMessage">
+      {{ step.failureMessage || 'See step log' }}
+    </p>
     <button
       type="button"
       class="step-layout"
@@ -100,7 +105,11 @@ import {
 import type { DashboardFlowStep } from './flowDashboardData'
 import { isUsableLayoutThumbnail } from './layoutThumbnail'
 
-const props = defineProps<{ step: DashboardFlowStep }>()
+const props = defineProps<{ step: DashboardFlowStep; waiting?: boolean }>()
+const executionLabel = computed(() => {
+  if (props.step.status !== 'queued') return statusLabel(props.step.status)
+  return props.waiting ? 'Waiting' : 'Not started'
+})
 defineEmits<{
   run: [step: DashboardFlowStep]
   layout: [step: DashboardFlowStep]
@@ -157,13 +166,32 @@ header {
   font-weight: 700;
 }
 .step-resources {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 7px;
+  display: grid;
+  gap: 3px;
+  padding-block: 2px 4px;
+  padding-inline: 7px;
 }
 .step-state {
-  font-size: 25px;
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 5px;
+  min-block-size: 18px;
+  padding: 0;
+  font-size: 1rem;
+  line-height: 1;
+}
+.step-execution-state {
+  color: var(--text-primary);
+  font-size: 0.6875rem;
+  line-height: 1.2;
+}
+.step-failure {
+  margin: 0 7px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
 }
 button {
   border: 0;
@@ -180,9 +208,9 @@ button:focus-visible {
   outline-offset: -2px;
 }
 dl {
-  flex: 1;
   margin: 0;
-  min-width: 0;
+  font-size: 0.6875rem;
+  line-height: 1.25;
 }
 dl > div {
   display: flex;
@@ -190,13 +218,12 @@ dl > div {
   gap: 4px;
 }
 dt {
-  font-size: 11px;
   color: var(--text-secondary);
 }
 dd {
-  font-size: 11px;
   margin: 0;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .step-layout {
   flex: 1;

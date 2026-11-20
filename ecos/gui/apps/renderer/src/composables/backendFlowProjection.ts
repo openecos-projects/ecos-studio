@@ -189,6 +189,18 @@ export function projectBackendFlowSteps(
         ? 'failed'
         : 'succeeded'
     step.state = normalizeState(data.state, fallback)
+    const error = data.error
+    const failureMessage =
+      typeof error === 'string'
+        ? error
+        : error && typeof error === 'object' && 'message' in error
+          ? error.message
+          : null
+    if (step.state === 'failed' && typeof failureMessage === 'string') {
+      step.failureMessage = failureMessage.split('\n', 1)[0]?.trim().slice(0, 240)
+    } else {
+      delete step.failureMessage
+    }
     const checklist = data.checklist_status ?? data.checklist
     if (
       checklist &&

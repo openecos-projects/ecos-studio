@@ -290,6 +290,7 @@ function readProductCommandRequest(value: unknown): ProductCommandRequest {
     case 'workspace.run':
       requireString(payload, 'workspaceHandle')
       requireString(payload, 'idempotencyKey')
+      requireOptionalString(payload, 'fromStep')
       validateRevision(payload.expectedWorkspaceRevision)
       break
     case 'workspace.runStep':

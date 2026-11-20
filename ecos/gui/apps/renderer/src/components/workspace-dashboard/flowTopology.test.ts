@@ -22,7 +22,7 @@ const ids = [
 ]
 const steps = ids.map((id, index) => ({
   id,
-  category: index >= 3 && index <= 10 ? ('CHECKER' as const) : ('PNR' as const),
+  stage: [1, 2, 3, 4, 4, 4, 4, 4, 5, 5, 6, 7, 8][index],
 }))
 
 describe('workspace flow topology', () => {
@@ -42,17 +42,16 @@ describe('workspace flow topology', () => {
     const empty = buildFlowTopology([])
     expect(withSignoffMilestone(empty, [])).toBe(empty)
   })
-  it('groups parallel checks into execution waves and waits for RCX before power analysis', () => {
+  it('groups authoritative stages without connecting individual steps across parallel groups', () => {
     const topology = buildFlowTopology(steps)
     expect(topology.rows).toBe(5)
     expect(topology.nodes.map((node) => node.id).sort()).toEqual([...ids].sort())
-    expect(
-      topology.edges.filter((edge) => edge.from === 'filler').map((edge) => edge.to),
-    ).toEqual(['lvs', 'drc', 'antenna_check', 'post_route_lec', 'rcx'])
-    expect(topology.edges).not.toContainEqual({ from: 'drc', to: 'antenna_check' })
-    expect(topology.edges).toContainEqual({ from: 'power_analysis', to: 'emir' })
-    expect(topology.edges).toContainEqual({ from: 'rcx', to: 'power_analysis' })
-    expect(topology.edges).toContainEqual({ from: 'rcx', to: 'sta' })
+    expect(topology.parallelGroups).toEqual([
+      { stage: 4, stepIds: ['lvs', 'drc', 'antenna_check', 'post_route_lec', 'rcx'] },
+      { stage: 5, stepIds: ['sta', 'power_analysis'] },
+    ])
+    expect(topology.edges).not.toContainEqual({ from: 'drc', to: 'sta' })
+    expect(topology.edges).not.toContainEqual({ from: 'filler', to: 'lvs' })
     expect(topology.edges).toContainEqual({ from: 'emir', to: 'harden' })
     const extraction = topology.nodes.find((node) => node.id === 'rcx')!
     const timing = topology.nodes.find((node) => node.id === 'sta')!
@@ -66,7 +65,8 @@ describe('workspace flow topology', () => {
     const topology = buildFlowTopology(steps.slice(2, 8))
     expect(topology.columns).toBe(2)
     expect(topology.rows).toBe(5)
-    expect(topology.edges).toHaveLength(5)
+    expect(topology.parallelGroups).toHaveLength(1)
+    expect(topology.edges).toHaveLength(0)
   })
 
   it('keeps unknown steps and omits absent verification steps', () => {

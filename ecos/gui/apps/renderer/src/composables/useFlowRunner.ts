@@ -36,6 +36,7 @@ import {
 /** 任意流程命令执行中为 true，供 Home flow log 等订阅，避免多实例 composable 状态不一致 */
 export interface FlowRunOptions {
   step?: string
+  fromStep?: string
   rerun?: boolean
   resetDependents?: boolean
   /** Bypasses the pre-run stale-resource guard after explicit user confirmation. */
@@ -422,6 +423,7 @@ export function useFlowRunner() {
         expectedWorkspaceRevision: currentWorkspaceRevision(),
         idempotencyKey: crypto.randomUUID(),
         rerun: Boolean(options.rerun),
+        ...(options.fromStep ? { fromStep: options.fromStep } : {}),
         workspaceHandle: requestScope.workspaceHandle,
         ...(options.allowStaleResources === true ? { allowStaleResources: true } : {}),
       })

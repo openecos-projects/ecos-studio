@@ -2,6 +2,7 @@
   <section class="workspace-flow-dashboard" aria-label="Flow diagram">
     <header class="flow-header">
       <h2><i class="ri-node-tree" aria-hidden="true" /> Flow</h2>
+      <span class="flow-execution-summary" role="status">{{ executionSummary }}</span>
       <label
         >Zoom
         <input
@@ -71,7 +72,7 @@
               class="flow-edges"
               :width="graphWidth"
               :height="graphHeight"
-              aria-label="Flow execution order"
+              aria-hidden="true"
             >
               <defs>
                 <marker
@@ -94,11 +95,31 @@
               >
                 <title>{{ edge.from }} → {{ edge.to }}</title>
               </path>
+              <path
+                v-for="(path, index) in parallelTransitions"
+                :key="`stage-${index}`"
+                :d="path"
+                :marker-end="`url(#${arrowId})`"
+              />
             </svg>
+            <div
+              v-for="group in parallelGroups"
+              :key="group.stage"
+              class="flow-parallel-group"
+              :style="{
+                left: `${group.x}px`,
+                top: `${group.y}px`,
+                width: `${FLOW_CARD.width}px`,
+                height: `${group.height}px`,
+              }"
+            >
+              <span>Stage {{ group.stage }} · {{ group.count }} steps</span>
+            </div>
             <FlowStepCard
               v-for="node in positionedSteps"
               :key="node.step.id"
               :step="node.step"
+              :waiting="waitingIds.has(node.step.id)"
               class="positioned-step"
               :style="{ left: `${node.x}px`, top: `${node.y}px` }"
               @run="openDetails('run', $event)"
@@ -150,13 +171,17 @@
       @update:visible="closeDetails"
     >
       <div v-if="selectedStep && detailKind === 'run'" class="step-run-action">
-        <span
-          >Run {{ selectedStep.label }} using the current workspace configuration.</span
-        >
+        <dl v-if="selectedInputs.length" class="step-inputs">
+          <div v-for="[input, source] in selectedInputs" :key="input">
+            <dt>{{ input.replace(/_/g, ' ') }}</dt>
+            <dd>{{ source }}</dd>
+          </div>
+        </dl>
         <FlowRunControl
           :key="selectedStep.id"
-          :step="selectedStep.path"
+          :step="selectedStep.id"
           :status="selectedStep.status"
+          show-step-actions
         />
       </div>
     </Dialog>
@@ -191,7 +216,7 @@ import { useCenteredFlowViewport } from './useCenteredFlowViewport'
 import { FLOW_CARD, flowGraphLayout } from './flowGraphLayout'
 
 const emit = defineEmits<{ layout: [thumbnail: HomeLayoutThumbnail] }>()
-const { projectedSteps, isLoading, error } = useBackendFlowStages()
+const { projectedSteps, activeOperation, isLoading, error } = useBackendFlowStages()
 const { layoutThumbnails } = useHomeSnapshots()
 const session = useBackendWorkspaceSession()
 const arrowId = `flow-arrow-${useId()}`
@@ -222,6 +247,59 @@ const topology = computed(() =>
 )
 const layout = computed(() => flowGraphLayout(topology.value))
 const positions = computed(() => layout.value.positions)
+const parallelGroups = computed(() =>
+  topology.value.parallelGroups.map(({ stage, stepIds }) => {
+    const first = positions.value.get(stepIds[0]!)!
+    const last = positions.value.get(stepIds[stepIds.length - 1]!)!
+    return {
+      ...first,
+      stage,
+      count: stepIds.length,
+      height: last.y - first.y + FLOW_CARD.height,
+    }
+  }),
+)
+const parallelTransitions = computed(() => {
+  const firstGroup = parallelGroups.value[0]
+  if (!firstGroup) return []
+  const center = firstGroup.y + firstGroup.height / 2
+  const groupX = new Set(parallelGroups.value.map((group) => group.x))
+  const columns = [
+    ...new Set(topology.value.nodes.map((node) => positions.value.get(node.id)!.x)),
+  ]
+  return columns.slice(0, -1).flatMap((x, index) => {
+    const next = columns[index + 1]!
+    if (!groupX.has(x) && !groupX.has(next)) return []
+    const from = x + FLOW_CARD.width + (groupX.has(x) ? 6 : 0)
+    const to = next - (groupX.has(next) ? 8 : 3)
+    return [`M ${from} ${center} H ${to}`]
+  })
+})
+const runningCount = computed(
+  () => steps.value.filter((step) => step.status === 'running').length,
+)
+const waitingIds = computed(() => {
+  const scope = activeOperation.value?.flowScope
+  if (!scope) return new Set<string>()
+  const start = scope.fromStep
+    ? steps.value.findIndex((step) => step.id === scope.fromStep)
+    : 0
+  if (start < 0) return new Set<string>()
+  return new Set(
+    steps.value
+      .slice(start)
+      .filter((step) => step.status === 'queued')
+      .map((step) => step.id),
+  )
+})
+const executionSummary = computed(() => {
+  const waiting = waitingIds.value.size
+  const failed = steps.value.filter((step) => step.status === 'failed').length
+  if (runningCount.value || waiting)
+    return `${runningCount.value} running${waiting ? ` · ${waiting} waiting` : ''}`
+  if (failed) return `${failed} failed`
+  return ''
+})
 const signoffPosition = computed(() => positions.value.get(SIGNOFF_MILESTONE_ID))
 const positionedSteps = computed(() =>
   steps.value.map((step) => ({ step, ...positions.value.get(step.id)! })),
@@ -242,6 +320,19 @@ const { surfaceSize, canvasOffset, fitToViewport } = useCenteredFlowViewport(
 const selectedStep = computed(
   () => steps.value.find((step) => step.id === selectedId.value) ?? null,
 )
+const selectedInputs = computed(() => {
+  const step = selectedStep.value
+  if (!step) return []
+  if (step.inputProducers) {
+    return Object.entries(step.inputProducers).map(([input, source]) => [
+      input,
+      source
+        ? (steps.value.find((candidate) => candidate.id === source)?.label ?? source)
+        : 'No upstream step',
+    ])
+  }
+  return step.inputStep ? [['Input step', step.inputStep]] : []
+})
 function edgePath(edge: FlowEdge): string {
   const from = positions.value.get(edge.from)!
   const to = positions.value.get(edge.to)!
@@ -458,13 +549,46 @@ output {
 }
 .step-run-action {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 16px;
   color: var(--text-primary);
   font-size: 13px;
 }
 .flow-header h2 {
   flex: 1;
+}
+.flow-parallel-group {
+  position: absolute;
+  outline: 1px solid var(--border-color);
+  outline-offset: 5px;
+  border-radius: 6px;
+  pointer-events: none;
+}
+.flow-parallel-group span {
+  position: absolute;
+  bottom: calc(100% + 9px);
+  color: var(--text-secondary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.flow-execution-summary {
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.step-inputs {
+  margin: 0;
+}
+.step-inputs div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  padding-block: 3px;
+}
+.step-inputs dt {
+  color: var(--text-secondary);
+}
+.step-inputs dd {
+  margin: 0;
 }
 </style>

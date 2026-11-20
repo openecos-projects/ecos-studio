@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { Page } from 'playwright-core'
 import { launchE2EApp, repoRoot, resolveOutDir, type E2EApp } from './support/launch'
 import { prepareGcdProject } from './support/design'
+import { readFlowSteps } from './support/flow'
 import { setupBackendWorkspace } from './support/journey'
 import { createMilestoneShots } from './support/screenshots'
 
@@ -121,6 +122,37 @@ describe('workspace dashboard layout', () => {
     await shot('workspace-sidebar-lvs')
   })
 
+  it('shows ECC parallel groups and distinguishes the two run scopes', async () => {
+    const page = launched!.page
+    const rcx = page.locator('.flow-step-card[data-step="rcx"]')
+    const drc = page.locator('.flow-step-card[data-step="drc"]')
+    const sta = page.locator('.flow-step-card[data-step="sta"]')
+    await expect.poll(() => rcx.getAttribute('data-stage')).toMatch(/^\d+$/)
+    expect(await drc.getAttribute('data-stage')).toBe(
+      await rcx.getAttribute('data-stage'),
+    )
+    expect(await sta.getAttribute('data-stage')).not.toBe(
+      await rcx.getAttribute('data-stage'),
+    )
+    expect(await page.locator('.flow-parallel-group').count()).toBeGreaterThan(0)
+    await shot('worker-flow-stages')
+    await sta.getByRole('button', { name: /run sta/i }).click()
+    const dialog = page.getByRole('dialog', { name: 'Run STA', exact: true })
+    await dialog.getByText('parasitics', { exact: true }).waitFor()
+    expect(await dialog.getByText('RCX', { exact: true }).count()).toBe(1)
+    await dialog.getByRole('button', { name: 'Run current step', exact: true }).waitFor()
+    await dialog.getByRole('button', { name: 'Run from this step', exact: true }).click()
+    const confirmation = page.getByRole('dialog', {
+      name: 'Run from this step?',
+      exact: true,
+    })
+    await confirmation
+      .getByRole('button', { name: 'Run from this step', exact: true })
+      .waitFor()
+    await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+  })
+
   it.each([
     [1440, 1000],
     [1280, 800],
@@ -216,4 +248,96 @@ describe('workspace dashboard layout', () => {
       await page.getByRole('button', { name: 'ECOS Agent', exact: true }).click()
     }
   })
+
+  it('runs a single step and then runs the remaining steps from the selected start', async () => {
+    const outDir = await resolveOutDir('workspace-run-scopes')
+    const design = await prepareGcdProject(join(outDir, 'work'))
+    const { page, close } = await launchE2EApp(outDir)
+    const capture = createMilestoneShots(page, outDir)
+    try {
+      const workspace = await setupBackendWorkspace(page, {
+        ...design,
+        flowRange: { fromStepId: 'synthesis', throughStepId: 'macro_placement' },
+        pdkRoot: process.env.ECOS_E2E_PDK_ROOT ?? join(repoRoot, 'pdk/icsprout55-pdk'),
+      })
+      const openRun = async (id: string, label: string) => {
+        await page
+          .locator(`.flow-step-card[data-step="${id}"]`)
+          .getByRole('button', { name: `Not started — run ${label}`, exact: true })
+          .click()
+        return page.getByRole('dialog', { name: `Run ${label}`, exact: true })
+      }
+      const synthesis = await openRun('synthesis', 'Synthesis')
+      await synthesis
+        .getByRole('button', { name: 'Run current step', exact: true })
+        .click()
+      await expect
+        .poll(() => page.locator('[data-step="synthesis"]').getAttribute('data-status'), {
+          timeout: 120_000,
+        })
+        .toBe('succeeded')
+      const synthesisCard = page.locator('.flow-step-card[data-step="synthesis"]')
+      await expect
+        .poll(() =>
+          synthesisCard.locator('.step-resources dd').evaluateAll((values) => {
+            const card = values[0]!.closest('.flow-step-card')!.getBoundingClientRect()
+            return values.map((value) => {
+              const range = document.createRange()
+              range.selectNodeContents(value)
+              const lines = range.getClientRects()
+              return (
+                lines.length === 1 &&
+                lines[0]!.left >= card.left &&
+                lines[0]!.right <= card.right &&
+                value.textContent?.trim() !== '--'
+              )
+            })
+          }),
+        )
+        .toEqual([true, true])
+      const states = async () =>
+        (await readFlowSteps(workspace.workspaceDir)).map(({ name, state }) => [
+          name,
+          state,
+        ])
+      expect(await states()).toEqual([
+        ['synthesis', 'Success'],
+        ['pre_floorplan', 'Unstart'],
+        ['macro_placement', 'Unstart'],
+      ])
+      await synthesis.getByRole('button', { name: 'Close', exact: true }).click()
+      await synthesisCard.screenshot({ path: join(outDir, 'synthesis-card-metrics.png') })
+
+      const floorplan = await openRun('pre_floorplan', 'Pre Floorplan')
+      const fromHere = { name: 'Run from this step', exact: true }
+      await floorplan.getByRole('button', fromHere).click()
+      const confirmation = page.getByRole('dialog', {
+        name: 'Run from this step?',
+        exact: true,
+      })
+      await confirmation.getByText(/Run Pre Floorplan and the later steps/).waitFor()
+      await confirmation.screenshot({
+        path: join(outDir, 'confirm-run-from-step.png'),
+        animations: 'disabled',
+      })
+      await confirmation.getByRole('button', fromHere).click()
+      await expect.poll(states, { timeout: 120_000 }).toEqual([
+        ['synthesis', 'Success'],
+        ['pre_floorplan', 'Success'],
+        ['macro_placement', 'Success'],
+      ])
+      await expect
+        .poll(() =>
+          page.locator('[data-step="macro_placement"]').getAttribute('data-status'),
+        )
+        .toBe('succeeded')
+      await floorplan.getByRole('button', { name: 'Close', exact: true }).click()
+      await capture('run-from-step-succeeded')
+    } catch (error) {
+      await capture('failure').catch(() => undefined)
+      throw error
+    } finally {
+      await close()
+    }
+  }, 300_000)
 })

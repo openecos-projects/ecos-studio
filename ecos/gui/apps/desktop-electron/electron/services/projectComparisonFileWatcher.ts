@@ -28,10 +28,13 @@ export class ProjectComparisonFileWatcher {
     private readonly workspaceFilename: WorkspaceFilename = 'engineering-snapshot.json',
   ) {}
 
-  async startProject(projectRoot: string): Promise<void> {
+  async startProject(
+    projectRoot: string,
+    filenames: readonly string[] = ['project.json'],
+  ): Promise<void> {
     const root = resolve(projectRoot)
-    const target = join(root, 'project.json')
-    const watcher = this.create(root, [target], () => this.callbacks.onManifestChanged())
+    const targets = filenames.map((filename) => join(root, filename))
+    const watcher = this.create(root, targets, () => this.callbacks.onManifestChanged())
     this.projectWatcher = watcher
     try {
       await ready(watcher)

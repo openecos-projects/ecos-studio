@@ -384,6 +384,7 @@ export interface EccRuntimeOperation {
   currentTool: string
   error: { code: string; message: string } | null
   flow?: { steps: EccRuntimeStepSnapshot[] }
+  flowScope?: { fromStep?: string }
   /**
    * Set when the flow did not succeed because a step's checklist gate blocked
    * it (for example a required step failed its gate, or the flow stopped with
@@ -481,6 +482,7 @@ export interface EccBackgroundOperationLogResult {
 
 export interface EccRuntimeStartFlowRequest extends EccWorkspaceMutationRequest {
   idempotencyKey: string
+  fromStep?: string
   rerun?: boolean
   /** Bypasses the pre-run stale-resource guard after explicit user confirmation. */
   allowStaleResources?: boolean

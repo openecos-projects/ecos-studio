@@ -61,16 +61,18 @@ export function useBackendFlowStages() {
       ? section.data.steps
       : []
   })
-  const projectedSteps = computed(() => {
+  const activeOperation = computed(() => {
     const revision = session.projection.data?.revision
     const workspacePath = currentProject.value?.path
-    const operation =
-      workspacePath && revision?.status === 'ready'
-        ? backgroundOperations.operationForWorkspace(
-            workspacePath,
-            revision.data.workspaceId,
-          )
-        : undefined
+    return workspacePath && revision?.status === 'ready'
+      ? backgroundOperations.operationForWorkspace(
+          workspacePath,
+          revision.data.workspaceId,
+        )
+      : undefined
+  })
+  const projectedSteps = computed(() => {
+    const operation = activeOperation.value
     if (operation?.flow) {
       return projectRuntimeFlowSteps(operation.flow.steps, committedSteps.value)
     }
@@ -177,6 +179,7 @@ export function useBackendFlowStages() {
   }
 
   return {
+    activeOperation,
     clearFlowStages: session.clear,
     dynamicFlowStages,
     error,

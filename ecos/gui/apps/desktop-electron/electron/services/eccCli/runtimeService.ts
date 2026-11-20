@@ -330,6 +330,20 @@ export class EccCliRuntimeService {
     return this.catalog
   }
 
+  async readProjectFlowPlan(projectRoot: string): Promise<unknown> {
+    const args = ['flow', 'status', '--project', projectRoot, '--json']
+    try {
+      const { stdout } = await this.cli.run(args, { cwd: projectRoot, timeoutMs: 5_000 })
+      return JSON.parse(stdout) as unknown
+    } catch (error) {
+      // ECC also emits the plan when it flags missing project inputs.
+      if (error instanceof EccCliCommandError && error.exitCode === 1) {
+        return JSON.parse(error.stdout) as unknown
+      }
+      throw error
+    }
+  }
+
   async verifyPdkDefaults(familyId: string, root: string): Promise<void> {
     await this.ensureContract()
     const directory = await mkdtemp(join(tmpdir(), 'ecos-pdk-verify-'))
@@ -1126,11 +1140,26 @@ export class EccCliRuntimeService {
     }
     const runId = randomUUID()
     const step = kind === 'step' ? (request as EccRuntimeStartStepRequest).step : ''
-    const rerunArgs = request.rerun
-      ? kind === 'step'
-        ? ['--force']
-        : ['--from', await firstFlowStep(session)]
-      : []
+    const fromStep = kind === 'flow' ? request.fromStep : undefined
+    if (fromStep !== undefined) {
+      const flow = await readWorkspaceFlow(session.directory)
+      if (!flow.steps.some((entry) => entry.name === fromStep)) {
+        throw codedError(
+          'The starting step is absent from this Workspace.',
+          'STEP_NOT_FOUND',
+        )
+      }
+    }
+    const rerunArgs = fromStep
+      ? ['--from', fromStep]
+      : request.rerun
+        ? kind === 'step'
+          ? ['--force']
+          : ['--from', await firstFlowStep(session)]
+        : []
+    if (this.isWorkspaceRuntimeActive(session.directory)) {
+      throw codedError('Workspace already has an active ECC run.', 'WORKSPACE_BUSY')
+    }
     const args = [
       'run',
       '--project',
@@ -1156,8 +1185,9 @@ export class EccCliRuntimeService {
       runId,
       kind,
       step,
-      Boolean(request.rerun),
+      Boolean(request.rerun || fromStep),
     )
+    if (kind === 'flow') operation.flowScope = fromStep ? { fromStep } : {}
     const tracked: TrackedOperation = {
       operation,
       projectRoot: session.projectRoot,

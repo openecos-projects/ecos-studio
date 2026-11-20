@@ -5,13 +5,14 @@ const GAP = { x: 32, y: 18 }
 const PADDING = 16
 
 export function flowGraphLayout(topology: FlowTopology) {
+  const topPadding = PADDING + (topology.parallelGroups.length ? 12 : 0)
   return {
     positions: new Map(
       topology.nodes.map((node) => [
         node.id,
         {
           x: PADDING + node.column * (FLOW_CARD.width + GAP.x),
-          y: PADDING + node.row * (FLOW_CARD.height + GAP.y),
+          y: topPadding + node.row * (FLOW_CARD.height + GAP.y),
         },
       ]),
     ),
@@ -20,7 +21,8 @@ export function flowGraphLayout(topology: FlowTopology) {
       Math.max(0, topology.columns - 1) * (FLOW_CARD.width + GAP.x) +
       FLOW_CARD.width,
     height:
-      PADDING * 2 +
+      PADDING +
+      topPadding +
       Math.max(0, topology.rows - 1) * (FLOW_CARD.height + GAP.y) +
       FLOW_CARD.height,
   }

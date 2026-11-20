@@ -8,10 +8,12 @@ const state = vi.hoisted(() => ({
   steps: null as any,
   session: null as any,
   loading: null as any,
+  operation: null as any,
 }))
 vi.mock('@/composables/useBackendFlowStages', () => ({
   useBackendFlowStages: () => ({
     projectedSteps: state.steps,
+    activeOperation: state.operation,
     isLoading: state.loading,
     error: ref(null),
   }),
@@ -27,6 +29,7 @@ import WorkspaceFlowDashboard from './WorkspaceFlowDashboard.vue'
 describe('workspace flow diagram', () => {
   beforeEach(() => {
     state.loading = ref(false)
+    state.operation = ref(undefined)
     state.layoutThumbnails = ref([])
     state.steps = ref(
       [
@@ -45,7 +48,8 @@ describe('workspace flow diagram', () => {
       ].map((stepId, order) => ({
         stepId,
         name: stepId,
-        category: order >= 2 && order <= 9 ? 'CHECKER' : 'PNR',
+        stage: [1, 2, 3, 3, 3, 3, 3, 4, 4, 5, 6, 7][order],
+        ...(stepId === 'sta' ? { inputProducers: { parasitics: 'rcx' } } : {}),
         order,
         state: 'succeeded',
       })),
@@ -101,7 +105,11 @@ describe('workspace flow diagram', () => {
     const wrapper = render()
     expect(wrapper.text()).not.toContain('Checks converge before Harden and Signoff')
     expect(wrapper.findAll('.flow-step-card')).toHaveLength(12)
-    expect(wrapper.get('svg').text()).toContain('rcx → sta')
+    expect(wrapper.get('svg').text()).not.toContain('drc → sta')
+    expect(wrapper.get('.flow-parallel-group').text()).toBe('Stage 3 · 5 steps')
+    await wrapper.get('button[aria-label="Succeeded — run STA"]').trigger('click')
+    expect(wrapper.get('.step-inputs').text()).toContain('parasitics')
+    expect(wrapper.get('.step-inputs').text()).toContain('RCX')
     for (const [label, dialog] of [
       ['LVS checklist details', '.checklist-dialog'],
       ['LVS reports', '.reports-dialog'],
@@ -122,6 +130,26 @@ describe('workspace flow diagram', () => {
     state.session.workspaceContextId = 'context-b'
     await nextTick()
     expect(wrapper.find('.log-dialog').exists()).toBe(false)
+  })
+
+  it('shows waiting only within a known active flow range', async () => {
+    state.steps.value = state.steps.value.map((step: { stepId: string }) => ({
+      ...step,
+      state: step.stepId === 'sta' ? 'running' : 'not-started',
+    }))
+    state.operation.value = { kind: 'flow', flowScope: { fromStep: 'sta' } }
+    const wrapper = render()
+    expect(wrapper.get('[data-step="synthesis"] .step-execution-state').text()).toBe(
+      'Not started',
+    )
+    expect(wrapper.get('[data-step="sta"] .step-execution-state').text()).toBe('Running')
+    expect(wrapper.get('[data-step="emir"] .step-execution-state').text()).toBe('Waiting')
+    state.operation.value = { kind: 'flow' }
+    await nextTick()
+    expect(wrapper.get('[data-step="emir"] .step-execution-state').text()).toBe(
+      'Not started',
+    )
+    wrapper.unmount()
   })
 
   it('opens macro placement from preFloorplan geometry before MacroPlacement runs', async () => {

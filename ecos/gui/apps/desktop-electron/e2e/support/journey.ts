@@ -91,6 +91,7 @@ export interface CreateWorkspaceInput {
   projectRoot: string
   projectId: string
   workspaceName?: string
+  flowRange?: { fromStepId: string; throughStepId: string }
   designName: string
   topModule: string
   clockPort: string
@@ -135,7 +136,7 @@ export async function createDefaultWorkspace(
       inputMode: 'rtl',
       inputs: workspaceInputs.map(({ inputId, role }) => ({ inputId, role })),
       pdk: { familyId: 'ics55', mode: 'default' },
-      flow: { flowId: 'rtl2gds' },
+      flow: { flowId: 'rtl2gds', ...input.flowRange },
       parameters: {
         'design.frequency_mhz': input.frequencyMhz,
         ...input.parameters,

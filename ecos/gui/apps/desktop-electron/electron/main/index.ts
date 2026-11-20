@@ -391,6 +391,8 @@ function getDesktopServices() {
   )
   const backendWorkspaceService = new BackendWorkspaceService({
     projectManagementReadService,
+    readProjectFlowPlan: (projectRoot) =>
+      eccRuntimeService.readProjectFlowPlan(projectRoot),
     snapshotWatcherFactory: (callbacks) =>
       new ProjectComparisonFileWatcher(callbacks, undefined, undefined, [
         'engineering-snapshot.json',
