@@ -1,6 +1,6 @@
 import type { EccRuntimeOperation, EccWorkspaceCreateRequest } from '@ecos-studio/shared'
 import { randomUUID } from 'node:crypto'
-import { access, mkdtemp, rm } from 'node:fs/promises'
+import { access, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { EccCliRuntimeService } from './runtimeService'
@@ -53,6 +53,32 @@ describeReal('ECC CLI runtime real integration', () => {
       workspaceId: 'ws_0001',
     })
     expect(created.reused).not.toBe(true)
+
+    const flowPath = join(workspaceRoot, 'home', 'flow.json')
+    const originalFlow = await readFile(flowPath, 'utf8')
+    const replayKey = 'a'.repeat(64)
+    const replay = await service.deriveCalibrationReplay(
+      created.workspaceHandle,
+      replayKey,
+    )
+    expect(replay.directory).toBe(join(projectRoot, `calibration-${replayKey}`))
+    const replayOperation = await service.startFlowOperation({
+      expectedWorkspaceRevision: replay.workspaceRevision,
+      idempotencyKey: randomUUID(),
+      rerun: true,
+      workspaceHandle: replay.workspaceHandle,
+    })
+    await expectSucceeded(service, replay.workspaceHandle, replayOperation)
+    expect(
+      await service.deriveCalibrationReplay(created.workspaceHandle, replayKey),
+    ).toMatchObject({ workspaceHandle: replay.workspaceHandle })
+    expect(await readFile(flowPath, 'utf8')).toBe(originalFlow)
+    await service.closeWorkspace({ workspaceHandle: replay.workspaceHandle })
+    await service.mutateProjectManifest(projectRoot, {
+      deleteDirectory: true,
+      type: 'delete-workspace',
+      workspaceId: replay.workspaceId!,
+    })
 
     const reused = await service.openWorkspace({ directory: workspaceRoot })
     expect(reused).toMatchObject({

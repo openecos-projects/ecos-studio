@@ -51,7 +51,6 @@ describe('ECOS Agent provider runtime factory', () => {
         openWorkspace: vi.fn(),
         operationStatus: vi.fn(),
         startFlowOperation: vi.fn(),
-        waitForOperation: vi.fn(),
         workspaceSession: vi.fn(),
       }
 

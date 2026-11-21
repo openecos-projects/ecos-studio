@@ -59,7 +59,6 @@ describe('AgentProviderProcessRuntime', () => {
         cancelOperation: vi.fn(),
         openWorkspace: vi.fn(),
         operationStatus: vi.fn(),
-        waitForOperation: vi.fn(),
         startFlowOperation: vi.fn().mockRejectedValue(
           Object.assign(new Error('Resource updates are available for: Yosys'), {
             code: 'RESOURCE_UPDATE_AVAILABLE',
@@ -268,7 +267,6 @@ describe('AgentProviderProcessRuntime', () => {
       openWorkspace: vi.fn(),
       operationStatus: vi.fn(),
       startFlowOperation: vi.fn(),
-      waitForOperation: vi.fn(),
       workspaceSession: vi.fn().mockResolvedValue({ workspaceHandle: 'handle-1' }),
     }
     const runtime = new AgentProviderProcessRuntime({
@@ -339,7 +337,6 @@ describe('AgentProviderProcessRuntime', () => {
       }),
       operationStatus: vi.fn(),
       startFlowOperation: vi.fn(),
-      waitForOperation: vi.fn(),
     }
     const runtime = new AgentProviderProcessRuntime({
       host,
@@ -453,7 +450,6 @@ describe('AgentProviderProcessRuntime', () => {
       openWorkspace: vi.fn(),
       operationStatus: vi.fn(),
       startFlowOperation: vi.fn().mockResolvedValue({ operationId: 'op-run' }),
-      waitForOperation: vi.fn(),
       workspaceSession: vi.fn().mockResolvedValue({ workspaceHandle: 'handle-1' }),
     }
     const runtime = new AgentProviderProcessRuntime({

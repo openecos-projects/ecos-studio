@@ -19,8 +19,8 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
-import shutil
 import time
+from uuid import uuid4
 from collections.abc import Callable
 from pathlib import Path
 
@@ -40,7 +40,9 @@ from ecos_agent.optimization.experiments.knowledge_treatment_execution import (
     _workspace_flow_succeeded,
 )
 
-_TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
+_TERMINAL_STATES = frozenset(
+    {"succeeded", "failed", "cancelled", "interrupted", "unknown"}
+)
 _MIN_REPLAYS = 2
 _PROGRESS_INTERVAL_SECONDS = 30.0
 _CACHE_MANIFEST_SCHEMA = "ecos.replay_cache_manifest.v1"
@@ -187,7 +189,9 @@ def _store_replay_cache(
     observation: TerminalObservation,
     fingerprint: dict[str, str],
     provenance: str,
+    workspace: Path | None = None,
 ) -> None:
+    replay_root.mkdir(parents=True, exist_ok=True)
     (replay_root / "terminal-observation.v1.json").write_text(
         observation.model_dump_json(), encoding="utf-8"
     )
@@ -197,6 +201,7 @@ def _store_replay_cache(
                 "schema_version": _CACHE_MANIFEST_SCHEMA,
                 "provenance": provenance,
                 "components": dict(fingerprint),
+                **({"workspace": str(workspace)} if workspace is not None else {}),
             },
             indent=2,
             sort_keys=True,
@@ -228,18 +233,21 @@ def _run_replay(
     timeout_seconds: float,
     fingerprint: dict[str, str],
     progress: Callable[[str], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> TerminalObservation:
     observation_path = replay_root / "terminal-observation.v1.json"
     manifest = _load_replay_manifest(replay_root)
     replay_workspace = replay_root / "workspace"
     if observation_path.is_file() and manifest is not None:
+        if isinstance(manifest.get("workspace"), str):
+            replay_workspace = Path(manifest["workspace"])
         _require_same_inputs(manifest, fingerprint, index)
         if manifest["components"].get("parser_sha256") == fingerprint["parser_sha256"]:
             return TerminalObservation.model_validate_json(observation_path.read_bytes())
         # Only the observation code moved: the cached ECC artifacts stay
         # authoritative, so re-parse them instead of paying for a flow rerun.
         observation = _terminal_observation(replay_workspace)
-        _store_replay_cache(replay_root, observation, fingerprint, "reparsed")
+        _store_replay_cache(replay_root, observation, fingerprint, "reparsed", replay_workspace)
         if progress is not None:
             progress("observation code changed; re-parsed the cached flow artifacts")
         return observation
@@ -251,24 +259,37 @@ def _run_replay(
         if progress is not None:
             progress("re-parsed the finished flow artifacts and adopted the replay cache")
         return observation
-    if not replay_workspace.exists():
-        shutil.copytree(
-            workspace, replay_workspace, ignore=shutil.ignore_patterns(".agent")
-        )
-    opened = _host_call("workspace.open", {"directory": str(replay_workspace)})
+    source = _host_call("workspace.open", {"directory": str(workspace)})
+    source_handle = source.get("workspaceHandle")
+    if not isinstance(source_handle, str) or not source_handle:
+        raise OptimizationRuntimeError("calibration source handle is missing")
+    replay_key = canonical_sha256(
+        {
+            "workspace": str(workspace),
+            "inputs": {key: fingerprint[key] for key in _REPLAY_INPUT_KEYS if key in fingerprint},
+            "replay": index,
+        }
+    ).removeprefix("sha256:")
+    opened = _host_call(
+        "workspace.deriveCalibrationReplay",
+        {"workspaceHandle": source_handle, "replayKey": replay_key},
+    )
     workspace_handle = opened.get("workspaceHandle")
     revision = opened.get("workspaceRevision")
     if not isinstance(workspace_handle, str) or not workspace_handle.strip():
         raise OptimizationRuntimeError("calibration workspace handle is missing")
-    if type(revision) is not int or revision < 1:
-        revision = 1
+    directory = opened.get("directory")
+    if type(revision) is not int or revision < 1 or not isinstance(directory, str):
+        raise OptimizationRuntimeError("calibration workspace identity is missing")
+    if should_stop is not None and should_stop():
+        raise OptimizationRuntimeError("noise calibration cancelled")
     operation = _host_call(
         "workspace.run",
         {
             "workspaceHandle": workspace_handle.strip(),
             "expectedWorkspaceRevision": revision,
             "rerun": True,
-            "idempotencyKey": f"noise-calibration.default-replay-{index}",
+            "idempotencyKey": f"noise-calibration.default-replay-{index}.{uuid4().hex}",
         },
     )
     if progress is not None:
@@ -280,14 +301,26 @@ def _run_replay(
                 "ECC start_flow response has no operation id"
             )
         heartbeat = _heartbeat_emitter(progress) if progress is not None else None
-        started = time.monotonic()
-        terminal = None
-        while time.monotonic() - started < timeout_seconds:
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            remaining = deadline - time.monotonic()
+            stopped = should_stop is not None and should_stop()
+            if stopped or remaining <= 0:
+                _host_call(
+                    "operation.cancel",
+                    {"workspaceHandle": workspace_handle, "operationId": operation_id},
+                )
+                if stopped:
+                    raise OptimizationRuntimeError("noise calibration cancelled")
+                raise OptimizationRuntimeError(
+                    f"default replay {index} timed out after {timeout_seconds}s"
+                )
             status = _host_call(
                 "operation.wait",
                 {
                     "workspaceHandle": workspace_handle.strip(),
                     "operationId": operation_id,
+                    "timeoutMs": min(1000, max(1, remaining * 1000)),
                 },
             )
             if status.get("state") in _TERMINAL_STATES:
@@ -295,18 +328,15 @@ def _run_replay(
                 break
             if heartbeat is not None:
                 heartbeat(status)
-        if terminal is None:
-            raise OptimizationRuntimeError(
-                f"default replay {index} timed out after {timeout_seconds}s"
-            )
     else:
         terminal = operation
     if terminal.get("state") != "succeeded":
         raise OptimizationRuntimeError(
             f"default replay {index} failed: {terminal.get('state')}"
         )
+    replay_workspace = Path(directory)
     observation = _terminal_observation(replay_workspace)
-    _store_replay_cache(replay_root, observation, fingerprint, "produced")
+    _store_replay_cache(replay_root, observation, fingerprint, "produced", replay_workspace)
     return observation
 
 
@@ -342,7 +372,7 @@ def calibrate(
         )
         if progress is not None:
             progress(
-                f"preparing replay {index}/{replays}: copying the workspace and "
+                f"preparing replay {index}/{replays}: deriving a workspace and "
                 "rerunning the default-parameter flow"
             )
         if replay_progress is not None:
@@ -355,6 +385,7 @@ def calibrate(
                 timeout_seconds,
                 fingerprint,
                 progress=scoped,
+                should_stop=should_stop,
             )
         )
         manifest = _load_replay_manifest(calibration_dir / f"default-replay-{index}")

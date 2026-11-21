@@ -137,10 +137,14 @@ def test_missing_workspace_reruns_the_flow_and_records_provenance(
         def call(self, method: str, params: dict[str, object]) -> dict[str, object]:
             self.calls.append((method, params))
             if method == "workspace.open":
+                assert params == {"directory": str(workspace)}
+                return {"workspaceHandle": "handle-parent"}
+            if method == "workspace.deriveCalibrationReplay":
+                assert params["workspaceHandle"] == "handle-parent"
                 return {
                     "workspaceHandle": "handle-1",
                     "workspaceRevision": 2,
-                    "directory": str(params["directory"]),
+                    "directory": str(tmp_path / "managed-replay"),
                 }
             if method == "workspace.run":
                 return {
@@ -158,13 +162,15 @@ def test_missing_workspace_reruns_the_flow_and_records_provenance(
 
     result = _run_replay(workspace, replay_root, 1, 60.0, dict(_FINGERPRINT))
     assert host.calls[0][0] == "workspace.open"
-    assert host.calls[1] == (
+    assert host.calls[1][0] == "workspace.deriveCalibrationReplay"
+    method, payload = host.calls[2]
+    assert payload.pop("idempotencyKey").startswith("noise-calibration.default-replay-1.")
+    assert (method, payload) == (
         "workspace.run",
         {
             "workspaceHandle": "handle-1",
             "expectedWorkspaceRevision": 2,
             "rerun": True,
-            "idempotencyKey": "noise-calibration.default-replay-1",
         },
     )
 

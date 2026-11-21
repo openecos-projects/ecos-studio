@@ -1,9 +1,11 @@
 """Noise calibration reports continuous progress for the GUI chat."""
 
 import queue
+import pytest
 
-from ecos_agent.optimization.calibrate_workspace import calibrate
+from ecos_agent.optimization.calibrate_workspace import _run_replay, calibrate
 from ecos_agent.optimization.ecc.rpc_client import EccContentLengthRpcClient
+from ecos_agent.optimization.runtime import OptimizationRuntimeError
 from tests.optimization.experiments.equal_budget_support import _terminal_observation
 
 
@@ -19,7 +21,8 @@ def test_calibrate_emits_per_replay_progress(tmp_path, monkeypatch) -> None:
     )
 
     def fake_run_replay(
-        workspace, replay_root, index, timeout_seconds, fingerprint, progress=None
+        workspace, replay_root, index, timeout_seconds, fingerprint, progress=None,
+        should_stop=None,
     ):
         assert progress is not None
         assert fingerprint == {"parser_sha256": "p1"}
@@ -78,12 +81,18 @@ def test_calibrate_never_reports_a_terminal_wait_as_running(tmp_path, monkeypatc
         lambda *_args: None,
     )
 
-    def host_call(method, _params):
+    def host_call(method, params):
         if method == "workspace.open":
-            return {"workspaceHandle": "handle-1", "workspaceRevision": 1}
+            assert params["directory"] == str(workspace)
+            return {"workspaceHandle": "handle-parent"}
+        if method == "workspace.deriveCalibrationReplay":
+            assert params["workspaceHandle"] == "handle-parent"
+            return {"workspaceHandle": "handle-1", "workspaceRevision": 1,
+                    "directory": str(tmp_path / "derived")}
         if method == "workspace.run":
             return {"operationId": "operation-1", "state": "running"}
         assert method == "operation.wait"
+        assert 0 < params["timeoutMs"] <= 1000
         return {"operationId": "operation-1", "state": "succeeded"}
 
     monkeypatch.setattr(
@@ -96,3 +105,35 @@ def test_calibrate_never_reports_a_terminal_wait_as_running(tmp_path, monkeypatc
         "flow running" in message and "ECC state: succeeded" in message
         for message in messages
     )
+
+
+@pytest.mark.parametrize("stop", [False, True])
+def test_active_replay_is_cancelled_on_stop_or_deadline(tmp_path, monkeypatch, stop):
+    elapsed = 0.0
+    cancelled = []
+
+    def host_call(method, params):
+        nonlocal elapsed
+        if method == "workspace.open":
+            return {"workspaceHandle": "source"}
+        if method == "workspace.deriveCalibrationReplay":
+            return {"workspaceHandle": "replay", "workspaceRevision": 1, "directory": str(tmp_path)}
+        if method == "workspace.run":
+            return {"operationId": "running", "state": "running"}
+        if method == "operation.wait":
+            assert 0 < params["timeoutMs"] <= 1000
+            elapsed += 1
+            return {"state": "running"}
+        assert method == "operation.cancel"
+        cancelled.append(params)
+        return {"accepted": True}
+
+    module = "ecos_agent.optimization.calibrate_workspace"
+    monkeypatch.setattr(f"{module}._host_call", host_call)
+    monkeypatch.setattr(f"{module}.time.monotonic", lambda: elapsed)
+    with pytest.raises(OptimizationRuntimeError, match="cancelled" if stop else "timed out"):
+        _run_replay(
+            tmp_path, tmp_path / "cache", 1, 2, {},
+            should_stop=lambda: stop and elapsed >= 1,
+        )
+    assert cancelled == [{"workspaceHandle": "replay", "operationId": "running"}]

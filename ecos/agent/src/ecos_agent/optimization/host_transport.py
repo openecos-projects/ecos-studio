@@ -32,10 +32,9 @@ def _require_host_transport() -> object:
     return _BOUND_HOST
 
 
-_TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
-# `workspace.derive` is intentionally not exposed to the host yet: Electron's
-# dispatchHostRequest does not handle it. Re-add it here together with a
-# dispatchHostRequest implementation when the calibration migration needs it.
+_TERMINAL_STATES = frozenset(
+    {"succeeded", "failed", "cancelled", "interrupted", "unknown"}
+)
 _PRODUCT_COMMAND_METHODS = frozenset(
     {
         "candidate.capabilities",
@@ -46,6 +45,7 @@ _PRODUCT_COMMAND_METHODS = frozenset(
         "operation.wait",
         "rpc.hello",
         "workspace.open",
+        "workspace.deriveCalibrationReplay",
         "workspace.run",
     }
 )
@@ -116,6 +116,7 @@ class ProtocolHostTransport:
             {
                 "workspaceHandle": self._workspace_handle,
                 "operationId": operation_id,
+                "timeoutMs": timeout_seconds * 1000,
             },
         )
         if not isinstance(result, dict):

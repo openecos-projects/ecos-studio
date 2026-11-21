@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { platform } from 'node:os'
 import { join } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { isDeepStrictEqual } from 'node:util'
 import type {
   DesktopAgentEventType,
@@ -48,8 +49,10 @@ import type {
   EccCandidateResumeRequest,
   EccCandidateRerunRequest,
   EccRuntimeOperationRequest,
+  EccRuntimeOperation,
   EccRuntimeStartFlowRequest,
   EccWorkspaceOpenRequest,
+  EccWorkspaceDeriveResult,
 } from '@ecos-studio/shared'
 import type { AgentProviderRuntime } from './agentProviderContract'
 import type { ResolvedAgentProviderManifest } from './agentProviderPlugin'
@@ -93,11 +96,14 @@ export interface AgentProviderHost {
   candidateRerun(request: EccCandidateRerunRequest): Promise<unknown>
   candidateResume(request: EccCandidateResumeRequest): Promise<unknown>
   cancelOperation(request: EccRuntimeOperationRequest): Promise<unknown>
+  deriveCalibrationReplay?(
+    workspaceHandle: string,
+    replayKey: string,
+  ): Promise<EccWorkspaceDeriveResult>
   hello?(): Promise<unknown>
   openWorkspace(request: EccWorkspaceOpenRequest): Promise<unknown>
-  operationStatus(request: EccRuntimeOperationRequest): Promise<unknown>
+  operationStatus(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
   startFlowOperation(request: EccRuntimeStartFlowRequest): Promise<unknown>
-  waitForOperation(request: EccRuntimeOperationRequest): Promise<unknown>
   workspaceSession?(
     workspaceHandle: string,
   ): Promise<{ workspaceHandle: string } | null> | { workspaceHandle: string } | null
@@ -563,6 +569,15 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
       }
     }
     switch (method) {
+      case 'workspace.deriveCalibrationReplay': {
+        if (!this.host.deriveCalibrationReplay) {
+          throw new Error('ECC calibration replay is unavailable.')
+        }
+        return await this.host.deriveCalibrationReplay(
+          workspaceHandle,
+          readRequiredString(params, 'replayKey'),
+        )
+      }
       case 'candidate.capabilities':
         return await this.host.candidateCapabilities({ workspaceHandle })
       case 'candidate.rerun': {
@@ -596,11 +611,20 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
           workspaceHandle,
           operationId: readRequiredString(params, 'operationId'),
         })
-      case 'operation.wait':
-        return await this.host.waitForOperation({
+      case 'operation.wait': {
+        const request = {
           workspaceHandle,
           operationId: readRequiredString(params, 'operationId'),
-        })
+        }
+        const timeout = params.timeoutMs
+        if (typeof timeout !== 'number' || !Number.isFinite(timeout) || timeout <= 0) {
+          throw new Error('Operation wait timeout is invalid.')
+        }
+        const status = await this.host.operationStatus(request)
+        if (status.state !== 'running' && status.state !== 'queued') return status
+        await delay(Math.min(timeout, 1000))
+        return await this.host.operationStatus(request)
+      }
       default:
         throw new Error(`Unsupported host method: ${method}`)
     }

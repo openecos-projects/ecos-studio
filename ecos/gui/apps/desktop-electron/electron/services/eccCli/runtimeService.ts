@@ -1099,6 +1099,21 @@ export class EccCliRuntimeService {
     )
   }
 
+  async deriveCalibrationReplay(workspaceHandle: string, replayKey: string) {
+    const session = this.requireSession(workspaceHandle)
+    if (!/^[0-9a-f]{64}$/.test(replayKey)) {
+      throw new Error('Calibration replay identity is invalid.')
+    }
+    const name = `calibration-${replayKey}`
+    return await this.deriveWorkspace({
+      commandId: name,
+      directory: session.directory,
+      resetFromStep: '',
+      targetDirectory: join(session.projectRoot, name),
+      workspaceHandle,
+    })
+  }
+
   async deriveWorkspace(
     request: EccWorkspaceDeriveRequest & { workspaceHandle: string },
   ): Promise<EccWorkspaceDeriveResult> {
