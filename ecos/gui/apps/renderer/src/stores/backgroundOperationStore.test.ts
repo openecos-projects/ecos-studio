@@ -398,6 +398,36 @@ describe('backgroundOperationStore', () => {
     ).toHaveLength(1)
   })
 
+  it('reports an unknown terminal result as a warning with a diagnostic link', async () => {
+    runtime.operationProjection.mockResolvedValue({
+      creations: [],
+      finalizations: [],
+      generation: 1,
+      operations: [],
+      outcomes: [
+        {
+          ...operation('operation-1', '/work/a'),
+          state: 'unknown',
+          logFile: '/work/a/log/operation-1.log',
+        },
+      ],
+    })
+    const store = useBackgroundOperationStore()
+    await store.start()
+
+    expect(store.activeCount).toBe(0)
+    expect(addNotification).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        title: 'Run outcome unknown',
+        severity: 'warn',
+        diagnostics: {
+          operationId: 'operation-1',
+          workspaceHandle: 'handle-operation-1',
+        },
+      }),
+    )
+  })
+
   it('marks the workspace startable again once recovery clears', async () => {
     runtime.operationProjection.mockResolvedValueOnce({
       creations: [],

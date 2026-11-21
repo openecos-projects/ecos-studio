@@ -221,6 +221,25 @@ describe('connectBackendRuntimeEventSession', () => {
     expect(sink.onTerminal).toHaveBeenCalledWith('/work/gcd')
   })
 
+  it('settles the run and refreshes Workspace data when the outcome is unknown', () => {
+    const sink = createSink()
+    connectBackendRuntimeEventSession('workspace-handle', '/work/gcd', sink)
+
+    bridge.emit({
+      designTool: 'backend',
+      message: 'ECC did not provide a result for this run.',
+      method: 'flow.run',
+      operationId: 'operation-1',
+      type: 'operation.unknown',
+      workspaceDirectory: '/work/gcd',
+      workspaceHandle: 'workspace-handle',
+    })
+
+    expect(sink.onTerminal).toHaveBeenCalledWith('/work/gcd')
+    expect(sink.invalidations).toEqual([undefined])
+    expect(sink.failures).toEqual([])
+  })
+
   it('still reports a flow.run failure as a Flow failure', () => {
     const sink = createSink()
     connectBackendRuntimeEventSession('workspace-handle', '/work/gcd', sink)

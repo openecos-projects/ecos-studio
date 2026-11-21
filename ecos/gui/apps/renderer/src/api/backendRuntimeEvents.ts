@@ -193,12 +193,13 @@ export function backendRuntimeEventState(event: DesignRuntimeEvent): string | un
 
 export function backendRuntimeEventTerminalState(
   event: DesignRuntimeEvent,
-): 'succeeded' | 'failed' | 'cancelled' | 'interrupted' | null {
+): 'succeeded' | 'failed' | 'cancelled' | 'interrupted' | 'unknown' | null {
   const kind = backendRuntimeEventKind(event)
   if (kind === 'operation.completed' || kind === 'operation.succeeded') return 'succeeded'
   if (kind === 'operation.failed') return 'failed'
   if (kind === 'operation.cancelled') return 'cancelled'
   if (kind === 'operation.interrupted') return 'interrupted'
+  if (kind === 'operation.unknown') return 'unknown'
   if (event.type === 'runtime.exited' && event.reason === 'unexpected')
     return 'interrupted'
   return null

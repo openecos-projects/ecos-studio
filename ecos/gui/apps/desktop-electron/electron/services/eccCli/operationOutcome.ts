@@ -1,4 +1,3 @@
-import type { EccRuntimeOperation } from '@ecos-studio/shared'
 import type { PersistedFlow } from './persistedState'
 
 const ADVISORY_STEPS = new Set(['antenna_check', 'emir'])
@@ -8,40 +7,11 @@ export interface BlockedFlowStep {
   step: string
 }
 
-export function terminalState(
-  flow: PersistedFlow | null,
-  cancelled: boolean,
-  exit?: { code: number | null },
-  selectedStep?: string,
-  fromStep?: string,
-  throughStep?: string,
-): EccRuntimeOperation['state'] {
+export function terminalState(cancelled: boolean, exit?: { code: number | null }) {
+  if (!exit) return 'unknown'
   if (cancelled) return 'cancelled'
-  if (exit) {
-    if (exit.code === null) return 'interrupted'
-    return exit.code === 0 ? 'succeeded' : 'failed'
-  }
-  // Fallback for runtimes that predate persisted run results.
-  const steps = flow ? runSteps(flow, selectedStep, fromStep, throughStep) : []
-  if (steps.some(({ state }) => state === 'Ongoing')) return 'interrupted'
-  if (
-    steps.some(
-      ({ name, state }) =>
-        state === 'Invalid' || (state === 'Incomplete' && !ADVISORY_STEPS.has(name)),
-    )
-  )
-    return 'failed'
-  if (
-    steps.length &&
-    steps.every(
-      ({ name, state }) =>
-        state === 'Success' ||
-        state === 'Skipped' ||
-        (state === 'Incomplete' && ADVISORY_STEPS.has(name)),
-    )
-  )
-    return 'succeeded'
-  return 'interrupted'
+  if (exit.code === null) return 'interrupted'
+  return exit.code === 0 ? 'succeeded' : 'failed'
 }
 
 export function blockedFlowStep(

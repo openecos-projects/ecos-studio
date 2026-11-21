@@ -92,6 +92,8 @@ import {
 const HANDSHAKE_TIMEOUT_MS = 30_000
 const WATCH_DEBOUNCE_MS = 75
 const PROCESS_POLL_MS = 5_000
+const UNKNOWN_RUN_RESULT_MESSAGE =
+  'ECC did not provide a result for this run. See the run log.'
 
 interface WorkspaceSession {
   directory: string
@@ -1182,7 +1184,11 @@ export class EccCliRuntimeService {
     if (request.includeDiagnostics) {
       const diagnostics = this.diagnostics.get(operation.operationId)
       if (diagnostics) return diagnostics
-      if (operation.state === 'failed' || operation.state === 'interrupted') {
+      if (
+        operation.state === 'failed' ||
+        operation.state === 'interrupted' ||
+        operation.state === 'unknown'
+      ) {
         const log = await readOperationLog(
           session.directory,
           operation.operationId,
@@ -1615,7 +1621,7 @@ export class EccCliRuntimeService {
       return
     }
     if (tracked.registrationPending || (tracked.child && !tracked.child.exit)) return
-    if (!tracked.child && (!manifest || !flow)) return
+    if (!tracked.child && !manifest) return
     const selectedStep =
       tracked.operation.kind === 'step' ? tracked.operation.step : undefined
     const exit = tracked.child?.exit
@@ -1626,17 +1632,9 @@ export class EccCliRuntimeService {
           tracked.session.workspaceId,
           tracked.operation.operationId,
         )
-    const terminal =
-      result?.state ??
-      terminalState(
-        flow,
-        tracked.requestedCancel,
-        exit,
-        selectedStep,
-        tracked.operation.flowScope?.fromStep,
-        tracked.operation.flowScope?.throughStep,
-      )
-    const captureDiagnostics = terminal === 'failed' || terminal === 'interrupted'
+    const terminal = result?.state ?? terminalState(tracked.requestedCancel, exit)
+    const captureDiagnostics =
+      terminal === 'failed' || terminal === 'interrupted' || terminal === 'unknown'
     const log = captureDiagnostics
       ? await readOperationLog(
           tracked.session.directory,
@@ -1650,7 +1648,7 @@ export class EccCliRuntimeService {
       return
     const failure = result?.error ?? (log ? readRunFailure(log.content) : undefined)
     const candidates =
-      captureDiagnostics && flow
+      (terminal === 'failed' || terminal === 'interrupted') && flow
         ? failedRunSteps(
             flow,
             selectedStep,
@@ -1710,7 +1708,12 @@ ${message}`)
                   ? `ECC was interrupted by ${exit.signal}. See the run log.`
                   : 'ECC execution was interrupted. See the run log.',
               }
-            : null,
+            : terminal === 'unknown'
+              ? {
+                  code: 'run_outcome_unknown',
+                  message: UNKNOWN_RUN_RESULT_MESSAGE,
+                }
+              : null,
       ...(flow ? { flow } : {}),
       ...(blocked && !selectedStep ? { flowBlock: blocked } : {}),
       state: terminal,
@@ -1752,7 +1755,9 @@ ${message}`)
         ? 'operation.completed'
         : terminal === 'cancelled'
           ? 'operation.cancelled'
-          : 'operation.failed',
+          : terminal === 'unknown'
+            ? 'operation.unknown'
+            : 'operation.failed',
     )
   }
 
@@ -1916,6 +1921,7 @@ ${message}`)
       | 'operation.progress'
       | 'operation.completed'
       | 'operation.cancelled'
+      | 'operation.unknown'
       | 'operation.failed',
   ): void {
     const base = {
@@ -1932,16 +1938,17 @@ ${message}`)
         step: tracked.operation.currentStep,
         type,
       })
-    } else if (type === 'operation.completed') {
+    } else if (type === 'operation.completed' || type === 'operation.cancelled') {
       this.emit({
         ...base,
         type,
         workspaceRevision: tracked.session.workspaceRevision,
       })
-    } else if (type === 'operation.cancelled') {
+    } else if (type === 'operation.unknown') {
       this.emit({
         ...base,
         type,
+        message: UNKNOWN_RUN_RESULT_MESSAGE,
         workspaceRevision: tracked.session.workspaceRevision,
       })
     } else {
@@ -2082,7 +2089,7 @@ export function registeredRunMatches(
 }
 
 function isTerminal(state: EccRuntimeOperation['state']): boolean {
-  return ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(state)
+  return ['succeeded', 'failed', 'cancelled', 'interrupted', 'unknown'].includes(state)
 }
 
 function buildCatalog(

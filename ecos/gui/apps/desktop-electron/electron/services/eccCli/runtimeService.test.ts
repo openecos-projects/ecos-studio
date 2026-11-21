@@ -1145,61 +1145,60 @@ describe('ECC CLI live flow projection', () => {
     await service.shutdown()
   })
 
-  it('adopts a registered CLI flow when the background projection refreshes', async () => {
+  it('keeps a finished CLI run unknown when only the Workspace ledger is available', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'ecc-runtime-adopt-flow-'))
     temporaryDirectories.push(projectRoot)
     const workspaceDirectory = join(projectRoot, 'ws_1')
     await mkdir(join(workspaceDirectory, 'home'), { recursive: true })
     const runId = '22222222-2222-4222-8222-222222222222'
     const timestamp = '2026-09-28T00:00:00.000Z'
-    await writeFile(
-      join(projectRoot, 'project.json'),
-      JSON.stringify({
-        schema_version: 1,
-        project_id: 'project-1',
-        name: 'Demo',
-        design_name: 'gcd',
-        description: '',
-        root_path: projectRoot,
-        created_at: timestamp,
-        updated_at: timestamp,
-        base_design: {},
-        objectives: { primary: '', directions: {} },
-        workspaces: [
-          {
-            workspace_id: 'ws_1',
-            name: 'ws_1',
-            workspace_path: workspaceDirectory,
-            source_workspace_id: null,
-            branch_from: null,
-            start_step: 'Synth',
-            end_step: 'Harden',
-            status: 'running',
-            created_at: timestamp,
-            updated_at: timestamp,
-            parameter_patch: {},
-          },
-        ],
-        mpc: null,
-        best_workspace: null,
-        qor_baseline: null,
-        runtime_processes: {
-          ws_1: {
-            schema_version: 1,
-            run_id: runId,
-            pid: 1234,
-            pgid: 1234,
-            process_start_id: 'start-1',
-            boot_id: 'boot-1',
-            host_id: 'host-1',
-            workspace_path: workspaceDirectory,
-            started_at: 1,
-            runtime_id: 'runtime-1',
-            log_path: `log/${runId}.log`,
-          },
+    const manifestPath = join(projectRoot, 'project.json')
+    const manifest = {
+      schema_version: 1,
+      project_id: 'project-1',
+      name: 'Demo',
+      design_name: 'gcd',
+      description: '',
+      root_path: projectRoot,
+      created_at: timestamp,
+      updated_at: timestamp,
+      base_design: {},
+      objectives: { primary: '', directions: {} },
+      workspaces: [
+        {
+          workspace_id: 'ws_1',
+          name: 'ws_1',
+          workspace_path: workspaceDirectory,
+          source_workspace_id: null,
+          branch_from: null,
+          start_step: 'Synth',
+          end_step: 'Harden',
+          status: 'running',
+          created_at: timestamp,
+          updated_at: timestamp,
+          parameter_patch: {},
         },
-      }),
-    )
+      ],
+      mpc: null,
+      best_workspace: null,
+      qor_baseline: null,
+      runtime_processes: {
+        ws_1: {
+          schema_version: 1,
+          run_id: runId,
+          pid: 1234,
+          pgid: 1234,
+          process_start_id: 'start-1',
+          boot_id: 'boot-1',
+          host_id: 'host-1',
+          workspace_path: workspaceDirectory,
+          started_at: 1,
+          runtime_id: 'runtime-1',
+          log_path: `log/${runId}.log`,
+        },
+      },
+    }
+    await writeFile(manifestPath, JSON.stringify(manifest))
     await writeFile(
       join(workspaceDirectory, 'home', 'flow.json'),
       JSON.stringify({
@@ -1256,6 +1255,44 @@ describe('ECC CLI live flow projection', () => {
     expect(projection.outcomes).toMatchObject([
       { operationId: finishedRunId, state: 'succeeded', kind: 'step', step: 'synthesis' },
     ])
+    const events = vi.fn()
+    service.onEvent(events)
+    const wait = service.waitForOperation({
+      workspaceHandle: 'handle-1',
+      operationId: runId,
+    })
+    await writeFile(
+      join(workspaceDirectory, 'home', 'flow.json'),
+      JSON.stringify({
+        schema_version: 3,
+        steps: [
+          {
+            directory: '01_synthesis_yosys',
+            name: 'Synthesis',
+            state: 'Success',
+            tool: 'yosys',
+          },
+        ],
+      }),
+    )
+    await writeFile(manifestPath, JSON.stringify({ ...manifest, runtime_processes: {} }))
+    await service.reconcileOperationProjection()
+    await expect(wait).resolves.toMatchObject({
+      state: 'unknown',
+      error: { code: 'run_outcome_unknown' },
+      flow: { steps: [{ state: 'Success' }] },
+    })
+    expect(service.operationProjection().operations).toEqual([])
+    expect(events).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'operation.unknown', operationId: runId }),
+    )
+    await expect(
+      service.operationLog({
+        workspaceHandle: 'handle-1',
+        operationId: runId,
+        includeDiagnostics: true,
+      }),
+    ).resolves.toMatchObject({ diagnostics: expect.stringContaining('State: unknown') })
     await service.shutdown()
   })
 })

@@ -94,6 +94,9 @@ export function useAgentFlowProgress(
         case 'operation.cancelled':
           report('Flow cancelled.')
           break
+        case 'operation.unknown':
+          report('Run outcome unknown.')
+          break
       }
     },
   )

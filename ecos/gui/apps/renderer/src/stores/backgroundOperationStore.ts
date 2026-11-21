@@ -289,7 +289,7 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
           ? { detail: outcome.flowBlock.failedItems.join('\n') }
           : {}),
         key:
-          outcome.logFile && ['failed', 'interrupted'].includes(outcome.state)
+          outcome.logFile && ['failed', 'interrupted', 'unknown'].includes(outcome.state)
             ? outcome.operationId
             : `runtime-outcome:${key}`,
         message: outcomeMessage(outcome),
@@ -297,7 +297,7 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
           ? 'warn'
           : outcome.state === 'succeeded'
             ? 'info'
-            : outcome.state === 'cancelled'
+            : outcome.state === 'cancelled' || outcome.state === 'unknown'
               ? 'warn'
               : 'error',
         title: outcome.flowBlock
@@ -308,7 +308,9 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
               ? 'Flow cancelled'
               : outcome.state === 'interrupted'
                 ? 'Flow interrupted'
-                : 'Flow failed',
+                : outcome.state === 'unknown'
+                  ? 'Run outcome unknown'
+                  : 'Flow failed',
       })
     }
   }

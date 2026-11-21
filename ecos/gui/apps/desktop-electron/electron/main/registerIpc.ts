@@ -1161,7 +1161,8 @@ export function registerIpc(
     if (
       payload.type === 'operation.completed' ||
       payload.type === 'operation.failed' ||
-      payload.type === 'operation.cancelled'
+      payload.type === 'operation.cancelled' ||
+      payload.type === 'operation.unknown'
     ) {
       return true
     }
@@ -1395,7 +1396,7 @@ export function registerIpc(
       snapshot.operations.some(
         (operation) =>
           !isRecord(operation) ||
-          !['succeeded', 'failed', 'cancelled', 'interrupted'].includes(
+          !['succeeded', 'failed', 'cancelled', 'interrupted', 'unknown'].includes(
             String(operation.state),
           ),
       )

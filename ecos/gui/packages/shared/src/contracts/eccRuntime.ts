@@ -384,6 +384,7 @@ export type EccRuntimeOperationState =
   | 'failed'
   | 'cancelled'
   | 'interrupted'
+  | 'unknown'
 export type EccRuntimeInterruptibility = 'safe' | 'deferred' | 'forbidden'
 
 export interface EccRuntimeOperation {
@@ -956,6 +957,15 @@ export type EccRuntimeEvent =
       rerun?: boolean
       step?: string
       type: 'operation.failed'
+      workspaceDirectory?: string
+      workspaceHandle?: string
+      workspaceRevision?: number
+    }
+  | {
+      message: string
+      method: string
+      operationId: string
+      type: 'operation.unknown'
       workspaceDirectory?: string
       workspaceHandle?: string
       workspaceRevision?: number
