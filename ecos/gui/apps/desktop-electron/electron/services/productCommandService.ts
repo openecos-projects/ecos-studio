@@ -45,12 +45,6 @@ interface ProductCommandRuntime {
 }
 
 interface ProductCommandContext {
-  adoptOptimizationCandidate?(
-    request: Extract<
-      ProductCommandRequest,
-      { command: 'optimization.adoptCandidate' }
-    >['payload'],
-  ): Promise<unknown>
   authorizeWorkspaceMutation?(
     command: ProductCommandRequest['command'],
     workspaceHandle: string,
@@ -79,12 +73,6 @@ interface ProductCommandContext {
   prepareCreate(request: EccWorkspaceCreateRequest): Promise<EccWorkspaceCreateRequest>
   runtime: ProductCommandRuntime
   trackCreateResult(result: unknown): void
-  cleanupOptimizationEpisode?(
-    request: Extract<
-      ProductCommandRequest,
-      { command: 'optimization.cleanup' }
-    >['payload'],
-  ): Promise<unknown>
 }
 
 export async function executeProductCommand(
@@ -246,16 +234,6 @@ export async function executeProductCommand(
       return await context.runtime.candidateRerun(request.payload)
     case 'candidate.resume':
       return await context.runtime.candidateResume(request.payload)
-    case 'optimization.adoptCandidate':
-      if (!context.adoptOptimizationCandidate) {
-        throw new Error('Optimization Parent Adoption is unavailable.')
-      }
-      return await context.adoptOptimizationCandidate(request.payload)
-    case 'optimization.cleanup':
-      if (!context.cleanupOptimizationEpisode) {
-        throw new Error('Optimization Episode cleanup is unavailable.')
-      }
-      return await context.cleanupOptimizationEpisode(request.payload)
   }
 }
 
@@ -410,55 +388,6 @@ function readProductCommandRequest(value: unknown): ProductCommandRequest {
       requireString(payload, 'parameterCardSha256')
       requireSeed(payload.seed)
       validateRevision(payload.expectedWorkspaceRevision)
-      break
-    case 'optimization.adoptCandidate':
-      requireString(payload, 'candidateId')
-      requireString(payload, 'candidateRootRef')
-      requireString(payload, 'episodeId')
-      requireString(payload, 'idempotencyKey')
-      requireString(payload, 'workspaceHandle')
-      requireRecord(payload, 'evidence')
-      validateRevision(payload.expectedWorkspaceRevision)
-      if (
-        !Array.isArray(payload.affectedFlowSteps) ||
-        payload.affectedFlowSteps.length === 0
-      ) {
-        throw new Error('Product Command requires affectedFlowSteps')
-      }
-      if (!Array.isArray(payload.parameterPatch) || payload.parameterPatch.length === 0) {
-        throw new Error('Product Command requires parameterPatch')
-      }
-      if (
-        payload.affectedFlowSteps.some((step) => typeof step !== 'string' || !step.trim())
-      ) {
-        throw new Error('Product Command affectedFlowSteps are invalid')
-      }
-      if (
-        payload.parameterPatch.some(
-          (item) =>
-            !isRecord(item) || typeof item.knob_id !== 'string' || !item.knob_id.trim(),
-        )
-      ) {
-        throw new Error('Product Command parameterPatch is invalid')
-      }
-      break
-    case 'optimization.cleanup':
-      requireString(payload, 'episodeId')
-      requireString(payload, 'parentWorkspaceDirectory')
-      requireString(payload, 'workspaceHandle')
-      if (payload.confirmation !== true) {
-        throw new Error('Product Command cleanup requires confirmation')
-      }
-      if (!Array.isArray(payload.executionWorkspaceDirectories)) {
-        throw new Error('Product Command requires executionWorkspaceDirectories')
-      }
-      if (
-        payload.executionWorkspaceDirectories.some(
-          (directory) => typeof directory !== 'string' || !directory.trim(),
-        )
-      ) {
-        throw new Error('Product Command executionWorkspaceDirectories are invalid')
-      }
       break
     default:
       throw new Error('Unsupported Product Command')

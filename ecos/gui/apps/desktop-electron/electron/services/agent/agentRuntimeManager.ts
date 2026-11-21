@@ -398,19 +398,6 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
     })
   }
 
-  markOptimizationEpisodeCleaned(episodeId: string): void {
-    const episode = this.optimizationEpisodes.get(episodeId)
-    if (!episode || !TERMINAL_OPTIMIZATION_STATES.has(episode.state)) {
-      throw new Error('Optimization cleanup requires a terminal Episode.')
-    }
-    if (episode.cleanupState === 'completed') return
-    this.publishOptimizationEpisode({
-      ...episode,
-      cleanupState: 'completed',
-      updatedAt: Date.now(),
-    })
-  }
-
   async prepareOptimizationShutdown(
     request: DesktopAgentInterruptRequest,
   ): Promise<void> {

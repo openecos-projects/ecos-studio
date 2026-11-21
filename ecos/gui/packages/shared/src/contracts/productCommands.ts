@@ -86,30 +86,6 @@ export type ProductCommandRequest =
   | { command: 'candidate.capabilities'; payload: EccCandidateCapabilitiesRequest }
   | { command: 'candidate.rerun'; payload: EccCandidateRerunRequest }
   | { command: 'candidate.resume'; payload: EccCandidateResumeRequest }
-  | {
-      command: 'optimization.adoptCandidate'
-      payload: {
-        affectedFlowSteps: string[]
-        candidateId: string
-        candidateRootRef: string
-        evidence: Record<string, unknown>
-        episodeId: string
-        expectedWorkspaceRevision: number
-        idempotencyKey: string
-        parameterPatch: Array<{ knob_id: string; value: unknown }>
-        workspaceHandle: string
-      }
-    }
-  | {
-      command: 'optimization.cleanup'
-      payload: {
-        confirmation: true
-        episodeId: string
-        executionWorkspaceDirectories: string[]
-        parentWorkspaceDirectory: string
-        workspaceHandle: string
-      }
-    }
 
 export type ProductCommandResult =
   | EccWorkspaceCreationPreview
@@ -127,8 +103,6 @@ export type ProductCommandResult =
   | { recovered: boolean; issue?: string }
   | { abandoned: boolean }
   | { completed: boolean }
-  | { adopted: boolean; workspaceRevision: number }
-  | { cleaned: boolean }
 
 export interface ProductCommandApi {
   execute(request: ProductCommandRequest): Promise<ProductCommandResult>

@@ -189,8 +189,6 @@ function isShutdownBlockedProductCommand(value: unknown): boolean {
     'workspace.abandonCreation',
     'candidate.rerun',
     'candidate.resume',
-    'optimization.adoptCandidate',
-    'optimization.cleanup',
   ].includes(value.command)
 }
 
@@ -236,7 +234,6 @@ export interface DesktopBridgeServices {
       workspaceRevision: number,
       directory: string,
     ): void
-    markOptimizationEpisodeCleaned?(episodeId: string): void
     syncEnvironmentOverrides?(
       overrides: Record<string, string | undefined>,
       request?: DesktopAgentStartRequest,
@@ -1714,11 +1711,9 @@ export function registerIpc(
     )
   }
 
-  const optimizationEpisodeCommands = registerOptimizationEpisodeIpc({
+  registerOptimizationEpisodeIpc({
     handle,
     runtime: services.agentRuntimeService,
-    updateWorkspaceStepConfiguration: (request) =>
-      services.eccRuntimeService.updateWorkspaceStepConfiguration(request),
     getWindowDirectory: (sender) => {
       const window = BrowserWindow.fromWebContents(sender)
       return window ? workspaceWindowRegistry.getPathForWindow(window) : null
@@ -2945,7 +2940,6 @@ export function registerIpc(
           code: 'OPTIMIZATION_PARENT_GUARDED',
         })
       },
-      adoptOptimizationCandidate: optimizationEpisodeCommands.adoptOptimizationCandidate,
       beginCreate: services.workspaceCreationJournal
         ? (createRequest) =>
             services.workspaceCreationJournal!.begin(ownerWindowId, createRequest)
@@ -2965,7 +2959,6 @@ export function registerIpc(
               ownerWindowId,
             )
         : undefined,
-      cleanupOptimizationEpisode: optimizationEpisodeCommands.cleanupOptimizationEpisode,
       failCreate: services.workspaceCreationJournal
         ? (creationId, error) =>
             services.workspaceCreationJournal!.markUnfinished(
