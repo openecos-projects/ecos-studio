@@ -63,7 +63,7 @@ import {
 } from './cliProcess'
 import { parseEccLineRecords, parseJsonLiteral } from './lineRecords'
 import { blockedFlowStep, failedRunSteps, terminalState } from './operationOutcome'
-import { CandidateOperations } from './candidateOperations'
+import { CandidateOperations, isCandidateOperationId } from './candidateOperations'
 import { buildOperationDiagnostics } from './operationDiagnostics'
 import {
   operationLogPath,
@@ -98,11 +98,17 @@ const UNKNOWN_RUN_RESULT_MESSAGE =
 interface WorkspaceSession {
   directory: string
   handle: string
+  projectId: string
   projectRoot: string
   workspaceId: string
   workspaceRevision: number
   projectWatcher?: FSWatcher
 }
+
+type WorkspaceIdentity = Pick<
+  WorkspaceSession,
+  'directory' | 'projectId' | 'projectRoot' | 'workspaceId'
+>
 
 interface TrackedOperation {
   child?: { exit?: { code: number | null; signal: NodeJS.Signals | null } }
@@ -126,6 +132,7 @@ export class EccCliRuntimeService {
   private readonly cli: EccCliProcess
   private readonly candidates: CandidateOperations
   private readonly sessions = new Map<string, WorkspaceSession>()
+  private readonly agentWorkspaceIdentities = new Map<string, WorkspaceIdentity>()
   private readonly handleByDirectory = new Map<string, string>()
   private readonly knownProjectRoots = new Set<string>()
   private readonly operations = new Map<string, TrackedOperation>()
@@ -510,6 +517,7 @@ export class EccCliRuntimeService {
     const session: WorkspaceSession = {
       directory,
       handle: randomUUID(),
+      projectId: manifest.project_id,
       projectRoot: discovered.projectRoot,
       workspaceId: entry.workspace_id,
       workspaceRevision: snapshot.workspaceRevision,
@@ -542,6 +550,38 @@ export class EccCliRuntimeService {
     const session = this.requireSession(workspaceHandle)
     await this.refreshSessionRevision(session)
     return sessionResult(session)
+  }
+
+  async agentWorkspaceSession(workspaceHandle: string): Promise<EccWorkspaceOpenResult> {
+    const live = this.sessions.get(workspaceHandle)
+    if (live) {
+      const { directory, projectId, projectRoot, workspaceId } = live
+      this.agentWorkspaceIdentities.set(workspaceHandle, {
+        directory,
+        projectId,
+        projectRoot,
+        workspaceId,
+      })
+      return await this.workspaceSession(workspaceHandle)
+    }
+
+    const previous = this.agentWorkspaceIdentities.get(workspaceHandle)
+    if (!previous) throw new Error('Workspace Session is not open.')
+    const project = await this.discoverProject(previous.directory)
+    if (
+      project?.projectId !== previous.projectId ||
+      project.projectRoot !== previous.projectRoot
+    ) {
+      throw new Error('Agent source Project identity changed.')
+    }
+    const opened = await this.openWorkspace({ directory: previous.directory })
+    if (
+      opened.directory !== previous.directory ||
+      opened.workspaceId !== previous.workspaceId
+    ) {
+      throw new Error('Agent source Workspace identity changed.')
+    }
+    return opened
   }
 
   async closeWorkspace(
@@ -1007,15 +1047,23 @@ export class EccCliRuntimeService {
   }
 
   operationStatus(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation> {
-    if (this.candidates.has(request.operationId)) {
-      return Promise.resolve(this.candidates.status(request))
+    if (isCandidateOperationId(request.operationId)) {
+      return this.candidates.status(
+        this.requireSession(request.workspaceHandle),
+        request.operationId,
+      )
     }
     const tracked = this.requireOperation(request)
     return Promise.resolve({ ...tracked.operation })
   }
 
   waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation> {
-    if (this.candidates.has(request.operationId)) return this.candidates.wait(request)
+    if (isCandidateOperationId(request.operationId)) {
+      return this.candidates.wait(
+        this.requireSession(request.workspaceHandle),
+        request.operationId,
+      )
+    }
     const tracked = this.requireOperation(request)
     if (isTerminal(tracked.operation.state))
       return Promise.resolve({ ...tracked.operation })
@@ -1023,7 +1071,12 @@ export class EccCliRuntimeService {
   }
 
   async cancelOperation(request: EccRuntimeOperationRequest) {
-    if (this.candidates.has(request.operationId)) return this.candidates.cancel(request)
+    if (isCandidateOperationId(request.operationId)) {
+      return await this.candidates.cancel(
+        this.requireSession(request.workspaceHandle),
+        request.operationId,
+      )
+    }
     const tracked = this.requireOperation(request)
     tracked.requestedCancel = true
     try {
@@ -1282,6 +1335,7 @@ export class EccCliRuntimeService {
 
   async shutdown() {
     await this.candidates.shutdown()
+    this.agentWorkspaceIdentities.clear()
     await Promise.all(
       [...this.sessions.values()].map(({ projectWatcher }) => projectWatcher?.close()),
     )

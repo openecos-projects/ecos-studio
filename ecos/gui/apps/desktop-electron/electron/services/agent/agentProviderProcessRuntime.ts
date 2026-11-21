@@ -561,13 +561,15 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
         directory: readRequiredString(params, 'directory'),
       })
     }
-    const workspaceHandle = readRequiredString(params, 'workspaceHandle')
+    let workspaceHandle = readRequiredString(params, 'workspaceHandle')
     if (this.host.workspaceSession) {
       const session = await this.host.workspaceSession(workspaceHandle)
       if (!session) {
         throw new Error('Product Command does not own this Workspace handle')
       }
+      workspaceHandle = session.workspaceHandle
     }
+    const request = { ...params, workspaceHandle }
     switch (method) {
       case 'workspace.deriveCalibrationReplay': {
         if (!this.host.deriveCalibrationReplay) {
@@ -582,21 +584,21 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
         return await this.host.candidateCapabilities({ workspaceHandle })
       case 'candidate.rerun': {
         const result = await this.host.candidateRerun(
-          params as unknown as EccCandidateRerunRequest,
+          request as unknown as EccCandidateRerunRequest,
         )
         this.recordHostOperationAssociation('candidate.rerun', result)
         return result
       }
       case 'candidate.resume': {
         const result = await this.host.candidateResume(
-          params as unknown as EccCandidateResumeRequest,
+          request as unknown as EccCandidateResumeRequest,
         )
         this.recordHostOperationAssociation('candidate.resume', result)
         return result
       }
       case 'workspace.run': {
         const result = await this.host.startFlowOperation(
-          params as unknown as EccRuntimeStartFlowRequest,
+          request as unknown as EccRuntimeStartFlowRequest,
         )
         this.recordHostOperationAssociation('workspace.run', result)
         return result
@@ -620,10 +622,15 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
         if (typeof timeout !== 'number' || !Number.isFinite(timeout) || timeout <= 0) {
           throw new Error('Operation wait timeout is invalid.')
         }
-        const status = await this.host.operationStatus(request)
-        if (status.state !== 'running' && status.state !== 'queued') return status
-        await delay(Math.min(timeout, 1000))
-        return await this.host.operationStatus(request)
+        const deadline = Date.now() + Math.min(timeout, 60_000)
+        let status = await this.host.operationStatus(request)
+        while (status.state === 'running' || status.state === 'queued') {
+          const remaining = deadline - Date.now()
+          if (remaining <= 0) break
+          await delay(Math.min(remaining, 1000))
+          status = await this.host.operationStatus(request)
+        }
+        return status
       }
       default:
         throw new Error(`Unsupported host method: ${method}`)

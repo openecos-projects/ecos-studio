@@ -49,6 +49,7 @@ export interface E2EBridge {
   runtime: {
     workspace: {
       open: DesktopApi['runtime']['workspace']['open']
+      close: DesktopApi['runtime']['workspace']['close']
       create(request: {
         designTool: 'frontend'
         payload: Record<string, unknown> & { directory: string }

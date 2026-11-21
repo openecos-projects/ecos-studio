@@ -524,7 +524,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
           desktopServices.eccRuntimeService.startFlowOperation(request),
         workspaceSession: async (workspaceHandle) => {
           try {
-            return await desktopServices.eccRuntimeService.workspaceSession(
+            return await desktopServices.eccRuntimeService.agentWorkspaceSession(
               workspaceHandle,
             )
           } catch {

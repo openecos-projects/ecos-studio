@@ -1,17 +1,17 @@
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import type {
   EccCandidateCapabilitiesResult,
   EccCandidateResumeRequest,
   EccCandidateRerunRequest,
   EccRuntimeOperation,
-  EccRuntimeOperationRequest,
 } from '@ecos-studio/shared'
 import { EccCliCommandError, type EccCliProcess } from './cliProcess'
 
 interface SourceWorkspace {
   directory: string
-  handle: string
+  projectId: string
   projectRoot: string
   workspaceId: string
 }
@@ -20,7 +20,11 @@ interface CandidateRun {
   controller: AbortController
   operation: EccRuntimeOperation
   terminal: Promise<EccRuntimeOperation>
-  workspaceHandle: string
+  source: SourceWorkspace
+}
+
+export function isCandidateOperationId(value: string): boolean {
+  return /^operation-[0-9a-f]{32}$/.test(value)
 }
 
 export class CandidateOperations {
@@ -90,7 +94,7 @@ export class CandidateOperations {
           const operation = readOperation(record.operation, workspaceId, action)
           if (!operation) return
           clearTimeout(timer)
-          run = { controller, operation, terminal, workspaceHandle: source.handle }
+          run = { controller, operation, terminal, source }
           this.operations.set(operation.operationId, run)
           accept(operation)
         },
@@ -153,7 +157,7 @@ export class CandidateOperations {
     const prefix = `${source.workspaceId}::candidate::${episodePrefix}`
     const active = [...this.operations.values()].filter(
       (run) =>
-        run.workspaceHandle === source.handle &&
+        sameSource(run.source, source) &&
         run.operation.workspaceId.startsWith(prefix) &&
         !isTerminal(run.operation.state),
     )
@@ -165,6 +169,7 @@ export class CandidateOperations {
       if (error.code === 'ENOENT') return []
       throw error
     })
+    const pending: string[] = []
     for (const entry of entries) {
       if (!entry.startsWith(episodePrefix) || !entry.endsWith('.json')) continue
       const id = entry.slice(0, -5)
@@ -176,38 +181,58 @@ export class CandidateOperations {
         record.record !== 'candidate_status' ||
         !Array.isArray(record.operations) ||
         !record.operations.length ||
-        record.operations.some(
-          (operation) =>
-            !isRecord(operation) ||
-            (operation.state !== 'interrupted' &&
-              !isTerminal(operation.state as EccRuntimeOperation['state'])),
-        )
+        record.workspaceId !== `${source.workspaceId}::candidate::${id}`
       ) {
         throw new Error('ECC candidate terminal evidence is unavailable.')
       }
+      for (const value of record.operations) {
+        const action =
+          isRecord(value) && value.kind === 'candidate_resume' ? 'resume' : 'rerun'
+        const operation = readOperation(value, record.workspaceId, action)
+        if (!operation) throw new Error('ECC candidate terminal evidence is unavailable.')
+        if (!isTerminal(operation.state)) pending.push(operation.operationId)
+      }
     }
+    await Promise.all(pending.map((id) => this.cancel(source, id)))
+    const deadline = Date.now() + 60_000
+    await Promise.all(pending.map((id) => this.wait(source, id, deadline)))
   }
 
-  has(operationId: string): boolean {
-    return this.operations.has(operationId)
+  async status(
+    source: SourceWorkspace,
+    operationId: string,
+  ): Promise<EccRuntimeOperation> {
+    const run = this.localOperation(source, operationId)
+    return run?.operation ?? (await this.readOperation(source, operationId)).operation
   }
 
-  status(request: EccRuntimeOperationRequest): EccRuntimeOperation {
-    return this.requireOperation(request).operation
+  async wait(
+    source: SourceWorkspace,
+    operationId: string,
+    deadline = Infinity,
+  ): Promise<EccRuntimeOperation> {
+    const run = this.localOperation(source, operationId)
+    if (run) return await run.terminal
+    while (Date.now() < deadline) {
+      const operation = await this.status(source, operationId)
+      if (isTerminal(operation.state)) return operation
+      await delay(1000)
+    }
+    throw new Error('ECC candidate did not reach a terminal state before the deadline.')
   }
 
-  wait(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation> {
-    return this.requireOperation(request).terminal
-  }
-
-  cancel(request: EccRuntimeOperationRequest) {
-    const run = this.requireOperation(request)
+  async cancel(source: SourceWorkspace, operationId: string) {
+    const run = this.localOperation(source, operationId)
+    if (!run) {
+      const result = await this.readOperation(source, operationId, true)
+      return { accepted: result.accepted, operationId, state: result.operation.state }
+    }
     const accepted = !isTerminal(run.operation.state)
     if (accepted) {
       run.controller.abort()
       run.operation = { ...run.operation, cancelRequested: true }
     }
-    return { accepted, operationId: request.operationId, state: run.operation.state }
+    return { accepted, operationId, state: run.operation.state }
   }
 
   hasActive(): boolean {
@@ -223,12 +248,44 @@ export class CandidateOperations {
     await this.waitForIdle()
   }
 
-  private requireOperation(request: EccRuntimeOperationRequest): CandidateRun {
-    const run = this.operations.get(request.operationId)
-    if (!run || request.workspaceHandle !== run.workspaceHandle) {
-      throw new Error('ECC candidate is not owned by this Workspace Session.')
+  private localOperation(
+    source: SourceWorkspace,
+    operationId: string,
+  ): CandidateRun | undefined {
+    const run = this.operations.get(operationId)
+    if (run && !sameSource(run.source, source)) {
+      throw new Error('ECC candidate is not owned by this Workspace.')
     }
     return run
+  }
+
+  private async readOperation(
+    source: SourceWorkspace,
+    operationId: string,
+    cancel = false,
+  ) {
+    const record = await this.query(
+      candidateArgs('operation', source, [
+        '--id',
+        operationId,
+        ...(cancel ? ['--cancel'] : []),
+      ]),
+      source.projectRoot,
+    )
+    const value = record.operation
+    if (
+      record.record === 'candidate_operation' &&
+      typeof record.accepted === 'boolean' &&
+      isRecord(value) &&
+      typeof value.workspaceId === 'string' &&
+      value.workspaceId.startsWith(`${source.workspaceId}::candidate::`) &&
+      value.operationId === operationId
+    ) {
+      const action = value.kind === 'candidate_resume' ? 'resume' : 'rerun'
+      const operation = readOperation(value, value.workspaceId, action)
+      if (operation) return { operation, accepted: record.accepted }
+    }
+    throw new Error('ECC candidate operation is unavailable.')
   }
 
   private async query(args: string[], cwd?: string) {
@@ -241,6 +298,15 @@ export class CandidateOperations {
       throw commandError(error)
     }
   }
+}
+
+function sameSource(left: SourceWorkspace, right: SourceWorkspace): boolean {
+  return (
+    left.projectRoot === right.projectRoot &&
+    left.projectId === right.projectId &&
+    left.workspaceId === right.workspaceId &&
+    left.directory === right.directory
+  )
 }
 
 function candidateArgs(
@@ -299,8 +365,8 @@ function readOperation(
     value.workspaceId !== workspaceId ||
     value.kind !== `candidate_${action}` ||
     typeof value.operationId !== 'string' ||
-    !/^operation-[0-9a-f]{32}$/.test(value.operationId) ||
-    !['queued', 'running', 'succeeded', 'failed', 'cancelled'].includes(
+    !isCandidateOperationId(value.operationId) ||
+    !['queued', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted'].includes(
       String(value.state),
     ) ||
     (value.result !== null && !isRecord(value.result))
@@ -314,7 +380,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isTerminal(state: EccRuntimeOperation['state']): boolean {
-  return state === 'succeeded' || state === 'failed' || state === 'cancelled'
+  return ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(state)
 }
 
 function commandError(error: unknown): Error {

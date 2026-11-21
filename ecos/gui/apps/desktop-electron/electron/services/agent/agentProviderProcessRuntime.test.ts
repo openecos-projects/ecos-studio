@@ -439,7 +439,7 @@ describe('AgentProviderProcessRuntime', () => {
     })
   })
 
-  it('records operation associations for host execution commands', async () => {
+  it('routes host execution commands to the current Workspace handle and records associations', async () => {
     resetAgentOperationAssociations()
     const harness = createSpawnHarness()
     const host = {
@@ -450,7 +450,7 @@ describe('AgentProviderProcessRuntime', () => {
       openWorkspace: vi.fn(),
       operationStatus: vi.fn(),
       startFlowOperation: vi.fn().mockResolvedValue({ operationId: 'op-run' }),
-      workspaceSession: vi.fn().mockResolvedValue({ workspaceHandle: 'handle-1' }),
+      workspaceSession: vi.fn().mockResolvedValue({ workspaceHandle: 'handle-2' }),
     }
     const runtime = new AgentProviderProcessRuntime({
       host,
@@ -491,6 +491,11 @@ describe('AgentProviderProcessRuntime', () => {
     }
 
     await vi.waitFor(() => {
+      expect(host.candidateRerun).toHaveBeenCalledWith({ workspaceHandle: 'handle-2' })
+      expect(host.candidateResume).toHaveBeenCalledWith({ workspaceHandle: 'handle-2' })
+      expect(host.startFlowOperation).toHaveBeenCalledWith({
+        workspaceHandle: 'handle-2',
+      })
       expect(getAgentOperationAssociation('codex', 'op-run')).toMatchObject({
         command: 'workspace.run',
       })

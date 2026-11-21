@@ -11,10 +11,10 @@ import { launchE2EApp, resolveOutDir } from './support/launch'
 
 const fixture = process.env.ECOS_E2E_CANDIDATE_PROJECT
 
-it.runIf(Boolean(fixture))(
-  'runs an isolated candidate through the real Electron bridge',
-  async () => {
-    const out = await resolveOutDir('agent-candidate')
+it.runIf(Boolean(fixture)).each(['placement', 'routing'])(
+  'runs an isolated %s candidate through the real Electron bridge',
+  async (target) => {
+    const out = await resolveOutDir(`agent-candidate-${target}`)
     const project = join(out, 'project')
     await cp(fixture!, project, { recursive: true })
     const manifestPath = join(project, 'project.json')
@@ -27,19 +27,20 @@ it.runIf(Boolean(fixture))(
     manifest.workspaces[0].workspace_path = workspace
     await writeFile(manifestPath, JSON.stringify(manifest))
 
-    const launched = await launchE2EApp(out)
+    let launched = await launchE2EApp(out)
     try {
-      const page = launched.page
-      const opened = (await page.evaluate(
-        (directory) =>
-          window.ecosDesktop.runtime.workspace.open({
-            designTool: 'backend',
-            directory,
-          }),
-        workspace,
-      )) as EccWorkspaceOpenResult
-      const handle = opened.workspaceHandle
-      const capabilities = await page.evaluate(
+      const open = () =>
+        launched.page.evaluate(
+          (directory) =>
+            window.ecosDesktop.runtime.workspace.open({
+              designTool: 'backend',
+              directory,
+            }),
+          workspace,
+        ) as Promise<EccWorkspaceOpenResult>
+      const opened = await open()
+      let handle = opened.workspaceHandle
+      const capabilities = await launched.page.evaluate(
         (workspaceHandle) =>
           window.ecosDesktop.productCommands.execute({
             command: 'candidate.capabilities',
@@ -59,7 +60,7 @@ it.runIf(Boolean(fixture))(
       const flow = join(workspace, 'home', 'flow.json')
       const initial = await readFile(flow, 'utf8')
       const run = (payload: EccCandidateRerunRequest) =>
-        page.evaluate(
+        launched.page.evaluate(
           (request) =>
             window.ecosDesktop.productCommands.execute({
               command: 'candidate.rerun',
@@ -68,7 +69,7 @@ it.runIf(Boolean(fixture))(
           payload,
         ) as Promise<EccRuntimeOperation>
       const wait = (operationId: string) =>
-        page.evaluate(
+        launched.page.evaluate(
           (request) => window.ecosDesktop.ecc.runtime!.waitForOperation(request),
           { workspaceHandle: handle, operationId },
         ) as Promise<EccRuntimeOperation>
@@ -86,45 +87,133 @@ it.runIf(Boolean(fixture))(
         seed: 17,
         patch: [{ knob_id: 'place.target_density', value: 0.45 }],
       }
-      await expect(
-        run({ ...request, expectedWorkspaceRevision: opened.workspaceRevision! + 1 }),
-      ).rejects.toThrow(/revision/i)
+      if (target === 'placement') {
+        await expect(
+          run({ ...request, expectedWorkspaceRevision: opened.workspaceRevision! + 1 }),
+        ).rejects.toThrow(/revision/i)
 
-      const failedStart = await run({
+        const failedStart = await run({
+          ...request,
+          candidateId: 'candidate-electron-invalid-knob',
+          idempotencyKey: randomUUID(),
+          patch: [{ knob_id: 'place.unknown_knob', value: 0.45 }],
+        })
+        const failed = await wait(failedStart.operationId)
+        expect(failed).toMatchObject({
+          state: 'failed',
+          error: { message: expect.stringMatching(/knob/i) },
+        })
+
+        const started = await run(request)
+        const terminal = await wait(started.operationId)
+        expect(terminal).toMatchObject({
+          state: 'succeeded',
+          result: {
+            candidateRootRef: '.agent/candidates/candidate-electron-placement',
+            candidateManifestSha256: expect.stringMatching(/^sha256:/),
+            parameterApplicationReceipt: {
+              requested: { knob_id: 'place.target_density', value: 0.45 },
+            },
+          },
+        })
+        const evidence = terminal.result!
+        const candidateManifest = await readFile(
+          join(workspace, String(evidence.candidateManifestRef)),
+        )
+        expect(evidence.candidateManifestSha256).toBe(
+          'sha256:' + createHash('sha256').update(candidateManifest).digest('hex'),
+        )
+        expect(await run(request)).toMatchObject({
+          operationId: started.operationId,
+          deduplicated: true,
+          state: 'succeeded',
+        })
+        expect(await readFile(flow, 'utf8')).toBe(initial)
+        return
+      }
+
+      const routing = await run({
         ...request,
-        candidateId: 'candidate-electron-invalid-knob',
+        candidateId: 'candidate-electron-routing',
         idempotencyKey: randomUUID(),
-        patch: [{ knob_id: 'place.unknown_knob', value: 0.45 }],
+        targetStep: 'routing',
+        patch: [{ knob_id: 'route.thread_number', value: 2 }],
       })
-      const failed = await wait(failedStart.operationId)
-      expect(failed).toMatchObject({
-        state: 'failed',
-        error: { message: expect.stringMatching(/knob/i) },
+      const routingFlow = join(
+        workspace,
+        '.agent',
+        'candidates',
+        'candidate-electron-routing',
+        'home',
+        'flow.json',
+      )
+      await expect
+        .poll(
+          async () => {
+            const persisted = await readFile(routingFlow, 'utf8').catch(() => '')
+            const steps = persisted ? JSON.parse(persisted).steps : []
+            return steps.find((step: { name: string }) => step.name === 'routing')?.state
+          },
+          { timeout: 75_000 },
+        )
+        .toBe('Ongoing')
+      await launched.page.evaluate(
+        (workspaceHandle) =>
+          window.ecosDesktop.runtime.workspace.close({
+            designTool: 'backend',
+            workspaceHandle,
+          }),
+        handle,
+      )
+      const reopened = await open()
+      expect(reopened.workspaceHandle).not.toBe(handle)
+      handle = reopened.workspaceHandle
+      const routingRequest = { workspaceHandle: handle, operationId: routing.operationId }
+      const cancelled = await launched.page.evaluate(
+        (payload) =>
+          window.ecosDesktop.productCommands.execute({
+            command: 'workspace.cancel',
+            payload,
+          }),
+        routingRequest,
+      )
+      expect(cancelled).toMatchObject({ accepted: true })
+      await expect(wait(routing.operationId)).resolves.toMatchObject({
+        state: 'cancelled',
       })
 
-      const started = await run(request)
-      const terminal = await wait(started.operationId)
-      expect(terminal).toMatchObject({
+      await launched.close()
+      launched = await launchE2EApp(join(out, 'restarted'))
+      const restarted = await open()
+      handle = restarted.workspaceHandle
+      await expect(wait(routing.operationId)).resolves.toMatchObject({
+        state: 'cancelled',
+      })
+      const resumed = (await launched.page.evaluate(
+        (payload) =>
+          window.ecosDesktop.productCommands.execute({
+            command: 'candidate.resume',
+            payload,
+          }),
+        {
+          workspaceHandle: handle,
+          candidateId: 'candidate-electron-routing',
+          idempotencyKey: randomUUID(),
+          expectedWorkspaceRevision: restarted.workspaceRevision!,
+          contextSha256: digest,
+          parameterCardSha256: digest,
+          seed: 17,
+        },
+      )) as EccRuntimeOperation
+      await expect(wait(resumed.operationId)).resolves.toMatchObject({
         state: 'succeeded',
         result: {
-          candidateRootRef: '.agent/candidates/candidate-electron-placement',
-          candidateManifestSha256: expect.stringMatching(/^sha256:/),
           parameterApplicationReceipt: {
-            requested: { knob_id: 'place.target_density', value: 0.45 },
+            requested: { knob_id: 'route.thread_number', value: 2 },
+            status: 'effective',
+            actual_value: 2,
           },
         },
-      })
-      const evidence = terminal.result!
-      const candidateManifest = await readFile(
-        join(workspace, String(evidence.candidateManifestRef)),
-      )
-      expect(evidence.candidateManifestSha256).toBe(
-        'sha256:' + createHash('sha256').update(candidateManifest).digest('hex'),
-      )
-      expect(await run(request)).toMatchObject({
-        operationId: started.operationId,
-        deduplicated: true,
-        state: 'succeeded',
       })
       expect(await readFile(flow, 'utf8')).toBe(initial)
     } finally {

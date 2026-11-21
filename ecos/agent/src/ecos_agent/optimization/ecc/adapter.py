@@ -51,7 +51,7 @@ _ALLOWED_METHODS = frozenset(
         "operation.ack_step_rendered",
     }
 )
-_TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
+_TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled", "interrupted", "unknown"})
 class EccRpcTransport(Protocol):
     def call(self, method: str, params: dict[str, object]) -> dict[str, object]: ...
 
@@ -209,12 +209,16 @@ class EccCandidateRerunAdapter:
             context_sha256,
             seed,
         )
-        if state == "failed":
+        if state in {"failed", "interrupted", "unknown"}:
             self._binding_by_execution_id.pop(operation_id, None)
             return CandidateExecutionReceipt(
                 execution_id=operation_id,
                 started=True,
-                outcome=OptimizationOutcomeKind.EXECUTION_FAILED,
+                outcome=(
+                    OptimizationOutcomeKind.INDETERMINATE
+                    if state == "unknown"
+                    else OptimizationOutcomeKind.EXECUTION_FAILED
+                ),
                 evidence=evidence,
                 parameter_application_receipt=application_receipt,
             )
@@ -255,7 +259,7 @@ class EccCandidateRerunAdapter:
             raise OptimizationEccAdapterError("terminal operation id does not match")
         outcome = (
             OptimizationOutcomeKind.TIMED_OUT_CANCELLED
-            if state in {"cancelled", "failed"}
+            if state in {"cancelled", "failed", "interrupted"}
             else None
         )
         evidence = self._evidence(terminal)
@@ -304,6 +308,8 @@ class EccCandidateRerunAdapter:
             "succeeded": OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
             "failed": OptimizationOutcomeKind.EXECUTION_FAILED,
             "cancelled": OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
+            "interrupted": OptimizationOutcomeKind.EXECUTION_FAILED,
+            "unknown": OptimizationOutcomeKind.INDETERMINATE,
         }.get(state)
         evidence = self._evidence(terminal)
         application_receipt = self._application_receipt(
