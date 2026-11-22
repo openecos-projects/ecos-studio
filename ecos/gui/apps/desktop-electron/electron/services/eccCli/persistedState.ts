@@ -10,6 +10,7 @@ import { isWorkspaceStepDirectory } from '../workspaceStepDirectory'
 
 const PROJECT_MAX_BYTES = 4 * 1024 * 1024
 const FLOW_MAX_BYTES = 4 * 1024 * 1024
+const SUPPORTED_FLOW_SCHEMA_VERSIONS = new Set<number>([1, 3])
 // ECC publishes JSON via a same-directory temp file + atomic rename, so a
 // read can briefly race the replacement and observe ENOENT on the old path.
 const ENOENT_RETRY_ATTEMPTS = 2
@@ -76,7 +77,8 @@ export async function readWorkspaceFlowFile(path: string): Promise<PersistedFlow
   const raw = await readBoundedJson(path, FLOW_MAX_BYTES)
   if (
     !isRecord(raw) ||
-    (raw.schema_version !== 1 && raw.schema_version !== 3) ||
+    typeof raw.schema_version !== 'number' ||
+    !SUPPORTED_FLOW_SCHEMA_VERSIONS.has(raw.schema_version) ||
     !Array.isArray(raw.steps) ||
     raw.steps.length > 4096
   ) {

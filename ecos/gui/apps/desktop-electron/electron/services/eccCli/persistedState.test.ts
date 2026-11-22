@@ -76,6 +76,37 @@ describe('readWorkspaceFlow', () => {
     })
   })
 
+  it('accepts ECC schema 3 and ignores step metadata beyond the flow projection', async () => {
+    const root = await writeFlow({
+      schema_version: 3,
+      steps: [
+        {
+          name: 'placement',
+          tool: 'dreamplace',
+          category: 'PNR',
+          directory: '06_placement_dreamplace',
+          state: 'Ongoing',
+          runtime: '',
+          'peak memory (mb)': 0,
+          info: {},
+          resource_observation: { status: 'available' },
+        },
+      ],
+    })
+
+    await expect(readWorkspaceFlow(root)).resolves.toEqual({
+      steps: [
+        {
+          name: 'placement',
+          peakMemory: 0,
+          runtime: '',
+          state: 'Ongoing',
+          tool: 'dreamplace',
+        },
+      ],
+    })
+  })
+
   it('retains checklist blocks that stop a required flow step', async () => {
     const root = await writeFlow({
       schema_version: 1,
