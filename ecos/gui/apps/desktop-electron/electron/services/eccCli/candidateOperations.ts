@@ -198,6 +198,17 @@ export class CandidateOperations {
     await Promise.all(pending.map((id) => this.wait(source, id, deadline)))
   }
 
+  async cleanupCandidates(source: SourceWorkspace, episodePrefix: string): Promise<void> {
+    const record = await this.query(
+      candidateArgs('cleanup', source, ['--prefix', episodePrefix]),
+      source.projectRoot,
+      120_000,
+    )
+    if (record.record !== 'candidate_cleanup' || !Number.isSafeInteger(record.removed)) {
+      throw new Error('ECC did not confirm candidate cleanup.')
+    }
+  }
+
   async status(
     source: SourceWorkspace,
     operationId: string,
@@ -288,9 +299,9 @@ export class CandidateOperations {
     throw new Error('ECC candidate operation is unavailable.')
   }
 
-  private async query(args: string[], cwd?: string) {
+  private async query(args: string[], cwd?: string, timeoutMs = 10_000) {
     try {
-      const { stdout } = await this.cli.run(args, { cwd, timeoutMs: 10_000 })
+      const { stdout } = await this.cli.run(args, { cwd, timeoutMs })
       const record = stdout.split('\n').map(readRecord).reverse().find(Boolean)
       if (!record) throw new Error('ECC candidate response is unavailable.')
       return record

@@ -69,6 +69,10 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
   private reconcileOptimizationStop?: (
     episode: DesktopAgentOptimizationEpisodeSummary,
   ) => Promise<void>
+  private cleanupOptimizationCandidates?: (
+    episode: DesktopAgentOptimizationEpisodeSummary,
+  ) => Promise<void>
+  private readonly optimizationCleanupsInFlight = new Set<string>()
   private readonly optimizationInvalidationListeners = new Set<
     (generation: number) => void
   >()
@@ -192,6 +196,12 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
     reconcile: (episode: DesktopAgentOptimizationEpisodeSummary) => Promise<void>,
   ): void {
     this.reconcileOptimizationStop = reconcile
+  }
+
+  setOptimizationCandidateCleanup(
+    cleanup: (episode: DesktopAgentOptimizationEpisodeSummary) => Promise<void>,
+  ): void {
+    this.cleanupOptimizationCandidates = cleanup
   }
 
   async getModelSettings(
@@ -546,6 +556,10 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
     ) {
       throw new Error('Optimization Episode is unavailable for this Agent Session.')
     }
+    if (request.action === 'cleanup') {
+      await this.cleanupFinishedEpisode(episode)
+      return
+    }
     const provider = this.providerForRequest(request)
     if (request.action === 'resume' && episode.state === 'interrupted') {
       if (
@@ -651,6 +665,36 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
       providerId,
       sessionId: request.sessionId,
     })
+  }
+
+  private async cleanupFinishedEpisode(
+    episode: DesktopAgentOptimizationEpisodeSummary,
+  ): Promise<void> {
+    const id = episode.episodeId
+    if (!TERMINAL_OPTIMIZATION_STATES.has(episode.state)) {
+      throw new Error(
+        'Finish or stop the optimization before deleting its candidate files.',
+      )
+    }
+    if (episode.cleanupState === 'completed') return
+    if (!this.cleanupOptimizationCandidates || !episode.parentWorkspaceDirectory) {
+      throw new Error('Candidate cleanup is unavailable for this optimization.')
+    }
+    if (this.optimizationCleanupsInFlight.has(id)) {
+      throw new Error('Candidate cleanup is already in progress.')
+    }
+    this.optimizationCleanupsInFlight.add(id)
+    try {
+      await this.cleanupOptimizationCandidates(episode)
+      const current = this.optimizationEpisodes.get(id) ?? episode
+      this.publishOptimizationEpisode(
+        { ...current, cleanupState: 'completed' },
+        true,
+        'Candidate files were deleted, but Studio could not save the cleanup status.',
+      )
+    } finally {
+      this.optimizationCleanupsInFlight.delete(id)
+    }
   }
 
   syncEnvironmentOverrides(
@@ -824,15 +868,14 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
   private publishOptimizationEpisode(
     episode: DesktopAgentOptimizationEpisodeSummary,
     requirePersistence = false,
+    persistenceError = 'Unable to persist Optimization Episode outcome; Parent remains guarded.',
   ): void {
     const previous = this.optimizationEpisodes.get(episode.episodeId)
     this.optimizationEpisodes.set(episode.episodeId, episode)
     if (!this.persistOptimizationProjection() && requirePersistence) {
       if (previous) this.optimizationEpisodes.set(episode.episodeId, previous)
       else this.optimizationEpisodes.delete(episode.episodeId)
-      throw new Error(
-        'Unable to persist Optimization Episode outcome; Parent remains guarded.',
-      )
+      throw new Error(persistenceError)
     }
     this.optimizationGeneration += 1
     for (const listener of this.optimizationInvalidationListeners) {

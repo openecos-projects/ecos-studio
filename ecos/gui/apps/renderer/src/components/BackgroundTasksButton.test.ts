@@ -227,6 +227,48 @@ describe('BackgroundTasksButton', () => {
     wrapper.unmount()
   })
 
+  it('confirms cleanup for a finished episode from Background Tasks', async () => {
+    const episodes = useOptimizationEpisodeStore()
+    episodes.episodes = [
+      {
+        agentSessionId: 'session-finished',
+        cleanupState: 'available',
+        episodeId: 'episode-finished',
+        inFlightCount: 0,
+        optimization: {
+          episode_id: 'episode-finished',
+          schema_version: 'ecos.optimization_status.v2',
+          state: 'completed',
+        },
+        parentWorkspaceDirectory: '/projects/demo/ws_1',
+        providerId: 'ecos_agent',
+        startedAt: Date.now() - 10_000,
+        state: 'completed',
+        turnCount: 1,
+        updatedAt: Date.now(),
+      },
+    ]
+    const cleanup = vi.spyOn(episodes, 'cleanup').mockResolvedValue()
+    const wrapper = mount(BackgroundTasksButton)
+
+    await wrapper.get('.background-tasks-trigger').trigger('click')
+    expect(wrapper.text()).toContain('0 active')
+    expect(wrapper.get('button[aria-label="Delete candidate files"]').exists()).toBe(true)
+    const dialog = wrapper.get<HTMLDialogElement>('dialog')
+    dialog.element.returnValue = 'cancel'
+    await dialog.trigger('close')
+    expect(cleanup).not.toHaveBeenCalled()
+
+    dialog.element.returnValue = 'delete'
+    await dialog.trigger('close')
+    expect(cleanup).toHaveBeenCalledExactlyOnceWith('episode-finished')
+    expect(testState.showToast).toHaveBeenCalledWith({
+      severity: 'success',
+      summary: 'Candidate files deleted',
+    })
+    wrapper.unmount()
+  })
+
   it('shows the owning design next to a default workspace name', async () => {
     const store = useBackgroundOperationStore()
     store.operations = [

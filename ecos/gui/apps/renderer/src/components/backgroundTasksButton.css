@@ -155,6 +155,11 @@
   cursor: pointer;
 }
 
+.background-task-cleanup {
+  align-self: center;
+  margin-right: 6px;
+}
+
 .background-task-retry {
   align-self: center;
   margin-right: 6px;

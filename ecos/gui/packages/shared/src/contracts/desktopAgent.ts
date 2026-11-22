@@ -594,7 +594,7 @@ export interface DesktopAgentOptimizationEpisodeInvalidatedEvent {
 }
 
 export interface DesktopAgentOptimizationEpisodeControlRequest extends DesktopAgentProviderRequest {
-  action: 'pause' | 'resume' | 'retry' | 'stop'
+  action: 'pause' | 'resume' | 'retry' | 'stop' | 'cleanup'
   episodeId: string
   sessionId: string
 }

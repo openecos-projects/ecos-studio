@@ -219,6 +219,9 @@ export interface DesktopBridgeServices {
     setOptimizationStopReconciler?(
       reconcile: (episode: DesktopAgentOptimizationEpisodeSummary) => Promise<void>,
     ): void
+    setOptimizationCandidateCleanup?(
+      cleanup: (episode: DesktopAgentOptimizationEpisodeSummary) => Promise<void>,
+    ): void
     controlOptimizationEpisode?(
       request: DesktopAgentOptimizationEpisodeControlRequest,
     ): Promise<void>
@@ -542,6 +545,10 @@ export interface DesktopBridgeServices {
   eccRuntimeService: {
     cancelOperation(request: EccRuntimeOperationRequest): Promise<unknown>
     stopOptimizationCandidates(
+      workspaceHandle: string,
+      episodePrefix: string,
+    ): Promise<void>
+    cleanupOptimizationCandidates?(
       workspaceHandle: string,
       episodePrefix: string,
     ): Promise<void>
@@ -1400,10 +1407,21 @@ export function registerIpc(
     ) {
       throw new Error('Parent ECC Operation evidence is unavailable or active.')
     }
-    const prefix = `candidate-${createHash('sha256').update(episode.episodeId).digest('hex').slice(0, 16)}-`
     await services.eccRuntimeService.stopOptimizationCandidates(
       context.workspaceHandle,
-      prefix,
+      optimizationCandidatePrefix(episode.episodeId),
+    )
+  })
+
+  services.agentRuntimeService?.setOptimizationCandidateCleanup?.(async (episode) => {
+    const ecc = services.eccRuntimeService
+    if (!ecc.cleanupOptimizationCandidates) {
+      throw new Error('ECC candidate cleanup is unavailable.')
+    }
+    const context = await resolveAgentWorkspaceContext(episode.parentWorkspaceDirectory)
+    await ecc.cleanupOptimizationCandidates(
+      context.workspaceHandle,
+      optimizationCandidatePrefix(episode.episodeId),
     )
   })
 
@@ -3923,6 +3941,11 @@ function readAgentInterruptRequest(value: unknown): DesktopAgentInterruptRequest
     providerId: readAgentProviderId(record),
     sessionId: readAgentSessionId(record.sessionId),
   }
+}
+
+function optimizationCandidatePrefix(episodeId: string): string {
+  const digest = createHash('sha256').update(episodeId).digest('hex').slice(0, 16)
+  return `candidate-${digest}-`
 }
 
 function readWorkspaceRerunToken(value: unknown): string {

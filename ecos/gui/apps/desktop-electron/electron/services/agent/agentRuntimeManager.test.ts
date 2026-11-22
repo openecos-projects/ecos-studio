@@ -242,6 +242,19 @@ describe('AgentRuntimeManager', () => {
       expect(restored.isOptimizationParentGuarded('workspace-handle-1')).toBe(false)
       expect(restored.isOptimizationParentGuarded('workspace-handle-2')).toBe(true)
 
+      const cleanupRequest = {
+        action: 'cleanup' as const,
+        episodeId: 'episode-1',
+        providerId: 'codex',
+        sessionId: 'session-1',
+      }
+      const cleanup = vi.fn(async () => {})
+      restored.setOptimizationCandidateCleanup(cleanup)
+      await expect(restored.controlOptimizationEpisode(cleanupRequest)).rejects.toThrow(
+        'Finish or stop the optimization',
+      )
+      expect(cleanup).not.toHaveBeenCalled()
+
       await expect(
         restored.controlOptimizationEpisode({
           action: 'retry',
@@ -275,6 +288,25 @@ describe('AgentRuntimeManager', () => {
       expect(restored.isOptimizationParentGuarded('workspace-handle-2')).toBe(false)
       expect(restoredProvider.sendMessage).not.toHaveBeenCalled()
       expect(restoredProvider.stopOptimizationEpisode).not.toHaveBeenCalled()
+
+      cleanup.mockRejectedValueOnce(new Error('Candidate busy'))
+      await expect(restored.controlOptimizationEpisode(cleanupRequest)).rejects.toThrow(
+        'Candidate busy',
+      )
+      expect(restored.optimizationProjection().episodes[0]?.cleanupState).toBe(
+        'available',
+      )
+      await restored.controlOptimizationEpisode(cleanupRequest)
+      await restored.controlOptimizationEpisode(cleanupRequest)
+      expect(cleanup).toHaveBeenCalledTimes(2)
+      const reopened = new AgentRuntimeManager({
+        defaultProviderId: 'codex',
+        optimizationProjectionPath: projectionPath,
+        providers: [{ providerId: 'codex', runtime: restoredProvider }],
+      })
+      expect(reopened.optimizationProjection().episodes[0]?.cleanupState).toBe(
+        'completed',
+      )
     } finally {
       await rm(root, { force: true, recursive: true })
     }

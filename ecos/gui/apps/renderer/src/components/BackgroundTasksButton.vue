@@ -30,7 +30,10 @@
           <strong>Background Tasks</strong>
           <span role="status" aria-live="polite">{{ taskCount }} active</span>
         </header>
-        <div v-if="taskCount || attentionCount" class="background-tasks-list">
+        <div
+          v-if="taskCount || attentionCount || episodeTasks.length"
+          class="background-tasks-list"
+        >
           <article
             v-for="episode in episodeTasks"
             :key="`optimization:${episode.episodeId}`"
@@ -47,13 +50,25 @@
               </span>
               <span class="background-task-copy">
                 <strong>{{ taskLabel(episode.parentWorkspaceDirectory) }}</strong>
-                <span>Agent optimization · {{ episodeProgress(episode) }}</span>
+                <span
+                  >Agent optimization ·
+                  {{
+                    episode.cleanupState === 'available'
+                      ? 'Candidate files'
+                      : episodeProgress(episode)
+                  }}</span
+                >
               </span>
               <span class="background-task-meta">
                 <span>{{ episodeStateLabel(episode.state) }}</span>
                 <time>{{ elapsedLabel(episode.startedAt) }}</time>
               </span>
             </button>
+            <AgentCandidateCleanup
+              v-if="episode.cleanupState === 'available'"
+              :episode-id="episode.episodeId"
+              class="background-task-cleanup"
+            />
           </article>
 
           <article
@@ -193,6 +208,7 @@ import type {
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import AgentCandidateCleanup from '@/components/AgentCandidateCleanup.vue'
 import { backgroundTaskIdentityLabel } from '@/components/backgroundTaskIdentity'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
@@ -260,15 +276,23 @@ const creationTasks = computed<PresentedCreation[]>(() => {
     },
   ]
 })
-const episodeTasks = computed(() =>
+const activeEpisodeTasks = computed(() =>
   episodes.value.filter(
     (episode) => !['completed', 'failed', 'stopped'].includes(episode.state),
   ),
 )
+const episodeTasks = computed(() => [
+  ...activeEpisodeTasks.value,
+  ...episodes.value.filter(
+    (episode) =>
+      episode.cleanupState === 'available' &&
+      ['completed', 'failed', 'stopped'].includes(episode.state),
+  ),
+])
 const taskCount = computed(
   () =>
     operations.value.length +
-    episodeTasks.value.filter(
+    activeEpisodeTasks.value.filter(
       (episode) => !['interrupted', 'needs_attention'].includes(episode.state),
     ).length +
     creationTasks.value.filter((creation) => creation.status === 'active').length,
@@ -276,7 +300,7 @@ const taskCount = computed(
 const attentionCount = computed(
   () =>
     finalizations.value.length +
-    episodeTasks.value.filter((episode) =>
+    activeEpisodeTasks.value.filter((episode) =>
       ['interrupted', 'needs_attention'].includes(episode.state),
     ).length +
     creationTasks.value.filter((creation) => creation.status !== 'active').length,
@@ -518,6 +542,7 @@ function closeFromDocument(event: MouseEvent): void {
 
 function closeFromKeyboard(event: KeyboardEvent): void {
   if (event.key !== 'Escape' || !open.value) return
+  if (event.target instanceof Element && event.target.closest('dialog:modal')) return
   open.value = false
   trigger.value?.focus()
 }

@@ -152,7 +152,8 @@ function readAgentOptimizationEpisodeControlRequest(
     record.action !== 'pause' &&
     record.action !== 'resume' &&
     record.action !== 'retry' &&
-    record.action !== 'stop'
+    record.action !== 'stop' &&
+    record.action !== 'cleanup'
   ) {
     throw new Error('Agent Optimization Episode action is invalid.')
   }

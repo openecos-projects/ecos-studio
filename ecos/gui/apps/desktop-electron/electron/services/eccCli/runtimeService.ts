@@ -1154,6 +1154,14 @@ export class EccCliRuntimeService {
     )
   }
 
+  async cleanupOptimizationCandidates(workspaceHandle: string, episodePrefix: string) {
+    await this.ensureContract()
+    return await this.candidates.cleanupCandidates(
+      this.requireSession(workspaceHandle),
+      episodePrefix,
+    )
+  }
+
   async deriveCalibrationReplay(workspaceHandle: string, replayKey: string) {
     const session = this.requireSession(workspaceHandle)
     const name = calibrationReplayId(replayKey)

@@ -126,6 +126,19 @@ export const useOptimizationEpisodeStore = defineStore('optimizationEpisodes', (
     action: 'pause' | 'resume' | 'retry' | 'stop',
   ): Promise<void> {
     const episode = episodeForSession(sessionId)
+    await controlEpisode(episode, action)
+  }
+
+  async function cleanup(episodeId: string): Promise<void> {
+    const episode = episodes.value.find((entry) => entry.episodeId === episodeId)
+    await controlEpisode(episode, 'cleanup')
+    await refresh()
+  }
+
+  async function controlEpisode(
+    episode: DesktopAgentOptimizationEpisodeSummary | null | undefined,
+    action: 'pause' | 'resume' | 'retry' | 'stop' | 'cleanup',
+  ): Promise<void> {
     const agent = getDesktopApi().agent
     if (!agent || !episode) {
       throw new Error('Optimization Episode is unavailable for this Agent Session.')
@@ -134,7 +147,7 @@ export const useOptimizationEpisodeStore = defineStore('optimizationEpisodes', (
       action,
       episodeId: episode.episodeId,
       providerId: episode.providerId,
-      sessionId,
+      sessionId: episode.agentSessionId,
     })
   }
 
@@ -193,6 +206,7 @@ export const useOptimizationEpisodeStore = defineStore('optimizationEpisodes', (
     generation,
     issue,
     control,
+    cleanup,
     dispose,
     episodeForParent,
     episodeForSession,
