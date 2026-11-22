@@ -151,7 +151,6 @@ function readAgentOptimizationEpisodeControlRequest(
   if (
     record.action !== 'pause' &&
     record.action !== 'resume' &&
-    record.action !== 'retry' &&
     record.action !== 'stop' &&
     record.action !== 'cleanup'
   ) {

@@ -98,15 +98,9 @@
         >
           <i class="ri-play-fill" aria-hidden="true"></i>
         </button>
-        <button
-          v-else-if="optimization.state === 'needs_attention'"
-          type="button"
-          aria-label="Retry optimization"
-          title="Retry optimization"
-          @click="$emit('control', 'retry')"
-        >
-          <i class="ri-restart-line" aria-hidden="true"></i>
-        </button>
+        <p v-else-if="optimization.state === 'needs_attention'">
+          This optimization needs recovery. Stop it safely before starting a new round.
+        </p>
         <button
           v-else-if="optimization.state !== 'stopping'"
           type="button"
@@ -140,7 +134,7 @@ const props = defineProps<{
 }>()
 
 defineEmits<{
-  control: [action: 'pause' | 'resume' | 'retry' | 'stop']
+  control: [action: 'pause' | 'resume' | 'stop']
 }>()
 
 const expanded = ref(true)

@@ -5,7 +5,7 @@ import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useMessageStore } from '@/stores/messageStore'
 import { useOptimizationEpisodeStore } from '@/stores/optimizationEpisodeStore'
 
-type OptimizationControl = 'pause' | 'resume' | 'retry' | 'stop'
+type OptimizationControl = 'pause' | 'resume' | 'stop'
 type RemoveTabOptions = { interrupt: boolean; preserveSession: boolean }
 
 interface OptimizationEpisodeTabsOptions {

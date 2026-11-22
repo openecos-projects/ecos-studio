@@ -123,7 +123,7 @@ export const useOptimizationEpisodeStore = defineStore('optimizationEpisodes', (
 
   async function control(
     sessionId: string,
-    action: 'pause' | 'resume' | 'retry' | 'stop',
+    action: 'pause' | 'resume' | 'stop',
   ): Promise<void> {
     const episode = episodeForSession(sessionId)
     await controlEpisode(episode, action)
@@ -137,7 +137,7 @@ export const useOptimizationEpisodeStore = defineStore('optimizationEpisodes', (
 
   async function controlEpisode(
     episode: DesktopAgentOptimizationEpisodeSummary | null | undefined,
-    action: 'pause' | 'resume' | 'retry' | 'stop' | 'cleanup',
+    action: 'pause' | 'resume' | 'stop' | 'cleanup',
   ): Promise<void> {
     const agent = getDesktopApi().agent
     if (!agent || !episode) {

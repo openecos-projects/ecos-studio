@@ -162,8 +162,9 @@ describe('AgentOptimizationCard', () => {
         timeline: [turnOne],
       },
     })
-    await needsAttention.get('[aria-label="Retry optimization"]').trigger('click')
-    expect(needsAttention.emitted('control')).toEqual([['retry']])
+    expect(needsAttention.text()).toContain('Stop it safely before starting a new round')
+    await needsAttention.get('[aria-label="Stop optimization"]').trigger('click')
+    expect(needsAttention.emitted('control')).toEqual([['stop']])
   })
 
   it('renders the proposal rationale as plain text', () => {

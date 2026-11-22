@@ -655,11 +655,6 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
       )
       return
     }
-    if (request.action === 'retry') {
-      throw new Error(
-        'No independently verified recovery source exists for this Episode; Parent remains guarded.',
-      )
-    }
     await provider.sendMessage({
       message: request.action,
       providerId,

@@ -255,15 +255,6 @@ describe('AgentRuntimeManager', () => {
       )
       expect(cleanup).not.toHaveBeenCalled()
 
-      await expect(
-        restored.controlOptimizationEpisode({
-          action: 'retry',
-          episodeId: 'episode-1',
-          providerId: 'codex',
-          sessionId: 'session-1',
-        }),
-      ).rejects.toThrow('verified recovery source')
-      expect(restoredProvider.sendMessage).not.toHaveBeenCalled()
       const unsafe = vi.fn(async () => {
         throw new Error('ECC Operation still running')
       })

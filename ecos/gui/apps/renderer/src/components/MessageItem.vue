@@ -426,7 +426,7 @@ const props = defineProps<{ message: Message }>()
 
 const emit = defineEmits<{
   (e: 'img-load'): void
-  (e: 'optimization-control', action: 'pause' | 'resume' | 'retry' | 'stop'): void
+  (e: 'optimization-control', action: 'pause' | 'resume' | 'stop'): void
 }>()
 
 const md = new MarkdownIt({
