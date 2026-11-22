@@ -23,7 +23,7 @@ import {
   type WorkspaceJourney,
 } from './support/journey'
 
-const ADVISORY_STEPS = new Set(['antennaCheck', 'emir'])
+const ADVISORY_STEPS = new Set(['antenna_check', 'emir'])
 const FLOW_TIMEOUT_MS = 75 * 60_000
 const PDK_ROOT = process.env.ECOS_E2E_PDK_ROOT ?? join(repoRoot, 'pdk/icsprout55-pdk')
 
