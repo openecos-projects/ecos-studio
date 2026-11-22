@@ -100,7 +100,7 @@ describe('readPersistedEngineeringSnapshot', () => {
     },
   )
 
-  it.each([4, 6])(
+  it.each([4, 6, 7])(
     'accepts v%s snapshots without optional workspace configuration',
     async (schemaVersion) => {
       const snapshot = JSON.parse(fixtureText('v6-valid.json'))

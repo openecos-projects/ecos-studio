@@ -293,7 +293,7 @@ describe('analyzeWorkspaceQor', () => {
     })
   })
 
-  it('validates and projects a schema v6 Snapshot produced by ECC', () => {
+  it('validates and projects a current Snapshot produced by ECC', () => {
     const snapshot = engineeringSnapshot(5000)
 
     const validated = validateEngineeringSnapshot(snapshot)
