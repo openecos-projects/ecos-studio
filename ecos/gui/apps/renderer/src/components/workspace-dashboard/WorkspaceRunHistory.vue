@@ -21,7 +21,13 @@
     <p v-if="issue" role="alert">{{ issue }}</p>
     <p v-if="loading && !runs.length" role="status">Loading runs…</p>
     <p v-else-if="!runs.length && !issue">No saved ECC run results in this Workspace.</p>
-    <div v-if="runs.length" class="run-table">
+    <div
+      v-if="runs.length"
+      class="run-table"
+      tabindex="0"
+      role="region"
+      aria-label="Run history table"
+    >
       <table>
         <thead>
           <tr>
@@ -198,6 +204,9 @@ async function runAction(run: EccRunHistoryEntry, includeDiagnostics: boolean) {
 }
 
 .run-history {
+  position: fixed;
+  inset: 0;
+  margin: auto;
   width: min(68rem, calc(100vw - 2rem));
   max-height: calc(100vh - 2rem);
   padding: 1rem;

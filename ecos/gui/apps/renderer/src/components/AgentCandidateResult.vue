@@ -31,7 +31,12 @@
         <p>
           Best candidate <code>{{ episode.bestCandidate.candidate_id }}</code>
         </p>
-        <div class="result-table">
+        <div
+          class="result-table"
+          tabindex="0"
+          role="region"
+          aria-label="Candidate metrics"
+        >
           <table>
             <thead>
               <tr>
@@ -146,6 +151,9 @@ async function save() {
 }
 
 .result-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
   width: min(42rem, calc(100vw - 2rem));
   max-height: calc(100vh - 2rem);
   padding: 1rem;
