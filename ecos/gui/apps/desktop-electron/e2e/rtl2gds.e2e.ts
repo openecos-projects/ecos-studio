@@ -154,12 +154,12 @@ describe('product e2e: backend rtl2gds journey', () => {
     'generates a real DEF View snapshot and rejects concurrent requests in the same Workspace',
     async () => {
       const page = launched!.page
-      for (const step of ['Synthesis', 'preFloorplan']) {
+      for (const step of ['synthesis', 'pre_floorplan']) {
         const terminal = await runWorkspaceStep(page, workspace!, step, 20 * 60_000)
         expect(terminal.state, `${step} terminal state`).toBe('succeeded')
       }
       const defPath = await findFirstDef(workspace!.workspaceDir)
-      expect(defPath).toMatch(/preFloorplan.*\.def(?:\.gz)?$/i)
+      expect(defPath).toMatch(/pre[_-]?floorplan.*\.def(?:\.gz)?$/i)
       const results = await page.evaluate(
         async ({ workspaceHandle, defPath }) => {
           const request = () =>
