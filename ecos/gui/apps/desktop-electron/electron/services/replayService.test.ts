@@ -22,8 +22,8 @@ afterEach(async () => {
   await rm(workspace, { recursive: true, force: true })
 })
 
-async function recording(): Promise<string> {
-  const root = join(workspace, 'place_dreamplace/output/geometry/replay')
+async function recording(directory = 'place_dreamplace'): Promise<string> {
+  const root = join(workspace, directory, 'output/geometry/replay')
   await json(join(root, 'manifest.json'), {
     schema: 'ecos.replay.v1',
     status: 'complete',
@@ -66,12 +66,18 @@ describe('Replay workspace boundary', () => {
           runtime: '00:00:03',
           resource_observation: { elapsed_seconds: 3.25 },
         },
-        { name: 'place', tool: 'dreamplace', state: 'Success', runtime: '00:00:04' },
+        {
+          name: 'place',
+          tool: 'dreamplace',
+          directory: '07_place_dreamplace',
+          state: 'Success',
+          runtime: '00:00:04',
+        },
       ],
     }
     const path = join(workspace, 'home/flow.json')
     await json(path, flow)
-    await recording()
+    await recording('07_place_dreamplace')
     const catalog = JSON.parse(
       await readFile(await buildReplayCatalog(workspace), 'utf8'),
     )
@@ -135,6 +141,17 @@ describe('Replay workspace boundary', () => {
     await rm(manifest)
     await symlink(join(workspace, 'home/flow.json'), manifest)
     await expect(buildReplayCatalog(workspace)).rejects.toThrow('escapes')
+  })
+
+  it('rejects a recorded step directory outside the workspace', async () => {
+    await json(join(workspace, 'home/flow.json'), {
+      steps: [
+        { name: 'place', tool: 'dreamplace', directory: '../place', state: 'Success' },
+      ],
+    })
+    await expect(buildReplayCatalog(workspace)).rejects.toThrow(
+      'Invalid flow step directory',
+    )
   })
 })
 

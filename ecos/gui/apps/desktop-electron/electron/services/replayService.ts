@@ -3,6 +3,7 @@ import { readFile, realpath, rename, writeFile } from 'node:fs/promises'
 import { join, relative, isAbsolute } from 'node:path'
 import { parse } from 'smol-toml'
 import { routeMilestones } from './replayRouteNodes'
+import { workspaceStepDirectoryName } from './workspaceResourceService'
 
 async function inside(root: string, path: string): Promise<string> {
   const resolved = await realpath(path)
@@ -64,9 +65,18 @@ export async function buildReplayCatalog(workspace: string): Promise<string> {
     if (['Ongoing', 'Running'].includes(String(step.state)))
       throw new Error('Replay is available after the flow stops')
     const folder =
-      step.name === 'Timing optimization'
-        ? 'timing_optimization_sizer'
-        : `${step.name}_${step.tool}`
+      step.directory === undefined
+        ? workspaceStepDirectoryName(step.name, step.tool)
+        : step.directory
+    if (
+      typeof folder !== 'string' ||
+      !folder ||
+      folder === '.' ||
+      folder === '..' ||
+      /[/\\:]/.test(folder) ||
+      folder.includes('\0')
+    )
+      throw new Error('Invalid flow step directory')
     const base = join(root, folder)
     const runtime =
       typeof step.runtime === 'string' ? step.runtime.split(':').map(Number) : []

@@ -734,7 +734,7 @@ function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values))
 }
 
-function workspaceStepDirectoryName(stepName: string, tool: string): string {
+export function workspaceStepDirectoryName(stepName: string, tool: string): string {
   // Workaround for Sizer step directory name
   // Perhaps we should establish some conventions for naming folder paths
   // during the creation of the ecc tool directory to better unify these paths.
