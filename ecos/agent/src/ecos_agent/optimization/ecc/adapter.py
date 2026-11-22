@@ -14,7 +14,6 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Protocol
 
-from ecos_agent.hashing import file_sha256
 from ecos_agent.optimization.contracts import OptimizationKnob, RequestedKnobValue
 from ecos_agent.optimization.execution import (
     CANDIDATE_END_STEP,
@@ -424,13 +423,16 @@ class EccCandidateRerunAdapter:
         result = self._result(response)
         if result is None:
             return None
-        raw = result.get("parameterApplicationReceipt")
-        if raw is None:
+        embedded = result.get("parameterApplicationReceipt")
+        if embedded is None:
             return None
         if requested is None:
             raise OptimizationEccAdapterError("application receipt cannot be bound")
         if state not in _TERMINAL_STATES:
             raise OptimizationEccAdapterError("application receipt is non-terminal")
+        if not isinstance(embedded, Mapping):
+            raise OptimizationEccAdapterError("application receipt is invalid")
+        raw = self._read_bound_receipt(result, embedded, candidate_ref)
         try:
             if (
                 not isinstance(raw, Mapping)
@@ -461,7 +463,6 @@ class EccCandidateRerunAdapter:
             raise OptimizationEccAdapterError(
                 "application receipt ECC revision does not match"
             )
-        self._validate_receipt_result_binding(result, raw, candidate_ref)
         card = load_parameter_card(requested.knob_id)
         if receipt.context.get("parameter_card_sha256") != card_hash(card):
             raise OptimizationEccAdapterError(
@@ -500,12 +501,12 @@ class EccCandidateRerunAdapter:
         self._ecc_revision = revision.strip()
         return self._ecc_revision
 
-    def _validate_receipt_result_binding(
+    def _read_bound_receipt(
         self,
         result: Mapping[str, object],
-        embedded: object,
+        embedded: Mapping[str, object],
         candidate_ref: str | None,
-    ) -> None:
+    ) -> object:
         ref = result.get("parameterApplicationReceiptRef")
         digest = result.get("parameterApplicationReceiptSha256")
         if (
@@ -533,19 +534,24 @@ class EccCandidateRerunAdapter:
             resolved.relative_to(self._workspace_root)
             if path.is_symlink() or not resolved.is_file():
                 raise ValueError("receipt path is invalid")
-            payload = json.loads(resolved.read_text(encoding="utf-8"))
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            contents = resolved.read_bytes()
+        except (OSError, ValueError) as exc:
             raise OptimizationEccAdapterError(
                 "application receipt reference is unavailable"
             ) from exc
-        if file_sha256(resolved) != digest:
+        if f"sha256:{hashlib.sha256(contents).hexdigest()}" != digest:
             raise OptimizationEccAdapterError(
                 "application receipt reference hash does not match"
             )
-        if payload != embedded:
+        try:
+            payload = json.loads(contents)
+        except (ValueError, UnicodeError) as exc:
+            raise OptimizationEccAdapterError("application receipt is invalid") from exc
+        if not _same_receipt_json(payload, embedded):
             raise OptimizationEccAdapterError(
                 "application receipt payload does not match"
             )
+        return payload
 
     def _materialize_patch(
         self, request: CandidateExecutionRequest
@@ -606,6 +612,22 @@ class EccCandidateRerunAdapter:
             self._expected_workspace_revision is not None
             and "::candidate::" in workspace_id
         )
+
+
+def _same_receipt_json(left: object, right: object) -> bool:
+    # JavaScript represents both 1 and 1.0 as the same number. Preserve the
+    # integer/float spelling for the signed fields by reading the ECC file.
+    if isinstance(left, Mapping) and isinstance(right, Mapping):
+        return left.keys() == right.keys() and all(
+            _same_receipt_json(value, right[key]) for key, value in left.items()
+        )
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            _same_receipt_json(a, b) for a, b in zip(left, right, strict=True)
+        )
+    if type(left) in (int, float) and type(right) in (int, float):
+        return left == right
+    return type(left) is type(right) and left == right
 
 
 from ecos_agent.optimization.ecc.rpc_client import (  # noqa: E402

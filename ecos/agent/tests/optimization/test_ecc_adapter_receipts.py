@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 
@@ -40,6 +41,9 @@ def test_adapter_rejects_application_receipt_from_foreign_context(
     native["evidence_sha256"] = canonical_sha256(
         {key: value for key, value in native.items() if key != "evidence_sha256"}
     )
+    receipt_path = tmp_path / evidence["parameterApplicationReceiptRef"]
+    receipt_path.write_text(json.dumps(native), encoding="utf-8")
+    evidence["parameterApplicationReceiptSha256"] = file_sha256(receipt_path)
     rpc = _FakeEccRpc(
         _running_operation(),
         terminal_response={
@@ -93,6 +97,9 @@ def test_adapter_rejects_application_receipt_from_foreign_seed(tmp_path: Path) -
     native["evidence_sha256"] = canonical_sha256(
         {key: value for key, value in native.items() if key != "evidence_sha256"}
     )
+    receipt_path = tmp_path / evidence["parameterApplicationReceiptRef"]
+    receipt_path.write_text(json.dumps(native), encoding="utf-8")
+    evidence["parameterApplicationReceiptSha256"] = file_sha256(receipt_path)
     rpc = _FakeEccRpc(
         _running_operation(),
         terminal_response={
@@ -263,6 +270,46 @@ def test_adapter_validates_native_receipt_bound_to_candidate_materialization(
     assert receipt.parameter_application_receipt.status == status
     assert receipt.parameter_application_receipt.actual_value == native["actual_value"]
     assert receipt.parameter_application_receipt.requested["value"] == 0.65
+
+
+@pytest.mark.parametrize("wire_value", [1, True, 0])
+def test_adapter_reads_exact_ecc_receipt_after_electron_json_round_trip(
+    tmp_path: Path, wire_value: int | bool,
+) -> None:
+    native, evidence, _ = _write_candidate_evidence(tmp_path)
+    native["observation"]["utilization_floor"] = 1.0
+    native["observation"]["target_density"] = 1.0
+    native["actual_value"] = 1.0
+    native["evidence_sha256"] = canonical_sha256(
+        {key: value for key, value in native.items() if key != "evidence_sha256"}
+    )
+    receipt_path = tmp_path / evidence["parameterApplicationReceiptRef"]
+    receipt_path.write_text(json.dumps(native), encoding="utf-8")
+    evidence["parameterApplicationReceiptSha256"] = file_sha256(receipt_path)
+    projection = deepcopy(native)
+    projection["observation"]["utilization_floor"] = wire_value
+    rpc = _FakeEccRpc(
+        _running_operation(),
+        terminal_response={
+            "operationId": "operation-1",
+            "workspaceId": "workspace-1",
+            "state": "succeeded",
+            "result": {**evidence, "parameterApplicationReceipt": projection},
+        },
+    )
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200, workspace_root=tmp_path
+    )
+    adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
+
+    if type(wire_value) is int and wire_value == 1:
+        receipt = adapter.wait_for_terminal("operation-1").parameter_application_receipt
+        assert receipt is not None
+        assert receipt.evidence_sha256 == native["evidence_sha256"]
+        assert type(receipt.observation["utilization_floor"]) is float
+    else:
+        with pytest.raises(OptimizationEccAdapterError, match="receipt payload does not match"):
+            adapter.wait_for_terminal("operation-1")
 
 
 def test_adapter_binds_candidate_parent_manifest(tmp_path: Path) -> None:
