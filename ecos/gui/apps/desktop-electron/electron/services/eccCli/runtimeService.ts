@@ -4,6 +4,7 @@ import { mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { watch, type FSWatcher } from 'chokidar'
 import { basename, dirname, join, resolve } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { stringify as stringifyToml } from 'smol-toml'
 import type {
   EccBackgroundOperationLogResult,
@@ -55,6 +56,7 @@ import type {
 } from '@ecos-studio/shared'
 import { electronLogger } from '../logger'
 import { normalizeWorkspacePath } from '../workspacePath'
+import { calibrationReplayId, verifyCalibrationReplay } from './calibrationReplay'
 import { readPersistedEngineeringSnapshot } from './engineeringSnapshotReader'
 import {
   EccCliCommandError,
@@ -1154,10 +1156,7 @@ export class EccCliRuntimeService {
 
   async deriveCalibrationReplay(workspaceHandle: string, replayKey: string) {
     const session = this.requireSession(workspaceHandle)
-    if (!/^[0-9a-f]{64}$/.test(replayKey)) {
-      throw new Error('Calibration replay identity is invalid.')
-    }
-    const name = `calibration-${replayKey}`
+    const name = calibrationReplayId(replayKey)
     return await this.deriveWorkspace({
       commandId: name,
       directory: session.directory,
@@ -1165,6 +1164,58 @@ export class EccCliRuntimeService {
       targetDirectory: join(session.projectRoot, name),
       workspaceHandle,
     })
+  }
+
+  async releaseCalibrationReplay(workspaceHandle: string, replayKey: string) {
+    const source = this.requireSession(workspaceHandle)
+    const workspaceId = calibrationReplayId(replayKey)
+    const directory = join(source.projectRoot, workspaceId)
+    const deadline = Date.now() + 25_000
+    await this.loadProjectManifest(source.projectRoot)
+    for (;;) {
+      const manifest = await readProjectManifest(source.projectRoot)
+      if (manifest.project_id !== source.projectId) {
+        throw new Error('Calibration source Project identity changed.')
+      }
+      const entry = manifest.workspaces.find((row) => row.workspace_id === workspaceId)
+      const handle = this.handleByDirectory.get(directory)
+      if (!entry) {
+        if (handle) await this.closeCalibrationSession(handle)
+        return { ok: true }
+      }
+      if (entry.workspace_path !== directory || directory === source.directory) {
+        throw new Error('Calibration Workspace registration changed.')
+      }
+      await verifyCalibrationReplay(source, directory, workspaceId)
+      try {
+        if (this.isWorkspaceRuntimeActive(directory)) {
+          throw codedError('Calibration replay is still running.', 'workspace_busy')
+        }
+        // ECC checks the Workspace lock and registered process before deleting.
+        await this.mutateProjectManifest(source.projectRoot, {
+          type: 'delete-workspace',
+          workspaceId,
+          deleteDirectory: true,
+        })
+        if (handle) await this.closeCalibrationSession(handle)
+        this.invalidate()
+        return { ok: true }
+      } catch (error) {
+        if (
+          !['workspace_busy', 'revision_conflict'].includes(
+            (error as NodeJS.ErrnoException).code ?? '',
+          ) ||
+          Date.now() >= deadline
+        )
+          throw error
+        await delay(500)
+      }
+    }
+  }
+
+  private async closeCalibrationSession(handle: string): Promise<void> {
+    await this.closeWorkspace({ workspaceHandle: handle })
+    this.agentWorkspaceIdentities.delete(handle)
   }
 
   async deriveWorkspace(

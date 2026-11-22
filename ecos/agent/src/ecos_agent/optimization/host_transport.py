@@ -46,6 +46,7 @@ _PRODUCT_COMMAND_METHODS = frozenset(
         "rpc.hello",
         "workspace.open",
         "workspace.deriveCalibrationReplay",
+        "workspace.releaseCalibrationReplay",
         "workspace.run",
     }
 )

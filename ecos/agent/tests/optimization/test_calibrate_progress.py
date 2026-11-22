@@ -91,6 +91,9 @@ def test_calibrate_never_reports_a_terminal_wait_as_running(tmp_path, monkeypatc
                     "directory": str(tmp_path / "derived")}
         if method == "workspace.run":
             return {"operationId": "operation-1", "state": "running"}
+        if method == "workspace.releaseCalibrationReplay":
+            assert params["workspaceHandle"] == "handle-parent"
+            return {"ok": True}
         assert method == "operation.wait"
         assert 0 < params["timeoutMs"] <= 1000
         return {"operationId": "operation-1", "state": "succeeded"}
@@ -111,6 +114,7 @@ def test_calibrate_never_reports_a_terminal_wait_as_running(tmp_path, monkeypatc
 def test_active_replay_is_cancelled_on_stop_or_deadline(tmp_path, monkeypatch, stop):
     elapsed = 0.0
     cancelled = []
+    released = []
 
     def host_call(method, params):
         nonlocal elapsed
@@ -124,6 +128,9 @@ def test_active_replay_is_cancelled_on_stop_or_deadline(tmp_path, monkeypatch, s
             assert 0 < params["timeoutMs"] <= 1000
             elapsed += 1
             return {"state": "running"}
+        if method == "workspace.releaseCalibrationReplay":
+            released.append(params["workspaceHandle"])
+            raise RuntimeError("cleanup failed")
         assert method == "operation.cancel"
         cancelled.append(params)
         return {"accepted": True}
@@ -137,3 +144,4 @@ def test_active_replay_is_cancelled_on_stop_or_deadline(tmp_path, monkeypatch, s
             should_stop=lambda: stop and elapsed >= 1,
         )
     assert cancelled == [{"workspaceHandle": "replay", "operationId": "running"}]
+    assert released == ["source"]

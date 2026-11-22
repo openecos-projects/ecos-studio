@@ -520,6 +520,11 @@ async function ensureDesktopBridgeReady(): Promise<void> {
           desktopServices.eccRuntimeService.openWorkspace(request),
         operationStatus: (request) =>
           desktopServices.eccRuntimeService.operationStatus(request),
+        releaseCalibrationReplay: (workspaceHandle, replayKey) =>
+          desktopServices.eccRuntimeService.releaseCalibrationReplay(
+            workspaceHandle,
+            replayKey,
+          ),
         startFlowOperation: (request) =>
           desktopServices.eccRuntimeService.startFlowOperation(request),
         workspaceSession: async (workspaceHandle) => {

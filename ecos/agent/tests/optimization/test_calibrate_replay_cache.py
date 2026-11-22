@@ -47,7 +47,7 @@ def test_matching_cache_reuses_the_stored_observation(tmp_path, monkeypatch) -> 
 
 def test_parser_change_reparses_cached_flow_artifacts(tmp_path, monkeypatch) -> None:
     replay_root = tmp_path / "default-replay-1"
-    replay_root.mkdir()
+    (replay_root / "workspace").mkdir(parents=True)
     stale = dict(_FINGERPRINT, parser_sha256="parser-0")
     _store_replay_cache(replay_root, _terminal_observation(), stale, "produced")
     reparsed = _terminal_observation()
@@ -124,6 +124,10 @@ def test_missing_workspace_reruns_the_flow_and_records_provenance(
     replay_root = tmp_path / "default-replay-1"
     workspace = tmp_path / "ws"
     workspace.mkdir()
+    _store_replay_cache(
+        replay_root, _terminal_observation(), dict(_FINGERPRINT, parser_sha256="old"),
+        "produced", tmp_path / "cleaned-replay",
+    )
     produced = _terminal_observation()
     monkeypatch.setattr(
         "ecos_agent.optimization.calibrate_workspace._terminal_observation",
@@ -152,6 +156,9 @@ def test_missing_workspace_reruns_the_flow_and_records_provenance(
                     "state": "succeeded",
                     "workspaceId": "workspace-1",
                 }
+            if method == "workspace.releaseCalibrationReplay":
+                assert _load_replay_manifest(replay_root)["components"] == _FINGERPRINT
+                return {"ok": True}
             raise AssertionError(f"unexpected host method {method}")
 
     host = FakeHost()
@@ -175,6 +182,7 @@ def test_missing_workspace_reruns_the_flow_and_records_provenance(
     )
 
     assert result == produced
+    assert host.calls[3] == ("workspace.releaseCalibrationReplay", host.calls[1][1])
     assert _load_replay_manifest(replay_root)["provenance"] == "produced"
 
 

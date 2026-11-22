@@ -222,7 +222,7 @@ export function workspaceDirectoryForId(
   return resolve(entry.workspace_path)
 }
 
-async function readBoundedJson(path: string, maxBytes: number): Promise<unknown> {
+export async function readBoundedJson(path: string, maxBytes: number): Promise<unknown> {
   let attempt = 0
   while (true) {
     try {

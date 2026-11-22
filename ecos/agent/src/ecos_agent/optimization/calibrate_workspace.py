@@ -7,11 +7,10 @@ two or more times in isolated copies of the workspace, then freezes the
 cross-replay noise profile into ``<workspace>/.agent/optimization/
 noise-epsilon.v1.json`` where the episode runtime loads it.
 
-Replays inherit the workspace's current parameters. Each replay caches its ECC
-flow artifacts behind a fingerprint manifest (ECC revision, PDK, workspace
-inputs, observation-code hash): cached replays are reused unchanged while the
-inputs match, re-parsed in place when only the observation code changed, and
-calibration refuses to run when the toolchain or workspace inputs drifted.
+Replays inherit the workspace's current parameters. Each replay saves a terminal
+observation and fingerprint before releasing its Workspace. Matching observations
+are reused, and a parser change triggers a fresh replay once the raw artifacts
+have been removed. Calibration rejects caches produced by different flow inputs.
 """
 
 from __future__ import annotations
@@ -19,6 +18,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import logging
 import time
 from uuid import uuid4
 from collections.abc import Callable
@@ -46,9 +46,8 @@ _TERMINAL_STATES = frozenset(
 _MIN_REPLAYS = 2
 _PROGRESS_INTERVAL_SECONDS = 30.0
 _CACHE_MANIFEST_SCHEMA = "ecos.replay_cache_manifest.v1"
-#: Fingerprint keys that gate the expensive ECC flow rerun and must fail
-#: closed on drift. ``parser_sha256`` only gates cheap re-parsing.
 _REPLAY_INPUT_KEYS = ("ecc_revision", "origin_sha256", "parameters_sha256", "pdk_sha256")
+_LOGGER = logging.getLogger(__name__)
 
 
 def write_noise_epsilon_artifact(
@@ -239,18 +238,26 @@ def _run_replay(
     manifest = _load_replay_manifest(replay_root)
     replay_workspace = replay_root / "workspace"
     if observation_path.is_file() and manifest is not None:
-        if isinstance(manifest.get("workspace"), str):
+        managed = isinstance(manifest.get("workspace"), str)
+        if managed:
             replay_workspace = Path(manifest["workspace"])
         _require_same_inputs(manifest, fingerprint, index)
         if manifest["components"].get("parser_sha256") == fingerprint["parser_sha256"]:
-            return TerminalObservation.model_validate_json(observation_path.read_bytes())
-        # Only the observation code moved: the cached ECC artifacts stay
-        # authoritative, so re-parse them instead of paying for a flow rerun.
-        observation = _terminal_observation(replay_workspace)
-        _store_replay_cache(replay_root, observation, fingerprint, "reparsed", replay_workspace)
-        if progress is not None:
-            progress("observation code changed; re-parsed the cached flow artifacts")
-        return observation
+            observation = TerminalObservation.model_validate_json(observation_path.read_bytes())
+            if managed and replay_workspace.is_dir():
+                _release_replay(workspace, _replay_key(workspace, fingerprint, index))
+            return observation
+        if replay_workspace.is_dir():
+            observation = _terminal_observation(replay_workspace)
+            _store_replay_cache(
+                replay_root, observation, fingerprint, "reparsed",
+                replay_workspace if managed else None,
+            )
+            if managed:
+                _release_replay(workspace, _replay_key(workspace, fingerprint, index))
+            if progress is not None:
+                progress("observation code changed; re-parsed the cached flow artifacts")
+            return observation
     if replay_workspace.is_dir() and _workspace_flow_succeeded(replay_workspace):
         # Pre-manifest cache from an earlier calibration: adopt the finished
         # flow artifacts, recording that their toolchain provenance is unverified.
@@ -259,21 +266,56 @@ def _run_replay(
         if progress is not None:
             progress("re-parsed the finished flow artifacts and adopted the replay cache")
         return observation
-    source = _host_call("workspace.open", {"directory": str(workspace)})
-    source_handle = source.get("workspaceHandle")
-    if not isinstance(source_handle, str) or not source_handle:
-        raise OptimizationRuntimeError("calibration source handle is missing")
-    replay_key = canonical_sha256(
+    source_handle = _open_source(workspace)
+    replay_key = _replay_key(workspace, fingerprint, index)
+    try:
+        opened = _host_call(
+            "workspace.deriveCalibrationReplay",
+            {"workspaceHandle": source_handle, "replayKey": replay_key},
+        )
+        directory = _execute_replay(opened, index, timeout_seconds, progress, should_stop)
+        observation = _terminal_observation(directory)
+        _store_replay_cache(replay_root, observation, fingerprint, "produced", directory)
+        return observation
+    finally:
+        _release_replay(workspace, replay_key, source_handle)
+
+
+def _replay_key(workspace: Path, fingerprint: dict[str, str], index: int) -> str:
+    return canonical_sha256(
         {
             "workspace": str(workspace),
             "inputs": {key: fingerprint[key] for key in _REPLAY_INPUT_KEYS if key in fingerprint},
             "replay": index,
         }
     ).removeprefix("sha256:")
-    opened = _host_call(
-        "workspace.deriveCalibrationReplay",
-        {"workspaceHandle": source_handle, "replayKey": replay_key},
-    )
+
+
+def _open_source(workspace: Path) -> str:
+    source = _host_call("workspace.open", {"directory": str(workspace)})
+    source_handle = source.get("workspaceHandle")
+    if not isinstance(source_handle, str) or not source_handle:
+        raise OptimizationRuntimeError("calibration source handle is missing")
+    return source_handle
+
+
+def _release_replay(workspace: Path, replay_key: str, source_handle: str | None = None) -> None:
+    try:
+        _host_call(
+            "workspace.releaseCalibrationReplay",
+            {"workspaceHandle": source_handle or _open_source(workspace), "replayKey": replay_key},
+        )
+    except Exception as exc:
+        _LOGGER.warning("Could not clean up calibration replay %s: %s", replay_key, exc)
+
+
+def _execute_replay(
+    opened: dict[str, object],
+    index: int,
+    timeout_seconds: float,
+    progress: Callable[[str], None] | None,
+    should_stop: Callable[[], bool] | None,
+) -> Path:
     workspace_handle = opened.get("workspaceHandle")
     revision = opened.get("workspaceRevision")
     if not isinstance(workspace_handle, str) or not workspace_handle.strip():
@@ -334,10 +376,7 @@ def _run_replay(
         raise OptimizationRuntimeError(
             f"default replay {index} failed: {terminal.get('state')}"
         )
-    replay_workspace = Path(directory)
-    observation = _terminal_observation(replay_workspace)
-    _store_replay_cache(replay_root, observation, fingerprint, "produced", replay_workspace)
-    return observation
+    return Path(directory)
 
 
 def calibrate(

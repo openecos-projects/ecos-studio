@@ -100,6 +100,7 @@ export interface AgentProviderHost {
     workspaceHandle: string,
     replayKey: string,
   ): Promise<EccWorkspaceDeriveResult>
+  releaseCalibrationReplay?(workspaceHandle: string, replayKey: string): Promise<unknown>
   hello?(): Promise<unknown>
   openWorkspace(request: EccWorkspaceOpenRequest): Promise<unknown>
   operationStatus(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
@@ -576,6 +577,15 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
           throw new Error('ECC calibration replay is unavailable.')
         }
         return await this.host.deriveCalibrationReplay(
+          workspaceHandle,
+          readRequiredString(params, 'replayKey'),
+        )
+      }
+      case 'workspace.releaseCalibrationReplay': {
+        if (!this.host.releaseCalibrationReplay) {
+          throw new Error('ECC calibration replay cleanup is unavailable.')
+        }
+        return await this.host.releaseCalibrationReplay(
           workspaceHandle,
           readRequiredString(params, 'replayKey'),
         )

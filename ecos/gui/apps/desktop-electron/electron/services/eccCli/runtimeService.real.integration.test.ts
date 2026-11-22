@@ -73,11 +73,43 @@ describeReal('ECC CLI runtime real integration', () => {
       await service.deriveCalibrationReplay(created.workspaceHandle, replayKey),
     ).toMatchObject({ workspaceHandle: replay.workspaceHandle })
     expect(await readFile(flowPath, 'utf8')).toBe(originalFlow)
-    await service.closeWorkspace({ workspaceHandle: replay.workspaceHandle })
+    await service.releaseCalibrationReplay(created.workspaceHandle, replayKey)
+    await service.releaseCalibrationReplay(created.workspaceHandle, replayKey)
+    await expect(access(replay.directory)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(service.workspaceSession(replay.workspaceHandle)).rejects.toThrow(
+      'Workspace Session is not open',
+    )
+    expect((await service.readProjectManifest(projectRoot)).workspaces).toHaveLength(1)
+
+    const orphanKey = 'b'.repeat(64)
+    const orphan = await service.deriveCalibrationReplay(
+      created.workspaceHandle,
+      orphanKey,
+    )
+    await service.closeWorkspace({ workspaceHandle: orphan.workspaceHandle })
+    const reopenedService = createService(wrapper)
+    services.push(reopenedService)
+    const reopened = await reopenedService.openWorkspace({ directory: workspaceRoot })
+    await reopenedService.releaseCalibrationReplay(reopened.workspaceHandle, orphanKey)
+    await expect(access(orphan.directory)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    const sameNameKey = 'c'.repeat(64)
+    const sameName = await service.deriveWorkspace({
+      commandId: randomUUID(),
+      directory: workspaceRoot,
+      resetFromStep: '',
+      targetDirectory: join(projectRoot, `calibration-${sameNameKey}`),
+      workspaceHandle: created.workspaceHandle,
+    })
+    await expect(
+      service.releaseCalibrationReplay(created.workspaceHandle, sameNameKey),
+    ).rejects.toThrow('Workspace was not created by this calibration replay')
+    await expect(access(sameName.directory)).resolves.toBeUndefined()
+    await service.closeWorkspace({ workspaceHandle: sameName.workspaceHandle })
     await service.mutateProjectManifest(projectRoot, {
       deleteDirectory: true,
       type: 'delete-workspace',
-      workspaceId: replay.workspaceId!,
+      workspaceId: sameName.workspaceId!,
     })
 
     const reused = await service.openWorkspace({ directory: workspaceRoot })
