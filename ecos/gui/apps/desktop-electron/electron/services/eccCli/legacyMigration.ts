@@ -82,7 +82,7 @@ export async function projectNeedsCliMigration(projectRoot: string): Promise<boo
         baseDesign = record(manifest.base_design)
       }
     }
-    return (
+    const missingRequiredConfiguration =
       !nonempty(design.name) ||
       !nonempty(design.top) ||
       !nonempty(design.clock_port === undefined ? baseDesign.clock : design.clock_port) ||
@@ -93,7 +93,15 @@ export async function projectNeedsCliMigration(projectRoot: string): Promise<boo
       ) ||
       !nonempty(pdk.name) ||
       !nonempty(flow.preset)
-    )
+    if (!missingRequiredConfiguration) return false
+
+    // `ecc init` creates the current manifest before workspace creation fills
+    // the remaining project configuration. Do not mistake that new, empty
+    // project for a broken legacy project and put it into read-only mode.
+    const manifest = await readLegacyJson(join(projectRoot, 'project.json'))
+    if (Array.isArray(manifest?.workspaces) && manifest.workspaces.length === 0)
+      return false
+    return true
   } catch {
     // ECC owns the final check and refuses to overwrite malformed user data.
     return true

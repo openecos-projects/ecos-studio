@@ -161,6 +161,22 @@ describe('projectNeedsCliMigration', () => {
     await expect(projectNeedsCliMigration(root)).resolves.toBe(true)
   })
 
+  it('allows a fresh initialized project with no workspaces to finish configuration', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ecc-config-migration-'))
+    roots.push(root)
+    await writeFile(
+      join(root, 'project.json'),
+      JSON.stringify({ schema_version: 1, workspaces: [] }),
+    )
+    await writeFile(
+      join(root, 'ecc.toml'),
+      '[design]\nname = "gcd"\ntop = "gcd"\n' +
+        '\n[pdk]\nname = "ics55"\nroot = ""\n\n[flow]\npreset = "rtl2gds"\n',
+    )
+
+    await expect(projectNeedsCliMigration(root)).resolves.toBe(false)
+  })
+
   it('delegates malformed TOML to the fail-closed CLI migration check', async () => {
     const root = await mkdtemp(join(tmpdir(), 'ecc-config-migration-'))
     roots.push(root)
