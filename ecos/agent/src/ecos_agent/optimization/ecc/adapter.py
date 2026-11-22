@@ -40,6 +40,7 @@ from ecos_agent.optimization.parameters.semantics import (
 
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SAFE_RPC_ERROR_DETAIL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .:_-]{0,255}$")
+_WORKSPACE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 _MAX_PAYLOAD_BYTES = 16 * 1024 * 1024
 _ALLOWED_METHODS = frozenset(
     {
@@ -72,7 +73,7 @@ class EccCandidateRerunAdapter:
         workspace_root: Path | None = None,
         expected_workspace_revision: int | None = None,
     ) -> None:
-        if not _ID.fullmatch(workspace_id):
+        if not _WORKSPACE_ID.fullmatch(workspace_id):
             raise OptimizationEccAdapterError("workspace id is invalid")
         if type(site_width_dbu) is not int or site_width_dbu <= 0:
             raise OptimizationEccAdapterError("site width is invalid")

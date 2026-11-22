@@ -475,7 +475,10 @@ def test_execution_adapter_fingerprints_workspace_input_modes(
     )
     before = sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*"))
     adapter, context = open_execution_adapter(
-        runtime=SimpleNamespace(workspace_handle="handle-1", expected_workspace_revision=3),
+        runtime=SimpleNamespace(
+            workspace_handle="4d60848a-7091-41a6-896c-156a5ee72280",
+            expected_workspace_revision=3,
+        ),
         workspace=tmp_path,
         site_width_dbu=200,
         parent_manifest=_HASH,
