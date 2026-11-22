@@ -139,7 +139,7 @@ export async function prepareGcdProject(workRoot: string): Promise<E2EDesign> {
     parameters: {
       'floorplan.core_util': 0.6,
       'cts.max_fanout': 20,
-      'place.target_density': 0.2,
+      'placement:place.target_density': 0.2,
     },
   }
 }

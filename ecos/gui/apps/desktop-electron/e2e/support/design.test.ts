@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { prepareDesignProject } from './design'
+import { prepareDesignProject, prepareGcdProject } from './design'
 
 const temporaryRoots: string[] = []
 
@@ -11,6 +11,19 @@ afterEach(async () => {
 })
 
 describe('E2E design preparation', () => {
+  it('uses step-scoped placement parameters for the default GCD fixture', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ecos-e2e-gcd-'))
+    temporaryRoots.push(root)
+
+    const design = await prepareGcdProject(join(root, 'work'))
+
+    expect(design.parameters).toEqual({
+      'floorplan.core_util': 0.6,
+      'cts.max_fanout': 20,
+      'placement:place.target_density': 0.2,
+    })
+  })
+
   it('keeps the CI case directory separate from RTL design and top module names', async () => {
     const root = await mkdtemp(join(tmpdir(), 'ecos-e2e-design-'))
     temporaryRoots.push(root)
