@@ -1028,6 +1028,7 @@ function optimizationEpisodeState(
     case 'interrupted':
     case 'completed':
     case 'stopped':
+    case 'failed':
       return value
     case 'error':
     case 'escalated':

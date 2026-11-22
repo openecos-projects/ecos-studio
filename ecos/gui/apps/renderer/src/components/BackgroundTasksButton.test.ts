@@ -253,7 +253,9 @@ describe('BackgroundTasksButton', () => {
 
     await wrapper.get('.background-tasks-trigger').trigger('click')
     expect(wrapper.text()).toContain('0 active')
-    expect(wrapper.get('button[aria-label="Delete candidate files"]').exists()).toBe(true)
+    expect(wrapper.find('button[aria-label="Delete candidate files"]').exists()).toBe(
+      true,
+    )
     const dialog = wrapper.get<HTMLDialogElement>('dialog')
     dialog.element.returnValue = 'cancel'
     await dialog.trigger('close')

@@ -371,6 +371,22 @@ describe('AgentRuntimeManager', () => {
       providerId: 'codex',
       sessionId: 'session-1',
     })
+
+    provider.emitForTest({
+      sessionId: 'session-1',
+      type: 'optimization',
+      optimization: {
+        episode_id: 'episode-1',
+        schema_version: 'ecos.optimization_status.v2',
+        state: 'failed',
+        workspace: '/work/demo',
+      },
+    })
+    expect(manager.optimizationProjection().episodes[0]).toMatchObject({
+      cleanupState: 'available',
+      state: 'failed',
+    })
+    expect(manager.isOptimizationParentGuarded('workspace-handle-1')).toBe(false)
   })
 
   it('persists terminal notification acknowledgement across projection reloads', async () => {
