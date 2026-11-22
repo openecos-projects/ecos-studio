@@ -277,6 +277,7 @@ function registerHandlers(
         }),
       ),
       operationLog: vi.fn(),
+      runHistory: vi.fn(),
       operationStatus: vi.fn(),
       waitForOperation: vi.fn(),
       openWorkspace: vi.fn(),

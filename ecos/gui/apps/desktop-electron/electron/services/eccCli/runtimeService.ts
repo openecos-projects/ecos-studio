@@ -21,6 +21,7 @@ import type {
   EccRuntimeEvent,
   EccRuntimeOperation,
   EccRuntimeOperationRequest,
+  EccRunHistoryRequest,
   EccRuntimeStartFlowRequest,
   EccRuntimeStartStepRequest,
   EccWorkspaceCloseResult,
@@ -71,6 +72,7 @@ import {
   operationLogPath,
   readOperationLog,
   readRunFailure,
+  readRunHistory,
   readRunResult,
   readRunSelection,
   recentRunResults,
@@ -1303,15 +1305,37 @@ export class EccCliRuntimeService {
     return this.operationProjection()
   }
 
+  async runHistory({ workspaceHandle, before }: EccRunHistoryRequest) {
+    const session = this.requireSession(workspaceHandle)
+    return await readRunHistory(session.directory, session.workspaceId, before)
+  }
+
   async operationLog(
     request: EccRuntimeOperationRequest,
   ): Promise<EccBackgroundOperationLogResult> {
-    const tracked = this.requireOperation(request)
-    const { operation, session } = tracked
+    const tracked = this.operations.get(request.operationId)
+    const session =
+      tracked?.session.handle === request.workspaceHandle
+        ? tracked.session
+        : this.requireSession(request.workspaceHandle)
+    const result = await readRunResult(
+      session.directory,
+      session.workspaceId,
+      request.operationId,
+    )
+    const operation =
+      tracked?.session.handle === request.workspaceHandle
+        ? tracked.operation
+        : result
+          ? persistedRunSnapshot(session, result)
+          : undefined
+    if (!operation)
+      throw new Error('ECC Operation is not owned by this Workspace Session.')
     if (request.includeDiagnostics) {
       const diagnostics = this.diagnostics.get(operation.operationId)
       if (diagnostics) return diagnostics
       if (
+        result ||
         operation.state === 'failed' ||
         operation.state === 'interrupted' ||
         operation.state === 'unknown'
@@ -1325,6 +1349,7 @@ export class EccCliRuntimeService {
           log,
           [],
           this.options.mainLogFile,
+          Boolean(result && !tracked?.operation.flow),
         )
       }
       throw new Error('Run diagnostics are unavailable for this operation.')
@@ -1568,21 +1593,7 @@ export class EccCliRuntimeService {
         }
         continue
       }
-      const operation = {
-        ...cliRunSnapshot(session, result.runId, result.startedAt, result.selection),
-        state: result.state,
-        updatedAt: result.finishedAt,
-        error:
-          result.error ??
-          (result.state === 'failed'
-            ? { code: 'flow_failed', message: 'ECC run failed. See the run log.' }
-            : result.state === 'interrupted'
-              ? {
-                  code: 'run_interrupted',
-                  message: 'ECC execution was interrupted. See the run log.',
-                }
-              : null),
-      }
+      const operation = persistedRunSnapshot(session, result)
       this.operations.set(result.runId, {
         operation,
         projectRoot: session.projectRoot,
@@ -2161,6 +2172,27 @@ function operationSnapshot(
     updatedAt: timestamp,
     workspaceId: session.workspaceId,
     workspaceRevision: session.workspaceRevision,
+  }
+}
+
+function persistedRunSnapshot(
+  session: WorkspaceSession,
+  result: NonNullable<Awaited<ReturnType<typeof readRunResult>>>,
+): EccRuntimeOperation {
+  return {
+    ...cliRunSnapshot(session, result.runId, result.startedAt, result.selection),
+    state: result.state,
+    updatedAt: result.finishedAt,
+    error:
+      result.error ??
+      (result.state === 'failed'
+        ? { code: 'flow_failed', message: 'ECC run failed. See the run log.' }
+        : result.state === 'interrupted'
+          ? {
+              code: 'run_interrupted',
+              message: 'ECC execution was interrupted. See the run log.',
+            }
+          : null),
   }
 }
 

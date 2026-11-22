@@ -485,6 +485,8 @@ const desktopApi: DesktopApi = {
         invokeDesktop(desktopApiIpcChannels.eccRuntimeEngineeringSnapshot, request),
       operationProjection: () =>
         invokeDesktop(desktopApiIpcChannels.eccRuntimeOperationProjection),
+      runHistory: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeRunHistory, request),
       operationLog: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccRuntimeOperationLog, request),
       onOperationProjectionInvalidated: (listener) =>

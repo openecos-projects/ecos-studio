@@ -486,6 +486,24 @@ export interface EccBackgroundOperationInvalidatedEvent {
   generation: number
 }
 
+export interface EccRunHistoryEntry {
+  runId: string
+  startedAt: number
+  finishedAt: number
+  state: 'succeeded' | 'failed' | 'cancelled' | 'interrupted'
+  selection: { only?: string; fromStep?: string; throughStep?: string }
+  error?: { code: string; message: string }
+}
+
+export interface EccRunHistoryRequest extends EccWorkspaceHandleRequest {
+  before?: Pick<EccRunHistoryEntry, 'finishedAt' | 'runId'>
+}
+
+export interface EccRunHistoryPage {
+  runs: EccRunHistoryEntry[]
+  next?: NonNullable<EccRunHistoryRequest['before']>
+}
+
 export interface EccBackgroundOperationLogResult {
   content: string
   truncated: boolean
@@ -990,6 +1008,7 @@ export interface EccRuntimeApi {
     snapshot(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceRuntimeSnapshot>
     waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
     operationProjection(): Promise<EccBackgroundOperationProjection>
+    runHistory(request: EccRunHistoryRequest): Promise<EccRunHistoryPage>
     operationLog(
       request: EccRuntimeOperationRequest,
     ): Promise<EccBackgroundOperationLogResult>

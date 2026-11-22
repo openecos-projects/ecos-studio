@@ -1,6 +1,11 @@
 import { constants } from 'node:fs'
 import { mkdir, open, readdir, realpath, stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import type {
+  EccRunHistoryEntry,
+  EccRunHistoryPage,
+  EccRunHistoryRequest,
+} from '@ecos-studio/shared'
 
 export function operationLogPath(runId: string): string {
   if (!/^[a-zA-Z0-9-]+$/.test(runId)) throw new Error('Invalid ECC run ID.')
@@ -47,22 +52,10 @@ export async function readOperationLog(directory: string, runId: string) {
   }
 }
 
-type RunTerminalState = 'succeeded' | 'failed' | 'cancelled' | 'interrupted'
+type RunTerminalState = EccRunHistoryEntry['state']
 
-export interface RunSelection {
-  only?: string
-  fromStep?: string
-  throughStep?: string
-}
-
-export interface RunResult {
-  runId: string
-  startedAt: number
-  finishedAt: number
-  state: RunTerminalState
-  selection: RunSelection
-  error?: { code: string; message: string }
-}
+export type RunSelection = EccRunHistoryEntry['selection']
+type RunResult = EccRunHistoryEntry
 
 export function readRunSelection(value: unknown): RunSelection {
   if (!value || typeof value !== 'object') return {}
@@ -164,6 +157,52 @@ export async function recentRunResults(workspace: string, workspaceId: string) {
       .map(({ runId }) => readRunResult(workspace, workspaceId, runId)),
   )
   return results.filter((result) => result !== undefined)
+}
+
+export async function readRunHistory(
+  workspace: string,
+  workspaceId: string,
+  before: EccRunHistoryRequest['before'],
+): Promise<EccRunHistoryPage> {
+  let entries
+  try {
+    entries = await readdir(await workspaceLogDirectory(workspace), {
+      withFileTypes: true,
+    })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { runs: [] }
+    throw error
+  }
+  const ids = entries.flatMap((entry) => {
+    const id = RUN_RESULT_FILE.exec(entry.name)?.[1]
+    return entry.isFile() && id ? [id] : []
+  })
+  const pageSize = 30
+  const latest: RunResult[] = []
+  const compare = (left: NonNullable<typeof before>, right: NonNullable<typeof before>) =>
+    right.finishedAt - left.finishedAt || right.runId.localeCompare(left.runId)
+  for (let index = 0; index < ids.length; index += RECENT_RUN_LIMIT) {
+    const batch = await Promise.all(
+      ids
+        .slice(index, index + RECENT_RUN_LIMIT)
+        .map((id) => readRunResult(workspace, workspaceId, id)),
+    )
+    latest.push(
+      ...batch.filter((run): run is RunResult =>
+        Boolean(run && (!before || compare(run, before) > 0)),
+      ),
+    )
+    latest.sort(compare)
+    latest.length = Math.min(latest.length, pageSize + 1)
+  }
+  const runs = latest.slice(0, pageSize)
+  const last = runs.at(-1)
+  return {
+    runs,
+    ...(last && latest.length > pageSize
+      ? { next: { finishedAt: last.finishedAt, runId: last.runId } }
+      : {}),
+  }
 }
 
 function isRunTerminalState(value: unknown): value is RunTerminalState {

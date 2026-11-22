@@ -11,6 +11,7 @@ export async function buildOperationDiagnostics(
   runLog: Awaited<ReturnType<typeof readOperationLog>> | null,
   workers: readonly string[],
   mainLogFile?: string,
+  persistedOnly = false,
 ): Promise<EccBackgroundOperationLogResult> {
   const { operationId, state, error } = operation
   const desktopLog = mainLogFile
@@ -23,7 +24,13 @@ export async function buildOperationDiagnostics(
       'ECC run diagnostics',
       `Run ID: ${operationId}`,
       `Workspace: ${operation.workspaceId}`,
-      `Origin: ${operation.origin}`,
+      ...(persistedOnly ? [] : [`Origin: ${operation.origin}`]),
+      `Scope: ${
+        operation.step ||
+        (operation.flowScope?.fromStep
+          ? `${operation.flowScope.fromStep} → ${operation.flowScope.throughStep ?? 'end'}`
+          : 'Full flow')
+      }`,
       `State: ${state}`,
       ...(error ? [`Error: ${error.code}\n${error.message}`] : []),
       '',

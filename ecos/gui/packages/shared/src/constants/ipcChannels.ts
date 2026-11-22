@@ -138,6 +138,7 @@ export const desktopApiIpcChannels = {
   eccRuntimeWaitForOperation: 'ecc:runtime-wait-operation',
   eccRuntimeSnapshot: 'ecc:runtime-snapshot',
   eccRuntimeOperationProjection: 'ecc:runtime-operation-projection',
+  eccRuntimeRunHistory: 'ecc:runtime-run-history',
   eccRuntimeOperationLog: 'ecc:runtime-operation-log',
   productCommandExecute: 'product-command:execute',
   workspaceCreationModelGet: 'workspace-creation-model:get',

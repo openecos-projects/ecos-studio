@@ -6,6 +6,7 @@ import {
   type EccBackgroundOperationProjection,
   type EccBackgroundWorkspaceCreation,
   type EccRuntimeOperationRequest,
+  type EccRunHistoryRequest,
 } from '@ecos-studio/shared'
 import { idleShutdownStatus } from './shutdownBlockers'
 
@@ -14,6 +15,7 @@ type Sender = IpcMainInvokeEvent['sender']
 
 interface BackgroundRuntime {
   onOperationProjectionInvalidated(listener: () => void): () => void
+  runHistory(request: EccRunHistoryRequest): Promise<unknown>
   operationLog(request: EccRuntimeOperationRequest): Promise<unknown>
   operationProjection(): EccBackgroundOperationProjection
   reconcileOperationProjection?(): Promise<EccBackgroundOperationProjection>
@@ -92,6 +94,28 @@ export function registerBackgroundLifecycleIpc(options: {
         owns(item.workspaceHandle),
       ),
     }
+  })
+
+  options.handle(desktopApiIpcChannels.eccRuntimeRunHistory, async (event, value) => {
+    if (
+      !isRecord(value) ||
+      typeof value.workspaceHandle !== 'string' ||
+      !options.ownsWorkspaceHandle(event.sender, value.workspaceHandle)
+    ) {
+      throw new Error('Run history request does not own this Workspace handle.')
+    }
+    const before = value.before
+    if (
+      before !== undefined &&
+      (!isRecord(before) ||
+        typeof before.finishedAt !== 'number' ||
+        !Number.isFinite(before.finishedAt) ||
+        typeof before.runId !== 'string' ||
+        !/^[a-f0-9-]{36}$/.test(before.runId))
+    ) {
+      throw new Error('Run history cursor is invalid.')
+    }
+    return await options.runtime.runHistory(value as unknown as EccRunHistoryRequest)
   })
 
   options.handle(desktopApiIpcChannels.eccRuntimeOperationLog, async (event, value) => {

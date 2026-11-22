@@ -34,6 +34,7 @@ import {
   type EccRuntimeEvent,
   type EccRuntimeOperation,
   type EccRuntimeOperationRequest,
+  type EccRunHistoryRequest,
   type EccCandidateCapabilitiesRequest,
   type EccCandidateResumeRequest,
   type EccCandidateRerunRequest,
@@ -576,6 +577,7 @@ export interface DesktopBridgeServices {
     operationProjection(): EccBackgroundOperationProjection
     reconcileOperationProjection?(): Promise<EccBackgroundOperationProjection>
     operationLog(request: EccRuntimeOperationRequest): Promise<unknown>
+    runHistory(request: EccRunHistoryRequest): Promise<unknown>
     operationStatus(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
     waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
     openWorkspace(

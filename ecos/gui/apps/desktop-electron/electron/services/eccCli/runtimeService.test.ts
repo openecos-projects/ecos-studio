@@ -1242,6 +1242,32 @@ describe('ECC CLI live flow projection', () => {
       workspaceRevision: 1,
     })
 
+    await writeFile(
+      join(workspaceDirectory, 'log', `${finishedRunId}.log`),
+      'single step complete',
+    )
+    await expect(service.runHistory({ workspaceHandle: 'handle-1' })).resolves.toEqual({
+      runs: [
+        {
+          runId: finishedRunId,
+          startedAt: 1,
+          finishedAt: 2,
+          state: 'succeeded',
+          selection: { only: 'synthesis' },
+        },
+      ],
+    })
+    await expect(
+      service.operationLog({
+        workspaceHandle: 'handle-1',
+        operationId: finishedRunId,
+        includeDiagnostics: true,
+      }),
+    ).resolves.toMatchObject({
+      content: 'single step complete',
+      diagnostics: expect.stringContaining('Scope: synthesis'),
+    })
+
     const projection = await service.reconcileOperationProjection()
 
     expect(projection.operations).toEqual([
