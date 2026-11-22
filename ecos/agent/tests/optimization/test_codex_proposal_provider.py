@@ -461,20 +461,23 @@ def test_planner_binds_domain_and_consumable_evidence(
     assert provider.consume_planning_evidence() is None
 
 
-def test_planner_schema_keeps_strategy_optional() -> None:
+def test_planner_schema_requires_nullable_strategy_and_all_nested_fields() -> None:
     domain = _domain()
     schema = _optimization_proposal_output_schema_v2(domain, ("increase", "decrease"))
 
     assert schema["properties"]["rationale_summary"]["minLength"] == 1
     assert schema["properties"]["rationale_summary"]["maxLength"] == 512
-    assert "strategy" in schema["properties"]
-    assert "strategy" not in schema["required"]
+    assert set(schema["required"]) == set(schema["properties"])
+    assert {"type": "null"} in schema["properties"]["strategy"]["anyOf"]
     step = schema["$defs"]["StrategyStepV4"]
-    assert set(step["required"]) == {"step_id", "knob_id", "direction"}
+    assert set(step["required"]) == set(step["properties"])
+    for optional in ("requested_value", "condition", "rationale"):
+        assert {"type": "null"} in step["properties"][optional]["anyOf"]
     strategy = schema["$defs"]["OptimizationStrategyV4"]
-    assert set(strategy["required"]) == {"goal", "steps"}
+    assert set(strategy["required"]) == set(strategy["properties"])
+    assert {"type": "null"} in strategy["properties"]["supersede_of"]["anyOf"]
     condition = schema["$defs"]["StrategyStepCondition"]
-    assert set(condition["required"]) == {"metric_id", "expects"}
+    assert set(condition["required"]) == set(condition["properties"])
 
 
 def test_planner_schema_is_closed_and_allows_unsampled_values() -> None:

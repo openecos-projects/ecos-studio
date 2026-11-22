@@ -40,12 +40,7 @@ from ecos_agent.optimization.planning import (
     planning_context_payload,
 )
 from ecos_agent.optimization.rules import ACTIVE_OPTIMIZATION_KNOBS
-from ecos_agent.optimization.parameters.contracts import (
-    OptimizationProposalV2,
-    OptimizationStrategyV4,
-    StrategyStepCondition,
-    StrategyStepV4,
-)
+from ecos_agent.optimization.parameters.contracts import OptimizationProposalV2
 from ecos_agent.workspace.rerun import GuiWorkspaceRerunParameterProposal
 
 
@@ -482,28 +477,9 @@ def _optimization_proposal_output_schema_v2(
         "anyOf": [*variants, {"type": "null"}],
         "description": "Select a range-bound probe, optionally with a paired supported claim, or null.",
     }
+    # Strict Responses schemas require every property to be present.
+    # The nullable strategy still lets the planner leave its plan unchanged.
     _require_all_schema_properties(schema)
-    # The declared multi-step strategy is optional: forcing it would demand a
-    # plan on every turn, and its nested step fields (suggested value,
-    # condition, intent) are optional by contract.
-    schema["required"] = [
-        field for field in schema["required"] if field != "strategy"
-    ]
-    for def_name, model in (
-        ("OptimizationStrategyV4", OptimizationStrategyV4),
-        ("StrategyStepV4", StrategyStepV4),
-        ("StrategyStepCondition", StrategyStepCondition),
-    ):
-        definition = schema.get("$defs", {}).get(def_name)
-        if isinstance(definition, dict) and isinstance(
-            definition.get("properties"), dict
-        ):
-            required = model.model_json_schema().get("required", [])
-            definition["required"] = [
-                field
-                for field in definition["properties"]
-                if field in required
-            ]
     return schema
 
 
