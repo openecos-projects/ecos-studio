@@ -415,6 +415,10 @@ class OptimizationEpisodeController(
         return active is not None and active.recovery_stage != "original"
 
     @property
+    def incumbent_candidate_manifest_sha256(self) -> str | None:
+        return self._incumbent_candidate_manifest_sha256
+
+    @property
     def incumbent_candidate_root_ref(self) -> str | None:
         return self._incumbent_candidate_root_ref
 

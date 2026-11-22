@@ -278,6 +278,7 @@ function registerHandlers(
       ),
       operationLog: vi.fn(),
       runHistory: vi.fn(),
+      retainOptimizationCandidate: vi.fn(),
       operationStatus: vi.fn(),
       waitForOperation: vi.fn(),
       openWorkspace: vi.fn(),
@@ -1495,14 +1496,14 @@ describe('registerIpc', () => {
     await handlers.get(desktopApiIpcChannels.agentOptimizationControl)?.(
       { sender: senderA },
       {
-        action: 'retry',
+        action: 'stop',
         episodeId: 'episode-a',
         providerId: 'ecos_agent',
         sessionId: 'session-a',
       },
     )
     expect(controlOptimizationEpisode).toHaveBeenCalledWith({
-      action: 'retry',
+      action: 'stop',
       episodeId: 'episode-a',
       providerId: 'ecos_agent',
       sessionId: 'session-a',

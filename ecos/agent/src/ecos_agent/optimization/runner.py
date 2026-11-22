@@ -78,6 +78,7 @@ class OptimizationEpisodeRunner:
         ]
         | None = None,
         objective: RoutabilityObjectiveContract | None = None,
+        baseline: TerminalObservation | None = None,
         stop_event: threading.Event | None = None,
         site_width_dbu: int = 1,
         terminal_waiter_any: Callable[
@@ -102,6 +103,7 @@ class OptimizationEpisodeRunner:
         self._terminal_waiter = terminal_waiter
         self._terminal_observation_supplier = terminal_observation_supplier
         self._objective = objective
+        self._baseline = baseline
         self._stop_event = stop_event or threading.Event()
         self._site_width_dbu = site_width_dbu
         self._terminal_waiter_any = terminal_waiter_any
@@ -153,6 +155,30 @@ class OptimizationEpisodeRunner:
     @property
     def budget(self) -> BudgetSnapshot:
         return self._controller.budget
+
+    def best_candidate_result(self) -> dict[str, object] | None:
+        baseline = getattr(self, "_baseline", None)
+        if baseline is None:
+            return None
+        root_ref = self._controller.incumbent_candidate_root_ref
+        digest = self._controller.incumbent_candidate_manifest_sha256
+        incumbent = self._controller.incumbent
+        if not root_ref or not digest or incumbent is None:
+            return None
+        candidate_metrics = incumbent.objective_metrics
+        baseline_metrics = baseline.objective_metrics
+        return {
+            "candidate_id": root_ref.rsplit("/", 1)[-1],
+            "manifest_sha256": digest,
+            "metrics": [
+                {
+                    "id": metric.value,
+                    "baseline": baseline_metrics.get(metric),
+                    "candidate": value,
+                }
+                for metric, value in candidate_metrics.items()
+            ],
+        }
 
     @property
     def incumbent_candidate_root_ref(self) -> str | None:

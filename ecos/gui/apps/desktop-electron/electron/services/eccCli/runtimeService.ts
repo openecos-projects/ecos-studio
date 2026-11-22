@@ -1156,6 +1156,21 @@ export class EccCliRuntimeService {
     )
   }
 
+  async retainOptimizationCandidate(
+    workspaceHandle: string,
+    candidateId: string,
+    manifestSha256: string,
+    target: string,
+  ) {
+    await this.ensureContract()
+    return await this.candidates.retainCandidate(
+      this.requireSession(workspaceHandle),
+      candidateId,
+      manifestSha256,
+      target,
+    )
+  }
+
   async cleanupOptimizationCandidates(workspaceHandle: string, episodePrefix: string) {
     await this.ensureContract()
     return await this.candidates.cleanupCandidates(

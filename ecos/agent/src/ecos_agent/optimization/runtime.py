@@ -242,6 +242,7 @@ def create_optimization_runner(
         executor=executor,
         routability_objective=routability_objective,
         site_width_dbu=site_width_dbu,
+        baseline=terminal_observation,
     )
 
 
@@ -376,6 +377,7 @@ def _assemble_runner(
     executor: EccCandidateRerunAdapter,
     routability_objective: RoutabilityObjectiveContract,
     site_width_dbu: int,
+    baseline: TerminalObservation | None = None,
 ) -> OptimizationEpisodeRunner:
     retrieval = OptimizationKnowledgeRetriever()
     stop_event = threading.Event()
@@ -469,6 +471,7 @@ def _assemble_runner(
         terminal_waiter=terminal_waiter,
         terminal_observation_supplier=terminal_observation_supplier,
         objective=routability_objective,
+        baseline=baseline,
         stop_event=stop_event,
         site_width_dbu=site_width_dbu,
         terminal_waiter_any=terminal_waiter_any,

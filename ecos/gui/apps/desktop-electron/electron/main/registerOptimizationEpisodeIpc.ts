@@ -6,6 +6,8 @@ import {
   type DesktopAgentOptimizationEpisodeNotificationAckRequest,
   type DesktopAgentOptimizationEpisodeProjection,
   type DesktopAgentStartSessionRequest,
+  type DesktopAgentOptimizationEpisodeSummary,
+  type DesktopAgentRetainedWorkspace,
 } from '@ecos-studio/shared'
 import type { AgentProviderRuntime } from '../services/agent/agentProviderContract'
 import { normalizeWorkspacePath } from '../services/workspacePath'
@@ -43,8 +45,13 @@ interface EpisodeIpcContext {
   trackAgentSession(sender: Sender, request: DesktopAgentStartSessionRequest): void
   requireAgentSessionOwner(
     sender: Sender,
-    request: EpisodeControlRequest | EpisodeAckRequest,
+    request: Pick<EpisodeControlRequest, 'sessionId' | 'providerId' | 'episodeId'>,
   ): void
+  retainOptimizationCandidate(
+    event: IpcMainInvokeEvent,
+    episode: DesktopAgentOptimizationEpisodeSummary,
+    name: string,
+  ): Promise<DesktopAgentRetainedWorkspace>
   resolveAgentWorkspaceContext(directory: string): Promise<WorkspaceContext>
 }
 
@@ -107,6 +114,43 @@ export function registerOptimizationEpisodeIpc(context: EpisodeIpcContext): void
     }
     return { ...projection, episodes }
   })
+
+  context.handle(
+    desktopApiIpcChannels.agentRetainOptimizationCandidate,
+    async (event, value) => {
+      const record = readAgentRecord(value)
+      const request = {
+        episodeId: readAgentSessionId(record.episodeId),
+        providerId: readAgentProviderId(record),
+        sessionId: readAgentSessionId(record.sessionId),
+      }
+      context.requireAgentSessionOwner(event.sender, request)
+      if (
+        typeof record.name !== 'string' ||
+        !/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(record.name)
+      ) {
+        throw new Error(
+          'Enter a Workspace name with letters, numbers, hyphens or underscores.',
+        )
+      }
+      const episode = requireRuntime(context.runtime)
+        .optimizationProjection?.()
+        .episodes.find(
+          (item) =>
+            item.episodeId === request.episodeId &&
+            item.providerId === request.providerId &&
+            item.agentSessionId === request.sessionId,
+        )
+      if (
+        !episode?.bestCandidate ||
+        episode.cleanupState !== 'available' ||
+        !['completed', 'failed', 'stopped'].includes(episode.state)
+      ) {
+        throw new Error('No completed candidate is available to save.')
+      }
+      return await context.retainOptimizationCandidate(event, episode, record.name)
+    },
+  )
 
   context.handle(desktopApiIpcChannels.agentOptimizationControl, async (event, value) => {
     const request = readAgentOptimizationEpisodeControlRequest(value)

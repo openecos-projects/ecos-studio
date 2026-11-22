@@ -1,3 +1,4 @@
+import { readBestOptimizationCandidate } from './optimizationCandidateResult'
 import type {
   DesktopAgentEvent,
   DesktopAgentInteractionAnswerRequest,
@@ -802,6 +803,7 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
       episodeId: payload.episode_id,
       inFlightCount: payload.in_flight ?? previous?.inFlightCount ?? 0,
       optimization: payload,
+      bestCandidate: payload.best_candidate ?? previous?.bestCandidate,
       parentWorkspaceDirectory,
       ...(context?.workspaceId || previous?.parentWorkspaceId
         ? { parentWorkspaceId: context?.workspaceId ?? previous?.parentWorkspaceId }
@@ -1120,6 +1122,7 @@ function readOptimizationEpisodeSummary(
         }
       : {}),
     ...(value.cleanupState ? { cleanupState: value.cleanupState } : {}),
+    bestCandidate: readBestOptimizationCandidate(value.bestCandidate),
     providerId: value.providerId,
     startedAt: value.startedAt,
     state,

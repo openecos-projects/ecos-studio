@@ -508,11 +508,30 @@ export type DesktopAgentRunStatus =
   | 'interrupted'
   | 'error'
 
+export interface DesktopAgentOptimizationCandidate {
+  candidate_id: string
+  manifest_sha256: string
+  metrics: { id: string; baseline: number | null; candidate: number }[]
+}
+
+export interface DesktopAgentRetainOptimizationCandidateRequest extends DesktopAgentProviderRequest {
+  episodeId: string
+  sessionId: string
+  name: string
+}
+
+export interface DesktopAgentRetainedWorkspace {
+  directory: string
+  projectRoot: string
+  workspaceId: string
+}
+
 export interface DesktopAgentOptimizationPayload {
   active_preserve_metrics?: string[]
   active_primary_metric?: string
   action?: { direction: string; knob_id: string } | null
   alignment_sha256?: string
+  best_candidate?: DesktopAgentOptimizationCandidate
   calibration_completed?: number
   calibration_required?: number
   decisive_metric?: string | null
@@ -576,6 +595,7 @@ export interface DesktopAgentOptimizationEpisodeSummary {
   updatedAt: number
   notificationStates?: DesktopAgentOptimizationEpisodeNotificationState[]
   cleanupState?: 'available' | 'completed'
+  bestCandidate?: DesktopAgentOptimizationCandidate
 }
 
 export type DesktopAgentOptimizationEpisodeNotificationState =

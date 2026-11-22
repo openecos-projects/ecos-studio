@@ -198,6 +198,35 @@ export class CandidateOperations {
     await Promise.all(pending.map((id) => this.wait(source, id, deadline)))
   }
 
+  async retainCandidate(
+    source: SourceWorkspace,
+    candidateId: string,
+    manifestSha256: string,
+    target: string,
+  ) {
+    const record = await this.query(
+      candidateArgs('retain', source, [
+        '--candidate',
+        candidateId,
+        '--manifest-sha256',
+        manifestSha256,
+        '--target',
+        target,
+      ]),
+      source.projectRoot,
+      120_000,
+    )
+    const directory = join(source.projectRoot, target)
+    if (
+      record.record !== 'candidate_retained' ||
+      record.workspaceId !== target ||
+      record.directory !== directory
+    ) {
+      throw new Error('ECC did not confirm the saved candidate Workspace.')
+    }
+    return { workspaceId: target, directory, projectRoot: source.projectRoot }
+  }
+
   async cleanupCandidates(source: SourceWorkspace, episodePrefix: string): Promise<void> {
     const record = await this.query(
       candidateArgs('cleanup', source, ['--prefix', episodePrefix]),

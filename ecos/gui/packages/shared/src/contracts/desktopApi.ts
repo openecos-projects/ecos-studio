@@ -63,6 +63,8 @@ import type {
 import type {
   DesktopAgentEvent,
   DesktopAgentOptimizationEpisodeControlRequest,
+  DesktopAgentRetainOptimizationCandidateRequest,
+  DesktopAgentRetainedWorkspace,
   DesktopAgentOptimizationEpisodeNotificationAckRequest,
   DesktopAgentOptimizationEpisodeInvalidatedEvent,
   DesktopAgentOptimizationEpisodeProjection,
@@ -479,6 +481,9 @@ export interface DesktopApi {
   ecc: EccRuntimeApi
   shutdown?: DesktopShutdownApi
   agent?: {
+    retainOptimizationCandidate(
+      request: DesktopAgentRetainOptimizationCandidateRequest,
+    ): Promise<DesktopAgentRetainedWorkspace>
     controlOptimizationEpisode(
       request: DesktopAgentOptimizationEpisodeControlRequest,
     ): Promise<void>

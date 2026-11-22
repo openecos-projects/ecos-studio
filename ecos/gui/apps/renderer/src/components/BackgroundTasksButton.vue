@@ -64,8 +64,18 @@
                 <time>{{ elapsedLabel(episode.startedAt) }}</time>
               </span>
             </button>
+            <AgentCandidateResult
+              v-if="episode.bestCandidate || episode.state === 'completed'"
+              :episode="episode"
+              class="background-task-cleanup"
+              @open-workspace="openSavedCandidate"
+            />
             <AgentEpisodeDiagnostics
-              v-if="episode.state === 'failed' || episode.state === 'needs_attention'"
+              v-if="
+                episode.state === 'failed' ||
+                episode.state === 'needs_attention' ||
+                (episode.state === 'stopped' && episode.optimization.rejection_reason)
+              "
               :episode="episode"
               class="background-task-cleanup"
             />
@@ -206,6 +216,7 @@ import { operationStepLabel } from '@/utils/operationStepLabel'
 import type {
   DesktopAgentOptimizationEpisodeState,
   DesktopAgentOptimizationEpisodeSummary,
+  DesktopAgentRetainedWorkspace,
   EccBackgroundOperation,
   EccBackgroundWorkspaceCreation,
   EccRuntimeOperationState,
@@ -214,6 +225,7 @@ import { storeToRefs } from 'pinia'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AgentCandidateCleanup from '@/components/AgentCandidateCleanup.vue'
+import AgentCandidateResult from '@/components/AgentCandidateResult.vue'
 import AgentEpisodeDiagnostics from '@/components/AgentEpisodeDiagnostics.vue'
 import { backgroundTaskIdentityLabel } from '@/components/backgroundTaskIdentity'
 import { useWorkspace } from '@/composables/useWorkspace'
@@ -227,6 +239,7 @@ import { discoverProjectForWorkspace } from '@/utils/projectManagementRead'
 import {
   resolveProjectRouteContextForWorkspace,
   workspaceRouteQueryFromProjectContext,
+  type ProjectRouteContext,
 } from '@/utils/projectManifestRegistration'
 import { useWorkspaceCreation } from '@/utils/workspaceNavigation'
 
@@ -292,8 +305,11 @@ const episodeTasks = computed(() => [
   ...episodes.value.filter(
     (episode) =>
       episode.state === 'failed' ||
-      (episode.cleanupState === 'available' &&
-        ['completed', 'stopped'].includes(episode.state)),
+      episode.state === 'completed' ||
+      Boolean(episode.bestCandidate && episode.state === 'stopped') ||
+      (episode.state === 'stopped' &&
+        (episode.cleanupState === 'available' ||
+          Boolean(episode.optimization.rejection_reason))),
   ),
 ])
 const taskCount = computed(
@@ -404,11 +420,19 @@ function episodeStateLabel(state: DesktopAgentOptimizationEpisodeState): string 
   return `${state.charAt(0).toUpperCase()}${state.slice(1).replace(/_/g, ' ')}`
 }
 
-async function openWorkspace(workspacePath: string): Promise<void> {
+function openSavedCandidate(workspace: DesktopAgentRetainedWorkspace) {
+  open.value = false
+  return openWorkspace(workspace.directory, { projectRoot: workspace.projectRoot })
+}
+
+async function openWorkspace(
+  workspacePath: string,
+  projectContext?: ProjectRouteContext,
+): Promise<void> {
   const normalizedPath = normalizePath(workspacePath)
   const originWorkspacePath = normalizePath(currentProject.value?.path ?? '')
   if (originWorkspacePath === normalizedPath) {
-    await navigateToWorkspace(normalizedPath)
+    await navigateToWorkspace(normalizedPath, projectContext)
     return
   }
   const workspaceName = taskLabel(normalizedPath)
@@ -420,12 +444,13 @@ async function openWorkspace(workspacePath: string): Promise<void> {
       lastOpened: new Date(),
     },
     {
+      projectContext,
       shouldActivate: () =>
         normalizePath(currentProject.value?.path ?? '') === originWorkspacePath,
     },
   )
   if (success && normalizePath(currentProject.value?.path ?? '') === normalizedPath) {
-    await navigateToWorkspace(normalizedPath)
+    await navigateToWorkspace(normalizedPath, projectContext)
     return
   }
   if (
@@ -440,8 +465,12 @@ async function openWorkspace(workspacePath: string): Promise<void> {
   }
 }
 
-async function navigateToWorkspace(workspacePath: string): Promise<void> {
-  const projectContext = await resolveProjectRouteContextForWorkspace(workspacePath)
+async function navigateToWorkspace(
+  workspacePath: string,
+  context?: ProjectRouteContext,
+): Promise<void> {
+  const projectContext =
+    context ?? (await resolveProjectRouteContextForWorkspace(workspacePath))
   await router.push({
     path: '/workspace/home',
     query: workspaceRouteQueryFromProjectContext(workspacePath, projectContext),

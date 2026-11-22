@@ -256,7 +256,7 @@ describe('BackgroundTasksButton', () => {
     expect(wrapper.find('button[aria-label="Delete candidate files"]').exists()).toBe(
       true,
     )
-    const dialog = wrapper.get<HTMLDialogElement>('dialog')
+    const dialog = wrapper.get<HTMLDialogElement>('.candidate-cleanup__dialog')
     dialog.element.returnValue = 'cancel'
     await dialog.trigger('close')
     expect(cleanup).not.toHaveBeenCalled()

@@ -145,6 +145,7 @@ export const desktopApiIpcChannels = {
   agentStart: 'agent:start',
   agentStartSession: 'agent:start-session',
   agentSendMessage: 'agent:send-message',
+  agentRetainOptimizationCandidate: 'agent:retain-optimization-candidate',
   agentOptimizationProjection: 'agent:optimization-projection',
   agentOptimizationControl: 'agent:optimization-control',
   agentOptimizationNotificationAck: 'agent:optimization-notification-ack',

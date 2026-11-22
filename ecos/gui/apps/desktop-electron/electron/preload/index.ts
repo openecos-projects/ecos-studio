@@ -503,6 +503,8 @@ const desktopApi: DesktopApi = {
     },
   },
   agent: {
+    retainOptimizationCandidate: (request) =>
+      invokeDesktop(desktopApiIpcChannels.agentRetainOptimizationCandidate, request),
     controlOptimizationEpisode: (request) =>
       invokeDesktop(desktopApiIpcChannels.agentOptimizationControl, request),
     acknowledgeOptimizationEpisodeNotification: (

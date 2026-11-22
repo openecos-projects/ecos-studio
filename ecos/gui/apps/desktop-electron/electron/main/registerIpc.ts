@@ -85,6 +85,7 @@ import {
   type DesktopAgentStartRequest,
   type DesktopAgentStartSessionRequest,
   type DesktopAgentOptimizationEpisodeSummary,
+  type DesktopAgentRetainedWorkspace,
   type DesktopCodexInstallProgressEvent,
   type ResourceImportPdkRequest,
   type ResourceImportLocalRequest,
@@ -194,6 +195,7 @@ function isShutdownBlockedProductCommand(value: unknown): boolean {
 }
 
 const acceptedWorkChannels = new Set<string>([
+  desktopApiIpcChannels.agentRetainOptimizationCandidate,
   desktopApiIpcChannels.productCommandExecute,
   desktopApiIpcChannels.projectManifestMutate,
   desktopApiIpcChannels.workspaceExecuteFlowAgentRerun,
@@ -549,6 +551,12 @@ export interface DesktopBridgeServices {
       workspaceHandle: string,
       episodePrefix: string,
     ): Promise<void>
+    retainOptimizationCandidate(
+      workspaceHandle: string,
+      candidateId: string,
+      manifestSha256: string,
+      target: string,
+    ): Promise<DesktopAgentRetainedWorkspace>
     cleanupOptimizationCandidates?(
       workspaceHandle: string,
       episodePrefix: string,
@@ -1744,6 +1752,28 @@ export function registerIpc(
       [...agentSessionSubscriptions.values()].map((subscription) => subscription.sender),
     trackAgentSession,
     requireAgentSessionOwner,
+    retainOptimizationCandidate: async (event, episode, name) => {
+      requireBackendMutationAllowed(event)
+      const candidate = episode.bestCandidate
+      if (
+        !candidate?.candidate_id.startsWith(
+          optimizationCandidatePrefix(episode.episodeId),
+        )
+      ) {
+        throw new Error('The candidate does not belong to this Optimization Episode.')
+      }
+      const opened = await services.eccRuntimeService.openWorkspace({
+        directory: episode.parentWorkspaceDirectory,
+      })
+      const result = await services.eccRuntimeService.retainOptimizationCandidate(
+        opened.workspaceHandle,
+        candidate.candidate_id,
+        candidate.manifest_sha256,
+        name,
+      )
+      services.backendProjectComparisonService.invalidateWorkspace(result.directory)
+      return result
+    },
     resolveAgentWorkspaceContext,
   })
 

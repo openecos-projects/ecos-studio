@@ -8,6 +8,11 @@ from ecos_agent.optimization.contracts import OptimizationEpisodeState
 
 
 class ProviderOptimizationEpisodeMixin:
+    @staticmethod
+    def _best_optimization_candidate(runner):
+        read_result = getattr(runner, "best_candidate_result", None)
+        return read_result() if read_result is not None else None
+
     def _run_optimization_episode(self, session: _Session) -> None:
         runner = session.optimization_runner
         provider = session.optimization_provider
@@ -144,6 +149,7 @@ class ProviderOptimizationEpisodeMixin:
                             if turn.planning.requested
                             else None
                         ),
+                        "best_candidate": self._best_optimization_candidate(runner),
                         "incumbent_candidate_root_ref": (
                             runner.incumbent_candidate_root_ref
                         ),
@@ -243,6 +249,7 @@ class ProviderOptimizationEpisodeMixin:
                     },
                     "rejection_reason": rejection_reason,
                     "rationale_summary": error_text,
+                    "best_candidate": self._best_optimization_candidate(runner),
                 },
             )
             self._emit_status(session, status)

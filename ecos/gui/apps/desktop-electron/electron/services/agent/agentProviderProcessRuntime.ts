@@ -1,3 +1,4 @@
+import { readBestOptimizationCandidate } from './optimizationCandidateResult'
 import { spawn as spawnChild } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
@@ -1184,6 +1185,7 @@ function readOptimizationPayload(
   ) {
     return null
   }
+  const candidate = readBestOptimizationCandidate(record.best_candidate)
   const action = readOptimizationAction(record.action)
   const requested = readOptimizationRequested(record.requested)
   const originalObjective =
@@ -1305,6 +1307,7 @@ function readOptimizationPayload(
               : optimizationDiagnostic(record.rejection_reason),
         }
       : {}),
+    ...(candidate ? { best_candidate: candidate } : {}),
     ...(action || record.action === null ? { action } : {}),
     ...(requested || record.requested === null ? { requested } : {}),
     ...(typeof record.incumbent_candidate_root_ref === 'string' ||
