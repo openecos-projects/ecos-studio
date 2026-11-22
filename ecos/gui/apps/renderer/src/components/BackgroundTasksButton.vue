@@ -64,6 +64,11 @@
                 <time>{{ elapsedLabel(episode.startedAt) }}</time>
               </span>
             </button>
+            <AgentEpisodeDiagnostics
+              v-if="episode.state === 'failed' || episode.state === 'needs_attention'"
+              :episode="episode"
+              class="background-task-cleanup"
+            />
             <AgentCandidateCleanup
               v-if="episode.cleanupState === 'available'"
               :episode-id="episode.episodeId"
@@ -209,6 +214,7 @@ import { storeToRefs } from 'pinia'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AgentCandidateCleanup from '@/components/AgentCandidateCleanup.vue'
+import AgentEpisodeDiagnostics from '@/components/AgentEpisodeDiagnostics.vue'
 import { backgroundTaskIdentityLabel } from '@/components/backgroundTaskIdentity'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
@@ -285,8 +291,9 @@ const episodeTasks = computed(() => [
   ...activeEpisodeTasks.value,
   ...episodes.value.filter(
     (episode) =>
-      episode.cleanupState === 'available' &&
-      ['completed', 'failed', 'stopped'].includes(episode.state),
+      episode.state === 'failed' ||
+      (episode.cleanupState === 'available' &&
+        ['completed', 'stopped'].includes(episode.state)),
   ),
 ])
 const taskCount = computed(

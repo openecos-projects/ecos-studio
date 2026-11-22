@@ -1004,6 +1004,7 @@ const DRAINABLE_OPTIMIZATION_STATES = new Set<DesktopAgentOptimizationEpisodeSta
 ])
 const NOTIFICATION_OPTIMIZATION_STATES = new Set<DesktopAgentOptimizationEpisodeState>([
   'completed',
+  'failed',
   'needs_attention',
   'interrupted',
   'stopped',

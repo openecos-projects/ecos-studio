@@ -803,6 +803,15 @@ function withStderrDiagnostic(message: string, stderr: string): string {
   return `${message}: ${diagnostic}`
 }
 
+function optimizationDiagnostic(value: string): string {
+  return SENSITIVE_STDERR_PATTERN.test(value)
+    ? 'Provider diagnostic redacted.'
+    : value
+        .replace(/\p{Cc}/gu, ' ')
+        .trim()
+        .slice(0, 2000)
+}
+
 function errorMessage(error: string | { message?: string }): string {
   return typeof error === 'string'
     ? error
@@ -1289,7 +1298,12 @@ function readOptimizationPayload(
       ? { proposal_reason: record.proposal_reason as string | null }
       : {}),
     ...(typeof record.rejection_reason === 'string' || record.rejection_reason === null
-      ? { rejection_reason: record.rejection_reason as string | null }
+      ? {
+          rejection_reason:
+            record.rejection_reason === null
+              ? null
+              : optimizationDiagnostic(record.rejection_reason),
+        }
       : {}),
     ...(action || record.action === null ? { action } : {}),
     ...(requested || record.requested === null ? { requested } : {}),
@@ -1303,7 +1317,7 @@ function readOptimizationPayload(
       : {}),
     ...(typeof record.kind === 'string' ? { kind: record.kind } : {}),
     ...(typeof record.rationale_summary === 'string'
-      ? { rationale_summary: record.rationale_summary }
+      ? { rationale_summary: optimizationDiagnostic(record.rationale_summary) }
       : {}),
     ...(typeof record.outcome === 'string' || record.outcome === null
       ? { outcome: record.outcome as string | null }

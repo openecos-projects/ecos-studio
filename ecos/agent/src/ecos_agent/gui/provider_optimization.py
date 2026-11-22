@@ -234,7 +234,7 @@ class ProviderOptimizationMixin(
     ProviderOptimizationRecoveryMixin, ProviderOptimizationEpisodeMixin
 ):
     def _emit_optimization_status(
-        self, session: _Session, state: str | None = None
+        self, session: _Session, state: str | None = None, *, failure: str | None = None
     ) -> None:
         episode_id = session.optimization_episode_id
         if episode_id is None:
@@ -252,6 +252,7 @@ class ProviderOptimizationMixin(
                 "workspace": session.rerun_workspace_path,
                 "state": state or str(session.optimization_phase),
                 "phase": str(session.optimization_phase),
+                "rejection_reason": failure,
                 "turn_count": session.optimization_turn_count,
                 "in_flight": len(pending),
                 "calibration_completed": session.optimization_calibration_completed,
@@ -480,7 +481,7 @@ class ProviderOptimizationMixin(
                 "error",
                 "Optimization runner is not configured with observation and ECC adapters; execution is blocked.",
             )
-            self._emit_optimization_status(session, "failed")
+            self._emit_optimization_status(session, "failed", failure="Optimization runner is not configured.")
             self._emit_phase_choice(session)
             return
         workspace = session.rerun_workspace_path
@@ -496,7 +497,7 @@ class ProviderOptimizationMixin(
             session.optimization_phase = "error"
             session.phase = "operation" if session.mode == "workspace" else "home_ready"
             self._emit(session, "error", f"Unable to persist optimization recovery context: {exc}")
-            self._emit_optimization_status(session, "failed")
+            self._emit_optimization_status(session, "failed", failure=f"Recovery context: {exc}")
             self._emit_phase_choice(session)
             return
         if not epsilon_artifact_path(workspace_path).is_file():
@@ -554,7 +555,8 @@ class ProviderOptimizationMixin(
                         f"Unable to calibrate noise epsilon: {exc}",
                     )
                 self._emit_optimization_status(
-                    session, "stopped" if cancelled else "needs_attention"
+                    session, "stopped" if cancelled else "needs_attention",
+                    failure=None if cancelled else f"Noise calibration: {exc}",
                 )
                 self._emit_phase_choice(session)
                 session.optimization_thread = None
@@ -628,7 +630,7 @@ class ProviderOptimizationMixin(
             session.optimization_phase = "error"
             session.phase = "operation" if session.mode == "workspace" else "home_ready"
             self._emit(session, "error", f"Unable to start optimization: {exc}")
-            self._emit_optimization_status(session, "failed")
+            self._emit_optimization_status(session, "failed", failure=f"Runner initialization: {exc}")
             self._emit_phase_choice(session)
             return
         assert provider is not None

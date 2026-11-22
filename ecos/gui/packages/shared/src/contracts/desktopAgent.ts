@@ -580,6 +580,7 @@ export interface DesktopAgentOptimizationEpisodeSummary {
 
 export type DesktopAgentOptimizationEpisodeNotificationState =
   | 'completed'
+  | 'failed'
   | 'needs_attention'
   | 'interrupted'
   | 'stopped'

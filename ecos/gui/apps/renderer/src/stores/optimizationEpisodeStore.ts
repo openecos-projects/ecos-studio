@@ -1,4 +1,5 @@
 import type {
+  DesktopAgentOptimizationEpisodeNotificationState,
   DesktopAgentOptimizationEpisodeState,
   DesktopAgentOptimizationEpisodeSummary,
 } from '@ecos-studio/shared'
@@ -171,7 +172,7 @@ export const useOptimizationEpisodeStore = defineStore('optimizationEpisodes', (
       nextStates.set(episode.episodeId, episode.state)
       const previous = observedStates.get(episode.episodeId)
       const persistedNotification = episode.notificationStates?.includes(
-        episode.state as 'completed' | 'needs_attention' | 'interrupted' | 'stopped',
+        episode.state as DesktopAgentOptimizationEpisodeNotificationState,
       )
       const notify =
         persistedNotification ??
@@ -183,7 +184,9 @@ export const useOptimizationEpisodeStore = defineStore('optimizationEpisodes', (
       notifications.addNotification({
         agentSessionId: episode.agentSessionId,
         key: `optimization:${episode.episodeId}:${episode.state}`,
-        message: presentation.message,
+        message: ['failed', 'needs_attention'].includes(episode.state)
+          ? episode.optimization.rejection_reason || presentation.message
+          : presentation.message,
         severity: presentation.severity,
         title: presentation.title,
       })
@@ -191,11 +194,7 @@ export const useOptimizationEpisodeStore = defineStore('optimizationEpisodes', (
         episodeId: episode.episodeId,
         providerId: episode.providerId,
         sessionId: episode.agentSessionId,
-        state: episode.state as
-          | 'completed'
-          | 'needs_attention'
-          | 'interrupted'
-          | 'stopped',
+        state: episode.state as DesktopAgentOptimizationEpisodeNotificationState,
       })
     }
     observedStates = nextStates
@@ -237,6 +236,7 @@ const TERMINAL_STATES = new Set<DesktopAgentOptimizationEpisodeState>([
 ])
 const NOTIFICATION_STATES = new Set<DesktopAgentOptimizationEpisodeState>([
   'completed',
+  'failed',
   'needs_attention',
   'interrupted',
   'stopped',
@@ -258,6 +258,13 @@ function notificationForEpisode(state: DesktopAgentOptimizationEpisodeState): {
       message: 'The background Optimization Episode completed.',
       severity: 'info',
       title: 'Optimization completed',
+    }
+  }
+  if (state === 'failed') {
+    return {
+      message: 'The background Optimization Episode failed.',
+      severity: 'error',
+      title: 'Optimization failed',
     }
   }
   if (state === 'needs_attention') {

@@ -55,9 +55,9 @@ class ProviderOptimizationEpisodeMixin:
                     final_phase = "quarantined"
                     break
                 turn = runner.run_turn(paused=session.optimization_pause.is_set())
-                rejection_reason = turn.planning.rejection_reason or (
+                rejection_reason = (
                     turn.execution.rejection_reason if turn.execution else None
-                )
+                ) or turn.planning.rejection_reason
                 session.optimization_turn_count += 1
                 active_before = getattr(turn, "active_objective_before", None)
                 active_after = getattr(turn, "active_objective_after", None)
@@ -133,7 +133,7 @@ class ProviderOptimizationEpisodeMixin:
                             if turn.planning.proposal
                             else None
                         ),
-                        "rejection_reason": turn.planning.rejection_reason,
+                        "rejection_reason": rejection_reason,
                         "action": (
                             turn.planning.proposal.action.model_dump(mode="json")
                             if turn.planning.proposal and turn.planning.proposal.action
@@ -188,7 +188,10 @@ class ProviderOptimizationEpisodeMixin:
                     resource.close()
                 except Exception as exc:
                     final_phase = "error"
-                    rejection_reason = f"{rejection_reason or 'cleanup_failed'}; {exc}"
+                    cleanup_error = f"Optimization cleanup: {exc}"
+                    rejection_reason = (
+                        f"{rejection_reason}. {cleanup_error}" if rejection_reason else cleanup_error
+                    )
                     error_text = optimization_error_message(session.language, "error", rejection_reason)
                     self._emit(session, "error", error_text)
             session.active_interrupt = None

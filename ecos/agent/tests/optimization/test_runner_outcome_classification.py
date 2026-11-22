@@ -598,6 +598,7 @@ def test_fake_runner_quarantines_terminal_waiter_exception(tmp_path: Path) -> No
 
     assert turn.execution is not None
     assert turn.execution.state == OptimizationEpisodeState.QUARANTINED
+    assert "RuntimeError: terminal wait failed" in turn.execution.rejection_reason
     assert controller.ledger.replay().terminal_outcomes[0].outcome == (
         OptimizationOutcomeKind.INDETERMINATE
     )

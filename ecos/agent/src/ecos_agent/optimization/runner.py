@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Mapping
 
 from ecos_agent.optimization.contracts import (
@@ -332,21 +332,21 @@ class OptimizationEpisodeRunner:
         if not pending_ids:
             return None
         if self._terminal_waiter is None and self._terminal_waiter_any is None:
-            return self._indeterminate_absorb(observation, None, None)
+            return self._indeterminate_absorb("No candidate terminal waiter is configured.")
         try:
             receipt = (
                 self._terminal_waiter_any(pending_ids)
                 if self._terminal_waiter_any is not None
                 else self._terminal_waiter(pending_ids[0])
             )
-        except Exception:
-            return self._indeterminate_absorb(observation, None, None)
+        except Exception as exc:
+            return self._indeterminate_absorb(f"{type(exc).__name__}: {exc}")
         if not isinstance(receipt, CandidateExecutionReceipt):
-            return self._indeterminate_absorb(observation, None, None)
+            return self._indeterminate_absorb("ECC did not return a candidate receipt.")
         if receipt.execution_id not in pending_ids:
-            return self._indeterminate_absorb(observation, None, None)
+            return self._indeterminate_absorb("ECC returned a receipt for an unexpected operation.")
         if not receipt.started or receipt.outcome is None:
-            return self._indeterminate_absorb(observation, None, None)
+            return self._indeterminate_absorb("ECC did not confirm a terminal candidate outcome.")
         record = self._controller.pending_execution(receipt.execution_id)
         try:
             terminal_observation = (
@@ -456,9 +456,7 @@ class OptimizationEpisodeRunner:
 
     def _indeterminate_absorb(
         self,
-        observation: StageObservation,
-        planning: OptimizationControlResult | None,
-        execution: OptimizationControlResult | None,
+        reason: str,
     ):
         pending_ids = self._controller.pending_execution_ids
         if not pending_ids:
@@ -470,11 +468,15 @@ class OptimizationEpisodeRunner:
             started=True,
             outcome=OptimizationOutcomeKind.INDETERMINATE,
         )
-        completed = self._controller.complete_terminal(receipt)
+        completed = replace(
+            self._controller.complete_terminal(receipt),
+            rejection_reason=f"Candidate terminal verification ({', '.join(pending_ids)}): {reason}",
+        )
         self._emit_event(
             "terminal",
             {
                 "outcome": OptimizationOutcomeKind.INDETERMINATE.value,
+                "rejection_reason": completed.rejection_reason,
                 "incumbent_decision": None,
                 "decisive_metric": None,
                 "promoted": False,

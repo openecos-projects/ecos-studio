@@ -170,6 +170,7 @@ function readAgentOptimizationEpisodeNotificationAckRequest(
   const record = readAgentRecord(value)
   if (
     record.state !== 'completed' &&
+    record.state !== 'failed' &&
     record.state !== 'needs_attention' &&
     record.state !== 'interrupted' &&
     record.state !== 'stopped'
