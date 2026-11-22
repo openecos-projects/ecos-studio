@@ -233,9 +233,7 @@ def _optimization_turn_event_payload(
 class ProviderOptimizationMixin(
     ProviderOptimizationRecoveryMixin, ProviderOptimizationEpisodeMixin
 ):
-    def _emit_optimization_status(
-        self, session: _Session, state: str | None = None, *, failure: str | None = None
-    ) -> None:
+    def _emit_optimization_status(self, session: _Session, state: str | None = None, *, failure: str | None = None) -> None:
         episode_id = session.optimization_episode_id
         if episode_id is None:
             return

@@ -85,7 +85,10 @@
       <p v-if="optimization.rationale_summary" class="optimization-card__rationale">
         {{ optimization.rationale_summary }}
       </p>
-      <p v-if="optimization.rejection_reason" class="optimization-card__rejection">
+      <p
+        v-if="optimization.rejection_reason && !failureState"
+        class="optimization-card__rejection"
+      >
         Rejected: {{ optimization.rejection_reason }}
       </p>
       <div v-if="controllableEpisode" class="optimization-card__controls">
@@ -157,14 +160,20 @@ const liveState = computed(() => {
 })
 
 const failureState = computed(() =>
-  ['error', 'escalated', 'quarantined', 'unavailable', 'needs_attention'].includes(
-    props.optimization.state ?? '',
-  ),
+  [
+    'error',
+    'escalated',
+    'quarantined',
+    'unavailable',
+    'needs_attention',
+    'failed',
+  ].includes(props.optimization.state ?? ''),
 )
 
 const statusLabel = computed(() => {
   const labels: Record<string, string> = {
     error: 'Failed',
+    failed: 'Failed',
     escalated: 'Needs attention',
     quarantined: 'Quarantined',
     unavailable: 'Unavailable',
