@@ -1109,7 +1109,12 @@ import { useStepReportDialog } from '@/composables/useStepReportDialog'
 import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { getDesktopApi } from '@/platform/desktop'
-import { buildChipViewerOpenRequest, canOpenChipViewer } from './drawingAreaChipViewer'
+import {
+  buildChipViewerOpenRequest,
+  canOpenChipViewer,
+  chipViewerLoadingMessage,
+} from './drawingAreaChipViewer'
+import { beginChipViewerOpening } from '@/composables/chipViewerOpeningStatus'
 import StatusPieChart from './home/StatusPieChart.vue'
 import StepConfigPanel from './StepConfigPanel.vue'
 import TimingAnalysisDialog from './step-insights/TimingAnalysisDialog.vue'
@@ -1467,11 +1472,15 @@ async function openChipViewer(mode: 'view' | 'edit' = 'view'): Promise<void> {
   if (!projectPath || !step || !chipViewerAvailable.value) return
 
   const busy = mode === 'edit' ? chipViewerEditBusy : chipViewerBusy
+  const openingStatus = beginChipViewerOpening(chipViewerLoadingMessage(mode), step)
+  let started = false
   busy.value = true
   try {
     const result = await getDesktopApi().chipViewer.open(
       buildChipViewerOpenRequest(projectPath, step, mode),
     )
+    openingStatus.complete()
+    started = true
     if (mode === 'edit' && result.macroStaging && !result.macroStaging.enabled) {
       showToast({
         severity: 'warn',
@@ -1484,7 +1493,14 @@ async function openChipViewer(mode: 'view' | 'edit' = 'view'): Promise<void> {
     }
   } catch (cause) {
     console.error('Failed to open Chip Viewer from step dashboard:', cause)
+    showToast({
+      severity: 'error',
+      summary: 'Unable to open Chip Viewer',
+      detail: cause instanceof Error ? cause.message : String(cause),
+      life: 8000,
+    })
   } finally {
+    if (!started) openingStatus.finish()
     busy.value = false
   }
 }

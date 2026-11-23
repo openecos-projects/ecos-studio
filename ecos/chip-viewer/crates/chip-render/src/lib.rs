@@ -4,6 +4,8 @@ use std::sync::Arc;
 use chip_view_db::ChipViewDb;
 use chipgeom_format::{GeometryViewTileRecord, Rect32, ShapeId};
 
+pub mod geometry2d;
+
 /// Viewport quantization grid for draw-path cache keys, in dbu.
 ///
 /// Keys of the pure-draw caches (`RenderPlanCache`, `ViewTilePlaneCache`) are

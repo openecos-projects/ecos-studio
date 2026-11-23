@@ -33,6 +33,12 @@ const DRC_DATA_PATH = join(STEP_DIRECTORY, 'feature', 'drc.step.json')
 const DRC_STATIS_PATH = join(STEP_DIRECTORY, 'analysis', 'drc_statis.csv')
 const LVS_DATA_PATH = join(STEP_DIRECTORY, 'feature', 'lvs.step.json')
 const MAP_ROOT_PATH = join(STEP_DIRECTORY, 'feature')
+const ANTENNA_DATA_PATH = join(
+  PROJECT_ROOT,
+  'antennaCheck_ecc',
+  'feature',
+  'antennaCheck.step.json',
+)
 const EDIT_ROOT_DIR = join(STEP_DIRECTORY, '.chip-viewer', 'layout-edit')
 const EDIT_COMMAND_DIR = join(EDIT_ROOT_DIR, 'commands')
 const EDIT_RESULT_DIR = join(EDIT_ROOT_DIR, 'results')
@@ -322,6 +328,94 @@ describe('ChipViewerService', () => {
     await expect(service.isOpen(request)).resolves.toEqual({ open: false })
   })
 
+  it('coalesces concurrent opens for the same project and step', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { service, spawnProcess, workspaceResourceService } = createService({
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
+      files: {},
+    })
+    let resolveStepInfo: ((result: WorkspaceStepInfoResult) => void) | undefined
+    workspaceResourceService.resolveStepInfo.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveStepInfo = resolve
+        }),
+    )
+    const request = { projectPath: PROJECT_ROOT, step: STEP_NAME }
+
+    const firstOpen = service.open(request)
+    const secondOpen = service.open(request)
+
+    await expect(service.isOpen(request)).resolves.toEqual({ open: true })
+    expect(workspaceResourceService.resolveStepInfo).toHaveBeenCalledTimes(1)
+    resolveStepInfo?.({
+      id: 'layout',
+      info: { db: DB_PATH, def: DEF_PATH, gds: GDS_PATH, image: IMAGE_PATH },
+      message: [],
+      missing: [],
+      response: 'available',
+      step: STEP_NAME,
+    })
+    const [firstResult, secondResult] = await Promise.all([firstOpen, secondOpen])
+
+    expect(firstResult).toEqual(secondResult)
+    expect(spawnProcess).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects a concurrent open of the same step in a different mode', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { service, workspaceResourceService } = createService({
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
+      files: {},
+    })
+    let resolveStepInfo: ((result: WorkspaceStepInfoResult) => void) | undefined
+    workspaceResourceService.resolveStepInfo.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveStepInfo = resolve
+        }),
+    )
+    const firstOpen = service.open({
+      mode: 'view',
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
+    })
+
+    await expect(
+      service.open({
+        mode: 'edit',
+        projectPath: PROJECT_ROOT,
+        step: STEP_NAME,
+      }),
+    ).rejects.toThrow('Chip Viewer is already opening this step in view mode.')
+    resolveStepInfo?.({
+      id: 'layout',
+      info: { db: DB_PATH, def: DEF_PATH, gds: GDS_PATH, image: IMAGE_PATH },
+      message: [],
+      missing: [],
+      response: 'available',
+      step: STEP_NAME,
+    })
+    await firstOpen
+  })
+
+  it('does not launch or report success when the development Rust build fails', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { execFile, service, spawnProcess } = createService({
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
+    })
+    vi.mocked(execFile).mockRejectedValueOnce(new Error('rustc compilation failed'))
+
+    await expect(
+      service.open({
+        projectPath: PROJECT_ROOT,
+        step: STEP_NAME,
+      }),
+    ).rejects.toThrow('Chip Viewer development build failed: rustc compilation failed')
+    expect(execFile).toHaveBeenCalledWith(devBinaries.viewer, ['--build-only'])
+    expect(spawnProcess).not.toHaveBeenCalled()
+  })
+
   it('rejects unsupported viewer modes before spawning the native process', async () => {
     const devBinaries = devChipViewerPaths()
     const { service, spawnProcess } = createService({
@@ -541,6 +635,39 @@ describe('ChipViewerService', () => {
         'view',
         '--drc-statis',
         DRC_STATIS_PATH,
+      ],
+      expect.objectContaining({
+        detached: true,
+        stdio: ['ignore', expect.any(Number), expect.any(Number)],
+      }),
+    )
+  })
+
+  it('passes the workspace Antenna report to the native viewer', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { service, spawnProcess } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+        ANTENNA_DATA_PATH,
+      ],
+    })
+
+    await service.open({
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
+    })
+
+    expect(spawnProcess).toHaveBeenCalledWith(
+      devBinaries.viewer,
+      [
+        '--manifest',
+        GEOMETRY_MANIFEST,
+        '--mode',
+        'view',
+        '--antenna-data',
+        ANTENNA_DATA_PATH,
       ],
       expect.objectContaining({
         detached: true,
@@ -901,7 +1028,7 @@ describe('ChipViewerService', () => {
       step: STEP_NAME,
     })
 
-    expect(execFile).not.toHaveBeenCalled()
+    expect(execFile).not.toHaveBeenCalledWith(devBinaries.ecc, expect.anything())
     expect(spawnProcess).toHaveBeenCalledWith(
       devBinaries.viewer,
       ['--manifest', GEOMETRY_MANIFEST, '--mode', 'view'],
@@ -927,7 +1054,7 @@ describe('ChipViewerService', () => {
       step: 'defview',
     })
 
-    expect(execFile).not.toHaveBeenCalled()
+    expect(execFile).not.toHaveBeenCalledWith(devBinaries.ecc, expect.anything())
     expect(spawnProcess).toHaveBeenCalledWith(
       devBinaries.viewer,
       ['--manifest', DEF_VIEW_MANIFEST, '--mode', 'view'],
