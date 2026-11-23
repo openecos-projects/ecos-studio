@@ -117,6 +117,7 @@ pub(super) struct SceneRequest {
 
 type LabelCompletion = OnceLock<(Arc<ResolvedLabels>, Duration)>;
 
+#[cfg(target_os = "linux")]
 const INTERACTIVE_SEED_INTERVAL: Duration = Duration::from_millis(50);
 
 pub(super) struct CpuScene {
@@ -165,6 +166,7 @@ pub(super) struct CpuSceneCache {
     initial_scene: Option<Arc<CpuScene>>,
     restored: bool,
     request_deferred: bool,
+    #[cfg(target_os = "linux")]
     interactive_seed_last_build: Option<Instant>,
     world_source: Option<Arc<world_source::WorldSource>>,
     label_results: label_result_cache::LabelResultCache,
@@ -198,6 +200,7 @@ impl Default for CpuSceneCache {
             initial_scene: None,
             restored: false,
             request_deferred: false,
+            #[cfg(target_os = "linux")]
             interactive_seed_last_build: None,
             world_source: None,
             label_results: Default::default(),
@@ -226,16 +229,21 @@ impl CpuSceneCache {
         self.key = Some(request.key.clone());
         self.restored = false;
 
-        let seed_due = self.interactive_seed_last_build.is_none_or(|last_build| {
-            now.saturating_duration_since(last_build) >= INTERACTIVE_SEED_INTERVAL
-        });
-        if seed_due && self.initial_scene.is_none() {
-            self.interactive_seed_last_build = Some(now);
-            if let Some(mut scene) = builder::build_ui_initial_scene(request) {
-                scene.generation = self.inbox.generation.load(Ordering::Relaxed);
-                self.initial_scene = Some(Arc::new(scene));
+        #[cfg(target_os = "linux")]
+        {
+            let seed_due = self.interactive_seed_last_build.is_none_or(|last_build| {
+                now.saturating_duration_since(last_build) >= INTERACTIVE_SEED_INTERVAL
+            });
+            if seed_due && self.initial_scene.is_none() {
+                self.interactive_seed_last_build = Some(now);
+                if let Some(mut scene) = builder::build_ui_initial_scene(request) {
+                    scene.generation = self.inbox.generation.load(Ordering::Relaxed);
+                    self.initial_scene = Some(Arc::new(scene));
+                }
             }
         }
+        #[cfg(not(target_os = "linux"))]
+        let _ = now;
     }
 
     #[cfg(test)]
@@ -251,14 +259,20 @@ impl CpuSceneCache {
         self.key = None;
         self.restored = false;
         self.request_deferred = false;
-        self.interactive_seed_last_build = None;
+        #[cfg(target_os = "linux")]
+        {
+            self.interactive_seed_last_build = None;
+        }
     }
 
     pub(super) fn get_or_request(&mut self, mut request: SceneRequest) -> Option<Arc<CpuScene>> {
         if self.request_deferred {
             self.key = None;
             self.request_deferred = false;
-            self.interactive_seed_last_build = None;
+            #[cfg(target_os = "linux")]
+            {
+                self.interactive_seed_last_build = None;
+            }
         }
         let completed_scenes = self
             .ready

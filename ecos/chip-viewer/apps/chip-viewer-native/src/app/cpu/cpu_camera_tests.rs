@@ -199,6 +199,7 @@ fn repeating_camera_requests_does_not_restart_inflight_work() {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn interactive_camera_seeds_refresh_at_a_bounded_interval_without_restarting_work() {
     let fixture = Fixture::new();
