@@ -241,6 +241,7 @@ describe('createEccRuntimeEnv', () => {
       },
       isPackaged: true,
       platform: 'linux',
+      dataHome: join(fixture.repoRoot, 'data-home'),
       userDataPath: fixture.userDataPath,
     })
 
@@ -288,6 +289,7 @@ describe('createEccRuntimeEnv', () => {
       },
       isPackaged: true,
       platform: 'linux',
+      dataHome: join(fixture.repoRoot, 'data-home'),
       userDataPath: fixture.userDataPath,
     })
 
@@ -369,6 +371,7 @@ describe('createEccRuntimeEnv', () => {
       },
       isPackaged: true,
       platform: 'linux',
+      dataHome: join(fixture.repoRoot, 'data-home'),
       userDataPath: fixture.userDataPath,
     })
 

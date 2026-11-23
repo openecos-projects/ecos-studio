@@ -67,6 +67,9 @@ fn main() -> Result<()> {
     } else {
         (ChipViewDb::open(&args.manifest)?, None)
     };
+    if open_timings.is_none() {
+        db.prewarm_render_indexes();
+    }
     let stats = db.stats();
     let memory_stats = db.memory_stats();
     let delta_stats = db.delta_stats();
