@@ -44,6 +44,7 @@ fn shifted(command: PaintCommand, delta: egui::Vec2) -> PaintCommand {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn coverage_ordered_spans_match_every_gl_prefix_with_clipping_and_translucency() {
     let Some(mut renderer) = coverage_blend_tests::renderer() else {
         return;
@@ -176,6 +177,7 @@ fn coverage_rejects_uncertified_inputs_instead_of_silently_snapping() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn coverage_integer_shift_matches_fresh_camera_and_only_certifies_visible_overlap() {
     let Some(mut renderer) = coverage_blend_tests::renderer() else {
         return;

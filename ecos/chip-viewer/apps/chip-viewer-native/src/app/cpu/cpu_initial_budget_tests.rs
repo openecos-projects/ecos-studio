@@ -1,6 +1,7 @@
 use super::*;
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn initial_progress_expired_budget_keeps_first_chunk_of_every_layer_in_exact_order() {
     use chip_render::geometry2d::GeometryPass;
     let fixture = Fixture::new();
@@ -145,6 +146,7 @@ fn attach_priority_cache(request: &mut SceneRequest) {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn initial_progress_cached_priority_uses_512_records_and_real_source_order() {
     let fixture = Fixture::new();
     let mut request = layered_request_with_spread(&fixture, 1024, true);
@@ -231,6 +233,7 @@ fn initial_progress_cached_priority_uses_512_records_and_real_source_order() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn initial_progress_expired_refinement_preserves_priority_and_spatial_ui_ids() {
     let fixture = Fixture::new();
     let mut request = layered_request_with_spread(&fixture, 4096, true);

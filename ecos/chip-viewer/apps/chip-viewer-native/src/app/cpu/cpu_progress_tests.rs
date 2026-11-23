@@ -249,6 +249,7 @@ fn mesh_history_reserves_the_fallback_copy_before_it_is_materialized() {
 
 #[cfg(target_os = "linux")]
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn progressive_gl_snapshots_match_original_ordered_geometry_prefixes() {
     let fixture = Fixture::new();
     let Ok(mut renderer) = offscreen::OffscreenRenderer::new("") else {

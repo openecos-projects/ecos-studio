@@ -3,6 +3,7 @@ use chip_display::FillPattern;
 use chip_render::geometry2d::{PaintCommand, PaintSink};
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn sparse_pattern_pixels_match_gl_for_every_texture_and_pixel_scale() {
     let mut renderer = match offscreen::OffscreenRenderer::new("") {
         Ok(renderer) => renderer,

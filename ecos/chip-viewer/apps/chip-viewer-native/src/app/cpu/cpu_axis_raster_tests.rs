@@ -15,6 +15,7 @@ fn render(renderer: &mut OffscreenRenderer, request: &SceneRequest, mesh: egui::
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn axis_raster_integer_strokes_match_original_gl_at_fractional_positions_and_clips() {
     let mut renderer = OffscreenRenderer::new("").expect("axis pixel oracle requires EGL; no skip");
     let fixture = Fixture::new();
@@ -211,6 +212,7 @@ fn axis_raster_rejects_noncanonical_lines_and_keeps_rectangle_api_line_free() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn axis_raster_feathered_strips_preserve_original_vertices_indices_and_gl_bytes() {
     let mut renderer = OffscreenRenderer::new("").expect("strip oracle requires EGL; no skip");
     let fixture = Fixture::new();

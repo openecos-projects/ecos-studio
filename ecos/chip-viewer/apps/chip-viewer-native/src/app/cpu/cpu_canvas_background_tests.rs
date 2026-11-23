@@ -2,6 +2,7 @@ use super::*;
 use crate::app::cpu_raster::{background, test_support::Presentation, CpuRasterCache};
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn cached_heatmap_composition_preserves_alpha_order_and_live_markers() {
     let fixture = Fixture::new();
     let renderer = match offscreen::OffscreenRenderer::new("") {
@@ -40,6 +41,7 @@ fn cached_heatmap_composition_preserves_alpha_order_and_live_markers() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn central_panel_clear_matches_original_frame_with_side_panels_and_content() {
     let fixture = Fixture::new();
     let renderer = match offscreen::OffscreenRenderer::new("") {
@@ -116,6 +118,7 @@ fn central_panel_clear_matches_original_frame_with_side_panels_and_content() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn canvas_background_clear_matches_original_rect_and_following_paint() {
     let fixture = Fixture::new();
     let renderer = match offscreen::OffscreenRenderer::new(

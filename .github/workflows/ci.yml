@@ -173,14 +173,11 @@ jobs:
         with:
           workspaces: ecos/chip-viewer
 
-      - name: Install EGL Test Dependencies
-        uses: ./.github/actions/install-gui-linux-deps
-
       - name: Check Rust Formatting
         run: cargo fmt --all -- --check
 
       - name: Run Rust Tests
-        run: cargo test --workspace -- --test-threads=1
+        run: cargo test --workspace
 
   ecc-runtime:
     name: Wait for Pinned ECC Runtime

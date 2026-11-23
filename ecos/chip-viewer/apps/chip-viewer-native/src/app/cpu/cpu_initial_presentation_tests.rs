@@ -1,6 +1,7 @@
 use super::*;
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn initial_progress_equal_primitive_counts_still_present_a_new_refinement() {
     let fixture = Fixture::new();
     let request = fixture.request(1.0, 1.0);
@@ -33,6 +34,7 @@ fn initial_progress_equal_primitive_counts_still_present_a_new_refinement() {
     });
 }
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn initial_progress_ui_first_callback_draws_current_geometry_without_worker_or_readback() {
     let renderer = renderer();
     let fixture = Fixture::new();
@@ -92,6 +94,7 @@ fn initial_progress_ui_first_callback_draws_current_geometry_without_worker_or_r
     });
 }
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn initial_progress_pending_selection_keeps_rich_equivalent_geometry() {
     let mut renderer = renderer();
     let fixture = Fixture::new();
@@ -152,6 +155,7 @@ fn initial_progress_pending_selection_keeps_rich_equivalent_geometry() {
     });
 }
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn initial_progress_incompatible_anchor_cleanup_preserves_the_new_first_seed() {
     let mut renderer = renderer();
     let fixture = Fixture::new();

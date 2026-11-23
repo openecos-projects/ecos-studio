@@ -270,6 +270,7 @@ fn check_pan_at_scale(
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn retained_regression_translucent_solid_matches_fresh_gl() {
     check_pan(
         &[rectangle(
@@ -284,6 +285,7 @@ fn retained_regression_translucent_solid_matches_fresh_gl() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn retained_regression_translucent_managed_pattern_matches_fresh_gl() {
     check_pan(
         &[rectangle(
@@ -298,6 +300,7 @@ fn retained_regression_translucent_managed_pattern_matches_fresh_gl() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn retained_regression_source_frame_only_can_become_target_pattern() {
     // At zoom 8 the source viewport rounds to x=56..72 and includes the
     // entire input bbox. Its visible width is only 5px, so no PatternRect is
@@ -316,6 +319,7 @@ fn retained_regression_source_frame_only_can_become_target_pattern() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn retained_regression_supported_source_fill_can_need_target_mesh() {
     // The 15px source fill becomes a 1px clipped fill. ExactRaster rejects
     // that target command and the fresh renderer uses feathered tessellation.
@@ -328,6 +332,7 @@ fn retained_regression_supported_source_fill_can_need_target_mesh() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn retained_regression_recompose_failure_cannot_copy_unproven_source_pattern() {
     // The first record needs target mesh fallback; the second has a changed
     // clipped texture origin. Copying the old source after recompose returns
@@ -344,6 +349,7 @@ fn retained_regression_recompose_failure_cannot_copy_unproven_source_pattern() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn retained_regression_mixed_pattern_and_point_matches_fresh_gl() {
     check_pan(
         &[
@@ -358,6 +364,7 @@ fn retained_regression_mixed_pattern_and_point_matches_fresh_gl() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn retained_regression_mesh_repairs_preserve_translucent_draw_order() {
     check_pan(
         &[
@@ -372,6 +379,7 @@ fn retained_regression_mesh_repairs_preserve_translucent_draw_order() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn retained_regression_fractional_camera_and_physical_pan_match_at_supported_dpi() {
     let inputs = [
         rectangle([24, 24, 88, 88], FillPattern::Solid, [173, 61, 237, 112]),

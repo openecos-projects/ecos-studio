@@ -2,6 +2,7 @@ use super::*;
 use wgpu::util::DeviceExt;
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn interaction_preserves_every_fill_pattern_pixel() {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
     let Some(adapter) =

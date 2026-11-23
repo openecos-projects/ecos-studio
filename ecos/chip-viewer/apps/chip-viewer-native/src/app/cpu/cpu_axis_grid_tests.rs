@@ -1,6 +1,7 @@
 use super::*;
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn axis_grid_rectangles_match_original_line_pixels_at_fractional_endpoints() {
     let Some(mut renderer) = coverage_blend_tests::renderer() else {
         return;

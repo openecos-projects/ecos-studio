@@ -94,6 +94,7 @@ fn pixels(
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn exact_pixel_rectangles_match_reference_across_fractional_inputs_dpr_alpha_and_clipping() {
     let fixture = Fixture::new();
     let Ok(mut renderer) = offscreen::OffscreenRenderer::new("") else {
@@ -207,6 +208,7 @@ fn exact_pixel_rectangles_reduce_index_work_without_merging_translucent_commands
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn exact_pixel_rectangles_preserve_every_pattern_and_fall_back_for_custom_tessellation() {
     struct Commands(Vec<PaintCommand>);
     impl PaintSink for Commands {

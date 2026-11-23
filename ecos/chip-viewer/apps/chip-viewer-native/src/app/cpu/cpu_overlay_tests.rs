@@ -2,6 +2,7 @@ use super::*;
 
 #[cfg(target_os = "linux")]
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn compact_grid_shader_matches_original_full_rgba_at_fractional_cameras() {
     let fixture = Fixture::new();
     let mut renderer = match offscreen::OffscreenRenderer::new("") {

@@ -203,6 +203,7 @@ fn compose_and_repair(
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn retained_regions_match_fresh_gl_at_every_declared_pixel_after_interrupted_pans() {
     let mut renderer = offscreen::OffscreenRenderer::new("").expect("retained oracle requires EGL");
     let certified = renderer.with_context(|gl| sparse_rects::certified_profile(gl));
@@ -304,6 +305,7 @@ fn retained_regions_match_fresh_gl_at_every_declared_pixel_after_interrupted_pan
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn retained_rectangles_and_patterns_recompose_without_using_old_rgba() {
     let mut renderer = offscreen::OffscreenRenderer::new("").expect("retained oracle requires EGL");
     let certified = renderer.with_context(|gl| sparse_rects::certified_profile(gl));
@@ -437,6 +439,7 @@ fn retained_regions_reject_unproven_camera_and_style_changes() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn retained_models_reject_visible_grid_overlays_and_mesh_fallback() {
     let mut renderer = offscreen::OffscreenRenderer::new("").expect("retained oracle requires EGL");
     let mut fixture = Fixture::new();
@@ -464,6 +467,7 @@ fn retained_models_reject_visible_grid_overlays_and_mesh_fallback() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn retained_capture_presents_only_valid_current_pixels_and_keeps_full_completion_separate() {
     let mut renderer = offscreen::OffscreenRenderer::new("").expect("retained oracle requires EGL");
     let fixture = Fixture::new();

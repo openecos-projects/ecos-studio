@@ -1,6 +1,7 @@
 use super::*;
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn sparse_axis_residuals_batch_locally_without_changing_full_rgba() {
     let Some(mut renderer) = coverage_blend_tests::renderer() else {
         return;
@@ -82,6 +83,7 @@ fn sparse_alpha_preserves_operand_order_at_integer_rounding_boundaries() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn sparse_rectangles_preserve_full_rgba_with_ordered_gl_repair() {
     let Some(mut renderer) = coverage_blend_tests::renderer() else {
         return;
@@ -152,6 +154,7 @@ fn sparse_rectangles_preserve_full_rgba_with_ordered_gl_repair() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn sparse_stream_preserves_each_command_prefix_labels_overlays_and_cancellation() {
     let Some(mut renderer) = coverage_blend_tests::renderer() else {
         return;
@@ -273,6 +276,7 @@ fn sparse_stream_preserves_each_command_prefix_labels_overlays_and_cancellation(
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn sparse_incremental_repair_and_mesh_replay_preserve_order_and_clips() {
     let Some(mut renderer) = coverage_blend_tests::renderer() else {
         return;

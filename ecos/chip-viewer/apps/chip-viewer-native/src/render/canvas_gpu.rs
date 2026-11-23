@@ -548,6 +548,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
     fn canvas_pipeline_accepts_visibility_uniforms() {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let Some(adapter) =

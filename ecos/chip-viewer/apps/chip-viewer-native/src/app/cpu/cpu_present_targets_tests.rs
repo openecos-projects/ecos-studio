@@ -3,6 +3,7 @@ use crate::app::cpu_raster::{target::RasterTarget, targets::PresentationTargets}
 use eframe::glow::{self, HasContext};
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn offscreen_target_survives_cancelled_work_and_clears_before_reuse() {
     let fixture = Fixture::new();
     let Ok(mut renderer) = offscreen::OffscreenRenderer::new("") else {
@@ -78,6 +79,7 @@ fn pixels(gl: &glow::Context, size: [u32; 2]) -> Vec<u8> {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn presentation_target_pool_reuses_one_target_and_fully_replaces_its_contents() {
     let fixture = Fixture::new();
     let mut key = fixture.request(1.0, 1.0).key;

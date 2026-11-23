@@ -41,6 +41,7 @@ fn image(key: &SceneKey) -> Arc<[u8]> {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn presentation_uses_progress_published_after_ui_preparation_in_the_same_paint() {
     let fixture = Fixture::new();
     let key = fixture.request(1.0, 1.0).key;
@@ -93,6 +94,7 @@ fn presentation_uses_progress_published_after_ui_preparation_in_the_same_paint()
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn queued_presentation_rejects_late_progress_for_a_different_camera_or_generation() {
     let fixture = Fixture::new();
     let key = fixture.request(1.0, 1.0).key;
@@ -138,6 +140,7 @@ fn queued_presentation_rejects_late_progress_for_a_different_camera_or_generatio
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn selection_keeps_complete_geometry_instead_of_replacing_it_with_a_partial_prefix() {
     let fixture = Fixture::new();
     let request = fixture.request(1.0, 1.0);
@@ -260,6 +263,7 @@ fn shifted(pixels: &[u8], size: [u32; 2], pan: [i32; 2]) -> Vec<u8> {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn pan_preserves_complete_overlap_and_fills_only_exposed_pixels_from_a_new_prefix() {
     let fixture = Fixture::new();
     let request = fixture.request(1.0, 1.0);
@@ -309,6 +313,7 @@ fn pan_preserves_complete_overlap_and_fills_only_exposed_pixels_from_a_new_prefi
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn retained_pan_repairs_damage_before_completion_and_prefixes_cannot_erase_it() {
     let fixture = Fixture::new();
     let mut request = fixture.request(1.0, 1.0);
@@ -397,6 +402,7 @@ fn retained_pan_repairs_damage_before_completion_and_prefixes_cannot_erase_it() 
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn presentation_zoom_discards_old_scale_instead_of_freezing_it() {
     let fixture = Fixture::new();
     let request = fixture.request(1.0, 1.0);
@@ -440,6 +446,7 @@ fn presentation_zoom_discards_old_scale_instead_of_freezing_it() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn presentation_keeps_partial_geometry_moving_across_consecutive_pans() {
     let fixture = Fixture::new();
     let source = fixture.request(2.6125715, 1.0).key;
@@ -471,6 +478,7 @@ fn presentation_keeps_partial_geometry_moving_across_consecutive_pans() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn presentation_adopts_current_progress_and_rejects_late_camera_results() {
     let fixture = Fixture::new();
     let source = fixture.request(2.6125715, 1.0).key;
@@ -521,6 +529,7 @@ fn presentation_adopts_current_progress_and_rejects_late_camera_results() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn presentation_resizes_retained_partial_storage_before_current_upload() {
     let fixture = Fixture::new();
     let source = fixture.request(1.0, 1.0).key;

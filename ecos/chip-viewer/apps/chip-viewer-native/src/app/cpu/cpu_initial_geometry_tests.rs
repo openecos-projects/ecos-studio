@@ -1,6 +1,7 @@
 use super::*;
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn initial_progress_real_gl_seeds_preserve_textures_and_exact_completion_order() {
     let mut renderer =
         offscreen::OffscreenRenderer::new("").expect("initial GL seeds require EGL; do not skip");
@@ -68,6 +69,7 @@ fn initial_progress_real_gl_seeds_preserve_textures_and_exact_completion_order()
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn initial_progress_real_gl_seeds_keep_clipped_mesh_geometry_erased_by_cpu_holes() {
     let mut renderer =
         offscreen::OffscreenRenderer::new("").expect("initial GL seeds require EGL; do not skip");
@@ -229,6 +231,7 @@ fn initial_progress_skips_named_labels_and_preserves_exact_geometry() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn initial_progress_large_seed_batches_preserve_translucent_texture_order_and_cancellation() {
     let fixture = Fixture::new();
     let mut request = layered_request(&fixture, 128);

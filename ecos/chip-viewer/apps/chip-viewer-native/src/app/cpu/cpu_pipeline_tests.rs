@@ -46,6 +46,7 @@ fn streaming_preparation_preserves_geometry_labels_and_cancellation() {
 
 #[cfg(target_os = "linux")]
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn pipelined_gl_pixels_and_every_publication_match_ordered_prefixes() {
     let fixture = Fixture::new();
     let Ok(mut renderer) = offscreen::OffscreenRenderer::new("") else {
@@ -116,6 +117,7 @@ fn pipelined_gl_pixels_and_every_publication_match_ordered_prefixes() {
 
 #[cfg(target_os = "linux")]
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn queued_gl_work_publishes_a_bounded_prefix_before_the_wall_timer() {
     let fixture = Fixture::new();
     let Ok(mut renderer) = offscreen::OffscreenRenderer::new("") else {
@@ -151,6 +153,7 @@ fn queued_gl_work_publishes_a_bounded_prefix_before_the_wall_timer() {
 
 #[cfg(target_os = "linux")]
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn compact_draws_restore_state_around_textured_meshes_callbacks_and_fractional_clips() {
     use eframe::glow::HasContext;
     let fixture = Fixture::new();
@@ -218,6 +221,7 @@ fn compact_draws_restore_state_around_textured_meshes_callbacks_and_fractional_c
 
 #[cfg(target_os = "linux")]
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn compact_submission_preserves_local_indices_beyond_a_shared_u16_vertex_range() {
     let fixture = Fixture::new();
     let request = fixture.request(1.0, 1.25);

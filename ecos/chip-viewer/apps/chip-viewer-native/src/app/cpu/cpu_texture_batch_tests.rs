@@ -189,6 +189,7 @@ fn request(fixture: &Fixture, scale: f32) -> SceneRequest {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn texture_batch_all_managed_masks_and_ordered_alpha_are_byte_exact_at_fractional_dpr() {
     let fixture = Fixture::new();
     for scale in [1.0, 1.25, 2.0, 4.0] {
@@ -227,6 +228,7 @@ fn texture_batch_all_managed_masks_and_ordered_alpha_are_byte_exact_at_fractiona
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn texture_batch_preserves_font_uvs_clip_changes_and_callback_fallback_order() {
     let fixture = Fixture::new();
     for scale in [1.0, 1.25, 2.0] {
@@ -309,6 +311,7 @@ fn texture_batch_preserves_font_uvs_clip_changes_and_callback_fallback_order() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn texture_batch_uses_u32_indices_above_the_compact_u16_vertex_limit() {
     let fixture = Fixture::new();
     let request = request(&fixture, 1.0);

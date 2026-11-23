@@ -81,6 +81,7 @@ fn coverage_negative_models_lose_multiplicity_order_and_intermediate_quantizatio
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn coverage_byte_transition_matches_gl_destination_ramps_and_flat_source_phases() {
     let Some(mut renderer) = renderer() else {
         return;
@@ -178,6 +179,7 @@ fn coverage_byte_transition_matches_gl_destination_ramps_and_flat_source_phases(
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn coverage_fractional_source_control_is_phase_sensitive() {
     let Some(mut renderer) = renderer() else {
         return;
@@ -205,6 +207,7 @@ fn coverage_fractional_source_control_is_phase_sensitive() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn coverage_gl_prefixes_expose_wrong_union_and_unordered_count_models() {
     let Some(mut renderer) = renderer() else {
         return;

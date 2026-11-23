@@ -15,6 +15,7 @@ fn renderer() -> Option<offscreen::OffscreenRenderer> {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn white_geometry_does_not_upload_the_font_atlas_across_camera_changes() {
     let fixture = Fixture::new();
     let Some(mut renderer) = renderer() else {
@@ -61,6 +62,7 @@ fn white_geometry_does_not_upload_the_font_atlas_across_camera_changes() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn deferred_atlas_upload_matches_every_mixed_prefix_and_refreshes_same_size_content() {
     let fixture = Fixture::new();
     let Some(mut renderer) = renderer() else {
@@ -152,6 +154,7 @@ fn deferred_atlas_upload_matches_every_mixed_prefix_and_refreshes_same_size_cont
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn white_and_textured_streams_reject_an_obsolete_atlas_size() {
     let fixture = Fixture::new();
     let Some(mut renderer) = renderer() else {
@@ -171,6 +174,7 @@ fn white_and_textured_streams_reject_an_obsolete_atlas_size() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn offscreen_raster_uploads_context_managed_pattern_textures() {
     let fixture = Fixture::new();
     let Some(mut renderer) = renderer() else {

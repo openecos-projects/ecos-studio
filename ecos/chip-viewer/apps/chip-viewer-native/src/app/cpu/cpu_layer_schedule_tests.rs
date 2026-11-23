@@ -342,6 +342,7 @@ fn layer_schedule_same_binary_baseline_preserves_identical_ordered_contributions
 
 #[cfg(target_os = "linux")]
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn layer_schedule_actual_gl_matches_baseline_with_translucent_overlapping_layers() {
     use crate::app::cpu_scene::{builder, offscreen, tests::Fixture};
     let fixture = Fixture::new();

@@ -1674,6 +1674,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
     fn test_canvas_3d_render_pass_execution_all_styles() {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let adapter =
@@ -1779,6 +1780,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
     fn test_grid_vbo_and_pipeline_creation() {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let adapter =

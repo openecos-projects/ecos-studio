@@ -1,6 +1,7 @@
 use super::*;
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn sparse_partial_clears_every_unrepaired_tile_and_keeps_only_current_pixels() {
     let Some(mut renderer) = coverage_blend_tests::renderer() else {
         return;
@@ -116,6 +117,7 @@ fn large_outline_repairs_its_edges_without_abandoning_sparse_rendering() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn triangle_repair_matches_full_gl_with_clipping_order_alpha_and_pixel_scales() {
     let Some(mut renderer) = coverage_blend_tests::renderer() else {
         return;

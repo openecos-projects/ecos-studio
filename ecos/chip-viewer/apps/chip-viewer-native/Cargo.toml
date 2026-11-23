@@ -4,6 +4,9 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 
+[features]
+render-pixel-tests = []
+
 [dependencies]
 anyhow.workspace = true
 bytemuck.workspace = true

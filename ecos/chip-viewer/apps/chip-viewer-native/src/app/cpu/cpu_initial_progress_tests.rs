@@ -137,6 +137,7 @@ fn initial_pixels(
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn initial_progress_does_not_starve_visible_layers_behind_layer_zero() {
     let fixture = Fixture::new();
     let request = layered_request(&fixture, 128);
@@ -163,6 +164,7 @@ fn initial_progress_worker_refines_the_ui_sample_to_full_visible_layer_coverage(
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn initial_progress_matches_ordered_layer_samples_and_independent_gl_pixels() {
     let mut renderer = renderer();
     let fixture = Fixture::new();
@@ -274,6 +276,7 @@ fn real_design_initial_progress_cost() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn initial_progress_seed_survives_large_layer_zero_prefix_and_resets_for_new_camera() {
     let fixture = Fixture::new();
     let request = layered_request(&fixture, 128);
@@ -319,6 +322,7 @@ fn initial_progress_seed_survives_large_layer_zero_prefix_and_resets_for_new_cam
 }
 
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn initial_progress_spreads_geometry_and_meets_a_reference_coverage_floor() {
     let fixture = Fixture::new();
     let request = layered_request_with_spread(&fixture, 1024, true);

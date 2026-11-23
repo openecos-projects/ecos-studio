@@ -1,5 +1,16 @@
 # Native rendering checks
 
+The default Rust suite skips tests that require a graphics device for pixel
+comparisons or pipeline validation. Run them locally from `ecos/chip-viewer`
+on Linux with Mesa EGL available. Set `ECOS_COVERAGE_GL_RENDERER` to the
+available llvmpipe renderer string. The example uses the profile tested here.
+
+```bash
+ECOS_REQUIRE_INTERACTION_EGL=1 ECOS_REQUIRE_COVERAGE_EGL=1 \
+  ECOS_COVERAGE_GL_RENDERER='llvmpipe (LLVM 20.1.2, 256 bits)' \
+  cargo test -p chip-viewer-native --features render-pixel-tests -- --test-threads=1
+```
+
 The November 16 missing-content investigation is recorded in
 [`render-interaction-damage.md`](../../../docs/render-interaction-damage.md).
 Zoom feedback now checks captured routing pixels against the completed target;
@@ -61,7 +72,7 @@ Run the new pixel regressions with EGL required, so unavailable graphics cannot
 silently skip the interaction checks:
 
 ```bash
-ECOS_REQUIRE_INTERACTION_EGL=1 cargo test -p chip-viewer-native interaction_tests -- --nocapture
+ECOS_REQUIRE_INTERACTION_EGL=1 cargo test -p chip-viewer-native --features render-pixel-tests interaction_tests -- --nocapture --test-threads=1
 ```
 
 These exercise the actual presentation framebuffer, current-camera adoption,
@@ -1091,7 +1102,7 @@ gate remains required; the small investigative A/B does not satisfy it.
 Force the certified oracle rather than accidentally testing another EGL device:
 
 ```sh
-ECOS_REQUIRE_COVERAGE_EGL=1 ECOS_COVERAGE_GL_RENDERER='llvmpipe (LLVM 20.1.2, 256 bits)' cargo test -p chip-viewer-native pixel_rect_tests -- --nocapture
+ECOS_REQUIRE_COVERAGE_EGL=1 ECOS_COVERAGE_GL_RENDERER='llvmpipe (LLVM 20.1.2, 256 bits)' cargo test -p chip-viewer-native --features render-pixel-tests pixel_rect_tests -- --nocapture --test-threads=1
 ```
 
 `ECOS_DISABLE_SPARSE_RECTS=1` retains the original production GL stream for
@@ -1107,7 +1118,7 @@ actual EGL prefix comparisons, and the remaining strict latency failures.
 This preserves the existing shader and does not cache atlas content by size.
 
 ```sh
-ECOS_REQUIRE_INTERACTION_EGL=1 cargo test -p chip-viewer-native raster_font_tests -- --nocapture
+ECOS_REQUIRE_INTERACTION_EGL=1 cargo test -p chip-viewer-native --features render-pixel-tests raster_font_tests -- --nocapture --test-threads=1
 ```
 
 `interaction_render_e2e.py --raster-trace` now enables the same raster diagnostic

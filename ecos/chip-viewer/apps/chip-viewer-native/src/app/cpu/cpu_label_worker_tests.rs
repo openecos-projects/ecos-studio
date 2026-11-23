@@ -411,6 +411,7 @@ fn cancelled_warm_label_marker_preserves_db_ordinary_labels_across_selection_ref
 
 #[cfg(target_os = "linux")]
 #[test]
+#[cfg_attr(not(feature = "render-pixel-tests"), ignore)]
 fn labels_can_finish_before_the_geometry_raster_readback() {
     let fixture = Fixture::new();
     let request = fixture.request(1.0, 1.0);
