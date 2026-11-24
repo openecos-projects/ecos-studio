@@ -686,8 +686,10 @@ dependencies = [
 name = "chip-render"
 version = "0.1.0"
 dependencies = [
+ "chip-display",
  "chip-view-db",
  "chipgeom-format",
+ "emath",
 ]
 
 [[package]]
@@ -717,6 +719,7 @@ dependencies = [
  "eframe",
  "egui",
  "egui-wgpu",
+ "glutin",
  "image",
  "log",
  "pollster",

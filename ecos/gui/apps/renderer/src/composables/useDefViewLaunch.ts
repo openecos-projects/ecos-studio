@@ -1,4 +1,5 @@
 import { getDesktopApi } from '@/platform/desktop'
+import { beginChipViewerOpening } from './chipViewerOpeningStatus'
 
 export interface DefViewLaunchDeps {
   workspacePath: string
@@ -35,6 +36,11 @@ export async function launchDefView(
   deps: DefViewLaunchDeps,
 ): Promise<void> {
   const api = getDesktopApi()
+  const openingStatus = beginChipViewerOpening(
+    'Preparing DEF layout',
+    'Selected DEF file',
+  )
+  let started = false
   try {
     await api.productCommands.execute({
       command: 'workspace.defView',
@@ -43,17 +49,23 @@ export async function launchDefView(
         workspaceHandle: deps.workspaceHandle,
       },
     })
+    openingStatus.update('Opening Chip Viewer', 'DEF View')
     await api.chipViewer.open({
       projectPath: deps.workspacePath,
       step: 'defview',
       mode: 'view',
     })
+    openingStatus.complete()
+    started = true
   } catch (error) {
+    openingStatus.finish()
     deps.showToast({
       severity: 'error',
       summary: 'DEF View Error',
       detail: error instanceof Error ? error.message : String(error),
       life: 15000,
     })
+  } finally {
+    if (!started) openingStatus.finish()
   }
 }

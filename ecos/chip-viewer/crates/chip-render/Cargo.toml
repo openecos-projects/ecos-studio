@@ -5,5 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+chip-display = { path = "../chip-display" }
 chip-view-db = { path = "../chip-view-db" }
 chipgeom-format = { path = "../chipgeom-format" }
+emath = "0.31"

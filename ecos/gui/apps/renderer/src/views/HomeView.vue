@@ -213,11 +213,13 @@ import { usePowerSummary } from '@/composables/usePowerSummary'
 import { useAntennaSummary, useLvsSummary } from '@/composables/useStepDetails'
 import { useBackendWorkspaceQor } from '@/composables/useBackendWorkspaceQor'
 import { useWorkspace } from '@/composables/useWorkspace'
+import { beginChipViewerOpening } from '@/composables/chipViewerOpeningStatus'
 import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 import { getDesktopApi } from '@/platform/desktop'
 import {
   buildChipViewerOpenRequest,
   canOpenChipViewer,
+  chipViewerLoadingMessage,
 } from '@/components/drawingAreaChipViewer'
 
 const route = useRoute()
@@ -231,7 +233,7 @@ function closeInsight(): void {
   void router.replace({ path: route.path, query })
 }
 
-const { currentProject } = useWorkspace()
+const { currentProject, showToast } = useWorkspace()
 const backendWorkspaceSession = useBackendWorkspaceSession()
 const workspaceOverview = computed(() => backendWorkspaceSession.projection.data)
 const resultFreshness = computed(() => workspaceOverview.value?.resultFreshness)
@@ -394,15 +396,29 @@ async function openLayoutThumbnail(
   const projectPath = currentProject.value?.path
   if (!projectPath || !canOpenLayoutThumbnail(thumbnail)) return
 
+  const openingStatus = beginChipViewerOpening(
+    chipViewerLoadingMessage(mode),
+    thumbnail.step,
+  )
+  let started = false
   openingLayoutStep.value = thumbnail.step
   try {
     const desktopApi = getDesktopApi()
     await desktopApi.chipViewer.open(
       buildChipViewerOpenRequest(projectPath, thumbnail.step, mode),
     )
+    openingStatus.complete()
+    started = true
   } catch (error) {
     console.error(`Failed to open ChipView for ${thumbnail.step} from Home:`, error)
+    showToast({
+      severity: 'error',
+      summary: 'Unable to open Chip Viewer',
+      detail: error instanceof Error ? error.message : String(error),
+      life: 8000,
+    })
   } finally {
+    if (!started) openingStatus.finish()
     if (openingLayoutStep.value === thumbnail.step) {
       openingLayoutStep.value = null
     }

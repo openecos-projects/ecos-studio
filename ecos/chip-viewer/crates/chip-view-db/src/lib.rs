@@ -21,17 +21,31 @@ use rstar::{RTree, RTreeObject, AABB};
 mod view_tiles;
 pub use view_tiles::ViewTileIndex;
 
+mod query_prefix;
+pub use query_prefix::QueryPrefixLimits;
+
+mod query_sample;
+pub use query_sample::LayerQuerySample;
+
+mod query_window;
+
+mod search;
+mod shape_lookup;
+
+pub use search::BoundedShapeSearch;
+
 pub mod clock_tree;
 
 pub struct ChipViewDb {
-    connectivity_index: ConnectivityIndex,
+    connectivity_index: OnceLock<ConnectivityIndex>,
     layer_index: LayerShapeIndex,
-    name_index: OwnerNameIndex,
+    name_index: OnceLock<OwnerNameIndex>,
     net_guides: OnceLock<Vec<UnroutedNetGuide>>,
-    net_index: NetMetadataIndex,
+    net_index: OnceLock<NetMetadataIndex>,
     shape_index: ShapeIdIndex,
     snapshot: GeometrySnapshot,
-    view_index: ViewTileIndex,
+    view_index: OnceLock<ViewTileIndex>,
+    window_queries: query_window::WindowQueries,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -48,6 +62,7 @@ pub struct SnapshotStats {
     pub bus_count: usize,
     pub group_count: usize,
     pub bbox: Option<Rect32>,
+    pub die_bbox: Option<Rect32>,
     pub owner_type_counts: BTreeMap<u8, usize>,
 }
 
@@ -72,8 +87,10 @@ pub struct ChipViewMemoryStats {
 /// Per-phase wall-clock timings collected while opening a [`ChipViewDb`].
 /// All fields are elapsed microseconds measured with [`Instant`]; index
 /// phases are built in parallel, so their individual durations overlap.
-/// `net_guides` is always zero: unrouted net guides are built lazily on
-/// first access instead of during `open`.
+/// `open` builds only the geometry-query indexes; name, net, connectivity and
+/// view indexes are lazy and therefore report zero until requested. The
+/// diagnostic `open_with_timings` eagerly builds them for comparable reports.
+/// `net_guides` is always zero because guides are lazy on first access.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct OpenTimings {
     pub snapshot_open: u128,
@@ -195,31 +212,15 @@ pub enum ShapeGeometry {
 
 #[derive(Clone, Debug, Default)]
 pub struct LayerShapeIndex {
-    by_layer: BTreeMap<u16, Vec<usize>>,
-    spatial_by_layer: BTreeMap<u16, RTree<LayerSpatialEntry>>,
+    by_layer: BTreeMap<u16, Arc<[usize]>>,
+    spatial_by_layer: BTreeMap<u16, OnceLock<RTree<LayerSpatialEntry>>>,
     layer_bboxes: RTree<LayerBBoxEntry>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct ShapeIdIndex {
-    lookup: ShapeIdLookup,
-}
-
-#[derive(Clone, Debug)]
-enum ShapeIdLookup {
-    /// Shape IDs are contiguous in record order. This is the common case for
-    /// exported snapshots and lets `find` address the slice directly instead
-    /// of materializing a multi-gigabyte hash map.
-    Contiguous {
-        first_id: ShapeId,
-    },
-    Hash(HashMap<ShapeId, usize>),
-}
-
-impl Default for ShapeIdLookup {
-    fn default() -> Self {
-        Self::Hash(HashMap::new())
-    }
+    by_id: HashMap<ShapeId, usize>,
+    dense_base: Option<ShapeId>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -304,12 +305,10 @@ const PARALLEL_SCAN_MIN_SHAPES: usize = 16 * 1024;
 /// runs on the calling thread instead of spawning one worker per map.
 const CONNECTIVITY_PARALLEL_MIN_ENDPOINTS: usize = 4096;
 
-/// Result of scanning one chunk of shapes for the layer index. Each worker
-/// produces one of these and they are merged in chunk order.
+/// Result of scanning one chunk for the ordered layer directory and bounds.
 #[derive(Default)]
 struct LayerScan {
     by_layer: BTreeMap<u16, Vec<usize>>,
-    spatial_entries_by_layer: BTreeMap<u16, Vec<LayerSpatialEntry>>,
     layer_bbox_map: BTreeMap<u16, [i32; 4]>,
 }
 
@@ -321,13 +320,6 @@ fn scan_layer_chunk(shapes: &[ShapeRecord], index_offset: usize) -> LayerScan {
         }
         let index = index_offset + local_index;
         scan.by_layer.entry(shape.layer_id).or_default().push(index);
-        scan.spatial_entries_by_layer
-            .entry(shape.layer_id)
-            .or_default()
-            .push(LayerSpatialEntry {
-                index,
-                envelope: rect_envelope(shape.bbox),
-            });
         // Merge this shape's bbox into the per-layer AABB.
         let b = shape.bbox;
         let lx = b.lx.min(b.hx);
@@ -364,42 +356,6 @@ fn parallel_layer_scans(shapes: &[ShapeRecord], workers: usize) -> Vec<LayerScan
     })
 }
 
-/// Bulk-loads one spatial R-Tree per layer, loading layers in parallel when
-/// there are enough layers to amortize the worker spawns.
-fn bulk_load_layer_trees(
-    spatial_entries_by_layer: BTreeMap<u16, Vec<LayerSpatialEntry>>,
-    workers: usize,
-) -> BTreeMap<u16, RTree<LayerSpatialEntry>> {
-    let mut layers: Vec<(u16, Vec<LayerSpatialEntry>)> =
-        spatial_entries_by_layer.into_iter().collect();
-    if workers > 1 && layers.len() > 1 {
-        let group_len = layers.len().div_ceil(workers);
-        let loaded: Vec<(u16, RTree<LayerSpatialEntry>)> = std::thread::scope(|scope| {
-            layers
-                .chunks_mut(group_len)
-                .map(|group| {
-                    scope.spawn(move || {
-                        group
-                            .iter_mut()
-                            .map(|(layer_id, entries)| {
-                                (*layer_id, RTree::bulk_load(std::mem::take(entries)))
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                })
-                .collect::<Vec<_>>()
-                .into_iter()
-                .flat_map(|handle| handle.join().expect("layer tree worker panicked"))
-                .collect()
-        });
-        return loaded.into_iter().collect();
-    }
-    layers
-        .into_iter()
-        .map(|(layer_id, entries)| (layer_id, RTree::bulk_load(entries)))
-        .collect()
-}
-
 /// Runs a build phase and reports how long it took, so `open` can report
 /// per-index timings even when phases run concurrently.
 fn timed<T>(phase: impl FnOnce() -> T) -> (T, Duration) {
@@ -417,19 +373,12 @@ impl LayerShapeIndex {
             vec![scan_layer_chunk(shapes, 0)]
         };
         let mut by_layer: BTreeMap<u16, Vec<usize>> = BTreeMap::new();
-        let mut spatial_entries_by_layer: BTreeMap<u16, Vec<LayerSpatialEntry>> = BTreeMap::new();
         let mut layer_bbox_map: BTreeMap<u16, [i32; 4]> = BTreeMap::new();
         // Merge chunk scans in chunk order so per-layer index and entry
         // vectors keep their original ascending-by-shape-index ordering.
         for scan in scans {
             for (layer_id, indices) in scan.by_layer {
                 by_layer.entry(layer_id).or_default().extend(indices);
-            }
-            for (layer_id, entries) in scan.spatial_entries_by_layer {
-                spatial_entries_by_layer
-                    .entry(layer_id)
-                    .or_default()
-                    .extend(entries);
             }
             for (layer_id, bbox) in scan.layer_bbox_map {
                 layer_bbox_map
@@ -443,7 +392,14 @@ impl LayerShapeIndex {
                     .or_insert(bbox);
             }
         }
-        let spatial_by_layer = bulk_load_layer_trees(spatial_entries_by_layer, workers);
+        let by_layer = by_layer
+            .into_iter()
+            .map(|(layer_id, indices)| (layer_id, Arc::from(indices)))
+            .collect::<BTreeMap<_, _>>();
+        let spatial_by_layer = by_layer
+            .keys()
+            .map(|layer_id| (*layer_id, OnceLock::new()))
+            .collect();
         // Build the top-level layer bounding-box R-Tree.
         let layer_bbox_entries: Vec<LayerBBoxEntry> = layer_bbox_map
             .into_iter()
@@ -461,30 +417,40 @@ impl LayerShapeIndex {
     }
 
     pub fn candidate_count(&self, layer_id: u16) -> usize {
-        self.by_layer.get(&layer_id).map_or(0, std::vec::Vec::len)
+        self.by_layer
+            .get(&layer_id)
+            .map_or(0, |indices| indices.len())
     }
 
-    pub fn query_candidate_count(&self, layer_id: u16, bbox: Rect32) -> usize {
-        self.spatial_candidate_indices(layer_id, bbox).len()
+    pub fn query_candidate_count(
+        &self,
+        shapes: &[ShapeRecord],
+        layer_id: u16,
+        bbox: Rect32,
+    ) -> usize {
+        self.spatial_candidate_indices(shapes, layer_id, bbox).len()
     }
 
     pub fn estimated_heap_bytes(&self) -> usize {
         size_of::<Self>()
+            + self.spatial_by_layer.len() * size_of::<(u16, OnceLock<RTree<LayerSpatialEntry>>)>()
             + self
                 .by_layer
                 .values()
                 .map(|indices| {
                     size_of::<u16>()
-                        + size_of::<Vec<usize>>()
-                        + indices.capacity() * size_of::<usize>()
+                        + size_of::<Arc<[usize]>>()
+                        + indices.len() * size_of::<usize>()
                 })
                 .sum::<usize>()
             + self
                 .spatial_by_layer
                 .values()
                 .map(|tree| {
-                    size_of::<RTree<LayerSpatialEntry>>()
-                        + tree.size() * size_of::<LayerSpatialEntry>()
+                    tree.get().map_or(0, |tree| {
+                        size_of::<RTree<LayerSpatialEntry>>()
+                            + tree.size() * size_of::<LayerSpatialEntry>()
+                    })
                 })
                 .sum::<usize>()
     }
@@ -508,19 +474,34 @@ impl LayerShapeIndex {
         bbox: Rect32,
     ) -> Vec<ShapeId> {
         let viewport_envelope = rect_envelope(bbox);
-        let layers_in_view: std::collections::HashSet<u16> = self
+        let layers_in_view: HashMap<_, _> = self
             .layer_bboxes
             .locate_in_envelope_intersecting(viewport_envelope)
-            .map(|entry| entry.layer_id)
+            .map(|entry| (entry.layer_id, entry.envelope))
             .collect();
 
         let mut hits = Vec::new();
         for layer_id in layer_ids {
             // Skip layers whose entire extent lies outside the viewport.
-            if !layers_in_view.contains(layer_id) {
+            let Some(envelope) = layers_in_view.get(layer_id) else {
                 continue;
-            }
-            let mut layer_hits = self.query_layer_intersect(shapes, *layer_id, bbox);
+            };
+            let mut layer_hits: Vec<_> = if bbox.lx <= bbox.hx
+                && bbox.ly <= bbox.hy
+                && bbox.lx <= envelope.lower()[0]
+                && bbox.ly <= envelope.lower()[1]
+                && bbox.hx >= envelope.upper()[0]
+                && bbox.hy >= envelope.upper()[1]
+            {
+                self.by_layer
+                    .get(layer_id)
+                    .into_iter()
+                    .flat_map(|indices| indices.iter())
+                    .map(|index| shapes[*index].id)
+                    .collect()
+            } else {
+                self.query_layer_intersect(shapes, *layer_id, bbox)
+            };
             layer_hits.sort_unstable();
             hits.extend(layer_hits);
         }
@@ -533,16 +514,39 @@ impl LayerShapeIndex {
         layer_id: u16,
         bbox: Rect32,
     ) -> Vec<usize> {
-        self.spatial_candidate_indices(layer_id, bbox)
+        self.spatial_candidate_indices(shapes, layer_id, bbox)
             .into_iter()
             .filter(|index| shapes[*index].bbox.intersects(bbox))
             .collect()
     }
 
-    fn spatial_candidate_indices(&self, layer_id: u16, bbox: Rect32) -> Vec<usize> {
+    fn spatial_tree(
+        &self,
+        shapes: &[ShapeRecord],
+        layer_id: u16,
+    ) -> Option<&RTree<LayerSpatialEntry>> {
+        let indices = self.by_layer.get(&layer_id)?;
+        let tree = self.spatial_by_layer.get(&layer_id)?.get_or_init(|| {
+            let entries = indices
+                .iter()
+                .map(|&index| LayerSpatialEntry {
+                    index,
+                    envelope: rect_envelope(shapes[index].bbox),
+                })
+                .collect();
+            RTree::bulk_load(entries)
+        });
+        Some(tree)
+    }
+
+    fn spatial_candidate_indices(
+        &self,
+        shapes: &[ShapeRecord],
+        layer_id: u16,
+        bbox: Rect32,
+    ) -> Vec<usize> {
         let mut indices = self
-            .spatial_by_layer
-            .get(&layer_id)
+            .spatial_tree(shapes, layer_id)
             .into_iter()
             .flat_map(|tree| tree.locate_in_envelope_intersecting(rect_envelope(bbox)))
             .map(|entry| entry.index)
@@ -552,11 +556,30 @@ impl LayerShapeIndex {
     }
 
     #[cfg(test)]
-    fn spatial_candidate_count(&self, layer_id: u16, bbox: Rect32) -> usize {
-        self.spatial_by_layer.get(&layer_id).map_or(0, |tree| {
+    fn spatial_candidate_count(
+        &self,
+        shapes: &[ShapeRecord],
+        layer_id: u16,
+        bbox: Rect32,
+    ) -> usize {
+        self.spatial_tree(shapes, layer_id).map_or(0, |tree| {
             tree.locate_in_envelope_intersecting(rect_envelope(bbox))
                 .count()
         })
+    }
+
+    #[cfg(test)]
+    fn initialized_spatial_tree_count(&self) -> usize {
+        self.spatial_by_layer
+            .values()
+            .filter(|tree| tree.get().is_some())
+            .count()
+    }
+
+    fn prewarm_spatial_indexes(&self, shapes: &[ShapeRecord]) {
+        for layer_id in self.by_layer.keys() {
+            let _ = self.spatial_tree(shapes, *layer_id);
+        }
     }
 
     pub fn pick_top_rect(
@@ -567,7 +590,9 @@ impl LayerShapeIndex {
     ) -> Option<ShapeId> {
         layer_ids
             .iter()
-            .flat_map(|layer_id| self.spatial_candidate_indices(*layer_id, point_bbox(point)))
+            .flat_map(|layer_id| {
+                self.spatial_candidate_indices(shapes, *layer_id, point_bbox(point))
+            })
             .filter(|index| {
                 let shape = &shapes[*index];
                 shape.state == ShapeState::Alive as u8
@@ -586,7 +611,9 @@ impl LayerShapeIndex {
     ) -> Option<ShapeId> {
         layer_ids
             .iter()
-            .flat_map(|layer_id| self.spatial_candidate_indices(*layer_id, point_bbox(point)))
+            .flat_map(|layer_id| {
+                self.spatial_candidate_indices(shapes, *layer_id, point_bbox(point))
+            })
             .filter(|index| {
                 let shape = &shapes[*index];
                 shape.state == ShapeState::Alive as u8
@@ -616,12 +643,17 @@ impl LayerShapeIndex {
             };
             layer_ids
                 .iter()
-                .flat_map(|layer_id| self.spatial_candidate_indices(*layer_id, bbox))
+                .flat_map(|layer_id| self.spatial_candidate_indices(shapes, *layer_id, bbox))
                 .collect::<Vec<_>>()
         } else {
             layer_ids
                 .iter()
-                .flat_map(|layer_id| self.by_layer.get(layer_id).into_iter().flatten().copied())
+                .flat_map(|layer_id| {
+                    self.by_layer
+                        .get(layer_id)
+                        .into_iter()
+                        .flat_map(|indices| indices.iter().copied())
+                })
                 .collect::<Vec<_>>()
         };
 
@@ -643,56 +675,6 @@ impl LayerShapeIndex {
                 shape_id,
                 distance_squared,
             })
-    }
-}
-
-impl ShapeIdIndex {
-    pub fn from_shapes(shapes: &[ShapeRecord]) -> Self {
-        let Some(first) = shapes.first() else {
-            return Self::default();
-        };
-        let contiguous = shapes.iter().enumerate().all(|(index, shape)| {
-            first
-                .id
-                .checked_add(index as ShapeId)
-                .is_some_and(|expected| shape.id == expected)
-        });
-        if contiguous {
-            return Self {
-                lookup: ShapeIdLookup::Contiguous { first_id: first.id },
-            };
-        }
-
-        let mut by_id = HashMap::<ShapeId, usize>::with_capacity(shapes.len());
-        for (index, shape) in shapes.iter().enumerate() {
-            by_id.entry(shape.id).or_insert(index);
-        }
-        Self {
-            lookup: ShapeIdLookup::Hash(by_id),
-        }
-    }
-
-    pub fn estimated_heap_bytes(&self) -> usize {
-        let lookup_bytes = match &self.lookup {
-            ShapeIdLookup::Contiguous { .. } => 0,
-            ShapeIdLookup::Hash(by_id) => by_id.capacity() * (size_of::<(ShapeId, usize)>() + 1),
-        };
-        size_of::<Self>() + lookup_bytes
-    }
-
-    pub fn find<'a>(
-        &self,
-        shapes: &'a [ShapeRecord],
-        shape_id: ShapeId,
-    ) -> Option<&'a ShapeRecord> {
-        match &self.lookup {
-            ShapeIdLookup::Contiguous { first_id } => shape_id
-                .checked_sub(*first_id)
-                .and_then(|offset| usize::try_from(offset).ok())
-                .and_then(|index| shapes.get(index))
-                .filter(|shape| shape.id == shape_id),
-            ShapeIdLookup::Hash(by_id) => by_id.get(&shape_id).and_then(|index| shapes.get(*index)),
-        }
     }
 }
 
@@ -1041,12 +1023,15 @@ impl ConnectivityIndex {
         endpoints: &'a [ConnectivityMetadata],
         pin_name: &str,
     ) -> Vec<&'a ConnectivityMetadata> {
-        let indices = if pin_name.contains('/') {
+        self.endpoint_refs(endpoints, self.indices_for_pin(pin_name))
+    }
+
+    fn indices_for_pin(&self, pin_name: &str) -> Option<&Vec<usize>> {
+        if pin_name.contains('/') {
             self.by_qualified_pin_name.get(pin_name)
         } else {
             self.by_pin_name.get(pin_name)
-        };
-        self.endpoint_refs(endpoints, indices)
+        }
     }
 
     fn endpoint_refs<'a>(
@@ -1301,17 +1286,18 @@ impl ChipViewIndexMemoryStats {
     fn from_indexes(
         layer_index: &LayerShapeIndex,
         shape_index: &ShapeIdIndex,
-        view_index: &ViewTileIndex,
-        name_index: &OwnerNameIndex,
-        net_index: &NetMetadataIndex,
-        connectivity_index: &ConnectivityIndex,
+        view_index: Option<&ViewTileIndex>,
+        name_index: Option<&OwnerNameIndex>,
+        net_index: Option<&NetMetadataIndex>,
+        connectivity_index: Option<&ConnectivityIndex>,
     ) -> Self {
         let layer_index_bytes = layer_index.estimated_heap_bytes();
         let shape_index_bytes = shape_index.estimated_heap_bytes();
-        let view_index_bytes = view_index.estimated_heap_bytes();
-        let name_index_bytes = name_index.estimated_heap_bytes();
-        let net_index_bytes = net_index.estimated_heap_bytes();
-        let connectivity_index_bytes = connectivity_index.estimated_heap_bytes();
+        let view_index_bytes = view_index.map_or(0, ViewTileIndex::estimated_heap_bytes);
+        let name_index_bytes = name_index.map_or(0, OwnerNameIndex::estimated_heap_bytes);
+        let net_index_bytes = net_index.map_or(0, NetMetadataIndex::estimated_heap_bytes);
+        let connectivity_index_bytes =
+            connectivity_index.map_or(0, ConnectivityIndex::estimated_heap_bytes);
         Self {
             layer_index_bytes,
             shape_index_bytes,
@@ -1889,7 +1875,6 @@ fn query_endpoint_pin_shape_ids_from_parts(
         .collect()
 }
 
-#[cfg(test)]
 fn endpoint_matches_pin(endpoint: &ConnectivityMetadata, pin_name: &str) -> bool {
     if let Some((instance_name, local_pin_name)) = pin_name.rsplit_once('/') {
         endpoint.instance_name == instance_name && endpoint.pin_name == local_pin_name
@@ -2114,49 +2099,75 @@ fn filter_shape_ids_by_owner_types(
 
 impl ChipViewDb {
     pub fn open(manifest_path: impl AsRef<Path>) -> Result<Self> {
-        let (db, _timings) = Self::open_with_timings(manifest_path)?;
+        let (db, _timings) = Self::open_internal(manifest_path, false)?;
         Ok(db)
     }
 
-    /// Opens the database like [`ChipViewDb::open`] and additionally reports
-    /// per-phase timings. All six indexes are built concurrently from the
-    /// read-only snapshot; unrouted net guides are built lazily on first
-    /// access, so `OpenTimings::net_guides` is always zero here.
+    /// Opens the database with all indexes built concurrently and reports
+    /// per-phase timings. This is intended for diagnostics and benchmarks;
+    /// normal viewer startup uses [`ChipViewDb::open`] to defer indexes that
+    /// are not needed to prepare the initial geometry. Unrouted net guides are
+    /// always lazy, so `OpenTimings::net_guides` is zero.
     pub fn open_with_timings(manifest_path: impl AsRef<Path>) -> Result<(Self, OpenTimings)> {
+        Self::open_internal(manifest_path, true)
+    }
+
+    fn open_internal(
+        manifest_path: impl AsRef<Path>,
+        build_auxiliary_indexes: bool,
+    ) -> Result<(Self, OpenTimings)> {
         let total_start = Instant::now();
         let snapshot_start = Instant::now();
         let snapshot = GeometrySnapshot::open(manifest_path)?;
         let snapshot_open = snapshot_start.elapsed();
 
-        let (
-            (connectivity_index, connectivity_elapsed),
-            (net_index, net_elapsed),
-            (view_index, view_elapsed),
-            (layer_index, layer_elapsed),
-            (shape_index, shape_elapsed),
-            (name_index, name_elapsed),
-        ) = std::thread::scope(|scope| {
-            let connectivity = scope.spawn(|| {
-                timed(|| ConnectivityIndex::from_endpoints(snapshot.connectivity_metadata()))
+        let (optional, layer_index, shape_index) = std::thread::scope(|scope| {
+            let connectivity = build_auxiliary_indexes.then(|| {
+                scope.spawn(|| {
+                    timed(|| ConnectivityIndex::from_endpoints(snapshot.connectivity_metadata()))
+                })
             });
-            let nets =
-                scope.spawn(|| timed(|| NetMetadataIndex::from_nets(snapshot.net_metadata())));
-            let views =
-                scope.spawn(|| timed(|| ViewTileIndex::from_tiles(snapshot.view_tile_records())));
-            let layers = scope.spawn(|| timed(|| LayerShapeIndex::from_shapes(snapshot.shapes())));
+            let nets = build_auxiliary_indexes.then(|| {
+                scope.spawn(|| timed(|| NetMetadataIndex::from_nets(snapshot.net_metadata())))
+            });
+            let views = build_auxiliary_indexes.then(|| {
+                scope.spawn(|| timed(|| ViewTileIndex::from_tiles(snapshot.view_tile_records())))
+            });
+            let layers = scope.spawn(|| {
+                timed(|| {
+                    let index = LayerShapeIndex::from_shapes(snapshot.shapes());
+                    if build_auxiliary_indexes {
+                        index.prewarm_spatial_indexes(snapshot.shapes());
+                    }
+                    index
+                })
+            });
             let shapes = scope.spawn(|| timed(|| ShapeIdIndex::from_shapes(snapshot.shapes())));
-            let names = timed(|| OwnerNameIndex::from_snapshot(&snapshot));
+            let names =
+                build_auxiliary_indexes.then(|| timed(|| OwnerNameIndex::from_snapshot(&snapshot)));
+            let optional = (
+                connectivity.map(|job| job.join().expect("connectivity index worker panicked")),
+                nets.map(|job| job.join().expect("net index worker panicked")),
+                views.map(|job| job.join().expect("view index worker panicked")),
+                names,
+            );
             (
-                connectivity
-                    .join()
-                    .expect("connectivity index worker panicked"),
-                nets.join().expect("net index worker panicked"),
-                views.join().expect("view index worker panicked"),
+                optional,
                 layers.join().expect("layer index worker panicked"),
                 shapes.join().expect("shape index worker panicked"),
-                names,
             )
         });
+        let (connectivity, nets, views, names) = optional;
+        let (connectivity_index, connectivity_elapsed) =
+            connectivity.unwrap_or_else(|| (ConnectivityIndex::default(), Duration::ZERO));
+        let (net_index, net_elapsed) =
+            nets.unwrap_or_else(|| (NetMetadataIndex::default(), Duration::ZERO));
+        let (view_index, view_elapsed) =
+            views.unwrap_or_else(|| (ViewTileIndex::default(), Duration::ZERO));
+        let (name_index, name_elapsed) =
+            names.unwrap_or_else(|| (OwnerNameIndex::default(), Duration::ZERO));
+        let (layer_index, layer_elapsed) = layer_index;
+        let (shape_index, shape_elapsed) = shape_index;
 
         let timings = OpenTimings {
             snapshot_open: snapshot_open.as_micros(),
@@ -2169,19 +2180,63 @@ impl ChipViewDb {
             net_guides: 0,
             total: total_start.elapsed().as_micros(),
         };
-        Ok((
-            Self {
-                connectivity_index,
-                layer_index,
-                name_index,
-                net_guides: OnceLock::new(),
-                net_index,
-                shape_index,
-                snapshot,
-                view_index,
-            },
-            timings,
-        ))
+        let db = Self {
+            connectivity_index: OnceLock::new(),
+            layer_index,
+            name_index: OnceLock::new(),
+            net_guides: OnceLock::new(),
+            net_index: OnceLock::new(),
+            shape_index,
+            snapshot,
+            view_index: OnceLock::new(),
+            window_queries: Default::default(),
+        };
+        if build_auxiliary_indexes {
+            let _ = db.connectivity_index.set(connectivity_index);
+            let _ = db.net_index.set(net_index);
+            let _ = db.view_index.set(view_index);
+            let _ = db.name_index.set(name_index);
+        }
+        Ok((db, timings))
+    }
+
+    fn name_index(&self) -> &OwnerNameIndex {
+        self.name_index
+            .get_or_init(|| OwnerNameIndex::from_snapshot(&self.snapshot))
+    }
+
+    fn net_index(&self) -> &NetMetadataIndex {
+        self.net_index
+            .get_or_init(|| NetMetadataIndex::from_nets(self.snapshot.net_metadata()))
+    }
+
+    fn connectivity_index(&self) -> &ConnectivityIndex {
+        self.connectivity_index.get_or_init(|| {
+            ConnectivityIndex::from_endpoints(self.snapshot.connectivity_metadata())
+        })
+    }
+
+    fn view_index(&self) -> &ViewTileIndex {
+        self.view_index
+            .get_or_init(|| ViewTileIndex::from_tiles(self.snapshot.view_tile_records()))
+    }
+
+    /// Build the optional indexes used by labels, category classification and
+    /// overview tiles on a caller-owned worker thread.
+    pub fn prewarm_render_indexes(&self) {
+        std::thread::scope(|scope| {
+            scope.spawn(|| self.name_index());
+            scope.spawn(|| self.net_index());
+            scope.spawn(|| self.view_index());
+            scope.spawn(|| self.connectivity_index());
+        });
+    }
+
+    /// Build the spatial query trees after the exact initial scene is visible.
+    /// Whole-layer startup queries do not need these indexes.
+    pub fn prewarm_spatial_indexes(&self) {
+        self.layer_index
+            .prewarm_spatial_indexes(self.snapshot.shapes());
     }
 
     pub fn snapshot(&self) -> &GeometrySnapshot {
@@ -2199,7 +2254,6 @@ impl ChipViewDb {
 
     pub fn stats(&self) -> SnapshotStats {
         let mut stats = SnapshotStats {
-            shape_count: self.snapshot.shapes().len(),
             owner_count: self.snapshot.owners().len(),
             name_count: self.snapshot.name_records().len(),
             site_count: self.snapshot.site_metadata().len(),
@@ -2214,6 +2268,10 @@ impl ChipViewDb {
         };
 
         for shape in self.snapshot.shapes() {
+            if shape.state != ShapeState::Alive as u8 {
+                continue;
+            }
+            stats.shape_count += 1;
             stats
                 .bbox
                 .as_mut()
@@ -2221,6 +2279,13 @@ impl ChipViewDb {
                 .unwrap_or_else(|| stats.bbox = Some(shape.bbox));
             if let Some(owner) = self.snapshot.owners().get(shape.owner_index as usize) {
                 *stats.owner_type_counts.entry(owner.owner_type).or_insert(0) += 1;
+                if owner.owner_type == OwnerType::Die as u8 {
+                    stats
+                        .die_bbox
+                        .as_mut()
+                        .map(|bbox| bbox.include(shape.bbox))
+                        .unwrap_or_else(|| stats.die_bbox = Some(shape.bbox));
+                }
             }
         }
 
@@ -2244,7 +2309,7 @@ impl ChipViewDb {
             &self.shape_index,
             self.snapshot.shapes(),
             self.snapshot.owners(),
-            &self.name_index,
+            self.name_index(),
             shape_id,
         )?;
         detail.owner_local_name = self
@@ -2295,7 +2360,7 @@ impl ChipViewDb {
     }
 
     pub fn net_kind_for_name(&self, net_name: &str) -> Option<&str> {
-        self.net_index.kind_for_name(net_name)
+        self.net_index().kind_for_name(net_name)
     }
 
     /// Returns the unrouted-net guides, building them on first access so
@@ -2327,8 +2392,8 @@ impl ChipViewDb {
         unrouted_net_guides_from_parts(
             self.snapshot.shapes(),
             self.snapshot.owners(),
-            &self.name_index,
-            &self.net_index,
+            self.name_index(),
+            self.net_index(),
             self.snapshot.connectivity_metadata(),
         )
     }
@@ -2361,7 +2426,7 @@ impl ChipViewDb {
                 query_bus_shape_ids_from_parts(
                     self.snapshot.shapes(),
                     self.snapshot.owners(),
-                    &self.name_index,
+                    self.name_index(),
                     bus,
                 )
             })
@@ -2374,7 +2439,7 @@ impl ChipViewDb {
                 query_group_shape_ids_from_parts(
                     self.snapshot.shapes(),
                     self.snapshot.owners(),
-                    &self.name_index,
+                    self.name_index(),
                     group,
                 )
             })
@@ -2386,7 +2451,7 @@ impl ChipViewDb {
         query_pin_shape_ids_from_endpoint_refs(
             self.snapshot.shapes(),
             self.snapshot.owners(),
-            &self.name_index,
+            self.name_index(),
             &endpoints,
             pin_name,
         )
@@ -2396,7 +2461,7 @@ impl ChipViewDb {
         query_endpoint_pin_shape_ids_from_parts(
             self.snapshot.shapes(),
             self.snapshot.owners(),
-            &self.name_index,
+            self.name_index(),
             instance_name,
             pin_name,
         )
@@ -2410,23 +2475,23 @@ impl ChipViewDb {
             self.snapshot.shapes(),
             self.snapshot.owners(),
             &self.shape_index,
-            &self.name_index,
+            self.name_index(),
             requests,
         )
     }
 
     pub fn connectivity_for_net(&self, net_name: &str) -> Vec<&ConnectivityMetadata> {
-        self.connectivity_index
+        self.connectivity_index()
             .endpoints_for_net(self.snapshot.connectivity_metadata(), net_name)
     }
 
     pub fn connectivity_for_pin(&self, pin_name: &str) -> Vec<&ConnectivityMetadata> {
-        self.connectivity_index
+        self.connectivity_index()
             .endpoints_for_pin(self.snapshot.connectivity_metadata(), pin_name)
     }
 
     pub fn connectivity_for_instance(&self, instance_name: &str) -> Vec<&ConnectivityMetadata> {
-        self.connectivity_index
+        self.connectivity_index()
             .endpoints_for_instance(self.snapshot.connectivity_metadata(), instance_name)
     }
 
@@ -2499,7 +2564,8 @@ impl ChipViewDb {
     }
 
     pub fn layer_viewport_candidate_count(&self, layer_id: u16, bbox: Rect32) -> usize {
-        self.layer_index.query_candidate_count(layer_id, bbox)
+        self.layer_index
+            .query_candidate_count(self.snapshot.shapes(), layer_id, bbox)
     }
 
     pub fn view_tile_count(&self) -> usize {
@@ -2511,10 +2577,10 @@ impl ChipViewDb {
         let index_bytes = ChipViewIndexMemoryStats::from_indexes(
             &self.layer_index,
             &self.shape_index,
-            &self.view_index,
-            &self.name_index,
-            &self.net_index,
-            &self.connectivity_index,
+            self.view_index.get(),
+            self.name_index.get(),
+            self.net_index.get(),
+            self.connectivity_index.get(),
         );
         ChipViewMemoryStats {
             mapped_plus_index_bytes: mapped_bytes.total() + index_bytes.total_bytes,
@@ -2533,22 +2599,22 @@ impl ChipViewDb {
         layer_id: u16,
         bbox: Rect32,
     ) -> Vec<&GeometryViewTileRecord> {
-        self.view_index
+        self.view_index()
             .query_tiles(self.snapshot.view_tile_records(), lod_level, layer_id, bbox)
     }
 
     pub fn query_owner_name(&self, name: &str) -> Vec<ShapeId> {
-        self.name_index
+        self.name_index()
             .query(self.snapshot.shapes(), self.snapshot.owners(), name)
     }
 
     pub fn query_owner_name_pattern(&self, pattern: &Regex) -> Vec<ShapeId> {
-        self.name_index
+        self.name_index()
             .query_pattern(self.snapshot.shapes(), self.snapshot.owners(), pattern)
     }
 
     pub fn query_owner_shapes(&self, owner_type: OwnerType, owner_id: u64) -> Vec<ShapeId> {
-        self.name_index.query_owner(
+        self.name_index().query_owner(
             self.snapshot.shapes(),
             self.snapshot.owners(),
             owner_type as u8,
@@ -2605,7 +2671,7 @@ impl ChipViewDb {
     }
 
     pub fn owner_name(&self, owner: &OwnerRef) -> Option<&str> {
-        self.name_index
+        self.name_index()
             .name_for_owner(owner.owner_type, owner.owner_id)
     }
 
@@ -2639,9 +2705,165 @@ impl ChipViewDb {
 }
 
 #[cfg(test)]
+#[path = "layer_query_tests.rs"]
+mod layer_query_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use chipgeom_format::{Rect32, ShapeKind, ShapeState};
+    use chipgeom_format::{
+        GeometryFileHeader, GeometryFileKind, GeometryMetaRecord, GeometryNameRecord,
+        GeometrySidMapRecord, GeometryViewTileRecord, Rect32, ShapeKind, ShapeState,
+        GEOMETRY_FILE_HEADER_SIZE, GEOMETRY_FILE_MAGIC, GEOMETRY_SCHEMA_VERSION,
+    };
+    use std::fs::File;
+    use std::io::Write;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn write_open_fixture() -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory =
+            std::env::temp_dir().join(format!("chip-view-db-open-{}-{unique}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let owner = OwnerRef {
+            owner_type: OwnerType::NetWireSegment as u8,
+            owner_id: 7,
+            ..OwnerRef::default()
+        };
+        let deleted_owner = OwnerRef {
+            owner_type: OwnerType::Die as u8,
+            owner_id: 8,
+            ..OwnerRef::default()
+        };
+        let shape = ShapeRecord {
+            id: 1,
+            layer_id: 1,
+            kind: ShapeKind::Rect as u8,
+            state: ShapeState::Alive as u8,
+            owner_index: 0,
+            bbox: Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 10,
+                hy: 10,
+            },
+            ..ShapeRecord::default()
+        };
+        let deleted_shape = ShapeRecord {
+            id: 2,
+            layer_id: 2,
+            kind: ShapeKind::Rect as u8,
+            state: ShapeState::Deleted as u8,
+            owner_index: 1,
+            bbox: Rect32 {
+                lx: 1_000,
+                ly: 2_000,
+                hx: 3_000,
+                hy: 4_000,
+            },
+            ..ShapeRecord::default()
+        };
+        let shapes = [shape, deleted_shape];
+        let owners = [owner, deleted_owner];
+        let owner_name = b"netA";
+        let name_record = GeometryNameRecord {
+            owner_type: OwnerType::NetWireSegment as u8,
+            owner_id: 7,
+            name_size: owner_name.len() as u32,
+            ..GeometryNameRecord::default()
+        };
+        let meta = GeometryMetaRecord {
+            shape_count: shapes.len() as u64,
+            owner_count: owners.len() as u64,
+            next_shape_id: 3,
+            name_record_count: 1,
+            name_payload_size: owner_name.len() as u64,
+            ..GeometryMetaRecord::default()
+        };
+        let write_file = |name: &str, kind: GeometryFileKind, record_size: u32, bytes: &[u8]| {
+            let header = GeometryFileHeader {
+                magic: GEOMETRY_FILE_MAGIC,
+                schema_version: GEOMETRY_SCHEMA_VERSION,
+                header_size: GEOMETRY_FILE_HEADER_SIZE as u32,
+                file_kind: kind as u16,
+                record_size,
+                record_count: if record_size == 0 {
+                    0
+                } else {
+                    bytes.len() as u64 / u64::from(record_size)
+                },
+                payload_size: bytes.len() as u64,
+                ..GeometryFileHeader::default()
+            };
+            let mut file = File::create(directory.join(name)).unwrap();
+            file.write_all(bytemuck::bytes_of(&header)).unwrap();
+            file.write_all(bytes).unwrap();
+        };
+        write_file(
+            "geometry.meta.bin",
+            GeometryFileKind::Meta,
+            size_of::<GeometryMetaRecord>() as u32,
+            bytemuck::bytes_of(&meta),
+        );
+        write_file(
+            "geometry.shapes.bin",
+            GeometryFileKind::Shapes,
+            size_of::<ShapeRecord>() as u32,
+            bytemuck::cast_slice(&shapes),
+        );
+        write_file(
+            "geometry.owners.bin",
+            GeometryFileKind::Owners,
+            size_of::<OwnerRef>() as u32,
+            bytemuck::cast_slice(&owners),
+        );
+        write_file("geometry.payload.bin", GeometryFileKind::Payload, 1, &[]);
+        write_file("geometry.names.bin", GeometryFileKind::Names, 1, owner_name);
+        write_file(
+            "geometry.name_index.bin",
+            GeometryFileKind::NameIndex,
+            size_of::<GeometryNameRecord>() as u32,
+            bytemuck::bytes_of(&name_record),
+        );
+        write_file(
+            "geometry.sidmap.bin",
+            GeometryFileKind::SidMap,
+            size_of::<GeometrySidMapRecord>() as u32,
+            bytemuck::cast_slice(&[
+                GeometrySidMapRecord { shape_id: 1, owner },
+                GeometrySidMapRecord {
+                    shape_id: 2,
+                    owner: deleted_owner,
+                },
+            ]),
+        );
+        write_file(
+            "geometry.view.bin",
+            GeometryFileKind::View,
+            size_of::<GeometryViewTileRecord>() as u32,
+            bytemuck::bytes_of(&GeometryViewTileRecord {
+                layer_id: 1,
+                shape_count: 1,
+                bbox: shape.bbox,
+                ..GeometryViewTileRecord::default()
+            }),
+        );
+        let manifest = directory.join("geometry.manifest");
+        std::fs::write(
+            &manifest,
+            "schema_version=1\nshape_count=2\nowner_count=2\npayload_size=0\n\
+             meta=geometry.meta.bin\nshapes=geometry.shapes.bin\nowners=geometry.owners.bin\n\
+             payload=geometry.payload.bin\nnames=geometry.names.bin\n\
+             name_index=geometry.name_index.bin\nsidmap=geometry.sidmap.bin\n\
+             view=geometry.view.bin\n",
+        )
+        .unwrap();
+        manifest
+    }
 
     fn shape(id: ShapeId, layer_id: u16) -> ShapeRecord {
         ShapeRecord {
@@ -2657,6 +2879,71 @@ mod tests {
             },
             ..ShapeRecord::default()
         }
+    }
+
+    #[test]
+    fn normal_open_defers_auxiliary_indexes_until_a_consumer_requests_them() {
+        let manifest = write_open_fixture();
+        let directory = manifest.parent().unwrap().to_path_buf();
+        let db = ChipViewDb::open(&manifest).unwrap();
+
+        assert!(db.name_index.get().is_none());
+        assert!(db.net_index.get().is_none());
+        assert!(db.connectivity_index.get().is_none());
+        assert!(db.view_index.get().is_none());
+        let memory = db.memory_stats();
+        assert_eq!(memory.index_bytes.name_index_bytes, 0);
+        assert_eq!(memory.index_bytes.connectivity_index_bytes, 0);
+        assert_eq!(memory.index_bytes.view_index_bytes, 0);
+
+        let layer_indices = Arc::clone(db.layer_index.by_layer.get(&1).unwrap());
+        let viewport = db.stats().bbox.unwrap();
+        let queried_indices = db.query_cached_layer_record_indices(1, viewport);
+        assert!(Arc::ptr_eq(&layer_indices, &queried_indices));
+        assert_eq!(queried_indices.as_ref(), &[0]);
+        assert_eq!(db.query_cached_layer_intersect(1, viewport), vec![1]);
+
+        let owner = db.owner_for_shape(db.find_shape(1).unwrap()).unwrap();
+        assert_eq!(db.owner_name(owner), Some("netA"));
+        assert_eq!(db.query_owner_name("netA"), vec![1]);
+        assert!(db.name_index.get().is_some());
+        assert!(db.connectivity_for_net("netA").is_empty());
+        assert!(db.connectivity_index.get().is_some());
+        assert_eq!(db.query_view_tiles(0, 1, Rect32::default()).len(), 1);
+        assert!(db.view_index.get().is_some());
+        assert_eq!(db.net_kind_for_name("netA"), None);
+        assert!(db.net_index.get().is_some());
+
+        drop(db);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn stats_ignore_deleted_shapes_for_shape_derived_values() {
+        let manifest = write_open_fixture();
+        let directory = manifest.parent().unwrap().to_path_buf();
+        let db = ChipViewDb::open(&manifest).unwrap();
+
+        let stats = db.stats();
+
+        assert_eq!(stats.shape_count, 1);
+        assert_eq!(
+            stats.bbox,
+            Some(Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 10,
+                hy: 10,
+            })
+        );
+        assert_eq!(stats.die_bbox, None);
+        assert_eq!(
+            stats.owner_type_counts,
+            BTreeMap::from([(OwnerType::NetWireSegment as u8, 1)])
+        );
+
+        drop(db);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -2882,7 +3169,7 @@ mod tests {
         };
 
         assert_eq!(index.query_layer_intersect(&shapes, 4, bbox), vec![999]);
-        assert!(index.spatial_candidate_count(4, bbox) < index.candidate_count(4));
+        assert!(index.spatial_candidate_count(&shapes, 4, bbox) < index.candidate_count(4));
     }
 
     #[test]
@@ -2916,8 +3203,47 @@ mod tests {
             hy: 30,
         };
 
-        assert_eq!(index.query_candidate_count(3, viewport), 1);
-        assert!(index.query_candidate_count(3, viewport) < index.candidate_count(3));
+        assert_eq!(index.query_candidate_count(&shapes, 3, viewport), 1);
+        assert!(index.query_candidate_count(&shapes, 3, viewport) < index.candidate_count(3));
+    }
+
+    #[test]
+    fn whole_layer_queries_do_not_build_spatial_trees_until_a_partial_view_needs_them() {
+        let shapes = [
+            shape(1, 4),
+            ShapeRecord {
+                bbox: Rect32 {
+                    lx: 100,
+                    ly: 100,
+                    hx: 110,
+                    hy: 110,
+                },
+                ..shape(2, 4)
+            },
+            shape(3, 7),
+        ];
+        let index = LayerShapeIndex::from_shapes(&shapes);
+        let whole_layer = Rect32 {
+            lx: -1,
+            ly: -1,
+            hx: 111,
+            hy: 111,
+        };
+        let partial = Rect32 {
+            lx: 5,
+            ly: 5,
+            hx: 15,
+            hy: 15,
+        };
+
+        assert_eq!(index.initialized_spatial_tree_count(), 0);
+        assert_eq!(
+            index.query_layers_intersect(&shapes, &[4], whole_layer),
+            vec![1, 2]
+        );
+        assert_eq!(index.initialized_spatial_tree_count(), 0);
+        assert_eq!(index.query_layer_intersect(&shapes, 4, partial), vec![1]);
+        assert_eq!(index.initialized_spatial_tree_count(), 1);
     }
 
     #[test]
@@ -3105,7 +3431,8 @@ mod tests {
         assert_eq!(index.find(&shapes, 10).map(|shape| shape.id), Some(10));
         assert_eq!(index.find(&shapes, 25).map(|shape| shape.layer_id), Some(8));
         assert!(index.find(&shapes, 999).is_none());
-        assert!(matches!(index.lookup, ShapeIdLookup::Hash(_)));
+        assert_eq!(index.dense_base, None);
+        assert_eq!(index.by_id.len(), shapes.len());
     }
 
     #[test]
@@ -3113,10 +3440,8 @@ mod tests {
         let shapes = [shape(100, 7), shape(101, 7), shape(102, 8)];
         let index = ShapeIdIndex::from_shapes(&shapes);
 
-        assert!(matches!(
-            index.lookup,
-            ShapeIdLookup::Contiguous { first_id: 100 }
-        ));
+        assert_eq!(index.dense_base, Some(100));
+        assert!(index.by_id.is_empty());
         assert_eq!(
             index.find(&shapes, 100).map(|shape| shape.layer_id),
             Some(7)
@@ -3351,6 +3676,45 @@ mod tests {
         assert_eq!(index.query(&shapes, &owners, "synthetic_clk"), vec![1, 2]);
         assert_eq!(index.query(&shapes, &owners, "u0"), vec![3]);
         assert!(index.query(&shapes, &owners, "missing").is_empty());
+    }
+
+    #[test]
+    fn bounded_pattern_search_limits_results_and_supports_cancellation() {
+        let manifest = write_open_fixture();
+        let db = ChipViewDb::open(&manifest).unwrap();
+        let pattern = Regex::new("^net").unwrap();
+        let query = |owner_types, limit| {
+            db.query_owner_name_pattern_bounded(&pattern, owner_types, limit, || true)
+                .unwrap()
+        };
+        let expected = BoundedShapeSearch {
+            shape_ids: vec![1],
+            truncated: false,
+        };
+        assert_eq!(query(Some(&[OwnerType::NetWireSegment]), 1), expected);
+        assert_eq!(
+            query(Some(&[OwnerType::InstanceBBox]), 1),
+            BoundedShapeSearch::default()
+        );
+        assert_eq!(
+            query(None, 0),
+            BoundedShapeSearch {
+                shape_ids: Vec::new(),
+                truncated: true,
+            }
+        );
+        let checks = std::cell::Cell::new(0);
+        assert!(db
+            .query_owner_name_pattern_bounded(&pattern, None, 1, || {
+                checks.set(checks.get() + 1);
+                checks.get() == 1
+            })
+            .is_none());
+        assert!(db.name_index.get().is_none());
+        assert_eq!(db.query_owner_name("netA"), vec![1]);
+        assert_eq!(query(None, 1), expected);
+        drop(db);
+        std::fs::remove_dir_all(manifest.parent().unwrap()).unwrap();
     }
 
     #[test]
@@ -3745,6 +4109,29 @@ mod tests {
             ),
             vec![3, 4]
         );
+    }
+
+    #[test]
+    fn bounded_pin_search_preserves_the_local_name_fallback() {
+        let manifest = write_open_fixture();
+        let db = ChipViewDb::open(&manifest).unwrap();
+        let expected = db.query_pin_name_bounded("instance/netA", 1, &|| true);
+        assert_eq!(
+            expected,
+            Some(BoundedShapeSearch {
+                shape_ids: vec![1],
+                truncated: false,
+            })
+        );
+        assert!(db.name_index.get().is_none());
+        assert!(db.connectivity_index.get().is_none());
+        assert_eq!(db.query_pin_name("instance/netA"), vec![1]);
+        assert_eq!(
+            db.query_pin_name_bounded("instance/netA", 1, &|| true),
+            expected
+        );
+        drop(db);
+        std::fs::remove_dir_all(manifest.parent().unwrap()).unwrap();
     }
 
     #[test]
@@ -4668,10 +5055,10 @@ mod tests {
         let stats = ChipViewIndexMemoryStats::from_indexes(
             &layer_index,
             &shape_index,
-            &view_index,
-            &name_index,
-            &net_index,
-            &connectivity_index,
+            Some(&view_index),
+            Some(&name_index),
+            Some(&net_index),
+            Some(&connectivity_index),
         );
 
         assert!(stats.layer_index_bytes >= 3 * core::mem::size_of::<usize>());

@@ -845,9 +845,10 @@ function enqueueOpenOrFocus<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 async function pickDirectory(
+  event: IpcMainInvokeEvent,
   options?: DesktopDirectoryDialogOptions,
 ): Promise<string | null> {
-  const result = await dialog.showOpenDialog({
+  const result = await dialog.showOpenDialog(getEventWindow(event), {
     properties: ['openDirectory'],
     title: options?.title,
     buttonLabel: 'Select Folder',
@@ -870,8 +871,11 @@ async function pickDirectory(
   return selectedPath
 }
 
-async function pickFiles(options?: DesktopFileDialogOptions): Promise<string[] | null> {
-  const result = await dialog.showOpenDialog({
+async function pickFiles(
+  event: IpcMainInvokeEvent,
+  options?: DesktopFileDialogOptions,
+): Promise<string[] | null> {
+  const result = await dialog.showOpenDialog(getEventWindow(event), {
     properties: options?.multiple ? ['openFile', 'multiSelections'] : ['openFile'],
     title: options?.title,
     filters: options?.filters,
@@ -938,9 +942,10 @@ async function classifyLocalPaths(paths: string[]): Promise<PickedRtlSources> {
 }
 
 async function pickRtlSources(
+  event: IpcMainInvokeEvent,
   options?: DesktopRtlSourceDialogOptions,
 ): Promise<PickedRtlSources | null> {
-  const result = await dialog.showOpenDialog({
+  const result = await dialog.showOpenDialog(getEventWindow(event), {
     properties:
       options?.multiple === false ? ['openFile'] : ['openFile', 'multiSelections'],
     title: options?.title,
@@ -2367,7 +2372,9 @@ export function registerIpc(
         }
       }
       requireBackendMutationAllowed(event)
-      const workspacePath = await pickDirectory({ title: 'Select Workspace Folder' })
+      const workspacePath = await pickDirectory(event, {
+        title: 'Select Workspace Folder',
+      })
       if (!workspacePath) return { status: 'cancelled' }
       try {
         const result = await services.projectWorkspaceImportService.importWorkspace(
@@ -2418,16 +2425,22 @@ export function registerIpc(
     },
   )
 
-  handle(desktopApiIpcChannels.dialogPickDirectory, async (_event, options) => {
-    return await pickDirectory(options as DesktopDirectoryDialogOptions | undefined)
+  handle(desktopApiIpcChannels.dialogPickDirectory, async (event, options) => {
+    return await pickDirectory(
+      event,
+      options as DesktopDirectoryDialogOptions | undefined,
+    )
   })
 
-  handle(desktopApiIpcChannels.dialogPickFiles, async (_event, options) => {
-    return await pickFiles(options as DesktopFileDialogOptions | undefined)
+  handle(desktopApiIpcChannels.dialogPickFiles, async (event, options) => {
+    return await pickFiles(event, options as DesktopFileDialogOptions | undefined)
   })
 
-  handle(desktopApiIpcChannels.dialogPickRtlSources, async (_event, options) => {
-    return await pickRtlSources(options as DesktopRtlSourceDialogOptions | undefined)
+  handle(desktopApiIpcChannels.dialogPickRtlSources, async (event, options) => {
+    return await pickRtlSources(
+      event,
+      options as DesktopRtlSourceDialogOptions | undefined,
+    )
   })
 
   handle(desktopApiIpcChannels.dialogSaveFile, async (event, options) => {

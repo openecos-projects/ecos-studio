@@ -936,6 +936,8 @@ describe('registerIpc', () => {
   it('imports only the workspace selected by the main-process directory picker', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: {} }
+    const window = createWindowDouble()
+    fromWebContents.mockReturnValue(window)
     showOpenDialog.mockResolvedValueOnce({
       canceled: false,
       filePaths: ['/tmp/external-workspace'],
@@ -956,6 +958,7 @@ describe('registerIpc', () => {
       ),
     ).resolves.toMatchObject({ status: 'imported' })
     expect(showOpenDialog).toHaveBeenCalledWith(
+      window,
       expect.objectContaining({
         properties: ['openDirectory'],
         title: 'Select Workspace Folder',
@@ -972,6 +975,7 @@ describe('registerIpc', () => {
 
   it('treats a cancelled workspace import picker as a no-op', async () => {
     const { handlers, services } = registerHandlers()
+    fromWebContents.mockReturnValue(createWindowDouble())
     showOpenDialog.mockResolvedValueOnce({ canceled: true, filePaths: [] })
 
     await expect(
@@ -2909,6 +2913,8 @@ describe('registerIpc', () => {
   it('delegates settings, dialog, and workspace calls to the provided services', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
+    const window = createWindowDouble()
+    fromWebContents.mockReturnValue(window)
     services.settingsStore.get.mockResolvedValue([{ id: 'recent' }])
     services.workspaceService.isProjectDirectory.mockResolvedValue(true)
     services.workspaceService.readProjectTextFile.mockResolvedValue('{"steps":[]}')
@@ -3131,12 +3137,12 @@ describe('registerIpc', () => {
       { id: 'recent' },
     ])
     expect(services.settingsStore.delete).toHaveBeenCalledWith('recent_projects')
-    expect(showOpenDialog).toHaveBeenCalledWith({
+    expect(showOpenDialog).toHaveBeenCalledWith(window, {
       properties: ['openDirectory'],
       title: 'Select Project',
       buttonLabel: 'Select Folder',
     })
-    expect(showOpenDialog).toHaveBeenCalledWith({
+    expect(showOpenDialog).toHaveBeenCalledWith(window, {
       properties: ['openFile', 'multiSelections'],
       title: 'Select RTL',
       filters: [{ name: 'HDL Files', extensions: ['v', 'sv'] }],
@@ -3216,6 +3222,8 @@ describe('registerIpc', () => {
   it('opens RTL source file picker as single file selection and rejects returned directories', async () => {
     const { handlers } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
+    const window = createWindowDouble()
+    fromWebContents.mockReturnValue(window)
     showOpenDialog.mockResolvedValueOnce({
       canceled: false,
       filePaths: ['/tmp/a.v'],
@@ -3231,7 +3239,7 @@ describe('registerIpc', () => {
       files: ['/tmp/a.v'],
     })
 
-    expect(showOpenDialog).toHaveBeenCalledWith({
+    expect(showOpenDialog).toHaveBeenCalledWith(window, {
       properties: ['openFile'],
       title: 'Add RTL Design Files',
       filters: [{ name: 'HDL Files', extensions: ['v', 'sv', 'vhd', 'vhdl', 'gz'] }],
