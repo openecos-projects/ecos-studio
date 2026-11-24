@@ -99,18 +99,18 @@ function detail(): WorkspaceStepDetail {
         availability: 'missing',
         kind: 'layout_image',
         name: 'gcd_Place.png',
-        stepId: 'Place',
+        stepId: 'placement',
       },
       {
         artifactId: 'report-place',
         availability: 'available',
         kind: 'report_text',
         name: 'MAX_125/RCworst/timing_max.rpt',
-        stepId: 'Place',
+        stepId: 'placement',
       },
     ],
     checklist: { findings: [] },
-    step: { stepId: 'Place', order: 0, name: 'Place', state: 'succeeded' },
+    step: { stepId: 'placement', order: 0, name: 'placement', state: 'succeeded' },
     subflow: { status: 'available', steps: [] },
   }
 }
@@ -127,7 +127,7 @@ describe('StepDashboard committed Snapshot rendering', () => {
     testState.openingStatusHandle.update.mockReset()
     testState.showToast.mockReset()
     testState.dashboard = {
-      currentStep: ref('Place'),
+      currentStep: ref('placement'),
       data: ref(snapshotStepDashboardData(detail())),
       error: ref(null),
       loadTimingCorner: vi.fn(),
@@ -192,7 +192,7 @@ describe('StepDashboard committed Snapshot rendering', () => {
 
     expect(testState.beginChipViewerOpening).toHaveBeenCalledWith(
       'Opening saved Chip Viewer layout...',
-      'place',
+      'placement',
     )
     expect(testState.openingStatusHandle.finish).not.toHaveBeenCalled()
     resolveOpen?.({})
