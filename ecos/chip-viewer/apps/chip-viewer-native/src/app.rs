@@ -39,7 +39,6 @@ use crate::map_data::{ColormapMode, HeatmapData, MapCatalog, MapItem};
 mod analysis_loader;
 #[path = "app/analysis/analysis_overlays.rs"]
 mod analysis_overlays;
-mod display_data;
 #[path = "app/analysis/clock_tree.rs"]
 mod clock_tree;
 #[cfg(test)]
@@ -49,6 +48,7 @@ mod coordinate_rulers_tests;
 mod cpu_raster;
 #[path = "app/cpu/cpu_scene.rs"]
 mod cpu_scene;
+mod display_data;
 #[path = "app/render/gpu_overview.rs"]
 mod gpu_overview;
 #[path = "app/render/gpu_tile_worker.rs"]

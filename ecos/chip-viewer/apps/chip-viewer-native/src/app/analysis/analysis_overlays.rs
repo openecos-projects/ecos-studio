@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use chipgeom_format::Rect32;
 
+use super::display_data;
 use super::{json_i32, json_i64, json_string_vec, json_string_vec_or_single, json_usize};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -111,8 +112,7 @@ impl DrcOverlay {
         let mut counts = BTreeMap::new();
 
         if let Some(path) = data_path.as_deref() {
-            match display_data::drc(path)
-            {
+            match display_data::drc(path) {
                 Ok((json_violations, json_counts)) => {
                     violations = json_violations;
                     counts = json_counts;
@@ -311,7 +311,9 @@ fn merge_drc_counts(
     }
 }
 
-pub(super) fn drc_counts_from_violations(violations: &[DrcViolation]) -> BTreeMap<String, DrcTypeCounts> {
+pub(super) fn drc_counts_from_violations(
+    violations: &[DrcViolation],
+) -> BTreeMap<String, DrcTypeCounts> {
     let mut counts = BTreeMap::<String, DrcTypeCounts>::new();
     for violation in violations {
         let type_counts = counts.entry(violation.drc_type.clone()).or_default();
@@ -348,8 +350,7 @@ impl AntennaOverlay {
         let mut counts = BTreeMap::new();
 
         if let Some(path) = data_path.as_deref() {
-            match display_data::antenna(path)
-            {
+            match display_data::antenna(path) {
                 Ok((json_violations, json_counts)) => {
                     violations = json_violations;
                     counts = json_counts;

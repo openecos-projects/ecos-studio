@@ -19,7 +19,10 @@ impl AnalysisPaths {
         paths.drc_data = manifest.drc.clone().or(paths.drc_data);
         match AnalysisLoader::start(paths) {
             Ok(loader) => (loader, None),
-            Err(error) => (None, Some(format!("Failed to start analysis data loader: {error}"))),
+            Err(error) => (
+                None,
+                Some(format!("Failed to start analysis data loader: {error}")),
+            ),
         }
     }
 }
@@ -36,7 +39,11 @@ struct AnalysisData {
 impl AnalysisData {
     fn load(mut paths: AnalysisPaths) -> Self {
         let mut timing_directory = None;
-        let maps = paths.manifest.as_deref().map(crate::geometry_maps::assets).transpose();
+        let maps = paths
+            .manifest
+            .as_deref()
+            .map(crate::geometry_maps::assets)
+            .transpose();
         let mut native_maps = Vec::new();
         let mut native_error = None;
         match maps {
@@ -46,7 +53,11 @@ impl AnalysisData {
                         Some("antenna") => paths.antenna_data = Some(path.clone()),
                         Some("lvs") => paths.lvs_data = Some(path.clone()),
                         Some("timing") => {
-                            timing_directory = paths.manifest.as_deref().and_then(Path::parent).map(Path::to_path_buf);
+                            timing_directory = paths
+                                .manifest
+                                .as_deref()
+                                .and_then(Path::parent)
+                                .map(Path::to_path_buf);
                         }
                         _ => {}
                     }
@@ -57,11 +68,19 @@ impl AnalysisData {
             Err(error) => native_error = Some(error.to_string()),
         }
         let (map_catalog, map_catalog_error) = if !native_maps.is_empty() {
-            (Some(MapCatalog { categories: native_maps, warnings: Vec::new() }), None)
+            (
+                Some(MapCatalog {
+                    categories: native_maps,
+                    warnings: Vec::new(),
+                }),
+                None,
+            )
         } else if let Some(root) = paths.map_root.as_deref() {
             match MapCatalog::discover(root) {
                 Ok(catalog) if !catalog.is_empty() => (Some(catalog), native_error),
-                Ok(catalog) if !catalog.warnings.is_empty() => (None, Some(catalog.warnings.join("; "))),
+                Ok(catalog) if !catalog.warnings.is_empty() => {
+                    (None, Some(catalog.warnings.join("; ")))
+                }
                 Ok(_) => (None, native_error),
                 Err(error) => (None, Some(error)),
             }
@@ -159,8 +178,13 @@ impl LoadedViewer {
         }
         let default_map = self.map_catalog.as_ref().and_then(|catalog| {
             catalog.default_power_item().or_else(|| {
-                catalog.categories.iter().flat_map(|category| &category.items)
-                    .find(|item| item.label.contains("All layers") || item.label == "total power [W]")
+                catalog
+                    .categories
+                    .iter()
+                    .flat_map(|category| &category.items)
+                    .find(|item| {
+                        item.label.contains("All layers") || item.label == "total power [W]"
+                    })
                     .map(|item| (item.clone(), None))
             })
         });

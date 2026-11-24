@@ -574,8 +574,10 @@ impl LoadedViewer {
                                     .min_size(egui::vec2(button_width, 40.0)),
                                 );
                                 let response = if available {
-                                    response
-                                        .on_hover_text(format!("Open {}", item.source.path().display()))
+                                    response.on_hover_text(format!(
+                                        "Open {}",
+                                        item.source.path().display()
+                                    ))
                                 } else {
                                     response.on_disabled_hover_text("layout.csv is missing")
                                 };
@@ -607,9 +609,14 @@ impl LoadedViewer {
         self.map_item_error = None;
         self.selected_map_bbox = None;
 
-        let requests = self.map_requests.get_or_insert_with(display_data::map_worker);
+        let requests = self
+            .map_requests
+            .get_or_insert_with(display_data::map_worker);
         let (sender, receiver) = mpsc::channel();
-        if requests.send((item.clone(), layout_path.map(Path::to_path_buf), sender)).is_ok() {
+        if requests
+            .send((item.clone(), layout_path.map(Path::to_path_buf), sender))
+            .is_ok()
+        {
             self.map_loading = Some(receiver);
         } else {
             self.map_loading = None;

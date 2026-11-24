@@ -1785,14 +1785,18 @@ fn map_catalog_find_item_locates_matching_item_and_layout() {
         warnings: Vec::new(),
     };
 
-    let found = catalog.find_item(&crate::map_source::MapKey::Csv(PathBuf::from("/tmp/item1.csv")));
+    let found = catalog.find_item(&crate::map_source::MapKey::Csv(PathBuf::from(
+        "/tmp/item1.csv",
+    )));
     assert!(found.is_some());
     let (item, layout) = found.unwrap();
     assert_eq!(item.label, "Item 1");
     assert_eq!(layout, Some(Path::new("/tmp/layout.csv")));
 
     assert!(catalog
-        .find_item(&crate::map_source::MapKey::Csv(PathBuf::from("/tmp/missing.csv")))
+        .find_item(&crate::map_source::MapKey::Csv(PathBuf::from(
+            "/tmp/missing.csv"
+        )))
         .is_none());
 }
 

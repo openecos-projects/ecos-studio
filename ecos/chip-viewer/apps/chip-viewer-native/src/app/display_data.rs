@@ -1,8 +1,10 @@
 //! Load geometry analyses off the UI thread, including legacy text compatibility.
+use super::analysis_overlays::{
+    antenna_counts_from_violations, drc_counts_from_violations, parse_antenna_json_text,
+    parse_antenna_violation, parse_drc_json_text, parse_drc_violation, AntennaTypeCounts,
+    DrcTypeCounts,
+};
 use super::*;
-use super::analysis_overlays::{antenna_counts_from_violations, drc_counts_from_violations,
-    parse_antenna_json_text, parse_antenna_violation, parse_drc_json_text, parse_drc_violation,
-    AntennaTypeCounts, DrcTypeCounts};
 use chipgeom_reader::display::DisplayAsset;
 
 pub(super) fn drc(
