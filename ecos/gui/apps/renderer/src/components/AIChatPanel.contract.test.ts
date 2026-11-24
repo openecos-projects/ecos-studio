@@ -27,7 +27,7 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('await startQuickStart(sessionId)')
     expect(source).toContain('const narrationMessageId = sessionId')
     expect(source).toContain('messageStore.appendToMessage(narrationMessageId')
-    expect(source).toContain('我先检查 GCD 示例、ICS55 PDK 和 MPC 资源。')
+    expect(source).toContain('我先检查 GCD 示例、ICS55 PDK、MPC Frame 和运行所需的工具。')
     expect(source).toContain('Quick Start 的完整 RTL 到 GDS 流程已执行完成。')
     expect(source).toContain('quick_start_result:')
     expect(source).toContain('operation_id: result.operationId')

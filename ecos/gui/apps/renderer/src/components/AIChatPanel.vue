@@ -124,8 +124,14 @@
                 <MessageItem
                   v-else-if="isVisibleResponse(msg)"
                   :message="msg"
+                  :can-retry-quick-start="
+                    shell === 'home' &&
+                    !isRunning &&
+                    messages[messages.length - 1]?.id === msg.id
+                  "
                   @img-load="onImageLoad"
                   @optimization-control="handleOptimizationControl"
+                  @retry-quick-start="retryQuickStart"
                   class="message-item w-full max-w-full min-w-0"
                 />
                 <AgentSessionContractPanels
@@ -2068,6 +2074,13 @@ function sendSuggestion(suggestion: { label: string; value: string }): void {
   void sendAgentMessage(suggestion.value, false)
 }
 
+function retryQuickStart(): void {
+  const sessionId = agentSessionId.value
+  if (sessionId && props.shell === 'home' && !isRunning.value) {
+    void startQuickStart(sessionId)
+  }
+}
+
 async function startQuickStart(sessionId: string): Promise<void> {
   if (!quickStartRunner || !isActiveGuiOwner(sessionId)) return
   const ownerUi = sessionUi(sessionId)
@@ -2094,7 +2107,7 @@ async function startQuickStart(sessionId: string): Promise<void> {
       (event) => {
         if (!sessionId) return
         if (event.status === 'running' && event.stepId === 'preflight') {
-          appendNarration('我先检查 GCD 示例、ICS55 PDK 和 MPC 资源。')
+          appendNarration('我先检查 GCD 示例、ICS55 PDK、MPC Frame 和运行所需的工具。')
         }
         const now = Date.now()
         const output = event.output as { state?: string } | undefined

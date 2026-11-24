@@ -613,13 +613,13 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal, onNarration) => 
     const api = desktopApi.value ?? (await waitForDesktopApi())
     desktopApi.value = api
     const versions = await api.app.getVersions()
-    const resources = await resolveQuickStartResources(api)
     let completedFlow: QuickStartFlowResult | undefined
     const host = {
       appVersion: versions.gui,
-      listResources: async () => resources,
+      listResources: () => resolveQuickStartResources(api),
       navigate: async (surface: string) => {
         if (surface === 'project-management') {
+          if (route.name !== 'ECOS') await router.push({ name: 'ECOS' })
           let homeProjectButton: HTMLButtonElement | undefined
           for (let attempt = 0; attempt < 100; attempt += 1) {
             signal?.throwIfAborted()
@@ -879,7 +879,12 @@ async function resolveQuickStartResources(
       }
     }
   }
-  const listed = (await api.resources.list()).resources
+  const [inventory, environment] = await Promise.allSettled([
+    api.resources.list(),
+    api.app.getEnvironmentDoctor(),
+  ])
+  if (inventory.status === 'rejected') throw inventory.reason
+  const listed = inventory.value.resources
   let pdkCandidate = await api.resources.get('pdk:ics55').catch(() => undefined)
   const ready = (resource: ResourceInfo | undefined) =>
     Boolean(
@@ -968,6 +973,21 @@ async function resolveQuickStartResources(
         : 'MPC mpc:mpc-frame is not installed (no matching Resource Management identity).',
     )
   }
+  const toolIssues =
+    environment.status === 'fulfilled'
+      ? environment.value.components
+          .filter(
+            (item) => item.component !== 'pdk' && item.required && item.status !== 'pass',
+          )
+          .map((item) => item.component)
+      : ['ECC 运行环境']
+  if (environment.status === 'rejected') {
+    diagnostics.push(
+      environment.reason instanceof Error
+        ? environment.reason.message
+        : String(environment.reason),
+    )
+  }
   return {
     design,
     diagnostics: [...(builtin?.diagnostics ?? []), ...diagnostics],
@@ -982,6 +1002,7 @@ async function resolveQuickStartResources(
           version: mpc.installed_version!,
         }
       : null,
+    toolIssues,
   }
 }
 

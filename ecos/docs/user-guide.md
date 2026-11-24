@@ -1067,8 +1067,10 @@ then confirm creation and execution. Cancelling the proposal creates no
 workspace and starts no flow.
 
 The Home Agent's **Get started** conversation also offers **Quick Start** for
-the built-in GCD example. It requires ready GCD, ICS55 PDK, and MPC resources;
-missing resources are reported before creation. A selected MPC that cannot be
+the built-in GCD example. Quick Start checks the example, ICS55 PDK, MPC Frame,
+and required ECC tools before creating a project. If a required resource needs
+attention, open **Resource Manager** from the message, install or repair the
+resource, and retry Quick Start. A selected MPC that cannot be
 downloaded or resolved is marked **Needs attention**, and confirmation fails
 without creating the workspace. The walkthrough opens Project Management,
 creates a project and workspace, and starts the full flow. Its final success or

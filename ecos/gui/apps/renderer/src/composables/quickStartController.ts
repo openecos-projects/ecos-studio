@@ -11,6 +11,7 @@ export interface QuickStartResourceSnapshot {
   diagnostics?: string[]
   mpc: { displayName?: string; id: string; path?: string; version: string } | null
   pdk: { id: string; path: string; version: string } | null
+  toolIssues?: string[]
 }
 
 export interface QuickStartWorkflowHost {
@@ -47,10 +48,15 @@ export async function runQuickStartWorkflow(
       },
       run: async () => {
         const resources = await host.listResources()
-        if (!resources.design || !resources.pdk || !resources.mpc) {
-          throw new Error(
-            `Quick Start resource preflight failed: ${resources.diagnostics?.join(' ') || 'GCD, PDK, and MPC must be Ready.'}`,
-          )
+        const unavailable = [
+          ...(!resources.design ? ['内置 GCD 示例'] : []),
+          ...(!resources.pdk ? ['ICS55 PDK'] : []),
+          ...(!resources.mpc ? ['MPC Frame 0.1.0'] : []),
+          ...(resources.toolIssues ?? []),
+        ]
+        if (unavailable.length) {
+          const details = resources.diagnostics?.join('\n')
+          throw new Error([unavailable.join('\n'), details].filter(Boolean).join('\n\n'))
         }
         return resources as unknown as QuickStartValue
       },

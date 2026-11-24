@@ -79,7 +79,9 @@ afterEach(() => {
   delete window.ecosDesktop
 })
 
-async function setup(options: { activeOptimization?: boolean } = {}) {
+async function setup(
+  options: { activeOptimization?: boolean; renderMessages?: boolean } = {},
+) {
   const pinia = createPinia()
   const shell = useAgentShellStore(pinia)
   const messages = useMessageStore(pinia)
@@ -155,7 +157,10 @@ async function setup(options: { activeOptimization?: boolean } = {}) {
   })
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: '/', component: { template: '<div />' } }],
+    routes: [
+      { path: '/', component: { template: '<div />' } },
+      { path: '/tools', name: 'PluginTools', component: { template: '<div />' } },
+    ],
   })
   await router.push('/')
   await router.isReady()
@@ -166,7 +171,7 @@ async function setup(options: { activeOptimization?: boolean } = {}) {
         plugins: [pinia, router],
         provide: { [quickStartRunnerKey]: runner, [agentWorkspaceSetupKey]: vi.fn() },
         stubs: {
-          MessageItem: true,
+          MessageItem: !options.renderMessages,
           AgentModelSettingsMenu: true,
           AgentActivityStream: true,
           AgentSessionContractPanels: true,
@@ -200,12 +205,37 @@ async function setup(options: { activeOptimization?: boolean } = {}) {
     messages,
     optimization,
     runner,
+    router,
     answer,
     flow,
     interrupt,
     sendMessage,
   }
 }
+
+it('lists unavailable Quick Start resources with a Resource Manager link and a retry action', async () => {
+  const state = await setup({ renderMessages: true })
+  state.runner.mockRejectedValueOnce(
+    new Error(
+      'Quick Start step preflight failed: ICS55 PDK\nkepler-formal\n\nProbe details',
+    ),
+  )
+  state.answer.resolve({ canUndo: false })
+  await flushPromises()
+
+  const preflight = state.wrapper.get('.quick-start-preflight-error')
+  expect(preflight.findAll('li').map((item) => item.text())).toEqual([
+    'ICS55 PDK',
+    'kepler-formal',
+  ])
+  expect(preflight.get('details').text()).toContain('Probe details')
+  await preflight.get('a').trigger('click')
+  await flushPromises()
+  expect(state.router.currentRoute.value.path).toBe('/tools')
+  await preflight.get('button').trigger('click')
+  await flushPromises()
+  expect(state.runner).toHaveBeenCalledTimes(2)
+})
 
 it('defers a delayed Quick Start answer until its owner is active and keeps that owner across remounts', async () => {
   const state = await setup()

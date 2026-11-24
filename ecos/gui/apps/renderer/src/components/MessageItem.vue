@@ -394,13 +394,39 @@
               <span>资源预检失败</span>
             </div>
           </header>
-          <p class="quick-start-preflight-error__detail">
-            {{ quickStartPreflightDetail }}
-          </p>
+          <ul class="quick-start-preflight-error__detail" aria-live="polite">
+            <li v-for="(issue, index) in quickStartPreflightIssues" :key="index">
+              {{ issue }}
+            </li>
+          </ul>
+          <details
+            v-if="quickStartPreflightDetail"
+            class="quick-start-preflight-error__hint"
+          >
+            <summary>查看检查详情</summary>
+            <p class="mt-1 wrap-anywhere whitespace-pre-wrap">
+              {{ quickStartPreflightDetail }}
+            </p>
+          </details>
           <p class="quick-start-preflight-error__hint">
-            请在 Resource Management 中确认 PDK 和 MPC 已安装且 Ready，然后重新点击 Quick
-            Start。
+            请在 Resource Manager 安装或修复所需的工具、PDK 和 MPC，再重新检查。
           </p>
+          <div class="mt-3 flex flex-wrap gap-x-3 gap-y-2 text-xs">
+            <RouterLink
+              :to="{ name: 'PluginTools' }"
+              class="text-(--accent-color) underline"
+            >
+              打开 Resource Manager
+            </RouterLink>
+            <button
+              v-if="canRetryQuickStart"
+              type="button"
+              class="text-(--accent-color) underline"
+              @click="$emit('retry-quick-start')"
+            >
+              重新检查并启动
+            </button>
+          </div>
         </section>
 
         <!-- 错误状态 -->
@@ -444,12 +470,13 @@ import { sanitizeHtml } from '@/utils/sanitizeHtml'
 import { readProjectBlobUrl } from '@/utils/projectFiles'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
 
-const props = defineProps<{ message: Message }>()
+const props = defineProps<{ message: Message; canRetryQuickStart?: boolean }>()
 const baselineCalibration = computed(() => readBaselineCalibration(props.message.content))
 
 const emit = defineEmits<{
   (e: 'img-load'): void
   (e: 'optimization-control', action: 'pause' | 'resume' | 'stop'): void
+  (e: 'retry-quick-start'): void
 }>()
 
 const md = new MarkdownIt({
@@ -478,8 +505,14 @@ const isQuickStartPreflightError = computed(
     props.message.status === 'error' &&
     props.message.content.startsWith(quickStartPreflightPrefix),
 )
+const quickStartPreflightSections = computed(() =>
+  props.message.content.slice(quickStartPreflightPrefix.length).split('\n\n'),
+)
+const quickStartPreflightIssues = computed(() =>
+  (quickStartPreflightSections.value[0] ?? '').split('\n').filter(Boolean),
+)
 const quickStartPreflightDetail = computed(() =>
-  props.message.content.slice(quickStartPreflightPrefix.length),
+  quickStartPreflightSections.value.slice(1).join('\n\n'),
 )
 
 const handleImageLoad = () => {
@@ -799,8 +832,8 @@ function csvRows(content: string): string[][] {
 
 .quick-start-preflight-error__detail {
   margin: 0.7rem 0 0;
-  padding: 0.55rem 0.625rem;
-  border-left: 2px solid var(--danger-color);
+  padding: 0.55rem 0.625rem 0.55rem 1.5rem;
+  list-style: disc;
   background: color-mix(in srgb, var(--bg-primary) 54%, transparent);
   color: var(--text-primary);
   font-size: 0.75rem;

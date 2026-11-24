@@ -98,6 +98,27 @@ describe('quick start controller', () => {
     expect(controller.createProject).not.toHaveBeenCalled()
   })
 
+  it('reports missing resources together and starts only after they are ready', async () => {
+    const controller = host()
+    vi.mocked(controller.listResources).mockResolvedValueOnce({
+      design: { id: 'example:gcd', path: '/resources/gcd/gcd.v', version: '1.0.0' },
+      pdk: null,
+      mpc: null,
+      toolIssues: ['kepler-formal'],
+    })
+
+    await expect(runQuickStartWorkflow(controller)).rejects.toThrow(
+      'Quick Start step preflight failed: ICS55 PDK\nMPC Frame 0.1.0\nkepler-formal',
+    )
+    expect(controller.navigate).not.toHaveBeenCalled()
+    expect(controller.createProject).not.toHaveBeenCalled()
+
+    await runQuickStartWorkflow(controller)
+    expect(controller.listResources).toHaveBeenCalledTimes(2)
+    expect(controller.createProject).toHaveBeenCalledOnce()
+    expect(controller.startFlow).toHaveBeenCalledOnce()
+  })
+
   it('honors setup cancellation before the next mutation', async () => {
     const abort = new AbortController()
     const controller = host({
