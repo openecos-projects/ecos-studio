@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ECC_FLOW_STEPS } from '@ecos-studio/shared'
 import source from './App.vue?raw'
+import drawerSource from './components/HomeAgentDrawer.vue?raw'
 import wizardSource from './components/NewProjectWizard.vue?raw'
 
 describe('agent workspace creation', () => {
@@ -116,7 +117,7 @@ describe('workspace update', () => {
 })
 
 describe('quick start resources', () => {
-  it('positions both creation dialogs beside the Agent for the entire Quick Start', () => {
+  it('uses the same Quick Start width for the Agent drawer and both creation overlays', () => {
     expect(source).toContain(
       ':class="{ \'app-wrapper--quick-start\': quickStartRunning }"',
     )
@@ -124,14 +125,17 @@ describe('quick start resources', () => {
     expect(source).toContain('quickStartRunning.value = true')
     expect(source).toContain('quickStartRunning.value = false')
     expect(source).toContain(
-      "'--home-agent-drawer-width': `${quickStartAgentPanelWidth}px`",
+      "'--home-agent-drawer-width': quickStartDrawerWidth ?? '0px'",
     )
+    expect(source).toContain(':width-override="quickStartDrawerWidth"')
+    expect(drawerSource).toContain('width: widthOverride ?? panelWidthStyle')
     expect(source).toContain('agentShell.homeAgentOpen')
     expect(source).toContain('.app-wrapper--quick-start :deep(.project-modal-scrim)')
     expect(source).toContain(
       '.app-wrapper--quick-start :deep(.new-workspace-wizard-overlay)',
     )
     expect(source).toContain('right: var(--home-agent-drawer-width)')
+    expect(source).toContain('background-color: rgb(0 0 0 / 18%)')
     expect(wizardSource).not.toContain('new-workspace-wizard-overlay--quick-start')
   })
 

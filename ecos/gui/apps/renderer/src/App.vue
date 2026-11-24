@@ -2,7 +2,7 @@
   <div
     class="app-wrapper"
     :class="{ 'app-wrapper--quick-start': quickStartRunning }"
-    :style="{ '--home-agent-drawer-width': `${quickStartAgentPanelWidth}px` }"
+    :style="{ '--home-agent-drawer-width': quickStartDrawerWidth ?? '0px' }"
   >
     <!-- 主应用容器 -->
     <div class="app-container">
@@ -30,7 +30,10 @@
         >
           <router-view />
         </div>
-        <HomeAgentDrawer v-if="!isWorkspaceRoute" />
+        <HomeAgentDrawer
+          v-if="!isWorkspaceRoute"
+          :width-override="quickStartDrawerWidth"
+        />
         <ECOSTerminal
           :expanded="terminalExpanded"
           :maximized="terminalPanelMaximized"
@@ -253,7 +256,6 @@ import { useRouter, useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/themeStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 import { usePluginStore } from '@/stores/pluginStore'
-import { AGENT_PANEL_DEFAULT_WIDTH } from '@/composables/agentPanelWidth'
 import { useAppMenuActions } from '@/composables/useAppMenuActions'
 import { useAppWindowClose } from '@/composables/useAppWindowClose'
 import { useSignoffPackageExport } from '@/composables/useSignoffPackageExport'
@@ -349,11 +351,6 @@ const pluginStore = usePluginStore()
 const route = useRoute()
 const isWelcome = computed(() => route.path === '/')
 const isWorkspaceRoute = computed(() => route.path.startsWith('/workspace'))
-const quickStartAgentPanelWidth = computed(() =>
-  agentShell.homeAgentOpen
-    ? Math.min(agentShell.panelWidthPx, AGENT_PANEL_DEFAULT_WIDTH)
-    : 0,
-)
 const zoomFactors = [0.8, 0.9, 1, 1.1, 1.25, 1.4] as const
 const zoomFactor = ref<(typeof zoomFactors)[number]>(1)
 const zoomSettingKey = 'ui.zoomFactor'
@@ -407,6 +404,11 @@ const {
 })
 const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
 const quickStartRunning = ref(false)
+const quickStartDrawerWidth = computed(() =>
+  quickStartRunning.value && !isWorkspaceRoute.value && agentShell.homeAgentOpen
+    ? `${Math.min(agentShell.panelWidthPx, 400)}px`
+    : undefined,
+)
 
 function updatePdkNameDialogVisibility(visible: boolean): void {
   if (!visible) cancelPdkName()
@@ -2425,11 +2427,17 @@ onUnmounted(() => {
   position: relative;
 }
 
+.app-wrapper--quick-start :deep(.project-modal-scrim),
+.app-wrapper--quick-start :deep(.new-workspace-wizard-overlay) {
+  background-color: rgb(0 0 0 / 18%);
+}
+
 @media (min-width: 1280px) {
   .app-wrapper--quick-start :deep(.project-modal-scrim),
   .app-wrapper--quick-start :deep(.new-workspace-wizard-overlay) {
+    top: var(--topbar-height, 40px);
     right: var(--home-agent-drawer-width);
-    overflow: hidden;
+    bottom: var(--status-bar-height);
   }
 }
 

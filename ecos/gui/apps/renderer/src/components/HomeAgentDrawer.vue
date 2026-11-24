@@ -8,7 +8,7 @@
         role="dialog"
         aria-modal="false"
         aria-label="ECOS Agent"
-        :style="{ width: panelWidthStyle }"
+        :style="{ width: widthOverride ?? panelWidthStyle }"
       >
         <div
           class="agent-panel-resize-handle"
@@ -32,6 +32,8 @@ import { storeToRefs } from 'pinia'
 import AIChatPanel from './AIChatPanel.vue'
 import { useAgentPanelResize } from '@/composables/useAgentPanelResize'
 import { useAgentShellStore } from '@/stores/agentShellStore'
+
+defineProps<{ widthOverride?: string }>()
 
 const agentShell = useAgentShellStore()
 const { homeAgentOpen } = storeToRefs(agentShell)
@@ -57,11 +59,6 @@ const { panelWidthStyle, onResizePointerDown } = useAgentPanelResize(viewportRef
   /* Keep the same surface as the shell so the drawer is not a solid square slab. */
   background: var(--bg-primary);
   box-shadow: -6px 0 24px rgb(0 0 0 / 6%);
-}
-
-/* Keep the walkthrough visible while Quick Start drives the underlying page. */
-.home-agent-drawer:has(.quick-start-stop) {
-  max-width: min(400px, calc(100vw - 320px));
 }
 
 .agent-panel-resize-handle {
