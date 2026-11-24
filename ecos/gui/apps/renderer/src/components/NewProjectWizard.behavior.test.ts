@@ -1697,6 +1697,12 @@ describe('NewProjectWizard behavior', () => {
   })
 
   it('keeps CTS and STA settings inside their selected flow cards', async () => {
+    const model = wizardMocks.defaultWorkspaceCreationModel()
+    const flow = model.discovery.flowDefinitions[0]!
+    flow.stepIds = flow.stepIds.map((id) =>
+      id === 'Synthesis' || id === 'CTS' ? id.toLowerCase() : id,
+    )
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue(model)
     const wrapper = mount(NewProjectWizard, {
       props: { initialConfig: { standaloneWorkspace: true } },
       global: {
@@ -1726,7 +1732,7 @@ describe('NewProjectWizard behavior', () => {
     await replay.setValue(true)
     expect(wizard.config.parameters.replay_enabled).toBe(true)
 
-    const ctsCard = wrapper.get('[data-flow-step-card="CTS"]')
+    const ctsCard = wrapper.get('[data-flow-step-card="cts"]')
     const clockTree = ctsCard.get('#cts-clock-tree-visualization')
     expect(ctsCard.text()).toContain('Clock-tree visualization')
     expect((clockTree.element as HTMLInputElement).checked).toBe(false)
@@ -1744,10 +1750,10 @@ describe('NewProjectWizard behavior', () => {
     expect(wrapper.find('#cts-clock-tree-visualization').exists()).toBe(false)
     expect(wrapper.find('#sta-max-parallel-corners').exists()).toBe(false)
 
-    await wrapper.get('[data-flow-step-card="CTS"] button').trigger('click')
+    await wrapper.get('[data-flow-step-card="cts"] button').trigger('click')
     await flushPromises()
     expect(
-      wrapper.find('[data-flow-step-card="CTS"] #cts-clock-tree-visualization').exists(),
+      wrapper.find('[data-flow-step-card="cts"] #cts-clock-tree-visualization').exists(),
     ).toBe(true)
     expect(wrapper.find('#sta-max-parallel-corners').exists()).toBe(false)
 
@@ -1760,10 +1766,18 @@ describe('NewProjectWizard behavior', () => {
       ).value,
     ).toBe('5')
 
+    wizard.currentStep = 5
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Import the starting DEF file')
+    expect(wrapper.text()).toContain('SDC is optional')
+
     wizard.currentStep = 7
     await flushPromises()
     expect(wrapper.text()).not.toContain('Clock-tree visualization')
     wrapper.unmount()
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue(
+      wizardMocks.defaultWorkspaceCreationModel(),
+    )
   })
 
   it('keeps manual macro placement inside the MacroPlacement flow card', async () => {

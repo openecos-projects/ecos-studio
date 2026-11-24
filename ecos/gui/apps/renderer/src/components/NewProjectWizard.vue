@@ -672,7 +672,10 @@
                         </button>
 
                         <div
-                          v-if="step.name === 'CTS' && isFlowStepRunnable(step.name)"
+                          v-if="
+                            sameFlowStepName(step.name, 'cts') &&
+                            isFlowStepRunnable(step.name)
+                          "
                           class="mt-4 border-t border-(--border-color)/70 pt-3"
                           @click.stop
                         >
@@ -1829,7 +1832,7 @@ import { getDesktopApi } from '@/platform/desktop'
 import { loadProjectHistory } from '@/utils/projectHistory'
 import { readProjectManagementManifest } from '@/utils/projectManagementRead'
 import { validateMpcDieArea } from '@/utils/mpcWorkspace'
-import { FLOW_START_DISABLED_STEPS, getStepMetadata } from '@/api/type'
+import { FLOW_START_DISABLED_STEPS, getStepMetadata, sameFlowStepName } from '@/api/type'
 import {
   projectIdFromName,
   type DesktopFileDialogOptions,
@@ -2010,8 +2013,10 @@ const initialDesignInputFingerprint = designInputFingerprint({
     ...(props.initialConfig?.rtl_list ?? []),
     ...(props.initialConfig?.source_config?.rtl_list ?? []),
   ].filter(Boolean),
-  startsFromSynthesis:
-    (props.initialConfig?.flow_config?.start_step ?? 'Synthesis') === 'Synthesis',
+  startsFromSynthesis: sameFlowStepName(
+    props.initialConfig?.flow_config?.start_step ?? 'Synthesis',
+    'synthesis',
+  ),
 })
 const { model: workspaceCreationModel, refresh: refreshWorkspaceCreationModel } =
   useWorkspaceCreationModel({
@@ -2485,8 +2490,9 @@ const SYSTEM_PARAMETER_DEFAULTS: Record<string, number> = {
 }
 
 function initialDesignInputType(startStep: FlowStepName): DesignInputKey {
-  if (startStep === 'preFloorplan') return 'verilog'
-  if (startStep !== 'Synthesis') return 'def'
+  const normalized = normalizeFlowStepName(startStep, startStep)
+  if (normalized === 'preFloorplan') return 'verilog'
+  if (normalized !== 'Synthesis') return 'def'
   // The RTL/filelist selection moved to the Import RTL step; synthesis entry
   // only offers workspace-level SDC here.
   return 'sdc'
@@ -2657,8 +2663,12 @@ const flowStepsBeforeStart = computed<ReadonlySet<string>>(() => {
 const runnableFlowSteps = computed(() =>
   selectedFlowSteps.value.filter((name) => !defaultSkippedFlowStepNames.value.has(name)),
 )
-const startsFromSynthesis = computed(() => flowStartStep.value === 'Synthesis')
-const startsFromPreFloorplan = computed(() => flowStartStep.value === 'preFloorplan')
+const startsFromSynthesis = computed(() =>
+  sameFlowStepName(flowStartStep.value, 'synthesis'),
+)
+const startsFromPreFloorplan = computed(
+  () => normalizeFlowStepName(flowStartStep.value, '') === 'preFloorplan',
+)
 const hasSelectedPdkConfig = computed(
   () =>
     isPdkEligible(selectedPdk.value) &&

@@ -201,6 +201,9 @@ export function backendWorkspaceOptions(
     'prefloorplan',
     'macroplacement',
     'postfloorplan',
+    'pre_floorplan',
+    'macro_placement',
+    'post_floorplan',
   ])
   const ctsApplies = parameterApplies(['cts'])
   const placementApplies = parameterApplies(['placement', 'place', 'macroplacement'])

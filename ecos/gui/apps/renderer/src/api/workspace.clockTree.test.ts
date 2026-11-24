@@ -35,6 +35,29 @@ describe('clock-tree workspace parameter projection', () => {
     expect(options.workspaceSpec.parameters).not.toHaveProperty('geometry.clock_tree')
   })
 
+  it('submits clock-tree and Replay options alongside scoped placement settings', () => {
+    const workspaceConfig = config(true)
+    workspaceConfig.parameters.replay_enabled = true
+    workspaceConfig.flow_config = {
+      start_step: 'synthesis',
+      end_step: 'filler',
+      steps: ['synthesis', 'pre_floorplan', 'placement', 'cts', 'routing', 'filler'],
+    }
+    const options = backendWorkspaceOptions(workspaceConfig, '/workspace/clock-tree', {
+      clock_tree: 'geometry.clock_tree',
+      replay_enabled: 'replay.enabled',
+      target_density: 'place.target_density',
+      target_overflow: 'place.stop_overflow',
+    })
+
+    expect(options.workspaceSpec.parameters).toMatchObject({
+      'geometry.clock_tree': true,
+      'replay.enabled': true,
+      'placement:place.target_density': 0.2,
+      'placement:place.stop_overflow': 0.1,
+    })
+  })
+
   it('omits the parameter when CTS is outside the selected flow range', () => {
     const workspaceConfig = config(true)
     workspaceConfig.flow_config = {
