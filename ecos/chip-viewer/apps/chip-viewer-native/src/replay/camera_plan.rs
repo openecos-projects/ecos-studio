@@ -9,7 +9,7 @@ pub struct Preset {
 }
 impl Preset {
     pub fn for_phase(step: &str, phase: &str, map: bool) -> Self {
-        let step = step.to_ascii_lowercase().replace([' ', '_', '-'], "");
+        let step = super::step_kind(step);
         let phase = phase.to_ascii_lowercase();
         let pitch = if map {
             86.0
@@ -21,7 +21,7 @@ impl Preset {
             )
         {
             36.0
-        } else if step == "route" {
+        } else if step == "routing" {
             if phase.contains("pin_access") {
                 72.0
             } else if phase.contains("track_assignment") {
@@ -40,7 +40,7 @@ impl Preset {
         } else {
             match step.as_str() {
                 "macroplacement" => 60.0,
-                "place" | "preplace" | "filler" | "prefloorplan" | "postfloorplan" => 76.0,
+                "placement" | "preplace" | "filler" | "prefloorplan" | "postfloorplan" => 76.0,
                 "legalization" => 82.0,
                 "diffsizing" | "timingoptimization" => 65.0,
                 "cts" => 55.0,

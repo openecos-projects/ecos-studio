@@ -177,17 +177,19 @@ fn describe(step: &str, phase: &str, complete: bool) -> &'static str {
     if phase.contains("core") || phase.contains("die") {
         return "Die and core boundaries establish the physical floorplan";
     }
-    match step.to_ascii_lowercase().as_str() {
+    match super::step_kind(step).as_str() {
         "synthesis" => "Recorded logical structure and synthesis results",
         "prefloorplan" | "postfloorplan" | "macroplacement" => {
             "Floorplan boundaries, cells and physical infrastructure"
         }
-        "preplace" | "place" | "legalization" => "Captured placement changes and cell positions",
-        "diff_sizing" | "timing optimization" => {
+        "preplace" | "placement" | "legalization" => {
+            "Captured placement changes and cell positions"
+        }
+        "diffsizing" | "timingoptimization" => {
             "Cell sizing and buffering changes committed by the tool"
         }
         "cts" => "Clock cell insertion and placement changes",
-        "route" => "Routing regions, metal wires and vias at captured algorithm nodes",
+        "routing" => "Routing regions, metal wires and vias at captured algorithm nodes",
         "filler" => "Filler insertion revealed in spatial batches",
         "rcx" => "Recorded parasitic extraction observations",
         "sta" => "Timing analysis observations; paths appear with completed results",

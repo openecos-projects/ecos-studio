@@ -28,8 +28,8 @@ impl ReplayApp {
     ) {
         if source.is_none()
             && matches!(
-                self.catalog.steps[step].name.as_str(),
-                "sta" | "powerAnalysis"
+                super::step_kind(&self.catalog.steps[step].name).as_str(),
+                "sta" | "poweranalysis"
             )
         {
             self.playing = true;

@@ -124,7 +124,7 @@ fn supplement(metrics: &mut Vec<Value>, feature: &Value, source: &str) {
     }
 }
 pub fn select(step: &str, metrics: &[Value]) -> Vec<Value> {
-    let ids: &[&str] = match step.to_ascii_lowercase().as_str() {
+    let ids: &[&str] = match super::step_kind(step).as_str() {
         "synthesis" => &[
             "synthesis_cell_area",
             "synthesis_cell_count",
@@ -140,7 +140,7 @@ pub fn select(step: &str, metrics: &[Value]) -> Vec<Value> {
             "pdn_net_count",
             "core_utilization",
         ],
-        "place" => &[
+        "placement" => &[
             "place_hpwl",
             "place_grwl",
             "place_congestion_egr_overflow_total",
@@ -148,7 +148,7 @@ pub fn select(step: &str, metrics: &[Value]) -> Vec<Value> {
             "place_rudy_utilization_max",
             "core_utilization",
         ],
-        "preplace" | "diff_sizing" | "diff_opt" | "diff_buffering" | "timing optimization" => &[
+        "preplace" | "diffsizing" | "diffopt" | "diffbuffering" | "timingoptimization" => &[
             "sta_setup_wns",
             "sta_setup_tns",
             "instance_area",
@@ -164,7 +164,7 @@ pub fn select(step: &str, metrics: &[Value]) -> Vec<Value> {
             "clock_wirelength",
             "cts_clock_tree_max_level",
         ],
-        "route" => &[
+        "routing" => &[
             "route_dr_total_wirelength",
             "route_dr_total_via_count",
             "route_dr_total_violation_count",
@@ -218,7 +218,7 @@ pub fn select(step: &str, metrics: &[Value]) -> Vec<Value> {
             || m["value"].is_boolean()
     };
     let mut selected = Vec::new();
-    if step.eq_ignore_ascii_case("powerAnalysis")
+    if super::step_kind(step) == "poweranalysis"
         && !metrics.iter().any(|m| m["id"] == "power_analysis_total_uw")
     {
         let value = |id: &str| {

@@ -74,7 +74,7 @@ pub fn class(object: &Object) -> u32 {
 }
 
 pub fn for_phase(step: &str, phase: &str, active_band: Option<[f32; 2]>) -> Style {
-    let step = step.to_ascii_lowercase().replace([' ', '_', '-'], "");
+    let step = super::step_kind(step);
     let phase = phase.to_ascii_lowercase();
     let pdn = phase.contains("pdn")
         || phase.contains("power_grid")
@@ -88,7 +88,7 @@ pub fn for_phase(step: &str, phase: &str, active_band: Option<[f32; 2]>) -> Styl
         if let Some([lo, hi]) = active_band {
             style.band = [lo, hi, 0.25, 0.0];
         }
-    } else if step == "route" {
+    } else if step == "routing" {
         style.classes = [1.0, 0.3, 1.0, 0.0];
         if let Some([lo, hi]) = active_band {
             style.band = [lo, hi, 0.25, 0.0];
@@ -100,7 +100,7 @@ pub fn for_phase(step: &str, phase: &str, active_band: Option<[f32; 2]>) -> Styl
             | "postfloorplan"
             | "macroplacement"
             | "preplace"
-            | "place"
+            | "placement"
             | "legalization"
             | "diffopt"
             | "diffsizing"

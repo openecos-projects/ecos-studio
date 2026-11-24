@@ -1,4 +1,19 @@
 //! Offline flow replay: capture loading, playback, rendering and analysis.
+// Presentation groups normalize spelling without changing the recorded step identity.
+fn step_kind(name: &str) -> String {
+    let kind = if name.starts_with("lec@") {
+        "lec"
+    } else {
+        name
+    };
+    let compact = kind.to_ascii_lowercase().replace([' ', '_', '-'], "");
+    match compact.as_str() {
+        "place" => "placement".into(),
+        "route" => "routing".into(),
+        _ => compact,
+    }
+}
+
 mod analysis;
 pub(crate) mod analysis_data;
 mod batch;
