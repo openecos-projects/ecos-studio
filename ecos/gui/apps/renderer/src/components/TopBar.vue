@@ -91,6 +91,21 @@
       >
         <i class="ri-book-open-line text-base" aria-hidden="true"></i>
       </button>
+      <WorkspaceRunHistory v-if="isWorkspaceRoute">
+        <template #trigger="{ open, disabled }">
+          <button
+            type="button"
+            class="window-btn run-history-trigger"
+            title="Run History"
+            aria-label="Run History"
+            aria-haspopup="dialog"
+            :disabled="disabled"
+            @click="open"
+          >
+            <i class="ri-history-line text-base" aria-hidden="true"></i>
+          </button>
+        </template>
+      </WorkspaceRunHistory>
       <BackgroundTasksButton />
       <ShutdownStatusButton />
       <NotificationCenter />
@@ -217,6 +232,7 @@ import { getDesktopApi } from '@/platform/desktop'
 import NotificationCenter from '@/components/NotificationCenter.vue'
 import BackgroundTasksButton from '@/components/BackgroundTasksButton.vue'
 import ShutdownStatusButton from '@/components/ShutdownStatusButton.vue'
+import WorkspaceRunHistory from '@/components/workspace-dashboard/WorkspaceRunHistory.vue'
 import { rememberWorkspaceManagementReturnRoute } from '@/utils/workspaceNavigation'
 import { useWorkspaceTitle } from '@/composables/useWorkspaceTitle'
 // ---- 类型定义 ----
@@ -935,6 +951,18 @@ const handleClose = async () => {
 .window-btn.active {
   background: var(--bg-secondary);
   color: var(--accent-color);
+}
+
+.run-history-trigger:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: -3px;
+}
+
+.run-history-trigger:disabled {
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .theme-btn {

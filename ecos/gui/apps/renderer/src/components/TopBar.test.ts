@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -13,6 +13,8 @@ const testState = vi.hoisted(() => ({
       isMaximized: vi.fn().mockResolvedValue(false),
       onMaximizedChanged: vi.fn(() => () => undefined),
     },
+    ecc: { runtime: { runHistory: vi.fn(), operationLog: vi.fn() } },
+    dialog: { saveFile: vi.fn() },
   },
 }))
 
@@ -50,6 +52,15 @@ vi.mock('@/stores/userGuideStore', async () => {
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => testState.desktopApi,
 }))
+vi.mock('@/composables/useWorkspace', async () => {
+  const { ref } = await import('vue')
+  return {
+    useWorkspace: () => ({
+      workspaceSession: ref({ workspaceId: 'workspace-handle' }),
+      showToast: vi.fn(),
+    }),
+  }
+})
 vi.mock('@/components/NotificationCenter.vue', () => ({
   default: { template: '<div />' },
 }))
@@ -265,5 +276,85 @@ describe('TopBar signoff export menu', () => {
     expect(updateWorkspace!.attributes('title')).toContain('flow is running')
 
     wrapper.unmount()
+  })
+})
+
+describe('TopBar run history', () => {
+  it('distinguishes the default flow command from explicit reruns', async () => {
+    const { runHistory } = testState.desktopApi.ecc.runtime
+    const run = { finishedAt: 100, state: 'succeeded' }
+    runHistory.mockResolvedValue({
+      runs: [
+        { ...run, runId: 'default-flow', selection: {} },
+        { ...run, runId: 'restart-flow', selection: { fromStep: 'synthesis' } },
+        {
+          ...run,
+          runId: 'bounded-rerun',
+          selection: { fromStep: 'synthesis', throughStep: 'placement' },
+        },
+        { ...run, runId: 'single-step', selection: { only: 'synthesis' } },
+      ],
+    })
+    const wrapper = mount(TopBar, { attachTo: document.body })
+    try {
+      await wrapper.get('button[aria-label="Run History"]').trigger('click')
+      await flushPromises()
+      const scopes = wrapper
+        .findAll('tbody tr')
+        .map((row) => row.get('td:nth-child(3)').text())
+      expect(scopes).toEqual([
+        'Run flow',
+        'Rerun from Synthesis',
+        'Synthesis → Place',
+        'Synthesis only',
+      ])
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('opens the current workspace history and runs both row actions', async () => {
+    const { ecc, dialog } = testState.desktopApi
+    ecc.runtime.runHistory.mockResolvedValue({
+      runs: [{ runId: 'run-1', finishedAt: 100, selection: {}, state: 'succeeded' }],
+    })
+    ecc.runtime.operationLog.mockResolvedValue({
+      content: 'Flow complete',
+      diagnostics: 'ECC diagnostics',
+    })
+    const wrapper = mount(TopBar, { attachTo: document.body })
+    try {
+      await wrapper.get('button[aria-label="Run History"]').trigger('click')
+      await flushPromises()
+      expect(ecc.runtime.runHistory).toHaveBeenCalledWith({
+        workspaceHandle: 'workspace-handle',
+        before: undefined,
+      })
+
+      const history = wrapper.get('dialog[open]')
+      expect(history.get('tbody').text()).toContain('run-1')
+      const [viewLog, saveDiagnostics] = history.get('tbody').findAll('button')
+      expect(viewLog!.text()).toBe('View log')
+      await viewLog!.trigger('click')
+      await flushPromises()
+      expect(history.get('pre').text()).toBe('Flow complete')
+
+      expect(saveDiagnostics!.text()).toBe('Save diagnostics')
+      await saveDiagnostics!.trigger('click')
+      await flushPromises()
+      expect(ecc.runtime.operationLog).toHaveBeenLastCalledWith({
+        workspaceHandle: 'workspace-handle',
+        operationId: 'run-1',
+        includeDiagnostics: true,
+      })
+      expect(dialog.saveFile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          defaultPath: 'ecc-run-run-1.txt',
+          content: 'ECC diagnostics',
+        }),
+      )
+    } finally {
+      wrapper.unmount()
+    }
   })
 })

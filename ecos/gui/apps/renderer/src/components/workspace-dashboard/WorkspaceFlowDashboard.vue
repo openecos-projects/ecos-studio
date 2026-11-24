@@ -18,7 +18,6 @@
         <output>{{ Math.round(zoom * 100) }}%</output></label
       >
       <FlowRunControl />
-      <WorkspaceRunHistory />
       <button
         type="button"
         class="flow-fit"
@@ -193,7 +192,6 @@
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import FlowRunControl from '@/components/workbench/FlowRunControl.vue'
-import WorkspaceRunHistory from './WorkspaceRunHistory.vue'
 import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
 import {
   useHomeSnapshots,

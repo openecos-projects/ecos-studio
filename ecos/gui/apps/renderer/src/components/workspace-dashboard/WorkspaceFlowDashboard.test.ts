@@ -71,7 +71,6 @@ describe('workspace flow diagram', () => {
       global: {
         stubs: {
           Teleport: stubTeleport,
-          WorkspaceRunHistory: true,
           FlowRunControl: {
             props: ['step', 'status'],
             template: '<button class="run-control">{{ step || "Full flow" }}</button>',
