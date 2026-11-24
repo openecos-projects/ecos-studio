@@ -46,6 +46,31 @@ export function parseToolContentLines(content: string): string[] {
     .filter(Boolean)
 }
 
+const REPLAY_PROGRESS = /^(?:preparing replay|noise calibration replay) \d+\/(\d+): /
+const REPLAY_FINISHED = /^replay (\d+)\/(\d+) finished$/
+
+export function readBaselineCalibration(
+  content: string,
+): { completed: number; total: number } | null {
+  let total = 0
+  let completed = 0
+  for (const line of parseToolContentLines(content)) {
+    const finished = REPLAY_FINISHED.exec(line)
+    const progress = finished ? null : REPLAY_PROGRESS.exec(line)
+    const replayTotal = Number(finished?.[2] ?? progress?.[1])
+    if (
+      !Number.isSafeInteger(replayTotal) ||
+      replayTotal < 1 ||
+      (total && total !== replayTotal)
+    ) {
+      return null
+    }
+    total = replayTotal
+    if (finished) completed = Math.max(completed, Number(finished[1]))
+  }
+  return total && completed <= total ? { completed, total } : null
+}
+
 /** True when the card is only transient Codex/prep chatter, not flow execution. */
 export function isEphemeralToolContent(content: string): boolean {
   const lines = parseToolContentLines(content)

@@ -520,9 +520,7 @@ class ProviderOptimizationMixin(
         session.optimization_shutdown.clear()
         self._emit_status(session, "calibrating")
         self._emit_optimization_status(session, "calibrating")
-        session.active_tool_message_id = (
-            f"optimization-progress-{session.session_id}"
-        )
+        log_message_id = f"optimization-progress-{session.session_id}"
 
         def replay_progress(completed: int, required: int, _state: str) -> None:
             session.optimization_calibration_completed = completed
@@ -534,7 +532,9 @@ class ProviderOptimizationMixin(
                 calibrate(
                     workspace_path,
                     should_stop=session.optimization_stop.is_set,
-                    progress=lambda text: self._progress(session, text),
+                    progress=lambda text: self._progress(
+                        session, text, message_id=log_message_id
+                    ),
                     replay_progress=replay_progress,
                 )
             except Exception as exc:
@@ -543,7 +543,6 @@ class ProviderOptimizationMixin(
                 session.phase = (
                     "operation" if session.mode == "workspace" else "home_ready"
                 )
-                session.active_tool_message_id = None
                 if cancelled:
                     self._emit(session, "message", cancellation_message(session.language))
                 else:
@@ -563,7 +562,6 @@ class ProviderOptimizationMixin(
                 self._close_idle_optimization_provider(session)
                 session.optimization_phase = "interrupted"
                 session.phase = "operation" if session.mode == "workspace" else "home_ready"
-                session.active_tool_message_id = None
                 session.optimization_thread = None
                 self._emit_optimization_status(session, "interrupted")
                 self._emit_status(session, "interrupted")

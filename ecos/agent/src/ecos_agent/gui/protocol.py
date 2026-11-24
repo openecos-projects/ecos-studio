@@ -6,6 +6,7 @@ import json
 import sys
 import threading
 import uuid
+from functools import partial
 from typing import Any
 
 from ecos_agent.gui.provider import EcosAgentProvider
@@ -24,7 +25,9 @@ class EcosAgentProtocolServer:
         self._pending_host: dict[str, _PendingHostCall] = {}
         self.provider = EcosAgentProvider(
             emit=self._emit,
-            optimization_runner_factory=create_optimization_runner,
+            optimization_runner_factory=partial(
+                create_optimization_runner, candidate_execution_limit=5
+            ),
         )
         bind_host_transport(ProtocolHostTransport(self.call_host))
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from pathlib import Path
+from threading import Event
 
 import pytest
 
@@ -47,9 +48,15 @@ def test_gui_start_auto_calibrates_missing_noise_epsilon(
     events: list[dict[str, object]] = []
     calibration_calls: list[Path] = []
     runner_calls: list[object] = []
+    emit_replay_log = Event()
 
     def fake_calibrate(workspace_path: Path, **kwargs: object) -> dict[str, object]:
         calibration_calls.append(workspace_path)
+        assert emit_replay_log.wait(timeout=2)
+        progress = kwargs.get("progress")
+        assert callable(progress)
+        progress("noise calibration replay 1/3: flow rerun started")
+        progress("replay 1/3 finished")
         replay_progress = kwargs.get("replay_progress")
         assert callable(replay_progress)
         replay_progress(1, 3, "completed")
@@ -71,6 +78,7 @@ def test_gui_start_auto_calibrates_missing_noise_epsilon(
     _send(provider, session_id, "3")
     _send(provider, session_id, "reduce wirelength")
     _send(provider, session_id, "1")
+    emit_replay_log.set()
 
     deadline = time.monotonic() + 2
     while provider.sessions[session_id].optimization_thread is not None and time.monotonic() < deadline:
@@ -79,6 +87,9 @@ def test_gui_start_auto_calibrates_missing_noise_epsilon(
     session = provider.sessions[session_id]
     assert calibration_calls == [workspace]
     assert len(runner_calls) == 1
+    assert [
+        event["messageId"] for event in events if event.get("type") == "tool"
+    ] == [f"optimization-progress-{session_id}"] * 2
     assert any(
         event["type"] == "message" and "noise epsilon" in str(event["text"]).lower()
         for event in events

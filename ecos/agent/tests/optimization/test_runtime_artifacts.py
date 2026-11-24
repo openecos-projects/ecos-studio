@@ -4,6 +4,7 @@ import json
 import threading
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Literal
 
 import pytest
 from pydantic import ValidationError
@@ -693,8 +694,9 @@ class _FakeRpc:
         self.closed = True
 
 
+@pytest.mark.parametrize("candidate_limit", [5, 20])
 def test_runner_uses_parent_terminal_baseline_without_replaying(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, candidate_limit: Literal[5, 20]
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -731,19 +733,19 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
         lambda _path: 10.0,
     )
 
+    context = {
+        "workspace": str(workspace),
+        "workspace_handle": "handle-1",
+        "expected_workspace_revision": 1,
+        "episode_id": "episode-new",
+        "objective": _semantic_objective(),
+        "objective_alignment": _alignment(_semantic_objective()),
+        "reference_runtime_seconds": 12.0,
+        "agent_mode": "llm_no_knowledge",
+        "knowledge_case_shots": 0,
+    }
     runner = create_optimization_runner(
-        {
-            "workspace": str(workspace),
-            "workspace_handle": "handle-1",
-            "expected_workspace_revision": 1,
-            "episode_id": "episode-new",
-            "objective": _semantic_objective(),
-            "objective_alignment": _alignment(_semantic_objective()),
-            "reference_runtime_seconds": 12.0,
-            "agent_mode": "llm_no_knowledge",
-            "knowledge_case_shots": 0,
-        },
-        planner=object(),
+        context, planner=object(), candidate_execution_limit=candidate_limit
     )
 
     assert ("rpc.hello", {"version": 1}) in rpc.calls
@@ -758,6 +760,17 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
     assert state["task_memory_scope_sha256"].startswith("sha256:")
     assert state["mode"] == "llm_no_knowledge"
     assert state.get("knowledge_case_shots", 0) == 0
-    assert runner.budget.budget.wall_time_limit_seconds == 264.0
+    budget = runner.budget.budget
+    assert budget.candidate_execution_limit == candidate_limit
+    assert budget.minimum_candidate_executions == candidate_limit
+    assert budget.wall_time_limit_seconds == 264.0
     runner.close()
     assert rpc.closed is True
+
+    recovered = create_optimization_runner(
+        context, planner=object(), candidate_execution_limit=5
+    )
+    try:
+        assert recovered.budget.budget == budget
+    finally:
+        recovered.close()

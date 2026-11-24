@@ -59,7 +59,9 @@ beforeEach(() => {
   useWorkspace().backendRuntimeEvents.value = []
 })
 
-async function mountPostCreateFlow(options: { handoff?: boolean } = {}) {
+async function mountPostCreateFlow(
+  options: { handoff?: boolean; renderMessages?: boolean } = {},
+) {
   const pinia = createPinia()
   const shell = useAgentShellStore(pinia)
   const messages = useMessageStore(pinia)
@@ -148,12 +150,14 @@ async function mountPostCreateFlow(options: { handoff?: boolean } = {}) {
         [quickStartRunnerKey]: vi.fn(),
       },
       stubs: {
-        MessageItem: {
-          props: ['message'],
-          components: { AgentToolCard },
-          template:
-            '<AgentToolCard v-if="message.type === \'tool\'" :content="message.content" :status="message.status" />',
-        },
+        MessageItem: options.renderMessages
+          ? false
+          : {
+              props: ['message'],
+              components: { AgentToolCard },
+              template:
+                '<AgentToolCard v-if="message.type === \'tool\'" :content="message.content" :status="message.status" />',
+            },
         AgentSessionContractPanels: true,
         AgentActivityStream: true,
         AgentCodexSetupCard: true,
@@ -171,6 +175,49 @@ function dispose(wrapper: ReturnType<typeof mount>) {
   removeAgentSessionUi('owner')
   delete window.ecosDesktop
 }
+
+it('folds legacy baseline replay heartbeats into one summary in the conversation', async () => {
+  const { wrapper, receiveAgentEvent } = await mountPostCreateFlow({
+    handoff: false,
+    renderMessages: true,
+  })
+  const event = { providerId: 'ecos_agent', sessionId: 'owner' }
+  try {
+    receiveAgentEvent({
+      ...event,
+      type: 'optimization',
+      optimization: {
+        episode_id: 'episode-1',
+        schema_version: 'ecos.optimization_status.v2',
+        state: 'calibrating',
+        calibration_required: 3,
+        calibration_completed: 0,
+      },
+    })
+    for (const [index, line] of [
+      'preparing replay 1/3: deriving a workspace',
+      'noise calibration replay 1/3: flow running, elapsed 0m31s',
+      'replay 1/3 finished',
+    ].entries()) {
+      receiveAgentEvent({
+        ...event,
+        type: 'tool',
+        messageId: `legacy-line-${index}`,
+        delta: `${line}\n`,
+      })
+    }
+    await flushPromises()
+
+    expect(wrapper.findAll('.optimization-log')).toHaveLength(1)
+    const log = wrapper.get('.optimization-log')
+    expect(log.get('summary').text()).toContain('1/3 complete')
+    expect(log.attributes('open')).toBeUndefined()
+    expect(log.get('pre').text()).toContain('elapsed 0m31s')
+    expect(wrapper.find('.timeline').exists()).toBe(false)
+  } finally {
+    dispose(wrapper)
+  }
+})
 
 it('restores selectable options after stopping an interaction answer', async () => {
   const { wrapper, messages, receiveAgentEvent } = await mountPostCreateFlow({

@@ -10,6 +10,7 @@ import {
   type DesktopAgentRetainedWorkspace,
 } from '@ecos-studio/shared'
 import type { AgentProviderRuntime } from '../services/agent/agentProviderContract'
+import { readOptimizationRounds } from '../services/agent/optimizationRounds'
 import { normalizeWorkspacePath } from '../services/workspacePath'
 
 type Sender = IpcMainInvokeEvent['sender']
@@ -112,7 +113,15 @@ export function registerOptimizationEpisodeIpc(context: EpisodeIpcContext): void
         // A closed or invalid Workspace is not safe to claim for control.
       }
     }
-    return { ...projection, episodes }
+    return {
+      ...projection,
+      episodes: await Promise.all(
+        episodes.map(async (episode) => {
+          const rounds = await readOptimizationRounds(episode)
+          return rounds ? { ...episode, rounds } : episode
+        }),
+      ),
+    }
   })
 
   context.handle(

@@ -9,6 +9,7 @@ import AIChatPanel from './AIChatPanel.vue'
 import { getAgentSessionUi, removeAgentSessionUi } from './agentSessionUi'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useMessageStore } from '@/stores/messageStore'
+import { useOptimizationEpisodeStore } from '@/stores/optimizationEpisodeStore'
 import { quickStartRunnerKey, type QuickStartRunner } from '@/composables/quickStartUi'
 import type { QuickStartFlowResult } from '@/composables/quickStartFlow'
 import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
@@ -82,6 +83,7 @@ async function setup(options: { activeOptimization?: boolean } = {}) {
   const pinia = createPinia()
   const shell = useAgentShellStore(pinia)
   const messages = useMessageStore(pinia)
+  const optimization = useOptimizationEpisodeStore(pinia)
   shell.createTab({ mode: 'home' }, { id: 'owner' })
   shell.createTab({ mode: 'home' }, { id: 'other', activate: false })
   shell.markTabStarted('owner')
@@ -196,6 +198,7 @@ async function setup(options: { activeOptimization?: boolean } = {}) {
     mountPanel,
     shell,
     messages,
+    optimization,
     runner,
     answer,
     flow,
@@ -278,4 +281,37 @@ it('keeps an active Optimization Episode running when its Agent tab is closed', 
   expect(state.shell.tabs.map((tab) => tab.id)).toEqual(['other'])
   expect(state.messages.messagesBySessionId.owner).toBe(ownerMessages)
   expect(state.interrupt).not.toHaveBeenCalled()
+})
+
+it('shows the current optimization above the conversation across repeated runs', async () => {
+  const { wrapper, optimization } = await setup({ activeOptimization: true })
+  const banner = () => wrapper.get('.agent-optimization-status')
+  const running = optimization.episodes[0]!
+  optimization.episodes = [
+    { ...running, episodeId: 'older-episode', state: 'completed' },
+    running,
+  ]
+  await flushPromises()
+
+  expect(wrapper.get('.agent-chat__scroll').element.contains(banner().element)).toBe(
+    false,
+  )
+  expect(banner().text()).toContain('Optimizing')
+  expect(banner().text()).toContain('1 candidate running')
+  expect(banner().find('button').exists()).toBe(false)
+  expect(wrapper.get('.agent-chat__scroll').find('message-item-stub').exists()).toBe(true)
+  expect(wrapper.find('.composer-footer textarea').exists()).toBe(true)
+
+  optimization.episodes[1]!.state = 'paused'
+  await flushPromises()
+  expect(banner().text()).toContain('Optimization paused')
+  expect(banner().text()).not.toContain('candidate running')
+
+  optimization.episodes[1]!.state = 'completed'
+  await flushPromises()
+  expect(banner().text()).toContain('Optimization finished')
+  expect(banner().find('button').exists()).toBe(false)
+
+  await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
+  expect(wrapper.find('.agent-optimization-status').exists()).toBe(false)
 })

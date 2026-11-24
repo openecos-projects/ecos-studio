@@ -62,7 +62,19 @@
     </div>
 
     <div v-show="expanded" class="optimization-card__body">
-      <div class="optimization-card__row optimization-card__summary">
+      <div
+        v-if="optimization.state === 'calibrating' && optimization.calibration_required"
+        class="optimization-card__calibration"
+      >
+        <strong>Baseline calibration</strong>
+        <progress
+          aria-label="Baseline replays completed"
+          :value="optimization.calibration_completed ?? 0"
+          :max="optimization.calibration_required"
+        ></progress>
+        <span>Candidate runs start after calibration.</span>
+      </div>
+      <div v-else class="optimization-card__row optimization-card__summary">
         <i class="ri-pulse-line" aria-hidden="true"></i>
         <span>{{ progressLabel }}</span>
         <span v-if="optimization.in_flight" class="optimization-card__badge">
@@ -85,11 +97,118 @@
       <p v-if="optimization.rationale_summary" class="optimization-card__rationale">
         {{ optimization.rationale_summary }}
       </p>
+      <p v-if="planningContinues" class="optimization-card__rationale">
+        Planning the next candidate…
+      </p>
+      <p v-else-if="budgetReached" class="optimization-card__rationale">
+        Optimization budget reached.
+      </p>
       <p
-        v-if="optimization.rejection_reason && !failureState"
+        v-else-if="optimization.rejection_reason && !plannerContinue && !failureState"
         class="optimization-card__rejection"
       >
         Rejected: {{ optimization.rejection_reason }}
+      </p>
+      <div v-if="resultMetric" class="optimization-card__result">
+        <strong>Best candidate · {{ metricLabel(resultMetric.id) }}</strong>
+        <p class="optimization-card__result-values">
+          <template v-if="resultMetric.baseline !== null">
+            Baseline {{ metricFormat.format(resultMetric.baseline) }} →
+          </template>
+          {{ metricFormat.format(resultMetric.candidate) }}
+          <span v-if="resultChange">({{ resultChange }})</span>
+        </p>
+        <details v-if="resultMetrics.length > 1" class="optimization-card__comparison">
+          <summary>Compare all metrics</summary>
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Metric</th>
+                <th scope="col">Baseline</th>
+                <th scope="col">Best</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="metric in resultMetrics" :key="metric.id">
+                <th scope="row">{{ metricLabel(metric.id) }}</th>
+                <td>
+                  {{
+                    metric.baseline === null ? '—' : metricFormat.format(metric.baseline)
+                  }}
+                </td>
+                <td>{{ metricFormat.format(metric.candidate) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </details>
+      </div>
+      <p v-else-if="finished" class="optimization-card__rationale">
+        No verified best candidate was recorded.
+      </p>
+      <section
+        v-if="rounds?.length"
+        class="optimization-card__rounds"
+        aria-label="Candidate rounds"
+      >
+        <h3>
+          Candidate rounds
+          <span>{{ finishedRounds }} / {{ rounds.length }} recorded</span>
+        </h3>
+        <details v-for="(round, index) in rounds" :key="round.interventionId">
+          <summary>
+            <span class="optimization-card__round-title">
+              Round {{ index + 1 }}
+              <span
+                v-if="isBest(round)"
+                class="optimization-card__badge optimization-card__badge--good"
+                >Best</span
+              >
+            </span>
+            <span class="optimization-card__round-metric">
+              {{ round.metric ? metricFormat.format(round.metric.value) : '' }}
+            </span>
+            <span
+              class="optimization-card__badge"
+              :class="outcomeBadgeClass(round.outcome)"
+            >
+              {{
+                round.outcome
+                  ? outcomeLabel(round.outcome)
+                  : finished
+                    ? 'No result'
+                    : 'Pending'
+              }}
+            </span>
+          </summary>
+          <dl>
+            <template v-if="round.requested">
+              <dt>Parameter</dt>
+              <dd>
+                <code>{{ round.requested.knob_id }}</code>
+              </dd>
+              <dt>Requested value</dt>
+              <dd>{{ round.requested.value }}</dd>
+            </template>
+            <template v-if="round.metric">
+              <dt>{{ metricLabel(round.metric.id) }}</dt>
+              <dd>{{ metricFormat.format(round.metric.value) }}</dd>
+            </template>
+            <template v-if="round.decision">
+              <dt>Decision</dt>
+              <dd>{{ outcomeLabel(round.decision) }}</dd>
+            </template>
+            <template v-if="round.failedGates?.length">
+              <dt>Failed checks</dt>
+              <dd>{{ round.failedGates.map(metricLabel).join(', ') }}</dd>
+            </template>
+          </dl>
+        </details>
+      </section>
+      <p
+        v-else-if="finished && optimization.turn_count"
+        class="optimization-card__rationale"
+      >
+        No candidate round details available.
       </p>
       <div v-if="controllableEpisode" class="optimization-card__controls">
         <button
@@ -129,11 +248,15 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { DesktopAgentOptimizationPayload } from '@ecos-studio/shared'
+import type {
+  DesktopAgentOptimizationPayload,
+  DesktopAgentOptimizationRound,
+} from '@ecos-studio/shared'
 
 const props = defineProps<{
   optimization: DesktopAgentOptimizationPayload
   timeline: DesktopAgentOptimizationPayload[]
+  rounds?: DesktopAgentOptimizationRound[]
 }>()
 
 defineEmits<{
@@ -159,6 +282,17 @@ const liveState = computed(() => {
   return typeof state === 'string' && LIVE_STATES.has(state)
 })
 
+const plannerContinue = computed(
+  () => props.optimization.rejection_reason === 'planner_continue',
+)
+
+const planningContinues = computed(() => {
+  const state = props.optimization.state
+  return (
+    plannerContinue.value && liveState.value && state !== 'paused' && state !== 'stopping'
+  )
+})
+
 const failureState = computed(() =>
   [
     'error',
@@ -170,7 +304,74 @@ const failureState = computed(() =>
   ].includes(props.optimization.state ?? ''),
 )
 
+const budgetReached = computed(
+  () =>
+    props.optimization.state === 'stopped' &&
+    props.optimization.rejection_reason === 'budget_exhausted' &&
+    !props.optimization.recovery_incomplete,
+)
+
+const finished = computed(() =>
+  [
+    'completed',
+    'stopped',
+    'failed',
+    'error',
+    'escalated',
+    'quarantined',
+    'unavailable',
+  ].includes(props.optimization.state ?? ''),
+)
+const resultMetrics = computed(() =>
+  finished.value ? (props.optimization.best_candidate?.metrics ?? []) : [],
+)
+const resultMetric = computed(() => {
+  const { active_primary_metric, original_primary_metric } = props.optimization
+  const primaryMetric = original_primary_metric || active_primary_metric
+  return (
+    resultMetrics.value.find((metric) => metric.id === primaryMetric) ??
+    resultMetrics.value[0] ??
+    null
+  )
+})
+
+const finishedRounds = computed(
+  () => props.rounds?.filter((round) => round.outcome).length ?? 0,
+)
+
+function metricLabel(id: string): string {
+  return id === 'route_wirelength' ? 'Routed wirelength' : id.replace(/_/g, ' ')
+}
+
+function outcomeLabel(value: string): string {
+  if (value === 'incumbent_retained') return 'Kept previous best'
+  if (value === 'candidate_better') return 'Became best candidate'
+  const label = value.replace(/_/g, ' ')
+  return label.charAt(0).toUpperCase() + label.slice(1)
+}
+
+function isBest(round: DesktopAgentOptimizationRound): boolean {
+  return Boolean(
+    round.manifestSha256 &&
+    round.manifestSha256 === props.optimization.best_candidate?.manifest_sha256,
+  )
+}
+const metricFormat = new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 })
+const resultChangeFormat = new Intl.NumberFormat('en-US', {
+  style: 'percent',
+  signDisplay: 'exceptZero',
+  maximumFractionDigits: 1,
+})
+const resultChange = computed(() => {
+  const metric = resultMetric.value
+  if (!metric || !metric.baseline) return null
+  return resultChangeFormat.format(
+    (metric.candidate - metric.baseline) / Math.abs(metric.baseline),
+  )
+})
+
 const statusLabel = computed(() => {
+  if (budgetReached.value) return 'Finished'
   const labels: Record<string, string> = {
     error: 'Failed',
     failed: 'Failed',
@@ -210,6 +411,7 @@ const progressLabel = computed(() => {
   const required = props.optimization.calibration_required
   if (required && completed !== undefined) return `Replay ${completed}/${required}`
   const turn = props.optimization.turn_count ?? props.optimization.turn
+  if (props.rounds?.length) return `${props.rounds.length} candidates`
   if (turn) return `Turn ${turn}`
   const phase = props.optimization.phase ?? props.optimization.state
   return phase ? phase.replace(/_/g, ' ') : 'Preparing'
@@ -235,6 +437,7 @@ const BAD_OUTCOMES = new Set([
   'infeasible',
   'execution_failed',
   'evidence_invalid',
+  'candidate_ineligible',
   'timed_out_cancelled',
   'indeterminate',
 ])
@@ -254,7 +457,7 @@ function outcomeBadgeClass(outcome: string | null | undefined): string {
 .optimization-card {
   width: 100%;
   min-width: 0;
-  max-width: min(94%, 68rem);
+  max-width: 68rem;
   overflow: hidden;
   border: 1px solid var(--border-color);
   border-radius: 0.625rem;
@@ -447,6 +650,120 @@ function outcomeBadgeClass(outcome: string | null | undefined): string {
   display: flex;
   justify-content: flex-end;
   gap: 0.25rem;
+}
+
+.optimization-card__result {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.625rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+  background: var(--bg-primary);
+  font-size: 0.75rem;
+}
+
+.optimization-card__calibration {
+  display: grid;
+  gap: 0.375rem;
+  padding-block: 0.375rem;
+  font-size: 0.75rem;
+}
+
+.optimization-card__calibration progress {
+  appearance: none;
+  width: 100%;
+  height: 0.625rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--border-color);
+  accent-color: var(--accent-color);
+}
+
+.optimization-card__calibration progress::-webkit-progress-bar {
+  background: var(--border-color);
+}
+
+.optimization-card__calibration progress::-webkit-progress-value {
+  background: var(--accent-color);
+}
+
+.optimization-card__calibration span {
+  color: var(--text-secondary);
+}
+
+.optimization-card__result-values {
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.optimization-card__comparison table {
+  width: 100%;
+  margin-top: 0.375rem;
+  border-collapse: collapse;
+  font-size: 0.6875rem;
+}
+
+.optimization-card__comparison th,
+.optimization-card__comparison td {
+  padding: 0.25rem;
+  border-top: 1px solid var(--border-color);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.optimization-card__comparison th:first-child {
+  text-align: left;
+}
+
+.optimization-card__rounds h3 {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.25rem;
+  margin-block: 0.5rem 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.optimization-card__rounds h3 span {
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.optimization-card__rounds details {
+  border-top: 1px solid var(--border-color);
+  font-size: 0.75rem;
+}
+
+.optimization-card__rounds summary {
+  padding-block: 0.4rem;
+}
+
+.optimization-card summary {
+  cursor: pointer;
+}
+
+.optimization-card__round-title {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem;
+  margin-inline: 0.125rem;
+  font-weight: 600;
+}
+
+.optimization-card__round-metric {
+  margin-inline-end: 0.25rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.optimization-card__rounds dl {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 0.25rem 0.5rem;
+  padding: 0.375rem 0.625rem 0.625rem;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
 }
 
 .optimization-card__controls button {

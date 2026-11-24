@@ -276,6 +276,8 @@ describe('AgentRuntimeManager', () => {
         sessionId: 'session-1',
       })
       expect(restored.optimizationProjection().episodes[0]?.state).toBe('stopped')
+      const finishedAt = restored.optimizationProjection().episodes[0]?.finishedAt
+      expect(finishedAt).toEqual(expect.any(Number))
       expect(restored.isOptimizationParentGuarded('workspace-handle-2')).toBe(false)
       expect(restoredProvider.sendMessage).not.toHaveBeenCalled()
       expect(restoredProvider.stopOptimizationEpisode).not.toHaveBeenCalled()
@@ -295,9 +297,10 @@ describe('AgentRuntimeManager', () => {
         optimizationProjectionPath: projectionPath,
         providers: [{ providerId: 'codex', runtime: restoredProvider }],
       })
-      expect(reopened.optimizationProjection().episodes[0]?.cleanupState).toBe(
-        'completed',
-      )
+      expect(reopened.optimizationProjection().episodes[0]).toMatchObject({
+        cleanupState: 'completed',
+        finishedAt,
+      })
     } finally {
       await rm(root, { force: true, recursive: true })
     }
@@ -380,9 +383,10 @@ describe('AgentRuntimeManager', () => {
     expect(manager.isOptimizationParentGuarded('workspace-handle-1')).toBe(false)
   })
 
-  it('persists terminal notification acknowledgement across projection reloads', async () => {
+  it('persists notification acknowledgement and keeps the original finish time', async () => {
     const root = await mkdtemp(join(tmpdir(), 'ecos-agent-notifications-'))
     const projectionPath = join(root, 'episodes.json')
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_795_400_000_000)
     try {
       const provider = createProvider() as AgentProviderRuntime & {
         emitForTest(event: DesktopAgentEvent): void
@@ -413,6 +417,8 @@ describe('AgentRuntimeManager', () => {
       expect(manager.optimizationProjection().episodes[0]?.notificationStates).toEqual([
         'completed',
       ])
+      const finishedAt = Date.now()
+      now.mockReturnValue(finishedAt + 60_000)
       manager.acknowledgeOptimizationEpisodeNotification({
         episodeId: 'episode-1',
         providerId: 'codex',
@@ -424,10 +430,13 @@ describe('AgentRuntimeManager', () => {
         optimizationProjectionPath: projectionPath,
         providers: [{ providerId: 'codex', runtime: createProvider() }],
       })
-      expect(restored.optimizationProjection().episodes[0]?.notificationStates).toEqual(
-        [],
-      )
+      expect(restored.optimizationProjection().episodes[0]).toMatchObject({
+        finishedAt,
+        notificationStates: [],
+        updatedAt: finishedAt + 60_000,
+      })
     } finally {
+      now.mockRestore()
       await rm(root, { force: true, recursive: true })
     }
   })

@@ -11,6 +11,27 @@
         <slot name="tab-actions" />
       </template>
     </AgentChatTabStrip>
+    <p class="composer-sr-status" role="status" aria-live="polite">
+      {{ statusLabel }}
+    </p>
+    <div
+      v-if="currentOptimizationEpisode"
+      class="agent-optimization-status"
+      :data-state="currentOptimizationEpisode.state"
+    >
+      <i
+        :class="
+          optimizationBusy
+            ? 'ri-loader-4-line agent-optimization-status__spinner'
+            : 'ri-sparkling-2-line'
+        "
+        aria-hidden="true"
+      ></i>
+      <div class="agent-optimization-status__copy">
+        <strong>{{ optimizationStatusLabel }}</strong>
+        <span v-if="optimizationStatusDetail">{{ optimizationStatusDetail }}</span>
+      </div>
+    </div>
     <div
       ref="scrollContainerRef"
       class="custom-scrollbar agent-chat__scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3"
@@ -190,9 +211,6 @@
           <span>Undo selection</span>
         </button>
       </div>
-      <p class="composer-sr-status" role="status" aria-live="polite">
-        {{ statusLabel }}
-      </p>
       <div v-if="queuedMessage" class="queue-row">
         <i class="ri-time-line" aria-hidden="true"></i>
         <span class="truncate">{{ queuedMessage }}</span>
@@ -461,6 +479,7 @@ const agentSessionId = computed({
 })
 const {
   activeOptimizationEpisode,
+  currentOptimizationEpisode,
   cancelTabClose,
   closeChatTab,
   handleOptimizationControl,
@@ -695,6 +714,50 @@ const contractPanelBind = computed(() => ({
 }))
 
 const episodeLocked = computed(() => Boolean(activeOptimizationEpisode.value))
+const optimizationBusy = computed(() =>
+  ['starting', 'calibrating', 'running', 'stopping'].includes(
+    currentOptimizationEpisode.value?.state ?? '',
+  ),
+)
+const optimizationStatusLabel = computed(() => {
+  const episode = currentOptimizationEpisode.value
+  if (!episode) return ''
+  const labels = {
+    starting: 'Starting optimization',
+    calibrating: 'Calibrating optimization',
+    running: 'Optimizing',
+    paused: 'Optimization paused',
+    stopping: 'Stopping optimization',
+    interrupted: 'Optimization interrupted',
+    needs_attention: 'Optimization needs attention',
+    completed: 'Optimization finished',
+    stopped:
+      episode.optimization.rejection_reason === 'budget_exhausted'
+        ? 'Optimization finished'
+        : 'Optimization stopped',
+    failed: 'Optimization failed',
+  }
+  return labels[episode.state]
+})
+const optimizationStatusDetail = computed(() => {
+  const episode = currentOptimizationEpisode.value
+  if (!episode || (episode.state !== 'running' && episode.state !== 'calibrating'))
+    return ''
+  if (episode.state === 'calibrating') {
+    const { calibration_completed, calibration_required } = episode.optimization
+    return calibration_required
+      ? `${calibration_completed ?? 0} of ${calibration_required} baseline replays complete`
+      : 'Replaying the baseline'
+  }
+  const { inFlightCount, rounds } = episode
+  const activity =
+    inFlightCount > 0
+      ? `${inFlightCount} ${inFlightCount === 1 ? 'candidate' : 'candidates'} running`
+      : 'Evaluating the next candidate'
+  if (!rounds?.length) return activity
+  const completed = rounds.filter((round) => round.outcome).length
+  return `${activity} · ${completed} finished`
+})
 const isRunning = computed(
   () =>
     isAgentRequestPending.value ||
@@ -779,12 +842,13 @@ const canSubmit = computed(
 const composerPlaceholder = computed(() => {
   if (isAgentConnecting.value) return 'Connecting…'
   if (!agentSessionId.value) return 'Unavailable'
-  if (episodeLocked.value) return 'Optimization in progress'
+  if (episodeLocked.value) return optimizationStatusLabel.value
   if (pendingInteraction.value) return 'Ask anything or reply…'
   if (isRunning.value) return 'Add a follow-up…'
   return 'Ask anything…'
 })
 const statusLabel = computed(() => {
+  if (episodeLocked.value) return optimizationStatusLabel.value
   if (isAgentConnecting.value) return 'Connecting'
   if (queuedMessage.value) return 'Agent is working, 1 message queued'
   if (isRunning.value) return isInterruptPending.value ? 'Stopping' : 'Agent is working'
@@ -2954,6 +3018,54 @@ const handleKeyDown = (e: KeyboardEvent) => {
   flex: 1 1 auto;
   padding-bottom: var(--interaction-overlay-height, 0px);
   scroll-padding-bottom: var(--interaction-overlay-height, 0px);
+}
+
+.agent-optimization-status {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.agent-optimization-status:is(
+  [data-state='starting'],
+  [data-state='calibrating'],
+  [data-state='running'],
+  [data-state='stopping']
+) {
+  background: var(--info-bg);
+}
+
+.agent-optimization-status > i {
+  color: var(--info-color);
+}
+
+.agent-optimization-status__copy {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  font-size: 0.75rem;
+}
+
+.agent-optimization-status__copy span {
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .agent-optimization-status__spinner {
+    animation: agent-optimization-spin 1s linear infinite;
+  }
+}
+
+@keyframes agent-optimization-spin {
+  to {
+    transform: rotate(1turn);
+  }
 }
 
 .composer-footer {

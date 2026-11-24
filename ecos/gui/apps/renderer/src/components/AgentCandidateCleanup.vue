@@ -23,7 +23,8 @@
       <h2 :id="titleId">Delete candidate files?</h2>
       <p :id="detailId">
         This permanently deletes the candidate workspaces and their generated files for
-        this optimization. The source Workspace and optimization history are kept.
+        this optimization and removes the task from Background Tasks. The source Workspace
+        and optimization history are kept.
       </p>
       <form method="dialog" class="candidate-cleanup__buttons">
         <button type="submit" value="cancel" autofocus>Cancel</button>

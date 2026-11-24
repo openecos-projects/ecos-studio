@@ -3,6 +3,7 @@ import type {
   DesktopAgentActivity,
   DesktopAgentInteractionRequest,
   DesktopAgentOptimizationPayload,
+  DesktopAgentOptimizationRound,
   ManualPdkConfiguration,
   PdkReadiness,
   ProjectManifestType,
@@ -85,6 +86,7 @@ export interface Message {
   optimization?: DesktopAgentOptimizationPayload
   /** Chronological optimization payloads accumulated for one episode. */
   optimizationTimeline?: DesktopAgentOptimizationPayload[]
+  optimizationRounds?: DesktopAgentOptimizationRound[]
 }
 
 export interface Thumbnail {

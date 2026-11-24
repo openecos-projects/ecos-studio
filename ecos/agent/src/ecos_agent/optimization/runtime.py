@@ -22,6 +22,7 @@ from pydantic import (
 from ecos_agent.workspace.step_directories import step_directory
 from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.hashing import canonical_sha256, file_sha256
+from ecos_agent.optimization.budget_contracts import CANDIDATE_EXECUTION_LIMIT
 from ecos_agent.optimization.contracts import (
     BudgetSnapshot,
     EpisodeBudget,
@@ -129,7 +130,10 @@ class OptimizationRuntimeContext(BaseModel):
 
 
 def create_optimization_runner(
-    context: Mapping[str, Any], planner: object
+    context: Mapping[str, Any],
+    planner: object,
+    *,
+    candidate_execution_limit: Literal[5, 20] = CANDIDATE_EXECUTION_LIMIT,
 ) -> OptimizationEpisodeRunner:
     try:
         runtime = OptimizationRuntimeContext.model_validate(context)
@@ -187,7 +191,9 @@ def create_optimization_runner(
     ):
         raise OptimizationRuntimeError("reference runtime is invalid")
     budget = BudgetSnapshot(
-        budget=EpisodeBudget.from_reference_rerun(float(reference_runtime))
+        budget=EpisodeBudget.from_reference_rerun(
+            float(reference_runtime), candidate_execution_limit=candidate_execution_limit
+        )
     )
     ledger_root = workspace / ".agent" / "optimization" / episode_id
     memory_scope = build_task_memory_scope(

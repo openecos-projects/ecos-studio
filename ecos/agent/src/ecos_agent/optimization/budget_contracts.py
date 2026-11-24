@@ -20,9 +20,9 @@ class EpisodeBudget(_BudgetContractModel):
     schema_version: Literal["ecos.optimization_budget.v5"] = (
         "ecos.optimization_budget.v5"
     )
-    candidate_execution_limit: Literal[20] = CANDIDATE_EXECUTION_LIMIT
+    candidate_execution_limit: Literal[5, 20] = CANDIDATE_EXECUTION_LIMIT
     planning_call_limit: Literal[60] = 60
-    minimum_candidate_executions: Literal[20] = CANDIDATE_EXECUTION_LIMIT
+    minimum_candidate_executions: Literal[5, 20] = CANDIDATE_EXECUTION_LIMIT
     # Bound on consecutive non-productive planning turns before escalation.
     # A turn is productive when it dispatches a candidate, waits on in-flight
     # evidence, or continues under a declared strategy with a viable step, so
@@ -41,7 +41,9 @@ class EpisodeBudget(_BudgetContractModel):
         return value
 
     @model_validator(mode="after")
-    def validate_wall_time_limit(self) -> "EpisodeBudget":
+    def validate_limits(self) -> "EpisodeBudget":
+        if self.minimum_candidate_executions != self.candidate_execution_limit:
+            raise ValueError("minimum candidate executions must equal the candidate limit")
         if not math.isclose(
             self.wall_time_limit_seconds,
             WALL_TIME_LIMIT_MULTIPLIER * self.reference_place_to_harden_seconds,
@@ -52,8 +54,15 @@ class EpisodeBudget(_BudgetContractModel):
         return self
 
     @classmethod
-    def from_reference_rerun(cls, duration: float) -> "EpisodeBudget":
+    def from_reference_rerun(
+        cls,
+        duration: float,
+        *,
+        candidate_execution_limit: Literal[5, 20] = CANDIDATE_EXECUTION_LIMIT,
+    ) -> "EpisodeBudget":
         return cls(
+            candidate_execution_limit=candidate_execution_limit,
+            minimum_candidate_executions=candidate_execution_limit,
             reference_place_to_harden_seconds=duration,
             wall_time_limit_seconds=WALL_TIME_LIMIT_MULTIPLIER * duration,
         )

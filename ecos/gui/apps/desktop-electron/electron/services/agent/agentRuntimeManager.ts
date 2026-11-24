@@ -868,7 +868,10 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
     persistenceError = 'Unable to persist Optimization Episode outcome; Parent remains guarded.',
   ): void {
     const previous = this.optimizationEpisodes.get(episode.episodeId)
-    this.optimizationEpisodes.set(episode.episodeId, episode)
+    const next = TERMINAL_OPTIMIZATION_STATES.has(episode.state)
+      ? { ...episode, finishedAt: previous?.finishedAt ?? episode.updatedAt }
+      : episode
+    this.optimizationEpisodes.set(next.episodeId, next)
     if (!this.persistOptimizationProjection() && requirePersistence) {
       if (previous) this.optimizationEpisodes.set(episode.episodeId, previous)
       else this.optimizationEpisodes.delete(episode.episodeId)
@@ -1125,6 +1128,14 @@ function readOptimizationEpisodeSummary(
     bestCandidate: readBestOptimizationCandidate(value.bestCandidate),
     providerId: value.providerId,
     startedAt: value.startedAt,
+    ...(TERMINAL_OPTIMIZATION_STATES.has(state)
+      ? {
+          finishedAt:
+            typeof value.finishedAt === 'number' && Number.isFinite(value.finishedAt)
+              ? value.finishedAt
+              : value.updatedAt,
+        }
+      : {}),
     state,
     turnCount: value.turnCount,
     updatedAt: value.updatedAt,

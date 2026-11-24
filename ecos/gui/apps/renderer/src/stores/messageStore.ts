@@ -5,10 +5,14 @@ import type {
   DesktopAgentExecutionContract,
   DesktopAgentInteractionRequest,
   DesktopAgentOptimizationPayload,
+  DesktopAgentOptimizationRound,
 } from '@ecos-studio/shared'
 import type { Message, Thumbnail, InfoData, MapData } from '../types'
 import { sameCapturedFlowStep } from '@/composables/flowRunArtifacts'
-import { isEphemeralToolContent } from '../components/agentToolSteps'
+import {
+  isEphemeralToolContent,
+  readBaselineCalibration,
+} from '../components/agentToolSteps'
 
 // 生成唯一 ID
 const generateId = (): string => {
@@ -346,7 +350,12 @@ export const useMessageStore = defineStore('messages', () => {
       const id = `optimization-${event.optimization.episode_id}`
       const existingOptimization = bucket.find((message) => message.id === id)
       if (existingOptimization) {
-        existingOptimization.optimization = event.optimization
+        const previous = existingOptimization.optimization
+        existingOptimization.optimization = {
+          ...event.optimization,
+          state: event.optimization.state ?? previous?.state,
+          best_candidate: event.optimization.best_candidate ?? previous?.best_candidate,
+        }
         existingOptimization.optimizationTimeline = [
           ...(existingOptimization.optimizationTimeline ?? []),
           event.optimization,
@@ -364,10 +373,23 @@ export const useMessageStore = defineStore('messages', () => {
       }
       return id
     }
-    const id = event.messageId ?? generateId()
+    let id = event.messageId ?? generateId()
+    const optimizationLogId = `optimization-progress-${sessionId}`
+    const text = event.delta ?? event.text ?? ''
+    const calibrationUpdate = event.type === 'tool' && readBaselineCalibration(text)
+    if (event.type === 'tool' && (id === optimizationLogId || calibrationUpdate)) {
+      id = optimizationLogId
+      for (let index = bucket.length - 1; index >= 0; index -= 1) {
+        const optimization = bucket[index]?.optimization
+        if (!optimization) continue
+        id = `${id}:${optimization.episode_id}`
+        break
+      }
+    }
+    const delta = calibrationUpdate ? `${text.trimEnd()}\n` : event.delta
     const existing = bucket.find((message) => message.id === id)
     if (existing) {
-      if (event.delta) existing.content += stripToolMarkdown(event.delta)
+      if (delta) existing.content += stripToolMarkdown(delta)
       else if (event.text) existing.content = stripToolMarkdown(event.text)
       existing.status =
         event.type === 'error' ? 'error' : event.delta ? 'loading' : 'done'
@@ -376,7 +398,7 @@ export const useMessageStore = defineStore('messages', () => {
     bucket.push({
       id,
       role: 'assistant',
-      content: stripToolMarkdown(event.delta ?? event.text ?? ''),
+      content: stripToolMarkdown(delta ?? text),
       type: event.type === 'tool' ? 'tool' : 'text',
       status: event.type === 'error' ? 'error' : event.delta ? 'loading' : 'done',
     })
@@ -386,6 +408,7 @@ export const useMessageStore = defineStore('messages', () => {
   const upsertOptimizationProjection = (
     sessionId: string,
     optimization: DesktopAgentOptimizationPayload,
+    rounds?: DesktopAgentOptimizationRound[],
   ): string => {
     const id = `optimization-${optimization.episode_id}`
     const bucket = sessionMessages(sessionId)
@@ -393,6 +416,7 @@ export const useMessageStore = defineStore('messages', () => {
     if (existing) {
       existing.optimization = optimization
       existing.optimizationTimeline = [optimization]
+      if (rounds) existing.optimizationRounds = rounds
       return id
     }
     bucket.push({
@@ -403,6 +427,7 @@ export const useMessageStore = defineStore('messages', () => {
       status: 'done',
       optimization,
       optimizationTimeline: [optimization],
+      optimizationRounds: rounds,
     })
     return id
   }

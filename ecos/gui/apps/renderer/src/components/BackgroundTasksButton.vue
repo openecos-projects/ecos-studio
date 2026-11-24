@@ -61,7 +61,7 @@
               </span>
               <span class="background-task-meta">
                 <span>{{ episodeStateLabel(episode.state) }}</span>
-                <time>{{ elapsedLabel(episode.startedAt) }}</time>
+                <time>{{ episodeElapsedLabel(episode) }}</time>
               </span>
             </button>
             <AgentCandidateResult
@@ -160,6 +160,16 @@
                 <span>{{ creation.stage || 'Invalid journal' }}</span>
               </span>
             </div>
+            <button
+              v-if="creation.status === 'unfinished'"
+              type="button"
+              class="background-task-retry"
+              title="Discard creation record"
+              :disabled="discardingCreation"
+              @click="openDiscardCreation(creation)"
+            >
+              Discard record
+            </button>
           </article>
 
           <article
@@ -208,6 +218,23 @@
         <div v-else class="background-tasks-empty">No background tasks</div>
       </section>
     </Transition>
+    <dialog
+      ref="discardDialog"
+      class="background-task-discard-dialog"
+      :aria-labelledby="discardTitleId"
+      :aria-describedby="discardDetailId"
+      @close="confirmDiscardCreation"
+    >
+      <h2 :id="discardTitleId">Discard this creation record?</h2>
+      <p :id="discardDetailId">
+        This clears the recovery record for <strong>{{ discardTargetLabel }}</strong>
+        and removes any registrations made by this attempt. Workspace files are kept.
+      </p>
+      <form method="dialog" class="background-task-discard-actions">
+        <button type="submit" value="cancel" autofocus>Cancel</button>
+        <button type="submit" value="discard">Discard record</button>
+      </form>
+    </dialog>
   </div>
 </template>
 
@@ -222,7 +249,7 @@ import type {
   EccRuntimeOperationState,
 } from '@ecos-studio/shared'
 import { storeToRefs } from 'pinia'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, useId, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AgentCandidateCleanup from '@/components/AgentCandidateCleanup.vue'
 import AgentCandidateResult from '@/components/AgentCandidateResult.vue'
@@ -259,6 +286,15 @@ const trigger = ref<HTMLButtonElement | null>(null)
 const now = ref(Date.now())
 let clock: ReturnType<typeof setInterval> | null = null
 const retryingHandle = ref('')
+const discardDialog = ref<HTMLDialogElement | null>(null)
+const discardTitleId = useId()
+const discardDetailId = useId()
+const discardTarget = ref<PresentedCreation | null>(null)
+const discardingCreation = ref(false)
+const discardTargetLabel = computed(() => {
+  const creation = discardTarget.value
+  return creation ? taskLabel(creation.targetDirectory, creation.projectRoot) : ''
+})
 const topbarOverlayEvent = 'ecos-topbar-overlay-open'
 const openAgentProgressEvent = 'ecos-open-agent-progress'
 const designOwners = ref<Record<string, string>>({})
@@ -295,21 +331,24 @@ const creationTasks = computed<PresentedCreation[]>(() => {
     },
   ]
 })
+const terminalEpisodeStates = new Set<DesktopAgentOptimizationEpisodeState>([
+  'completed',
+  'failed',
+  'stopped',
+])
 const activeEpisodeTasks = computed(() =>
-  episodes.value.filter(
-    (episode) => !['completed', 'failed', 'stopped'].includes(episode.state),
-  ),
+  episodes.value.filter((episode) => !terminalEpisodeStates.has(episode.state)),
 )
 const episodeTasks = computed(() => [
   ...activeEpisodeTasks.value,
   ...episodes.value.filter(
     (episode) =>
-      episode.state === 'failed' ||
-      episode.state === 'completed' ||
-      Boolean(episode.bestCandidate && episode.state === 'stopped') ||
-      (episode.state === 'stopped' &&
-        (episode.cleanupState === 'available' ||
-          Boolean(episode.optimization.rejection_reason))),
+      terminalEpisodeStates.has(episode.state) &&
+      episode.cleanupState !== 'completed' &&
+      (episode.state !== 'stopped' ||
+        episode.cleanupState === 'available' ||
+        episode.bestCandidate ||
+        episode.optimization.rejection_reason),
   ),
 ])
 const taskCount = computed(
@@ -395,7 +434,11 @@ function openAgentProgress(episode: DesktopAgentOptimizationEpisodeSummary): voi
   } else {
     agentShell.activateTab(episode.agentSessionId)
   }
-  messageStore.upsertOptimizationProjection(episode.agentSessionId, episode.optimization)
+  messageStore.upsertOptimizationProjection(
+    episode.agentSessionId,
+    episode.optimization,
+    episode.rounds,
+  )
   agentShell.openHomeAgent()
   agentShell.openWorkspaceAgent()
   open.value = false
@@ -516,6 +559,34 @@ async function retrySnapshot(workspaceHandle: string): Promise<void> {
   }
 }
 
+function openDiscardCreation(creation: PresentedCreation): void {
+  discardTarget.value = creation
+  discardDialog.value?.showModal()
+}
+
+async function confirmDiscardCreation(): Promise<void> {
+  const dialog = discardDialog.value
+  const creation = discardTarget.value
+  if (!dialog || !creation) return
+  const confirmed = dialog.returnValue === 'discard'
+  dialog.returnValue = ''
+  discardTarget.value = null
+  if (!confirmed) return
+
+  discardingCreation.value = true
+  try {
+    await store.abandonCreation(creation.creationId)
+  } catch (error) {
+    showToast({
+      severity: 'error',
+      summary: 'Could not discard creation record',
+      detail: error instanceof Error ? error.message : String(error),
+    })
+  } finally {
+    discardingCreation.value = false
+  }
+}
+
 function taskLabel(path: string, projectRoot?: string): string {
   const workspacePath = normalizePath(path)
   return backgroundTaskIdentityLabel({
@@ -563,9 +634,16 @@ function stateLabel(state: EccRuntimeOperationState): string {
   return state === 'queued' ? 'Queued' : 'Running'
 }
 
-function elapsedLabel(timestamp: number): string {
+function episodeElapsedLabel(episode: DesktopAgentOptimizationEpisodeSummary): string {
+  const end = terminalEpisodeStates.has(episode.state)
+    ? (episode.finishedAt ?? episode.updatedAt)
+    : now.value
+  return elapsedLabel(episode.startedAt, end)
+}
+
+function elapsedLabel(timestamp: number, end = now.value): string {
   const startedAt = timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp
-  const seconds = Math.max(0, Math.floor((now.value - startedAt) / 1000))
+  const seconds = Math.max(0, Math.floor((end - startedAt) / 1000))
   if (seconds < 60) return `${seconds}s`
   const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `${minutes}m ${seconds % 60}s`

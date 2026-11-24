@@ -46,6 +46,47 @@ describe('messageStore', () => {
     expect(store.messages.map((message) => message.content)).toEqual(['alpha'])
   })
 
+  it('keeps optimization log updates together and separates episodes in the same chat', () => {
+    const store = useMessageStore()
+    const sessionId = 'session-test'
+    for (const episodeId of ['episode-one', 'episode-two']) {
+      store.upsertOptimizationProjection(sessionId, {
+        schema_version: 'ecos.optimization_status.v2',
+        episode_id: episodeId,
+        state: 'calibrating',
+      })
+      store.upsertAgentEvent({
+        type: 'tool',
+        sessionId,
+        messageId: `optimization-progress-${sessionId}`,
+        delta: 'preparing replay 1/3: deriving a workspace\n',
+      })
+      store.upsertAgentEvent({
+        type: 'tool',
+        sessionId,
+        messageId: 'legacy-heartbeat',
+        delta: 'noise calibration replay 1/3: flow running, elapsed 0m31s\n',
+      })
+      store.upsertAgentEvent({
+        type: 'tool',
+        sessionId,
+        text: 'replay 1/3 finished',
+      })
+    }
+    expect(store.messages.filter((message) => message.type === 'tool')).toMatchObject([
+      {
+        id: 'optimization-progress-session-test:episode-one',
+        content:
+          'preparing replay 1/3: deriving a workspace\nnoise calibration replay 1/3: flow running, elapsed 0m31s\nreplay 1/3 finished\n',
+      },
+      {
+        id: 'optimization-progress-session-test:episode-two',
+        content:
+          'preparing replay 1/3: deriving a workspace\nnoise calibration replay 1/3: flow running, elapsed 0m31s\nreplay 1/3 finished\n',
+      },
+    ])
+  })
+
   it('clears all in-memory chat messages', () => {
     const store = useMessageStore()
 

@@ -584,7 +584,13 @@ class ProviderEmissionMixin:
         self._emit(session, "interaction", clarification.title, interaction=request)
 
 
-    def _progress(self, session: _Session, activity: str | Mapping[str, Any]) -> None:
+    def _progress(
+        self,
+        session: _Session,
+        activity: str | Mapping[str, Any],
+        *,
+        message_id: str | None = None,
+    ) -> None:
         self._check_interrupted(session)
         if isinstance(activity, Mapping):
             payload = dict(activity)
@@ -617,7 +623,7 @@ class ProviderEmissionMixin:
             "tool",
             activity,
             delta=f"{activity}\n",
-            message_id=session.active_tool_message_id,
+            message_id=message_id or session.active_tool_message_id,
         )
 
     def _local_activity(

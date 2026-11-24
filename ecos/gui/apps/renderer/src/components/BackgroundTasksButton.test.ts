@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import type { EccBackgroundOperation } from '@ecos-studio/shared'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -227,7 +227,8 @@ describe('BackgroundTasksButton', () => {
     wrapper.unmount()
   })
 
-  it('confirms cleanup for a finished episode from Background Tasks', async () => {
+  it('freezes the duration of a finished episode and removes it after confirmed cleanup', async () => {
+    const startedAt = Date.now() - 60_000
     const episodes = useOptimizationEpisodeStore()
     episodes.episodes = [
       {
@@ -242,17 +243,25 @@ describe('BackgroundTasksButton', () => {
         },
         parentWorkspaceDirectory: '/projects/demo/ws_1',
         providerId: 'ecos_agent',
-        startedAt: Date.now() - 10_000,
+        startedAt,
         state: 'completed',
         turnCount: 1,
-        updatedAt: Date.now(),
+        updatedAt: startedAt + 12_000,
       },
     ]
-    const cleanup = vi.spyOn(episodes, 'cleanup').mockResolvedValue()
+    const cleanup = vi.spyOn(episodes, 'cleanup').mockImplementation(async () => {
+      episodes.episodes[0].cleanupState = 'completed'
+    })
     const wrapper = mount(BackgroundTasksButton)
 
     await wrapper.get('.background-tasks-trigger').trigger('click')
     expect(wrapper.text()).toContain('0 active')
+    expect(wrapper.get('time').text()).toBe('12s')
+    const episode = episodes.episodes[0]
+    episode.finishedAt = episode.updatedAt
+    episode.updatedAt += 30_000
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('time').text()).toBe('12s')
     expect(wrapper.find('button[aria-label="Delete candidate files"]').exists()).toBe(
       true,
     )
@@ -268,6 +277,8 @@ describe('BackgroundTasksButton', () => {
       severity: 'success',
       summary: 'Candidate files deleted',
     })
+    expect(wrapper.find('.background-task-optimization').exists()).toBe(false)
+    expect(episodes.episodes).toHaveLength(1)
     wrapper.unmount()
   })
 
@@ -417,7 +428,7 @@ describe('BackgroundTasksButton', () => {
     wrapper.unmount()
   })
 
-  it('keeps unfinished creation recovery in the task list without a Project Management shortcut', async () => {
+  it('discards an unfinished creation record only after confirmation', async () => {
     const store = useBackgroundOperationStore()
     store.creations = [
       {
@@ -433,8 +444,33 @@ describe('BackgroundTasksButton', () => {
     await wrapper.get('.background-tasks-trigger').trigger('click')
 
     expect(wrapper.text()).toContain('Application exited during creation.')
-    expect(wrapper.find('.background-task-recovery-actions').exists()).toBe(false)
+    expect(wrapper.get('.background-tasks-trigger').text()).toContain('!')
     expect(wrapper.find('.background-tasks-view').exists()).toBe(false)
+    const discard = wrapper.get('button[title="Discard creation record"]')
+    const dialog = wrapper.get<HTMLDialogElement>('dialog.background-task-discard-dialog')
+    await discard.trigger('click')
+    dialog.element.returnValue = 'cancel'
+    await dialog.trigger('close')
+    expect(testState.execute).not.toHaveBeenCalled()
+
+    testState.runtimeAvailable = true
+    testState.operationProjection.mockResolvedValueOnce({
+      creations: [],
+      finalizations: [],
+      generation: 1,
+      operations: [],
+      outcomes: [],
+    })
+    testState.execute.mockResolvedValueOnce({ abandoned: true })
+    await discard.trigger('click')
+    dialog.element.returnValue = 'discard'
+    await dialog.trigger('close')
+    await flushPromises()
+    expect(testState.execute).toHaveBeenCalledExactlyOnceWith({
+      command: 'workspace.abandonCreation',
+      payload: { creationId: 'creation-1' },
+    })
+    expect(wrapper.text()).toContain('No background tasks')
     expect(testState.push).not.toHaveBeenCalled()
     wrapper.unmount()
   })

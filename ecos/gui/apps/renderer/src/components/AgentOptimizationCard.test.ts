@@ -99,6 +99,96 @@ describe('AgentOptimizationCard', () => {
     expect(wrapper.find('img').exists()).toBe(false)
   })
 
+  it('shows a finished episode when the optimization budget has been used', async () => {
+    const stopped: DesktopAgentOptimizationPayload = {
+      schema_version: 'ecos.optimization_status.v1',
+      episode_id: 'episode-1',
+      active_primary_metric: 'route_wirelength',
+      state: 'stopped',
+      turn_count: 6,
+      rejection_reason: 'budget_exhausted',
+    }
+    const wrapper = mount(AgentOptimizationCard, {
+      props: { optimization: stopped, timeline: [stopped] },
+    })
+
+    expect(wrapper.text()).toContain('Finished')
+    expect(wrapper.text()).toContain('Optimization budget reached.')
+    expect(wrapper.text()).not.toContain('Rejected')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+
+    await wrapper.setProps({ optimization: { ...stopped, rejection_reason: undefined } })
+    expect(wrapper.text()).toContain('Stopped')
+    expect(wrapper.text()).not.toContain('Optimization budget reached.')
+  })
+
+  it('shows a planner continue as progress while a candidate is running', async () => {
+    const continuing: DesktopAgentOptimizationPayload = {
+      ...turnOne,
+      in_flight: 1,
+      proposal_decision: 'continue',
+      rejection_reason: 'planner_continue',
+    }
+    const wrapper = mount(AgentOptimizationCard, {
+      props: { optimization: continuing, timeline: [continuing] },
+    })
+
+    expect(wrapper.text()).toContain('Planning the next candidate')
+    expect(wrapper.text()).toContain('1 in flight')
+    expect(wrapper.text()).not.toContain('Rejected')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+
+    await wrapper.setProps({ optimization: { ...continuing, state: 'paused' } })
+    expect(wrapper.text()).toContain('Paused')
+    expect(wrapper.text()).not.toContain('Planning the next candidate')
+    expect(wrapper.text()).not.toContain('Rejected')
+  })
+
+  it('shows the best candidate and its baseline on the finished optimization card', () => {
+    const finished: DesktopAgentOptimizationPayload = {
+      schema_version: 'ecos.optimization_status.v1',
+      episode_id: 'episode-1',
+      state: 'stopped',
+      rejection_reason: 'budget_exhausted',
+      active_primary_metric: 'route_wirelength',
+      best_candidate: {
+        candidate_id: 'candidate-1',
+        manifest_sha256: 'a'.repeat(64),
+        metrics: [
+          { id: 'drc_count', baseline: 0, candidate: 0 },
+          { id: 'route_wirelength', baseline: 6175.6, candidate: 5934.4 },
+        ],
+      },
+    }
+    const wrapper = mount(AgentOptimizationCard, {
+      props: {
+        optimization: finished,
+        timeline: [finished],
+        rounds: [
+          {
+            interventionId: 'intervention-1',
+            requested: { knob_id: 'place.target_density', value: 0.45 },
+            metric: { id: 'route_wirelength', value: 5934.4 },
+            outcome: 'improved',
+            manifestSha256: finished.best_candidate!.manifest_sha256,
+          },
+          { interventionId: 'intervention-2', outcome: 'candidate_ineligible' },
+        ],
+      },
+    })
+
+    expect(wrapper.text()).toContain('Best candidate · Routed wirelength')
+    expect(wrapper.text().replace(/\s+/g, ' ')).toContain(
+      'Baseline 6,175.6 → 5,934.4 (-3.9%)',
+    )
+    expect(wrapper.get('table').text()).toContain('Routed wirelength')
+    const rounds = wrapper.findAll('.optimization-card__rounds details')
+    expect(rounds).toHaveLength(2)
+    expect(rounds[0].get('summary').text()).toContain('Best')
+    expect(rounds[0].text()).toContain('place.target_density')
+    expect(rounds[1].get('summary').text()).toContain('Candidate ineligible')
+  })
+
   it('renders a compact episode summary without duplicating Operation detail', () => {
     const wrapper = mount(AgentOptimizationCard, {
       props: {

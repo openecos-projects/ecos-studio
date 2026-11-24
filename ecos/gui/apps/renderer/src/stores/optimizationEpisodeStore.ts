@@ -93,7 +93,14 @@ export const useOptimizationEpisodeStore = defineStore('optimizationEpisodes', (
     sessionId: string | null | undefined,
   ): DesktopAgentOptimizationEpisodeSummary | null {
     if (!sessionId) return null
-    return episodes.value.find((episode) => episode.agentSessionId === sessionId) ?? null
+    const matches = episodes.value.filter(
+      (episode) => episode.agentSessionId === sessionId,
+    )
+    return (
+      matches.find((episode) => !isTerminalEpisode(episode.state)) ??
+      matches[matches.length - 1] ??
+      null
+    )
   }
 
   function episodeForParent(

@@ -29,8 +29,11 @@ export function useOptimizationEpisodeTabs(options: OptimizationEpisodeTabsOptio
   const pendingTabCloseId = ref<string | null>(null)
   const tabCloseStopping = ref(false)
   const tabCloseIssue = ref('')
+  const currentOptimizationEpisode = computed(() =>
+    optimizationEpisodes.episodeForSession(options.sessionId.value),
+  )
   const activeOptimizationEpisode = computed(() => {
-    const episode = optimizationEpisodes.episodeForSession(options.sessionId.value)
+    const episode = currentOptimizationEpisode.value
     return episode && !TERMINAL_STATES.has(episode.state) ? episode : null
   })
 
@@ -39,7 +42,14 @@ export function useOptimizationEpisodeTabs(options: OptimizationEpisodeTabsOptio
       if (!agentShell.tabs.some((tab) => tab.id === episode.agentSessionId)) continue
       messageStore.upsertOptimizationProjection(
         episode.agentSessionId,
-        episode.optimization,
+        {
+          ...episode.optimization,
+          state: episode.optimization.state ?? episode.state,
+          turn_count: episode.turnCount,
+          in_flight: episode.inFlightCount,
+          best_candidate: episode.bestCandidate ?? episode.optimization.best_candidate,
+        },
+        episode.rounds,
       )
     }
   }
@@ -127,6 +137,7 @@ export function useOptimizationEpisodeTabs(options: OptimizationEpisodeTabsOptio
 
   return {
     activeOptimizationEpisode,
+    currentOptimizationEpisode,
     closeChatTab,
     handleOptimizationControl,
     handleTabCloseDialogVisibility,

@@ -177,6 +177,46 @@
   opacity: 0.4;
 }
 
+.background-task-discard-dialog {
+  margin: auto;
+  width: min(26rem, calc(100vw - 2rem));
+  padding: 1.25rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
+.background-task-discard-dialog:modal {
+  overscroll-behavior: contain;
+}
+
+.background-task-discard-dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background: rgb(0 0 0 / 45%);
+}
+
+.background-task-discard-dialog h2 {
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+.background-task-discard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.background-task-discard-actions button {
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+}
+
 .background-tasks-empty {
   padding: 24px 8px;
   border-top: 1px solid var(--border-color);

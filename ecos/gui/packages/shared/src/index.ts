@@ -500,6 +500,7 @@ export type {
   DesktopAgentToolCallActivity,
   DesktopAgentWebSearchAction,
   DesktopAgentWebSearchActivity,
+  DesktopAgentOptimizationRound,
 } from './contracts/desktopAgent.ts'
 export { desktopAgentParameterWriteFiles } from './contracts/desktopAgent.ts'
 export {

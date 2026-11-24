@@ -9,8 +9,29 @@
       v-else-if="message.type === 'optimization' && message.optimization"
       :optimization="message.optimization"
       :timeline="message.optimizationTimeline ?? [message.optimization]"
+      :rounds="message.optimizationRounds"
       @control="$emit('optimization-control', $event)"
     />
+    <details
+      v-else-if="
+        message.type === 'tool' && message.id.startsWith('optimization-progress-')
+      "
+      class="optimization-log"
+    >
+      <summary>
+        <template v-if="baselineCalibration">
+          Baseline calibration
+          <span
+            >{{ baselineCalibration.completed }}/{{
+              baselineCalibration.total
+            }}
+            complete</span
+          >
+        </template>
+        <template v-else>Optimization log</template>
+      </summary>
+      <pre class="custom-scrollbar">{{ message.content.trimEnd() }}</pre>
+    </details>
     <AgentToolCard
       v-else-if="message.type === 'tool'"
       :content="message.content"
@@ -417,12 +438,14 @@ import type { Message } from '../types'
 import AgentActivityStream from './AgentActivityStream.vue'
 import AgentOptimizationCard from './AgentOptimizationCard.vue'
 import AgentToolCard from './AgentToolCard.vue'
+import { readBaselineCalibration } from './agentToolSteps'
 import ChatArtifactLightbox from './ChatArtifactLightbox.vue'
 import { sanitizeHtml } from '@/utils/sanitizeHtml'
 import { readProjectBlobUrl } from '@/utils/projectFiles'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
 
 const props = defineProps<{ message: Message }>()
+const baselineCalibration = computed(() => readBaselineCalibration(props.message.content))
 
 const emit = defineEmits<{
   (e: 'img-load'): void
@@ -667,6 +690,35 @@ function csvRows(content: string): string[][] {
 </script>
 
 <style scoped>
+.optimization-log {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 0.625rem;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.optimization-log summary {
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+}
+
+.optimization-log summary span {
+  margin-inline-start: 0.375rem;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.optimization-log pre {
+  max-height: 12rem;
+  overflow: auto;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--border-color);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
 .message-bubble--assistant {
   max-width: min(94%, 68rem);
   border: 0;

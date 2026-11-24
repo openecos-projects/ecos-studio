@@ -143,7 +143,7 @@ describe('AIChatPanel flow contracts', () => {
     )
     expect(source).toContain('undo: true')
     expect(source).toContain('messageStore.rewindToInteraction(')
-    expect(source).toContain('<div class="composer-footer">')
+    expect(source).toContain('class="composer-footer"')
     expect(source).not.toContain('@other="focusComposer"')
     expect(source).not.toContain('composerInputRef.value?.focus()')
     expect(source).toContain('if (textMessage) messageStore.addMessage(textMessage)')

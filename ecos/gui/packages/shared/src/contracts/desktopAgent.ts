@@ -514,6 +514,16 @@ export interface DesktopAgentOptimizationCandidate {
   metrics: { id: string; baseline: number | null; candidate: number }[]
 }
 
+export interface DesktopAgentOptimizationRound {
+  interventionId: string
+  requested?: { knob_id: string; value: boolean | number }
+  outcome?: string
+  decision?: string
+  metric?: { id: string; value: number }
+  manifestSha256?: string
+  failedGates?: string[]
+}
+
 export interface DesktopAgentRetainOptimizationCandidateRequest extends DesktopAgentProviderRequest {
   episodeId: string
   sessionId: string
@@ -590,12 +600,14 @@ export interface DesktopAgentOptimizationEpisodeSummary {
   parentWorkspaceRevision?: number
   providerId: string
   startedAt: number
+  finishedAt?: number
   state: DesktopAgentOptimizationEpisodeState
   turnCount: number
   updatedAt: number
   notificationStates?: DesktopAgentOptimizationEpisodeNotificationState[]
   cleanupState?: 'available' | 'completed'
   bestCandidate?: DesktopAgentOptimizationCandidate
+  rounds?: DesktopAgentOptimizationRound[]
 }
 
 export type DesktopAgentOptimizationEpisodeNotificationState =
