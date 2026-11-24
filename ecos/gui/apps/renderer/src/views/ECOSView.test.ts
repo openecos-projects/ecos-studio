@@ -416,6 +416,11 @@ describe('ECOSView home', () => {
     expect(container.textContent).toContain('Templates and core constraints')
     expect(container.textContent).toContain('IP Catalog')
     expect(container.textContent).toContain('Benchmarks')
+    expect(
+      Array.from(container.querySelectorAll('button, a, [tabindex]')).some((element) =>
+        /IP Catalog|Benchmarks/.test(element.textContent ?? ''),
+      ),
+    ).toBe(false)
     expect(container.textContent.indexOf('Resource Manager')).toBeLessThan(
       container.textContent.indexOf('IP Catalog'),
     )

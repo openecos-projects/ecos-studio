@@ -95,13 +95,12 @@
                 ></i>
               </button>
 
-              <button
-                @click="handleNotReady"
-                class="group flex w-full cursor-pointer items-center gap-3 rounded-lg border border-(--border-color) bg-(--bg-secondary) px-4 py-3 text-left opacity-50 transition-all duration-200 hover:border-(--accent-color)"
+              <div
+                class="flex min-h-12 items-center gap-3 rounded-lg border border-(--border-color) px-4 py-3 text-(--text-secondary)"
               >
-                <i class="ri-puzzle-line text-lg text-(--text-secondary)"></i>
-                <span class="text-sm text-(--text-primary)">IP Catalog</span>
-              </button>
+                <i class="ri-puzzle-line text-lg" aria-hidden="true"></i>
+                <span class="text-sm">IP Catalog</span>
+              </div>
             </div>
           </div>
 
@@ -125,13 +124,12 @@
                 ></i>
               </button>
 
-              <button
-                @click="handleNotReady"
-                class="group flex w-full cursor-pointer items-center gap-3 rounded-lg border border-(--border-color) bg-(--bg-secondary) px-4 py-3 text-left opacity-50 transition-all duration-200 hover:border-(--accent-color)"
+              <div
+                class="flex min-h-12 items-center gap-3 rounded-lg border border-(--border-color) px-4 py-3 text-(--text-secondary)"
               >
-                <i class="ri-bar-chart-box-line text-lg text-(--text-secondary)"></i>
-                <span class="text-sm text-(--text-primary)">Benchmarks</span>
-              </button>
+                <i class="ri-bar-chart-box-line text-lg" aria-hidden="true"></i>
+                <span class="text-sm">Benchmarks</span>
+              </div>
             </div>
           </div>
         </div>
@@ -182,7 +180,4 @@ const navigateToFE = () => router.push('/fe')
 const navigateToProjects = () => router.push('/projects')
 const navigateToTools = () => router.push('/tools')
 const navigateToMpcResources = () => router.push('/mpc')
-const handleNotReady = () => {
-  /* placeholder */
-}
 </script>
