@@ -1,6 +1,13 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import router from './index'
+
+const { hasOpenWorkspace } = vi.hoisted(() => ({ hasOpenWorkspace: vi.fn(() => false) }))
+vi.mock('../composables/useWorkspace', () => ({ hasOpenWorkspace }))
+vi.mock('../views/WelcomeView.vue', () => ({ default: {} }))
+vi.mock('../views/ECCView.vue', () => ({ default: {} }))
+vi.mock('../views/WorkspaceViewWrapper.vue', () => ({ default: {} }))
+vi.mock('../views/WorkspaceRouteView.vue', () => ({ default: {} }))
 
 describe('MPC resources route', () => {
   it('resolves the dedicated MPC catalog under the welcome shell', () => {
@@ -40,5 +47,25 @@ describe('workspace fixed routes', () => {
 
     expect(failure).toBeTruthy()
     expect(router.currentRoute.value.path).not.toBe('/workspace/configure')
+  })
+
+  it('lets the app restore an initial workspace route', async () => {
+    await router.push('/workspace/home')
+
+    expect(router.currentRoute.value.path).toBe('/workspace/home')
+  })
+
+  it('returns to Backend Design when navigating without an open workspace', async () => {
+    await router.push('/ecc')
+    await router.push('/workspace/synthesis')
+
+    expect(router.currentRoute.value.path).toBe('/ecc')
+  })
+
+  it('opens flow steps when a workspace is open', async () => {
+    hasOpenWorkspace.mockReturnValueOnce(true)
+    await router.push('/workspace/synthesis')
+
+    expect(router.currentRoute.value.path).toBe('/workspace/synthesis')
   })
 })

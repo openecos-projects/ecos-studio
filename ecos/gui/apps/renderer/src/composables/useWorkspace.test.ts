@@ -889,6 +889,32 @@ describe('useWorkspace openProject', () => {
     expect(workspace.currentProject.value?.path).toBe('/work/broken')
   })
 
+  it('redirects an initial workspace route when this window has no bound workspace', async () => {
+    const workspace = useWorkspace()
+    routerMock.currentRoute.value = { path: '/workspace/home', query: {} }
+
+    await workspace.loadRecentProjects()
+
+    expect(routerMock.replace).toHaveBeenCalledWith('/ecc')
+    expect(loadWorkspaceApiMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps the initial route when the bound workspace is restored', async () => {
+    const workspace = useWorkspace()
+    routerMock.currentRoute.value = { path: '/workspace/synthesis', query: {} }
+    vi.mocked(desktopApi.workspace.getBoundPath).mockResolvedValueOnce('/work/gcd')
+    loadWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: { directory: '/work/gcd', workspace_handle: 'restored-workspace' },
+    })
+
+    await workspace.loadRecentProjects()
+
+    expect(workspace.currentProject.value?.path).toBe('/work/gcd')
+    expect(workspace.workspaceSession.value.state).toBe('active')
+    expect(routerMock.replace).not.toHaveBeenCalled()
+  })
+
   it('routes a snapshot open failure during session restore to the recovery dialog', async () => {
     const workspace = useWorkspace()
     routerMock.currentRoute.value = { path: '/workspace/home', query: {} }
@@ -905,7 +931,7 @@ describe('useWorkspace openProject', () => {
       code: 'snapshot_rebuild_required',
       directory: '/work/broken',
     })
-    expect(routerMock.replace).toHaveBeenCalledWith('/')
+    expect(routerMock.replace).toHaveBeenCalledWith('/ecc')
   })
 
   it('keeps the silent restore fallback for unrelated reload failures', async () => {
@@ -917,7 +943,7 @@ describe('useWorkspace openProject', () => {
     await workspace.loadRecentProjects()
 
     expect(useSnapshotOpenRecovery().pendingRequest.value).toBeNull()
-    expect(routerMock.replace).toHaveBeenCalledWith('/')
+    expect(routerMock.replace).toHaveBeenCalledWith('/ecc')
   })
 
   it('keeps Agent chat messages when a workspace opens successfully', async () => {

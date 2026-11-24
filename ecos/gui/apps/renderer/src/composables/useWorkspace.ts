@@ -94,6 +94,11 @@ interface SerializedProject {
 }
 
 const currentProject = ref<Project | null>()
+
+export function hasOpenWorkspace(): boolean {
+  return Boolean(currentProject.value?.path)
+}
+
 const recentProjects = ref<Project[]>([])
 let openProjectRequestSequence = 0
 let activeCurrentProjectPathOwner: number | null = null
@@ -577,7 +582,7 @@ export function useWorkspace() {
           ? await desktopApi.workspace.getBoundPath()
           : null
       if (!boundPath) {
-        await router.replace('/')
+        await router.replace('/ecc')
         return
       }
 
@@ -597,7 +602,7 @@ export function useWorkspace() {
 
       const affinity = await resolveWorkspaceWindowAffinity(normalizedBoundPath)
       if (affinity.action === 'focused') {
-        await router.replace('/')
+        await router.replace('/ecc')
         return
       }
 
@@ -621,7 +626,7 @@ export function useWorkspace() {
           if (!workspaceLifecycle.isCurrentSession(session.sessionId)) return
           if (!canonicalProjectRoot) {
             workspaceLifecycle.failSession(session.sessionId)
-            await router.replace('/')
+            await router.replace('/ecc')
             return
           }
           const routeProjectRoot = asString(router.currentRoute.value.query.projectRoot)
@@ -650,7 +655,7 @@ export function useWorkspace() {
           connectRuntimeEvents(workspaceId, restoredDesignTool, session.sessionId)
         } else {
           workspaceLifecycle.failSession(session.sessionId)
-          await router.replace('/')
+          await router.replace('/ecc')
         }
       } catch (error) {
         workspaceLifecycle.failSession(session.sessionId)
@@ -665,7 +670,7 @@ export function useWorkspace() {
             retry: () => openProject(restored),
           })
         }
-        await router.replace('/')
+        await router.replace('/ecc')
       }
     } catch (error) {
       console.error('Load recent projects error:', error)

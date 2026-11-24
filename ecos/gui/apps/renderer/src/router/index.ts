@@ -1,5 +1,6 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
+import { createRouter, createWebHashHistory, START_LOCATION } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
+import { hasOpenWorkspace } from '../composables/useWorkspace'
 
 // 使用 Hash 模式，因为 desktop runtime 应用使用本地文件系统
 const routes: RouteRecordRaw[] = [
@@ -77,15 +78,11 @@ const router = createRouter({
   routes,
 })
 
-// 路由守卫：确保有项目才能进入工作区
-router.beforeEach((to, _from, next) => {
-  if (to.meta.requiresProject) {
-    // 这里可以检查是否有打开的项目
-    // 暂时先允许通过，后续可以添加验证逻辑
-    next()
-  } else {
-    next()
-  }
+router.beforeEach((to, from) => {
+  if (!to.meta.requiresProject || hasOpenWorkspace()) return true
+  // App restores the current window's workspace after the first route resolves.
+  if (from === START_LOCATION) return true
+  return { name: 'ECC', replace: true }
 })
 
 export default router

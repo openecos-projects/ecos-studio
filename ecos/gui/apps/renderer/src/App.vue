@@ -28,7 +28,10 @@
           class="app-content"
           :class="{ 'app-content--terminal-safe-area': terminalExpanded }"
         >
-          <router-view />
+          <router-view v-if="!route.meta.requiresProject || currentProject?.path" />
+          <p v-else class="m-auto p-4 text-sm text-(--text-secondary)" role="status">
+            Restoring workspace…
+          </p>
         </div>
         <HomeAgentDrawer
           v-if="!isWorkspaceRoute"
@@ -2220,6 +2223,9 @@ onMounted(async () => {
       await router.replace({ path: route.path, query: nextQuery })
     },
   })
+  if (route.meta.requiresProject && !currentProject.value?.path) {
+    await router.replace({ name: 'ECC' })
+  }
 
   document.addEventListener('selectstart', handleSelectStart)
 
