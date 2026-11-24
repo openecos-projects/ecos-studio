@@ -305,16 +305,32 @@ class CodexThreadManagementMixin:
 
     def get_model_settings(self) -> dict[str, Any]:
         models = self.list_models()
-        preferred = "glm-5.3-flash" if any(item.get("model") == "glm-5.3-flash" for item in models) else "gpt-5.6-terra"
+        requested = self._model
+        if requested is None:
+            try:
+                config = self._ensure_client().request(
+                    "config/read", {"cwd": str(self.cwd), "includeLayers": False}
+                )
+                requested = _read_nested_string(config, (("config", "model"),))
+            except CodexProviderError:
+                # Older app servers may only expose the catalog.
+                pass
         current = next(
-            (item for item in models if self._model in {item.get("id"), item.get("model")}),
-            next((item for item in models if item.get("model") == preferred),
-                 next((item for item in models if item.get("isDefault") is True), models[0])),
+            (
+                item
+                for item in models
+                if requested and requested in (item.get("id"), item["model"])
+            ),
+            None,
         )
+        if current is None:
+            current = next(
+                (item for item in models if item.get("isDefault") is True), models[0]
+            )
         efforts = _model_reasoning_efforts(current)
         default = current.get("defaultReasoningEffort")
         effort = self._reasoning_effort or (default if default in efforts else efforts[0])
-        if self._model is None:
+        if self._model != current["model"]:
             self._model = current["model"]
             configured = str(self.env.get("ECOS_AGENT_DEFAULT_REASONING_EFFORT", "")).strip()
             if configured in efforts:

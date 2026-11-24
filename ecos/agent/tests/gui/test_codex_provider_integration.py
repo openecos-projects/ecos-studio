@@ -215,6 +215,48 @@ def test_codex_turn_effort_override_reaches_thread_start(
     assert client.turn["effort"] == "low"
 
 
+@pytest.mark.parametrize(
+    ("configured_model", "expected"),
+    [
+        (None, "gpt-new"),
+        ("gpt-configured", "gpt-configured"),
+        ("gpt-unavailable", "gpt-new"),
+    ],
+)
+def test_model_settings_follow_codex_configuration_and_catalog(
+    tmp_path: Path, configured_model: str | None, expected: str
+) -> None:
+    codex = tmp_path / "codex"
+    codex.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    codex.chmod(0o755)
+    provider = CodexAppServerProposalProvider(codex_bin=str(codex), cwd=tmp_path)
+
+    class FakeClient:
+        def request(self, method: str, params: dict[str, object]) -> dict[str, object]:
+            if method == "model/list":
+                return {
+                    "data": [
+                        {"model": "gpt-5.6-terra"},
+                        {"model": "gpt-configured"},
+                        {"model": "gpt-new", "isDefault": True},
+                    ]
+                }
+            if method == "config/read":
+                assert params == {"cwd": str(tmp_path), "includeLayers": False}
+                return {"config": {"model": configured_model}}
+            if method == "thread/start":
+                assert params["model"] == expected
+                return {"thread": {"id": "thread-1"}}
+            raise AssertionError(method)
+
+    client = FakeClient()
+    provider._client = client
+
+    assert provider.get_model_settings()["model"] == expected
+    assert provider._ensure_thread(client) == "thread-1"
+    assert provider.set_model_settings(model="gpt-5.6-terra")["model"] == "gpt-5.6-terra"
+
+
 def test_model_settings_default_effort_is_env_configurable(tmp_path: Path) -> None:
     codex = tmp_path / "codex"
     codex.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
