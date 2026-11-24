@@ -15,7 +15,7 @@
       {{ statusLabel }}
     </p>
     <div
-      v-if="currentOptimizationEpisode"
+      v-if="currentOptimizationEpisode && optimizationStatusLabel"
       class="agent-optimization-status"
       :data-state="currentOptimizationEpisode.state"
     >
@@ -730,10 +730,10 @@ const optimizationStatusLabel = computed(() => {
     stopping: 'Stopping optimization',
     interrupted: 'Optimization interrupted',
     needs_attention: 'Optimization needs attention',
-    completed: 'Optimization finished',
+    completed: '',
     stopped:
       episode.optimization.rejection_reason === 'budget_exhausted'
-        ? 'Optimization finished'
+        ? ''
         : 'Optimization stopped',
     failed: 'Optimization failed',
   }

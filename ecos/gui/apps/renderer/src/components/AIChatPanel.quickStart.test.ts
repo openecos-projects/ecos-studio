@@ -283,35 +283,67 @@ it('keeps an active Optimization Episode running when its Agent tab is closed', 
   expect(state.interrupt).not.toHaveBeenCalled()
 })
 
-it('shows the current optimization above the conversation across repeated runs', async () => {
-  const { wrapper, optimization } = await setup({ activeOptimization: true })
-  const banner = () => wrapper.get('.agent-optimization-status')
-  const running = optimization.episodes[0]!
-  optimization.episodes = [
-    { ...running, episodeId: 'older-episode', state: 'completed' },
-    running,
-  ]
-  await flushPromises()
+it.each([
+  { state: 'completed', rejectionReason: null },
+  { state: 'stopped', rejectionReason: 'budget_exhausted' },
+] as const)(
+  'hides the progress banner after $state and keeps the optimization message',
+  async ({ state, rejectionReason }) => {
+    const { wrapper, optimization, messages } = await setup({ activeOptimization: true })
+    const banner = () => wrapper.get('.agent-optimization-status')
+    const running = optimization.episodes[0]!
+    const previous = {
+      ...running,
+      episodeId: 'older-episode',
+      state: 'completed' as const,
+      optimization: {
+        ...running.optimization,
+        episode_id: 'older-episode',
+        state: 'completed' as const,
+      },
+    }
+    optimization.episodes = [previous, running]
+    await flushPromises()
 
-  expect(wrapper.get('.agent-chat__scroll').element.contains(banner().element)).toBe(
-    false,
-  )
-  expect(banner().text()).toContain('Optimizing')
-  expect(banner().text()).toContain('1 candidate running')
-  expect(banner().find('button').exists()).toBe(false)
-  expect(wrapper.get('.agent-chat__scroll').find('message-item-stub').exists()).toBe(true)
-  expect(wrapper.find('.composer-footer textarea').exists()).toBe(true)
+    expect(wrapper.get('.agent-chat__scroll').element.contains(banner().element)).toBe(
+      false,
+    )
+    expect(banner().text()).toContain('Optimizing')
+    expect(banner().text()).toContain('1 candidate running')
+    expect(banner().find('button').exists()).toBe(false)
+    expect(wrapper.get('.agent-chat__scroll').find('message-item-stub').exists()).toBe(
+      true,
+    )
+    expect(wrapper.find('.composer-footer textarea').exists()).toBe(true)
 
-  optimization.episodes[1]!.state = 'paused'
-  await flushPromises()
-  expect(banner().text()).toContain('Optimization paused')
-  expect(banner().text()).not.toContain('candidate running')
+    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
+    expect(wrapper.find('.agent-optimization-status').exists()).toBe(false)
+    await wrapper.findAll('[role="tab"]')[0]!.trigger('click')
 
-  optimization.episodes[1]!.state = 'completed'
-  await flushPromises()
-  expect(banner().text()).toContain('Optimization finished')
-  expect(banner().find('button').exists()).toBe(false)
+    optimization.episodes[1]!.state = 'paused'
+    await flushPromises()
+    expect(banner().text()).toContain('Optimization paused')
+    expect(banner().text()).not.toContain('candidate running')
 
-  await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
-  expect(wrapper.find('.agent-optimization-status').exists()).toBe(false)
-})
+    optimization.episodes = [
+      previous,
+      {
+        ...running,
+        state,
+        optimization: {
+          ...running.optimization,
+          state,
+          rejection_reason: rejectionReason,
+        },
+      },
+    ]
+    await flushPromises()
+    expect(wrapper.find('.agent-optimization-status').exists()).toBe(false)
+    expect(messages.messagesBySessionId.owner).toContainEqual(
+      expect.objectContaining({
+        type: 'optimization',
+        optimization: expect.objectContaining({ episode_id: running.episodeId, state }),
+      }),
+    )
+  },
+)
