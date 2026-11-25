@@ -64,6 +64,8 @@ function resolveHashRoute(initialRoute = '/', openWorkspacePath?: string): strin
 export async function createMainWindow(
   options: CreateMainWindowOptions = {},
 ): Promise<BrowserWindow> {
+  const useWindowControlsOverlay =
+    process.platform === 'linux' || process.platform === 'win32'
   const mainWindow = new BrowserWindow({
     width: 1440,
     height: 960,
@@ -71,6 +73,10 @@ export async function createMainWindow(
     minHeight: 720,
     autoHideMenuBar: true,
     frame: false,
+    ...(useWindowControlsOverlay && {
+      titleBarStyle: 'hidden',
+      titleBarOverlay: { height: 40, color: '#fdfdfc', symbolColor: '#5d6972' },
+    }),
     // GTK's Wayland shadows move native resize handles outside our visible border.
     // Set this at construction; changing it later does not remove that decoration.
     hasShadow: process.platform !== 'linux',

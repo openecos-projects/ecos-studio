@@ -1,5 +1,5 @@
 <template>
-  <div class="topbar">
+  <div class="topbar" :class="{ 'topbar--overlay': overlayVisible }">
     <!-- 左侧：应用图标和菜单栏 -->
     <div class="topbar-left" @mousedown.stop>
       <!-- 应用图标 -->
@@ -116,7 +116,7 @@
       >
         <i :class="isDark ? 'ri-sun-line' : 'ri-moon-line'" class="text-base"></i>
       </button>
-      <template v-if="desktopApi">
+      <template v-if="!overlayVisible">
         <!-- 最小化 -->
         <button @click="handleMinimize" class="window-btn" aria-label="Minimize window">
           <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
@@ -222,7 +222,7 @@
 <script setup lang="ts">
 import type { AppMenuAction } from '@ecos-studio/shared'
 import { appMenuActionIds } from '@ecos-studio/shared'
-import { ref, onMounted, onUnmounted, computed, nextTick, toRef } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick, toRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useThemeStore } from '@/stores/themeStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
@@ -294,6 +294,30 @@ const chatButtonActive = computed(() =>
   isWorkspaceRoute.value ? workspaceAgentOpen.value : homeAgentOpen.value,
 )
 const desktopApi = getDesktopApi()
+const windowControlsOverlay = (
+  navigator as Navigator & {
+    windowControlsOverlay?: EventTarget & { readonly visible: boolean }
+  }
+).windowControlsOverlay
+const overlayVisible = ref(windowControlsOverlay?.visible ?? false)
+const syncOverlayVisibility = () => {
+  overlayVisible.value = windowControlsOverlay?.visible ?? false
+}
+
+watch(
+  [overlayVisible, isDark],
+  ([visible]) => {
+    if (!visible) return
+    const style = getComputedStyle(document.documentElement)
+    void desktopApi.window
+      .setTitleBarColors(
+        style.getPropertyValue('--topbar-bg').trim(),
+        style.getPropertyValue('--text-secondary').trim(),
+      )
+      .catch((error) => console.error('Failed to update window controls colors:', error))
+  },
+  { immediate: true, flush: 'post' },
+)
 const canOpenStepConfig = computed(
   () => isWorkspaceRoute.value && Boolean(props.hasWorkspace),
 )
@@ -587,6 +611,8 @@ async function syncMaximizedState() {
 }
 
 onMounted(async () => {
+  windowControlsOverlay?.addEventListener('geometrychange', syncOverlayVisibility)
+  syncOverlayVisibility()
   document.addEventListener('click', handleClickOutside)
   document.addEventListener('keydown', handleKeydown)
   document.addEventListener(topbarOverlayEvent, closeForOverlay)
@@ -600,6 +626,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  windowControlsOverlay?.removeEventListener('geometrychange', syncOverlayVisibility)
   document.removeEventListener('click', handleClickOutside)
   document.removeEventListener('keydown', handleKeydown)
   document.removeEventListener(topbarOverlayEvent, closeForOverlay)
@@ -626,7 +653,6 @@ const handleClose = async () => {
 .topbar {
   height: 40px;
   width: 100%;
-  -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
   user-select: none;
@@ -636,6 +662,16 @@ const handleClose = async () => {
   position: relative;
   z-index: 100;
   cursor: default;
+}
+
+.topbar--overlay {
+  height: env(titlebar-area-height, 40px);
+  /* The compositor can place window controls on either side of the row. */
+  padding-left: env(titlebar-area-x, 0px);
+  padding-right: max(
+    0px,
+    calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw))
+  );
 }
 
 /* 左侧区域 */
@@ -817,6 +853,8 @@ const handleClose = async () => {
  * 只让中间空白区域承担窗口拖拽。
  * 如果把 drag region 挂在覆盖全宽的标题层上，桌面端会优先命中拖拽层，
  * 左侧菜单即使视觉上在上面，也可能被判定为“不可点击”。
+ * A no-drag region on the parent would also be inherited by the overlapping
+ * title, which would cancel the spacer's drag region in Electron 45.
  */
 .topbar-drag-spacer {
   flex: 1;

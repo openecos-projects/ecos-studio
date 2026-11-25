@@ -8,6 +8,7 @@ export const desktopApiIpcChannels = {
   windowToggleMaximize: 'window:toggle-maximize',
   windowClose: 'window:close',
   windowSetTitle: 'window:set-title',
+  windowSetTitleBarColors: 'window:set-title-bar-colors',
   windowIsMaximized: 'window:is-maximized',
   windowSetZoomFactor: 'window:set-zoom-factor',
   windowCreate: 'window:create',

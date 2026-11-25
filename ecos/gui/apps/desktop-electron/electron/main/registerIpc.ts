@@ -1840,6 +1840,21 @@ export function registerIpc(
     setWindowTitle(getEventWindow(event), title as string)
   })
 
+  handle(desktopApiIpcChannels.windowSetTitleBarColors, (event, color, symbolColor) => {
+    const hexColor = /^#[\da-f]{6}$/i
+    if (
+      typeof color !== 'string' ||
+      typeof symbolColor !== 'string' ||
+      !hexColor.test(color) ||
+      !hexColor.test(symbolColor)
+    ) {
+      throw new Error('Title bar colors must be six-digit hexadecimal colors')
+    }
+    if (process.platform === 'linux' || process.platform === 'win32') {
+      getEventWindow(event).setTitleBarOverlay({ color, symbolColor })
+    }
+  })
+
   handle(desktopApiIpcChannels.windowIsMaximized, (event) => {
     return isWindowMaximized(getEventWindow(event))
   })

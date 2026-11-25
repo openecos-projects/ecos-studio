@@ -314,6 +314,7 @@ export interface DesktopApi {
     toggleMaximize(): Promise<void>
     close(): Promise<void>
     setTitle(title: string): Promise<void>
+    setTitleBarColors(color: string, symbolColor: string): Promise<void>
     isMaximized(): Promise<boolean>
     setZoomFactor(factor: number): Promise<void>
     create(options?: { initialRoute?: string }): Promise<void>

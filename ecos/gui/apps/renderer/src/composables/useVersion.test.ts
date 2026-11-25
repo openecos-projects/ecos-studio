@@ -61,6 +61,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       create: async () => undefined,
       setTitle: async (_title: string) => undefined,
       setZoomFactor: async (_factor: number) => undefined,
+      setTitleBarColors: async () => undefined,
       isMaximized: async () => false,
       onResized: () => () => undefined,
       onMaximizedChanged: () => () => undefined,

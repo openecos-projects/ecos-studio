@@ -1,29 +1,26 @@
 <template>
-  <!-- Share the app stacking context so TopBar popovers stay above the drawer. -->
-  <Teleport to="#app">
-    <Transition name="home-agent-drawer">
-      <aside
-        v-if="homeAgentOpen"
-        class="home-agent-drawer"
-        role="dialog"
-        aria-modal="false"
-        aria-label="ECOS Agent"
-        :style="{ width: widthOverride ?? panelWidthStyle }"
-      >
-        <div
-          class="agent-panel-resize-handle"
-          title="Resize Agent panel"
-          aria-label="Resize Agent panel"
-          role="separator"
-          aria-orientation="vertical"
-          @pointerdown="onResizePointerDown"
-        ></div>
-        <div class="home-agent-drawer__body">
-          <AIChatPanel shell="home" class="home-agent-drawer__chat" />
-        </div>
-      </aside>
-    </Transition>
-  </Teleport>
+  <Transition name="home-agent-drawer">
+    <aside
+      v-if="homeAgentOpen"
+      class="home-agent-drawer"
+      role="dialog"
+      aria-modal="false"
+      aria-label="ECOS Agent"
+      :style="{ width: widthOverride ?? panelWidthStyle }"
+    >
+      <div
+        class="agent-panel-resize-handle"
+        title="Resize Agent panel"
+        aria-label="Resize Agent panel"
+        role="separator"
+        aria-orientation="vertical"
+        @pointerdown="onResizePointerDown"
+      ></div>
+      <div class="home-agent-drawer__body">
+        <AIChatPanel shell="home" class="home-agent-drawer__chat" />
+      </div>
+    </aside>
+  </Transition>
 </template>
 
 <script setup lang="ts">
@@ -37,7 +34,7 @@ defineProps<{ widthOverride?: string }>()
 
 const agentShell = useAgentShellStore()
 const { homeAgentOpen } = storeToRefs(agentShell)
-/** Use viewport as the width budget for the fixed right drawer. */
+/** Use the viewport as the width budget for the right drawer. */
 const viewportRef = ref<HTMLElement | null>(
   typeof document !== 'undefined' ? document.documentElement : null,
 )
@@ -46,10 +43,9 @@ const { panelWidthStyle, onResizePointerDown } = useAgentPanelResize(viewportRef
 
 <style scoped>
 .home-agent-drawer {
-  position: fixed;
-  top: var(--topbar-height, 40px);
+  position: absolute;
+  inset-block: 0;
   right: 0;
-  bottom: var(--status-bar-height, 24px);
   z-index: 40;
   display: flex;
   min-width: 280px;

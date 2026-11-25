@@ -46,6 +46,15 @@
           @height-change="handleTerminalHeightChange"
           @toggle-maximize="toggleTerminalMaximized"
         />
+        <WorkspaceWizard
+          v-if="showNewProjectWizard"
+          :title="workspaceWizardTitle"
+          :initial-config="workspaceWizardInitialConfig"
+          :creation-pending="workspaceWizardCreating"
+          :creation-error="workspaceWizardError"
+          @close="handleWizardClose"
+          @create="handleWizardCreate"
+        />
       </div>
       <StatusBar
         :terminal-expanded="terminalExpanded"
@@ -56,17 +65,6 @@
     <!-- 全局 Toast 通知 -->
     <Toast position="top-right" class="app-toast" />
     <ChipViewerOpeningStatus />
-
-    <!-- 全局新建工程向导 -->
-    <WorkspaceWizard
-      v-if="showNewProjectWizard"
-      :title="workspaceWizardTitle"
-      :initial-config="workspaceWizardInitialConfig"
-      :creation-pending="workspaceWizardCreating"
-      :creation-error="workspaceWizardError"
-      @close="handleWizardClose"
-      @create="handleWizardCreate"
-    />
 
     <div
       v-if="quickStartCursor.visible"
@@ -2461,12 +2459,14 @@ onUnmounted(() => {
   background-color: rgb(0 0 0 / 18%);
 }
 
+.app-wrapper--quick-start :deep(.new-workspace-wizard-overlay) {
+  position: absolute;
+}
+
 @media (min-width: 1280px) {
   .app-wrapper--quick-start :deep(.project-modal-scrim),
   .app-wrapper--quick-start :deep(.new-workspace-wizard-overlay) {
-    top: var(--topbar-height, 40px);
     right: var(--home-agent-drawer-width);
-    bottom: var(--status-bar-height);
   }
 }
 

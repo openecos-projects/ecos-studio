@@ -9,7 +9,7 @@
       :class="
         isWizardMaximized
           ? 'h-full max-h-none max-w-none rounded-none'
-          : 'h-[88vh] max-h-[900px] max-w-6xl rounded-[20px]'
+          : 'h-[88vh] max-h-[min(900px,100%)] max-w-6xl rounded-[20px]'
       "
       :data-current-step="currentStep"
     >

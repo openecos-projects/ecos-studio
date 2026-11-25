@@ -105,6 +105,8 @@ const desktopApi: DesktopApi = {
     toggleMaximize: () => invokeDesktop(desktopApiIpcChannels.windowToggleMaximize),
     close: () => invokeDesktop(desktopApiIpcChannels.windowClose),
     setTitle: (title) => invokeDesktop(desktopApiIpcChannels.windowSetTitle, title),
+    setTitleBarColors: (color, symbolColor) =>
+      invokeDesktop(desktopApiIpcChannels.windowSetTitleBarColors, color, symbolColor),
     isMaximized: () => invokeDesktop(desktopApiIpcChannels.windowIsMaximized),
     setZoomFactor: (factor) =>
       invokeDesktop(desktopApiIpcChannels.windowSetZoomFactor, factor),

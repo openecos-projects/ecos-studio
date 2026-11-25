@@ -52,6 +52,15 @@ describe('createMainWindow', () => {
         backgroundColor: '#ffffff',
       }),
     )
+    const options = browserWindowConstructor.mock.calls[0]
+    if (process.platform === 'linux' || process.platform === 'win32') {
+      expect(options).toEqual([
+        expect.objectContaining({
+          titleBarStyle: 'hidden',
+          titleBarOverlay: expect.objectContaining({ height: 40 }),
+        }),
+      ])
+    }
     expect(windowDouble.maximize).toHaveBeenCalledTimes(1)
     expect(windowDouble.loadFile).toHaveBeenCalledWith(
       expect.any(String),

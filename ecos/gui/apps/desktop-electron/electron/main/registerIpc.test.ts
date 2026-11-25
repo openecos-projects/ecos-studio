@@ -461,6 +461,7 @@ function createWindowDouble(isMaximized = false) {
     maximize: vi.fn(),
     minimize: vi.fn(),
     setTitle: vi.fn(),
+    setTitleBarOverlay: vi.fn(),
     webContents: {
       setZoomFactor: vi.fn(),
     },
@@ -2729,6 +2730,27 @@ describe('registerIpc', () => {
       ok: false,
     })
     expect(windowDouble.webContents.setZoomFactor).toHaveBeenCalledTimes(1)
+  })
+
+  it('validates window control colors and applies them to the calling window', async () => {
+    const { handlers } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const windowDouble = createWindowDouble()
+    fromWebContents.mockReturnValue(windowDouble)
+    const setColors = handlers.get(desktopApiIpcChannels.windowSetTitleBarColors)
+
+    await expect(setColors?.(event, 'transparent', '#5d6972')).resolves.toMatchObject({
+      ok: false,
+    })
+    expect(fromWebContents).not.toHaveBeenCalled()
+    await expect(setColors?.(event, '#18181c', '#a1a1aa')).resolves.toBeUndefined()
+    if (process.platform === 'linux' || process.platform === 'win32') {
+      expect(fromWebContents).toHaveBeenCalledExactlyOnceWith(event.sender)
+      expect(windowDouble.setTitleBarOverlay).toHaveBeenCalledExactlyOnceWith({
+        color: '#18181c',
+        symbolColor: '#a1a1aa',
+      })
+    }
   })
 
   it('toggles maximize by maximizing a normal window and restoring a maximized one', async () => {

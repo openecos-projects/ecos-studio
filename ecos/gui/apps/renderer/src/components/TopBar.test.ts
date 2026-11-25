@@ -12,6 +12,7 @@ const testState = vi.hoisted(() => ({
     window: {
       isMaximized: vi.fn().mockResolvedValue(false),
       onMaximizedChanged: vi.fn(() => () => undefined),
+      setTitleBarColors: vi.fn().mockResolvedValue(undefined),
     },
     ecc: { runtime: { runHistory: vi.fn(), operationLog: vi.fn() } },
     dialog: { saveFile: vi.fn() },
@@ -85,6 +86,36 @@ beforeEach(async () => {
 })
 
 describe('TopBar title', () => {
+  it('shows custom controls only while the native window controls are unavailable', async () => {
+    const overlay = Object.assign(new EventTarget(), { visible: true })
+    Object.defineProperty(navigator, 'windowControlsOverlay', {
+      configurable: true,
+      value: overlay,
+    })
+    const style = document.documentElement.style
+    style.setProperty('--topbar-bg', '#fdfdfc')
+    style.setProperty('--text-secondary', '#5d6972')
+    const wrapper = mount(TopBar)
+    try {
+      expect(wrapper.get('.topbar').classes()).toContain('topbar--overlay')
+      expect(wrapper.find('button[aria-label="Close window"]').exists()).toBe(false)
+      expect(testState.desktopApi.window.setTitleBarColors).toHaveBeenCalledWith(
+        '#fdfdfc',
+        '#5d6972',
+      )
+
+      overlay.visible = false
+      overlay.dispatchEvent(new Event('geometrychange'))
+      await nextTick()
+      expect(wrapper.find('button[aria-label="Close window"]').exists()).toBe(true)
+    } finally {
+      wrapper.unmount()
+      Reflect.deleteProperty(navigator, 'windowControlsOverlay')
+      style.removeProperty('--topbar-bg')
+      style.removeProperty('--text-secondary')
+    }
+  })
+
   it('toggles the workspace Agent panel from the workspace route', async () => {
     testState.route.path = '/workspace/home'
     const agentStore = await import('@/stores/agentShellStore')
