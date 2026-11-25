@@ -109,57 +109,6 @@ async function submitWorkspaceWizard(page: Page) {
 }
 
 describe('product e2e: repeated workspace creation', () => {
-  const incompatibleBinDir = process.env.ECOS_E2E_INCOMPATIBLE_ECC_BIN_DIR
-
-  it.skipIf(!incompatibleBinDir)(
-    'shows the incompatible ECC error at Flow Setup',
-    async () => {
-      const outDir = await resolveOutDir('incompatible-ecc-wizard')
-      const design = await prepareGcdProject(join(outDir, 'work'))
-      const projectName = 'incompatible-ecc-e2e'
-      const setup = await launchE2EApp(join(outDir, 'setup'))
-      try {
-        await waitToolchainReady(setup.page)
-        await createBackendProject(setup.page, {
-          projectRoot: design.projectRoot,
-          name: projectName,
-          designName: design.designName,
-          rtlImport: design.rtlImport,
-        })
-      } finally {
-        await setup.close()
-      }
-
-      const { page, close } = await launchE2EApp(outDir, {
-        adjustEnv: (env) => {
-          env.ECOS_ECC_BIN_DIR = incompatibleBinDir!
-        },
-      })
-      const shot = createMilestoneShots(page, outDir)
-      try {
-        await rememberProject(page, design.projectRoot, projectName)
-        const panel = await openWorkspaceWizard(page, projectName)
-        await advanceWizard(panel, 1, 4)
-        const error = panel.getByRole('alert').filter({ hasText: 'workspace fork' })
-        await error.waitFor({ state: 'visible' })
-        expect(await error.innerText()).toContain('ECOS_ECC_BIN_DIR')
-        expect(
-          await panel.getByRole('combobox', { name: 'Start Step' }).isEnabled(),
-        ).toBe(false)
-        expect(await panel.getByRole('button', { name: 'Continue' }).isEnabled()).toBe(
-          false,
-        )
-        await shot('incompatible-ecc')
-      } catch (error) {
-        await shot('failure').catch(() => undefined)
-        throw error
-      } finally {
-        await close()
-      }
-    },
-    180_000,
-  )
-
   it.each(['rtl', 'filelist'] as const)(
     'retains the top module and sources when creating another workspace from %s',
     async (mode) => {

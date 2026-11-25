@@ -1848,7 +1848,7 @@ describe('NewProjectWizard behavior', () => {
 
   it('shows a discovery failure and restores flow steps after retry', async () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const message = 'Install the ECC #380 runtime with workspace fork and step workers.'
+    const message = 'Could not load the ECC flow definition.'
     wizardMocks.getWorkspaceCreationModel.mockRejectedValue(new Error(message))
     const wrapper = mount(NewProjectWizard, {
       props: { initialConfig: { standaloneWorkspace: true } },

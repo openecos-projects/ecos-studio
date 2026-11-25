@@ -1,4 +1,3 @@
-import { workspaceForkProbe, workspaceForkRequired } from '../cliSelfCheck'
 import { randomUUID } from 'node:crypto'
 import { mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -2029,7 +2028,7 @@ ${message}`)
     this.contractCheck ??= Promise.resolve()
       .then(() => assertEccCliPlatformSupported())
       .then(() => this.cli.run(['version', '--json']))
-      .then(async ({ stdout }) => {
+      .then(({ stdout }) => {
         const value = JSON.parse(stdout)
         if (
           !isRecord(value) ||
@@ -2041,12 +2040,6 @@ ${message}`)
             'Installed ECC does not support CLI contract 1.',
             'ECC_CLI_INCOMPATIBLE',
           )
-        }
-        try {
-          await this.cli.run([...workspaceForkProbe])
-        } catch (error) {
-          if (!(error instanceof EccCliCommandError)) throw error
-          throw codedError(workspaceForkRequired, 'ECC_CLI_INCOMPATIBLE')
         }
         const version = typeof value.ecc === 'string' ? value.ecc : 'unknown'
         this.contractRuntimeId = `tool:ecc@${version}`

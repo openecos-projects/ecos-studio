@@ -25,27 +25,9 @@ export function parseVersionFromSelfCheckDetail(detail: string | null): string |
   return match ? match[0] : null
 }
 
-// The release version is shared by builds on both sides of ECC #380.
-export const workspaceForkProbe = ['workspace', 'fork', '--help'] as const
-export const workspaceForkRequired =
-  'This Studio build requires ECC with workspace fork and step workers. Install the ECC #380 runtime or select it with ECOS_ECC_BIN_DIR.'
-
-export async function runSelfCheck(
+export function runSelfCheck(
   spawnImpl: CliSpawnLike,
   executable: string,
-  env: NodeJS.ProcessEnv,
-  timeoutMs: number,
-): Promise<CliInstallSelfCheck> {
-  const version = await probe(spawnImpl, executable, ['--version'], env, timeoutMs)
-  if (!version.ok) return version
-  const fork = await probe(spawnImpl, executable, workspaceForkProbe, env, timeoutMs)
-  return fork.ok ? version : { ok: false, detail: workspaceForkRequired }
-}
-
-function probe(
-  spawnImpl: CliSpawnLike,
-  executable: string,
-  args: readonly string[],
   env: NodeJS.ProcessEnv,
   timeoutMs: number,
 ): Promise<CliInstallSelfCheck> {
@@ -57,7 +39,7 @@ function probe(
       resolve(result)
     }
     try {
-      const child = spawnImpl(executable, args, {
+      const child = spawnImpl(executable, ['--version'], {
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: timeoutMs,

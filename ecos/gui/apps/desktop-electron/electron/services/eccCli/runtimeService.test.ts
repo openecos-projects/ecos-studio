@@ -397,7 +397,7 @@ describe('ECC CLI workspace command planning', () => {
 describe('ECC CLI RTL import planning', () => {
   const mockCliRun = (commands: string[][]) =>
     vi.spyOn(EccCliProcess.prototype, 'run').mockImplementation(async (args) => {
-      if (args[0] !== 'version' && !args.includes('--help')) commands.push([...args])
+      if (args[0] !== 'version') commands.push([...args])
       if (args[0] === 'version') {
         return {
           exitCode: 0,
@@ -540,7 +540,7 @@ describe('ECC CLI RTL import planning', () => {
     temporaryDirectories.push(root)
     const commands: string[][] = []
     vi.spyOn(EccCliProcess.prototype, 'run').mockImplementation(async (args) => {
-      if (args[0] !== 'version' && !args.includes('--help')) commands.push([...args])
+      if (args[0] !== 'version') commands.push([...args])
       if (args[0] === 'version') {
         return {
           exitCode: 0,
