@@ -104,7 +104,6 @@ function applyWorkspaceDesignDefaults(
     : {}
   const rtlList = inputPaths(configuration, 'rtl')
   const filelist = inputPaths(configuration, 'filelist')[0]
-  const sdc = inputPaths(configuration, 'sdc')[0]
   const originVerilog = inputPaths(configuration, 'netlist')[0]
   const originDef = inputPaths(configuration, 'def')[0]
 
@@ -116,7 +115,6 @@ function applyWorkspaceDesignDefaults(
       ...(originDef ? { origin_def: originDef } : {}),
       ...(originVerilog ? { origin_verilog: originVerilog } : {}),
       ...(rtlList.length ? { rtl_list: rtlList } : {}),
-      ...(sdc ? { sdc } : {}),
       ...(stringValue(design.clockPort) ? { clock: stringValue(design.clockPort) } : {}),
       ...(stringValue(design.topModule)
         ? { top_module: stringValue(design.topModule) }

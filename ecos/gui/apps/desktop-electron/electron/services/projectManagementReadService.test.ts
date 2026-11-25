@@ -274,39 +274,46 @@ describe('ProjectManagementReadService', () => {
     expect(access).toHaveBeenCalledWith(join(projectRoot, 'project.json'))
   })
 
-  it('reuses canonical design defaults from an existing Project Workspace', async () => {
-    const { projectRoot, workspaceRoot } = await createProject()
-    const readWorkspaceConfiguration = vi.fn().mockResolvedValue({
-      workspaceSpec: {
-        design: { name: 'gcd', topModule: 'gcd_top', clockPort: 'clk_i' },
-        inputs: [
-          { inputId: 'rtl-main', role: 'rtl' },
-          { inputId: 'rtl-helper', role: 'rtl' },
-          { inputId: 'constraints', role: 'sdc' },
-        ],
-      },
-      workspaceBindings: {
-        inputs: {
-          'rtl-main': `${workspaceRoot}/origin/gcd.v`,
-          'rtl-helper': `${workspaceRoot}/origin/helper.sv`,
-          constraints: `${workspaceRoot}/origin/gcd.sdc`,
+  it.each(['timing_constraints_template.tcl', undefined])(
+    'reuses Workspace design defaults and preserves the Project timing input %s',
+    async (sdc) => {
+      const { projectRoot, workspaceRoot } = await createProject()
+      const manifestPath = join(projectRoot, 'project.json')
+      const persisted = JSON.parse(await readFile(manifestPath, 'utf8'))
+      persisted.base_design = { sdc }
+      await writeFile(manifestPath, JSON.stringify(persisted))
+      const readWorkspaceConfiguration = vi.fn().mockResolvedValue({
+        workspaceSpec: {
+          design: { name: 'gcd', topModule: 'gcd_top', clockPort: 'clk_i' },
+          inputs: [
+            { inputId: 'rtl-main', role: 'rtl' },
+            { inputId: 'rtl-helper', role: 'rtl' },
+            { inputId: 'constraints', role: 'sdc' },
+          ],
         },
-      },
-    })
+        workspaceBindings: {
+          inputs: {
+            'rtl-main': `${workspaceRoot}/origin/gcd.v`,
+            'rtl-helper': `${workspaceRoot}/origin/helper.sv`,
+            constraints: `${workspaceRoot}/origin/pre_CTS/TYP_25_TYPICAL.tcl`,
+          },
+        },
+      })
 
-    const manifest = await createReadService(
-      undefined,
-      readWorkspaceConfiguration,
-    ).readManifest(projectRoot)
+      const manifest = await createReadService(
+        undefined,
+        readWorkspaceConfiguration,
+      ).readManifest(projectRoot)
 
-    expect(readWorkspaceConfiguration).toHaveBeenCalledWith(workspaceRoot)
-    expect(manifest?.base_design).toMatchObject({
-      clock: 'clk_i',
-      rtl_list: [`${workspaceRoot}/origin/gcd.v`, `${workspaceRoot}/origin/helper.sv`],
-      sdc: `${workspaceRoot}/origin/gcd.sdc`,
-      top_module: 'gcd_top',
-    })
-  })
+      expect(readWorkspaceConfiguration).toHaveBeenCalledWith(workspaceRoot)
+      expect(manifest?.base_design).toMatchObject({
+        clock: 'clk_i',
+        rtl_list: [`${workspaceRoot}/origin/gcd.v`, `${workspaceRoot}/origin/helper.sv`],
+        top_module: 'gcd_top',
+      })
+      expect(manifest?.base_design.sdc).toBe(sdc)
+    },
+  )
 
   it('rejects undeclared workspaces for Step Configuration reads', async () => {
     const { projectRoot } = await createProject()
