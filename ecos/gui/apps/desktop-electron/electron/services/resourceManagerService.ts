@@ -42,6 +42,7 @@ import {
   prepareResourceArchive,
   removeCompletedResourceArchive,
 } from './resourceArchiveRecovery'
+import { prepareLegacyIcs55Release } from './legacyIcs55Release'
 import {
   PdkInventoryService,
   type PdkInventoryServiceOptions,
@@ -1405,7 +1406,7 @@ export class ResourceManagerService {
     }
 
     const scanned = await scanPdkDirectory(canonicalRoot)
-    if ((await validateScannedPdk(scanned)) !== 'ok') {
+    if ((await this.pdkHealth(scanned.pdkId, canonicalRoot)) !== 'ok') {
       throw new Error(`PDK validation failed for ${scanned.pdkId}`)
     }
   }
@@ -2113,10 +2114,11 @@ export class ResourceManagerService {
       throwIfAborted(signal)
 
       const scanned = await scanPdkDirectory(tempExtract)
-      const health = await validateScannedPdk({ ...scanned, pdkId })
+      if (pdkId === 'ics55') await prepareLegacyIcs55Release(tempExtract, version)
+      const health = await this.pdkHealth(pdkId, tempExtract, version)
       throwIfAborted(signal)
       if (health !== 'ok') {
-        throw new Error(`PDK validation failed for ${pdkId} v${version}`)
+        throw new Error(`PDK validation failed for ${pdkId} v${version}: ${health}`)
       }
       await replaceDirectoryWithRollback(
         tempExtract,
@@ -2540,7 +2542,7 @@ export class ResourceManagerService {
   ): Promise<void> {
     const seenPaths = new Set<string>()
     const packageDestinations = packages.map((packageAsset) => {
-      validatePdkPackage(packageAsset)
+      validateSupplementalAsset(packageAsset)
       if (seenPaths.has(packageAsset.path)) {
         throw new Error(`Duplicate PDK package path: ${packageAsset.path}`)
       }
@@ -3334,6 +3336,16 @@ export class ResourceManagerService {
     )
   }
 
+  private async pdkHealth(
+    familyId: string,
+    root: string,
+    release?: string,
+  ): Promise<string> {
+    if (familyId !== 'ics55') return 'ok'
+    const result = await this.pdkInventoryService.inspectIcs55Root(root, release)
+    return result.readiness === 'ready' ? 'ok' : (result.reason ?? 'invalid')
+  }
+
   private async migratePdkManifest(manifest: ResourceManifest): Promise<void> {
     const entries = Object.entries(manifest.installed)
     for (const [resourceId, entry] of entries) {
@@ -3352,7 +3364,10 @@ export class ResourceManagerService {
             ...scanned.detectedFiles.files,
           ]
           entry.detected_file_groups = scanned.detectedFiles
-          entry.health = await validateScannedPdk({ ...scanned, pdkId })
+          entry.health =
+            (await this.pdkHealth(pdkId, scanned.canonicalPath, entry.version)) === 'ok'
+              ? 'ok'
+              : 'invalid'
         } else {
           entry.canonical_path = versionRoot
           entry.detected_files = []
@@ -3368,7 +3383,10 @@ export class ResourceManagerService {
             ...scanned.detectedFiles.files,
           ]
           entry.detected_file_groups = scanned.detectedFiles
-          entry.health = await validateScannedPdk({ ...scanned, pdkId })
+          entry.health =
+            (await this.pdkHealth(pdkId, scanned.canonicalPath)) === 'ok'
+              ? 'ok'
+              : 'invalid'
         } catch {
           entry.health = 'missing'
         }
@@ -3419,7 +3437,8 @@ export class ResourceManagerService {
             imported_at: utcNowIso(),
             active: false,
             managed: true,
-            health: await validateScannedPdk({ ...scanned, pdkId }),
+            health:
+              (await this.pdkHealth(pdkId, path, version)) === 'ok' ? 'ok' : 'invalid',
           }
         }
       }
@@ -4927,27 +4946,6 @@ function withUpdateCheckHealth(
   }
 }
 
-function isKnownPdk(pdkId: string): boolean {
-  return pdkId === 'ics55'
-}
-
-async function validateScannedPdk(scanned: {
-  pdkId: string
-  detectedFiles: { directories: string[]; files: string[] }
-}): Promise<string> {
-  if (!isKnownPdk(scanned.pdkId)) return 'ok'
-  const required = [
-    'prtech/techLEF/N551P6M_ecos.lef',
-    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/lef/ics55_LLSC_H7CR_ecos.lef',
-    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/lef/ics55_LLSC_H7CL_ecos.lef',
-    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/liberty/ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
-    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/liberty/ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
-  ]
-  return required.every((file) => scanned.detectedFiles.files.includes(file))
-    ? 'ok'
-    : 'invalid'
-}
-
 function mpcHealth(entry: MpcInventoryEntry): Record<string, unknown> {
   return {
     status: entry.health,
@@ -5601,15 +5599,6 @@ function validateSupplementalAsset(asset: RegistrySupplementalAsset): void {
   }
   if (!Number.isSafeInteger(asset.size) || asset.size <= 0) {
     throw new Error(`Invalid size for supplemental asset ${asset.path || '(unknown)'}`)
-  }
-}
-
-function validatePdkPackage(packageAsset: RegistryPdkPackage): void {
-  validateSupplementalAsset(packageAsset)
-  if (!packageAsset.cnb_url) {
-    throw new Error(
-      `Missing mirror URL for PDK package ${packageAsset.path || '(unknown)'}`,
-    )
   }
 }
 

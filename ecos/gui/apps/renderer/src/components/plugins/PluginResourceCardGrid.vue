@@ -13,6 +13,7 @@
           :row="row"
           :importing="importingIds.has(row.id)"
           @action="emit('action', row, $event)"
+          @install-version="emit('installVersion', row, $event)"
           @homepage="emit('homepage', row)"
         />
       </div>
@@ -43,6 +44,7 @@ defineProps<{
 
 const emit = defineEmits<{
   action: [row: ResourceRow, id: PluginCardActionId]
+  installVersion: [row: ResourceRow, version: string]
   homepage: [row: ResourceRow]
   clearFilters: []
 }>()

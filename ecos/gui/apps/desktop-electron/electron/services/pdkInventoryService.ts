@@ -433,6 +433,65 @@ export class PdkInventoryService {
     })
   }
 
+  async inspectIcs55Root(
+    root: string,
+    release?: string,
+  ): Promise<
+    Pick<
+      PdkInstallationSnapshot,
+      'readiness' | 'reason' | 'supportsEccDefaults' | 'defaultResources'
+    > & { dataVersion: string | null }
+  > {
+    const marker = (
+      await readFile(join(root, 'VERSION'), 'utf8').catch((error) => {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+        throw error
+      })
+    ).trim()
+    try {
+      const major = release?.match(/^([12])\./)?.[1]
+      if (major && (marker || 'ics55-v1') !== `ics55-v${major}`) {
+        throw new Error(
+          `PDK VERSION ${marker || '(missing)'} does not match registry version ${release}`,
+        )
+      }
+      if (marker && this.options.verifyIcs55Root) await this.options.verifyIcs55Root(root)
+      if (marker && marker !== 'ics55-v1') {
+        if (!this.options.verifyIcs55Root)
+          throw new Error('ECC PDK verification is unavailable')
+        return {
+          dataVersion: marker,
+          readiness: 'ready',
+          reason: null,
+          supportsEccDefaults: true,
+        }
+      }
+      const markers = await Promise.all(
+        ICS55_MARKERS.map((path) => stat(resolve(root, path)).catch(() => null)),
+      )
+      if (markers.some((file) => !file?.isFile()))
+        throw new Error('Required ICS55 PDK files are missing')
+      return {
+        dataVersion: marker || null,
+        readiness: 'ready',
+        reason: null,
+        supportsEccDefaults: true,
+        defaultResources: {
+          techLef: resolve(root, ICS55_DEFAULT_RESOURCES.techLef),
+          cellLefs: ICS55_DEFAULT_RESOURCES.cellLefs.map((file) => resolve(root, file)),
+          liberty: ICS55_DEFAULT_RESOURCES.liberty.map((file) => resolve(root, file)),
+        },
+      }
+    } catch (error) {
+      return {
+        dataVersion: marker || null,
+        readiness: 'invalid',
+        reason: error instanceof Error ? error.message : String(error),
+        supportsEccDefaults: false,
+      }
+    }
+  }
+
   private async snapshot(
     installation: PdkInstallationRecord,
   ): Promise<PdkInstallationSnapshot> {
@@ -454,63 +513,16 @@ export class PdkInventoryService {
           supportsEccDefaults: false,
         }
       }
-      const marker = await readFile(join(installation.root, 'VERSION'), 'utf8').catch(
-        (error) => {
-          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
-          throw error
-        },
+      const { dataVersion, ...health } = await this.inspectIcs55Root(
+        installation.root,
+        installation.ownership === 'managed'
+          ? (installation.version ?? undefined)
+          : undefined,
       )
-      if (marker.trim() && marker.trim() !== 'ics55-v1') {
-        const identified = {
-          ...installation,
-          version: installation.version ?? marker.trim(),
-        }
-        try {
-          if (!this.options.verifyIcs55Root)
-            throw new Error('ECC PDK verification is unavailable')
-          await this.options.verifyIcs55Root(installation.root)
-          return {
-            ...identified,
-            readiness: 'ready',
-            reason: null,
-            supportsEccDefaults: true,
-          }
-        } catch (error) {
-          return {
-            ...identified,
-            readiness: 'invalid',
-            reason: error instanceof Error ? error.message : String(error),
-            supportsEccDefaults: false,
-          }
-        }
-      }
-      const markers = await Promise.all(
-        ICS55_MARKERS.map((marker) =>
-          stat(resolve(installation.root, marker)).catch(() => null),
-        ),
-      )
-      if (markers.some((marker) => !marker?.isFile())) {
-        return {
-          ...installation,
-          readiness: 'invalid',
-          reason: 'Required ICS55 PDK files are missing',
-          supportsEccDefaults: true,
-        }
-      }
       return {
         ...installation,
-        readiness: 'ready',
-        reason: null,
-        supportsEccDefaults: true,
-        defaultResources: {
-          techLef: resolve(installation.root, ICS55_DEFAULT_RESOURCES.techLef),
-          cellLefs: ICS55_DEFAULT_RESOURCES.cellLefs.map((file) =>
-            resolve(installation.root, file),
-          ),
-          liberty: ICS55_DEFAULT_RESOURCES.liberty.map((file) =>
-            resolve(installation.root, file),
-          ),
-        },
+        version: installation.version ?? dataVersion,
+        ...health,
       }
     } catch {
       return {

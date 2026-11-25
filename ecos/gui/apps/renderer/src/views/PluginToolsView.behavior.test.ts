@@ -72,6 +72,30 @@ function pdkResource(overrides: Partial<ResourceItem>): ResourceItem {
 }
 
 describe('PluginToolsView PDK behavior', () => {
+  it('installs the selected registry version and retries that same version', async () => {
+    for (const status of ['available', 'error'] as const) {
+      viewMocks.store.resources = [
+        pdkResource({ status, available_versions: ['2.0.0', '1.10.103'] }),
+      ]
+      const wrapper = mount(PluginToolsView)
+      const selector = wrapper.get('select[aria-label="ICS55 download version"]')
+      expect((selector.element as HTMLSelectElement).value).toBe('2.0.0')
+      await selector.setValue('1.10.103')
+      await wrapper
+        .get(
+          status === 'error'
+            ? 'button.danger'
+            : '.plugin-card-actions button:not(.icon-only)',
+        )
+        .trigger('click')
+      expect(viewMocks.store.installResource).toHaveBeenLastCalledWith(
+        'pdk:ics55',
+        '1.10.103',
+      )
+      wrapper.unmount()
+    }
+  })
+
   it('keeps Available Offers separate from Installed Installations', async () => {
     viewMocks.store.resources = [
       pdkResource({}),
