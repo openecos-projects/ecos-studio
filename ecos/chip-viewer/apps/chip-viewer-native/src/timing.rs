@@ -106,18 +106,17 @@ impl TimingAnalysis {
         };
         let files = discover_timing_files(feature_dir);
         if files.is_empty() {
-            analysis.load_error = Some(format!(
-                "No STA timing_paths.json files found under {}",
-                feature_dir.display()
-            ));
+            analysis.load_error = Some("No STA timing_paths.json files found".to_string());
             return analysis;
         }
 
+        let mut loaded_files = 0;
         let mut seen_path_ids = BTreeSet::new();
         for path in files {
             match read_timing_file(&path) {
-                Ok(mut paths) => {
-                    for timing_path in &mut paths {
+                Ok(paths) => {
+                    loaded_files += 1;
+                    for timing_path in paths {
                         let key = timing_path.display_id();
                         if !seen_path_ids.insert(key) {
                             analysis.load_errors.push(format!(
@@ -126,7 +125,7 @@ impl TimingAnalysis {
                             ));
                             continue;
                         }
-                        analysis.paths.push(timing_path.clone());
+                        analysis.paths.push(timing_path);
                     }
                 }
                 Err(error) => analysis
@@ -143,15 +142,10 @@ impl TimingAnalysis {
                 .then_with(|| left.path_id.cmp(&right.path_id))
         });
         analysis.corners = summarize_corners(&analysis.paths);
-        if analysis.paths.is_empty() && analysis.load_error.is_none() {
-            analysis.load_error = Some(if analysis.load_errors.is_empty() {
-                "No timing violations in STA feature data".to_string()
-            } else {
-                format!(
-                    "No usable STA timing data: {}",
-                    analysis.load_errors.first().cloned().unwrap_or_default()
-                )
-            });
+        if loaded_files == 0 {
+            analysis.load_error = Some("No usable STA timing data".to_string());
+        } else if !analysis.load_errors.is_empty() {
+            analysis.load_error = Some("Some STA timing data could not be loaded".to_string());
         }
         analysis
     }
@@ -443,9 +437,10 @@ struct RawTimingStage {
 
 impl RawTimingStage {
     fn into_timing_stage(self, path_id: &str) -> Result<TimingStage, String> {
-        let is_port_point =
-            self.kind.eq_ignore_ascii_case("point") && self.instance.trim().is_empty();
-        if self.pin.trim().is_empty() || (!is_port_point && self.cell.trim().is_empty()) {
+        let is_port_stage = self.instance.trim().is_empty()
+            && (self.kind.eq_ignore_ascii_case("point")
+                || self.kind.eq_ignore_ascii_case("net_arc"));
+        if self.pin.trim().is_empty() || (!is_port_stage && self.cell.trim().is_empty()) {
             return Err(format!(
                 "path {path_id} has a stage with an empty pin or cell"
             ));
@@ -547,6 +542,26 @@ mod tests {
     }
 
     #[test]
+    fn parser_accepts_violations_ending_at_output_ports() {
+        let json = timing_json(
+            r#"{"path_id":"port-path","analysis_type":"setup","path_group":"VCLK_clk","start_point":"ff:Q","end_point":"resp_msg_14","launch_clock":"CLK_clk","capture_clock":"VCLK_clk","check_type":"none","slack_ns":-0.2,"stages":[{"kind":"cell_arc","pin":"ff:Q","instance":"ff","cell":"DFF"},{"kind":"net_arc","pin":"resp_msg_14","instance":"","cell":"","incremental_delay_ns":0.0016}]}"#,
+        );
+        let paths = parse_timing_file_text(Path::new("timing_paths.json"), &json).unwrap();
+        assert_eq!(
+            paths[0].stages.last(),
+            Some(&TimingStage {
+                kind: "net_arc".to_string(),
+                pin: "resp_msg_14".to_string(),
+                instance: String::new(),
+                cell: String::new(),
+                delay_ns: Some(0.0016),
+                arrival_ns: None,
+                transition: String::new(),
+            })
+        );
+    }
+
+    #[test]
     fn corners_are_summarized_from_kept_paths() {
         let paths = vec![
             parse_timing_file_text(
@@ -587,6 +602,39 @@ mod tests {
         fs::write(nested.join("timing_paths.json"), "{}").unwrap();
         let files = discover_timing_files(&root);
         assert_eq!(files, vec![nested.join("timing_paths.json")]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn loader_distinguishes_no_violations_from_unreadable_data() {
+        let root = std::env::temp_dir().join(format!(
+            "chip-viewer-timing-load-status-{}",
+            std::process::id()
+        ));
+        let corner_dir = root.join("MIN_m40").join("Cworst");
+        fs::create_dir_all(&corner_dir).unwrap();
+        let valid_file = corner_dir.join("timing_paths.json");
+        fs::write(&valid_file, timing_json(&path_json("clean", "hold", 0.1))).unwrap();
+
+        let clean = TimingAnalysis::load(&root);
+        assert!(clean.paths.is_empty());
+        assert_eq!(clean.load_error, None);
+
+        fs::write(root.join("timing_paths.json"), "{}").unwrap();
+        let partial = TimingAnalysis::load(&root);
+        assert!(partial.paths.is_empty());
+        assert_eq!(
+            partial.load_error.as_deref(),
+            Some("Some STA timing data could not be loaded")
+        );
+
+        fs::remove_file(valid_file).unwrap();
+        let unreadable = TimingAnalysis::load(&root);
+        assert!(unreadable.paths.is_empty());
+        assert_eq!(
+            unreadable.load_error.as_deref(),
+            Some("No usable STA timing data")
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -182,13 +182,14 @@ impl TimingPanelState {
 
         if self.analysis.corners.is_empty() {
             ui.add_space(6.0);
-            ui.label(
-                egui::RichText::new("No negative-slack timing paths")
-                    .size(13.0)
-                    .color(ecos_text_secondary()),
-            );
             if let Some(error) = &self.analysis.load_error {
                 ui.colored_label(ecos_warning(), error);
+            } else {
+                ui.label(
+                    egui::RichText::new("No negative-slack timing paths")
+                        .size(13.0)
+                        .color(ecos_text_secondary()),
+                );
             }
             for error in self.analysis.load_errors.iter().take(4) {
                 ui.label(
@@ -199,6 +200,15 @@ impl TimingPanelState {
             }
             info_panel_label(ui, self.analysis.feature_dir.display().to_string());
             return None;
+        }
+
+        if let Some(error) = &self.analysis.load_error {
+            ui.add_space(6.0);
+            ui.colored_label(ecos_warning(), error).on_hover_ui(|ui| {
+                for detail in self.analysis.load_errors.iter().take(4) {
+                    ui.label(detail);
+                }
+            });
         }
 
         let mut next_corner = self.corner.clone();
@@ -289,11 +299,6 @@ impl TimingPanelState {
                         ui.add_space(6.0);
                     }
                 });
-        }
-
-        if let Some(error) = &self.analysis.load_error {
-            ui.add_space(6.0);
-            ui.colored_label(ecos_warning(), error);
         }
 
         if next_corner != self.corner {
