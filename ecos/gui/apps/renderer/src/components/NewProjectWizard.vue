@@ -1310,7 +1310,7 @@
                       <span
                         class="rounded-md bg-(--bg-primary)/70 px-2 py-1 text-xs text-(--text-secondary)"
                       >
-                        {{ activeManualPdkSelections.length }} selected
+                        {{ selectedPdkResourceCount }} selected
                       </span>
                     </div>
                     <p
@@ -2722,6 +2722,12 @@ const displayedPdkSelections = computed(() =>
   pdkConfigMode.value === 'default'
     ? effectiveDefaultPdkResources.value
     : pdkSelections.value,
+)
+const selectedPdkResourceCount = computed(() =>
+  Object.values(displayedPdkSelections.value).reduce(
+    (count, files) => count + files.length,
+    0,
+  ),
 )
 const currentPdkDetectedFiles = computed<PdkDetectedFiles>(
   () =>

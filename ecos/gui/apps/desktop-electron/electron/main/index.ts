@@ -201,8 +201,8 @@ function getDesktopServices() {
   let eccRuntimeService: EccCliRuntimeService | undefined
   const runtimeInUse = () =>
     eccRuntimeService?.isRuntimeResourceInUse('tool:ecc') ?? false
-  const resourceManagerService = new ResourceManagerService({
-    verifyIcs55Root: (root): Promise<void> => verifyIcs55PdkRoot(eccCliProcess, root),
+  const resourceManagerService: ResourceManagerService = new ResourceManagerService({
+    verifyIcs55Root: (root) => verifyIcs55PdkRoot(eccCliProcess, root),
     resourceInUse: (resourceId) =>
       eccRuntimeService?.isRuntimeResourceInUse(resourceId) ?? false,
   })

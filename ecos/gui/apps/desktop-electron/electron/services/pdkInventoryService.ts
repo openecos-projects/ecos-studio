@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { mkdir, readFile, realpath, rename, rm, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type {
+  ManualPdkConfiguration,
   PdkBindRequest,
   PdkBinding,
   PdkImportRequest,
@@ -29,7 +30,7 @@ export interface PdkInventoryServiceOptions {
   managedRoot?: string
   jsonWriter?: typeof writeJsonAtomic
   legacyCleaner?: () => Promise<void>
-  verifyIcs55Root?: (root: string) => Promise<void>
+  verifyIcs55Root?: (root: string) => Promise<ManualPdkConfiguration>
 }
 
 export interface ManagedPdkInstallationRequest extends PdkImportRequest {
@@ -37,23 +38,6 @@ export interface ManagedPdkInstallationRequest extends PdkImportRequest {
   registrySha256: string
   version: string
 }
-
-const ICS55_DEFAULT_RESOURCES = {
-  techLef: 'prtech/techLEF/N551P6M_ecos.lef',
-  cellLefs: [
-    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/lef/ics55_LLSC_H7CR_ecos.lef',
-    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/lef/ics55_LLSC_H7CL_ecos.lef',
-  ],
-  liberty: [
-    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/liberty/ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
-    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/liberty/ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
-  ],
-}
-const ICS55_MARKERS = [
-  ICS55_DEFAULT_RESOURCES.techLef,
-  ...ICS55_DEFAULT_RESOURCES.cellLefs,
-  ...ICS55_DEFAULT_RESOURCES.liberty,
-]
 
 export class PdkInventoryService {
   private operation: Promise<void> = Promise.resolve()
@@ -455,32 +439,15 @@ export class PdkInventoryService {
           `PDK VERSION ${marker || '(missing)'} does not match registry version ${release}`,
         )
       }
-      if (marker && this.options.verifyIcs55Root) await this.options.verifyIcs55Root(root)
-      if (marker && marker !== 'ics55-v1') {
-        if (!this.options.verifyIcs55Root)
-          throw new Error('ECC PDK verification is unavailable')
-        return {
-          dataVersion: marker,
-          readiness: 'ready',
-          reason: null,
-          supportsEccDefaults: true,
-        }
-      }
-      const markers = await Promise.all(
-        ICS55_MARKERS.map((path) => stat(resolve(root, path)).catch(() => null)),
-      )
-      if (markers.some((file) => !file?.isFile()))
-        throw new Error('Required ICS55 PDK files are missing')
+      if (!this.options.verifyIcs55Root)
+        throw new Error('ECC PDK verification is unavailable')
+      const defaultResources = await this.options.verifyIcs55Root(root)
       return {
         dataVersion: marker || null,
         readiness: 'ready',
         reason: null,
         supportsEccDefaults: true,
-        defaultResources: {
-          techLef: resolve(root, ICS55_DEFAULT_RESOURCES.techLef),
-          cellLefs: ICS55_DEFAULT_RESOURCES.cellLefs.map((file) => resolve(root, file)),
-          liberty: ICS55_DEFAULT_RESOURCES.liberty.map((file) => resolve(root, file)),
-        },
+        defaultResources,
       }
     } catch (error) {
       return {

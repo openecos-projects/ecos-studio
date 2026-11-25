@@ -479,6 +479,7 @@ describe('NewProjectWizard behavior', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('/pdks/ics55')
     expect(wrapper.text()).toContain('/pdks/ics55/prtech/tech.lef')
+    expect(wrapper.text()).toContain('3 selected')
     expect(wrapper.text()).toContain('No external PDK paths declared.')
     expect(wizard.canProceed).toBe(true)
     expect(wizard.config.pdk_effective_resources).toBeUndefined()

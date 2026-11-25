@@ -417,17 +417,27 @@ function testUpdateCheckCachePath(cacheDir: string, registryUrl: string): string
   return join(cacheDir, `resource-update-checks-${key}.json`)
 }
 
-function testResourceDirs(root: string): {
-  resourcesDir: string
-  toolsDir: string
-  pdksDir: string
-  cacheDir: string
-} {
+async function verifyFixturePdk(root: string) {
+  const techLef = join(root, 'prtech/techLEF/N551P6M_ecos.lef')
+  const views = ['ics55_LLSC_H7CR', 'ics55_LLSC_H7CL'].map((name) => ({
+    name,
+    dir: join(root, 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100', name),
+  }))
+  const cellLefs = views.map(({ dir, name }) => join(dir, 'lef', `${name}_ecos.lef`))
+  const liberty = views.map(({ dir, name }) =>
+    join(dir, 'liberty', `${name}_ss_rcworst_1p08_125_nldm.lib`),
+  )
+  await Promise.all([techLef, ...cellLefs, ...liberty].map((file) => stat(file)))
+  return { techLef, cellLefs, liberty }
+}
+
+function testResourceDirs(root: string) {
   return {
     resourcesDir: join(root, 'state', 'resources'),
     toolsDir: join(root, 'data', 'tools'),
     pdksDir: join(root, 'data', 'pdks'),
     cacheDir: join(root, 'cache'),
+    verifyIcs55Root: verifyFixturePdk,
   }
 }
 
@@ -7411,9 +7421,7 @@ describe('ResourceManagerService', () => {
     const verifySha256 = vi.fn(async () => true)
     const service = new ResourceManagerService({
       registryUrl: `file://${registryPath}`,
-      resourcesDir: join(root, 'state', 'resources'),
-      toolsDir: join(root, 'data', 'tools'),
-      pdksDir: join(root, 'data', 'pdks'),
+      ...testResourceDirs(root),
       commandRunner: postInstallRunner,
       sha256Verifier: verifySha256,
     })
@@ -7901,7 +7909,14 @@ describe('ResourceManagerService', () => {
       registryUrl: `file://${registryPath}`,
       ...dirs,
       verifyIcs55Root: async (path) => {
+        if (!(await stat(join(path, 'VERSION')).catch(() => null)))
+          return verifyFixturePdk(path)
         expect(await readFile(join(path, 'VERSION'), 'utf8')).toBe('ics55-v2\n')
+        return {
+          techLef: join(path, 'tech.lef'),
+          cellLefs: [join(path, 'cells.lef')],
+          liberty: [join(path, 'cells.lib')],
+        }
       },
     })
     for (const version of ['1.10.103', '2.0.0'])
@@ -8527,9 +8542,7 @@ describe('ResourceManagerService', () => {
     const verifySha256 = vi.fn(async () => true)
     const service = new ResourceManagerService({
       registryUrl: `file://${registryPath}`,
-      resourcesDir: join(root, 'state', 'resources'),
-      toolsDir: join(root, 'data', 'tools'),
-      pdksDir: join(root, 'data', 'pdks'),
+      ...testResourceDirs(root),
       sha256Verifier: verifySha256,
     })
 
@@ -8689,9 +8702,7 @@ describe('ResourceManagerService', () => {
     )
     const service = new ResourceManagerService({
       registryUrl: `file://${registryPath}`,
-      resourcesDir: join(root, 'state', 'resources'),
-      toolsDir: join(root, 'data', 'tools'),
-      pdksDir: join(root, 'data', 'pdks'),
+      ...testResourceDirs(root),
       commandRunner: postInstallRunner,
       fetchImpl: fetchImpl as typeof fetch,
       sha256Verifier: verifySha256,
@@ -9309,9 +9320,7 @@ describe('ResourceManagerService', () => {
     )
     const service = new ResourceManagerService({
       registryUrl: `file://${registryPath}`,
-      resourcesDir: join(root, 'state', 'resources'),
-      toolsDir: join(root, 'data', 'tools'),
-      pdksDir: join(root, 'data', 'pdks'),
+      ...testResourceDirs(root),
       commandRunner: postInstallRunner,
       fetchImpl: fetchImpl as typeof fetch,
       sha256Verifier: vi.fn(async () => true),
