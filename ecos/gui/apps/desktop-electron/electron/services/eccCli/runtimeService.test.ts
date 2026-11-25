@@ -1145,6 +1145,71 @@ describe('ECC CLI live flow projection', () => {
     await service.shutdown()
   })
 
+  it('opens a Workspace with historical runs without publishing them as new outcomes', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ecc-runtime-run-history-'))
+    temporaryDirectories.push(projectRoot)
+    const workspaceDirectory = join(projectRoot, 'ws_1')
+    const logDirectory = join(workspaceDirectory, 'log')
+    await mkdir(logDirectory, { recursive: true })
+    await writeFile(
+      join(projectRoot, 'project.json'),
+      JSON.stringify({
+        schema_version: 1,
+        project_id: 'project-1',
+        name: 'Demo',
+        design_name: 'tpu_top',
+        root_path: projectRoot,
+        base_design: {},
+        objectives: {},
+        workspaces: [{ workspace_id: 'ws_1', workspace_path: 'ws_1' }],
+      }),
+    )
+    const history = [
+      { runId: '11111111-1111-4111-8111-111111111111', state: 'interrupted' },
+      { runId: '22222222-2222-4222-8222-222222222222', state: 'cancelled' },
+      { runId: '33333333-3333-4333-8333-333333333333', state: 'succeeded' },
+    ]
+    for (const [index, run] of history.entries()) {
+      await writeFile(
+        join(logDirectory, `${run.runId}.run.json`),
+        JSON.stringify({
+          schema_version: 1,
+          run_id: run.runId,
+          workspace_id: 'ws_1',
+          started_at: 1,
+          finished_at: 2 + index,
+          state: run.state,
+        }),
+      )
+    }
+    const snapshotReader = await import('./engineeringSnapshotReader')
+    vi.spyOn(snapshotReader, 'readPersistedEngineeringSnapshot').mockResolvedValue({
+      workspaceRevision: 1,
+    } as Awaited<ReturnType<typeof snapshotReader.readPersistedEngineeringSnapshot>>)
+    vi.spyOn(EccCliProcess.prototype, 'run').mockResolvedValue({
+      exitCode: 0,
+      stderr: '',
+      stdout: JSON.stringify({ schema_version: 2, runtime: 'ECC CLI', cli_contract: 1 }),
+    })
+    const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
+    try {
+      const { workspaceHandle } = await service.openWorkspace({
+        directory: workspaceDirectory,
+      })
+      expect(service.operationProjection().outcomes).toEqual([])
+      await expect(service.reconcileOperationProjection()).resolves.toMatchObject({
+        operations: [],
+        outcomes: [],
+      })
+      const { runs } = await service.runHistory({ workspaceHandle })
+      expect(runs.map(({ runId, state }) => ({ runId, state }))).toEqual(
+        [...history].reverse(),
+      )
+    } finally {
+      await service.shutdown()
+    }
+  })
+
   it('keeps a finished CLI run unknown when only the Workspace ledger is available', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'ecc-runtime-adopt-flow-'))
     temporaryDirectories.push(projectRoot)
@@ -1278,9 +1343,7 @@ describe('ECC CLI live flow projection', () => {
         workspaceDirectory,
       }),
     ])
-    expect(projection.outcomes).toMatchObject([
-      { operationId: finishedRunId, state: 'succeeded', kind: 'step', step: 'synthesis' },
-    ])
+    expect(projection.outcomes).toEqual([])
     const events = vi.fn()
     service.onEvent(events)
     const wait = service.waitForOperation({
@@ -1309,6 +1372,9 @@ describe('ECC CLI live flow projection', () => {
       flow: { steps: [{ state: 'Success' }] },
     })
     expect(service.operationProjection().operations).toEqual([])
+    expect(service.operationProjection().outcomes).toMatchObject([
+      { operationId: runId, state: 'unknown' },
+    ])
     expect(events).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'operation.unknown', operationId: runId }),
     )

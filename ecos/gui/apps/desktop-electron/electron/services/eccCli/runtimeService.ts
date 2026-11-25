@@ -74,7 +74,6 @@ import {
   readRunHistory,
   readRunResult,
   readRunSelection,
-  recentRunResults,
   RECENT_RUN_LIMIT,
   type RunSelection,
 } from './operationLog'
@@ -527,6 +526,17 @@ export class EccCliRuntimeService {
     }
     this.sessions.set(session.handle, session)
     this.handleByDirectory.set(directory, session.handle)
+    for (const tracked of this.operations.values()) {
+      if (
+        isTerminal(tracked.operation.state) &&
+        tracked.session.directory === directory &&
+        tracked.session.projectId === session.projectId &&
+        tracked.session.workspaceId === session.workspaceId &&
+        !this.sessions.has(tracked.session.handle)
+      ) {
+        tracked.session = session
+      }
+    }
     const watcher = watch(session.projectRoot, {
       depth: 0,
       followSymlinks: false,
@@ -541,7 +551,7 @@ export class EccCliRuntimeService {
       electronLogger.warn('[runtime] ECC Project watcher failed', error),
     )
     await new Promise<void>((ready) => watcher.once('ready', ready))
-    await this.restoreWorkspaceRuns(
+    await this.restoreRegisteredOperation(
       session,
       await readProjectManifest(session.projectRoot),
     )
@@ -1308,7 +1318,7 @@ export class EccCliRuntimeService {
     await Promise.allSettled(
       [...this.sessions.values()].map(async (session) => {
         const manifest = await readProjectManifest(session.projectRoot)
-        await this.restoreWorkspaceRuns(session, manifest)
+        await this.restoreRegisteredOperation(session, manifest)
       }),
     )
     await Promise.allSettled(
@@ -1584,48 +1594,6 @@ export class EccCliRuntimeService {
       this.emitOperationEvent(tracked, 'operation.progress')
     }
     return { ...tracked.operation }
-  }
-
-  private async restoreWorkspaceRuns(
-    session: WorkspaceSession,
-    manifest: ProjectManifest,
-  ) {
-    await this.restoreRegisteredOperation(session, manifest)
-    const results = await recentRunResults(session.directory, session.workspaceId)
-    if (!this.sessions.has(session.handle)) return
-    let changed = false
-    for (const result of results) {
-      const existing = this.operations.get(result.runId)
-      if (existing) {
-        if (
-          isTerminal(existing.operation.state) &&
-          existing.session.directory === session.directory &&
-          !this.sessions.has(existing.session.handle)
-        ) {
-          existing.session = session
-          changed = true
-        }
-        continue
-      }
-      const operation = persistedRunSnapshot(session, result)
-      this.operations.set(result.runId, {
-        operation,
-        projectRoot: session.projectRoot,
-        registrationPending: false,
-        requestedCancel: false,
-        poller: null,
-        refreshSequence: 0,
-        session,
-        waiters: [],
-        watcher: null,
-      })
-      this.outcomes.push(operation)
-      changed = true
-    }
-    if (changed) {
-      this.trimOutcomes()
-      this.invalidate()
-    }
   }
 
   private async restoreRegisteredOperation(
