@@ -1,4 +1,5 @@
 import {
+  eccFlowStepKey,
   parseProjectManifestFlowStep,
   projectAnalysisArtifactPolicy,
   projectManagementWorkspaceStepAnalysisSpecs,
@@ -34,8 +35,9 @@ function artifactsForSpec<T extends ArtifactStatusRef>(
   const kinds = new Set<string>(STEP_ARTIFACTS.map((artifact) => artifact.kind))
   return artifacts.filter(
     (artifact) =>
-      spec.eccStepIds.some((stepId) => stepId === artifact.stepId) &&
-      kinds.has(artifact.kind),
+      spec.eccStepIds.some(
+        (stepId) => eccFlowStepKey(stepId) === eccFlowStepKey(artifact.stepId),
+      ) && kinds.has(artifact.kind),
   )
 }
 
@@ -47,7 +49,9 @@ function artifactForKind<T extends ArtifactStatusRef>(
   let fallback: T | undefined
   for (const stepId of spec.eccStepIds) {
     const candidates = artifacts.filter(
-      (artifact) => artifact.stepId === stepId && artifact.kind === kind,
+      (artifact) =>
+        eccFlowStepKey(artifact.stepId) === eccFlowStepKey(stepId) &&
+        artifact.kind === kind,
     )
     const available = candidates.find((artifact) => artifact.availability === 'available')
     if (available) return available

@@ -1,11 +1,17 @@
 import { existsSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { EccPersistedEngineeringSnapshot, ReadSection } from '@ecos-studio/shared'
+import type {
+  EccPersistedEngineeringSnapshot,
+  EccWorkspaceStepOutputArtifact,
+  EccWorkspaceStepOutputsResult,
+  ReadSection,
+} from '@ecos-studio/shared'
 import {
   ENGINEERING_SNAPSHOT_MAX_BYTES,
   validateEngineeringSnapshot,
 } from '@ecos-studio/shared'
+import { isWorkspaceStepDirectory } from '../workspaceStepDirectory'
 
 function readyData<T>(section: ReadSection<T>): T {
   if (section.status !== 'ready') throw new Error(section.issues[0]?.code)
@@ -14,6 +20,49 @@ function readyData<T>(section: ReadSection<T>): T {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function outputArtifact(value: unknown): EccWorkspaceStepOutputArtifact | null {
+  if (
+    !isRecord(value) ||
+    typeof value.path !== 'string' ||
+    typeof value.exists !== 'boolean'
+  )
+    return null
+  const path = value.path
+  if (!path.split('/').every(isWorkspaceStepDirectory)) return null
+  return { path, exists: value.exists }
+}
+
+function stepOutputs(value: unknown): EccWorkspaceStepOutputsResult | undefined {
+  if (
+    !isRecord(value) ||
+    typeof value.design !== 'string' ||
+    value.directory !== '.' ||
+    !Array.isArray(value.steps)
+  )
+    return
+  return {
+    design: value.design,
+    directory: value.directory,
+    sdc: outputArtifact(value.sdc),
+    steps: value.steps.flatMap((step) =>
+      isRecord(step) &&
+      typeof step.step === 'string' &&
+      typeof step.tool === 'string' &&
+      typeof step.state === 'string'
+        ? [
+            {
+              step: step.step,
+              tool: step.tool,
+              state: step.state,
+              def: outputArtifact(step.def),
+              verilog: outputArtifact(step.verilog),
+            },
+          ]
+        : [],
+    ),
+  }
 }
 
 export async function readPersistedEngineeringSnapshot(
@@ -55,9 +104,11 @@ export async function readPersistedEngineeringSnapshot(
     configuration[field] = value
   }
   const { qorSnapshotExtension } = validated.sections
+  const outputs = stepOutputs(parsed.stepOutputs)
   return {
     ...validated.snapshot,
     ...configuration,
+    ...(outputs ? { stepOutputs: outputs } : {}),
     artifacts: readyData(validated.sections.artifacts),
     checklist: readyData(validated.sections.checklist),
     flow: readyData(validated.sections.flow),

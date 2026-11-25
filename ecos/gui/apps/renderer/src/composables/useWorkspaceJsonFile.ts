@@ -1,10 +1,38 @@
 import { computed, onScopeDispose, ref, watch } from 'vue'
+import {
+  eccFlowStepKey,
+  normalizeLocalPath,
+  type WorkspaceResourceIndex,
+} from '@ecos-studio/shared'
+import { getWorkspaceResourceIndexApi } from '@/api/workspaceResources'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 
+const inFlightIndexes = new Map<string, Promise<WorkspaceResourceIndex>>()
+
+export async function workspaceStepFeaturePath(
+  workspace: string,
+  stepId: string,
+): Promise<string | undefined> {
+  let pending = inFlightIndexes.get(workspace)
+  if (!pending) {
+    pending = getWorkspaceResourceIndexApi().finally(() =>
+      inFlightIndexes.delete(workspace),
+    )
+    inFlightIndexes.set(workspace, pending)
+  }
+  const index = await pending
+  if (normalizeLocalPath(index.root) !== normalizeLocalPath(workspace)) return
+  if (index.status === 'error') throw new Error(index.messages.join('\n'))
+  const feature = index.flow.steps.find(
+    (step) => eccFlowStepKey(step.name) === eccFlowStepKey(stepId),
+  )?.resources.feature.step
+  return feature?.exists ? feature.path : undefined
+}
+
 export function useWorkspaceJsonFile<T>(
-  path: string,
+  path: string | ((workspace: string) => Promise<string | undefined>),
   parse: (value: unknown) => T | null,
   invalidMessage: string,
 ) {
@@ -35,7 +63,11 @@ export function useWorkspaceJsonFile<T>(
     loading.value = true
     error.value = null
     try {
-      const text = await readOptionalProjectTextFile(path, { projectPath })
+      const resolvedPath = typeof path === 'function' ? await path(projectPath) : path
+      if (version !== requestVersion) return
+      const text = resolvedPath
+        ? await readOptionalProjectTextFile(resolvedPath, { projectPath })
+        : null
       if (version !== requestVersion) return
       if (!text) {
         data.value = null

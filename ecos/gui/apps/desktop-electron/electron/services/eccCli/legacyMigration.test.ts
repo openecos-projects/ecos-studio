@@ -127,6 +127,23 @@ describe('hasLegacyRunsLayout', () => {
 })
 
 describe('projectNeedsCliMigration', () => {
+  it('accepts clock and frequency from the current project manifest', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ecc-config-migration-'))
+    roots.push(root)
+    await writeFile(
+      join(root, 'project.json'),
+      JSON.stringify({
+        schema_version: 1,
+        base_design: { clock: 'clk', frequency_mhz: 100 },
+      }),
+    )
+    await writeFile(
+      join(root, 'ecc.toml'),
+      '[design]\nname = "gcd"\ntop = "gcd"\n[pdk]\nname = "ics55"\n[flow]\npreset = "rtl2gds"\n',
+    )
+    await expect(projectNeedsCliMigration(root)).resolves.toBe(false)
+  })
+
   it('detects a manifest project whose ecc.toml is missing', async () => {
     const root = await mkdtemp(join(tmpdir(), 'ecc-config-migration-'))
     roots.push(root)

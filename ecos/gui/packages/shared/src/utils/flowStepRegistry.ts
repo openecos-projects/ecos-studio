@@ -299,6 +299,14 @@ export function normalizeFlowStepName(value: string): string {
     .replace(/[\s_-]/g, '')
 }
 
+/** Match persisted ECC step names across versions without grouping substages. */
+export function eccFlowStepKey(value: string): string {
+  const key = normalizeFlowStepName(value)
+  if (key === 'place') return 'placement'
+  if (key === 'route') return 'routing'
+  return key
+}
+
 /** Normalized-name → canonical id index built from id, label, eccNames, aliases. */
 const FLOW_STEP_BY_NAME: ReadonlyMap<string, ProjectManifestFlowStep> = (() => {
   const map = new Map<string, ProjectManifestFlowStep>()

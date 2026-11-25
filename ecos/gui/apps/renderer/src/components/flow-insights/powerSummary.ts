@@ -36,5 +36,3 @@ export function parsePowerSummaryStep(value: unknown): PowerSummaryModel | null 
     leakageUw: parsed.leakageUw as number,
   }
 }
-
-export const POWER_SUMMARY_STEP_PATH = 'powerAnalysis_ecc/feature/powerAnalysis.step.json'

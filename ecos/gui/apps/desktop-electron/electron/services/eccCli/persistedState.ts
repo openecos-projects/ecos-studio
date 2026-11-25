@@ -6,6 +6,7 @@ import {
   type EccProjectManifest,
   type ProjectManifest,
 } from '@ecos-studio/shared'
+import { isWorkspaceStepDirectory } from '../workspaceStepDirectory'
 
 const PROJECT_MAX_BYTES = 4 * 1024 * 1024
 const FLOW_MAX_BYTES = 4 * 1024 * 1024
@@ -15,6 +16,7 @@ const ENOENT_RETRY_ATTEMPTS = 2
 const ENOENT_RETRY_DELAY_MS = 75
 
 export interface PersistedFlowStep {
+  directory?: string
   checklistBlocked?: boolean
   checklistFailedItems?: string[]
   name: string
@@ -74,7 +76,7 @@ export async function readWorkspaceFlowFile(path: string): Promise<PersistedFlow
   const raw = await readBoundedJson(path, FLOW_MAX_BYTES)
   if (
     !isRecord(raw) ||
-    raw.schema_version !== 1 ||
+    (raw.schema_version !== 1 && raw.schema_version !== 3) ||
     !Array.isArray(raw.steps) ||
     raw.steps.length > 4096
   ) {
@@ -83,6 +85,8 @@ export async function readWorkspaceFlowFile(path: string): Promise<PersistedFlow
   const steps = raw.steps.map((value) => {
     if (
       !isRecord(value) ||
+      ((raw.schema_version === 3 || value.directory !== undefined) &&
+        !isWorkspaceStepDirectory(value.directory)) ||
       typeof value.name !== 'string' ||
       !value.name ||
       value.name.length > 256 ||
@@ -112,6 +116,7 @@ export async function readWorkspaceFlowFile(path: string): Promise<PersistedFlow
           .slice(0, 64)
       : []
     return {
+      ...(typeof value.directory === 'string' ? { directory: value.directory } : {}),
       ...(checklistBlocked
         ? {
             checklistBlocked: true,

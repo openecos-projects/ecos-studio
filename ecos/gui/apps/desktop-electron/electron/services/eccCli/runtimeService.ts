@@ -50,6 +50,7 @@ import type {
   ProjectManifestMutation,
   ProjectRuntimeProcessEntry,
 } from '@ecos-studio/shared'
+import { eccFlowStepKey } from '@ecos-studio/shared'
 import { electronLogger } from '../logger'
 import { isPathWithinRoot } from '../pathScope'
 import { normalizeWorkspacePath } from '../workspacePath'
@@ -674,6 +675,17 @@ export class EccCliRuntimeService {
     step: string,
     snapshot: EccEngineeringSnapshot,
   ): Promise<EccWorkspaceStepConfigurationReadResult> {
+    const steps = snapshot.flow.steps
+    const resolved = Array.isArray(steps)
+      ? steps.find(
+          (entry) =>
+            isRecord(entry) &&
+            typeof entry.name === 'string' &&
+            eccFlowStepKey(entry.name) === eccFlowStepKey(step),
+        )
+      : undefined
+    const canonicalStep =
+      isRecord(resolved) && typeof resolved.name === 'string' ? resolved.name : step
     const result = await this.cli.run(
       [
         'param',
@@ -683,7 +695,7 @@ export class EccCliRuntimeService {
         '--workspace',
         workspaceId,
         '--step',
-        step,
+        canonicalStep,
         '--all',
         '--plain',
       ],

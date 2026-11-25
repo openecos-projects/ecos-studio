@@ -234,7 +234,11 @@ describe('WorkspaceResourceService', () => {
   it('discovers every file below a step report directory', async () => {
     const root = await tempWorkspace()
     await writeWorkspace(root, [{ name: 'sta', tool: 'ecc' }])
-    const reportDirectory = join(root, 'sta_ecc', 'report')
+    await writeJson(join(root, 'home', 'flow.json'), {
+      schema_version: 3,
+      steps: [{ name: 'sta', tool: 'ecc', state: 'Success', directory: '18_sta_ecc' }],
+    })
+    const reportDirectory = join(root, '18_sta_ecc', 'report')
     await mkdir(join(reportDirectory, 'MAX_125', 'Cworst'), { recursive: true })
     await writeFile(join(reportDirectory, 'sta.db.rpt'), 'summary', 'utf8')
     await writeFile(

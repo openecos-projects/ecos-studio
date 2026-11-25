@@ -1,4 +1,5 @@
 import {
+  eccFlowStepKey,
   parseProjectManifestFlowStep,
   projectAnalysisArtifactPolicy,
   projectManagementWorkspaceStepAnalysisSpecs,
@@ -283,7 +284,9 @@ function findDeclaredArtifact(
   let fallback: EccEngineeringAnalysisArtifactRef | undefined
   for (const stepId of eccStepIds) {
     const candidates = artifacts.filter(
-      (artifact) => artifact.stepId === stepId && artifact.kind === kind,
+      (artifact) =>
+        eccFlowStepKey(artifact.stepId) === eccFlowStepKey(stepId) &&
+        artifact.kind === kind,
     )
     const available = candidates.find((artifact) => artifact.availability === 'available')
     if (available) return available

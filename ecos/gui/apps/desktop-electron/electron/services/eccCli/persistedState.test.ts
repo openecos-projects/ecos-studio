@@ -21,6 +21,35 @@ async function writeFlow(value: unknown): Promise<string> {
 }
 
 describe('readWorkspaceFlow', () => {
+  it('retains indexed directories from the current ledger', async () => {
+    const root = await writeFlow({
+      schema_version: 3,
+      steps: [
+        {
+          name: 'lec@synthesis',
+          state: 'Success',
+          directory: '02_lec@synthesis_kepler_formal',
+        },
+      ],
+    })
+    await expect(readWorkspaceFlow(root)).resolves.toMatchObject({
+      steps: [{ directory: '02_lec@synthesis_kepler_formal' }],
+    })
+  })
+
+  it.each([undefined, '..', '../outside', 'sub\\outside'])(
+    'rejects invalid schema 3 directory %s',
+    async (directory) => {
+      const root = await writeFlow({
+        schema_version: 3,
+        steps: [{ name: 'sta', state: 'Success', directory }],
+      })
+      await expect(readWorkspaceFlow(root)).rejects.toThrow(
+        'Workspace flow step is invalid',
+      )
+    },
+  )
+
   it('accepts schema 1 with dynamic and unknown step IDs', async () => {
     const root = await writeFlow({
       schema_version: 1,

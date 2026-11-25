@@ -88,6 +88,6 @@ describe('FlowInsightsPanel', () => {
 
     expect(wrapper.text()).toContain('LVS Results · lvs.step.json')
     await wrapper.setProps({ selectedModule: 'antenna' })
-    expect(wrapper.text()).toContain('Antenna Check · antennaCheck.step.json')
+    expect(wrapper.text()).toContain('Antenna Check · ECC antenna results')
   })
 })

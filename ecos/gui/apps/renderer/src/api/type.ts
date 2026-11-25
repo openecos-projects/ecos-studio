@@ -1,4 +1,8 @@
-import { flowStepRegistry, sameProjectManifestFlowStep } from '@ecos-studio/shared'
+import {
+  eccFlowStepKey,
+  flowStepRegistry,
+  sameProjectManifestFlowStep,
+} from '@ecos-studio/shared'
 
 export enum CMDEnum {
   catalog_list = 'catalog_list',
@@ -337,7 +341,9 @@ export function getStepMetadata(stepName: string): StepMetadata | undefined {
   return (
     STEP_METADATA[key] ??
     Object.values(STEP_METADATA).find(
-      (meta) => meta.label.toLowerCase() === key || meta.path.toLowerCase() === key,
+      (meta) =>
+        meta.label.toLowerCase() === key ||
+        eccFlowStepKey(meta.path) === eccFlowStepKey(key),
     )
   )
 }

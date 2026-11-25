@@ -29,6 +29,7 @@ export interface PdkInventoryServiceOptions {
   managedRoot?: string
   jsonWriter?: typeof writeJsonAtomic
   legacyCleaner?: () => Promise<void>
+  verifyIcs55Root?: (root: string) => Promise<void>
 }
 
 export interface ManagedPdkInstallationRequest extends PdkImportRequest {
@@ -57,8 +58,10 @@ const ICS55_MARKERS = [
 export class PdkInventoryService {
   private operation: Promise<void> = Promise.resolve()
   private legacyCleanupComplete = false
-  private readonly options: Required<Omit<PdkInventoryServiceOptions, 'legacyCleaner'>> &
-    Pick<PdkInventoryServiceOptions, 'legacyCleaner'>
+  private readonly options: Required<
+    Omit<PdkInventoryServiceOptions, 'legacyCleaner' | 'verifyIcs55Root'>
+  > &
+    Pick<PdkInventoryServiceOptions, 'legacyCleaner' | 'verifyIcs55Root'>
 
   constructor(options: PdkInventoryServiceOptions = {}) {
     const stateRoot = process.env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state')
@@ -73,6 +76,7 @@ export class PdkInventoryService {
       managedRoot: options.managedRoot ?? join(dataRoot, 'ecos-studio', 'pdks'),
       jsonWriter: options.jsonWriter ?? writeJsonAtomic,
       legacyCleaner: options.legacyCleaner,
+      verifyIcs55Root: options.verifyIcs55Root,
     }
   }
 
@@ -202,7 +206,13 @@ export class PdkInventoryService {
         const bound = inventory.installations.find(
           (candidate) => candidate.id === existing.installationId,
         )
-        if (bound && installationSatisfiesRequirement(bound, request.requirement)) {
+        if (
+          bound &&
+          installationSatisfiesRequirement(
+            await this.snapshot(bound),
+            request.requirement,
+          )
+        ) {
           // The Requirement drifted but the bound Installation still satisfies
           // it; sync the stored Requirement instead of failing validation later.
           existing.requirement = request.requirement
@@ -221,10 +231,12 @@ export class PdkInventoryService {
 
       const matching: PdkInstallationRecord[] = []
       for (const installation of inventory.installations) {
-        if (!installationSatisfiesRequirement(installation, request.requirement)) {
+        if (installation.familyId !== request.requirement.familyId) continue
+        const snapshot = await this.snapshot(installation)
+        if (!installationSatisfiesRequirement(snapshot, request.requirement)) {
           continue
         }
-        const readiness = (await this.snapshot(installation)).readiness
+        const { readiness } = snapshot
         if (readiness === 'ready' || readiness === 'unverified') {
           matching.push(installation)
         }
@@ -257,12 +269,13 @@ export class PdkInventoryService {
         (candidate) => candidate.id === request.installationId,
       )
       if (!installation) throw new Error('PDK Installation was not found')
-      if (!installationSatisfiesRequirement(installation, request.requirement)) {
+      const snapshot = await this.snapshot(installation)
+      if (!installationSatisfiesRequirement(snapshot, request.requirement)) {
         throw new Error(
-          `PDK Installation does not satisfy the Project Requirement (${describeRequirementMismatch(installation, request.requirement)})`,
+          `PDK Installation does not satisfy the Project Requirement (${describeRequirementMismatch(snapshot, request.requirement)})`,
         )
       }
-      const readiness = (await this.snapshot(installation)).readiness
+      const { readiness } = snapshot
       if (readiness !== 'ready' && readiness !== 'unverified') {
         throw new Error('PDK Installation is not eligible for Binding')
       }
@@ -298,12 +311,12 @@ export class PdkInventoryService {
         (candidate) => candidate.id === binding.installationId,
       )
       if (!installation) throw new Error('Bound PDK Installation was not found')
-      if (!installationSatisfiesRequirement(installation, request.requirement)) {
+      const snapshot = await this.snapshot(installation)
+      if (!installationSatisfiesRequirement(snapshot, request.requirement)) {
         throw new Error(
-          `Bound PDK Installation does not satisfy the Project Requirement (${describeRequirementMismatch(installation, request.requirement)})`,
+          `Bound PDK Installation does not satisfy the Project Requirement (${describeRequirementMismatch(snapshot, request.requirement)})`,
         )
       }
-      const snapshot = await this.snapshot(installation)
       if (snapshot.readiness === 'missing' || snapshot.readiness === 'invalid') {
         throw new Error(snapshot.reason ?? 'Bound PDK Installation is not usable')
       }
@@ -439,6 +452,36 @@ export class PdkInventoryService {
           readiness: 'unverified',
           reason: null,
           supportsEccDefaults: false,
+        }
+      }
+      const marker = await readFile(join(installation.root, 'VERSION'), 'utf8').catch(
+        (error) => {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+          throw error
+        },
+      )
+      if (marker.trim() && marker.trim() !== 'ics55-v1') {
+        const identified = {
+          ...installation,
+          version: installation.version ?? marker.trim(),
+        }
+        try {
+          if (!this.options.verifyIcs55Root)
+            throw new Error('ECC PDK verification is unavailable')
+          await this.options.verifyIcs55Root(installation.root)
+          return {
+            ...identified,
+            readiness: 'ready',
+            reason: null,
+            supportsEccDefaults: true,
+          }
+        } catch (error) {
+          return {
+            ...identified,
+            readiness: 'invalid',
+            reason: error instanceof Error ? error.message : String(error),
+            supportsEccDefaults: false,
+          }
         }
       }
       const markers = await Promise.all(

@@ -73,11 +73,24 @@ export async function projectNeedsCliMigration(projectRoot: string): Promise<boo
     const design = record(document.design)
     const pdk = record(document.pdk)
     const flow = record(document.flow)
+    // Current ECC also takes clock and frequency from the manifest layer.
+    let baseDesign: Record<string, unknown> = {}
+    if (design.clock_port === undefined || design.frequency_mhz === undefined) {
+      const manifestPath = join(projectRoot, 'project.json')
+      if ((await stat(manifestPath)).size <= LEGACY_MANIFEST_MAX_BYTES) {
+        const manifest = record(JSON.parse(await readFile(manifestPath, 'utf8')))
+        baseDesign = record(manifest.base_design)
+      }
+    }
     return (
       !nonempty(design.name) ||
       !nonempty(design.top) ||
-      !nonempty(design.clock_port) ||
-      !positiveNumber(design.frequency_mhz) ||
+      !nonempty(design.clock_port === undefined ? baseDesign.clock : design.clock_port) ||
+      !positiveNumber(
+        design.frequency_mhz === undefined
+          ? baseDesign.frequency_mhz
+          : design.frequency_mhz,
+      ) ||
       !nonempty(pdk.name) ||
       !nonempty(flow.preset)
     )

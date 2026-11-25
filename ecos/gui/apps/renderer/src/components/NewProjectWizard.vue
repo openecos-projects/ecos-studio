@@ -682,6 +682,7 @@
                             STA maximum parallel corners
                           </label>
                           <select
+                            v-if="staParallelCornerLimit !== null"
                             id="sta-max-parallel-corners"
                             v-model.number="config.parameters.sta_max_parallel_corners"
                             class="mt-2 w-full cursor-pointer rounded-md border border-(--border-color) bg-(--bg-primary)/75 px-2 py-1.5 text-xs text-(--text-primary)"
@@ -694,6 +695,15 @@
                               {{ count }}
                             </option>
                           </select>
+                          <input
+                            v-else
+                            id="sta-max-parallel-corners"
+                            v-model.number="config.parameters.sta_max_parallel_corners"
+                            type="number"
+                            min="1"
+                            step="1"
+                            class="mt-2 w-full rounded-md border border-(--border-color) bg-(--bg-primary)/75 px-2 py-1.5 text-xs text-(--text-primary)"
+                          />
                         </div>
 
                         <div
@@ -861,7 +871,7 @@
                           <i class="ri-upload-2-line"></i>
                           {{
                             activeDesignInputType === 'sdc'
-                              ? 'Import SDC'
+                              ? 'Import Timing Constraints'
                               : `Import ${activeDesignInput?.label || 'File'}`
                           }}
                         </button>
@@ -870,7 +880,7 @@
                         v-if="activeDesignInputType === 'sdc'"
                         class="mt-3 text-xs text-(--text-secondary)"
                       >
-                        SDC is optional and stored with the design inputs.
+                        ECC timing input template (TOML).
                       </p>
                       <p v-if="designFileError" class="mt-3 text-xs text-red-500">
                         {{ designFileError }}
@@ -2058,7 +2068,7 @@ const discoveredFlowDefinition = computed<Record<string, unknown> | null>(() => 
   return isRecord(definition) ? definition : null
 })
 
-const discoveredFlowStepIds = computed<FlowStepName[] | null>(() => {
+const discoveredFlowStepIds = computed<string[] | null>(() => {
   const definition = discoveredFlowDefinition.value
   if (!definition || !Array.isArray(definition.stepIds)) return null
   const stepIds = definition.stepIds.filter(
@@ -2067,23 +2077,34 @@ const discoveredFlowStepIds = computed<FlowStepName[] | null>(() => {
   return stepIds.length > 0 ? stepIds : null
 })
 
+function wizardStepName(stepId: string): FlowStepName {
+  return normalizeFlowStepName(stepId, stepId)
+}
+
 const skippableFlowStepNames = computed<ReadonlySet<string>>(() => {
   const ids = discoveredFlowDefinition.value?.skippableStepIds
   if (!Array.isArray(ids)) return NO_FLOW_STEP_NAMES
-  return new Set(ids.filter((id): id is string => typeof id === 'string'))
+  return new Set(
+    ids.filter((id): id is string => typeof id === 'string').map(wizardStepName),
+  )
 })
 
 const defaultSkippedFlowStepNames = computed<ReadonlySet<string>>(() => {
   const ids = discoveredFlowDefinition.value?.defaultSkippedStepIds
   if (!Array.isArray(ids)) return NO_FLOW_STEP_NAMES
-  return new Set(ids.filter((id): id is string => typeof id === 'string'))
+  return new Set(
+    ids.filter((id): id is string => typeof id === 'string').map(wizardStepName),
+  )
 })
 
 const flowStepOptions = computed<Array<{ name: FlowStepName; description: string }>>(
   () => {
     const stepIds = discoveredFlowStepIds.value
     if (!stepIds) return []
-    return stepIds.map((id) => ({ name: id, description: flowStepDescription(id) }))
+    return stepIds.map((id) => ({
+      name: wizardStepName(id),
+      description: flowStepDescription(id),
+    }))
   },
 )
 
@@ -2142,10 +2163,15 @@ const staParallelCornerLimit = computed(() => {
   const maximum = Array.isArray(range) ? range[1] : null
   return typeof maximum === 'number' && Number.isSafeInteger(maximum) && maximum >= 1
     ? maximum
-    : 1
+    : Array.isArray(range) && maximum === null
+      ? null
+      : 1
 })
 watch(staParallelCornerLimit, (maximum) => {
-  if (Number(config.value.parameters.sta_max_parallel_corners ?? 1) > maximum) {
+  if (
+    maximum !== null &&
+    Number(config.value.parameters.sta_max_parallel_corners ?? 1) > maximum
+  ) {
     config.value.parameters.sta_max_parallel_corners = maximum
   }
 })
@@ -2616,10 +2642,7 @@ const selectedPdk = computed(() =>
   pdkOptions.value.find((pdk) => pdk.id === selectedPdkId.value),
 )
 const defaultConfigAvailable = computed(
-  () =>
-    selectedPdk.value?.readiness === 'ready' &&
-    selectedPdk.value.supportsEccDefaults &&
-    Boolean(selectedPdk.value.defaultResources),
+  () => selectedPdk.value?.readiness === 'ready' && selectedPdk.value.supportsEccDefaults,
 )
 const defaultConfigUnavailableReason = computed(() => {
   if (!selectedPdk.value) return 'Select a PDK first.'
@@ -2630,8 +2653,6 @@ const defaultConfigUnavailableReason = computed(() => {
   if (!isPdkEligible(selectedPdk.value)) return 'This PDK is not validated.'
   if (!selectedPdk.value.supportsEccDefaults)
     return 'ECC defaults are only available for a known PDK layout.'
-  if (!selectedPdk.value.defaultResources)
-    return 'Default PDK resources are unavailable; re-check the PDK.'
   return ''
 })
 const manualPdkDetectedFiles = ref<PdkDetectedFiles | null>(null)
@@ -2831,6 +2852,7 @@ const canProceed = computed(() => {
       )
         return false
       if (pdkConfigMode.value === 'default') {
+        if (!selectedPdk.value?.defaultResources) return defaultConfigAvailable.value
         return pdkWizardSteps.every(
           (step) => effectiveDefaultPdkResources.value[step.key].length > 0,
         )
@@ -3193,7 +3215,7 @@ async function applyProjectDesignFileDefaults(
 
   const projectSdc = firstString(baseDesign.sdc, parameters.sdc)
   if (projectSdc && !sdcPath.value && !hasInitialConfigValue('sdc')) {
-    sdcPath.value = projectSdc
+    sdcPath.value = resolveProjectRelativePath(projectRoot, projectSdc)
   }
 
   if (
@@ -3655,8 +3677,8 @@ function getDesignFileOptions(type: DesignInputKey): DesktopFileDialogOptions | 
     case 'sdc':
       return {
         ...common,
-        title: 'Select SDC File',
-        filters: [{ name: 'SDC Files', extensions: ['sdc', 'gz'] }],
+        title: 'Select ECC Timing Constraints',
+        filters: [{ name: 'Timing Constraints', extensions: ['toml', 'tcl', 'sdc'] }],
       }
     case 'def':
       return {
@@ -4100,7 +4122,8 @@ function specReady() {
     Number(params.max_fanout) > 0 &&
     Number.isInteger(params.sta_max_parallel_corners ?? 1) &&
     Number(params.sta_max_parallel_corners ?? 1) >= 1 &&
-    Number(params.sta_max_parallel_corners ?? 1) <= staParallelCornerLimit.value
+    (staParallelCornerLimit.value === null ||
+      Number(params.sta_max_parallel_corners ?? 1) <= staParallelCornerLimit.value)
 
   if (!hasCoreFields || projectManifestError.value || isLoadingProjectManifest.value) {
     return false
@@ -4146,6 +4169,7 @@ function syncWorkspaceConfig() {
   }
   if (
     pdkConfigMode.value === 'default' &&
+    selectedPdk.value?.defaultResources &&
     hasProjectPdkResourceOverrides.value &&
     !projectPdkMismatch.value &&
     !isLoadingProjectEccPdk.value &&
@@ -4398,7 +4422,18 @@ function createWorkspace() {
   syncWorkspaceConfig()
   isCreating.value = true
   try {
-    emit('create', config.value)
+    const ids = new Map(
+      discoveredFlowStepIds.value?.map((id) => [wizardStepName(id), id]),
+    )
+    const stepId = (name: string) => ids.get(name) ?? name
+    emit('create', {
+      ...config.value,
+      flow_config: {
+        start_step: stepId(flowStartStep.value),
+        end_step: stepId(flowEndStep.value),
+        steps: selectedFlowSteps.value.map(stepId),
+      },
+    })
   } finally {
     isCreating.value = false
   }

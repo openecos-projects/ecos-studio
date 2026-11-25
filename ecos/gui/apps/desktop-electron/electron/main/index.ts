@@ -14,6 +14,7 @@ import { CodexDependencyService } from '../services/agent/codexDependencyService
 import { ModelProfileService } from '../services/agent/modelProfileService'
 import { AppInfoService } from '../services/appInfoService'
 import { EccCliCommandError, EccCliProcess } from '../services/eccCli/cliProcess'
+import { verifyIcs55PdkRoot } from '../services/eccCli/verifyPdkRoot'
 import {
   EnvironmentDoctorService,
   environmentDoctorLimits,
@@ -201,6 +202,7 @@ function getDesktopServices() {
   const runtimeInUse = () =>
     eccRuntimeService?.isRuntimeResourceInUse('tool:ecc') ?? false
   const resourceManagerService = new ResourceManagerService({
+    verifyIcs55Root: (root): Promise<void> => verifyIcs55PdkRoot(eccCliProcess, root),
     resourceInUse: (resourceId) =>
       eccRuntimeService?.isRuntimeResourceInUse(resourceId) ?? false,
   })

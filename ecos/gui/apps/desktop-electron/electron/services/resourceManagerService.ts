@@ -402,6 +402,7 @@ export interface ResourceManagerServiceOptions {
   manifestWriter?: ManifestWriter
   mirrorFallback?: MirrorFallbackPreference
   pdkInventoryWriter?: PdkInventoryServiceOptions['jsonWriter']
+  verifyIcs55Root?: PdkInventoryServiceOptions['verifyIcs55Root']
   pdksDir?: string
   mpcsDir?: string
   registryUrl?: string
@@ -476,6 +477,7 @@ export class ResourceManagerService {
       legacyManifestPath: this.manifestPath,
       managedRoot: this.pdksDir,
       jsonWriter: options.pdkInventoryWriter,
+      verifyIcs55Root: options.verifyIcs55Root,
       legacyCleaner: () => this.removeLegacyPdkManifestData(),
     })
     this.registryUrl =
