@@ -67,33 +67,38 @@ describe('readPersistedEngineeringSnapshot', () => {
     expect(snapshot.signoffAssessment.status).toBe('blocked')
   })
 
-  it('preserves workspace configuration and bindings for backend consumers', async () => {
-    const workspaceSpec = {
-      design: { topModule: 'gcd', clockPort: 'clk' },
-      inputs: [{ inputId: 'filelist', role: 'filelist' }],
-      pdk: { name: 'icsprout55' },
-      extension: { producerOption: true },
-    }
-    const workspaceBindings = {
-      inputs: { filelist: join(directory, 'origin', 'sources.f') },
-      pdk: { root: '/pdks/icsprout55', version: '1' },
-    }
-    writeFileSync(
-      join(directory, 'home', 'engineering-snapshot.json'),
-      JSON.stringify({
-        ...JSON.parse(fixtureText('v6-valid.json')),
-        workspaceSpec,
-        workspaceBindings,
-        unknownProjection: { ignored: true },
-      }),
-    )
+  it.each([6, 7])(
+    'preserves v%s workspace configuration and bindings',
+    async (schemaVersion) => {
+      const workspaceSpec = {
+        design: { topModule: 'gcd', clockPort: 'clk' },
+        inputs: [{ inputId: 'filelist', role: 'filelist' }],
+        pdk: { name: 'icsprout55' },
+        extension: { producerOption: true },
+      }
+      const workspaceBindings = {
+        inputs: { filelist: join(directory, 'origin', 'sources.f') },
+        pdk: { root: '/pdks/icsprout55', version: '1' },
+      }
+      writeFileSync(
+        join(directory, 'home', 'engineering-snapshot.json'),
+        JSON.stringify({
+          ...JSON.parse(fixtureText('v6-valid.json')),
+          schemaVersion,
+          workspaceSpec,
+          workspaceBindings,
+          unknownProjection: { ignored: true },
+        }),
+      )
 
-    const snapshot = await readPersistedEngineeringSnapshot(directory)
+      const snapshot = await readPersistedEngineeringSnapshot(directory)
 
-    expect(snapshot.workspaceSpec).toEqual(workspaceSpec)
-    expect(snapshot.workspaceBindings).toEqual(workspaceBindings)
-    expect(snapshot).not.toHaveProperty('unknownProjection')
-  })
+      expect(snapshot.schemaVersion).toBe(schemaVersion)
+      expect(snapshot.workspaceSpec).toEqual(workspaceSpec)
+      expect(snapshot.workspaceBindings).toEqual(workspaceBindings)
+      expect(snapshot).not.toHaveProperty('unknownProjection')
+    },
+  )
 
   it.each([4, 6])(
     'accepts v%s snapshots without optional workspace configuration',

@@ -128,7 +128,7 @@ describe('ECC canonical snapshot fixtures', () => {
     expect(validated.snapshot).toEqual({
       cause: 'workspace.created',
       parameters: { design: 'gcd', frequency_mhz: 100 },
-      schemaVersion: ENGINEERING_SNAPSHOT_SCHEMA_VERSION,
+      schemaVersion: 6,
       workspaceId: 'workspace-fixture-v6',
       workspaceRevision: 1,
     })
@@ -264,7 +264,7 @@ describe('Engineering Snapshot v6 envelope', () => {
     expect(validated.ok && validated.sections.artifacts.status).toBe('ready')
   })
 
-  it.each([5, 7, 0, -1])(
+  it.each([5, ENGINEERING_SNAPSHOT_SCHEMA_VERSION + 1, 0, -1])(
     'fails closed with rebuild semantics for unsupported schemaVersion %s',
     (schemaVersion) => {
       expect(
