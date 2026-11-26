@@ -168,6 +168,7 @@ const desktopBridge = {
   backendWorkspace: {} as DesktopApi['backendWorkspace'],
   backendProjectComparison: {} as DesktopApi['backendProjectComparison'],
   dialog: {
+    pathForDroppedFile: () => '',
     pickDirectory,
     pickFiles: async () => null,
     pickRtlSources: async () => null,

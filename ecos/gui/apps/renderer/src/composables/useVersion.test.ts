@@ -84,6 +84,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
     backendWorkspace: {} as DesktopApi['backendWorkspace'],
     backendProjectComparison: {} as DesktopApi['backendProjectComparison'],
     dialog: {
+      pathForDroppedFile: () => '',
       pickDirectory: async () => null,
       pickFiles: async () => null,
       pickRtlSources: async () => null,

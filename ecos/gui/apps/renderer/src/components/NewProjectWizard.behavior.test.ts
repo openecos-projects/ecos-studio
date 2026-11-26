@@ -90,6 +90,7 @@ const wizardMocks = vi.hoisted(() => {
     writeProjectEccPdkConfig: vi.fn(),
     scanPdkDirectory: vi.fn(),
     pickFiles: vi.fn(),
+    pathForDroppedFile: vi.fn(),
     pickDirectory: vi.fn(),
     discoverHdlModules: vi.fn(async (request: { rtlPaths?: string[] }) => {
       if (request.rtlPaths?.includes('/rtl/empty.v')) {
@@ -123,6 +124,7 @@ vi.mock('@/platform/desktop', () => ({
     },
     dialog: {
       pickFiles: wizardMocks.pickFiles,
+      pathForDroppedFile: wizardMocks.pathForDroppedFile,
       pickDirectory: wizardMocks.pickDirectory,
     },
     workspaceCreationModel: { get: wizardMocks.getWorkspaceCreationModel },
@@ -1240,6 +1242,53 @@ describe('NewProjectWizard behavior', () => {
       filelistPath: '/rtl/sources.f',
     })
     expect(wizard.canProceed).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('accepts the ECC timing template from Browse and drop with the same rules', async () => {
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { standaloneWorkspace: true } },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    const wizard = wrapper.vm as unknown as { currentStep: number; sdcPath: string }
+    wizard.currentStep = 5
+    await flushPromises()
+    const button = wrapper
+      .findAll('button')
+      .find((node) => node.text() === 'Import Timing Inputs')!
+    const template = '/project/timing_constraints_template.tcl'
+    wizardMocks.pickFiles.mockResolvedValueOnce([template])
+    await button.trigger('click')
+    await flushPromises()
+    expect(wizardMocks.pickFiles).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        filters: [{ name: 'ECC Timing Inputs', extensions: ['tcl', 'toml'] }],
+      }),
+    )
+    expect(wizard.sdcPath).toBe(template)
+
+    const input = wrapper.get('input[placeholder="No file imported"]')
+    const dropZone = input.element.parentElement!.parentElement!
+    const drop = (path: string) => {
+      wizardMocks.pathForDroppedFile.mockReturnValueOnce(path)
+      const event = new Event('drop', { bubbles: true, cancelable: true })
+      Object.defineProperty(event, 'dataTransfer', {
+        value: { files: [new File([], 'timing')] },
+      })
+      dropZone.dispatchEvent(event)
+    }
+    drop('/project/full-script.sdc')
+    await flushPromises()
+    expect(wizard.sdcPath).toBe(template)
+    expect(wrapper.text()).toContain('Convert full SDC scripts')
+    drop('/project/custom.toml')
+    expect(wizard.sdcPath).toBe('/project/custom.toml')
     wrapper.unmount()
   })
 

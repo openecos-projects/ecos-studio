@@ -5,21 +5,25 @@ import {
 } from '@ecos-studio/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { contextBridgeExposeInMainWorld, ipcRenderer } = vi.hoisted(() => ({
-  contextBridgeExposeInMainWorld: vi.fn(),
-  ipcRenderer: {
-    invoke: vi.fn(),
-    on: vi.fn(),
-    removeListener: vi.fn(),
-    send: vi.fn(),
-  },
-}))
+const { contextBridgeExposeInMainWorld, ipcRenderer, getPathForFile } = vi.hoisted(
+  () => ({
+    contextBridgeExposeInMainWorld: vi.fn(),
+    getPathForFile: vi.fn(),
+    ipcRenderer: {
+      invoke: vi.fn(),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+      send: vi.fn(),
+    },
+  }),
+)
 
 vi.mock('electron', () => ({
   contextBridge: {
     exposeInMainWorld: contextBridgeExposeInMainWorld,
   },
   ipcRenderer,
+  webUtils: { getPathForFile },
 }))
 
 async function loadDesktopBridge() {
@@ -96,6 +100,7 @@ async function loadDesktopBridge() {
       }
     }
     dialog: {
+      pathForDroppedFile(file: File): string
       saveFile(options: unknown): Promise<unknown>
     }
     menu: {
@@ -132,6 +137,14 @@ describe('preload desktop bridge contract', () => {
     ipcRenderer.removeListener.mockReset()
     ipcRenderer.send.mockReset()
     delete process.env.ECOS_ELECTRON_SMOKE
+  })
+
+  it('resolves a dropped file through Electron webUtils', async () => {
+    const api = await loadDesktopBridge()
+    const file = new File([], 'timing.tcl')
+    getPathForFile.mockReturnValue('/project/timing.tcl')
+    expect(api.dialog.pathForDroppedFile(file)).toBe('/project/timing.tcl')
+    expect(getPathForFile).toHaveBeenCalledWith(file)
   })
 
   it('exposes the Electron desktop bridge in the isolated renderer world', async () => {

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
@@ -255,6 +255,7 @@ const desktopApi: DesktopApi = {
       ),
   },
   dialog: {
+    pathForDroppedFile: (file) => webUtils.getPathForFile(file),
     pickDirectory: (options?: DesktopDirectoryDialogOptions) =>
       invokeDesktop(desktopApiIpcChannels.dialogPickDirectory, options),
     pickFiles: (options?: DesktopFileDialogOptions) =>

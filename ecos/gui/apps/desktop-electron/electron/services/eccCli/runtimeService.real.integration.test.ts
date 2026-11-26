@@ -132,16 +132,17 @@ describeReal('ECC CLI runtime real integration', () => {
     const refreshedRevision = requiredRevision(refreshed)
     expect(refreshedRevision).toBeGreaterThan(currentRevision)
 
-    const updated = await service.updateWorkspaceConfiguration({
-      commandId: randomUUID(),
-      configuration: {
-        design: {},
-        parameters: { 'design.frequency_mhz': 125 },
-        pdk: {},
-      },
-      expectedWorkspaceRevision: refreshedRevision,
-      workspaceHandle: created.workspaceHandle,
-    })
+    const updateConfiguration = (parameters: Record<string, unknown>) =>
+      service.updateWorkspaceConfiguration({
+        commandId: randomUUID(),
+        configuration: { design: {}, parameters, pdk: {} },
+        expectedWorkspaceRevision: refreshedRevision,
+        workspaceHandle: created.workspaceHandle,
+      })
+    await expect(updateConfiguration({ 'design.frequency_mhz': 125 })).rejects.toThrow(
+      'fixed at 100 MHz by primary_clocks',
+    )
+    const updated = await updateConfiguration({ 'flow.run_analysis': false })
     const updatedRevision = requiredRevision(updated)
     expect(updatedRevision).toBeGreaterThan(refreshedRevision)
     const synthesisConfiguration = await service.readWorkspaceStepConfiguration({
@@ -154,9 +155,9 @@ describeReal('ECC CLI runtime real integration', () => {
     }
     expect(
       synthesisConfiguration.parameters.find(
-        (parameter) => parameter.param === 'design.frequency_mhz',
+        (parameter) => parameter.param === 'flow.run_analysis',
       )?.value,
-    ).toBe(125)
+    ).toBe(false)
 
     const configuration = await service.readWorkspaceConfiguration(workspaceRoot)
     const managedRefresh = await service.updateWorkspace({

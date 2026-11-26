@@ -363,6 +363,7 @@ export interface DesktopApi {
     repairConsistency(projectRoot: string): Promise<ProjectDoctorRepairResult>
   }
   dialog: {
+    pathForDroppedFile(file: File): string
     pickDirectory(options?: DesktopDirectoryDialogOptions): Promise<string | null>
     pickFiles(options?: DesktopFileDialogOptions): Promise<string[] | null>
     saveFile(options?: DesktopSaveFileDialogOptions): Promise<string | null>

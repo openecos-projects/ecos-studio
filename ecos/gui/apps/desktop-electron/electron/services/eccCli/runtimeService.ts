@@ -648,7 +648,7 @@ export class EccCliRuntimeService {
     )
     if (rtlImport) await this.runWorkspaceMutation(session, rtlImport)
 
-    const projectSettings = projectSettingsArgs(request)
+    const projectSettings = projectSettingsArgs(request, currentConfiguration)
     if (projectSettings.length) {
       await this.cli.run(
         [
@@ -2448,6 +2448,7 @@ export function projectSettingsArgs(
     EccWorkspaceCreateRequest,
     'workspaceSpec' | 'workspaceBindings' | 'eccPdkConfig'
   >,
+  current?: Pick<EccWorkspaceCreateRequest, 'workspaceSpec' | 'workspaceBindings'>,
 ): string[] {
   const spec = request.workspaceSpec
   const bindings = request.workspaceBindings
@@ -2456,6 +2457,9 @@ export function projectSettingsArgs(
   const flow = requireRecord(spec.flow)
   const pdkBindings = requireRecord(bindings.pdk)
   const byRole = inputRolePaths(request)
+  const sdc = byRole.get('sdc')?.[0]
+  // The persisted binding can refer to the executable Tcl that ECC generated.
+  const currentSdc = current ? inputRolePaths(current).get('sdc')?.[0] : undefined
   const parameters = isRecord(spec.parameters) ? spec.parameters : {}
   const set = (key: string, value: unknown): string[] => {
     if (typeof value === 'string' && value.trim()) return ['--set', `${key}=${value}`]
@@ -2478,7 +2482,7 @@ export function projectSettingsArgs(
     ...set('design.frequency_mhz', parameters['design.frequency_mhz']),
     ...set('design.netlist', byRole.get('netlist')?.[0]),
     ...set('design.def', byRole.get('def')?.[0]),
-    ...set('design.sdc', byRole.get('sdc')?.[0]),
+    ...set('design.sdc', sdc === currentSdc ? undefined : sdc),
     ...set('design.golden_netlist', byRole.get('golden_netlist')?.[0]),
     ...set('design.spef', byRole.get('spef')?.[0]),
     ...set('pdk.name', pdk.familyId),

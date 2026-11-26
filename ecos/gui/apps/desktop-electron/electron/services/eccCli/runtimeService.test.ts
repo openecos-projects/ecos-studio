@@ -878,6 +878,22 @@ describe('ECC CLI Workspace update transaction', () => {
         'pdk.overrides.lefs=["/macros/sram/sram.lef"]',
       ]),
     )
+    expect(commands[0]).not.toContain('design.sdc=/inputs/design.sdc')
+    expect(
+      projectSettingsArgs(
+        {
+          ...input,
+          workspaceBindings: {
+            ...input.workspaceBindings,
+            inputs: {
+              ...(input.workspaceBindings.inputs as object),
+              sdc: '/inputs/timing.tcl',
+            },
+          },
+        },
+        input,
+      ),
+    ).toContain('design.sdc=/inputs/timing.tcl')
     expect(commands[1]).toEqual([
       'workspace',
       'refresh',

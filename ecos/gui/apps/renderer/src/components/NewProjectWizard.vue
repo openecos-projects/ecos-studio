@@ -952,6 +952,8 @@
 
                     <div
                       class="rounded-xl border border-(--border-color) bg-(--bg-primary)/65 p-5"
+                      @dragover.prevent
+                      @drop.prevent="dropDesignInput"
                     >
                       <div class="mb-5 flex items-start justify-between gap-4">
                         <div>
@@ -978,18 +980,15 @@
                           @click="importDesignInput(activeDesignInputType)"
                         >
                           <i class="ri-upload-2-line"></i>
-                          {{
-                            activeDesignInputType === 'sdc'
-                              ? 'Import SDC'
-                              : `Import ${activeDesignInput?.label || 'File'}`
-                          }}
+                          Import {{ activeDesignInput?.label || 'File' }}
                         </button>
                       </div>
                       <p
                         v-if="activeDesignInputType === 'sdc'"
                         class="mt-3 text-xs text-(--text-secondary)"
                       >
-                        SDC is optional and stored with the design inputs.
+                        Optional. Choose or drop the timing template from ecc init, or
+                        another .tcl or .toml file with the five ECC timing fields.
                       </p>
                       <p v-if="designFileError" class="mt-3 text-xs text-red-500">
                         {{ designFileError }}
@@ -2721,10 +2720,11 @@ const hasSelectedPdkConfig = computed(
     config.value.pdk_root.trim() !== '',
 )
 
+const timingInputExtensions = ['tcl', 'toml']
 const constraintInput: DesignInputType = {
   key: 'sdc',
-  label: 'SDC',
-  description: 'Timing constraints.',
+  label: 'Timing Inputs',
+  description: 'Timing constraints in the ECC template format.',
 }
 
 const designInputTypes = computed<DesignInputType[]>(() =>
@@ -3784,11 +3784,26 @@ async function importDesignInput(type: DesignInputKey) {
     return
   }
 
-  const file = picked?.[0]
-  if (!file) return
+  if (picked?.[0]) applyDesignInput(type, picked[0])
+}
 
+function dropDesignInput(event: DragEvent) {
+  const file = event.dataTransfer?.files[0]
+  if (file) {
+    applyDesignInput(
+      activeDesignInputType.value,
+      getDesktopApi().dialog.pathForDroppedFile(file),
+    )
+  }
+}
+
+function applyDesignInput(type: DesignInputKey, file: string) {
+  designFileError.value = ''
   if (!isAllowedDesignInputPath(type, file)) {
-    designFileError.value = `Please select a supported ${type.toUpperCase()} file.`
+    designFileError.value =
+      type === 'sdc'
+        ? 'Choose an ECC timing template (.tcl or .toml). Convert full SDC scripts to the five timing fields first.'
+        : `Please select a supported ${type.toUpperCase()} file.`
     return
   }
 
@@ -3805,8 +3820,8 @@ function getDesignFileOptions(type: DesignInputKey): DesktopFileDialogOptions | 
     case 'sdc':
       return {
         ...common,
-        title: 'Select SDC File',
-        filters: [{ name: 'SDC Files', extensions: ['sdc', 'gz'] }],
+        title: 'Select ECC Timing Inputs',
+        filters: [{ name: 'ECC Timing Inputs', extensions: timingInputExtensions }],
       }
     case 'def':
       return {
@@ -3840,7 +3855,7 @@ function isAllowedDesignInputPath(type: DesignInputKey, path: string) {
         lowerPath.endsWith(`.${extension}`) || lowerPath.endsWith(`.${extension}.gz`),
     )
 
-  if (type === 'sdc') return matches(['sdc'])
+  if (type === 'sdc') return hasExtension(path, timingInputExtensions)
   if (type === 'def') return matches(['def'])
   if (type === 'verilog' || type === 'golden_netlist') return matches(['v', 'sv', 'vg'])
   if (type === 'spef') return matches(['spef'])
