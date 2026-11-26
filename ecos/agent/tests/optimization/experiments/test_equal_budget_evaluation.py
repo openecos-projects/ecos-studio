@@ -178,7 +178,8 @@ def test_equal_budget_computes_simple_regret_per_design() -> None:
     assert summary.simple_regret == 6.0
 
 
-def test_build_candidate_trace_uses_native_receipt_and_terminal_metrics() -> None:
+@pytest.mark.parametrize("legacy_power", [False, True])
+def test_build_candidate_trace_uses_native_receipt_and_terminal_metrics(legacy_power) -> None:
     receipt_payload = {
         "receipt_id": "receipt-1",
         "tool": ToolRef(name="DREAMPlace", revision="bound"),
@@ -210,6 +211,20 @@ def test_build_candidate_trace_uses_native_receipt_and_terminal_metrics() -> Non
         evidence_sha256=HASH,
     )
     terminal = _terminal_observation()
+    dynamic_id = "power_analysis_dynamic_uw"
+    leakage_id = "power_analysis_leakage_uw"
+    if legacy_power:
+        legacy_ids = {dynamic_id: "sta_typical_dynamic_power", leakage_id: "sta_typical_leakage_power"}
+        terminal = terminal.model_copy(update={
+            "evaluation_metrics": tuple(
+                metric.model_copy(update={
+                    "metric_id": legacy_ids[metric.metric_id],
+                    "source_refs": ("sta/feature/TYP_25/TYPICAL/sta_power.json",),
+                }) if metric.metric_id in legacy_ids else metric
+                for metric in terminal.evaluation_metrics
+            )
+        })
+        dynamic_id, leakage_id = legacy_ids[dynamic_id], legacy_ids[leakage_id]
     reference = terminal.model_copy(
         update={
             "observation_id": "reference",
@@ -239,6 +254,13 @@ def test_build_candidate_trace_uses_native_receipt_and_terminal_metrics() -> Non
     assert trace.area == 12.0
     assert trace.dynamic_power == 2.5
     assert trace.leakage_power == 0.4
+    assert trace.power_measurements == {
+        column: next(
+            metric.model_dump(mode="json") for metric in terminal.evaluation_metrics
+            if metric.metric_id == metric_id
+        )
+        for column, metric_id in (("dynamic_power", dynamic_id), ("leakage_power", leakage_id))
+    }
     assert trace.frequency == 100.0
     assert trace.drc == 0.0
     assert trace.timing == 0.0

@@ -11,7 +11,9 @@ from typing import Iterable, Literal
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
+    ArchivedPowerMetric,
     ObjectiveMetric,
+    TerminalEvaluationMetric,
     TerminalObservation,
     TimingMetric,
     objective_metric_utility,
@@ -64,6 +66,7 @@ class CandidateTrace:
     area: float | None = None
     dynamic_power: float | None = None
     leakage_power: float | None = None
+    power_measurements: dict[str, dict[str, object]] | None = None
     frequency: float | None = None
     drc: float | None = None
     timing: float | None = None
@@ -158,6 +161,17 @@ def build_candidate_trace(
         OptimizationOutcomeKind.TRADEOFF,
     }
     evaluation = terminal_observation.evaluation_metrics if terminal_observation else ()
+    dynamic_power = _evaluation_metric(evaluation, "power_analysis_dynamic_uw") or _evaluation_metric(
+        evaluation, ArchivedPowerMetric.TYPICAL_DYNAMIC
+    )
+    leakage_power = _evaluation_metric(evaluation, "power_analysis_leakage_uw") or _evaluation_metric(
+        evaluation, ArchivedPowerMetric.TYPICAL_LEAKAGE
+    )
+    power_measurements = {
+        column: metric.model_dump(mode="json")
+        for column, metric in (("dynamic_power", dynamic_power), ("leakage_power", leakage_power))
+        if metric is not None
+    }
     return CandidateTrace(
         design_id=design_id,
         candidate_id=candidate_id,
@@ -177,8 +191,9 @@ def build_candidate_trace(
             float(reference_observation.objective_metrics[objective_metric]),
         ),
         area=_evaluation_value(evaluation, "sta_standard_cell_area"),
-        dynamic_power=_evaluation_value(evaluation, "power_analysis_dynamic_uw"),
-        leakage_power=_evaluation_value(evaluation, "power_analysis_leakage_uw"),
+        dynamic_power=float(dynamic_power.value) if dynamic_power is not None else None,
+        leakage_power=float(leakage_power.value) if leakage_power is not None else None,
+        power_measurements=power_measurements or None,
         frequency=_evaluation_value(evaluation, "sta_frequency"),
         drc=_evaluation_value(evaluation, "drc_count"),
         timing=(
@@ -234,23 +249,23 @@ def build_candidate_trace(
     )
 
 
-def _evaluation_value(metrics: Iterable[object], metric_id: str) -> float | None:
-    matches = [
-        item
-        for item in metrics
-        if getattr(item, "metric_id", None) == metric_id
-    ]
+def _evaluation_metric(
+    metrics: Iterable[TerminalEvaluationMetric], metric_id: str
+) -> TerminalEvaluationMetric | None:
+    matches = [item for item in metrics if item.metric_id == metric_id]
     if not matches:
         return None
-    preferred = next(
-        (
-            item
-            for item in matches
-            if getattr(item, "corner", None) in {None, "TYP_25/TYPICAL"}
-        ),
+    return next(
+        (item for item in matches if item.corner in {None, "TYP_25/TYPICAL"}),
         matches[0],
     )
-    return float(getattr(preferred, "value"))
+
+
+def _evaluation_value(
+    metrics: Iterable[TerminalEvaluationMetric], metric_id: str
+) -> float | None:
+    metric = _evaluation_metric(metrics, metric_id)
+    return float(metric.value) if metric is not None else None
 
 
 def export_episode_traces(
