@@ -144,6 +144,17 @@ describe('workspace flow diagram', () => {
     )
     expect(wrapper.get('[data-step="sta"] .step-execution-state').text()).toBe('Running')
     expect(wrapper.get('[data-step="emir"] .step-execution-state').text()).toBe('Waiting')
+    state.operation.value = {
+      kind: 'flow',
+      flowScope: { fromStep: 'sta', throughStep: 'power_analysis' },
+    }
+    await nextTick()
+    expect(wrapper.get('[data-step="power_analysis"] .step-execution-state').text()).toBe(
+      'Waiting',
+    )
+    expect(wrapper.get('[data-step="emir"] .step-execution-state').text()).toBe(
+      'Not started',
+    )
     state.operation.value = { kind: 'flow' }
     await nextTick()
     expect(wrapper.get('[data-step="emir"] .step-execution-state').text()).toBe(

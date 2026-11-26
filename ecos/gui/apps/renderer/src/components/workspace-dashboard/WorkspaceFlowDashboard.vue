@@ -284,10 +284,13 @@ const waitingIds = computed(() => {
   const start = scope.fromStep
     ? steps.value.findIndex((step) => step.id === scope.fromStep)
     : 0
-  if (start < 0) return new Set<string>()
+  const end = scope.throughStep
+    ? steps.value.findIndex((step) => step.id === scope.throughStep)
+    : steps.value.length - 1
+  if (start < 0 || end < start) return new Set<string>()
   return new Set(
     steps.value
-      .slice(start)
+      .slice(start, end + 1)
       .filter((step) => step.status === 'queued')
       .map((step) => step.id),
   )
