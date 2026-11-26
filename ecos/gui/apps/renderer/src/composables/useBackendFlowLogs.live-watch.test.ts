@@ -180,6 +180,56 @@ describe('useBackendFlowLogs runtime updates', () => {
     scope.stop()
   })
 
+  it('loads the final tail when a live read is still in flight', async () => {
+    testState.currentProject = ref({ path: '/workspace/demo' })
+    const step = {
+      info: {},
+      name: 'place',
+      resources: { log: { file: { path: '/workspace/demo/place.log' } } },
+      state: 'Ongoing',
+      tool: 'dreamplace',
+    }
+    testState.getWorkspaceResourceIndexApi.mockResolvedValue({ flow: { steps: [step] } })
+    const chunk = { content: 'starting\n', nextOffsetBytes: 9, sizeBytes: 9 }
+    let finishChunk = () => {}
+    testState.readOptionalProjectTextFileChunk.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishChunk = () => resolve(chunk)
+      }),
+    )
+    testState.readOptionalProjectTextFileTail.mockResolvedValue({
+      content: 'starting\nfinished\n',
+      sizeBytes: 18,
+      truncated: false,
+    })
+    const scope = effectScope()
+    try {
+      const { useBackendFlowLogs } = await import('./useBackendFlowLogs')
+      const logs = scope.run(() => useBackendFlowLogs())!
+      await vi.waitFor(() => expect(logs.flowLogSegments.value[0]?.live).toBe(true))
+      const liveRead = logs.ensureFlowLogSegmentContentLoaded(
+        logs.flowLogSegments.value[0]!,
+      )
+      await vi.waitFor(() =>
+        expect(testState.readOptionalProjectTextFileChunk).toHaveBeenCalled(),
+      )
+      testState.getWorkspaceResourceIndexApi.mockResolvedValue({
+        flow: { steps: [{ ...step, state: 'Success' }] },
+      })
+      await logs.refreshFlowLogs()
+      const finalRead = logs.ensureFlowLogSegmentContentLoaded(
+        logs.flowLogSegments.value[0]!,
+      )
+      finishChunk()
+      await Promise.all([liveRead, finalRead])
+      expect(Object.values(logs.flowLogContentByKey.value)).toEqual([
+        'starting\nfinished\n',
+      ])
+    } finally {
+      scope.stop()
+    }
+  })
+
   it('restarts a live log from byte zero after the file is truncated', async () => {
     testState.currentProject = ref({ path: '/workspace/demo' })
     testState.getWorkspaceResourceIndexApi.mockResolvedValue({

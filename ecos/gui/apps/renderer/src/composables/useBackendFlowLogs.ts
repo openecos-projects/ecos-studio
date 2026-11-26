@@ -161,6 +161,9 @@ export function useBackendFlowLogs() {
         if (!sameAttempt) {
           deleteContent(key)
           fullContentLoads.delete(key)
+        } else if (prior?.live && !live) {
+          // The completed step needs a tail read even if a live chunk is pending.
+          fullContentLoads.delete(key)
         }
         return [
           {
