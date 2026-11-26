@@ -10,12 +10,13 @@ export async function buildOperationDiagnostics(
   operation: EccRuntimeOperation,
   runLog: Awaited<ReturnType<typeof readOperationLog>> | null,
   workers: readonly string[],
-  mainLogFile?: string,
+  mainLogFile: string | undefined,
+  runKey: string,
   persistedOnly = false,
 ): Promise<EccBackgroundOperationLogResult> {
   const { operationId, state, error } = operation
   const desktopLog = mainLogFile
-    ? await desktopRunMessages(mainLogFile, operationId).catch(() => '')
+    ? await desktopRunMessages(mainLogFile, runKey).catch(() => '')
     : ''
   return {
     content: runLog?.content ?? '',
@@ -49,7 +50,7 @@ export async function buildOperationDiagnostics(
   }
 }
 
-async function desktopRunMessages(path: string, runId: string): Promise<string> {
+async function desktopRunMessages(path: string, runKey: string): Promise<string> {
   const file = await open(
     path,
     constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
@@ -64,7 +65,7 @@ async function desktopRunMessages(path: string, runId: string): Promise<string> 
       .subarray(0, bytesRead)
       .toString('utf8')
       .split('\n')
-      .filter((line) => line.includes(`[runtime] ECC run ${runId} ended in `))
+      .filter((line) => line.includes(`[runtime] ECC run ${runKey} ended in `))
       .join('\n')
   } finally {
     await file.close()

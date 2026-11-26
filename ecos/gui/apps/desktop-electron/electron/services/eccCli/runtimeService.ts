@@ -112,7 +112,17 @@ type WorkspaceIdentity = Pick<
   'directory' | 'projectId' | 'projectRoot' | 'workspaceId'
 >
 
+function runKey(session: WorkspaceSession, runId: string): string {
+  return JSON.stringify([
+    session.directory,
+    session.projectId,
+    session.workspaceId,
+    runId,
+  ])
+}
+
 interface TrackedOperation {
+  diagnostics?: EccBackgroundOperationLogResult
   child?: { exit?: { code: number | null; signal: NodeJS.Signals | null } }
   operation: EccRuntimeOperation
   projectRoot: string
@@ -139,8 +149,7 @@ export class EccCliRuntimeService {
   private readonly knownProjectRoots = new Set<string>()
   private readonly operations = new Map<string, TrackedOperation>()
   private readonly defViewsInFlight = new Set<string>()
-  private readonly outcomes: EccRuntimeOperation[] = []
-  private readonly diagnostics = new Map<string, EccBackgroundOperationLogResult>()
+  private readonly outcomes: TrackedOperation[] = []
   private readonly eventListeners = new Set<(event: EccRuntimeEvent) => void>()
   private readonly projectionListeners = new Set<(generation: number) => void>()
   private readonly releasedListeners = new Set<(workspaceHandle: string) => void>()
@@ -1117,11 +1126,11 @@ export class EccCliRuntimeService {
   }
 
   async cancelOperationLegacy(operationId?: string) {
-    const tracked = operationId
-      ? this.operations.get(operationId)
-      : [...this.operations.values()].find(
-          (candidate) => candidate.operation.state === 'running',
-        )
+    const tracked = [...this.operations.values()].find(
+      ({ operation }) =>
+        operation.state === 'running' &&
+        (!operationId || operation.operationId === operationId),
+    )
     if (!tracked) return { cancelled: false, ...(operationId ? { operationId } : {}) }
     await this.cancelOperation({
       operationId: tracked.operation.operationId,
@@ -1301,15 +1310,12 @@ export class EccCliRuntimeService {
           workspaceDirectory: tracked.session.directory,
           workspaceHandle: tracked.session.handle,
         })),
-      outcomes: this.outcomes.map((operation) => {
-        const tracked = this.operations.get(operation.operationId)
-        return {
-          ...operation,
-          ...(tracked ? { projectRoot: tracked.projectRoot } : {}),
-          workspaceDirectory: tracked?.session.directory ?? '',
-          workspaceHandle: tracked?.session.handle ?? '',
-        }
-      }),
+      outcomes: this.outcomes.map(({ operation, projectRoot, session }) => ({
+        ...operation,
+        projectRoot,
+        workspaceDirectory: session.directory,
+        workspaceHandle: session.handle,
+      })),
       recoveries: [],
     }
   }
@@ -1337,27 +1343,19 @@ export class EccCliRuntimeService {
   async operationLog(
     request: EccRuntimeOperationRequest,
   ): Promise<EccBackgroundOperationLogResult> {
-    const tracked = this.operations.get(request.operationId)
-    const session =
-      tracked?.session.handle === request.workspaceHandle
-        ? tracked.session
-        : this.requireSession(request.workspaceHandle)
+    const session = this.requireSession(request.workspaceHandle)
+    const tracked = this.operations.get(runKey(session, request.operationId))
     const result = await readRunResult(
       session.directory,
       session.workspaceId,
       request.operationId,
     )
     const operation =
-      tracked?.session.handle === request.workspaceHandle
-        ? tracked.operation
-        : result
-          ? persistedRunSnapshot(session, result)
-          : undefined
+      tracked?.operation ?? (result ? persistedRunSnapshot(session, result) : undefined)
     if (!operation)
       throw new Error('ECC Operation is not owned by this Workspace Session.')
     if (request.includeDiagnostics) {
-      const diagnostics = this.diagnostics.get(operation.operationId)
-      if (diagnostics) return diagnostics
+      if (tracked?.diagnostics) return tracked.diagnostics
       if (
         result ||
         operation.state === 'failed' ||
@@ -1373,6 +1371,7 @@ export class EccCliRuntimeService {
           log,
           [],
           this.options.mainLogFile,
+          runKey(session, operation.operationId),
           Boolean(result && !tracked?.operation.flow),
         )
       }
@@ -1537,7 +1536,8 @@ export class EccCliRuntimeService {
       waiters: [],
       watcher: null,
     }
-    this.operations.set(runId, tracked)
+    const key = runKey(session, runId)
+    this.operations.set(key, tracked)
     try {
       const child = await this.cli.spawnDetached(args, {
         cwd: session.projectRoot,
@@ -1555,7 +1555,7 @@ export class EccCliRuntimeService {
         onExit(child.exitCode, child.signalCode)
       }
     } catch (error) {
-      this.operations.delete(runId)
+      this.operations.delete(key)
       this.invalidate()
       throw error
     }
@@ -1601,9 +1601,11 @@ export class EccCliRuntimeService {
     manifest: ProjectManifest,
   ): Promise<void> {
     const entry = manifest.runtime_processes?.[session.workspaceId]
-    if (!entry || this.operations.has(entry.run_id)) return
+    if (!entry) return
+    const key = runKey(session, entry.run_id)
+    if (this.operations.has(key)) return
     const alive = await this.processIsAlive(session, entry)
-    if (this.operations.has(entry.run_id)) return
+    if (this.operations.has(key)) return
     if (!alive) {
       await this.cli
         .run([
@@ -1636,7 +1638,7 @@ export class EccCliRuntimeService {
       waiters: [],
       watcher: null,
     }
-    this.operations.set(entry.run_id, tracked)
+    this.operations.set(key, tracked)
     const watcher = this.watchOperation(tracked)
     tracked.watcher = watcher
     tracked.poller = this.pollOperation(tracked)
@@ -1843,7 +1845,7 @@ ${message}`)
     if (tracked.operation.error) {
       electronLogger.warn(
         '[runtime] ECC run %s ended in %s (%s): %s',
-        tracked.operation.operationId,
+        runKey(tracked.session, tracked.operation.operationId),
         terminal,
         tracked.operation.error.code,
         tracked.operation.error.message,
@@ -1854,17 +1856,15 @@ ${message}`)
     if (tracked.poller) clearInterval(tracked.poller)
     tracked.poller = null
     if (captureDiagnostics) {
-      this.diagnostics.set(
-        tracked.operation.operationId,
-        await buildOperationDiagnostics(
-          tracked.operation,
-          log,
-          workers,
-          this.options.mainLogFile,
-        ),
+      tracked.diagnostics = await buildOperationDiagnostics(
+        tracked.operation,
+        log,
+        workers,
+        this.options.mainLogFile,
+        runKey(tracked.session, tracked.operation.operationId),
       )
     }
-    this.outcomes.push({ ...tracked.operation })
+    this.outcomes.push(tracked)
     this.trimOutcomes()
     for (const resolveWait of tracked.waiters.splice(0))
       resolveWait({ ...tracked.operation })
@@ -1883,9 +1883,11 @@ ${message}`)
   }
 
   private trimOutcomes() {
-    this.outcomes.sort((left, right) => right.updatedAt - left.updatedAt)
+    this.outcomes.sort(
+      (left, right) => right.operation.updatedAt - left.operation.updatedAt,
+    )
     for (const outcome of this.outcomes.splice(RECENT_RUN_LIMIT)) {
-      this.diagnostics.delete(outcome.operationId)
+      delete outcome.diagnostics
     }
   }
 
@@ -1979,7 +1981,8 @@ ${message}`)
   }
 
   private requireOperation(request: EccRuntimeOperationRequest): TrackedOperation {
-    const tracked = this.operations.get(request.operationId)
+    const session = this.requireSession(request.workspaceHandle)
+    const tracked = this.operations.get(runKey(session, request.operationId))
     if (!tracked || tracked.session.handle !== request.workspaceHandle) {
       throw new Error('ECC Operation is not owned by this Workspace Session.')
     }

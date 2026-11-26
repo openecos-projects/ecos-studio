@@ -1106,7 +1106,7 @@ describe('ECC CLI live flow projection', () => {
       }),
     ])
 
-    const tracked = (service as any).operations.get(runId)
+    const tracked = [...(service as any).operations.values()][0]
     await tracked.watcher.close()
     tracked.watcher = null
     await writeFlow([
@@ -1294,9 +1294,17 @@ describe('ECC CLI live flow projection', () => {
         only: 'synthesis',
       }),
     )
+    const mainLogFile = join(projectRoot, 'main.log')
+    const privateMessage = 'ws_1 main log message'
+    const key = JSON.stringify([workspaceDirectory, null, 'ws_1', runId])
+    await writeFile(
+      mainLogFile,
+      `[runtime] ECC run ${key} ended in unknown: ${privateMessage}\n`,
+    )
     const service = new EccCliRuntimeService({
       resolveLaunch: vi.fn(),
       runtimeId: 'runtime-1',
+      mainLogFile,
     })
     vi.spyOn(service as any, 'processIsAlive').mockResolvedValue(true)
     ;(service as any).sessions.set('handle-1', {
@@ -1384,7 +1392,37 @@ describe('ECC CLI live flow projection', () => {
         operationId: runId,
         includeDiagnostics: true,
       }),
-    ).resolves.toMatchObject({ diagnostics: expect.stringContaining('State: unknown') })
+    ).resolves.toMatchObject({ diagnostics: expect.stringContaining(privateMessage) })
+
+    const otherDirectory = join(projectRoot, 'ws_2')
+    await mkdir(join(otherDirectory, 'log'), { recursive: true })
+    await writeFile(
+      join(otherDirectory, 'log', `${runId}.run.json`),
+      JSON.stringify({
+        schema_version: 1,
+        run_id: runId,
+        workspace_id: 'ws_2',
+        started_at: 1,
+        finished_at: 2,
+        state: 'failed',
+      }),
+    )
+    await writeFile(join(otherDirectory, 'log', `${runId}.log`), 'ws_2 diagnostics')
+    ;(service as any).sessions.set('handle-2', {
+      directory: otherDirectory,
+      handle: 'handle-2',
+      projectRoot,
+      workspaceId: 'ws_2',
+      workspaceRevision: 1,
+    })
+    const otherDiagnostics = await service.operationLog({
+      workspaceHandle: 'handle-2',
+      operationId: runId,
+      includeDiagnostics: true,
+    })
+    expect(otherDiagnostics.content).toBe('ws_2 diagnostics')
+    expect(otherDiagnostics.diagnostics).toContain('State: failed')
+    expect(otherDiagnostics.diagnostics).not.toContain(privateMessage)
     await service.shutdown()
   })
 })
