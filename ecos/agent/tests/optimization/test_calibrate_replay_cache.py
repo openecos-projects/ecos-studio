@@ -118,16 +118,25 @@ def test_toolchain_drift_refuses_to_reuse_the_cache(tmp_path) -> None:
     assert _load_replay_manifest(replay_root)["components"]["ecc_revision"] == "rev-0"
 
 
-def test_missing_workspace_reruns_the_flow_and_records_provenance(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize("legacy_workspace", [False, True])
+def test_unusable_workspace_reruns_the_flow_and_records_provenance(
+    tmp_path, monkeypatch, legacy_workspace
 ) -> None:
     replay_root = tmp_path / "default-replay-1"
     workspace = tmp_path / "ws"
     workspace.mkdir()
-    _store_replay_cache(
-        replay_root, _terminal_observation(), dict(_FINGERPRINT, parser_sha256="old"),
-        "produced", tmp_path / "cleaned-replay",
-    )
+    if legacy_workspace:
+        home = replay_root / "workspace" / "home"
+        home.mkdir(parents=True)
+        (home / "flow.json").write_text(
+            json.dumps({"steps": [{"name": "Harden", "state": "Success"}]}),
+            encoding="utf-8",
+        )
+    else:
+        _store_replay_cache(
+            replay_root, _terminal_observation(), dict(_FINGERPRINT, parser_sha256="old"),
+            "produced", tmp_path / "cleaned-replay",
+        )
     produced = _terminal_observation()
     monkeypatch.setattr(
         "ecos_agent.optimization.calibrate_workspace._terminal_observation",

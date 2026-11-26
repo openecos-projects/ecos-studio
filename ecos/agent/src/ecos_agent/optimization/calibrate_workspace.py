@@ -225,6 +225,16 @@ def _require_same_inputs(
         )
 
 
+def _can_adopt_replay(workspace: Path) -> bool:
+    if not workspace.is_dir():
+        return False
+    try:
+        return _workspace_flow_succeeded(workspace)
+    except ValueError:
+        # Pre-manifest caches may contain an older flow ledger or an incomplete write.
+        return False
+
+
 def _run_replay(
     workspace: Path,
     replay_root: Path,
@@ -258,7 +268,7 @@ def _run_replay(
             if progress is not None:
                 progress("observation code changed; re-parsed the cached flow artifacts")
             return observation
-    if replay_workspace.is_dir() and _workspace_flow_succeeded(replay_workspace):
+    if _can_adopt_replay(replay_workspace):
         # Pre-manifest cache from an earlier calibration: adopt the finished
         # flow artifacts, recording that their toolchain provenance is unverified.
         observation = _terminal_observation(replay_workspace)
