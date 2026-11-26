@@ -97,7 +97,7 @@ describe('agent workspace creation', () => {
 })
 
 describe('workspace update', () => {
-  it('opens the workspace wizard for backend workspaces instead of refreshing config in place', () => {
+  it('edits backend parameters in the active session and keeps the creation wizard for frontend updates', () => {
     const start = source.indexOf('async function openWorkspaceReconfigureWizard')
     const end = source.indexOf(
       'async function buildReconfigureWizardInitialConfig',
@@ -105,7 +105,8 @@ describe('workspace update', () => {
     )
     const updateSource = source.slice(start, end)
 
-    expect(updateSource).not.toContain("=== 'backend'")
+    expect(updateSource).toContain("currentProject.value?.designTool !== 'frontend'")
+    expect(updateSource).toContain('updateSessionId.value = session.sessionId')
     expect(updateSource).not.toContain('refreshConfigApi')
     expect(updateSource).toContain('buildReconfigureWizardInitialConfig')
     expect(updateSource).toContain(

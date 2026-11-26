@@ -174,11 +174,9 @@ it; while a menu is open, hovering another menu name switches to it. Press
   - **New Window** (`Ctrl+Shift+N`) — open a new application window.
   - **New Workspace** (`Ctrl+N`) — open the workspace creation wizard.
   - **Open Workspace** (`Ctrl+O`) — pick a directory and open that workspace.
-  - **Update Workspace** — recreate a backend workspace from current project
-    settings, or reopen the wizard for a frontend workspace. Read
-    [Updating a Workspace](#updating-a-workspace) before using this action: a
-    backend update replaces existing execution data. Disabled while a flow is
-    running.
+  - **Update Workspace** — edit parameters of the open backend workspace, or
+    reopen the wizard for a frontend workspace. See
+    [Updating a Workspace](#updating-a-workspace). Disabled while a flow is running.
   - **Export Signoff Package** _(workspace screens only)_ — review and export
     the sign-off package. Disabled while a flow is running.
   - **Export Design Summary** — export a design summary report.
@@ -447,25 +445,22 @@ start as unstarted, and the target is registered with its own identity and range
 
 ### Updating a Workspace
 
-For a backend ECC workspace, **File → Update Workspace** applies the current
-Project design inputs, PDK, and flow selection through `ecc workspace refresh`.
-Workspace-local parameter overrides are preserved; edit them separately in the
-parameter UI. **Back up the workspace before updating:** refresh replaces the
-workspace directory with a fresh generation, removing its previous flow state,
-outputs, logs, and user-added files. The new generation must be run again. The
-backend GUI action does not offer a backup choice.
+For a backend ECC workspace, **File → Update Workspace** shows its saved ECC
+parameter values. **Save changes** applies only edited values to this workspace.
+ECC determines which steps need to run again. The project defaults, PDK, and
+timing inputs are unchanged. Use **Edit → Config** for step-specific overrides.
 
-To retain the old generation, use the terminal instead:
+When a workspace has literal `primary_clocks`, its frequency is read-only. To
+use a new clock period, edit the project's timing input and create a workspace.
+To explicitly rebuild an existing workspace from current project settings and
+keep its old generation, use the terminal:
 
 ```bash
 ecc workspace refresh ws_0001 --project /path/to/project --keep-backup
 ```
 
 ECC retains the replaced tree in a sibling `.ws_0001.replace-backup-N` directory
-and registers it as an archived workspace in `project.json`. If derived
-`config/*.json` files were edited by hand, refresh refuses the overwrite until
-you explicitly approve it; the GUI asks before retrying. The operation is
-disabled while a flow is running.
+and registers it as an archived workspace in `project.json`.
 
 For a frontend workspace, **File → Update Workspace** re-opens the workspace
 wizard. Before replacing it you choose how to treat the existing data:
