@@ -52,6 +52,41 @@ def test_matching_cache_reuses_the_stored_observation(tmp_path, monkeypatch) -> 
     )["provenance"] == "produced"
 
 
+@pytest.mark.parametrize("parser_changed", [False, True])
+def test_retained_managed_cache_saves_evidence_before_release(
+    tmp_path, monkeypatch, parser_changed
+) -> None:
+    from ecos_agent.optimization import calibrate_workspace as calibration
+
+    replay_root = tmp_path / "default-replay-1"
+    managed = tmp_path / "managed-replay"
+    managed.mkdir()
+    observation = _terminal_observation()
+    old = dict(_FINGERPRINT, parser_sha256="old") if parser_changed else _FINGERPRINT
+    _store_replay_cache(replay_root, observation, old, "produced", managed)
+    evidence = replay_root / OPPORTUNITY_CONTEXT_FILE
+    if parser_changed:
+        evidence.write_text("old evidence", encoding="utf-8")
+
+    def save(root, directory, index, revision):
+        assert (root, directory, index, revision) == (
+            replay_root, managed, 1, _FINGERPRINT["ecc_revision"],
+        )
+        assert managed.is_dir()
+        evidence.write_text("new evidence", encoding="utf-8")
+
+    def release(*_args):
+        assert evidence.read_text(encoding="utf-8") == "new evidence"
+        managed.rmdir()
+
+    monkeypatch.setattr(calibration, "_store_opportunity_context", save)
+    monkeypatch.setattr(calibration, "_release_replay", release)
+    monkeypatch.setattr(calibration, "_terminal_observation", lambda _path: observation)
+    assert _run_replay(tmp_path / "ws", replay_root, 1, 60, _FINGERPRINT) == observation
+    assert not managed.exists()
+    assert _load_replay_manifest(replay_root)["components"] == _FINGERPRINT
+
+
 def test_parser_change_reparses_cached_flow_artifacts(tmp_path, monkeypatch) -> None:
     replay_root = tmp_path / "default-replay-1"
     (replay_root / "workspace").mkdir(parents=True)
