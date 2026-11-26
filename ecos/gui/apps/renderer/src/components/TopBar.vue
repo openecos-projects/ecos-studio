@@ -91,7 +91,7 @@
       >
         <i class="ri-book-open-line text-base" aria-hidden="true"></i>
       </button>
-      <WorkspaceRunHistory v-if="isWorkspaceRoute">
+      <WorkspaceRunHistory v-if="showRunHistory">
         <template #trigger="{ open, disabled }">
           <button
             type="button"
@@ -235,6 +235,7 @@ import ShutdownStatusButton from '@/components/ShutdownStatusButton.vue'
 import WorkspaceRunHistory from '@/components/workspace-dashboard/WorkspaceRunHistory.vue'
 import { rememberWorkspaceManagementReturnRoute } from '@/utils/workspaceNavigation'
 import { useWorkspaceTitle } from '@/composables/useWorkspaceTitle'
+import { useWorkspace } from '@/composables/useWorkspace'
 // ---- 类型定义 ----
 type TopBarMenuAction = AppMenuAction | 'step-config'
 
@@ -257,6 +258,13 @@ interface Menu {
 const route = useRoute()
 const router = useRouter()
 const isWorkspaceRoute = computed(() => route.path.startsWith('/workspace'))
+const { currentProject } = useWorkspace()
+const showRunHistory = computed(
+  () =>
+    isWorkspaceRoute.value &&
+    currentProject.value &&
+    (currentProject.value.designTool ?? 'backend') === 'backend',
+)
 const workspaceProjectRoot = computed(() => queryString(route.query.projectRoot))
 const workspaceProjectName = computed(() => queryString(route.query.projectName))
 // ---- Props & Emits ----

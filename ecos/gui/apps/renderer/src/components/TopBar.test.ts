@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const testState = vi.hoisted(() => ({
   route: { path: '/workspace/demo', query: {} },
+  designTool: 'backend',
   routerPush: vi.fn(),
   routerReplace: vi.fn(),
   desktopApi: {
@@ -54,9 +55,10 @@ vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => testState.desktopApi,
 }))
 vi.mock('@/composables/useWorkspace', async () => {
-  const { ref } = await import('vue')
+  const { computed, ref } = await import('vue')
   return {
     useWorkspace: () => ({
+      currentProject: computed(() => ({ designTool: testState.designTool })),
       workspaceSession: ref({ workspaceId: 'workspace-handle' }),
       showToast: vi.fn(),
     }),
@@ -83,6 +85,7 @@ beforeEach(async () => {
   vi.clearAllMocks()
   testState.route.path = '/workspace/demo'
   testState.route.query = {}
+  testState.designTool = 'backend'
 })
 
 describe('TopBar title', () => {
@@ -311,6 +314,13 @@ describe('TopBar signoff export menu', () => {
 })
 
 describe('TopBar run history', () => {
+  it('hides ECC Run History in an ECC-FE workspace', () => {
+    testState.designTool = 'frontend'
+    const wrapper = mount(TopBar)
+    expect(wrapper.find('button[aria-label="Run History"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('distinguishes the default flow command from explicit reruns', async () => {
     const { runHistory } = testState.desktopApi.ecc.runtime
     const run = { finishedAt: 100, state: 'succeeded' }
