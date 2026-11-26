@@ -66,6 +66,13 @@ class ObjectiveMetric(StrEnum):
     GUI_OVERALL_QOR_SCORE = "gui_overall_qor_score"
 
 
+class ArchivedPowerMetric(StrEnum):
+    TYPICAL_DYNAMIC = "sta_typical_dynamic_power"
+    TYPICAL_LEAKAGE = "sta_typical_leakage_power"
+    WORST_DYNAMIC = "sta_worst_dynamic_power"
+    WORST_LEAKAGE = "sta_worst_leakage_power"
+
+
 class PowerMetric(StrEnum):
     POWER_ANALYSIS_DYNAMIC_UW = "power_analysis_dynamic_uw"
     POWER_ANALYSIS_LEAKAGE_UW = "power_analysis_leakage_uw"
@@ -472,7 +479,8 @@ class OptimizationTaskMemoryReference(_ContractModel):
 
 
 class ExpectedEffect(_ContractModel):
-    metric_id: ObjectiveMetric
+    # The V1 execution summary is persisted verbatim in hash chains.
+    metric_id: ObjectiveMetric | ArchivedPowerMetric
     direction: ExpectedEffectDirection
 
 

@@ -375,3 +375,67 @@ def test_ledger_chains_still_append_and_replay(tmp_path: Path) -> None:
     ledger.append_terminal(_terminal("intervention-1"))
     replay = ledger.verify()
     assert len(replay.entries) == 2
+
+
+def test_replays_legacy_power_predictions_without_changing_their_hash(tmp_path: Path) -> None:
+    action = {
+        "knob_id": "place.target_density",
+        "direction": "decrease",
+        "expected_effects": [
+            {"metric_id": "sta_typical_dynamic_power", "direction": "decrease"},
+        ],
+    }
+    requested = {"knob_id": "place.target_density", "value": 0.6}
+    payload = _start().model_dump(mode="json", exclude_unset=True)
+    payload.update(proposal_action=action, requested=requested)
+    ledger_record = {
+        "schema_version": "ecos.optimization_ledger_entry.v2",
+        "sequence": 1,
+        "previous_entry_sha256": None,
+        "payload": payload,
+    }
+    audit_record = {
+        "schema_version": "ecos.optimization_decision_audit.v1",
+        "sequence": 1,
+        "previous_entry_sha256": None,
+        "planning_entry_sha256": HASH,
+        "proposal": {
+            "context_ref": {
+                "episode_id": "episode-1",
+                "checkpoint_id": "checkpoint-1",
+                "input_sha256": HASH,
+            },
+            "decision": "propose",
+            "reason_code": "observation",
+            "rationale_summary": "Reduce dynamic power.",
+            "observation_refs": [{"observation_id": "observation-1", "sha256": HASH}],
+            "action": action,
+        },
+        "attribution": {
+            "source": "outcome_attribution",
+            "reason_code": "prediction_outcome",
+            "summary": "Dynamic power decreased.",
+            "intervention_id": "intervention-1",
+            "expected_effect_verdicts": [
+                {
+                    "metric_id": "sta_typical_dynamic_power",
+                    "predicted": "decrease",
+                    "verdict": "confirmed",
+                },
+            ],
+        },
+        "validation_result": "accepted",
+        "requested": requested,
+        "state": "awaiting_execution",
+    }
+    ledger = OptimizationLedger(tmp_path)
+    audit = OptimizationDecisionAudit(tmp_path)
+    ledger.ledger_path.write_bytes(_canonical_line(ledger_record, ledger_record) + b"\n")
+    audit.audit_path.write_bytes(_canonical_line(audit_record, audit_record) + b"\n")
+
+    assert ledger.verify().chain_head_sha256 == canonical_sha256(ledger_record)
+    replay = audit.verify()
+    assert replay.chain_head_sha256 == canonical_sha256(audit_record)
+    assert replay.entries[0].proposal.action.expected_effects[0].metric_id == (
+        "sta_typical_dynamic_power"
+    )

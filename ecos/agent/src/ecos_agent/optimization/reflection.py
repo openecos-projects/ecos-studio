@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Literal, Sequence
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ecos_agent.optimization.contracts import (
+    ArchivedPowerMetric,
     ExpectedEffect,
     ExpectedEffectDirection,
     LegalAction,
@@ -50,7 +51,7 @@ class PredictionVerdict(StrEnum):
 
 
 class ExpectedEffectVerdict(_FeedbackModel):
-    metric_id: ObjectiveMetric
+    metric_id: ObjectiveMetric | ArchivedPowerMetric
     predicted: ExpectedEffectDirection
     verdict: PredictionVerdict
     observed_delta: float | None = None

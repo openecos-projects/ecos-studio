@@ -8,7 +8,6 @@ import re
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Iterator, Literal
 
@@ -24,6 +23,7 @@ from pydantic import (
 from ecos_agent.optimization.parameters.effective_domain import EffectiveDomainSnapshot
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization.contracts import (
+    ArchivedPowerMetric,
     BudgetSnapshot,
     HistoryReference,
     ObjectiveMetric,
@@ -77,17 +77,10 @@ class _LedgerModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-class _ArchivedPowerMetric(StrEnum):
-    TYPICAL_DYNAMIC = "sta_typical_dynamic_power"
-    TYPICAL_LEAKAGE = "sta_typical_leakage_power"
-    WORST_DYNAMIC = "sta_worst_dynamic_power"
-    WORST_LEAKAGE = "sta_worst_leakage_power"
-
-
 class _ArchivedActiveObjective(ActiveOptimizationObjective):
-    original_primary_metric: ObjectiveMetric | _ArchivedPowerMetric
-    active_primary_metric: ObjectiveMetric | _ArchivedPowerMetric
-    active_preserve_metrics: tuple[ObjectiveMetric | _ArchivedPowerMetric, ...] = Field(
+    original_primary_metric: ObjectiveMetric | ArchivedPowerMetric
+    active_primary_metric: ObjectiveMetric | ArchivedPowerMetric
+    active_preserve_metrics: tuple[ObjectiveMetric | ArchivedPowerMetric, ...] = Field(
         max_length=2
     )
 
@@ -236,7 +229,7 @@ class OptimizationTerminalOutcome(_LedgerModel):
     materialization_receipt_sha256: str | None = None
     parameter_application_receipt_id: str | None = None
     incumbent_decision: IncumbentDecision | None = None
-    decisive_metric: SelectionMetric | _ArchivedPowerMetric | None = None
+    decisive_metric: SelectionMetric | ArchivedPowerMetric | None = None
     objective_alignment_sha256: str | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
