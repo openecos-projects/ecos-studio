@@ -3646,6 +3646,8 @@ describe('registerIpc', () => {
       workspaceHandle: 'workspace-handle-1',
     })
     await openBackendWorkspace(handlers, event, { directory: '/work/demo' })
+    services.workspaceService.pathExists.mockResolvedValue(true)
+    services.workspaceService.registerProjectRoot.mockClear()
     services.pdkInventoryService.resolveBinding.mockResolvedValue({
       installationId: 'pdk-installation:ics55',
       projectId: 'proj_demo',
@@ -3673,6 +3675,7 @@ describe('registerIpc', () => {
         payload: {
           commandId: 'workspace-update-1',
           draft: {
+            projectRoot: '/work',
             targetDirectory: '/work/demo',
             workspaceBindings: { inputs: {}, pdk: {} },
             workspaceSpec: { pdk: { familyId: 'ics55', mode: 'default' } },
@@ -3699,6 +3702,7 @@ describe('registerIpc', () => {
     // The in-place update replaced the journal IPC handlers that used to
     // invalidate the Project Management and Workspace projections.
     expect(services.backendWorkspaceService.invalidateWindow).toHaveBeenCalledWith(11)
+    expect(services.workspaceService.registerProjectRoot).not.toHaveBeenCalled()
     expect(
       services.backendProjectComparisonService.invalidateWorkspace,
     ).toHaveBeenCalledWith('/work/demo')
