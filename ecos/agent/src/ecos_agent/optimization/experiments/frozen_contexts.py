@@ -5,6 +5,7 @@ from typing import Mapping, Sequence
 
 from ecos_agent.hashing import canonical_sha256
 
+OPPORTUNITY_CONTEXT_FILE = "opportunity-context.v1.json"
 CONTEXT_SCHEMA_VERSION = "ecos.frozen_context.v1"
 
 # Frozen strata label why a context exists; expected_behavior is the

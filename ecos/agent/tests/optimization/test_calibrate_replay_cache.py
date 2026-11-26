@@ -1,6 +1,8 @@
 """The replay cache re-parses on observation-code drift and fails closed on toolchain drift."""
 
 import json
+import shutil
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,6 +12,11 @@ from ecos_agent.optimization.calibrate_workspace import (
     _store_replay_cache,
     write_noise_epsilon_artifact,
 )
+from ecos_agent.optimization.experiments.frozen_contexts import (
+    OPPORTUNITY_CONTEXT_FILE,
+    build_frozen_context,
+)
+from ecos_agent.optimization.experiments.opportunity_coverage import analyze_replay
 from ecos_agent.optimization.runtime import OptimizationRuntimeError
 from tests.optimization.experiments.equal_budget_support import _terminal_observation
 
@@ -137,6 +144,33 @@ def test_unusable_workspace_reruns_the_flow_and_records_provenance(
             replay_root, _terminal_observation(), dict(_FINGERPRINT, parser_sha256="old"),
             "produced", tmp_path / "cleaned-replay",
         )
+    managed_replay = tmp_path / "managed-replay"
+    (managed_replay / "home").mkdir(parents=True)
+    (managed_replay / "home" / "params.toml").write_text(
+        '[design]\nname = "gcd"\n', encoding="utf-8"
+    )
+    opportunity = build_frozen_context({
+        "design_id": "gcd",
+        "objective_contract_sha256": "objective",
+        "legal_domain_sha256": "domain",
+        "knowledge_bundle_sha256": "catalog",
+        "stratum": "knowledge_opportunity",
+        "expected_behavior": "abstain",
+        "label_evidence": "fixture has no supported actions",
+        "planning_context": {
+            "supported_action_view": {"actions": [], "matches": [], "candidate_refs": []},
+        },
+    })
+
+    def capture(**kwargs):
+        assert kwargs["workspace"] == managed_replay
+        assert kwargs["ecc_revision"] == _FINGERPRINT["ecc_revision"]
+        assert managed_replay.is_dir()
+        return [opportunity]
+
+    monkeypatch.setattr(
+        "ecos_agent.optimization.experiments.knowledge_pilot.build_context_bank", capture
+    )
     produced = _terminal_observation()
     monkeypatch.setattr(
         "ecos_agent.optimization.calibrate_workspace._terminal_observation",
@@ -157,7 +191,7 @@ def test_unusable_workspace_reruns_the_flow_and_records_provenance(
                 return {
                     "workspaceHandle": "handle-1",
                     "workspaceRevision": 2,
-                    "directory": str(tmp_path / "managed-replay"),
+                    "directory": str(managed_replay),
                 }
             if method == "workspace.run":
                 return {
@@ -167,6 +201,8 @@ def test_unusable_workspace_reruns_the_flow_and_records_provenance(
                 }
             if method == "workspace.releaseCalibrationReplay":
                 assert _load_replay_manifest(replay_root)["components"] == _FINGERPRINT
+                assert (replay_root / OPPORTUNITY_CONTEXT_FILE).is_file()
+                shutil.rmtree(managed_replay)
                 return {"ok": True}
             raise AssertionError(f"unexpected host method {method}")
 
@@ -193,6 +229,14 @@ def test_unusable_workspace_reruns_the_flow_and_records_provenance(
     assert result == produced
     assert host.calls[3] == ("workspace.releaseCalibrationReplay", host.calls[1][1])
     assert _load_replay_manifest(replay_root)["provenance"] == "produced"
+
+    assert not managed_replay.exists()
+    row = analyze_replay(
+        "gcd", 1, replay_root, workspace, tmp_path,
+        SimpleNamespace(catalog_sha256="catalog"), {},
+    )
+    assert row["context_fingerprint"] == opportunity["context_fingerprint"]
+    assert row["covered_replay"] is False
 
 
 def test_epsilon_artifact_records_calibration_metadata(tmp_path) -> None:

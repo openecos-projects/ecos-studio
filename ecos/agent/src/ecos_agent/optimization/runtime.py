@@ -6,6 +6,7 @@ import json
 import math
 import re
 import threading
+from collections.abc import Callable
 from time import monotonic as _monotonic
 from pathlib import Path
 from typing import Any, Literal, Mapping
@@ -134,6 +135,8 @@ def create_optimization_runner(
     planner: object,
     *,
     candidate_execution_limit: Literal[5, 20] = CANDIDATE_EXECUTION_LIMIT,
+    execution_adapter_factory: Callable[..., tuple[EccCandidateRerunAdapter, dict[str, object]]] | None = None,
+    ledger_root: Path | None = None,
 ) -> OptimizationEpisodeRunner:
     try:
         runtime = OptimizationRuntimeContext.model_validate(context)
@@ -195,7 +198,7 @@ def create_optimization_runner(
             float(reference_runtime), candidate_execution_limit=candidate_execution_limit
         )
     )
-    ledger_root = workspace / ".agent" / "optimization" / episode_id
+    ledger_root = ledger_root or workspace / ".agent" / "optimization" / episode_id
     memory_scope = build_task_memory_scope(
         workspace_manifest_sha256=parent_manifest,
         design_id=design_id,
@@ -205,7 +208,7 @@ def create_optimization_runner(
     )
     memory_store = OptimizationTaskMemoryStore(ledger_root.parent, memory_scope)
     ledger = _ledger(ledger_root)
-    executor, execution_context = open_execution_adapter(
+    executor, execution_context = (execution_adapter_factory or open_execution_adapter)(
         runtime=runtime,
         workspace=workspace,
         site_width_dbu=site_width_dbu,

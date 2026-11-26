@@ -1,18 +1,9 @@
 #!/usr/bin/env python3
-"""Offline knowledge-opportunity coverage over default replay workspaces.
+"""Measure knowledge opportunity coverage from completed calibration replays.
 
-Read-only over the baseline run artifacts: for every design replay the script
-replays the knowledge pilot's frozen-context capture on a scratch copy of the
-replay workspace, compiles the full stage-compatible support catalog against
-the captured default terminal state, and judges the frozen run-plan criterion
-(>=2 of 3 replays with >=1 pass/weak claim-action whose knob is inside the
-default-parameter legal domain).  No flow is executed and no runtime code is
-modified; scratch copies are deleted after capture.
-
-Requires the ECC runtime environment (CHIPCOMPILER_ECC_SIZER_ROOT,
-ECOS_AGENT_ECC_RPC_BIN) because the capture opens the workspace once.
-
-``scripts/analyze_opportunity_coverage.py`` is the thin CLI entry point.
+New replays save the first planning context before releasing the temporary
+workspace. Older runs can still be analyzed from a retained replay workspace.
+The scan never launches an ECC flow.
 """
 
 from __future__ import annotations
@@ -20,17 +11,21 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import shutil
 import time
 from pathlib import Path
 
 from ecos_agent.knowledge.step import load_default_general_knowledge_bundles
+from ecos_agent.optimization.experiments.frozen_contexts import (
+    OPPORTUNITY_CONTEXT_FILE,
+    validate_frozen_context,
+)
 from ecos_agent.optimization.experiments.knowledge_pilot import build_context_bank
 from ecos_agent.optimization.knowledge.compiler import (
     knowledge_support_catalog_from_bundles,
     load_state_rule_manifest,
 )
 from ecos_agent.optimization.knowledge.compiler_runtime import _evaluate
+from ecos_agent.optimization.runtime import _load_trend_noise_epsilon
 
 _NUMERIC_NEAR_MISS = {"positive", "zero", "negative"}
 
@@ -73,32 +68,31 @@ def _near_miss(view: dict, catalog_claims: dict, matches: dict) -> list[dict]:
 def analyze_replay(
     design_id: str,
     replay: int,
-    replay_workspace: Path,
-    epsilon_path: Path,
+    replay_root: Path,
+    workspace: Path,
     scratch_root: Path,
     catalog,
     catalog_claims: dict,
 ) -> dict:
-    episode_id = f"opportunity-{design_id}-r{replay}"
-    scratch = scratch_root / f"{design_id}-r{replay}"
-    if scratch.exists():
-        shutil.rmtree(scratch)
-    shutil.copytree(
-        replay_workspace, scratch, ignore=shutil.ignore_patterns(".agent")
-    )
-    optimization_root = scratch / ".agent" / "optimization"
-    optimization_root.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(epsilon_path, optimization_root / "noise-epsilon.v1.json")
     started = time.monotonic()
-    try:
-        contexts = build_context_bank(
-            workspace=scratch, design_id=design_id, episode_id=episode_id
-        )
-    finally:
-        shutil.rmtree(scratch, ignore_errors=True)
-    opportunity = contexts[0]
+    frozen = replay_root / OPPORTUNITY_CONTEXT_FILE
+    if frozen.is_file():
+        opportunity = json.loads(frozen.read_text(encoding="utf-8"))
+        validate_frozen_context(opportunity)
+        if opportunity["knowledge_bundle_sha256"] != catalog.catalog_sha256:
+            raise ValueError(f"coverage evidence uses a different knowledge catalog: {frozen}")
+    else:
+        replay_workspace = replay_root / "workspace"
+        if not replay_workspace.is_dir():
+            raise ValueError(f"missing coverage evidence for {design_id} replay {replay}: {frozen}")
+        opportunity = build_context_bank(
+            workspace=replay_workspace, design_id=design_id,
+            episode_id=f"opportunity-{design_id}-r{replay}",
+            trend_noise_epsilon=_load_trend_noise_epsilon(workspace),
+            scratch_root=scratch_root,
+        )[0]
     if opportunity["stratum"] != "knowledge_opportunity":
-        raise ValueError("context bank did not return the opportunity stratum first")
+        raise ValueError("expected a saved knowledge opportunity context")
     planning = opportunity["planning_context"]
     view = planning["supported_action_view"]
     actions = view["actions"]
@@ -165,7 +159,7 @@ def main() -> int:
     parser.add_argument("--replays", type=int, default=3)
     parser.add_argument(
         "--scratch-root", type=Path, default=None,
-        help="transient capture copies (default: <run-root>/opportunity-analysis/scratch)",
+        help="temporary storage for legacy context capture",
     )
     args = parser.parse_args()
     run_root = args.run_root.resolve()
@@ -191,17 +185,13 @@ def main() -> int:
         if not epsilon_path.is_file():
             raise SystemExit(f"missing noise epsilon for {design_id}: {epsilon_path}")
         for replay in range(1, args.replays + 1):
-            replay_workspace = (
+            replay_root = (
                 workspace
                 / ".agent" / "optimization" / "noise-calibration"
-                / f"default-replay-{replay}" / "workspace"
+                / f"default-replay-{replay}"
             )
-            if not replay_workspace.is_dir():
-                raise SystemExit(
-                    f"missing replay workspace: {replay_workspace}"
-                )
             row = analyze_replay(
-                design_id, replay, replay_workspace, epsilon_path,
+                design_id, replay, replay_root, workspace,
                 scratch_root, catalog, catalog_claims,
             )
             replays.append(row)

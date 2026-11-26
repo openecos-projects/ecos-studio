@@ -70,7 +70,7 @@ def test_calibrate_never_reports_a_terminal_wait_as_running(tmp_path, monkeypatc
 
     monkeypatch.setattr(
         "ecos_agent.optimization.calibrate_workspace._environment_fingerprint",
-        lambda _workspace: {"parser_sha256": "p1"},
+        lambda _workspace: {"parser_sha256": "p1", "ecc_revision": "rev-1"},
     )
     monkeypatch.setattr(
         "ecos_agent.optimization.calibrate_workspace._terminal_observation",
@@ -78,6 +78,10 @@ def test_calibrate_never_reports_a_terminal_wait_as_running(tmp_path, monkeypatc
     )
     monkeypatch.setattr(
         "ecos_agent.optimization.calibrate_workspace._store_replay_cache",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        "ecos_agent.optimization.calibrate_workspace._store_opportunity_context",
         lambda *_args: None,
     )
 

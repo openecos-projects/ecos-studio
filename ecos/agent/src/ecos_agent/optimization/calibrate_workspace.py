@@ -8,7 +8,8 @@ cross-replay noise profile into ``<workspace>/.agent/optimization/
 noise-epsilon.v1.json`` where the episode runtime loads it.
 
 Replays inherit the workspace's current parameters. Each replay saves a terminal
-observation and fingerprint before releasing its Workspace. Matching observations
+observation and fingerprint before releasing its Workspace. Coverage analysis
+also retains the first planning context for designs in the state-rule scope. Matching observations
 are reused, and a parser change triggers a fresh replay once the raw artifacts
 have been removed. Calibration rejects caches produced by different flow inputs.
 """
@@ -25,6 +26,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
+from ecos_agent.optimization.controller_helpers import _write_json_atomic
 from ecos_agent.optimization.host_transport import _require_host_transport
 from ecos_agent.optimization.observation_contracts import (
     TerminalObservation,
@@ -34,6 +36,7 @@ from ecos_agent.optimization.observations import build_terminal_observation
 from ecos_agent.optimization.runtime import (
     OptimizationRuntimeError,
     WorkspaceParametersError,
+    _design_id,
     _runtime_parameters,
 )
 from ecos_agent.optimization.experiments.knowledge_treatment_execution import (
@@ -225,6 +228,28 @@ def _require_same_inputs(
         )
 
 
+def _store_opportunity_context(
+    replay_root: Path, workspace: Path, index: int, ecc_revision: str
+) -> None:
+    from ecos_agent.optimization.experiments.frozen_contexts import OPPORTUNITY_CONTEXT_FILE
+    from ecos_agent.optimization.experiments.knowledge_pilot import build_context_bank
+    from ecos_agent.optimization.knowledge.compiler import load_state_rule_manifest
+
+    design_id = _design_id(workspace)
+    if design_id not in load_state_rule_manifest().scope:
+        return
+    context = build_context_bank(
+        workspace=workspace,
+        design_id=design_id,
+        episode_id=f"opportunity-{design_id}-r{index}",
+        ecc_revision=ecc_revision,
+        # An initial planning turn has no history to compare for trends.
+        trend_noise_epsilon={},
+    )[0]
+    replay_root.mkdir(parents=True, exist_ok=True)
+    _write_json_atomic(replay_root / OPPORTUNITY_CONTEXT_FILE, context)
+
+
 def _can_adopt_replay(workspace: Path) -> bool:
     if not workspace.is_dir():
         return False
@@ -285,6 +310,7 @@ def _run_replay(
         )
         directory = _execute_replay(opened, index, timeout_seconds, progress, should_stop)
         observation = _terminal_observation(directory)
+        _store_opportunity_context(replay_root, directory, index, fingerprint["ecc_revision"])
         _store_replay_cache(replay_root, observation, fingerprint, "produced", directory)
         return observation
     finally:

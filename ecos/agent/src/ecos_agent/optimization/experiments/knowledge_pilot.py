@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from tempfile import TemporaryDirectory
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -324,40 +325,66 @@ def build_context_bank(
     workspace: Path,
     design_id: str,
     episode_id: str,
+    ecc_revision: str = "unrecorded",
+    trend_noise_epsilon: dict[str, float] | None = None,
+    scratch_root: Path | None = None,
 ) -> list[dict[str, object]]:
-    """Capture one native planning turn and freeze its strata contexts."""
-    from ecos_agent.optimization.experiments.knowledge_treatment_runner import (
-        _objective,
-    )
+    """Capture a planning turn from on-disk evidence without an execution host."""
+    from ecos_agent.optimization.ecc.adapter import EccCandidateRerunAdapter
+    from ecos_agent.optimization.experiments.knowledge_treatment_runner import _objective
+    from ecos_agent.optimization.host_transport import ProtocolHostTransport
     from ecos_agent.optimization.knowledge.retrieval import (
         OptimizationKnowledgeRetriever,
         build_optimization_retrieval_request,
     )
     from ecos_agent.optimization.objective_alignment import build_objective_alignment
     from ecos_agent.optimization.observations import build_terminal_observation
-    from ecos_agent.optimization.runtime import create_optimization_runner
+    from ecos_agent.optimization.runtime import (
+        _optimization_execution_context,
+        create_optimization_runner,
+    )
+
+    def refuse_execution(method, params):
+        raise RuntimeError("offline context capture cannot execute ECC commands")
+
+    def offline_adapter(*, runtime, workspace, site_width_dbu, parent_manifest, design_id):
+        return (
+            EccCandidateRerunAdapter(
+                ProtocolHostTransport(refuse_execution),
+                workspace_id="offline",
+                site_width_dbu=site_width_dbu,
+                workspace_root=workspace,
+            ),
+            _optimization_execution_context(
+                workspace, site_width_dbu, parent_manifest, ecc_revision, design_id=design_id,
+            ),
+        )
 
     objective = _objective()
     terminal = build_terminal_observation(workspace)
     alignment = build_objective_alignment(objective, terminal)
     capture = _ContextCaptureProvider()
-    runner = create_optimization_runner(
-        {
-            "workspace": str(workspace),
-            "episode_id": episode_id,
-            "objective": objective.model_dump(mode="json"),
-            "objective_alignment": alignment.model_dump(mode="json"),
-            "seed": 0,
-            "receipt_aware_planning": True,
-            "agent_mode": "full_agent",
-            "knowledge_case_shots": 0,
-        },
-        capture,
-    )
-    try:
-        runner.run_turn()
-    finally:
-        runner.close()
+    with TemporaryDirectory(prefix="ecos-opportunity-", dir=scratch_root) as scratch:
+        runner = create_optimization_runner(
+            {
+                "workspace": str(workspace),
+                "episode_id": episode_id,
+                "objective": objective.model_dump(mode="json"),
+                "objective_alignment": alignment.model_dump(mode="json"),
+                "seed": 0,
+                "receipt_aware_planning": True,
+                "agent_mode": "full_agent",
+                "knowledge_case_shots": 0,
+                "trend_noise_epsilon": trend_noise_epsilon,
+            },
+            capture,
+            execution_adapter_factory=offline_adapter,
+            ledger_root=Path(scratch) / episode_id,
+        )
+        try:
+            runner.run_turn()
+        finally:
+            runner.close()
     if not capture.captured:
         raise ValueError("bank capture produced no planning context")
     captured = capture.captured[-1]
