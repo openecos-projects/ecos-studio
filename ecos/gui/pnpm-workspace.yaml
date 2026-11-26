@@ -1,6 +1,8 @@
 packages:
   - apps/*
   - packages/*
+overrides:
+  '@electron/rebuild>node-abi': 4.43.0
 allowBuilds:
   electron: true
   electron-winstaller: true
