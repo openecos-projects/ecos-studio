@@ -32,7 +32,9 @@ impl LoadedViewer {
         let mut layers =
             layer_ui_states_from_summaries(layer_catalog, &BTreeMap::new(), color_theme);
         let mut object_visibility = ObjectVisibility::default();
-        if all_visible {
+        // A read-only view opens on the full layout. Edit mode keeps its
+        // placement-focused filters; later sidebar changes remain user-owned.
+        if !edit_enabled || all_visible {
             set_layer_visibility(&mut layers, true);
             object_visibility.set_all_visible(true);
         }
@@ -2115,17 +2117,18 @@ impl LoadedViewer {
                 // sharing a cache key; the 16ms repaint catch-up rebuilds
                 // labels when a pan or zoom ends.
                 let build_labels = !is_interacting;
-                let active_tile_keys = tiles
-                    .iter()
+                let tiles: Vec<_> = tiles
+                    .into_iter()
                     .map(|(tx, ty)| crate::canvas_gpu::GpuBufferKey {
                         geometry_epoch: self.geometry_epoch,
-                        tile_x: *tx,
-                        tile_y: *ty,
+                        tile_x: tx,
+                        tile_y: ty,
                         zoom_tier: u8::from(build_labels),
                         layer_visibility_hash: self.visibility_rules_cache.layer_visibility_hash,
                         object_visibility_bits: 0,
                     })
                     .collect();
+                let active_tile_keys = tiles.iter().copied().collect();
                 self.gpu_tile_worker.set_active_tiles(active_tile_keys);
 
                 let cached_bytes = self
@@ -2165,22 +2168,14 @@ impl LoadedViewer {
                     }
                 }
 
-                for (tx, ty) in tiles {
+                for buffer_key in tiles {
+                    let (tx, ty) = (buffer_key.tile_x, buffer_key.tile_y);
                     let tile_bbox = Rect32 {
                         lx: tx * crate::canvas_gpu::GPU_TILE_SIZE_DBU,
                         ly: ty * crate::canvas_gpu::GPU_TILE_SIZE_DBU,
                         hx: (tx + 1) * crate::canvas_gpu::GPU_TILE_SIZE_DBU,
                         hy: (ty + 1) * crate::canvas_gpu::GPU_TILE_SIZE_DBU,
                     };
-                    let buffer_key = crate::canvas_gpu::GpuBufferKey {
-                        geometry_epoch: self.geometry_epoch,
-                        tile_x: tx,
-                        tile_y: ty,
-                        zoom_tier: 0,
-                        layer_visibility_hash: self.visibility_rules_cache.layer_visibility_hash,
-                        object_visibility_bits: 0,
-                    };
-
                     let Some(tile_instances) = self.gpu_tile_instances.get(&buffer_key) else {
                         gpu_scene_pending = true;
                         if let Err(err) = self.gpu_tile_worker.request(

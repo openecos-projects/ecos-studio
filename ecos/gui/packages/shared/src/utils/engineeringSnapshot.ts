@@ -11,7 +11,7 @@ import type {
 import type { ReadIssue, ReadSection } from '../contracts/backendWorkspace.ts'
 
 export const ENGINEERING_SNAPSHOT_MAX_BYTES = 16 * 1024 * 1024
-export const ENGINEERING_SNAPSHOT_SCHEMA_VERSION = 6
+export const ENGINEERING_SNAPSHOT_SCHEMA_VERSION = 7
 export const ENGINEERING_SNAPSHOT_ARTIFACT_LIMIT = 4096
 // Mirrors the producer's hard cap (ECC `_CHECKLIST_PROJECTION_MAX_ITEMS`); an
 // over-long projection is a producer contract violation, so the section
@@ -115,7 +115,7 @@ export function parseEngineeringSnapshotJson(
 }
 
 /**
- * Snapshot v4/v6 reader: a tolerant reader for field-level evolution (unknown
+ * Snapshot v4/v6/v7 reader: a tolerant reader for field-level evolution (unknown
  * fields are ignored per ADR-0005) that fails closed on the envelope,
  * container, version, identity, and artifact-reference invariants the ECC
  * producer guarantees. Section payloads degrade independently so a malformed
@@ -136,6 +136,7 @@ export function validateEngineeringSnapshot(
   }
   if (
     value.schemaVersion !== 4 &&
+    value.schemaVersion !== 6 &&
     value.schemaVersion !== ENGINEERING_SNAPSHOT_SCHEMA_VERSION
   ) {
     return {

@@ -13,6 +13,7 @@ export type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
   deriveDirectoryFromDesign?: boolean
   lockProjectContext?: boolean
   lockWorkspaceDirectory?: boolean
+  savedPrimaryClocks?: string
   standaloneWorkspace?: boolean
   suggestedWorkspaceName?: string
 }

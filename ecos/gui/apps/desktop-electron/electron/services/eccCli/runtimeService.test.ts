@@ -3,7 +3,7 @@ import type {
   EccWorkspaceUpdateRequest,
 } from '@ecos-studio/shared'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -871,11 +871,33 @@ describe('ECC CLI Workspace update transaction', () => {
     return service
   }
 
-  it('persists Wizard project settings, refreshes with a backup, and applies parameters', async () => {
+  it('refreshes from selected inputs without changing the owning project and registers its backup', async () => {
     const input = request()
+    vi.spyOn(await import('./persistedState'), 'readProjectManifest').mockResolvedValue({
+      project_id: 'demo',
+      workspaces: [{ workspace_id: 'ws_1', workspace_path: '/projects/demo/ws_1' }],
+    } as never)
     const commands: string[][] = []
     vi.spyOn(EccCliProcess.prototype, 'run').mockImplementation(async (args) => {
       commands.push([...args])
+      if (args[1] === 'refresh') {
+        const root = args[args.indexOf('--project') + 1]!
+        expect(root).not.toBe('/projects/demo')
+        const declarations = JSON.parse(
+          await readFile(join(root, 'project.json'), 'utf8'),
+        )
+        expect(declarations.base_design).toMatchObject({
+          sdc: '/inputs/design.sdc',
+          rtl_list: ['/inputs/design.v'],
+          top_module: 'gcd_top',
+        })
+        return {
+          exitCode: 0,
+          stderr: '',
+          stdout:
+            'workspace_id=ws_1 status=refreshed workspace=/projects/demo/ws_1 workspace_revision=5 backup=/projects/demo/.ws_1.replace-backup-1\n',
+        }
+      }
       return { exitCode: 0, stderr: '', stdout: '' }
     })
     const readSnapshot = vi.spyOn(
@@ -884,6 +906,7 @@ describe('ECC CLI Workspace update transaction', () => {
     )
     readSnapshot
       .mockResolvedValueOnce({
+        parameters: {},
         workspaceBindings: input.workspaceBindings,
         workspaceRevision: 4,
         workspaceSpec: input.workspaceSpec,
@@ -892,10 +915,6 @@ describe('ECC CLI Workspace update transaction', () => {
       .mockResolvedValueOnce({ workspaceRevision: 6 } as never)
     const update: EccWorkspaceUpdateRequest = {
       commandId: 'update-1',
-      eccPdkConfig: {
-        externalPaths: ['/macros/sram'],
-        overrides: { lefs: ['/macros/sram/sram.lef'] },
-      },
       expectedWorkspaceRevision: 4,
       retainBackup: true,
       workspaceBindings: input.workspaceBindings,
@@ -910,35 +929,14 @@ describe('ECC CLI Workspace update transaction', () => {
     })
 
     expect(commands.map((args) => args.slice(0, 2))).toEqual([
-      ['project', 'apply'],
       ['workspace', 'refresh'],
+      ['workspace', 'import'],
+      ['workspace', 'archive'],
       ['param', 'apply'],
     ])
-    expect(commands[0]).toEqual(
-      expect.arrayContaining([
-        '--set',
-        'design.top=gcd_top',
-        '--set',
-        'pdk.external_paths=["/macros/sram"]',
-        '--set',
-        'pdk.overrides.lefs=["/macros/sram/sram.lef"]',
-      ]),
-    )
-    expect(commands[1]).toEqual([
-      'workspace',
-      'refresh',
-      'ws_1',
-      '--project',
-      '/projects/demo',
-      '--expected-revision',
-      '4',
-      '--command-id',
-      'update-1',
-      '--no-wait',
-      '--force',
-      '--keep-backup',
-    ])
-    expect(commands[2]).toEqual([
+    expect(commands[0]).toContain('--keep-backup')
+    expect(commands[0]).not.toContain('--force')
+    expect(commands[3]).toEqual([
       'param',
       'apply',
       '--project',

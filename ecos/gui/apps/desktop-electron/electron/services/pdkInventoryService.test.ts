@@ -22,40 +22,38 @@ afterEach(async () => {
 })
 
 describe('PdkInventoryService', () => {
-  it('exposes the validated ICS55 ECC default resource paths', async () => {
-    const root = await createTempDir()
-    const pdkRoot = join(root, 'ics55')
-    const tech = 'prtech/techLEF/N551P6M_ecos.lef'
-    const cellLefs = [
-      'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/lef/ics55_LLSC_H7CR_ecos.lef',
-      'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/lef/ics55_LLSC_H7CL_ecos.lef',
-    ]
-    const liberty = [
-      'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/liberty/ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
-      'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/liberty/ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
-    ]
-    for (const file of [tech, ...cellLefs, ...liberty]) {
-      await mkdir(join(pdkRoot, file, '..'), { recursive: true })
-      await writeFile(join(pdkRoot, file), '')
-    }
-    const service = new PdkInventoryService({
-      inventoryPath: join(root, 'inventory.json'),
-      managedRoot: join(root, 'managed'),
-    })
-    const installation = await service.importInstallation({
-      displayName: 'ICS55',
-      familyId: 'ics55',
-      root: pdkRoot,
-    })
-    expect(installation).toMatchObject({
-      readiness: 'ready',
-      defaultResources: {
-        techLef: join(pdkRoot, tech),
-        cellLefs: cellLefs.map((file) => join(pdkRoot, file)),
-        liberty: liberty.map((file) => join(pdkRoot, file)),
-      },
-    })
-  })
+  it.each(['ics55-v1', 'ics55-v2'])(
+    'exposes resources resolved by ECC for %s',
+    async (version) => {
+      const root = await createTempDir()
+      const pdkRoot = join(root, 'ics55')
+      await mkdir(pdkRoot)
+      await writeFile(join(pdkRoot, 'VERSION'), version)
+      const defaults = {
+        techLef: join(pdkRoot, 'tech.lef'),
+        cellLefs: [join(pdkRoot, 'cells.lef')],
+        liberty: [join(pdkRoot, 'cells.lib')],
+      }
+      const service = new PdkInventoryService({
+        inventoryPath: join(root, 'inventory.json'),
+        managedRoot: join(root, 'managed'),
+        verifyIcs55Root: async (selectedRoot) => {
+          expect(selectedRoot).toBe(pdkRoot)
+          return defaults
+        },
+      })
+      const installation = await service.importInstallation({
+        displayName: 'ICS55',
+        familyId: 'ics55',
+        root: pdkRoot,
+      })
+      expect(installation).toMatchObject({
+        readiness: 'ready',
+        defaultResources: defaults,
+        version,
+      })
+    },
+  )
 
   it('represents a real directory and its symlink as one stable Installation', async () => {
     const root = await createTempDir()

@@ -44,6 +44,22 @@ describe('buildSnapshotFlowInsights', () => {
         data: {
           metrics: [
             {
+              id: 'route_dr_total_violation_count',
+              name: 'Detailed route violations',
+              polarity: 'lower_is_better',
+              stepId: 'Route',
+              unit: 'count',
+              value: 0,
+            },
+            {
+              id: 'route_la_total_overflow',
+              name: 'Layer assignment overflow',
+              polarity: 'lower_is_better',
+              stepId: 'Route',
+              unit: 'count',
+              value: 2,
+            },
+            {
               id: 'instance_count',
               name: 'Instance Count',
               polarity: 'trend_only',
@@ -156,6 +172,8 @@ describe('buildSnapshotFlowInsights', () => {
       ]),
     )
     expect(result?.drcRelated.drcCount).toBe(0)
+    expect(result?.drcRelated.routeDrViolations).toBe(0)
+    expect(result?.drcRelated.routeLaOverflow).toBe(2)
   })
 
   it('preserves an explicitly missing STA corner', () => {

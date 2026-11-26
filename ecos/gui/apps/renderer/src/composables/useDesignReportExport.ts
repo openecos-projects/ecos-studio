@@ -606,8 +606,12 @@ export function useDesignReportExport({
       )
 
       // 6. STA timing issues
-      let staTimingIssues: Record<string, unknown> | null = null
-      staTimingIssues = await readWorkspaceJson('sta_ecc/analysis/sta_timing_issues.json')
+      const staTimingReference = runtimeSnapshot?.engineeringSnapshot?.artifacts.find(
+        (artifact) => artifact.kind === 'sta_timing_issues',
+      )?.reference
+      const staTimingIssues = await readWorkspaceJson(
+        staTimingReference ?? 'sta_ecc/analysis/sta_timing_issues.json',
+      )
 
       if (unmounted || generation !== loadGeneration) return
 

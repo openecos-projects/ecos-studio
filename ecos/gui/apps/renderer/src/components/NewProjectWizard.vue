@@ -682,6 +682,7 @@
                             STA maximum parallel corners
                           </label>
                           <select
+                            v-if="staParallelCornerLimit !== null"
                             id="sta-max-parallel-corners"
                             v-model.number="config.parameters.sta_max_parallel_corners"
                             class="mt-2 w-full cursor-pointer rounded-md border border-(--border-color) bg-(--bg-primary)/75 px-2 py-1.5 text-xs text-(--text-primary)"
@@ -694,6 +695,15 @@
                               {{ count }}
                             </option>
                           </select>
+                          <input
+                            v-else
+                            id="sta-max-parallel-corners"
+                            v-model.number="config.parameters.sta_max_parallel_corners"
+                            type="number"
+                            min="1"
+                            step="1"
+                            class="mt-2 w-full rounded-md border border-(--border-color) bg-(--bg-primary)/75 px-2 py-1.5 text-xs text-(--text-primary)"
+                          />
                         </div>
 
                         <div
@@ -850,7 +860,11 @@
                           :value="getDesignInputPath(activeDesignInputType)"
                           readonly
                           type="text"
-                          placeholder="No file imported"
+                          :placeholder="
+                            lockWorkspaceDirectory && activeDesignInputType === 'sdc'
+                              ? 'Keep saved workspace timing constraints'
+                              : 'No file imported'
+                          "
                           class="min-w-0 flex-1 rounded-lg border border-(--border-color) bg-(--bg-secondary)/35 px-3 py-2.5 text-sm text-(--text-primary) outline-none"
                         />
                         <button
@@ -861,7 +875,7 @@
                           <i class="ri-upload-2-line"></i>
                           {{
                             activeDesignInputType === 'sdc'
-                              ? 'Import SDC'
+                              ? 'Import Timing Constraints'
                               : `Import ${activeDesignInput?.label || 'File'}`
                           }}
                         </button>
@@ -870,8 +884,21 @@
                         v-if="activeDesignInputType === 'sdc'"
                         class="mt-3 text-xs text-(--text-secondary)"
                       >
-                        SDC is optional and stored with the design inputs.
+                        {{
+                          lockWorkspaceDirectory && !sdcPath
+                            ? 'Using the timing constraints saved in this workspace.'
+                            : 'ECC timing input template (TOML).'
+                        }}
                       </p>
+                      <pre
+                        v-if="
+                          activeDesignInputType === 'sdc' &&
+                          !sdcPath &&
+                          initialConfig?.savedPrimaryClocks
+                        "
+                        class="mt-2 overflow-auto text-xs"
+                        >{{ initialConfig.savedPrimaryClocks.trim() }}</pre
+                      >
                       <p v-if="designFileError" class="mt-3 text-xs text-red-500">
                         {{ designFileError }}
                       </p>
@@ -888,13 +915,17 @@
                 <header class="mb-4 shrink-0">
                   <h2 class="text-xl font-bold text-(--text-primary)">PDK Config</h2>
                   <p class="mt-1 text-xs text-(--text-secondary)">
-                    Select an imported PDK, then use ECC defaults or customize PDK
-                    resource files.
+                    {{
+                      lockWorkspaceDirectory
+                        ? 'This workspace keeps its saved PDK and resource selection.'
+                        : 'Select an imported PDK, then use ECC defaults or customize PDK resource files.'
+                    }}
                   </p>
                 </header>
 
                 <div class="grid gap-3">
                   <section
+                    :inert="lockWorkspaceDirectory"
                     class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3"
                   >
                     <div class="mb-3 flex items-center justify-between gap-3">
@@ -1124,6 +1155,7 @@
                         <button
                           type="button"
                           class="shrink-0 cursor-pointer rounded-md border border-(--border-color) bg-(--bg-primary)/75 px-3 py-1.5 text-xs font-semibold text-(--text-primary) transition-colors duration-200 hover:border-(--accent-color)/45"
+                          :disabled="lockWorkspaceDirectory"
                           @click="handleAddExternalPdkPath"
                         >
                           <i class="ri-add-line mr-1"></i>
@@ -1157,6 +1189,7 @@
                             type="button"
                             class="shrink-0 cursor-pointer rounded-md px-2 py-0.5 text-xs text-(--text-secondary) transition-colors duration-200 hover:text-red-500"
                             title="Remove external PDK path"
+                            :disabled="lockWorkspaceDirectory"
                             @click="handleRemoveExternalPdkPath(path)"
                           >
                             <i class="ri-delete-bin-line"></i>
@@ -1213,7 +1246,7 @@
                               ? 'cursor-pointer border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'
                               : 'cursor-not-allowed border-(--border-color) bg-(--bg-primary)/40 opacity-65'
                         "
-                        :disabled="!defaultConfigAvailable"
+                        :disabled="lockWorkspaceDirectory || !defaultConfigAvailable"
                         :title="
                           defaultConfigAvailable
                             ? 'Use ECC defaults for this PDK'
@@ -1252,6 +1285,7 @@
                             : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'
                         "
                         @click="pdkConfigMode = 'manual'"
+                        :disabled="lockWorkspaceDirectory"
                       >
                         <span
                           class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border"
@@ -1300,7 +1334,7 @@
                       <span
                         class="rounded-md bg-(--bg-primary)/70 px-2 py-1 text-xs text-(--text-secondary)"
                       >
-                        {{ activeManualPdkSelections.length }} selected
+                        {{ selectedPdkResourceCount }} selected
                       </span>
                     </div>
                     <p
@@ -1366,7 +1400,7 @@
                             </p>
                           </div>
                           <button
-                            v-if="pdkConfigMode === 'manual'"
+                            v-if="pdkConfigMode === 'manual' && !lockWorkspaceDirectory"
                             type="button"
                             class="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-(--border-color) bg-(--bg-secondary)/45 text-(--text-secondary) transition-colors duration-200 hover:border-(--accent-color)/45 hover:bg-(--accent-color)/10 hover:text-(--text-primary)"
                             title="Update selection"
@@ -1493,6 +1527,7 @@
                       >
                       <input
                         v-model="config.parameters.clock"
+                        :readonly="timingDefinesClock"
                         type="text"
                         placeholder="clk"
                         class="w-full rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
@@ -1505,6 +1540,12 @@
                       >
                       <input
                         v-model.number="config.parameters.frequency_max"
+                        :readonly="timingDefinesClock"
+                        :title="
+                          timingDefinesClock
+                            ? 'Set the clock period in Design Files → Timing Constraints.'
+                            : undefined
+                        "
                         type="number"
                         min="1"
                         step="1"
@@ -1723,7 +1764,13 @@
               >
                 <i v-if="isCreating" class="ri-loader-4-line animate-spin"></i>
                 <i v-else class="ri-rocket-line"></i>
-                {{ isCreating ? 'Creating Workspace...' : 'Create Workspace' }}
+                {{
+                  lockWorkspaceDirectory
+                    ? 'Rebuild Workspace'
+                    : isCreating
+                      ? 'Creating Workspace...'
+                      : 'Create Workspace'
+                }}
               </button>
             </div>
           </footer>
@@ -1793,6 +1840,7 @@ type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
   deriveDirectoryFromDesign?: boolean
   lockProjectContext?: boolean
   lockWorkspaceDirectory?: boolean
+  savedPrimaryClocks?: string
   standaloneWorkspace?: boolean
 }
 
@@ -2030,6 +2078,15 @@ const filelistPath = ref(initialFilelistPath)
 const sdcPath = ref(
   props.initialConfig?.sdc ?? props.initialConfig?.source_config?.sdc ?? '',
 )
+const timingDefinesClock = computed(() =>
+  Boolean(
+    props.initialConfig?.lockWorkspaceDirectory &&
+    (sdcPath.value ||
+      props.initialConfig.savedPrimaryClocks
+        ?.split('\n')
+        .some((line) => line.trim() && !line.trimStart().startsWith('#'))),
+  ),
+)
 const dieAreaMode = ref<DieAreaMode>(
   normalizeDieAreaMode(props.initialConfig?.parameters?.die_area_mode),
 )
@@ -2058,7 +2115,7 @@ const discoveredFlowDefinition = computed<Record<string, unknown> | null>(() => 
   return isRecord(definition) ? definition : null
 })
 
-const discoveredFlowStepIds = computed<FlowStepName[] | null>(() => {
+const discoveredFlowStepIds = computed<string[] | null>(() => {
   const definition = discoveredFlowDefinition.value
   if (!definition || !Array.isArray(definition.stepIds)) return null
   const stepIds = definition.stepIds.filter(
@@ -2067,23 +2124,34 @@ const discoveredFlowStepIds = computed<FlowStepName[] | null>(() => {
   return stepIds.length > 0 ? stepIds : null
 })
 
+function wizardStepName(stepId: string): FlowStepName {
+  return normalizeFlowStepName(stepId, stepId)
+}
+
 const skippableFlowStepNames = computed<ReadonlySet<string>>(() => {
   const ids = discoveredFlowDefinition.value?.skippableStepIds
   if (!Array.isArray(ids)) return NO_FLOW_STEP_NAMES
-  return new Set(ids.filter((id): id is string => typeof id === 'string'))
+  return new Set(
+    ids.filter((id): id is string => typeof id === 'string').map(wizardStepName),
+  )
 })
 
 const defaultSkippedFlowStepNames = computed<ReadonlySet<string>>(() => {
   const ids = discoveredFlowDefinition.value?.defaultSkippedStepIds
   if (!Array.isArray(ids)) return NO_FLOW_STEP_NAMES
-  return new Set(ids.filter((id): id is string => typeof id === 'string'))
+  return new Set(
+    ids.filter((id): id is string => typeof id === 'string').map(wizardStepName),
+  )
 })
 
 const flowStepOptions = computed<Array<{ name: FlowStepName; description: string }>>(
   () => {
     const stepIds = discoveredFlowStepIds.value
     if (!stepIds) return []
-    return stepIds.map((id) => ({ name: id, description: flowStepDescription(id) }))
+    return stepIds.map((id) => ({
+      name: wizardStepName(id),
+      description: flowStepDescription(id),
+    }))
   },
 )
 
@@ -2142,10 +2210,15 @@ const staParallelCornerLimit = computed(() => {
   const maximum = Array.isArray(range) ? range[1] : null
   return typeof maximum === 'number' && Number.isSafeInteger(maximum) && maximum >= 1
     ? maximum
-    : 1
+    : Array.isArray(range) && maximum === null
+      ? null
+      : 1
 })
 watch(staParallelCornerLimit, (maximum) => {
-  if (Number(config.value.parameters.sta_max_parallel_corners ?? 1) > maximum) {
+  if (
+    maximum !== null &&
+    Number(config.value.parameters.sta_max_parallel_corners ?? 1) > maximum
+  ) {
     config.value.parameters.sta_max_parallel_corners = maximum
   }
 })
@@ -2616,10 +2689,7 @@ const selectedPdk = computed(() =>
   pdkOptions.value.find((pdk) => pdk.id === selectedPdkId.value),
 )
 const defaultConfigAvailable = computed(
-  () =>
-    selectedPdk.value?.readiness === 'ready' &&
-    selectedPdk.value.supportsEccDefaults &&
-    Boolean(selectedPdk.value.defaultResources),
+  () => selectedPdk.value?.readiness === 'ready' && selectedPdk.value.supportsEccDefaults,
 )
 const defaultConfigUnavailableReason = computed(() => {
   if (!selectedPdk.value) return 'Select a PDK first.'
@@ -2630,8 +2700,6 @@ const defaultConfigUnavailableReason = computed(() => {
   if (!isPdkEligible(selectedPdk.value)) return 'This PDK is not validated.'
   if (!selectedPdk.value.supportsEccDefaults)
     return 'ECC defaults are only available for a known PDK layout.'
-  if (!selectedPdk.value.defaultResources)
-    return 'Default PDK resources are unavailable; re-check the PDK.'
   return ''
 })
 const manualPdkDetectedFiles = ref<PdkDetectedFiles | null>(null)
@@ -2701,6 +2769,12 @@ const displayedPdkSelections = computed(() =>
   pdkConfigMode.value === 'default'
     ? effectiveDefaultPdkResources.value
     : pdkSelections.value,
+)
+const selectedPdkResourceCount = computed(() =>
+  Object.values(displayedPdkSelections.value).reduce(
+    (count, files) => count + files.length,
+    0,
+  ),
 )
 const currentPdkDetectedFiles = computed<PdkDetectedFiles>(
   () =>
@@ -2831,6 +2905,7 @@ const canProceed = computed(() => {
       )
         return false
       if (pdkConfigMode.value === 'default') {
+        if (!selectedPdk.value?.defaultResources) return defaultConfigAvailable.value
         return pdkWizardSteps.every(
           (step) => effectiveDefaultPdkResources.value[step.key].length > 0,
         )
@@ -3090,8 +3165,10 @@ async function applyProjectDefaultsForProject(projectRoot: string) {
 
 async function applyProjectManifestDefaults(manifest: ProjectManifest) {
   projectContext.value.project_id = manifest.project_id
-  projectDesignName.value = manifest.design_name
-  config.value.parameters.design = manifest.design_name
+  projectDesignName.value =
+    (lockWorkspaceDirectory.value && props.initialConfig?.parameters?.design) ||
+    manifest.design_name
+  config.value.parameters.design = projectDesignName.value
   designNameTouched.value = true
   const baseDesign = manifest.base_design
   const baseDesignRecord = baseDesign as ProjectManifest['base_design'] &
@@ -3193,7 +3270,7 @@ async function applyProjectDesignFileDefaults(
 
   const projectSdc = firstString(baseDesign.sdc, parameters.sdc)
   if (projectSdc && !sdcPath.value && !hasInitialConfigValue('sdc')) {
-    sdcPath.value = projectSdc
+    sdcPath.value = resolveProjectRelativePath(projectRoot, projectSdc)
   }
 
   if (
@@ -3351,7 +3428,7 @@ function setBooleanParameterDefault(key: string, value: unknown) {
   }
 }
 
-function hasInitialConfigValue(key: keyof WorkspaceConfig) {
+function hasInitialConfigValue(key: keyof NonNullable<WorkspaceConfig['source_config']>) {
   return (
     props.initialConfig?.[key] !== undefined ||
     props.initialConfig?.source_config?.[key] !== undefined
@@ -3655,8 +3732,8 @@ function getDesignFileOptions(type: DesignInputKey): DesktopFileDialogOptions | 
     case 'sdc':
       return {
         ...common,
-        title: 'Select SDC File',
-        filters: [{ name: 'SDC Files', extensions: ['sdc', 'gz'] }],
+        title: 'Select ECC Timing Constraints',
+        filters: [{ name: 'Timing Constraints', extensions: ['toml', 'tcl', 'sdc'] }],
       }
     case 'def':
       return {
@@ -3920,7 +3997,7 @@ async function persistExternalPdkPaths(
   externalPaths: string[],
   pdkRoot: string,
 ) {
-  if (!projectRoot) return
+  if (!projectRoot || lockWorkspaceDirectory.value) return
   try {
     await getDesktopApi().projectEccConfig.write({
       projectRoot,
@@ -4002,6 +4079,17 @@ async function loadProjectEccPdkConfig() {
     if (generation !== projectEccPdkLoadGeneration) return
     await ensurePdksLoaded()
     if (generation !== projectEccPdkLoadGeneration) return
+    if (lockWorkspaceDirectory.value && props.initialConfig?.pdk_root) {
+      await selectDeclaredProjectPdk(
+        {
+          ...result,
+          pdkName: props.initialConfig.pdk ?? '',
+          pdkRoot: props.initialConfig.pdk_root,
+        },
+        generation,
+      )
+      return
+    }
     projectEccPdkConfig.value = result
     if (result.exists) {
       await selectDeclaredProjectPdk(
@@ -4100,7 +4188,8 @@ function specReady() {
     Number(params.max_fanout) > 0 &&
     Number.isInteger(params.sta_max_parallel_corners ?? 1) &&
     Number(params.sta_max_parallel_corners ?? 1) >= 1 &&
-    Number(params.sta_max_parallel_corners ?? 1) <= staParallelCornerLimit.value
+    (staParallelCornerLimit.value === null ||
+      Number(params.sta_max_parallel_corners ?? 1) <= staParallelCornerLimit.value)
 
   if (!hasCoreFields || projectManifestError.value || isLoadingProjectManifest.value) {
     return false
@@ -4146,6 +4235,7 @@ function syncWorkspaceConfig() {
   }
   if (
     pdkConfigMode.value === 'default' &&
+    selectedPdk.value?.defaultResources &&
     hasProjectPdkResourceOverrides.value &&
     !projectPdkMismatch.value &&
     !isLoadingProjectEccPdk.value &&
@@ -4398,7 +4488,18 @@ function createWorkspace() {
   syncWorkspaceConfig()
   isCreating.value = true
   try {
-    emit('create', config.value)
+    const ids = new Map(
+      discoveredFlowStepIds.value?.map((id) => [wizardStepName(id), id]),
+    )
+    const stepId = (name: string) => ids.get(name) ?? name
+    emit('create', {
+      ...config.value,
+      flow_config: {
+        start_step: stepId(flowStartStep.value),
+        end_step: stepId(flowEndStep.value),
+        steps: selectedFlowSteps.value.map(stepId),
+      },
+    })
   } finally {
     isCreating.value = false
   }

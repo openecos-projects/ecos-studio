@@ -70,7 +70,7 @@
         <StepDetailsPanel
           v-else-if="activeTab === 'antenna'"
           title="Antenna Check"
-          source="antennaCheck.step.json"
+          source="ECC antenna results"
           :summary="antennaSummary"
           :loading="antennaSummaryLoading"
           :error="antennaSummaryError"

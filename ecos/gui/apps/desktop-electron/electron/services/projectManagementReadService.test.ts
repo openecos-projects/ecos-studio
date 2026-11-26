@@ -274,8 +274,17 @@ describe('ProjectManagementReadService', () => {
     expect(access).toHaveBeenCalledWith(join(projectRoot, 'project.json'))
   })
 
-  it('reuses canonical design defaults from an existing Project Workspace', async () => {
+  it('reuses workspace design defaults without treating generated timing as project input', async () => {
     const { projectRoot, workspaceRoot } = await createProject()
+    const manifestPath = join(projectRoot, 'project.json')
+    const original = JSON.parse(await readFile(manifestPath, 'utf8'))
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        ...original,
+        base_design: { sdc: 'timing_constraints_template.tcl' },
+      }),
+    )
     const readWorkspaceConfiguration = vi.fn().mockResolvedValue({
       workspaceSpec: {
         design: { name: 'gcd', topModule: 'gcd_top', clockPort: 'clk_i' },
@@ -289,7 +298,7 @@ describe('ProjectManagementReadService', () => {
         inputs: {
           'rtl-main': `${workspaceRoot}/origin/gcd.v`,
           'rtl-helper': `${workspaceRoot}/origin/helper.sv`,
-          constraints: `${workspaceRoot}/origin/gcd.sdc`,
+          constraints: `${workspaceRoot}/origin/pre_CTS/TYP_25_TYPICAL.tcl`,
         },
       },
     })
@@ -303,7 +312,7 @@ describe('ProjectManagementReadService', () => {
     expect(manifest?.base_design).toMatchObject({
       clock: 'clk_i',
       rtl_list: [`${workspaceRoot}/origin/gcd.v`, `${workspaceRoot}/origin/helper.sv`],
-      sdc: `${workspaceRoot}/origin/gcd.sdc`,
+      sdc: 'timing_constraints_template.tcl',
       top_module: 'gcd_top',
     })
   })

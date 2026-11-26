@@ -180,12 +180,14 @@ export function backendWorkspaceOptions(
   const flowId =
     selectedSteps.size === 1 && selectedSteps.has('defview')
       ? 'defview'
-      : selectedSteps.size === 1 && selectedSteps.has('Synthesis')
+      : selectedSteps.size === 1 && startStep?.toLowerCase() === 'synthesis'
         ? 'syn_sta'
         : 'rtl2gds'
   // Mirrors ECC's applicability aliases (ecc/chipcompiler/engine/workspace_spec.py
   // _parameter_applies_to_flow); an empty step set means the full flow.
-  const normalizedSteps = new Set([...selectedSteps].map((step) => step.toLowerCase()))
+  const normalizedSteps = new Set(
+    [...selectedSteps].map((step) => step.toLowerCase().replace(/[_\s-]/g, '')),
+  )
   const parameterApplies = (aliases: string[]) =>
     normalizedSteps.size === 0 || aliases.some((alias) => normalizedSteps.has(alias))
   const synthesisApplies = parameterApplies(['synthesis'])
@@ -196,6 +198,10 @@ export function backendWorkspaceOptions(
   ])
   const ctsApplies = parameterApplies(['cts'])
   const placementApplies = parameterApplies(['placement', 'place', 'macroplacement'])
+  const placementSpecKey = (displayKey: string, fallback: string) => {
+    const key = specKey(displayKey, fallback)
+    return selectedSteps.has('placement') && !key.includes(':') ? `placement:${key}` : key
+  }
   const macroPlacementApplies = parameterApplies(['macroplacement'])
   const mpc = config.mpc as ProjectManifestMpc | null | undefined
   const projectContext = config.project_context
@@ -332,11 +338,11 @@ export function backendWorkspaceOptions(
           : {}),
         ...(placementApplies
           ? {
-              [specKey('target_density', 'place.target_density')]: numberValue(
+              [placementSpecKey('target_density', 'place.target_density')]: numberValue(
                 parameters.target_density,
                 0.2,
               ),
-              [specKey('target_overflow', 'place.target_overflow')]: numberValue(
+              [placementSpecKey('target_overflow', 'place.target_overflow')]: numberValue(
                 parameters.target_overflow,
                 0.1,
               ),

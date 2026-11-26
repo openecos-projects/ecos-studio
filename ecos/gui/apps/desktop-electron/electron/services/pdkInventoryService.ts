@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { mkdir, readFile, realpath, rename, rm, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type {
+  ManualPdkConfiguration,
   PdkBindRequest,
   PdkBinding,
   PdkImportRequest,
@@ -29,6 +30,7 @@ export interface PdkInventoryServiceOptions {
   managedRoot?: string
   jsonWriter?: typeof writeJsonAtomic
   legacyCleaner?: () => Promise<void>
+  verifyIcs55Root?: (root: string) => Promise<ManualPdkConfiguration>
 }
 
 export interface ManagedPdkInstallationRequest extends PdkImportRequest {
@@ -37,28 +39,13 @@ export interface ManagedPdkInstallationRequest extends PdkImportRequest {
   version: string
 }
 
-const ICS55_DEFAULT_RESOURCES = {
-  techLef: 'prtech/techLEF/N551P6M_ecos.lef',
-  cellLefs: [
-    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/lef/ics55_LLSC_H7CR_ecos.lef',
-    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/lef/ics55_LLSC_H7CL_ecos.lef',
-  ],
-  liberty: [
-    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/liberty/ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
-    'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/liberty/ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
-  ],
-}
-const ICS55_MARKERS = [
-  ICS55_DEFAULT_RESOURCES.techLef,
-  ...ICS55_DEFAULT_RESOURCES.cellLefs,
-  ...ICS55_DEFAULT_RESOURCES.liberty,
-]
-
 export class PdkInventoryService {
   private operation: Promise<void> = Promise.resolve()
   private legacyCleanupComplete = false
-  private readonly options: Required<Omit<PdkInventoryServiceOptions, 'legacyCleaner'>> &
-    Pick<PdkInventoryServiceOptions, 'legacyCleaner'>
+  private readonly options: Required<
+    Omit<PdkInventoryServiceOptions, 'legacyCleaner' | 'verifyIcs55Root'>
+  > &
+    Pick<PdkInventoryServiceOptions, 'legacyCleaner' | 'verifyIcs55Root'>
 
   constructor(options: PdkInventoryServiceOptions = {}) {
     const stateRoot = process.env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state')
@@ -73,6 +60,7 @@ export class PdkInventoryService {
       managedRoot: options.managedRoot ?? join(dataRoot, 'ecos-studio', 'pdks'),
       jsonWriter: options.jsonWriter ?? writeJsonAtomic,
       legacyCleaner: options.legacyCleaner,
+      verifyIcs55Root: options.verifyIcs55Root,
     }
   }
 
@@ -202,7 +190,13 @@ export class PdkInventoryService {
         const bound = inventory.installations.find(
           (candidate) => candidate.id === existing.installationId,
         )
-        if (bound && installationSatisfiesRequirement(bound, request.requirement)) {
+        if (
+          bound &&
+          installationSatisfiesRequirement(
+            await this.snapshot(bound),
+            request.requirement,
+          )
+        ) {
           // The Requirement drifted but the bound Installation still satisfies
           // it; sync the stored Requirement instead of failing validation later.
           existing.requirement = request.requirement
@@ -221,10 +215,12 @@ export class PdkInventoryService {
 
       const matching: PdkInstallationRecord[] = []
       for (const installation of inventory.installations) {
-        if (!installationSatisfiesRequirement(installation, request.requirement)) {
+        if (installation.familyId !== request.requirement.familyId) continue
+        const snapshot = await this.snapshot(installation)
+        if (!installationSatisfiesRequirement(snapshot, request.requirement)) {
           continue
         }
-        const readiness = (await this.snapshot(installation)).readiness
+        const { readiness } = snapshot
         if (readiness === 'ready' || readiness === 'unverified') {
           matching.push(installation)
         }
@@ -257,12 +253,13 @@ export class PdkInventoryService {
         (candidate) => candidate.id === request.installationId,
       )
       if (!installation) throw new Error('PDK Installation was not found')
-      if (!installationSatisfiesRequirement(installation, request.requirement)) {
+      const snapshot = await this.snapshot(installation)
+      if (!installationSatisfiesRequirement(snapshot, request.requirement)) {
         throw new Error(
-          `PDK Installation does not satisfy the Project Requirement (${describeRequirementMismatch(installation, request.requirement)})`,
+          `PDK Installation does not satisfy the Project Requirement (${describeRequirementMismatch(snapshot, request.requirement)})`,
         )
       }
-      const readiness = (await this.snapshot(installation)).readiness
+      const { readiness } = snapshot
       if (readiness !== 'ready' && readiness !== 'unverified') {
         throw new Error('PDK Installation is not eligible for Binding')
       }
@@ -298,12 +295,12 @@ export class PdkInventoryService {
         (candidate) => candidate.id === binding.installationId,
       )
       if (!installation) throw new Error('Bound PDK Installation was not found')
-      if (!installationSatisfiesRequirement(installation, request.requirement)) {
+      const snapshot = await this.snapshot(installation)
+      if (!installationSatisfiesRequirement(snapshot, request.requirement)) {
         throw new Error(
-          `Bound PDK Installation does not satisfy the Project Requirement (${describeRequirementMismatch(installation, request.requirement)})`,
+          `Bound PDK Installation does not satisfy the Project Requirement (${describeRequirementMismatch(snapshot, request.requirement)})`,
         )
       }
-      const snapshot = await this.snapshot(installation)
       if (snapshot.readiness === 'missing' || snapshot.readiness === 'invalid') {
         throw new Error(snapshot.reason ?? 'Bound PDK Installation is not usable')
       }
@@ -420,6 +417,48 @@ export class PdkInventoryService {
     })
   }
 
+  async inspectIcs55Root(
+    root: string,
+    release?: string,
+  ): Promise<
+    Pick<
+      PdkInstallationSnapshot,
+      'readiness' | 'reason' | 'supportsEccDefaults' | 'defaultResources'
+    > & { dataVersion: string | null }
+  > {
+    const marker = (
+      await readFile(join(root, 'VERSION'), 'utf8').catch((error) => {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+        throw error
+      })
+    ).trim()
+    try {
+      const major = release?.match(/^([12])\./)?.[1]
+      if (major && (marker || 'ics55-v1') !== `ics55-v${major}`) {
+        throw new Error(
+          `PDK VERSION ${marker || '(missing)'} does not match registry version ${release}`,
+        )
+      }
+      if (!this.options.verifyIcs55Root)
+        throw new Error('ECC PDK verification is unavailable')
+      const defaultResources = await this.options.verifyIcs55Root(root)
+      return {
+        dataVersion: marker || null,
+        readiness: 'ready',
+        reason: null,
+        supportsEccDefaults: true,
+        defaultResources,
+      }
+    } catch (error) {
+      return {
+        dataVersion: marker || null,
+        readiness: 'invalid',
+        reason: error instanceof Error ? error.message : String(error),
+        supportsEccDefaults: false,
+      }
+    }
+  }
+
   private async snapshot(
     installation: PdkInstallationRecord,
   ): Promise<PdkInstallationSnapshot> {
@@ -441,33 +480,16 @@ export class PdkInventoryService {
           supportsEccDefaults: false,
         }
       }
-      const markers = await Promise.all(
-        ICS55_MARKERS.map((marker) =>
-          stat(resolve(installation.root, marker)).catch(() => null),
-        ),
+      const { dataVersion, ...health } = await this.inspectIcs55Root(
+        installation.root,
+        installation.ownership === 'managed'
+          ? (installation.version ?? undefined)
+          : undefined,
       )
-      if (markers.some((marker) => !marker?.isFile())) {
-        return {
-          ...installation,
-          readiness: 'invalid',
-          reason: 'Required ICS55 PDK files are missing',
-          supportsEccDefaults: true,
-        }
-      }
       return {
         ...installation,
-        readiness: 'ready',
-        reason: null,
-        supportsEccDefaults: true,
-        defaultResources: {
-          techLef: resolve(installation.root, ICS55_DEFAULT_RESOURCES.techLef),
-          cellLefs: ICS55_DEFAULT_RESOURCES.cellLefs.map((file) =>
-            resolve(installation.root, file),
-          ),
-          liberty: ICS55_DEFAULT_RESOURCES.liberty.map((file) =>
-            resolve(installation.root, file),
-          ),
-        },
+        version: installation.version ?? dataVersion,
+        ...health,
       }
     } catch {
       return {

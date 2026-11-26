@@ -793,7 +793,7 @@ export interface EccSnapshotArtifactDescriptor {
 }
 
 /**
- * Engineering Snapshot v6: a bounded, regenerable commit projection. Overview
+ * Engineering Snapshot: a bounded, regenerable commit projection. Overview
  * data lives in the projection sections; full content is always lazy-loaded
  * through the artifact index (ADR-0005, ADR-0007, ADR-0010).
  */
@@ -808,7 +808,7 @@ export interface EccEngineeringSnapshot {
   parameters: Record<string, unknown>
   qorAssessment?: Record<string, unknown>
   qorSnapshotExtension?: EccQorSnapshotExtension
-  schemaVersion: 4 | 6
+  schemaVersion: 4 | 6 | 7
   signoffAssessment: EccWorkspaceInspectSignoffResult
   timingPreview: EccTimingPreview
   workspaceId: string
