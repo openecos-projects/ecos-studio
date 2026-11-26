@@ -19,6 +19,7 @@ from typing import Any, Callable
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
+    ArchivedPowerMetric,
     ObjectiveMetric,
     OptimizationEpisodeState,
     OptimizationObjectiveProposal,
@@ -29,6 +30,7 @@ from ecos_agent.optimization.contracts import (
 )
 from ecos_agent.optimization.experiments.equal_budget import (
     CandidateTrace,
+    _evaluation_metric,
     _evaluation_value,
     export_episode_traces,
 )
@@ -59,7 +61,10 @@ from ecos_agent.optimization.ledger import (
 from ecos_agent.optimization.metrics.contracts import TELEMETRY_METRIC_IDS
 from ecos_agent.optimization.objective_alignment import build_objective_alignment
 from ecos_agent.optimization.objective_intent import OptimizationParameterPolicy
-from ecos_agent.optimization.observation_contracts import deterministic_noise_profile
+from ecos_agent.optimization.observation_contracts import (
+    _metric_profile_key,
+    deterministic_noise_profile,
+)
 from ecos_agent.optimization.rules import freeze_optimization_objective
 from ecos_agent.optimization.runtime import create_optimization_runner
 
@@ -284,8 +289,6 @@ _COMPARISON_KEYS = (
     ("drc_count", "drc"),
     ("die_area", "die_area"),
     ("sta_standard_cell_area", "area"),
-    ("power_analysis_dynamic_uw", "dynamic_power"),
-    ("power_analysis_leakage_uw", "leakage_power"),
     ("sta_frequency", "frequency"),
     ("sta_setup_wns", "timing"),
     ("sta_hold_wns", "hold_wns"),
@@ -300,6 +303,25 @@ _COMPARISON_KEYS = (
     ("qor_robustness_quality", "qor_robustness"),
     ("qor_summary_balanced", "qor_summary"),
 )
+
+
+_POWER_COMPARISON_KEYS = (
+    ("dynamic_power", "power_analysis_dynamic_uw", ArchivedPowerMetric.TYPICAL_DYNAMIC.value),
+    ("leakage_power", "power_analysis_leakage_uw", ArchivedPowerMetric.TYPICAL_LEAKAGE.value),
+)
+
+
+def _comparison_row(
+    reference: float | None, best: float | None, epsilon: float | None
+) -> dict[str, float | bool | None]:
+    delta = best - reference if best is not None and reference is not None else None
+    return {
+        "reference": reference,
+        "best": best,
+        "delta": delta,
+        "epsilon": epsilon,
+        "beyond_noise": abs(delta) > epsilon if delta is not None and epsilon is not None else None,
+    }
 
 
 def build_metric_comparison(
@@ -329,26 +351,34 @@ def build_metric_comparison(
         if trace.terminal_success and trace.terminal_utility is not None
     ]
     best = max(started, key=lambda trace: trace.terminal_utility, default=None)
-    rows: dict[str, object] = {}
-    for key, column in _COMPARISON_KEYS:
-        base = reference_value(key)
-        best_value = getattr(best, column) if best is not None else None
-        delta = (
-            best_value - base
-            if best_value is not None and base is not None
-            else None
+    rows: dict[str, object] = {
+        key: _comparison_row(
+            reference_value(key), getattr(best, column) if best is not None else None,
+            epsilon.get(key),
         )
-        rows[key] = {
-            "reference": base,
-            "best": best_value,
-            "delta": delta,
-            "epsilon": epsilon.get(key),
-            "beyond_noise": (
-                abs(delta) > epsilon[key]
-                if delta is not None and key in epsilon
-                else None
-            ),
-        }
+        for key, column in _COMPARISON_KEYS
+    }
+    for column, current_id, archived_id in _POWER_COMPARISON_KEYS:
+        measured = (best.power_measurements or {}).get(column) if best is not None else None
+        for metric_id in (current_id, archived_id):
+            baseline = _evaluation_metric(reference.evaluation_metrics, metric_id)
+            candidate = measured if measured and measured["metric_id"] == metric_id else None
+            if metric_id == archived_id and baseline is None and candidate is None:
+                continue
+            best_value = None
+            if candidate is not None:
+                if baseline is None or (
+                    candidate["corner"] == baseline.corner and candidate["unit"] == baseline.unit
+                ):
+                    best_value = getattr(best, column)
+            elif measured is None and best is not None and metric_id == current_id:
+                # Earlier traces with no metadata used only the current power metrics.
+                best_value = getattr(best, column)
+            rows[metric_id] = _comparison_row(
+                float(baseline.value) if baseline is not None else None,
+                best_value,
+                epsilon.get(_metric_profile_key(baseline)) if baseline is not None else None,
+            )
     return {
         "best_candidate_id": best.candidate_id if best is not None else None,
         "metrics": rows,

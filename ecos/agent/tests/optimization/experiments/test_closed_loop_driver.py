@@ -176,3 +176,47 @@ def test_metric_comparison_without_started_candidates_keeps_reference() -> None:
         "epsilon": None,
         "beyond_noise": None,
     }
+
+
+@pytest.mark.parametrize(
+    ("candidate_id", "candidate_unit", "expected_delta"),
+    [
+        ("sta_typical_dynamic_power", "uW", -1.0),
+        ("sta_typical_dynamic_power", "mW", None),
+        ("power_analysis_dynamic_uw", "uW", None),
+    ],
+)
+def test_power_comparison_matches_recorded_measurement(candidate_id, candidate_unit, expected_delta) -> None:
+    reference = _terminal_observation()
+    dynamic = next(
+        metric for metric in reference.evaluation_metrics
+        if metric.metric_id == "power_analysis_dynamic_uw"
+    )
+    archived = dynamic.model_copy(update={
+        "metric_id": "sta_typical_dynamic_power", "corner": "TYP_25/TYPICAL",
+    })
+    reference = reference.model_copy(update={
+        "evaluation_metrics": tuple(
+            archived if metric is dynamic else metric for metric in reference.evaluation_metrics
+        ),
+    })
+    candidate = dynamic.model_copy(update={
+        "metric_id": candidate_id, "unit": candidate_unit, "value": 1.5, "corner": archived.corner,
+    })
+    trace = CandidateTrace(
+        design_id="gcd", candidate_id="candidate", started=True, terminal_success=True,
+        terminal_utility=-4.0, dynamic_power=1.5,
+        power_measurements={"dynamic_power": candidate.model_dump(mode="json")},
+    )
+    comparison = build_metric_comparison(reference, (trace,), {
+        "sta_typical_dynamic_power@TYP_25/TYPICAL": 0.1,
+        "power_analysis_dynamic_uw": 2.0,
+    })
+    rows = comparison["metrics"]
+    assert rows["sta_typical_dynamic_power"]["reference"] == 2.5
+    assert rows["sta_typical_dynamic_power"]["epsilon"] == 0.1
+    assert rows["sta_typical_dynamic_power"]["delta"] == expected_delta
+    assert rows["sta_typical_dynamic_power"]["beyond_noise"] == (
+        True if expected_delta is not None else None
+    )
+    assert rows["power_analysis_dynamic_uw"]["delta"] is None
