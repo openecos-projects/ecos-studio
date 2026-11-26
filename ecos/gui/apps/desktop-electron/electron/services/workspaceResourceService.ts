@@ -195,6 +195,7 @@ export class WorkspaceResourceService {
     return {
       index: {
         root,
+        ...(snapshot ? { engineeringArtifacts: snapshot.artifacts } : {}),
         design,
         topModule,
         pdk,

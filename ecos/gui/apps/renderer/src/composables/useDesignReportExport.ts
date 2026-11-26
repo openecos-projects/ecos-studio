@@ -202,17 +202,7 @@ export function useDesignReportExport({
         /* ignore */
       }
 
-      // 2. Query workspace resource index
-      let resourceIndex: WorkspaceResourceIndex | null = null
-      if (!isBackend) {
-        try {
-          resourceIndex = await getWorkspaceResourceIndexApi()
-        } catch {
-          /* ignore if index API fails */
-        }
-      }
-
-      // 3. Backend configuration comes from ECC; frontend keeps its file resources.
+      // Backend configuration comes from ECC; frontend keeps its file resources.
       let flow: Record<string, unknown> | null = null
       let parameters: Record<string, unknown> | null = null
       let projectMetadata: Record<string, unknown> | null = null
@@ -229,6 +219,10 @@ export function useDesignReportExport({
           )
         } catch {}
       }
+
+      const resourceIndex: WorkspaceResourceIndex | null = runtimeSnapshot
+        ? null
+        : await getWorkspaceResourceIndexApi().catch(() => null)
 
       if (runtimeSnapshot) {
         flow = runtimeSnapshot.flow
@@ -285,7 +279,12 @@ export function useDesignReportExport({
       let staTimingIssues: Record<string, unknown> | null = null
 
       if (isBackend) {
-        const artifacts = runtimeSnapshot?.engineeringSnapshot?.artifacts ?? []
+        const artifacts =
+          runtimeSnapshot?.engineeringSnapshot?.artifacts ??
+          (resourceIndex?.root === workspacePath
+            ? resourceIndex.engineeringArtifacts
+            : undefined) ??
+          []
         for (const entry of artifacts) {
           if (entry.availability !== 'available') continue
           const step = canonicalizeStageName(entry.stepId)
@@ -642,9 +641,10 @@ export function useDesignReportExport({
       const extracted = extractDesignReportData({
         workspacePath,
         workspaceName: currentProject.value?.name,
-        designName: resourceIndex?.design || currentProject.value?.topModule,
+        designName:
+          (!isBackend && resourceIndex?.design) || currentProject.value?.topModule,
         topModule,
-        pdk: resourceIndex?.pdk || currentProject.value?.pdk,
+        pdk: (!isBackend && resourceIndex?.pdk) || currentProject.value?.pdk,
         frequencyTarget: currentProject.value?.frequencyTarget,
         parameters,
         flow,

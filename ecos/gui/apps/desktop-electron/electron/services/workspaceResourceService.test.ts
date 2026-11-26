@@ -195,6 +195,9 @@ describe('WorkspaceResourceService', () => {
     expect(projectScopeProvider.requestProjectPathAccess).toHaveBeenCalledWith(
       snapshotPath,
     )
+    expect(index.engineeringArtifacts).toMatchObject([
+      { kind: 'qor_metrics', stepId: 'place', reference: 'published/metrics.json' },
+    ])
     expect(index.flow.steps[0].resources.output.def).toMatchObject({
       path: join(root, 'published', 'layout.def'),
       exists: true,

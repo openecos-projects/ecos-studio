@@ -223,6 +223,18 @@ describe('useDesignReportExport', () => {
       designTool: 'backend',
     }
     mockRuntimeSnapshot.mockRejectedValue(new Error('runtime unavailable'))
+    const references = [
+      { kind: 'qor_metrics', stepId: 'synthesis', reference: 'reports/qor_metrics.json' },
+      { kind: 'qor_hotspots', stepId: 'synthesis', reference: 'reports/hotspots.json' },
+      { kind: 'sta_timing_issues', stepId: 'sta', reference: 'reports/issues.json' },
+    ]
+    mockGetIndex.mockResolvedValue({
+      root: '/projects/gcd/ws_001',
+      engineeringArtifacts: references.map((item) => ({
+        ...item,
+        availability: 'available',
+      })),
+    })
     mockReadOptionalProjectTextFile.mockImplementation(async (path: string) => {
       if (path.endsWith('/home/flow.json')) {
         return JSON.stringify({
@@ -230,6 +242,12 @@ describe('useDesignReportExport', () => {
           steps: [
             { name: 'synthesis', directory: '01_synthesis_yosys', state: 'Success' },
           ],
+        })
+      }
+      if (path.endsWith('/reports/qor_metrics.json')) {
+        return JSON.stringify({
+          schema_version: 3,
+          metrics: [{ id: 'instance_count', value: 572 }],
         })
       }
       return null
@@ -246,6 +264,12 @@ describe('useDesignReportExport', () => {
 
     expect(composable.error.value).toBe('')
     expect(composable.reportData.value?.design.designName).toBe('gcd_run')
+    expect(mockGetIndex).toHaveBeenCalled()
+    for (const { reference } of references) {
+      expect(mockReadOptionalProjectTextFile).toHaveBeenCalledWith(
+        `/projects/gcd/ws_001/${reference}`,
+      )
+    }
     expect(mockReadOptionalProjectTextFile).toHaveBeenCalledWith(
       '/projects/gcd/ws_001/home/flow.json',
     )

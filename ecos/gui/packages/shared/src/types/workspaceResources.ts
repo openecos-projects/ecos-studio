@@ -1,3 +1,5 @@
+import type { EccPersistedEngineeringSnapshot } from '../contracts/eccRuntime'
+
 export type WorkspaceResourceStatus = 'available' | 'missing' | 'error'
 
 export interface WorkspaceResourceFile {
@@ -59,6 +61,7 @@ export interface WorkspaceTechResources {
 
 export interface WorkspaceResourceIndex {
   root: string
+  engineeringArtifacts?: EccPersistedEngineeringSnapshot['artifacts']
   design: string
   topModule: string
   pdk: string
