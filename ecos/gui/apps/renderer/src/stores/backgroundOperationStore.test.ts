@@ -27,7 +27,8 @@ const addNotification = vi.hoisted(() => vi.fn())
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => ({ ecc: { runtime }, shutdown }),
 }))
-vi.mock('@/stores/notificationStore', () => ({
+vi.mock('@/stores/notificationStore', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/stores/notificationStore')>()),
   useNotificationStore: () => ({ addNotification }),
 }))
 
@@ -422,7 +423,7 @@ describe('backgroundOperationStore', () => {
         severity: 'warn',
         diagnostics: {
           operationId: 'operation-1',
-          workspaceHandle: 'handle-operation-1',
+          workspaceDirectory: '/work/a',
         },
       }),
     )

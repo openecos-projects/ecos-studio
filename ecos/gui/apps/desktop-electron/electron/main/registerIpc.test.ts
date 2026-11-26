@@ -4172,6 +4172,49 @@ describe('registerIpc', () => {
     })
   })
 
+  it('resolves diagnostics through the sender’s current backend workspace session', async () => {
+    const { handlers, services } = registerHandlers()
+    const owner = Object.assign(new EventEmitter(), {
+      id: 11,
+      isDestroyed: vi.fn(() => false),
+      send: vi.fn(),
+    })
+    const directory = '/work/demo'
+    services.eccRuntimeService.openWorkspace
+      .mockResolvedValueOnce({ directory, workspaceHandle: 'old-handle' })
+      .mockResolvedValueOnce({ directory, workspaceHandle: 'new-handle' })
+    await openBackendWorkspace(handlers, { sender: owner }, { directory })
+    await closeBackendWorkspace(
+      handlers,
+      { sender: owner },
+      { workspaceHandle: 'old-handle' },
+    )
+    const log = handlers.get(desktopApiIpcChannels.eccRuntimeOperationLog)!
+    const request = {
+      operationId: 'run-1',
+      workspaceDirectory: directory,
+      includeDiagnostics: true,
+    }
+    await expect(log({ sender: owner }, request)).resolves.toMatchObject({ ok: false })
+
+    await openBackendWorkspace(handlers, { sender: owner }, { directory })
+    await expect(log({ sender: { id: 22 } }, request)).resolves.toMatchObject({
+      ok: false,
+    })
+    expect(services.eccRuntimeService.operationLog).not.toHaveBeenCalled()
+    services.eccRuntimeService.operationLog.mockResolvedValue({
+      diagnostics: 'run details',
+    })
+    await expect(log({ sender: owner }, request)).resolves.toEqual({
+      diagnostics: 'run details',
+    })
+    expect(services.eccRuntimeService.operationLog).toHaveBeenCalledWith({
+      operationId: 'run-1',
+      workspaceHandle: 'new-handle',
+      includeDiagnostics: true,
+    })
+  })
+
   it('routes directory-scoped runtime.ready only to the matching workspace window', async () => {
     const { handlers, services } = registerHandlers()
     const ownerSend = vi.fn()

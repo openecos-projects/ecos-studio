@@ -2552,7 +2552,7 @@ describe('useWorkspace openProject', () => {
 
     expect(notifications.notifications.value).toEqual([
       expect.objectContaining({
-        key: 'operation-place',
+        key: '["/work/demo","operation-place"]',
         logFile: '/work/demo/place_dreamplace/log/place.log',
         title: 'Place interrupted',
       }),

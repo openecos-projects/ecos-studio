@@ -43,6 +43,7 @@ interface ShutdownBridge {
 export function registerBackgroundLifecycleIpc(options: {
   creationJournal?: CreationJournal
   handle(channel: string, handler: Handler): void
+  workspaceHandleForDirectory(sender: Sender, directory: string): string | null
   ownsWorkspaceHandle(sender: Sender, workspaceHandle: string): boolean
   runtime: BackgroundRuntime
   shutdown?: ShutdownBridge
@@ -121,17 +122,27 @@ export function registerBackgroundLifecycleIpc(options: {
   options.handle(desktopApiIpcChannels.eccRuntimeOperationLog, async (event, value) => {
     if (
       !isRecord(value) ||
-      typeof value.workspaceHandle !== 'string' ||
       typeof value.operationId !== 'string' ||
       (value.includeDiagnostics !== undefined &&
-        typeof value.includeDiagnostics !== 'boolean') ||
-      !options.ownsWorkspaceHandle(event.sender, value.workspaceHandle)
+        typeof value.includeDiagnostics !== 'boolean')
     ) {
       throw new Error('Operation log request does not own this Workspace handle.')
     }
-    return await options.runtime.operationLog(
-      value as unknown as EccRuntimeOperationRequest,
-    )
+    const workspaceHandle =
+      typeof value.workspaceDirectory === 'string'
+        ? options.workspaceHandleForDirectory(event.sender, value.workspaceDirectory)
+        : value.workspaceHandle
+    if (
+      typeof workspaceHandle !== 'string' ||
+      !options.ownsWorkspaceHandle(event.sender, workspaceHandle)
+    ) {
+      throw new Error('Operation log request does not own this Workspace handle.')
+    }
+    return await options.runtime.operationLog({
+      workspaceHandle,
+      operationId: value.operationId,
+      includeDiagnostics: value.includeDiagnostics,
+    })
   })
 
   options.handle(

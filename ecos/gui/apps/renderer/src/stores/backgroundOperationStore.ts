@@ -9,7 +9,7 @@ import type {
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { getDesktopApi } from '@/platform/desktop'
-import { useNotificationStore } from '@/stores/notificationStore'
+import { runNotificationKey, useNotificationStore } from '@/stores/notificationStore'
 import {
   setBackendFlowProjectionReady,
   setBackendFlowProjectionUnknown,
@@ -267,7 +267,12 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
 
   function publishOutcomes(outcomes: EccBackgroundOperationOutcome[]): void {
     for (const outcome of outcomes) {
-      const key = `${outcome.runtimeInstanceId ?? ''}\0${outcome.workspaceId}\0${outcome.operationId}\0${outcome.state}`
+      const identity = {
+        operationId: outcome.operationId,
+        workspaceDirectory: outcome.workspaceDirectory,
+      }
+      const runKey = runNotificationKey(identity)
+      const key = `${outcome.runtimeInstanceId ?? ''}\0${runKey}\0${outcome.state}`
       if (seenOutcomes.has(key)) continue
       seenOutcomes.add(key)
       while (seenOutcomes.size > 256) {
@@ -279,10 +284,7 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
         outcome.state !== 'cancelled'
           ? {
               logFile: outcome.logFile,
-              diagnostics: {
-                operationId: outcome.operationId,
-                workspaceHandle: outcome.workspaceHandle,
-              },
+              diagnostics: identity,
             }
           : {}),
         ...(outcome.flowBlock
@@ -290,7 +292,7 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
           : {}),
         key:
           outcome.logFile && ['failed', 'interrupted', 'unknown'].includes(outcome.state)
-            ? outcome.operationId
+            ? runKey
             : `runtime-outcome:${key}`,
         message: outcomeMessage(outcome),
         severity: outcome.flowBlock

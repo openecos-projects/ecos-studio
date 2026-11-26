@@ -1098,6 +1098,8 @@ export function registerIpc(
     ownsWorkspaceHandle: (sender, workspaceHandle) =>
       workspaceHandleSubscriptions.get(workspaceHandle)?.sender === sender ||
       releasedWorkspaceHandleOwnerIds.get(workspaceHandle) === sender.id,
+    workspaceHandleForDirectory: (sender, directory) =>
+      workspaceHandleForSender(sender, directory, 'backend'),
     runtime: services.eccRuntimeService,
     shutdown: services.shutdownCoordinator,
   })
@@ -1719,11 +1721,13 @@ export function registerIpc(
   const workspaceHandleForSender = (
     sender: IpcMainInvokeEvent['sender'],
     directory: string,
+    designTool?: DesignTool,
   ): string | null => {
     const normalizedDirectory = normalizeWorkspacePath(directory)
     for (const [workspaceHandle, subscription] of workspaceHandleSubscriptions) {
       if (
         subscription.sender === sender &&
+        (!designTool || subscription.designTool === designTool) &&
         subscription.directories.has(normalizedDirectory)
       ) {
         return workspaceHandle

@@ -270,6 +270,7 @@ export type {
   EccRuntimeInterruptibility,
   EccRuntimeOperation,
   EccRuntimeOperationKind,
+  EccOperationLogRequest,
   EccRuntimeOperationRequest,
   EccRuntimeOperationState,
   EccRuntimeProtocolEvent,

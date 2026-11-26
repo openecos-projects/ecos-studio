@@ -123,18 +123,18 @@
 </template>
 
 <script setup lang="ts">
-import type { EccRuntimeOperationRequest } from '@ecos-studio/shared'
 import { getDesktopApi } from '@/platform/desktop'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
   useNotificationStore,
   type AppNotificationSeverity,
+  type RunDiagnosticsIdentity,
 } from '@/stores/notificationStore'
 
 const exporting = ref('')
 const exportStatus = ref<{ id: string; message: string } | null>(null)
 
-async function exportDiagnostics(id: string, request: EccRuntimeOperationRequest) {
+async function exportDiagnostics(id: string, request: RunDiagnosticsIdentity) {
   if (exporting.value) return
   exporting.value = id
   exportStatus.value = null

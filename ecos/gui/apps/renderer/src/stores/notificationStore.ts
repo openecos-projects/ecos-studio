@@ -1,7 +1,18 @@
 import { computed, ref } from 'vue'
-import type { EccRuntimeOperationRequest } from '@ecos-studio/shared'
 
 export type AppNotificationSeverity = 'error' | 'warn' | 'info'
+
+export interface RunDiagnosticsIdentity {
+  workspaceDirectory: string
+  operationId: string
+}
+
+export function runNotificationKey({
+  workspaceDirectory,
+  operationId,
+}: RunDiagnosticsIdentity) {
+  return JSON.stringify([workspaceDirectory, operationId])
+}
 
 export interface AppNotification {
   agentSessionId?: string
@@ -11,7 +22,7 @@ export interface AppNotification {
   message: string
   detail?: string
   logFile?: string
-  diagnostics?: EccRuntimeOperationRequest
+  diagnostics?: RunDiagnosticsIdentity
   key?: string
   createdAt: number
   read: boolean
@@ -41,7 +52,7 @@ function addNotification(
     (item) =>
       (!item.diagnostics ||
         !input.diagnostics ||
-        item.diagnostics.operationId === input.diagnostics.operationId) &&
+        runNotificationKey(item.diagnostics) === runNotificationKey(input.diagnostics)) &&
       item.severity === input.severity &&
       item.message === message &&
       Date.now() - item.createdAt < 5000,

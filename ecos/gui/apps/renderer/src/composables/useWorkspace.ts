@@ -42,7 +42,7 @@ import { clearBackendOptimisticRun } from './backendFlowOptimisticRun'
 import { finishRuntimeStepRender } from './runtimeStepRenderSync'
 import { setDesktopWindowTitle } from './windowTitle'
 import { useAgentShellStore } from '@/stores/agentShellStore'
-import { useNotificationStore } from '@/stores/notificationStore'
+import { runNotificationKey, useNotificationStore } from '@/stores/notificationStore'
 import {
   useWorkspaceLifecycle,
   WORKSPACE_RESULT_INVALIDATION_SCOPES,
@@ -1713,8 +1713,12 @@ export function useWorkspace() {
         const stepTitle = failure.step
           ? `${failure.step.charAt(0).toUpperCase()}${failure.step.slice(1)}`
           : 'Flow'
+        const diagnostics =
+          failure.operationId && projectPath
+            ? { operationId: failure.operationId, workspaceDirectory: projectPath }
+            : undefined
         notificationStore.addNotification({
-          key: failure.operationId,
+          key: diagnostics ? runNotificationKey(diagnostics) : undefined,
           severity: 'error',
           title: failure.sidecarStopped
             ? 'ECC sidecar stopped'
@@ -1730,14 +1734,7 @@ export function useWorkspace() {
               ? 'The step was marked Incomplete and was not rerun automatically.'
               : 'Review the step log before rerunning.'),
           logFile: failure.logFile,
-          ...(failure.logFile && failure.operationId
-            ? {
-                diagnostics: {
-                  operationId: failure.operationId,
-                  workspaceHandle: workspaceId,
-                },
-              }
-            : {}),
+          ...(failure.logFile && diagnostics ? { diagnostics } : {}),
         })
       },
       onInvalidate: (step) => {

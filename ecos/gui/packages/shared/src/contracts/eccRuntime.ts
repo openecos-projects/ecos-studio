@@ -585,6 +585,14 @@ export interface EccRuntimeOperationRequest extends EccWorkspaceHandleRequest {
   operationId: string
 }
 
+export type EccOperationLogRequest =
+  | EccRuntimeOperationRequest
+  | {
+      workspaceDirectory: string
+      operationId: string
+      includeDiagnostics?: boolean
+    }
+
 export interface EccRuntimeStepSnapshot {
   category?: 'PNR' | 'CHECKER'
   inputStep?: string
@@ -1010,7 +1018,7 @@ export interface EccRuntimeApi {
     operationProjection(): Promise<EccBackgroundOperationProjection>
     runHistory(request: EccRunHistoryRequest): Promise<EccRunHistoryPage>
     operationLog(
-      request: EccRuntimeOperationRequest,
+      request: EccOperationLogRequest,
     ): Promise<EccBackgroundOperationLogResult>
     onOperationProjectionInvalidated(
       listener: (event: EccBackgroundOperationInvalidatedEvent) => void,
