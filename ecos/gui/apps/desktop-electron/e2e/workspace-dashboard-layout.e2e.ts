@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { stripVTControlCharacters } from 'node:util'
 import type { Page } from 'playwright-core'
 import { shellQuote } from '../electron/services/cliInstallerArtifacts'
 import { launchE2EApp, repoRoot, resolveOutDir, type E2EApp } from './support/launch'
@@ -14,6 +15,7 @@ import {
   readOperationLog,
   setupBackendWorkspace,
   typeTerminalCommand,
+  waitFlowTerminal,
   type WorkspaceJourney,
 } from './support/journey'
 import { createMilestoneShots } from './support/screenshots'
@@ -511,6 +513,77 @@ describe('workspace dashboard layout', () => {
     await row.getByRole('cell', { name: /^Cancelled/ }).waitFor()
     await shot('externally-cancelled-gui-run')
     await history.getByRole('button', { name: 'Close run history' }).click()
+  }, 180_000)
+
+  it('limits waiting cards and follows the step log through a bounded CLI run', async () => {
+    const { app, page } = launched!
+    const synthesis = page.locator('.flow-step-card[data-step="synthesis"]')
+    const downstream = page.locator('.flow-step-card[data-step="placement"]')
+    const operationId = randomUUID()
+    await typeTerminalCommand(
+      page,
+      [
+        'ecc',
+        'run',
+        '--project',
+        workspace.projectRoot,
+        '--workspace',
+        workspace.workspaceDir,
+        '--from',
+        'synthesis',
+        '--to',
+        'synthesis',
+        '--run-id',
+        operationId,
+        '--plain',
+      ]
+        .map(shellQuote)
+        .join(' '),
+    )
+    await page.locator('.status-terminal-toggle').click()
+    await expect
+      .poll(() => synthesis.getAttribute('data-status'), { timeout: 90_000 })
+      .toBe('running')
+    const projection = await page.evaluate(() =>
+      window.ecosDesktop.ecc.runtime.operationProjection(),
+    )
+    expect(
+      projection.operations.find((operation) => operation.operationId === operationId),
+    ).toMatchObject({
+      origin: 'cli',
+      flowScope: { fromStep: 'synthesis', throughStep: 'synthesis' },
+    })
+    expect(await downstream.locator('.step-execution-state').textContent()).toBe(
+      'Not started',
+    )
+    await shot('bounded-cli-run')
+
+    await synthesis.getByRole('button', { name: 'Synthesis log', exact: true }).click()
+    const log = page.getByRole('dialog', { name: 'Synthesis — Log', exact: true })
+    const copy = log.getByRole('button', { name: /^(Copied|Copy) log$/ })
+    await expect.poll(() => copy.isEnabled()).toBe(true)
+    const terminal = await waitFlowTerminal(page, workspace, operationId, 90_000)
+    expect(terminal.state).toBe('succeeded')
+    const steps = await readFlowSteps(workspace.workspaceDir)
+    expect(steps.find(({ name }) => name === 'placement')?.state).toBe('Unstart')
+
+    const logText = await readFile(
+      join(workspace.workspaceDir, '01_synthesis_yosys/log/synthesis.log'),
+      'utf8',
+    )
+    const lastLine = stripVTControlCharacters(logText).trimEnd().split('\n').at(-1)!
+    expect(lastLine).toBeTruthy()
+    await expect
+      .poll(
+        async () => {
+          await copy.click()
+          return app.evaluate(({ clipboard }) => clipboard.readText())
+        },
+        { timeout: 15_000 },
+      )
+      .toContain(lastLine)
+    await shot('bounded-cli-step-log')
+    await log.getByRole('button', { name: 'Close', exact: true }).click()
   }, 180_000)
 
   it('runs a single step and then runs the remaining steps from the selected start', async () => {
