@@ -21,6 +21,7 @@ from pydantic import (
     model_validator,
 )
 
+from ecos_agent.ecc_contracts import ECCParameterPatchItem, ParameterPatchScalar
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
     HistoryReference,
@@ -357,7 +358,7 @@ class MaterializationRef(_Model):
     before_snapshot_sha256: str | None = None
     after_snapshot_ref: str | None = None
     after_snapshot_sha256: str | None = None
-    written_value: Scalar = Field(
+    written_value: ParameterPatchScalar = Field(
         description="The value actually written to the tool input, after unit mapping."
     )
     unit: str
@@ -457,7 +458,7 @@ class ParameterApplicationReceipt(_Model):
         )
     )
     materialization: MaterializationRef
-    actual_value: Scalar | None = Field(description="Actual value in the requested unit.")
+    actual_value: ParameterPatchScalar | None = Field(description="Actual value in the requested unit.")
     status: Literal["effective", "inactive", "unknown"]
     reason: str | None = None
     observation: dict[str, Any] = Field(default_factory=dict)
@@ -480,24 +481,29 @@ class ParameterApplicationReceipt(_Model):
     @model_validator(mode="after")
     def verify_receipt(self) -> "ParameterApplicationReceipt":
         knob = self.requested.get("knob_id")
-        if knob not in {item.value for item in OptimizationKnob}:
-            raise ValueError("receipt requested knob is invalid")
-        try:
-            from ecos_agent.optimization.contracts import RequestedKnobValue
+        requested = self.requested.get("value")
+        if knob in ("route.bottom_layer", "route.top_layer"):
+            from ecos_agent.workspace.knob_registry import validate_value
 
-            RequestedKnobValue(knob_id=knob, value=self.requested.get("value"))
-        except (TypeError, ValueError):
-            raise ValueError("receipt requested value is outside the bounded domain")
+            validate_value(ECCParameterPatchItem(knob_id=knob, value=requested))
+        else:
+            if knob not in {item.value for item in OptimizationKnob}:
+                raise ValueError("receipt requested knob is invalid")
+            try:
+                from ecos_agent.optimization.contracts import RequestedKnobValue
+
+                RequestedKnobValue(knob_id=knob, value=requested)
+            except (TypeError, ValueError):
+                raise ValueError("receipt requested value is outside the bounded domain")
         if not isinstance(self.requested.get("unit"), str) or not self.requested.get(
             "unit"
         ):
             raise ValueError("receipt requested unit is invalid")
-        requested = self.requested["value"]
         written = self.materialization.written_value
         if isinstance(written, float) and not math.isfinite(written):
             raise ValueError("materialization written value must be finite")
         if knob == OptimizationKnob.CELL_PADDING_X.value and (
-            isinstance(written, bool) or written < 0
+            isinstance(written, (str, bool)) or written < 0
         ):
             raise ValueError("materialization padding value is invalid")
         if knob != OptimizationKnob.CELL_PADDING_X.value and (
@@ -506,7 +512,12 @@ class ParameterApplicationReceipt(_Model):
         ):
             raise ValueError("materialization written value does not match request")
         if self.actual_value is not None:
-            if isinstance(self.actual_value, bool) != isinstance(requested, bool):
+            if isinstance(self.actual_value, str) and not self.actual_value.strip():
+                raise ValueError("actual layer name is empty")
+            if (
+                isinstance(self.actual_value, str) != isinstance(requested, str)
+                or isinstance(self.actual_value, bool) != isinstance(requested, bool)
+            ):
                 raise ValueError("actual parameter value type does not match request")
             if isinstance(self.actual_value, float) and not math.isfinite(self.actual_value):
                 raise ValueError("actual parameter value must be finite")

@@ -67,7 +67,7 @@ def test_receipt_hash_does_not_accept_omitted_default_fields() -> None:
         _rehash(payload)
 
 
-@pytest.mark.parametrize("actual", (None, True, float("inf")))
+@pytest.mark.parametrize("actual", (None, True, float("inf"), "0.8"))
 def test_effective_receipt_requires_a_finite_correctly_typed_actual_value(actual) -> None:
     payload = density_receipt(domain_context()).model_dump(mode="json")
     payload["actual_value"] = actual
@@ -272,3 +272,20 @@ def test_fixed_size_floorplan_without_geometry_cannot_confirm_run_completion(sta
         "run_fp_call_count": 1, "geometry_constructed": False,
     }, status=status)
     validate_application_receipt(receipt, load_parameter_cards())
+
+
+@pytest.mark.parametrize("knob", ["route.top_layer", "route.bottom_layer"])
+def test_routing_receipt_preserves_requested_written_and_observed_layers(knob):
+    payload = density_receipt(domain_context()).model_dump(mode="json")
+    payload["tool"].update(name="ECC-Routing", revision="ecc.agent.routing_parameter_observer.v1")
+    payload["context"].update(stage="routing", unit="layer")
+    payload["observation"] = {"native_config_value": "MET3", "routing_completed": True}
+    payload["requested"] = {"knob_id": knob, "value": "MET2", "unit": "layer"}
+    payload["materialization"].update(written_value="MET2", unit="layer")
+    payload["actual_value"] = "MET3"
+    receipt = _rehash(payload)
+    assert receipt.actual_value == "MET3"
+    assert receipt.materialization.written_value == receipt.requested["value"] == "MET2"
+    for invalid in ("", 2, True):
+        with pytest.raises(ValueError):
+            _rehash({**payload, "actual_value": invalid})
