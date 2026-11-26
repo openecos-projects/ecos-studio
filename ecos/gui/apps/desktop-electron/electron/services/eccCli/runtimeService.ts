@@ -144,6 +144,7 @@ export class EccCliRuntimeService {
   private readonly cli: EccCliProcess
   private readonly candidates: CandidateOperations
   private readonly sessions = new Map<string, WorkspaceSession>()
+  private readonly releasedDiagnosticRuns = new Map<string, Set<string>>()
   private readonly agentWorkspaceIdentities = new Map<string, WorkspaceIdentity>()
   private readonly handleByDirectory = new Map<string, string>()
   private readonly knownProjectRoots = new Set<string>()
@@ -611,12 +612,22 @@ export class EccCliRuntimeService {
   ): Promise<EccWorkspaceCloseResult> {
     const session = this.sessions.get(request.workspaceHandle)
     if (!session) return { ok: true }
-    const active = [...this.operations.values()].some(
-      (tracked) =>
-        tracked.session.handle === request.workspaceHandle &&
-        tracked.operation.state === 'running',
+    const operations = [...this.operations.values()].filter(
+      ({ session: owner }) => owner.handle === request.workspaceHandle,
     )
+    const active = operations.some(({ operation }) => operation.state === 'running')
     if (active) return { ok: true, retained: true }
+    const diagnosticRuns = operations
+      .filter(({ diagnostics }) => diagnostics)
+      .map(({ operation }) => runKey(session, operation.operationId))
+    if (diagnosticRuns.length) {
+      this.releasedDiagnosticRuns.set(session.handle, new Set(diagnosticRuns))
+      if (this.releasedDiagnosticRuns.size > RECENT_RUN_LIMIT) {
+        this.releasedDiagnosticRuns.delete(
+          this.releasedDiagnosticRuns.keys().next().value!,
+        )
+      }
+    }
     this.sessions.delete(request.workspaceHandle)
     this.handleByDirectory.delete(session.directory)
     await session.projectWatcher?.close()
@@ -1344,12 +1355,13 @@ export class EccCliRuntimeService {
     request: EccRuntimeOperationRequest,
   ): Promise<EccBackgroundOperationLogResult> {
     if (request.includeDiagnostics && !this.sessions.has(request.workspaceHandle)) {
-      const closed = this.outcomes.find(
-        ({ session, operation }) =>
-          session.handle === request.workspaceHandle &&
-          operation.operationId === request.operationId,
+      const keys = this.releasedDiagnosticRuns.get(request.workspaceHandle)
+      const cached = this.outcomes.find(
+        ({ operation, session }) =>
+          operation.operationId === request.operationId &&
+          keys?.has(runKey(session, operation.operationId)),
       )
-      if (closed?.diagnostics) return closed.diagnostics
+      if (cached?.diagnostics) return cached.diagnostics
     }
     const session = this.requireSession(request.workspaceHandle)
     const tracked = this.operations.get(runKey(session, request.operationId))

@@ -7,6 +7,9 @@ import { launchE2EApp, repoRoot, resolveOutDir, type E2EApp } from './support/la
 import { prepareGcdProject } from './support/design'
 import { readFlowSteps } from './support/flow'
 import {
+  createDefaultWorkspace,
+  importExternalPdk,
+  openWorkspaceInUi,
   readOperationLog,
   setupBackendWorkspace,
   type WorkspaceJourney,
@@ -92,6 +95,25 @@ describe('workspace dashboard layout', () => {
   afterAll(async () => {
     await launched?.close()
   })
+
+  async function createSiblingWorkspace(name: string): Promise<WorkspaceJourney> {
+    const { page, outDir } = launched!
+    const design = await prepareGcdProject(join(outDir, 'work'))
+    const project = await page.evaluate(
+      (root) => window.ecosDesktop.projectManagement.readManifest(root),
+      workspace.projectRoot,
+    )
+    const pdkInstallationId = await importExternalPdk(
+      page,
+      process.env.ECOS_E2E_PDK_ROOT ?? join(repoRoot, 'pdk/icsprout55-pdk'),
+    )
+    return createDefaultWorkspace(page, {
+      ...design,
+      projectId: project!.project_id,
+      pdkInstallationId,
+      workspaceName: name,
+    })
+  }
 
   async function resize(width: number, height: number) {
     await launched!.app.evaluate(
@@ -231,7 +253,7 @@ describe('workspace dashboard layout', () => {
     )
   })
 
-  it('shows the STA worker failure and its run log in notifications', async () => {
+  it('exports the original STA failure from notifications after reopening the workspace', async () => {
     const page = launched!.page
     const card = page.locator('.flow-step-card[data-step="sta"]')
     await card.getByRole('button', { name: /run sta/i }).click()
@@ -307,24 +329,57 @@ describe('workspace dashboard layout', () => {
       )
       .toBe('Incomplete')
 
-    const savePath = join(launched!.outDir, 'sta-first-run.txt')
-    await launched!.app.evaluate(({ dialog }, filePath) => {
-      dialog.showSaveDialog = async () => ({ canceled: false, filePath })
-    }, savePath)
-    await page.getByRole('button', { name: 'Open notifications' }).click()
-    const firstFailure = notifications.locator('.notification-item').filter({
-      has: page.locator('code', { hasText: firstRun!.request.operationId }),
-    })
-    const exportButton = firstFailure.getByRole('button', {
-      name: 'Save run diagnostics',
-    })
-    if (!(await exportButton.isVisible()))
-      await firstFailure.getByText('View details').click()
-    await exportButton.click()
-    await expect
-      .poll(() => readFile(savePath, 'utf8').catch(() => ''))
-      .toBe(firstRun!.report)
-    await page.getByRole('button', { name: 'Open notifications' }).click()
+    const other = await createSiblingWorkspace('reopen-control')
+    await openWorkspaceInUi(page, other)
+    await openWorkspaceInUi(page, { ...workspace, creationId: undefined })
+    const reopened = await page.evaluate(
+      (directory) =>
+        window.ecosDesktop.runtime.workspace.open({ designTool: 'backend', directory }),
+      workspace.workspaceDir,
+    )
+    expect(reopened.workspaceHandle).not.toBe(firstRun!.request.workspaceHandle)
+    workspace.workspaceHandle = reopened.workspaceHandle
+
+    const saveOriginalFailure = async (filename: string) => {
+      const savePath = join(launched!.outDir, filename)
+      await launched!.app.evaluate(({ dialog }, filePath) => {
+        dialog.showSaveDialog = async () => ({ canceled: false, filePath })
+      }, savePath)
+      await page.getByRole('button', { name: 'Open notifications' }).click()
+      const firstFailure = notifications.locator('.notification-item').filter({
+        has: page.locator('code', { hasText: firstRun!.request.operationId }),
+      })
+      const exportButton = firstFailure.getByRole('button', {
+        name: 'Save run diagnostics',
+      })
+      if (!(await exportButton.isVisible()))
+        await firstFailure.getByText('View details').click()
+      await exportButton.click()
+      await expect
+        .poll(() => readFile(savePath, 'utf8').catch(() => ''))
+        .toBe(firstRun!.report)
+      await page.getByRole('button', { name: 'Open notifications' }).click()
+    }
+    await saveOriginalFailure('sta-first-run.txt')
+    await openWorkspaceInUi(page, { ...other, creationId: undefined })
+    await expect(
+      page.evaluate(
+        (workspaceHandle) => window.ecosDesktop.ecc.runtime.snapshot({ workspaceHandle }),
+        reopened.workspaceHandle,
+      ),
+    ).rejects.toThrow('Workspace Session is not open')
+    await saveOriginalFailure('sta-closed-again.txt')
+    await openWorkspaceInUi(page, { ...workspace, creationId: undefined })
+    workspace.workspaceHandle = await page.evaluate(
+      async (directory) =>
+        (
+          await window.ecosDesktop.runtime.workspace.open({
+            designTool: 'backend',
+            directory,
+          })
+        ).workspaceHandle,
+      workspace.workspaceDir,
+    )
   })
 
   it('keeps the same cards outside the canvas during zoom, pan, and fit', async () => {
