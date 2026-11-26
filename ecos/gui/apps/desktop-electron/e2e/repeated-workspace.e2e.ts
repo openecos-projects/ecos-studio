@@ -63,6 +63,7 @@ async function openConfiguredWorkspaceWizard(
   projectName: string,
   shot?: ReturnType<typeof createMilestoneShots>,
   editFlow = false,
+  timingTemplate?: string,
 ) {
   const panel = await openWorkspaceWizard(page, projectName)
   await advanceWizard(panel, 1, 4)
@@ -82,7 +83,15 @@ async function openConfiguredWorkspaceWizard(
     await panel.getByLabel('Insert LEC after').selectOption('synthesis')
   }
   await shot?.('flow-setup')
-  await advanceWizard(panel, 4, 7)
+  await advanceWizard(panel, 4, 5)
+  if (timingTemplate) {
+    await panel.getByRole('button', { name: /Import\s*Timing Inputs/ }).click()
+    await expect
+      .poll(() => panel.getByPlaceholder('No file imported').inputValue())
+      .toBe(timingTemplate)
+    await shot?.('timing-template-imported')
+  }
+  await advanceWizard(panel, 5, 7)
   await expect
     .poll(() => panel.locator('.top-module-select .p-select-label').innerText(), {
       timeout: 60_000,
@@ -143,7 +152,33 @@ describe('product e2e: repeated workspace creation', () => {
             (root) => window.ecosDesktop.projectManagement.readManifest(root),
             design.projectRoot,
           )
-        await openConfiguredWorkspaceWizard(page, projectName, shot, mode === 'filelist')
+        let timingTemplate: string | undefined
+        if (mode === 'rtl') {
+          const generated = await readFile(
+            join(design.projectRoot, 'timing_constraints_template.tcl'),
+            'utf8',
+          )
+          timingTemplate = join(outDir, 'selected-timing-template.tcl')
+          await writeFile(timingTemplate, generated.replace('-period 10', '-period 20'))
+          await launched.app.evaluate(({ dialog }, filePath) => {
+            dialog.showOpenDialog = async (
+              _window,
+              options?: Electron.OpenDialogOptions,
+            ) => {
+              const acceptsTcl = options?.filters?.some(({ extensions }) =>
+                extensions.includes('tcl'),
+              )
+              return { canceled: !acceptsTcl, filePaths: acceptsTcl ? [filePath] : [] }
+            }
+          }, timingTemplate)
+        }
+        await openConfiguredWorkspaceWizard(
+          page,
+          projectName,
+          shot,
+          mode === 'filelist',
+          timingTemplate,
+        )
         await submitWorkspaceWizard(page)
         await expect.poll(async () => (await readManifest())?.workspaces.length).toBe(1)
         if (mode === 'filelist') {
@@ -162,9 +197,11 @@ describe('product e2e: repeated workspace creation', () => {
             manifest!.workspaces[0]!.workspace_path,
           )
           const card = page.locator('.flow-step-card[data-step="synthesis"]')
-          expect(await readFile(join(directory, 'home/params.toml'), 'utf8')).not.toMatch(
-            /placement:place\.target_density.*"cli"/,
-          )
+          const params = await readFile(join(directory, 'home/params.toml'), 'utf8')
+          expect(params).not.toMatch(/placement:place\.target_density.*"cli"/)
+          expect(parse(params).params).toMatchObject({
+            sdc: { primary_clocks: expect.stringContaining('-period 20') },
+          })
           await card.getByRole('button', { name: /run synthesis/i }).click()
           const runStep = page.getByRole('dialog', { name: 'Run Synthesis' })
           await runStep.getByRole('button', { name: 'Run current step' }).click()
