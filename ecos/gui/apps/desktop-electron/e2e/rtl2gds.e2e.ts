@@ -379,6 +379,59 @@ describe('product e2e: backend rtl2gds journey', () => {
     })
   }, 60_000)
 
+  it('saves populated QoR and timing metrics with the ECC session closed', async () => {
+    const { app, page } = launched!
+    const showReport = async () => {
+      await app.evaluate(({ BrowserWindow, Menu }) => {
+        const item = Menu.getApplicationMenu()!.getMenuItemById('export_design_summary')!
+        item.click(item, BrowserWindow.getAllWindows()[0], {} as Electron.KeyboardEvent)
+      })
+      const dialog = page.getByRole('dialog', { name: 'Export Design Summary' })
+      await dialog.getByRole('tab', { name: 'Text', exact: true }).click()
+      return dialog
+    }
+    const live = await showReport()
+    const preview = live.locator('.preview-code')
+    await preview.waitFor({ state: 'visible' })
+    const livePreview = await preview.textContent()
+    const metricRows = (content: string) =>
+      content.split('\n').filter((line) => /Total Instances|Setup Slack \(WNS/.test(line))
+    const expected = metricRows(livePreview ?? '')
+    expect(expected).toHaveLength(2)
+    expect(expected[0]).toMatch(/Total Instances\s+[\d,]+\s+Cells placed/)
+    expect(expected[1]).toMatch(/Setup Slack \(WNS \/ TNS\)\s+-?[\d.]+ ns/)
+    await live.getByText('Close', { exact: true }).click()
+
+    const request = { workspaceHandle: workspace!.workspaceHandle }
+    await page.evaluate(
+      (payload) =>
+        window.ecosDesktop.runtime.workspace.close({ designTool: 'backend', ...payload }),
+      request,
+    )
+    await expect(
+      page.evaluate(
+        (payload) => window.ecosDesktop.ecc.runtime.snapshot(payload),
+        request,
+      ),
+    ).rejects.toThrow('Workspace Session is not open')
+
+    const offline = await showReport()
+    const savePath = join(outDir, 'offline-design-summary.txt')
+    await app.evaluate(({ dialog }, filePath) => {
+      dialog.showSaveDialog = async () => ({ canceled: false, filePath })
+    }, savePath)
+    await offline.getByRole('button', { name: 'Save .txt', exact: true }).click()
+    await expect
+      .poll(() =>
+        readFile(savePath, 'utf8')
+          .then(metricRows)
+          .catch(() => []),
+      )
+      .toEqual(expected)
+    await shot('offline-design-summary')
+    await offline.getByText('Close', { exact: true }).click()
+  }, 90_000)
+
   it.skipIf(!process.env.ECOS_E2E_LIT_SUITE)(
     'passes the signoff-lit artifact gate',
     () => {
