@@ -1,5 +1,17 @@
+import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { lstat, open, readdir, realpath, stat } from 'node:fs/promises'
+import { promisify } from 'node:util'
+import {
+  lstat,
+  mkdtemp,
+  open,
+  readdir,
+  realpath,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path'
 import type {
   EccBackgroundOperationLogResult,
@@ -516,45 +528,199 @@ export class EccCliRuntimeService {
     request: EccWorkspaceUpdateRequest,
   ): Promise<EccWorkspaceUpdateResult> {
     const session = this.requireSession(request.workspaceHandle)
-    const currentConfiguration = await this.readWorkspaceConfiguration(session.directory)
-    const rtlImport = workspaceRtlImport(
-      request,
-      session.projectRoot,
-      currentConfiguration,
+    this.assertProjectWritable(session.projectRoot)
+    const [manifest, snapshot] = await Promise.all([
+      readProjectManifest(session.projectRoot),
+      readPersistedEngineeringSnapshot(session.directory, session.workspaceId),
+    ])
+    if (snapshot.workspaceRevision !== request.expectedWorkspaceRevision)
+      throw new Error(
+        'Workspace changed. Reopen Update Workspace to load its current settings.',
+      )
+    if (
+      manifest.runtime_processes?.[session.workspaceId] ||
+      this.isWorkspaceRuntimeActive(session.directory)
     )
-    if (rtlImport) await this.runWorkspaceMutation(session, rtlImport)
+      throw new Error('Stop the running flow before updating its workspace.')
+    const entry = workspaceEntryForDirectory(manifest, session.directory)
+    if (!entry || entry.workspace_id !== session.workspaceId)
+      throw new Error('Workspace registration changed.')
+    if (
+      [manifest.best_workspace, manifest.qor_baseline].some(
+        (pointer) => pointer?.workspace_id === session.workspaceId,
+      )
+    )
+      throw new Error(
+        'Select a different project baseline or best workspace before replacing this generation.',
+      )
+    const spec = request.workspaceSpec
+    const design = requireRecord(spec.design)
+    const flow = requireRecord(spec.flow)
+    const original = inputRolePaths({
+      workspaceSpec: snapshot.workspaceSpec ?? {},
+      workspaceBindings: snapshot.workspaceBindings ?? {},
+    })
+    const inputs = inputRolePaths(request)
+    const parameters = isRecord(spec.parameters) ? spec.parameters : {}
+    const current = requireRecord(snapshot.workspaceSpec?.parameters)
+    const pdkRoot = requireString(requireRecord(request.workspaceBindings.pdk).root)
+    const priorPdk = requireRecord(snapshot.workspaceBindings?.pdk)
+    if (pdkRoot !== priorPdk.root)
+      throw new Error(
+        'The PDK belongs to the project. Create a project to switch PDK roots.',
+      )
+    const savedSdc = isRecord(snapshot.parameters.sdc) ? snapshot.parameters.sdc : {}
+    if (
+      !inputs.has('sdc') &&
+      parameters['design.frequency_mhz'] !== undefined &&
+      typeof savedSdc.primary_clocks === 'string' &&
+      savedSdc.primary_clocks
+        .split('\n')
+        .some((line) => line.trim() && !line.trimStart().startsWith('#'))
+    )
+      throw new Error(
+        'Import revised timing constraints to change a clock defined by the workspace timing input.',
+      )
 
-    const projectSettings = projectSettingsArgs(request)
-    if (projectSettings.length) {
-      this.assertProjectWritable(session.projectRoot)
-      await this.cli.run(
-        [
-          'project',
-          'apply',
-          '--project',
-          session.projectRoot,
-          ...projectSettings,
-          '--no-wait',
-        ],
-        { cwd: session.projectRoot },
+    const oldSpec = requireRecord(snapshot.workspaceSpec)
+    const oldDesign = requireRecord(oldSpec.design)
+    const oldFlow = requireRecord(oldSpec.flow)
+    const sameStructure =
+      ['name', 'topModule', 'clockPort'].every((key) => oldDesign[key] === design[key]) &&
+      ['fromStepId', 'throughStepId'].every((key) => oldFlow[key] === flow[key]) &&
+      !inputs.has('sdc') &&
+      ['rtl', 'filelist', 'netlist', 'def'].every(
+        (role) =>
+          JSON.stringify(original.get(role) ?? []) ===
+          JSON.stringify(inputs.get(role) ?? []),
+      )
+    if (
+      request.eccPdkConfig?.overrides &&
+      JSON.stringify(request.eccPdkConfig.overrides) !==
+        JSON.stringify(snapshot.parameters.pdk_overrides)
+    )
+      throw new Error(
+        'This ECC version cannot change workspace PDK resources during rebuild. Create a workspace with the new resource selection.',
+      )
+    if (sameStructure) {
+      const backup = request.retainBackup
+        ? await this.copyWorkspaceBackup(session)
+        : undefined
+      const revision = request.expectedWorkspaceRevision
+      if (Object.keys(parameters).length)
+        await this.applyWorkspaceParameters(
+          session,
+          parameters,
+          revision!,
+          `${request.commandId}:parameters`,
+        )
+      await this.resetFlow({
+        workspaceHandle: session.handle,
+        expectedWorkspaceRevision: Object.keys(parameters).length
+          ? session.workspaceRevision
+          : revision,
+      })
+      return { ...updateResult(session), ...(backup ? { backupDirectory: backup } : {}) }
+    }
+    if (
+      oldSpec.inputMode === 'def' ||
+      requireRecord(oldSpec.pdk).mode === 'manual' ||
+      snapshot.parameters.pdk_overrides ||
+      snapshot.parameters.pdk_config
+    ) {
+      throw new Error(
+        'ECC cannot preserve the custom inputs of this workspace during structural refresh. Update parameters in place or create a workspace with the new inputs.',
       )
     }
 
-    await this.runWorkspaceMutation(
-      session,
-      workspaceRefreshArgs({
-        commandId: request.commandId,
-        expectedWorkspaceRevision: request.expectedWorkspaceRevision,
-        force: true,
-        keepBackup: request.retainBackup === true,
-        projectRoot: session.projectRoot,
-        workspaceId: session.workspaceId,
-      }),
-    )
-
-    const parameters = isRecord(request.workspaceSpec.parameters)
-      ? request.workspaceSpec.parameters
-      : {}
+    // ECC refresh takes its structural inputs from a project. Give it a private
+    // manifest for this invocation; never change the defaults of sibling workspaces.
+    const privateRoot = await mkdtemp(join(tmpdir(), 'ecos-workspace-refresh-'))
+    let backup: string | undefined
+    try {
+      const rtl =
+        inputs.get('filelist') ??
+        inputs.get('rtl') ??
+        original.get('filelist') ??
+        original.get('rtl') ??
+        []
+      await writeFile(
+        join(privateRoot, 'project.json'),
+        JSON.stringify({
+          schema_version: manifest.schema_version,
+          project_id: manifest.project_id,
+          name: manifest.name,
+          design_name: design.name,
+          root_path: privateRoot,
+          description: '',
+          created_at: manifest.created_at,
+          updated_at: manifest.updated_at,
+          objectives: manifest.objectives,
+          mpc: manifest.mpc,
+          best_workspace: null,
+          qor_baseline: null,
+          base_design: {
+            pdk: requireRecord(spec.pdk).familyId,
+            pdk_root: pdkRoot,
+            top_module: design.topModule,
+            clock: design.clockPort,
+            frequency_mhz:
+              parameters['design.frequency_mhz'] ?? current['design.frequency_mhz'],
+            rtl_list: rtl,
+            origin_def: inputs.get('def')?.[0] ?? '',
+            netlist: inputs.get('netlist')?.[0] ?? '',
+            golden_netlist: original.get('goldenNetlist')?.[0] ?? '',
+            spef: original.get('spef')?.[0] ?? '',
+            sdc: inputs.get('sdc')?.[0] ?? '',
+          },
+          workspaces: [
+            {
+              ...entry,
+              source_workspace_id: null,
+              branch_from: null,
+              workspace_path: session.directory,
+              start_step: flow.fromStepId ?? entry.start_step,
+              end_step: flow.throughStepId ?? entry.end_step,
+            },
+          ],
+        }),
+        { mode: 0o600 },
+      )
+      const result = await this.cli.run(
+        [
+          ...workspaceRefreshArgs({
+            commandId: request.commandId,
+            expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+            keepBackup: request.retainBackup === true,
+            projectRoot: privateRoot,
+            workspaceId: session.workspaceId,
+          }),
+          '--plain',
+        ],
+        { cwd: privateRoot },
+      )
+      if (request.retainBackup) {
+        const line = result.stdout
+          .split(/\r?\n/)
+          .find(
+            (line) =>
+              line.startsWith('workspace_id=') && line.includes(' status=refreshed '),
+          )
+        backup = line && parseEccLineRecords(`record=refresh ${line}`)[0]?.backup
+        if (
+          !backup ||
+          dirname(backup) !== dirname(session.directory) ||
+          !basename(backup).startsWith(`.${basename(session.directory)}.replace-backup-`)
+        )
+          throw new Error(
+            'Workspace rebuilt, but ECC did not report its retained backup.',
+          )
+        await this.registerArchivedBackup(session, backup)
+      }
+    } finally {
+      await rm(privateRoot, { recursive: true, force: true })
+    }
+    await this.refreshSessionRevision(session)
     if (Object.keys(parameters).length) {
       await this.applyWorkspaceParameters(
         session,
@@ -563,7 +729,56 @@ export class EccCliRuntimeService {
         `${request.commandId}:parameters`,
       )
     }
-    return updateResult(session)
+    return { ...updateResult(session), ...(backup ? { backupDirectory: backup } : {}) }
+  }
+
+  private async registerArchivedBackup(session: WorkspaceSession, backup: string) {
+    const id = basename(backup)
+    await this.cli.run([
+      'workspace',
+      'import',
+      id,
+      '--path',
+      backup,
+      '--project',
+      session.projectRoot,
+      '--no-wait',
+    ])
+    await this.cli.run([
+      'workspace',
+      'archive',
+      id,
+      '--project',
+      session.projectRoot,
+      '--no-wait',
+    ])
+  }
+
+  private async copyWorkspaceBackup(session: WorkspaceSession) {
+    const path = await mkdtemp(
+      join(dirname(session.directory), `.${basename(session.directory)}.replace-backup-`),
+    )
+    try {
+      // Same Linux sibling flock as ECC: a second CLI must not run midway through the copy.
+      await promisify(execFile)('flock', [
+        '--nonblock',
+        `${session.directory}.lock`,
+        'cp',
+        '--archive',
+        '--reflink=auto',
+        '--',
+        `${session.directory}/.`,
+        path,
+      ])
+      const copy = await readPersistedEngineeringSnapshot(path)
+      if (copy.workspaceRevision !== session.workspaceRevision)
+        throw new Error('Workspace changed while creating its backup.')
+    } catch (error) {
+      await rm(path, { recursive: true, force: true })
+      throw error
+    }
+    await this.registerArchivedBackup(session, path)
+    return path
   }
 
   async updateWorkspaceConfiguration(
@@ -1948,32 +2163,6 @@ function workspaceCreateRtlImport(
     filelist: byRole.get('filelist')?.[0],
     verilog: byRole.get('rtl') ?? [],
   })
-}
-
-function workspaceRtlImport(
-  request: Pick<EccWorkspaceCreateRequest, 'workspaceSpec' | 'workspaceBindings'>,
-  projectRoot: string,
-  current: Pick<EccWorkspaceCreateRequest, 'workspaceSpec' | 'workspaceBindings'>,
-): string[] | null {
-  const requested = inputRolePaths(request)
-  if (sameInputRolePaths(requested, inputRolePaths(current))) return null
-  return rtlImportArgs(projectRoot, {
-    filelist: requested.get('filelist')?.[0],
-    verilog: requested.get('rtl') ?? [],
-  })
-}
-
-function sameInputRolePaths(
-  left: Map<string, string[]>,
-  right: Map<string, string[]>,
-): boolean {
-  if (left.size !== right.size) return false
-  for (const [role, paths] of left) {
-    const other = right.get(role)
-    if (!other || other.length !== paths.length) return false
-    if (paths.some((path, index) => path !== other[index])) return false
-  }
-  return true
 }
 
 export function projectSettingsArgs(

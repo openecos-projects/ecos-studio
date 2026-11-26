@@ -207,14 +207,34 @@
       </div>
     </Dialog>
 
-    <WorkspaceUpdateDialog
-      v-if="updateSessionId && updateSessionId === workspaceSession.sessionId"
-      :handle="workspaceSession.workspaceId"
-      :directory="currentProject?.path ?? ''"
-      :session-id="updateSessionId"
-      @close="updateSessionId = ''"
-      @saved="workspaceParametersSaved"
-    />
+    <Dialog
+      :visible="
+        Boolean(runPromptSession && runPromptSession === workspaceSession.sessionId)
+      "
+      modal
+      header="Run workspace flow?"
+      :draggable="false"
+      @update:visible="runPromptSession = ''"
+    >
+      <p>{{ currentProject?.path }}</p>
+      <div class="workspace-update-backup-actions">
+        <button
+          type="button"
+          class="workspace-update-backup-secondary"
+          autofocus
+          @click="runPromptSession = ''"
+        >
+          Not now
+        </button>
+        <button
+          type="button"
+          class="workspace-update-backup-primary"
+          @click="runRebuiltWorkspace"
+        >
+          <i class="ri-play-fill" aria-hidden="true" /> Run flow
+        </button>
+      </div>
+    </Dialog>
 
     <!-- Full-screen loading while the workspace is being prepared (open/new project, session restore) -->
     <Teleport to="body">
@@ -294,7 +314,8 @@ import DesignFilesManageDialog from '@/components/DesignFilesManageDialog.vue'
 import WorkspaceSnapshotRecoveryDialog from '@/components/WorkspaceSnapshotRecoveryDialog.vue'
 import ResourceStalenessDialog from '@/components/ResourceStalenessDialog.vue'
 import WorkspaceStepConfigDialog from '@/components/WorkspaceStepConfigDialog.vue'
-import WorkspaceUpdateDialog from '@/components/WorkspaceUpdateDialog.vue'
+import { getWorkspaceRuntimeSnapshotApi } from '@/api/workspaceResources'
+import { workspaceReconfigureInitialConfig } from '@/utils/workspaceReconfigure'
 import type { WorkspaceConfig } from '@/types'
 import {
   frontendWorkspaceReconfigureConfig,
@@ -463,15 +484,16 @@ const quickStartCursor = reactive({ clicking: false, visible: false, left: 0, to
 let quickStartWizardResolve: ((config: WorkspaceConfig) => void) | null = null
 let quickStartWizardReject: ((error: Error) => void) | null = null
 const showStepConfigDialog = ref(false)
-const updateSessionId = ref('')
-
-function workspaceParametersSaved() {
-  updateSessionId.value = ''
-  showToast({
-    severity: 'success',
-    summary: 'Workspace Updated',
-    detail: 'Workspace parameters saved.',
-  })
+const runPromptSession = ref('')
+const wizardRevision = ref<number>()
+async function runRebuiltWorkspace() {
+  if (
+    !runPromptSession.value ||
+    runPromptSession.value !== workspaceSession.value.sessionId
+  )
+    return
+  runPromptSession.value = ''
+  await runAllFlow({ rerun: false })
 }
 const pendingOpenStepConfigAfterCreate = usePendingOpenStepConfigAfterCreate()
 watch(
@@ -1472,20 +1494,29 @@ async function runWorkspaceUpdate(keepReplacementBackup: boolean) {
     return
   }
 
-  resetWorkspaceWizard()
+  const baseline = workspaceWizardInitialConfig.value?.parameters
+  const revision = wizardRevision.value
   const success = await newProject({
     ...config,
+    ...(config.designTool !== 'frontend' && baseline
+      ? { updateBaseline: { parameters: baseline, revision } }
+      : {}),
     directory: normalizeLocalPath(targetReconfigurePath),
     replaceExistingWorkspace: true,
     keepReplacementBackup,
   })
   if (success) {
-    await syncProjectManagedWorkspace(config, normalizeLocalPath(targetReconfigurePath))
+    resetWorkspaceWizard()
+    if (config.designTool === 'frontend') {
+      await syncProjectManagedWorkspace(config, normalizeLocalPath(targetReconfigurePath))
+    } else {
+      runPromptSession.value = workspaceSession.value.sessionId
+    }
     router.push({
       path: route.path.startsWith('/workspace') ? route.path : '/workspace',
       query: route.query,
     })
-  }
+  } else cancelWorkspaceUpdateBackup()
 }
 
 async function syncProjectManagedWorkspace(
@@ -1523,13 +1554,6 @@ async function openWorkspaceReconfigureWizard() {
   }
 
   try {
-    if (currentProject.value?.designTool !== 'frontend') {
-      const session = workspaceSession.value
-      if (session.state !== 'active' || !session.workspaceId)
-        throw new Error('Workspace is not ready.')
-      updateSessionId.value = session.sessionId
-      return
-    }
     const normalizedWorkspacePath = normalizeLocalPath(workspacePath)
     const api = desktopApi.value ?? (await waitForDesktopApi())
     desktopApi.value = api
@@ -1541,10 +1565,27 @@ async function openWorkspaceReconfigureWizard() {
       await api.workspace.registerProjectReadRoot(projectContext.projectRoot)
     }
 
-    workspaceWizardInitialConfig.value = await buildReconfigureWizardInitialConfig(
-      normalizedWorkspacePath,
-      projectContext,
-    )
+    if (currentProject.value?.designTool === 'frontend') {
+      workspaceWizardInitialConfig.value = await buildReconfigureWizardInitialConfig(
+        normalizedWorkspacePath,
+        projectContext,
+      )
+    } else {
+      const session = workspaceSession.value
+      if (session.state !== 'active' || !session.workspaceId)
+        throw new Error('Workspace is not ready.')
+      const snapshot = await getWorkspaceRuntimeSnapshotApi(session.workspaceId)
+      if (workspaceSession.value.sessionId !== session.sessionId) return
+      wizardRevision.value =
+        snapshot.engineeringSnapshot?.workspaceRevision ??
+        session.workspaceRevision ??
+        undefined
+      workspaceWizardInitialConfig.value = workspaceReconfigureInitialConfig(
+        snapshot,
+        normalizedWorkspacePath,
+        projectContext,
+      )
+    }
     reconfigureWorkspacePath.value = normalizedWorkspacePath
     showNewProjectWizard.value = true
   } catch (error) {

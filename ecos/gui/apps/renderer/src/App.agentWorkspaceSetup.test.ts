@@ -97,7 +97,7 @@ describe('agent workspace creation', () => {
 })
 
 describe('workspace update', () => {
-  it('edits backend parameters in the active session and keeps the creation wizard for frontend updates', () => {
+  it('opens the creation wizard with the active workspace snapshot for backend updates', () => {
     const start = source.indexOf('async function openWorkspaceReconfigureWizard')
     const end = source.indexOf(
       'async function buildReconfigureWizardInitialConfig',
@@ -105,8 +105,8 @@ describe('workspace update', () => {
     )
     const updateSource = source.slice(start, end)
 
-    expect(updateSource).toContain("currentProject.value?.designTool !== 'frontend'")
-    expect(updateSource).toContain('updateSessionId.value = session.sessionId')
+    expect(updateSource).toContain('getWorkspaceRuntimeSnapshotApi(session.workspaceId)')
+    expect(updateSource).toContain('workspaceReconfigureInitialConfig(')
     expect(updateSource).not.toContain('refreshConfigApi')
     expect(updateSource).toContain('buildReconfigureWizardInitialConfig')
     expect(updateSource).toContain(

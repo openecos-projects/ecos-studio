@@ -14,7 +14,8 @@ function text(value: unknown): string {
 }
 
 function number(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value
+  return typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : undefined
 }
 
 function records(value: unknown): Record<string, unknown>[] {
@@ -66,29 +67,60 @@ export function workspaceReconfigureInitialConfig(
   const dieWidth = number(parameters['floorplan.die_builder.die_size.width_micron']) ?? 0
   const dieHeight =
     number(parameters['floorplan.die_builder.die_size.height_micron']) ?? 0
-  const pdkMode = pdk.mode === 'manual' ? 'manual' : 'default'
+  const overrides = record(snapshot.parameters.pdk_overrides)
+  const pdkMode =
+    pdk.mode === 'manual' || (overrides.tech && overrides.lefs && overrides.libs)
+      ? 'manual'
+      : 'default'
+  const overridePaths = (key: string, role: string) => {
+    const paths = overrides[key]
+    const values =
+      typeof paths === 'string'
+        ? [paths]
+        : Array.isArray(paths)
+          ? paths.filter((path): path is string => typeof path === 'string')
+          : []
+    return values.length
+      ? values.map((path) =>
+          path.startsWith('/') ? path : `${text(pdkBindings.root)}/${path}`,
+        )
+      : pathsForPdkRole(role)
+  }
 
   return {
     directory: workspacePath,
+    lockProjectContext: Boolean(projectContext),
     lockWorkspaceDirectory: true,
+    savedPrimaryClocks: text(record(snapshot.parameters.sdc).primary_clocks),
     standaloneWorkspace: !projectContext,
     pdk: text(pdk.familyId) || 'ics55',
     pdk_root: text(pdkBindings.root),
     parameters: {
-      ...parameters,
       design: text(design.name),
       top_module: text(design.topModule),
       clock: text(design.clockPort),
       die_area_mode:
-        dieWidth > 0 && dieHeight > 0 ? 'width_height' : 'utilization_margin',
+        parameters['floorplan.die_builder.mode'] === 'die_size'
+          ? 'width_height'
+          : 'utilization_margin',
       die_width: dieWidth,
       die_height: dieHeight,
       frequency_max: number(parameters['design.frequency_mhz']),
       utilization: number(parameters['floorplan.core_util']),
       margin: coreMargin[0],
       max_fanout: number(parameters['cts.max_fanout']),
-      target_density: number(parameters['place.target_density']),
-      target_overflow: number(parameters['place.target_overflow']),
+      target_density: number(
+        parameters['placement:place.target_density'] ??
+          parameters['place.target_density'],
+      ),
+      target_overflow: number(
+        parameters['placement:place.target_overflow'] ??
+          parameters['placement:place.stop_overflow'] ??
+          parameters['place.target_overflow'] ??
+          parameters['place.stop_overflow'],
+      ),
+      clock_tree: parameters['geometry.clock_tree'] === true,
+      sta_max_parallel_corners: number(parameters['sta.max_parallel_corners']),
       manual_macro_placement: parameters['macro.manual_placement'] === true,
     } as WorkspaceConfig['parameters'],
     origin_def: pathForInputRole('def'),
@@ -96,13 +128,14 @@ export function workspaceReconfigureInitialConfig(
     rtl_list: pathsForInputRole('rtl'),
     filelist: pathForInputRole('filelist'),
     design_input_mode: spec.inputMode === 'postSynthesis' ? 'post_synthesis' : 'rtl',
-    sdc: pathForInputRole('sdc'),
+    // ECC's bound SDC is an executable corner output, never a project timing template.
+    sdc: '',
     pdk_config_mode: pdkMode,
     pdk_config: {
       mode: pdkMode,
-      tech_lef: pathsForPdkRole('tech'),
-      cell_lef: pathsForPdkRole('lef'),
-      liberty: pathsForPdkRole('liberty'),
+      tech_lef: overridePaths('tech', 'tech'),
+      cell_lef: overridePaths('lefs', 'lef'),
+      liberty: overridePaths('libs', 'liberty'),
     },
     pdk_json: '',
     flow_config: {

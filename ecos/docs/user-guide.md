@@ -174,8 +174,7 @@ it; while a menu is open, hovering another menu name switches to it. Press
   - **New Window** (`Ctrl+Shift+N`) — open a new application window.
   - **New Workspace** (`Ctrl+N`) — open the workspace creation wizard.
   - **Open Workspace** (`Ctrl+O`) — pick a directory and open that workspace.
-  - **Update Workspace** — edit parameters of the open backend workspace, or
-    reopen the wizard for a frontend workspace. See
+  - **Update Workspace** — reopen the creation wizard with the open workspace's settings. See
     [Updating a Workspace](#updating-a-workspace). Disabled while a flow is running.
   - **Export Signoff Package** _(workspace screens only)_ — review and export
     the sign-off package. Disabled while a flow is running.
@@ -445,22 +444,16 @@ start as unstarted, and the target is registered with its own identity and range
 
 ### Updating a Workspace
 
-For a backend ECC workspace, **File → Update Workspace** shows its saved ECC
-parameter values. **Save changes** applies only edited values to this workspace.
-ECC determines which steps need to run again. The project defaults, PDK, and
-timing inputs are unchanged. Use **Edit → Config** for step-specific overrides.
+For a backend ECC workspace, **File → Update Workspace** opens the same wizard
+as **New Workspace**, filled with the current workspace's inputs and parameters.
+The workspace name and directory stay fixed. On **Design Files**, leave the timing
+input unchanged to keep the saved constraints, or import a replacement ECC template.
+Use **Edit → Config** to edit individual stage parameters without rebuilding.
 
-When a workspace has literal `primary_clocks`, its frequency is read-only. To
-use a new clock period, edit the project's timing input and create a workspace.
-To explicitly rebuild an existing workspace from current project settings and
-keep its old generation, use the terminal:
-
-```bash
-ecc workspace refresh ws_0001 --project /path/to/project --keep-backup
-```
-
-ECC retains the replaced tree in a sibling `.ws_0001.replace-backup-N` directory
-and registers it as an archived workspace in `project.json`.
+At **Rebuild Workspace**, choose whether to archive the previous results. The rebuilt
+workspace starts with no completed steps. Choose **Run flow** to start immediately
+or **Not now** to inspect the updated workspace first. Rebuilding does not update
+the defaults used to create other workspaces.
 
 For a frontend workspace, **File → Update Workspace** re-opens the workspace
 wizard. Before replacing it you choose how to treat the existing data:

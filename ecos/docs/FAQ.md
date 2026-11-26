@@ -137,9 +137,9 @@ Management. Logs are displayed separately from the verified workspace state.
 **Q: Does Update Workspace keep completed results?**
 
 Backend **File → Update Workspace** reads the open workspace's existing values.
-Opening and closing the dialog leaves results untouched. Saving changed values
-lets ECC mark affected steps for rerun without recreating the workspace or
-changing the project defaults. Use **Edit → Config** for step-specific overrides.
+Closing the wizard leaves results untouched. At **Rebuild Workspace**, choose
+**Backup Original** to retain the previous results as an archived workspace.
+The active workspace keeps its name and path. Running its new flow is optional.
 See [Updating a Workspace](user-guide.md#updating-a-workspace).
 
 **Q: Does deleting a workspace delete its files?**
