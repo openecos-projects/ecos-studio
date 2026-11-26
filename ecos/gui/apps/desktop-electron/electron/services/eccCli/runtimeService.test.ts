@@ -5,6 +5,7 @@ import type {
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { EventEmitter } from 'node:events'
 import { tmpdir } from 'node:os'
 import {
   assertEccCliPlatformSupported,
@@ -1143,6 +1144,76 @@ describe('ECC CLI live flow projection', () => {
       }),
     ])
     await service.shutdown()
+  })
+
+  it.each([
+    ['cancelled', 'cancelled'],
+    [null, 'failed'],
+  ])('prefers the ECC receipt %s over the Studio child exit', async (receipt, state) => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ecc-runtime-child-exit-'))
+    temporaryDirectories.push(projectRoot)
+    const directory = join(projectRoot, 'ws_1')
+    await mkdir(join(directory, 'log'), { recursive: true })
+    await writeFile(
+      join(projectRoot, 'project.json'),
+      JSON.stringify({
+        schema_version: 1,
+        project_id: 'project-1',
+        name: 'Demo',
+        design_name: 'gcd',
+        root_path: projectRoot,
+        base_design: {},
+        objectives: {},
+        workspaces: [{ workspace_id: 'ws_1', workspace_path: 'ws_1' }],
+      }),
+    )
+    vi.spyOn(EccCliProcess.prototype, 'run').mockResolvedValue({
+      exitCode: 0,
+      stderr: '',
+      stdout: JSON.stringify({ schema_version: 2, runtime: 'ECC CLI', cli_contract: 1 }),
+    })
+    vi.spyOn(EccCliProcess.prototype, 'spawnDetached').mockImplementation(
+      async (args) => {
+        const runId = args[args.indexOf('--run-id') + 1]
+        if (receipt) {
+          await writeFile(
+            join(directory, 'log', `${runId}.run.json`),
+            JSON.stringify({
+              schema_version: 1,
+              run_id: runId,
+              workspace_id: 'ws_1',
+              started_at: 1,
+              finished_at: 2,
+              state: receipt,
+            }),
+          )
+        }
+        return Object.assign(new EventEmitter(), {
+          exitCode: 1,
+          signalCode: null,
+        }) as Awaited<ReturnType<EccCliProcess['spawnDetached']>>
+      },
+    )
+    const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
+    ;(service as any).sessions.set('handle-1', {
+      directory,
+      handle: 'handle-1',
+      projectId: 'project-1',
+      projectRoot,
+      workspaceId: 'ws_1',
+      workspaceRevision: 1,
+    })
+    try {
+      const result = await service.startFlowOperation({
+        expectedWorkspaceRevision: 1,
+        idempotencyKey: 'command-1',
+        workspaceHandle: 'handle-1',
+      })
+      expect(result.state).toBe(state)
+      expect(service.operationProjection().outcomes).toMatchObject([{ state }])
+    } finally {
+      await service.shutdown()
+    }
   })
 
   it('opens a Workspace with historical runs without publishing them as new outcomes', async () => {

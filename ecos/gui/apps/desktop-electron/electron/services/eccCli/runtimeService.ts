@@ -1748,13 +1748,11 @@ export class EccCliRuntimeService {
     const selectedStep =
       tracked.operation.kind === 'step' ? tracked.operation.step : undefined
     const exit = tracked.child?.exit
-    const result = tracked.child
-      ? undefined
-      : await readRunResult(
-          tracked.session.directory,
-          tracked.session.workspaceId,
-          tracked.operation.operationId,
-        )
+    const result = await readRunResult(
+      tracked.session.directory,
+      tracked.session.workspaceId,
+      tracked.operation.operationId,
+    )
     const terminal = result?.state ?? terminalState(tracked.requestedCancel, exit)
     const captureDiagnostics =
       terminal === 'failed' || terminal === 'interrupted' || terminal === 'unknown'
