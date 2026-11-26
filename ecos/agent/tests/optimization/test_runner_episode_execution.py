@@ -26,6 +26,7 @@ from ecos_agent.optimization.ledger import (
     OptimizationPlanningAuditIntegrityError,
 )
 from ecos_agent.optimization.knowledge.cases import EmpiricalCaseAuditIntegrityError
+from ecos_agent.optimization.metrics.contracts import TerminalEvaluationMetric
 from ecos_agent.optimization.rules import IncumbentDecision
 from ecos_agent.optimization.runner import OptimizationEpisodeRunner
 
@@ -153,13 +154,39 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(
         execution_context=_execution_context(),
         incumbent=_incumbent(),
     )
+
+    # The observation supplier represents a historical STA run. Keep the
+    # original unit and source when the exporter reloads the ledger from disk.
+    source = "18_sta_ecc/feature/TYP_25/TYPICAL/sta_power.json"
+    archived_power = tuple(
+        TerminalEvaluationMetric(
+            metric_id=metric_id,
+            value=value,
+            unit="W",
+            category="ppa",
+            role="report",
+            direction="lower_is_better",
+            source_refs=(source,),
+        )
+        for metric_id, value in (
+            ("sta_typical_dynamic_power", 2.5e-6),
+            ("sta_typical_leakage_power", 4.0e-7),
+        )
+    )
+
+    def observe_archived_power(*args):
+        observed = _terminal_observation(*args)
+        return observed.model_copy(
+            update={"evaluation_metrics": observed.evaluation_metrics + archived_power},
+        )
+
     runner = OptimizationEpisodeRunner(
         controller=controller,
         observation_supplier=_observation,
         retrieval_supplier=_retrieval,
         current_values=_CURRENT_VALUES,
         terminal_waiter=executor.wait_for_terminal,
-        terminal_observation_supplier=_terminal_observation,
+        terminal_observation_supplier=observe_archived_power,
         objective=_objective(),
     )
 
@@ -269,6 +296,13 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(
     assert planning_mode == "receipt-aware"
     assert len(started_traces) == 2
     assert all(item.receipt_status == "ok" for item in started_traces)
+    for trace in started_traces:
+        assert trace.dynamic_power == 2.5e-6
+        assert trace.leakage_power == 4.0e-7
+        assert trace.power_measurements is not None
+        for metric in trace.power_measurements.values():
+            assert metric["unit"] == "W"
+            assert metric["source_refs"] == [source]
     case_audit_path = tmp_path / "episode" / "optimization-knowledge-cases.v1.jsonl"
     case_audit = case_audit_path.read_text(encoding="utf-8")
     case_audit_path.write_text(
