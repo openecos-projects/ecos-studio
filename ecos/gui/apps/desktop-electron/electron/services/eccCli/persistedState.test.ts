@@ -98,6 +98,7 @@ describe('readWorkspaceFlow', () => {
       steps: [
         {
           name: 'placement',
+          directory: '06_placement_dreamplace',
           peakMemory: 0,
           runtime: '',
           state: 'Ongoing',
