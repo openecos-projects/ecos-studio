@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Page } from 'playwright-core'
+import { shellQuote } from '../electron/services/cliInstallerArtifacts'
 import { launchE2EApp, repoRoot, resolveOutDir, type E2EApp } from './support/launch'
 import { prepareGcdProject } from './support/design'
 import { readFlowSteps } from './support/flow'
@@ -12,6 +13,7 @@ import {
   openWorkspaceInUi,
   readOperationLog,
   setupBackendWorkspace,
+  typeTerminalCommand,
   type WorkspaceJourney,
 } from './support/journey'
 import { createMilestoneShots } from './support/screenshots'
@@ -446,6 +448,70 @@ describe('workspace dashboard layout', () => {
       await page.getByRole('button', { name: 'ECOS Agent', exact: true }).click()
     }
   })
+
+  it('shows cancellation in notifications and Run History when ECC cancels a GUI run', async () => {
+    const { page } = launched!
+    await page.locator('.flow-run-icon-button').click()
+    const live = async () => {
+      const projection = await page.evaluate(() =>
+        window.ecosDesktop.ecc.runtime.operationProjection(),
+      )
+      return projection.operations.find(
+        ({ workspaceDirectory }) => workspaceDirectory === workspace.workspaceDir,
+      )
+    }
+    let operationId = ''
+    await expect
+      .poll(
+        async () => {
+          const operation = await live()
+          if (
+            operation?.origin === 'gui' &&
+            operation.flow?.steps.some(({ state }) => state === 'Ongoing')
+          ) {
+            operationId = operation.operationId
+          }
+          return operationId
+        },
+        { timeout: 90_000 },
+      )
+      .toBeTruthy()
+
+    await typeTerminalCommand(
+      page,
+      [
+        'ecc',
+        'process',
+        'cancel',
+        '--project',
+        workspace.projectRoot,
+        '--workspace',
+        workspace.workspaceDir,
+        '--run-id',
+        operationId,
+        '--plain',
+      ]
+        .map(shellQuote)
+        .join(' '),
+    )
+    await page.locator('.status-terminal-toggle').click()
+    const terminal = await page.evaluate(
+      (request) => window.ecosDesktop.ecc.runtime.waitForOperation(request),
+      { workspaceHandle: workspace.workspaceHandle, operationId },
+    )
+    expect(terminal.state).toBe('cancelled')
+    await page.getByRole('button', { name: 'Open notifications' }).click()
+    const notifications = page.getByRole('dialog', { name: 'Notifications' })
+    await notifications.getByText('Flow cancelled', { exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Open notifications' }).click()
+
+    await page.getByRole('button', { name: 'Run History' }).click()
+    const history = page.getByRole('dialog', { name: 'Run history' })
+    const row = history.getByRole('row').filter({ hasText: operationId })
+    await row.getByRole('cell', { name: /^Cancelled/ }).waitFor()
+    await shot('externally-cancelled-gui-run')
+    await history.getByRole('button', { name: 'Close run history' }).click()
+  }, 180_000)
 
   it('runs a single step and then runs the remaining steps from the selected start', async () => {
     const outDir = await resolveOutDir('workspace-run-scopes')

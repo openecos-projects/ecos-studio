@@ -10,6 +10,7 @@ import { createMilestoneShots } from './support/screenshots'
 import {
   openWorkspaceInUi,
   registerWorkspaceRoot,
+  typeTerminalCommand,
   waitToolchainReady,
   type WorkspaceJourney,
 } from './support/journey'
@@ -28,16 +29,6 @@ async function waitForFile(path: string, timeoutMs: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 500))
   }
   throw new Error(`file did not appear within ${timeoutMs}ms: ${path}`)
-}
-
-async function typeTerminalCommand(page: E2EApp['page'], command: string): Promise<void> {
-  const terminal = page.locator('.ecos-terminal-panel')
-  if (!(await terminal.isVisible())) await page.locator('.status-terminal-toggle').click()
-  const input = page.locator('.xterm-helper-textarea')
-  await input.waitFor({ state: 'attached' })
-  await input.click()
-  await page.keyboard.insertText(command)
-  await page.keyboard.press('Enter')
 }
 
 describe('product e2e: CLI-started rtl2gds journey', () => {

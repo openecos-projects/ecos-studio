@@ -390,6 +390,16 @@ export async function readOperationLog(
   return result.content
 }
 
+export async function typeTerminalCommand(page: Page, command: string): Promise<void> {
+  const terminal = page.locator('.ecos-terminal-panel')
+  if (!(await terminal.isVisible())) await page.locator('.status-terminal-toggle').click()
+  const input = page.locator('.xterm-helper-textarea')
+  await input.waitFor({ state: 'attached' })
+  await input.click()
+  await page.keyboard.insertText(command)
+  await page.keyboard.press('Enter')
+}
+
 interface OverviewStep {
   stepId?: string
   state?: string
