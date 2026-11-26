@@ -13,6 +13,7 @@ import {
   importExternalPdk,
   openWorkspaceInUi,
   readOperationLog,
+  runWorkspaceStep,
   setupBackendWorkspace,
   typeTerminalCommand,
   waitFlowTerminal,
@@ -584,6 +585,63 @@ describe('workspace dashboard layout', () => {
       .toContain(lastLine)
     await shot('bounded-cli-step-log')
     await log.getByRole('button', { name: 'Close', exact: true }).click()
+  }, 180_000)
+
+  it('keeps diagnostics separate when two workspaces reuse the same run ID', async () => {
+    const { page } = launched!
+    const failed = await runWorkspaceStep(page, workspace, 'sta', 60_000)
+    expect(failed.state).toBe('failed')
+    const operationId = failed.operationId
+    const getDiagnostics = (workspaceHandle: string) =>
+      page.evaluate((request) => window.ecosDesktop.ecc.runtime.operationLog(request), {
+        workspaceHandle,
+        operationId,
+        includeDiagnostics: true,
+      })
+    const original = await getDiagnostics(workspace.workspaceHandle)
+    expect(original.diagnostics).toContain('missing filled, parasitics')
+
+    const second = await createSiblingWorkspace('independent')
+    await typeTerminalCommand(
+      page,
+      [
+        'ecc',
+        'run',
+        '--project',
+        second.projectRoot,
+        '--workspace',
+        second.workspaceDir,
+        '--only',
+        'synthesis',
+        '--run-id',
+        operationId,
+        '--log-file',
+        `log/${operationId}.log`,
+        '--plain',
+      ]
+        .map(shellQuote)
+        .join(' '),
+    )
+    await page.locator('.status-terminal-toggle').click()
+    const receiptPath = join(second.workspaceDir, 'log', `${operationId}.run.json`)
+    await expect
+      .poll(
+        () =>
+          readFile(receiptPath, 'utf8')
+            .then((source) => JSON.parse(source))
+            .catch(() => null),
+        { timeout: 90_000 },
+      )
+      .toMatchObject({
+        state: 'succeeded',
+        run_id: operationId,
+        workspace_id: 'independent',
+      })
+    const report = await getDiagnostics(second.workspaceHandle)
+    expect(report.diagnostics).toContain('Workspace: independent\n')
+    expect(report.diagnostics).toContain('State: succeeded\n')
+    expect(report.diagnostics).not.toContain('missing filled, parasitics')
+    expect(await getDiagnostics(workspace.workspaceHandle)).toEqual(original)
   }, 180_000)
 
   it('runs a single step and then runs the remaining steps from the selected start', async () => {
