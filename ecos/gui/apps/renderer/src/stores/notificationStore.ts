@@ -4,6 +4,7 @@ export type AppNotificationSeverity = 'error' | 'warn' | 'info'
 
 export interface RunDiagnosticsIdentity {
   workspaceDirectory: string
+  workspaceHandle?: string
   operationId: string
 }
 

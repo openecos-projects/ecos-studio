@@ -424,6 +424,7 @@ describe('backgroundOperationStore', () => {
         diagnostics: {
           operationId: 'operation-1',
           workspaceDirectory: '/work/a',
+          workspaceHandle: 'handle-operation-1',
         },
       }),
     )

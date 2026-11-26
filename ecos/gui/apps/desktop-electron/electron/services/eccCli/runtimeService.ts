@@ -1343,6 +1343,14 @@ export class EccCliRuntimeService {
   async operationLog(
     request: EccRuntimeOperationRequest,
   ): Promise<EccBackgroundOperationLogResult> {
+    if (request.includeDiagnostics && !this.sessions.has(request.workspaceHandle)) {
+      const closed = this.outcomes.find(
+        ({ session, operation }) =>
+          session.handle === request.workspaceHandle &&
+          operation.operationId === request.operationId,
+      )
+      if (closed?.diagnostics) return closed.diagnostics
+    }
     const session = this.requireSession(request.workspaceHandle)
     const tracked = this.operations.get(runKey(session, request.operationId))
     const result = await readRunResult(

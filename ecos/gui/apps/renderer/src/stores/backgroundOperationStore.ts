@@ -270,6 +270,7 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
       const identity = {
         operationId: outcome.operationId,
         workspaceDirectory: outcome.workspaceDirectory,
+        workspaceHandle: outcome.workspaceHandle,
       }
       const runKey = runNotificationKey(identity)
       const key = `${outcome.runtimeInstanceId ?? ''}\0${runKey}\0${outcome.state}`

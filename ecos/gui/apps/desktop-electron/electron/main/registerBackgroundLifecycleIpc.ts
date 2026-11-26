@@ -130,7 +130,8 @@ export function registerBackgroundLifecycleIpc(options: {
     }
     const workspaceHandle =
       typeof value.workspaceDirectory === 'string'
-        ? options.workspaceHandleForDirectory(event.sender, value.workspaceDirectory)
+        ? (options.workspaceHandleForDirectory(event.sender, value.workspaceDirectory) ??
+          value.workspaceHandle)
         : value.workspaceHandle
     if (
       typeof workspaceHandle !== 'string' ||

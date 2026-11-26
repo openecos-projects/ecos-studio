@@ -1510,6 +1510,14 @@ describe('ECC CLI live flow projection', () => {
     expect(otherDiagnostics.content).toBe('ws_2 diagnostics')
     expect(otherDiagnostics.diagnostics).toContain('State: failed')
     expect(otherDiagnostics.diagnostics).not.toContain(privateMessage)
+    await service.closeWorkspace({ workspaceHandle: 'handle-1' })
+    await expect(
+      service.operationLog({
+        workspaceHandle: 'handle-1',
+        operationId: runId,
+        includeDiagnostics: true,
+      }),
+    ).resolves.toMatchObject({ diagnostics: expect.stringContaining(privateMessage) })
     await service.shutdown()
   })
 })

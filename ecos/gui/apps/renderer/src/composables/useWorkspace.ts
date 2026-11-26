@@ -1715,7 +1715,11 @@ export function useWorkspace() {
           : 'Flow'
         const diagnostics =
           failure.operationId && projectPath
-            ? { operationId: failure.operationId, workspaceDirectory: projectPath }
+            ? {
+                operationId: failure.operationId,
+                workspaceDirectory: projectPath,
+                workspaceHandle: workspaceId,
+              }
             : undefined
         notificationStore.addNotification({
           key: diagnostics ? runNotificationKey(diagnostics) : undefined,

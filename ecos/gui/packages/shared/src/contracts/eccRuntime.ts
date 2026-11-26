@@ -589,6 +589,7 @@ export type EccOperationLogRequest =
   | EccRuntimeOperationRequest
   | {
       workspaceDirectory: string
+      workspaceHandle?: string
       operationId: string
       includeDiagnostics?: boolean
     }

@@ -4184,6 +4184,11 @@ describe('registerIpc', () => {
       .mockResolvedValueOnce({ directory, workspaceHandle: 'old-handle' })
       .mockResolvedValueOnce({ directory, workspaceHandle: 'new-handle' })
     await openBackendWorkspace(handlers, { sender: owner }, { directory })
+    const released = services.eccRuntimeService.onWorkspaceReleased.mock.calls[0]?.[0]
+    services.eccRuntimeService.releaseWorkspace.mockImplementationOnce(async () => {
+      released?.('old-handle')
+      return { ok: true }
+    })
     await closeBackendWorkspace(
       handlers,
       { sender: owner },
@@ -4193,15 +4198,26 @@ describe('registerIpc', () => {
     const request = {
       operationId: 'run-1',
       workspaceDirectory: directory,
+      workspaceHandle: 'old-handle',
       includeDiagnostics: true,
     }
-    await expect(log({ sender: owner }, request)).resolves.toMatchObject({ ok: false })
+    services.eccRuntimeService.operationLog.mockResolvedValue({
+      diagnostics: 'run details',
+    })
+    await expect(log({ sender: owner }, request)).resolves.toEqual({
+      diagnostics: 'run details',
+    })
+    expect(services.eccRuntimeService.operationLog).toHaveBeenLastCalledWith({
+      operationId: 'run-1',
+      workspaceHandle: 'old-handle',
+      includeDiagnostics: true,
+    })
 
     await openBackendWorkspace(handlers, { sender: owner }, { directory })
     await expect(log({ sender: { id: 22 } }, request)).resolves.toMatchObject({
       ok: false,
     })
-    expect(services.eccRuntimeService.operationLog).not.toHaveBeenCalled()
+    expect(services.eccRuntimeService.operationLog).toHaveBeenCalledTimes(1)
     services.eccRuntimeService.operationLog.mockResolvedValue({
       diagnostics: 'run details',
     })
