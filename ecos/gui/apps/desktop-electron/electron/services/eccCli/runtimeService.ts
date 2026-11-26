@@ -1358,8 +1358,13 @@ export class EccCliRuntimeService {
       session.workspaceId,
       request.operationId,
     )
-    const operation =
-      tracked?.operation ?? (result ? persistedRunSnapshot(session, result) : undefined)
+    let operation = tracked?.operation
+    if (result && (!operation || !isTerminal(operation.state))) {
+      const persisted = persistedRunSnapshot(session, result)
+      operation = operation
+        ? { ...operation, state: persisted.state, error: persisted.error }
+        : persisted
+    }
     if (!operation)
       throw new Error('ECC Operation is not owned by this Workspace Session.')
     if (request.includeDiagnostics) {

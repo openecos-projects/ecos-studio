@@ -1159,6 +1159,27 @@ describe('ECC CLI live flow projection', () => {
         },
       }),
     ])
+    // ECC persists the receipt before dropping the process registration.
+    ;(service as any).sessions.set(session.handle, session)
+    await mkdir(join(workspaceDirectory, 'log'))
+    await writeFile(
+      join(workspaceDirectory, 'log', `${runId}.run.json`),
+      JSON.stringify({
+        schema_version: 1,
+        run_id: runId,
+        workspace_id: session.workspaceId,
+        started_at: 1,
+        finished_at: 2,
+        state: 'succeeded',
+      }),
+    )
+    await expect(
+      service.operationLog({
+        workspaceHandle: session.handle,
+        operationId: runId,
+        includeDiagnostics: true,
+      }),
+    ).resolves.toMatchObject({ diagnostics: expect.stringContaining('State: succeeded') })
     await service.shutdown()
   })
 
