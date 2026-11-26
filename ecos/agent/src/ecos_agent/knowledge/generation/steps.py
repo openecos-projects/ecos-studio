@@ -108,7 +108,7 @@ STAGES = (
         "The floorplan phase runs as three flow steps sharing one Floorplan configuration. `preFloorplan` derives a `<stem>_simple` configuration copy with `macro_placer.mode` forced to `auto` and an empty `file_path`, marks the workspace `clock` net as a CLOCK net when one is configured, then calls `init_fp` and `run_simple_fp`, which runs iFP `DieBuilder` and auto IO-pin placement and writes the floorplan and IO-pin-list outputs that feed macro placement. The `macroPlacement` step consumes those outputs: manual `macro.placements` parameters bypass DreamPlace entirely, otherwise DreamPlace runs macro-only placement and `tcl_save` writes the hard-macro placement commands to the workspace macro-location Tcl. `postFloorplan` rewrites the Floorplan configuration to `macro_placer.mode` `file` with that location file, calls `init_fp`, whose database wrapping applies the file's macro placements, runs `run_fp` in the native order `DieBuilder -> IOPlacer -> MacroPlacer -> PDNGenerator -> PhyPlacer`, then `destroy_fp`, shared persistence, and analysis. The runner marks each subflow item successful without branching on the native iFP return values.",
         "The phase cannot proceed without an ECC database instance. A missing, malformed, or unknown-macro macro-location file, iFP configuration, layer/capacity, macro-placement, or geometry errors can be logged while the wrapper still records subflow progress; only `postFloorplan` runs analysis, so inspect native logs, saved artifacts, and analysis records before claiming a successful floorplan.",
         "ECC reads design-layout and design-statistics facts from the post-floorplan feature database to publish die and core area, die width and height, die and core utilization, and IO-pin, instance, and net counts; shared persistence also writes the derived die/core size, area, bounding box, and aspect ratio back into the workspace parameters.",
-        "ecc/chipcompiler/tools/ecc/configs/floorplan_ecc.json",
+        "ecc/chipcompiler/tools/ecc/configs/defaults/floorplan_ecc.json",
     ),
     Stage(
         "place",
@@ -117,7 +117,7 @@ STAGES = (
         "The DreamPlace runner loads the current ECC design, constructs the placement engine, runs global placement with its acceptance gate, then optionally legalizes and refines the result before publishing maps, artifacts, and QoR analysis.",
         "A missing ECC module, a failed DreamPlace import, or infinite HPWL prevents a successful placement result. Subflow progress is not terminal evidence; inspect the tool result and published artifacts.",
         "DreamPlace and ECC publish placement wirelength, density, and congestion facts together with the placement-map resources consumed by the GUI.",
-        "ecc/chipcompiler/tools/ecc_dreamplace/configs/dreamplace_ecc.json",
+        "ecc/chipcompiler/tools/ecc_dreamplace/configs/defaults/dreamplace_ecc.json",
         ("dreamplace.runner", "dreamplace.module", "ecc.runner", "ecc.module"),
         entry_writer=_add_place_stage_entries,
         catalog_schema="ecos-place-catalog.v3",
@@ -135,7 +135,7 @@ STAGES = (
         "The ECC runner loads the design, invokes `run_cts` for clock-tree synthesis with the CTS configuration and step data directory, writes a CTS report and map, saves the design, persists clock-timing feature facts, and then runs analysis and checklist generation. The wrapper does not branch on the native `run_cts`, report, or map return values; timing-fact persistence and shared save-data results are the explicit gates it checks.",
         "The step cannot execute without an ECC database instance. Native CTS may return not-initialized, no-op, synthesis, optimization, instantiation, evaluation, or report errors that are not reflected by the wrapper's subflow updates; CTS metric availability also depends on persisted `CTS` feature facts and must not be interpreted as zero skew.",
         "ECC reads the `CTS` feature record for buffer, clock-path, wirelength, level, skew, and insertion-latency facts, then the GUI selects the published normalized metrics.",
-        "ecc/chipcompiler/tools/ecc/configs/cts_ecc.json",
+        "ecc/chipcompiler/tools/ecc/configs/defaults/cts_ecc.json",
     ),
     Stage(
         "legalization",
@@ -144,7 +144,7 @@ STAGES = (
         "The DreamPlace runner loads ECC data, builds `DreamplaceModule`, forces legalization-only parameters, creates the placement engine, and runs it. In legalization-only mode global placement, fillers, and detailed placement are disabled while `legalize_flag` is enabled, and cell padding is reset to the placement site width; the runner then saves the design and runs analysis and checklist generation.",
         "A missing ECC instance prevents execution. DreamPlace reports failure when its PPA result has infinite HPWL, so subflow progress alone is not terminal legalization evidence.",
         "The standard GUI stage comparison has no legalization-specific numeric metric. Database and QoR artifacts are still produced by the shared analysis path when the run reaches it.",
-        "ecc/chipcompiler/tools/ecc_dreamplace/configs/dreamplace_ecc.json",
+        "ecc/chipcompiler/tools/ecc_dreamplace/configs/defaults/dreamplace_ecc.json",
         ("dreamplace.runner", "dreamplace.module", "ecc.runner", "ecc.module"),
     ),
     Stage(
@@ -163,7 +163,7 @@ STAGES = (
         "The ECC runner loads the design and invokes the iRT pipeline through `run_routing`; timing-driven routing is self-contained in iRT, which builds its own timing engine from the shared database configuration, so the runner performs no Python-side STA initialization around routing. It saves the resulting design and geometry snapshot, then runs analysis and checklist generation. The wrapper marks the routing subflow successful without inspecting the native routing return value.",
         "The step cannot execute without an ECC database instance. iRT initialization, pin access, planar/layer/track/detailed routing, or violation reporting can fail while the wrapper still records progress; timing awareness is decided inside iRT from its own configuration, so timing data must not be assumed from route completion alone.",
         "ECC collects database net wirelength and via counts plus route feature facts; the GUI exposes detailed-route patch, via, violation, wirelength, demand, and overflow records when available.",
-        "ecc/chipcompiler/tools/ecc/configs/routing_ecc.json",
+        "ecc/chipcompiler/tools/ecc/configs/defaults/routing_ecc.json",
     ),
     Stage(
         "drc",
@@ -172,7 +172,7 @@ STAGES = (
         "The ECC runner loads the design, runs the native iDRC lifecycle `init_drc -> run_drc -> destroy_drc` in the step data directory, saves the design, translates the native `violation_map.json` into the DRC feature record, and then runs analysis and checklist generation. The wrapper does not branch on the native DRC lifecycle results, so the feature and report artifacts are the observable completion evidence.",
         "The step cannot execute without an ECC database instance. Shape collection, cluster partitioning, enabled-rule dispatch, or report/feature persistence can fail while the wrapper records subflow progress; a DRC run needs its feature/report artifacts to distinguish zero reported violations from missing analysis output.",
         "ECC reads the `drc.number` feature fact to publish the DRC count used by the GUI.",
-        "ecc/chipcompiler/tools/ecc/configs/drc_ecc.json",
+        "ecc/chipcompiler/tools/ecc/configs/defaults/drc_ecc.json",
     ),
     Stage(
         "filler",
@@ -189,7 +189,7 @@ STAGES = (
         "The ECC runner loads the design, removes stale SPEF artifacts left in the step directory by an earlier run, initializes RCX with the workspace PDK, runs RCX, and destroys it in a `finally` block. Init or run failures mark `run rcx` incomplete and return false. On success, generated SPEF files are copied to the declared output paths, and shared persistence plus parsed SPEF feature facts are checked explicitly before analysis and checklist generation.",
         "The step cannot execute without an ECC database instance. Failed RCX initialization or extraction now terminates the step through the checked init/run/copy gates; topology/environment construction, process-table extraction, SPEF writing, or output copying failures must remain visible through RCX feature and signoff metrics rather than being treated as successful extraction.",
         "ECC derives SPEF file and expected-corner coverage, parses electrical totals by corner, and publishes missing-corner, parse-failure, worst-capacitance, and worst-resistance facts.",
-        "ecc/chipcompiler/tools/ecc/configs/rcx_ecc.json",
+        "ecc/chipcompiler/tools/ecc/configs/defaults/rcx_ecc.json",
     ),
     Stage(
         "sta",
@@ -198,7 +198,7 @@ STAGES = (
         "The ECC runner expands configured STA signoff items into Liberty and RCX-corner combinations. For each item it requires the SDC, SPEF, and Liberty files, runs timing into corner-specific report and feature directories, saves the design, and then builds multi-corner analysis and checklist evidence.",
         "No signoff items, a missing SDC, SPEF, Liberty file, or report/feature directory terminates STA as incomplete. The stage does not synthesize missing corners, and its aggregate results must preserve that coverage state.",
         "ECC reads all available corner QoR summaries, selects the worst setup/hold WNS and TNS and lowest frequency, records violation and coverage counts, then emits signoff facts and timing-issue artifacts.",
-        "ecc/chipcompiler/tools/ecc/configs/sta_ecc.json",
+        "ecc/chipcompiler/tools/ecc/configs/defaults/sta_ecc.json",
     ),
     Stage(
         "harden",
@@ -207,7 +207,7 @@ STAGES = (
         "The ECC runner loads the database, requires at least one configured STA signoff item, writes an abstract LEF, writes a timing-model LIB from the selected signoff inputs, exports hardened GDS, and then runs final package analysis. Native writer return values are not wrapper gates; the runner marks the harden subflow successful and relies on package analysis to expose missing outputs.",
         "Without an ECC module, a configured STA signoff item, or a workspace STA config path the runner returns failure before delivery. LEF/LIB/GDS writer errors can still leave a successful subflow record, so final evidence requires all generated package artifacts and their completeness metric.",
         "ECC checks hardened GDS, LEF, and LIB existence and publishes the count of missing required delivery artifacts.",
-        "ecc/chipcompiler/tools/ecc/configs/sta_ecc.json",
+        "ecc/chipcompiler/tools/ecc/configs/defaults/sta_ecc.json",
     ),
 )
 

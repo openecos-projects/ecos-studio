@@ -385,6 +385,60 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.diff_buffering_coefficients_cap"></a>
+## parameter.legalization.diff_buffering_coefficients_cap
+
+**Meaning:** The `diff_buffering_coefficients.cap` configuration field for legalization.
+
+**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.diff_buffering_coefficients_slew"></a>
+## parameter.legalization.diff_buffering_coefficients_slew
+
+**Meaning:** The `diff_buffering_coefficients.slew` configuration field for legalization.
+
+**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.diff_buffering_coefficients_tns"></a>
+## parameter.legalization.diff_buffering_coefficients_tns
+
+**Meaning:** The `diff_buffering_coefficients.tns` configuration field for legalization.
+
+**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.diff_buffering_coefficients_wns"></a>
+## parameter.legalization.diff_buffering_coefficients_wns
+
+**Meaning:** The `diff_buffering_coefficients.wns` configuration field for legalization.
+
+**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.diff_buffering_rounds"></a>
+## parameter.legalization.diff_buffering_rounds
+
+**Meaning:** The number of differential buffering rounds.
+
+**Role:** It controls how often buffering candidates are evaluated and selected.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
+<a id="parameter.legalization.diff_buffering_selection_fraction"></a>
+## parameter.legalization.diff_buffering_selection_fraction
+
+**Meaning:** The fraction of buffering candidates selected per round.
+
+**Role:** It sets the per-round selection budget.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.diff_optimization_flows"></a>
 ## parameter.legalization.diff_optimization_flows
 

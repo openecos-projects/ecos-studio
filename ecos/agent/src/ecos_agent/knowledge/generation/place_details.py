@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 
 PLACE_SOURCE_PATHS = {
-    "dreamplace.config": "ecc/chipcompiler/tools/ecc_dreamplace/configs/dreamplace_ecc.json",
+    "dreamplace.config": "ecc/chipcompiler/tools/ecc_dreamplace/configs/defaults/dreamplace_ecc.json",
     "dreamplace.overrides": "ecc/chipcompiler/tools/ecc_dreamplace/parameter_overrides.py",
     "ecos.params": "ecc/chipcompiler/cli/project/params.py",
     "dreamplace.runner": "ecc/chipcompiler/tools/ecc_dreamplace/runner.py",
@@ -188,6 +188,9 @@ PLACE_PARAMETER_SEMANTICS = {
     "buffering_segment_strategy": ("The segment-count optimization strategy.", "It selects continuous optimization or discrete net-gradient updates."),
     "buffering_segment_transfer_backend": ("The native segment timing-transfer implementation.", "It selects the backend used to propagate timing across buffered segments."),
     "cell_model_schema": ("The cell timing-model schema.", "It selects the piecewise-linear timing model; a null value inherits the flow default."),
+    "diff_buffering_coefficients": ("The WNS, TNS, capacitance, and slew weights for differential buffering.", "It weights the objective used to rank buffering actions."),
+    "diff_buffering_rounds": ("The number of differential buffering rounds.", "It controls how often buffering candidates are evaluated and selected."),
+    "diff_buffering_selection_fraction": ("The fraction of buffering candidates selected per round.", "It sets the per-round selection budget."),
     "diff_sizing_coefficients": ("The differential-sizing WNS, TNS, capacitance, and slew coefficients.", "It weights the continuous sizing objective in the standalone diff-sizing profile."),
     "diff_sizing_continuous_steps": ("The number of continuous differential-sizing steps.", "It bounds continuous sizing before discrete refinement; zero disables the continuous phase."),
     "diff_timing_driven_placement": ("The differentiable timing-driven placement switch.", "It adds timing gradients to the placement objective when enabled."),

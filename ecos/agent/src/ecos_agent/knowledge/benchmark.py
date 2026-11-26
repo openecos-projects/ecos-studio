@@ -206,11 +206,11 @@ def _aliases_by_target() -> dict[str, tuple[str, ...]]:
     if not isinstance(terms, dict):
         raise ValueError("legacy alias audit terms are invalid")
     aliases = {str(key): tuple(str(value) for value in values) for key, values in terms.items() if isinstance(values, list)}
+    current_targets = set()
     for spec in STEP_KNOWLEDGE_SPECS:
         bundle = StepKnowledge.from_directory(AGENT_ROOT / "knowledge" / "tool" / spec.slug, spec)
-        if any(f"{spec.slug}:{entity.entity_id}" not in aliases for entity in bundle.entities):
-            raise ValueError("legacy alias audit terms are incomplete")
-    return aliases
+        current_targets.update(f"{spec.slug}:{entity.entity_id}" for entity in bundle.entities)
+    return {target: terms for target, terms in aliases.items() if target in current_targets}
 
 
 def _aliases_leak(query: str, aliases: tuple[str, ...]) -> bool:

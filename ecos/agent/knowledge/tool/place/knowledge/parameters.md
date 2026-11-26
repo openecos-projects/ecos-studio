@@ -887,6 +887,27 @@
 
 **Role:** Controls the action, rounds, timing weights and selection budget for each sizing phase.
 
+<a id="parameter.dreamplace.diff_buffering_rounds"></a>
+## parameter.dreamplace.diff_buffering_rounds
+
+**Meaning:** The number of differential buffering rounds.
+
+**Role:** It controls how often buffering candidates are evaluated and selected.
+
+<a id="parameter.dreamplace.diff_buffering_selection_fraction"></a>
+## parameter.dreamplace.diff_buffering_selection_fraction
+
+**Meaning:** The fraction of buffering candidates selected per round.
+
+**Role:** It sets the per-round selection budget.
+
+<a id="parameter.dreamplace.diff_buffering_coefficients"></a>
+## parameter.dreamplace.diff_buffering_coefficients
+
+**Meaning:** The WNS, TNS, capacitance, and slew weights for differential buffering.
+
+**Role:** It weights the objective used to rank buffering actions.
+
 <a id="parameter.dreamplace.timing_placement_carrier"></a>
 ## parameter.dreamplace.timing_placement_carrier
 
