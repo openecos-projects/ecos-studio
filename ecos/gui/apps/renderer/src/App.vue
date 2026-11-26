@@ -1632,14 +1632,14 @@ async function buildReconfigureWizardInitialConfig(
           optionalString(dbInput?.origin_verilog),
           optionalString(dbInput?.verilog_path),
         ])
-  const sdc =
-    (await firstExistingWorkspaceFile(workspacePath, [
-      ...originInputs.sdcFiles,
-      `origin/${designName}.sdc`,
-      `origin/${designName}.sdc.gz`,
-      optionalString(dbInput?.sdc_path),
-      optionalString(pdkJson?.sdc),
-    ])) || ''
+  // Project-managed updates inherit design.sdc through the wizard's project
+  // defaults. The database SDC is a generated corner script, not that input.
+  const sdc = resolvedProjectContext
+    ? undefined
+    : await firstExistingWorkspaceFile(workspacePath, [
+        'origin/timing_constraints_template.tcl',
+        ...originInputs.sdcFiles,
+      ])
 
   return {
     directory: workspacePath,
