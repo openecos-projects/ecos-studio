@@ -308,7 +308,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/pdk/icsprout55-pdk"
-          tar -xzf "$RUNNER_TEMP/artifacts/icsprout55-pdk/icsprout55-pdk.tar.gz" \
+          tar -xjf "$RUNNER_TEMP/artifacts/icsprout55-pdk/icsprout55-pdk.tar.bz2" \
             -C "$RUNNER_TEMP/pdk/icsprout55-pdk"
           test -s "$RUNNER_TEMP/pdk/icsprout55-pdk/techfile/icsprout55.layermap"
           echo "ECOS_E2E_PDK_ROOT=$RUNNER_TEMP/pdk/icsprout55-pdk" >> "$GITHUB_ENV"
