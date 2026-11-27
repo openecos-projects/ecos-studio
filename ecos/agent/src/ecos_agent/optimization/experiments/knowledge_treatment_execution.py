@@ -277,10 +277,15 @@ def _run_ecc(args: list[str], timeout: float) -> None:
 def _workspace_flow_succeeded(workspace: Path) -> bool:
     flow = _workspace_json(workspace, "home/flow.json")
     steps = flow.get("steps")
-    if not isinstance(steps, list) or not steps or steps[-1].get("name") != "harden":
+    if (
+        not isinstance(steps, list)
+        or not steps
+        or any(not isinstance(step, dict) for step in steps)
+        or steps[-1].get("name") != "harden"
+    ):
         raise ValueError("Phase 8 workspace flow is invalid")
     return steps[-1].get("state") == "Success" and all(
-        step.get("state") in {"Success", "Skipped"} for step in steps
+        step.get("state") in ("Success", "Skipped") for step in steps
     )
 
 

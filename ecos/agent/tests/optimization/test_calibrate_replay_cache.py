@@ -163,7 +163,9 @@ def test_toolchain_drift_refuses_to_reuse_the_cache(tmp_path) -> None:
     assert _load_replay_manifest(replay_root)["components"]["ecc_revision"] == "rev-0"
 
 
-@pytest.mark.parametrize("cache", ["old_parser", "missing_context", "legacy_workspace"])
+@pytest.mark.parametrize(
+    "cache", ["old_parser", "missing_context", "legacy_workspace", "malformed_steps"]
+)
 def test_unusable_workspace_reruns_the_flow_and_records_provenance(
     tmp_path, monkeypatch, cache
 ) -> None:
@@ -171,11 +173,16 @@ def test_unusable_workspace_reruns_the_flow_and_records_provenance(
     workspace = tmp_path / "ws"
     (workspace / "home").mkdir(parents=True)
     (workspace / "home/params.toml").write_text('[design]\nname = "gcd"\n', encoding="utf-8")
-    if cache == "legacy_workspace":
+    if cache in ("legacy_workspace", "malformed_steps"):
         home = replay_root / "workspace" / "home"
         home.mkdir(parents=True)
+        steps = (
+            [{"name": "Harden", "state": "Success"}]
+            if cache == "legacy_workspace"
+            else [None, {"name": "harden", "state": "Success"}]
+        )
         (home / "flow.json").write_text(
-            json.dumps({"steps": [{"name": "Harden", "state": "Success"}]}),
+            json.dumps({"steps": steps}),
             encoding="utf-8",
         )
     else:
