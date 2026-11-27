@@ -4,6 +4,7 @@ import {
   extractDesignReportData,
   generateDesignReport,
   joinLocalPath,
+  normalizeLocalPath,
   parsePowerRpt,
   parseQorSummaryRpt,
   type DesignReportData,
@@ -25,6 +26,7 @@ import {
   writeProjectTextFile,
 } from '@/utils/projectFiles'
 import { parseDrcStatisCsv } from '@/components/flow-insights/flowInsightsData'
+import { parsePowerSummary } from '@/components/flow-insights/powerSummary'
 
 interface WorkspaceProject {
   path?: string
@@ -281,7 +283,8 @@ export function useDesignReportExport({
       if (isBackend) {
         const artifacts =
           runtimeSnapshot?.engineeringSnapshot?.artifacts ??
-          (resourceIndex?.root === workspacePath
+          (resourceIndex &&
+          normalizeLocalPath(resourceIndex.root) === normalizeLocalPath(workspacePath)
             ? resourceIndex.engineeringArtifacts
             : undefined) ??
           []
@@ -298,13 +301,26 @@ export function useDesignReportExport({
                   : null
           if (bucket) {
             const report = await readWorkspaceJson(entry.reference)
-            if (report) bucket[step] = report
+            if (report) bucket[step] = { ...report, ...(bucket[step] as object) }
           } else if (entry.kind === 'power_report') {
             const report = await readWorkspaceText(entry.reference)
             if (report) {
               stepMetrics[step] = {
-                ...(stepMetrics[step] as object),
                 ...parsePowerRpt(report),
+                ...(stepMetrics[step] as object),
+              }
+            }
+          } else if (entry.kind === 'power_summary') {
+            const summary = parsePowerSummary(await readWorkspaceJson(entry.reference))
+            if (summary) {
+              stepMetrics[step] = {
+                ...(stepMetrics[step] as object),
+                internal_power: summary.internalUw / 1000,
+                switching_power: summary.switchingUw / 1000,
+                dynamic_power: summary.dynamicUw / 1000,
+                leakage_power: summary.leakageUw / 1000,
+                total_power: (summary.dynamicUw + summary.leakageUw) / 1000,
+                power_unit: 'mW',
               }
             }
           } else if (entry.kind === 'sta_timing_issues') {
