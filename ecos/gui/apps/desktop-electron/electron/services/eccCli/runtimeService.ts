@@ -618,7 +618,7 @@ export class EccCliRuntimeService {
     const active = operations.some(({ operation }) => operation.state === 'running')
     if (active) return { ok: true, retained: true }
     const diagnosticRuns = operations
-      .filter(({ diagnostics }) => diagnostics)
+      .filter(({ operation }) => capturesRunDiagnostics(operation.state))
       .map(({ operation }) => runKey(session, operation.operationId))
     if (diagnosticRuns.length) {
       this.releasedDiagnosticRuns.set(session.handle, new Set(diagnosticRuns))
@@ -1381,12 +1381,7 @@ export class EccCliRuntimeService {
       throw new Error('ECC Operation is not owned by this Workspace Session.')
     if (request.includeDiagnostics) {
       if (tracked?.diagnostics) return tracked.diagnostics
-      if (
-        result ||
-        operation.state === 'failed' ||
-        operation.state === 'interrupted' ||
-        operation.state === 'unknown'
-      ) {
+      if (result || capturesRunDiagnostics(operation.state)) {
         const log = await readOperationLog(
           session.directory,
           operation.operationId,
@@ -1779,8 +1774,7 @@ export class EccCliRuntimeService {
       tracked.operation.operationId,
     )
     const terminal = result?.state ?? terminalState(tracked.requestedCancel, exit)
-    const captureDiagnostics =
-      terminal === 'failed' || terminal === 'interrupted' || terminal === 'unknown'
+    const captureDiagnostics = capturesRunDiagnostics(terminal)
     const log = captureDiagnostics
       ? await readOperationLog(
           tracked.session.directory,
@@ -2252,6 +2246,10 @@ export function registeredRunMatches(
 
 function isTerminal(state: EccRuntimeOperation['state']): boolean {
   return ['succeeded', 'failed', 'cancelled', 'interrupted', 'unknown'].includes(state)
+}
+
+function capturesRunDiagnostics(state: EccRuntimeOperation['state']): boolean {
+  return state === 'failed' || state === 'interrupted' || state === 'unknown'
 }
 
 function buildCatalog(

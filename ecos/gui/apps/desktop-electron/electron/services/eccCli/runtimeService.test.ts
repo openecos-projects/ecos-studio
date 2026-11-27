@@ -1481,7 +1481,29 @@ describe('ECC CLI live flow projection', () => {
       }),
     )
     await writeFile(manifestPath, JSON.stringify({ ...manifest, runtime_processes: {} }))
-    await service.reconcileOperationProjection()
+    const tracked = [...(service as any).operations.values()][0]
+    const watcher = tracked.watcher
+    let markClosing!: () => void
+    const closing = new Promise<void>((resolve) => {
+      markClosing = resolve
+    })
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    vi.spyOn(watcher, 'close').mockImplementationOnce(async () => {
+      markClosing()
+      await gate
+    })
+    const refresh = service.reconcileOperationProjection()
+    await closing
+    try {
+      await service.closeWorkspace({ workspaceHandle: 'handle-1' })
+    } finally {
+      release()
+      await refresh
+      await watcher.close()
+    }
     await expect(wait).resolves.toMatchObject({
       state: 'unknown',
       error: { code: 'run_outcome_unknown' },
@@ -1531,14 +1553,6 @@ describe('ECC CLI live flow projection', () => {
     expect(otherDiagnostics.content).toBe('ws_2 diagnostics')
     expect(otherDiagnostics.diagnostics).toContain('State: failed')
     expect(otherDiagnostics.diagnostics).not.toContain(privateMessage)
-    await service.closeWorkspace({ workspaceHandle: 'handle-1' })
-    await expect(
-      service.operationLog({
-        workspaceHandle: 'handle-1',
-        operationId: runId,
-        includeDiagnostics: true,
-      }),
-    ).resolves.toMatchObject({ diagnostics: expect.stringContaining(privateMessage) })
     await service.shutdown()
   })
 })
