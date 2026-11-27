@@ -6,7 +6,17 @@
       <div class="plugin-card-main">
         <span class="plugin-card-title">
           <strong :title="row.name">{{ row.name }}</strong>
-          <small :title="metaText">{{ metaText }}</small>
+          <select
+            v-if="versions.length > 1"
+            v-model="selectedVersion"
+            :aria-label="`${row.name} download version`"
+            :disabled="row.statusKind === 'installing'"
+          >
+            <option v-for="version in versions" :key="version" :value="version">
+              v{{ version }}
+            </option>
+          </select>
+          <small v-else :title="metaText">{{ metaText }}</small>
         </span>
         <p
           v-if="row.progressMessage || row.description"
@@ -84,7 +94,7 @@
               :data-title="action.iconOnly ? action.label : undefined"
               :aria-label="action.iconOnly ? action.label : undefined"
               :disabled="action.disabled"
-              @click.stop="emit('action', action.id)"
+              @click.stop="onAction(action.id)"
             >
               <i :class="action.icon" aria-hidden="true"></i>
               <span v-if="!action.iconOnly">{{ action.label }}</span>
@@ -100,7 +110,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { ResourceRow } from '@/views/pluginToolsRows'
 import {
   cardActionsForRow,
@@ -116,6 +126,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   action: [id: PluginCardActionId]
+  installVersion: [version: string]
   homepage: []
 }>()
 
@@ -124,6 +135,25 @@ const actions = computed(() =>
 )
 const metaText = computed(() => cardMetaText(props.row))
 const homepageUrl = computed(() => homepageUrlFor(props.row))
+const versions = computed(() =>
+  props.row.type === 'pdk' && props.row.resource.source === 'registry'
+    ? props.row.resource.available_versions
+    : [],
+)
+const selectedVersion = ref('')
+watch(
+  versions,
+  (available) => {
+    if (!available.includes(selectedVersion.value))
+      selectedVersion.value = available[0] ?? ''
+  },
+  { immediate: true },
+)
+function onAction(id: PluginCardActionId): void {
+  if ((id === 'install' || id === 'retry') && versions.value.length > 1) {
+    emit('installVersion', selectedVersion.value)
+  } else emit('action', id)
+}
 </script>
 
 <style scoped>

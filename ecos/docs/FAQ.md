@@ -136,11 +136,10 @@ Management. Logs are displayed separately from the verified workspace state.
 
 **Q: Does Update Workspace keep completed results?**
 
-Backend **File → Update Workspace** recreates the workspace from project
-settings. It retains workspace parameter overrides, but replaces previous flow
-state, outputs, logs, and workspace-local user files. Back up the directory
-first, or use `ecc workspace refresh NAME --project DIR --keep-backup` to retain
-the replaced generation. For parameter-only changes, use **Edit → Config**.
+Backend **File → Update Workspace** reads the open workspace's existing values.
+Closing the wizard leaves results untouched. At **Rebuild Workspace**, choose
+**Backup Original** to retain the previous results as an archived workspace.
+The active workspace keeps its name and path. Running its new flow is optional.
 See [Updating a Workspace](user-guide.md#updating-a-workspace).
 
 **Q: Does deleting a workspace delete its files?**

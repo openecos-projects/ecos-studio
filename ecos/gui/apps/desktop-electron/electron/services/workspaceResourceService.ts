@@ -1,6 +1,6 @@
 import { open, readdir, stat } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
-import { isObsoleteFlowStepName } from '@ecos-studio/shared'
+import { eccFlowStepKey, isObsoleteFlowStepName } from '@ecos-studio/shared'
 import type {
   WorkspaceResourceFile,
   WorkspaceResourceIndex,
@@ -12,6 +12,7 @@ import type {
   EccPersistedEngineeringSnapshot,
 } from '@ecos-studio/shared'
 import type { ProjectScopeProvider } from './workspaceService'
+import { isWorkspaceStepDirectory } from './workspaceStepDirectory'
 import { isPathWithinRoot } from './pathScope'
 import { readPersistedEngineeringSnapshot } from './eccCli/engineeringSnapshotReader'
 import {
@@ -94,8 +95,9 @@ export class WorkspaceResourceService {
         }
       }
 
+      const stepKey = eccFlowStepKey(request.step)
       const step = index.flow.steps.find(
-        (candidate) => candidate.name.toLowerCase() === request.step.toLowerCase(),
+        (candidate) => eccFlowStepKey(candidate.name) === stepKey,
       )
       if (!step) {
         return {
@@ -110,6 +112,12 @@ export class WorkspaceResourceService {
 
       const stepInfoResult = await this.buildStepInfoResponse(request.id, step)
       const info = stepInfoResult.info
+      if (request.id === 'layout') {
+        const antenna = index.flow.steps.find(
+          (candidate) => eccFlowStepKey(candidate.name) === 'antennacheck',
+        )?.resources.feature.step
+        if (antenna?.exists) info.antenna = antenna.path
+      }
       const requiredFiles = this.requiredFilesForStepInfo(request.id, step)
       const missing = requiredFiles
         .filter((file) => !file.exists)
@@ -171,7 +179,7 @@ export class WorkspaceResourceService {
     const steps =
       isRecord(flowData) && Array.isArray(flowData.steps)
         ? flowData.steps
-            .map(readFlowStep)
+            .map((step) => readFlowStep(step, flowData.schema_version === 3))
             .filter(
               (step): step is FlowStepInput =>
                 step !== null && !isObsoleteFlowStepName(step.name),
@@ -1056,7 +1064,7 @@ function isWorkspaceResourceFile(value: unknown): value is WorkspaceResourceFile
   )
 }
 
-function readFlowStep(value: unknown): FlowStepInput | null {
+function readFlowStep(value: unknown, directoryRequired: boolean): FlowStepInput | null {
   if (!isRecord(value)) return null
   const name = typeof value.name === 'string' ? value.name : ''
   if (!name) return null
@@ -1065,13 +1073,10 @@ function readFlowStep(value: unknown): FlowStepInput | null {
   const directory = isFrontendTool(tool.toLowerCase())
     ? `${name}_${tool}`
     : value.directory
-  if (
-    typeof directory !== 'string' ||
-    !/^[a-zA-Z0-9_@.-]+$/.test(directory) ||
-    directory === '.' ||
-    directory === '..'
-  )
+  if (!isWorkspaceStepDirectory(directory)) {
+    if (!directoryRequired && directory === undefined) return null
     throw new Error('Invalid flow step directory.')
+  }
   return {
     directory,
     name,

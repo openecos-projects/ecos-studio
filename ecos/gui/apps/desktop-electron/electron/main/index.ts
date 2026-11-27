@@ -15,6 +15,7 @@ import { CodexDependencyService } from '../services/agent/codexDependencyService
 import { ModelProfileService } from '../services/agent/modelProfileService'
 import { AppInfoService } from '../services/appInfoService'
 import { EccCliCommandError, EccCliProcess } from '../services/eccCli/cliProcess'
+import { verifyIcs55PdkRoot } from '../services/eccCli/verifyPdkRoot'
 import {
   EnvironmentDoctorService,
   environmentDoctorLimits,
@@ -202,7 +203,8 @@ function getDesktopServices() {
   let eccRuntimeService: EccCliRuntimeService | undefined
   const runtimeInUse = () =>
     eccRuntimeService?.isRuntimeResourceInUse('tool:ecc') ?? false
-  const resourceManagerService = new ResourceManagerService({
+  const resourceManagerService: ResourceManagerService = new ResourceManagerService({
+    verifyIcs55Root: (root) => verifyIcs55PdkRoot(eccCliProcess, root),
     verifyPdkDefaults: ({ familyId, root }) => {
       if (!eccRuntimeService) throw new Error('ECC runtime is unavailable')
       return eccRuntimeService.verifyPdkDefaults(familyId, root)

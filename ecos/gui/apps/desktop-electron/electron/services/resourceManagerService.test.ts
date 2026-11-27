@@ -417,17 +417,27 @@ function testUpdateCheckCachePath(cacheDir: string, registryUrl: string): string
   return join(cacheDir, `resource-update-checks-${key}.json`)
 }
 
-function testResourceDirs(root: string): {
-  resourcesDir: string
-  toolsDir: string
-  pdksDir: string
-  cacheDir: string
-} {
+async function verifyFixturePdk(root: string) {
+  const techLef = join(root, 'prtech/techLEF/N551P6M_ecos.lef')
+  const views = ['ics55_LLSC_H7CR', 'ics55_LLSC_H7CL'].map((name) => ({
+    name,
+    dir: join(root, 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100', name),
+  }))
+  const cellLefs = views.map(({ dir, name }) => join(dir, 'lef', `${name}_ecos.lef`))
+  const liberty = views.map(({ dir, name }) =>
+    join(dir, 'liberty', `${name}_ss_rcworst_1p08_125_nldm.lib`),
+  )
+  await Promise.all([techLef, ...cellLefs, ...liberty].map((file) => stat(file)))
+  return { techLef, cellLefs, liberty }
+}
+
+function testResourceDirs(root: string) {
   return {
     resourcesDir: join(root, 'state', 'resources'),
     toolsDir: join(root, 'data', 'tools'),
     pdksDir: join(root, 'data', 'pdks'),
     cacheDir: join(root, 'cache'),
+    verifyIcs55Root: verifyFixturePdk,
   }
 }
 
@@ -7414,9 +7424,7 @@ describe('ResourceManagerService', () => {
     const verifySha256 = vi.fn(async () => true)
     const service = new ResourceManagerService({
       registryUrl: `file://${registryPath}`,
-      resourcesDir: join(root, 'state', 'resources'),
-      toolsDir: join(root, 'data', 'tools'),
-      pdksDir: join(root, 'data', 'pdks'),
+      ...testResourceDirs(root),
       commandRunner: postInstallRunner,
       sha256Verifier: verifySha256,
     })
@@ -7857,6 +7865,80 @@ describe('ResourceManagerService', () => {
         error: 'Missing SHA256 checksum for ics55',
       }),
     )
+  })
+
+  it('installs releases side by side and validates the staged VERSION before registering them', async () => {
+    const root = await createTempDir('ecos-pdk-versions-')
+    const v1 = await createPdkArchive(root)
+    const v2 = join(root, 'v2.tar')
+    const source = join(root, '9t')
+    await mkdir(source)
+    await writeFile(
+      join(source, 'ecc-pdk.json'),
+      JSON.stringify({ family_id: 'ics55', release: 'v2-2026.10.28-7d83e6d' }),
+    )
+    await runFixtureCommand('tar', ['-cf', v2, '-C', root, '9t'])
+    const platform = (path: string, prefix: string, sha: string) => ({
+      'all-platform': { url: `file://${path}`, sha256: sha, strip_prefix: prefix },
+    })
+    const v2Platform = platform(v2, '9t', (await archiveLock(v2)).sha256)
+    const registryPath = join(root, 'registry.json')
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        schema_version: 2,
+        tools: [],
+        pdks: [
+          {
+            id: 'ics55',
+            versions: [
+              { version: '2.0.0', platforms: v2Platform },
+              {
+                version: '1.10.103',
+                platforms: platform(
+                  v1.path,
+                  'icsprout55-pdk-1.10.100',
+                  (await archiveLock(v1.path)).sha256,
+                ),
+              },
+              { version: '1.10.102', platforms: v2Platform },
+            ],
+          },
+        ],
+      }),
+    )
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+      verifyIcs55Root: async (path) => {
+        if (!(await stat(join(path, 'VERSION')).catch(() => null)))
+          return verifyFixturePdk(path)
+        expect(await readFile(join(path, 'VERSION'), 'utf8')).toBe('ics55-v2\n')
+        return {
+          techLef: join(path, 'tech.lef'),
+          cellLefs: [join(path, 'cells.lef')],
+          liberty: [join(path, 'cells.lib')],
+        }
+      },
+    })
+    for (const version of ['1.10.103', '2.0.0'])
+      await service.installResource('pdk:ics55', version)
+    await expect(service.installResource('pdk:ics55', '1.10.102')).rejects.toThrow(
+      'does not match registry version',
+    )
+    const inventory = service.getPdkInventoryService()
+    expect(await inventory.listInstallations()).toHaveLength(2)
+    for (const version of ['1.10.103', '2.0.0']) {
+      const request = {
+        projectRoot: join(root, `project-${version}`),
+        projectId: `gcd-${version}`,
+        requirement: { familyId: 'ics55', version, manualConfig: null },
+      }
+      expect(await inventory.resolveBinding(request)).toMatchObject({
+        installationId: `pdk:ics55:managed:${version}`,
+      })
+    }
   })
 
   it('removes an invalid managed PDK download before recording it', async () => {
@@ -8463,9 +8545,7 @@ describe('ResourceManagerService', () => {
     const verifySha256 = vi.fn(async () => true)
     const service = new ResourceManagerService({
       registryUrl: `file://${registryPath}`,
-      resourcesDir: join(root, 'state', 'resources'),
-      toolsDir: join(root, 'data', 'tools'),
-      pdksDir: join(root, 'data', 'pdks'),
+      ...testResourceDirs(root),
       sha256Verifier: verifySha256,
     })
 
@@ -8625,9 +8705,7 @@ describe('ResourceManagerService', () => {
     )
     const service = new ResourceManagerService({
       registryUrl: `file://${registryPath}`,
-      resourcesDir: join(root, 'state', 'resources'),
-      toolsDir: join(root, 'data', 'tools'),
-      pdksDir: join(root, 'data', 'pdks'),
+      ...testResourceDirs(root),
       commandRunner: postInstallRunner,
       fetchImpl: fetchImpl as typeof fetch,
       sha256Verifier: verifySha256,
@@ -9245,9 +9323,7 @@ describe('ResourceManagerService', () => {
     )
     const service = new ResourceManagerService({
       registryUrl: `file://${registryPath}`,
-      resourcesDir: join(root, 'state', 'resources'),
-      toolsDir: join(root, 'data', 'tools'),
-      pdksDir: join(root, 'data', 'pdks'),
+      ...testResourceDirs(root),
       commandRunner: postInstallRunner,
       fetchImpl: fetchImpl as typeof fetch,
       sha256Verifier: vi.fn(async () => true),

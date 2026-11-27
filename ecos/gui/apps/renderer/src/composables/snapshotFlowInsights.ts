@@ -255,6 +255,13 @@ export function buildSnapshotFlowInsights(
     artifacts?.status === 'ready' || artifacts?.status === 'partial'
       ? artifacts.data.items
       : []
+  const qor = overview.qor
+  const routeMetric = (id: string) =>
+    qor?.status === 'ready' || qor?.status === 'partial'
+      ? (qor.data.metrics.find(
+          (metric) => metric.id === id && canonicalStepKey(metric.stepId) === 'Route',
+        )?.value ?? null)
+      : null
   return {
     signature: `${revision.data.workspaceId}:${revision.data.workspaceRevision}`,
     stepResources: buildStepResourcesModel(steps),
@@ -268,6 +275,8 @@ export function buildSnapshotFlowInsights(
     drc: drcSummaryFromSnapshot(insights.data.drc),
     drcRelated: buildDrcRelatedMetrics({
       drcCount: insights.data.drc.totalCount,
+      routeDrViolations: routeMetric('route_dr_total_violation_count'),
+      routeLaOverflow: routeMetric('route_la_total_overflow'),
       drcStepName: flow.data.steps.find((step) => canonicalStepKey(step.name) === 'DRC')
         ?.name,
       routeStepName: flow.data.steps.find(

@@ -111,7 +111,9 @@ export interface Project extends Omit<WorkspaceSummary, 'lastOpened'> {
 // New Project Wizard Types
 export type WorkspaceParameters = SharedWorkspaceParameters
 
-export type WorkspaceConfig = SharedWorkspaceConfig
+export type WorkspaceConfig = SharedWorkspaceConfig & {
+  updateBaseline?: { revision?: number; parameters: SharedWorkspaceConfig['parameters'] }
+}
 
 // 已导入的 PDK 信息（持久化存储）
 export interface ImportedPdk {

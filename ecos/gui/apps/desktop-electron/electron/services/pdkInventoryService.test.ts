@@ -45,6 +45,38 @@ describe('PdkInventoryService', () => {
       expect.objectContaining({ familyId: 'sg13g2', root: pdkRoot }),
     )
   })
+  it.each(['ics55-v1', 'ics55-v2'])(
+    'exposes resources resolved by ECC for %s',
+    async (version) => {
+      const root = await createTempDir()
+      const pdkRoot = join(root, 'ics55')
+      await mkdir(pdkRoot)
+      await writeFile(join(pdkRoot, 'VERSION'), version)
+      const defaults = {
+        techLef: join(pdkRoot, 'tech.lef'),
+        cellLefs: [join(pdkRoot, 'cells.lef')],
+        liberty: [join(pdkRoot, 'cells.lib')],
+      }
+      const service = new PdkInventoryService({
+        inventoryPath: join(root, 'inventory.json'),
+        managedRoot: join(root, 'managed'),
+        verifyIcs55Root: async (selectedRoot) => {
+          expect(selectedRoot).toBe(pdkRoot)
+          return defaults
+        },
+      })
+      const installation = await service.importInstallation({
+        displayName: 'ICS55',
+        familyId: 'ics55',
+        root: pdkRoot,
+      })
+      expect(installation).toMatchObject({
+        readiness: 'ready',
+        defaultResources: defaults,
+        version,
+      })
+    },
+  )
 
   it('represents a real directory and its symlink as one stable Installation', async () => {
     const root = await createTempDir()

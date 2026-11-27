@@ -115,6 +115,8 @@ function applyWorkspaceDesignDefaults(
       ...(originDef ? { origin_def: originDef } : {}),
       ...(originVerilog ? { origin_verilog: originVerilog } : {}),
       ...(rtlList.length ? { rtl_list: rtlList } : {}),
+      // The workspace binding points to generated per-corner Tcl. The project
+      // manifest's SDC is the source ECC consumes when creating a workspace.
       ...(stringValue(design.clockPort) ? { clock: stringValue(design.clockPort) } : {}),
       ...(stringValue(design.topModule)
         ? { top_module: stringValue(design.topModule) }

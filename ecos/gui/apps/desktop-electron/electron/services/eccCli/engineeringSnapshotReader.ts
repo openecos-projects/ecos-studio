@@ -1,10 +1,11 @@
 import { existsSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { EccPersistedEngineeringSnapshot, ReadSection } from '@ecos-studio/shared'
 import type {
+  EccPersistedEngineeringSnapshot,
   EccWorkspaceStepOutputArtifact,
   EccWorkspaceStepOutputsResult,
+  ReadSection,
 } from '@ecos-studio/shared'
 import {
   ENGINEERING_SNAPSHOT_MAX_BYTES,

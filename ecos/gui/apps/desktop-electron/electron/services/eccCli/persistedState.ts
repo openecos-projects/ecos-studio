@@ -7,6 +7,7 @@ import {
   type EccProjectManifest,
   type ProjectManifest,
 } from '@ecos-studio/shared'
+import { isWorkspaceStepDirectory } from '../workspaceStepDirectory'
 
 const PROJECT_MAX_BYTES = 4 * 1024 * 1024
 const FLOW_MAX_BYTES = 4 * 1024 * 1024
@@ -94,6 +95,8 @@ export function parseWorkspaceFlow(raw: unknown): PersistedFlow {
   const steps = raw.steps.map((value): PersistedFlowStep => {
     if (
       !isRecord(value) ||
+      ((raw.schema_version === 3 || value.directory !== undefined) &&
+        !isWorkspaceStepDirectory(value.directory)) ||
       typeof value.name !== 'string' ||
       !value.name ||
       value.name.length > 256 ||

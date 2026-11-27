@@ -59,6 +59,9 @@
             :loading="pluginStore.loading"
             :importing-ids="importingResourceIds"
             @action="handleCardAction"
+            @install-version="
+              (row, version) => pluginStore.installResource(row.resource.id, version)
+            "
             @homepage="handleHomepage"
             @clear-filters="clearFilters"
           />

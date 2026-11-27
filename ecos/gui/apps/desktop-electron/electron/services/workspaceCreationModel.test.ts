@@ -3,6 +3,19 @@ import { describe, expect, it } from 'vitest'
 import { buildWorkspaceCreationModel } from './workspaceCreationModel'
 
 describe('buildWorkspaceCreationModel', () => {
+  it('keeps the runtime range when the catalog leaves signoff to the PDK', () => {
+    const model = buildWorkspaceCreationModel(
+      {
+        parameterCatalog: [
+          { id: 'sta.max_parallel_corners', default: 1, range: [1, null] },
+          { id: 'sta.signoff', default: [] },
+        ],
+      },
+      [],
+    )
+    expect(model.parameters[0]?.definition.range).toEqual([1, null])
+  })
+
   it.each([
     { catalogMaximum: null, preset: undefined, explicit: undefined, expected: 13 },
     {

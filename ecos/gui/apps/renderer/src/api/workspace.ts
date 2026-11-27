@@ -196,9 +196,12 @@ export function backendWorkspaceOptions(
         : 'rtl2gds'
   // Mirrors ECC's applicability aliases (ecc/chipcompiler/engine/workspace_spec.py
   // _parameter_applies_to_flow); an empty step set means the full flow.
-  const normalizedSteps = new Set([...selectedSteps].map((step) => step.toLowerCase()))
+  const normalizedSteps = new Set(
+    [...selectedSteps].map((step) => step.toLowerCase().replace(/[_\s-]/g, '')),
+  )
   const parameterApplies = (aliases: string[]) =>
-    normalizedSteps.size === 0 || aliases.some((alias) => normalizedSteps.has(alias))
+    normalizedSteps.size === 0 ||
+    aliases.some((alias) => normalizedSteps.has(alias.replace(/[_\s-]/g, '')))
   const synthesisApplies = parameterApplies(['synthesis'])
   const floorplanApplies = parameterApplies([
     'pre_floorplan',

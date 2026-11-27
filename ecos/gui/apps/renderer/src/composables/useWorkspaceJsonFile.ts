@@ -1,8 +1,36 @@
 import { computed, onScopeDispose, ref, watch } from 'vue'
+import {
+  eccFlowStepKey,
+  normalizeLocalPath,
+  type WorkspaceResourceIndex,
+} from '@ecos-studio/shared'
+import { getWorkspaceResourceIndexApi } from '@/api/workspaceResources'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 import { getDesktopApi } from '@/platform/desktop'
+
+const inFlightIndexes = new Map<string, Promise<WorkspaceResourceIndex>>()
+
+export async function workspaceStepFeaturePath(
+  workspace: string,
+  stepId: string,
+): Promise<string | undefined> {
+  let pending = inFlightIndexes.get(workspace)
+  if (!pending) {
+    pending = getWorkspaceResourceIndexApi().finally(() =>
+      inFlightIndexes.delete(workspace),
+    )
+    inFlightIndexes.set(workspace, pending)
+  }
+  const index = await pending
+  if (normalizeLocalPath(index.root) !== normalizeLocalPath(workspace)) return
+  if (index.status === 'error') throw new Error(index.messages.join('\n'))
+  const feature = index.flow.steps.find(
+    (step) => eccFlowStepKey(step.name) === eccFlowStepKey(stepId),
+  )?.resources.feature.step
+  return feature?.exists ? feature.path : undefined
+}
 
 export function useWorkspaceJsonFile<T>(
   path: string,
@@ -43,7 +71,7 @@ export function useWorkspaceJsonFile<T>(
       flow?.status === 'ready' || flow?.status === 'partial'
         ? flow.data.steps.find((step) => step.name === stepId)?.directory
         : undefined
-    if (!projectPath || (artifactKind ? !artifact : stepId && !directory)) {
+    if (!projectPath || (artifactKind && !artifact)) {
       data.value = null
       loading.value = false
       error.value = null
@@ -71,9 +99,15 @@ export function useWorkspaceJsonFile<T>(
             text = result.artifact.data.text ?? null
         }
       } else {
-        text = await readOptionalProjectTextFile(stepId ? `${directory}/${path}` : path, {
-          projectPath,
-        })
+        const resolvedPath = directory
+          ? `${directory}/${path}`
+          : stepId
+            ? await workspaceStepFeaturePath(projectPath, stepId)
+            : path
+        if (version !== requestVersion) return
+        text = resolvedPath
+          ? await readOptionalProjectTextFile(resolvedPath, { projectPath })
+          : null
       }
       if (version !== requestVersion) return
       if (!text) {

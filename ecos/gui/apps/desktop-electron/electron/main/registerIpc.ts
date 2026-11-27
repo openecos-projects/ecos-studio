@@ -3108,7 +3108,11 @@ export function registerIpc(
         return await prepareWorkspaceCreatePreview(services, createRequest)
       },
       prepareCreate: async (createRequest) => {
-        await authorizeBackendProjectRootForCreate(services, createRequest)
+        // Updates already own a live workspace handle. Registering the parent
+        // here would redirect subsequent dashboard reads away from that workspace.
+        if (!isRecord(request) || request.command !== 'workspace.update') {
+          await authorizeBackendProjectRootForCreate(services, createRequest)
+        }
         return await prepareWorkspaceCreateBinding(services, createRequest)
       },
       runtime: services.eccRuntimeService,

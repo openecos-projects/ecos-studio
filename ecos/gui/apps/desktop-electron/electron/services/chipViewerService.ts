@@ -1018,12 +1018,9 @@ export class ChipViewerService {
     // command/result transport outside that published artifact tree.
     const editDirectory = join(workspaceStepDirectory, '.chip-viewer', 'layout-edit')
     const drcStatisPath = join(workspaceStepDirectory, 'analysis', 'drc_statis.csv')
-    const antennaDataPath = join(
-      workspaceDirectory,
-      'antennaCheck_ecc',
-      'feature',
-      'antennaCheck.step.json',
-    )
+    const antennaDataPath =
+      readStringInfo(layoutInfo, 'antenna') ||
+      join(workspaceDirectory, 'antennaCheck_ecc', 'feature', 'antennaCheck.step.json')
     const mapRootPath = join(workspaceStepDirectory, 'feature')
     const isDrcStep = isDrcWorkspaceStep(step, stepLabel, workspaceStepDirectory)
     const lvsDataPath = join(workspaceStepDirectory, 'feature', 'lvs.step.json')
@@ -1032,7 +1029,10 @@ export class ChipViewerService {
     const isStaStep = isStaWorkspaceStep(step, stepLabel, workspaceStepDirectory)
 
     return {
-      antennaDataPath: this.fileExists(antennaDataPath) ? antennaDataPath : undefined,
+      antennaDataPath:
+        isPathInside(projectPath, antennaDataPath) && this.fileExists(antennaDataPath)
+          ? antennaDataPath
+          : undefined,
       dbPath,
       defPath,
       drcStatisPath:

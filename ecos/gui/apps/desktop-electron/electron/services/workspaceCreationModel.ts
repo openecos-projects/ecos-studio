@@ -83,10 +83,14 @@ function applyStaCornerLimit(model: WorkspaceCreationModel): void {
   const parallel = model.parameters.find(
     (parameter) => parameter.definition.id === 'sta.max_parallel_corners',
   )
-  const signoff = model.parameters.find(
+  const signoffParameter = model.parameters.find(
     (parameter) => parameter.definition.id === 'sta.signoff',
-  )?.value
+  )
+  const signoff = signoffParameter?.value
   if (!parallel || !Array.isArray(signoff)) return
+  // ECC resolves PDK defaults when it creates the workspace. An empty catalog
+  // default does not tell us how many corners the selected PDK will provide.
+  if (signoff.length === 0 && signoffParameter?.source === 'catalogDefault') return
   const cornerCount = signoff
     .filter(isRecord)
     .reduce(

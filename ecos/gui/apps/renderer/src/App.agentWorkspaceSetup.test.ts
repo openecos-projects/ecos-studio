@@ -98,7 +98,7 @@ describe('agent workspace creation', () => {
 })
 
 describe('workspace update', () => {
-  it('opens the workspace wizard for backend workspaces instead of refreshing config in place', () => {
+  it('opens the creation wizard with the active workspace snapshot for backend updates', () => {
     const start = source.indexOf('async function openWorkspaceReconfigureWizard')
     const end = source.indexOf(
       'async function buildReconfigureWizardInitialConfig',
@@ -106,13 +106,14 @@ describe('workspace update', () => {
     )
     const updateSource = source.slice(start, end)
 
-    expect(updateSource).not.toContain("=== 'backend'")
+    expect(updateSource).toContain('getWorkspaceRuntimeSnapshotApi(session.workspaceId)')
+    expect(updateSource).toContain('workspaceReconfigureInitialConfig(')
     expect(updateSource).not.toContain('refreshConfigApi')
     expect(updateSource).toContain(
-      'const initialConfig = await buildReconfigureWizardInitialConfig(',
+      'initialConfig = await buildReconfigureWizardInitialConfig(',
     )
     expect(updateSource).toMatch(
-      /openWorkspaceWizard\(\{\s*initialConfig,\s*reconfigurePath: normalizedWorkspacePath,\s*\}\)/,
+      /openWorkspaceWizard\(\{\s*initialConfig,\s*reconfigurePath: normalizedWorkspacePath,?\s*\}\)/,
     )
     const openStart = source.indexOf('function openWorkspaceWizard(')
     const openWizard = source.slice(openStart, source.indexOf('\nwatch(', openStart))

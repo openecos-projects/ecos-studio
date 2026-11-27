@@ -602,6 +602,7 @@ export {
   flowStepDefinition,
   flowStepLabel,
   flowStepRegistry,
+  eccFlowStepKey,
   isLayoutFlowStep,
   isObsoleteFlowStepName,
   normalizeFlowStepName,

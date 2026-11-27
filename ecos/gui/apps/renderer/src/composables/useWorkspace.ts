@@ -1158,14 +1158,35 @@ export function useWorkspace() {
         runtimeBackendSubtitle.value = 'Committing the revised engineering specification'
         runtimeBackendConnecting.value = true
         const expectedWorkspaceRevision =
+          config?.updateBaseline?.revision ??
           workspaceLifecycle.session.value.workspaceRevision
         if (!Number.isInteger(expectedWorkspaceRevision)) {
           throw new Error('The current Workspace revision is unavailable.')
         }
         const currentWorkspaceHandle = workspaceLifecycle.session.value.workspaceId
         const parameterDisplayIndex = await loadWorkspaceParameterDisplayIndex()
+        const draft = backendWorkspaceOptions(
+          config!,
+          selectedPath,
+          parameterDisplayIndex,
+        )
+        if (config?.updateBaseline) {
+          // Update retains its PDK; the manual resource lists in the wizard are for display.
+          delete draft.eccPdkConfig
+          const before = backendWorkspaceOptions(
+            { ...config, parameters: config.updateBaseline.parameters },
+            selectedPath,
+            parameterDisplayIndex,
+          ).workspaceSpec.parameters as Record<string, unknown>
+          const after = draft.workspaceSpec.parameters as Record<string, unknown>
+          draft.workspaceSpec.parameters = Object.fromEntries(
+            Object.entries(after).filter(
+              ([key, value]) => JSON.stringify(before[key]) !== JSON.stringify(value),
+            ),
+          )
+        }
         const updated = await updateWorkspaceApi(
-          backendWorkspaceOptions(config!, selectedPath, parameterDisplayIndex),
+          draft,
           currentWorkspaceHandle,
           expectedWorkspaceRevision!,
           { retainBackup: config!.keepReplacementBackup === true },
@@ -1442,7 +1463,9 @@ export function useWorkspace() {
       console.error('New project error:', error)
       showToast({
         severity: 'error',
-        summary: 'Failed to Create Project',
+        summary: config?.replaceExistingWorkspace
+          ? 'Failed to Update Workspace'
+          : 'Failed to Create Project',
         detail: String(error),
       })
       return false
