@@ -187,6 +187,31 @@ def test_phase8_converts_the_archived_gcd_template_at_its_frozen_baseline(tmp_pa
     assert runner.file_sha256(sdc) == archived_hash
 
 
+@pytest.mark.parametrize(
+    "content",
+    [
+        "",
+        "# comment only\n",
+        'primary_clocks = "create_clock -period 10 [get_ports clk]"\n',
+        (
+            'primary_clocks = "# create_clock -period 10 [get_ports clk]"\n'
+            'generated_clocks = ""\n'
+            'clock_groups = ""\n'
+            'io_constraints = ""\n'
+            'timing_exceptions = ""\n'
+        ),
+    ],
+)
+def test_phase8_timing_input_rejects_invalid_toml_templates(tmp_path, content) -> None:
+    runner = _load_experiment_execution()
+    sdc = tmp_path / "bad.sdc"
+    sdc.write_text(content, encoding="utf-8")
+    design = runner.DesignSpec("gcd", "gcd", "clk", tmp_path / "filelist.f", (), sdc)
+
+    with pytest.raises(ValueError, match="no valid primary clock"):
+        runner._timing_input(design, 100)
+
+
 def test_phase8_runner_resumes_created_unstarted_workspace(
     tmp_path, monkeypatch
 ) -> None:

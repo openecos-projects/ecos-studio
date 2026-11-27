@@ -58,6 +58,8 @@ def test_every_knob_targets_a_writable_workspace_file() -> None:
         assert spec.write_target.file in WRITABLE_FILES, knob_id
         if spec.read_target.file == "config/dreamplace_ecc.json":
             assert spec.write_target.file == "home/params.toml", knob_id
+        else:
+            assert spec.read_target.file in WRITABLE_FILES, knob_id
         assert spec.write_target.json_path, knob_id
 
 
