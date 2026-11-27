@@ -157,7 +157,7 @@ it.runIf(Boolean(fixture)).each(['placement', 'routing'])(
           { timeout: 75_000 },
         )
         .toBe('Ongoing')
-      await launched.page.evaluate(
+      const closed = await launched.page.evaluate(
         (workspaceHandle) =>
           window.ecosDesktop.runtime.workspace.close({
             designTool: 'backend',
@@ -165,9 +165,9 @@ it.runIf(Boolean(fixture)).each(['placement', 'routing'])(
           }),
         handle,
       )
+      expect(closed).toMatchObject({ ok: true, retained: true })
       const reopened = await open()
-      expect(reopened.workspaceHandle).not.toBe(handle)
-      handle = reopened.workspaceHandle
+      expect(reopened.workspaceHandle).toBe(handle)
       const routingRequest = { workspaceHandle: handle, operationId: routing.operationId }
       const cancelled = await launched.page.evaluate(
         (payload) =>
@@ -185,6 +185,7 @@ it.runIf(Boolean(fixture)).each(['placement', 'routing'])(
       await launched.close()
       launched = await launchE2EApp(join(out, 'restarted'))
       const restarted = await open()
+      expect(restarted.workspaceHandle).not.toBe(handle)
       handle = restarted.workspaceHandle
       await expect(wait(routing.operationId)).resolves.toMatchObject({
         state: 'cancelled',
