@@ -916,6 +916,7 @@ export class EccCliRuntimeService {
     directory: string,
     step: string,
   ): Promise<EccWorkspaceStepConfigurationReadResult> {
+    await this.ensureContract()
     const snapshot = await readPersistedEngineeringSnapshot(directory)
     const project = await discoverProject(directory)
     if (!project) throw new Error('Workspace project could not be discovered.')
@@ -2072,6 +2073,7 @@ ${message}`)
     workspaceId: string,
     runId: string,
   ): Promise<boolean> {
+    await this.ensureContract()
     try {
       await this.cli.run([
         'process',
