@@ -199,40 +199,39 @@ function requestFromStep(): void {
 
 async function confirmRerun(): Promise<void> {
   rerunConfirmationVisible.value = false
-  if (runFromStep.value && props.step) {
-    if (flowRunControlDisabled.value) return
-    setRunStepOngoingByPath(props.step)
-    await runAllFlow({ fromStep: props.step })
-    return
-  }
-  await executeRun(true)
+  await executeRun(true, runFromStep.value ? props.step : undefined)
 }
 
-async function executeRun(rerun: boolean): Promise<void> {
+async function executeRun(rerun: boolean, fromStep?: string): Promise<void> {
   if (flowRunControlDisabled.value) return
 
-  if (!(await ensureApiReady())) {
-    await refreshFlowStages()
-    return
-  }
-
-  if (rerun) {
-    preparingRerun.value = true
-    try {
-      if (!isHomeStage.value && !(await canRerunCurrentStep())) {
+  preparingRerun.value = true
+  try {
+    if (!(await ensureApiReady())) {
+      await refreshFlowStages()
+      return
+    }
+    if (rerun) {
+      try {
+        if (!isHomeStage.value && !(await canRerunCurrentStep())) return
+      } catch (error) {
+        showToast({
+          severity: 'error',
+          summary: 'Unable to Prepare Rerun',
+          detail: error instanceof Error ? error.message : String(error),
+          life: 15000,
+        })
         return
       }
-    } catch (error) {
-      showToast({
-        severity: 'error',
-        summary: 'Unable to Prepare Rerun',
-        detail: error instanceof Error ? error.message : String(error),
-        life: 15000,
-      })
-      return
-    } finally {
-      preparingRerun.value = false
     }
+  } finally {
+    preparingRerun.value = false
+  }
+
+  if (fromStep) {
+    setRunStepOngoingByPath(fromStep)
+    await runAllFlow({ fromStep, rerun })
+    return
   }
 
   if (isHomeStage.value) {
