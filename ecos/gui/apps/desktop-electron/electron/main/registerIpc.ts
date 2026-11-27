@@ -1875,7 +1875,7 @@ export function registerIpc(
     ) {
       throw new Error('Title bar colors must be six-digit hexadecimal colors')
     }
-    if (process.platform === 'linux' || process.platform === 'win32') {
+    if (process.platform === 'win32') {
       getEventWindow(event).setTitleBarOverlay({ color, symbolColor })
     }
   })

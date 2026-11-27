@@ -2774,12 +2774,14 @@ describe('registerIpc', () => {
     })
     expect(fromWebContents).not.toHaveBeenCalled()
     await expect(setColors?.(event, '#18181c', '#a1a1aa')).resolves.toBeUndefined()
-    if (process.platform === 'linux' || process.platform === 'win32') {
+    if (process.platform === 'win32') {
       expect(fromWebContents).toHaveBeenCalledExactlyOnceWith(event.sender)
       expect(windowDouble.setTitleBarOverlay).toHaveBeenCalledExactlyOnceWith({
         color: '#18181c',
         symbolColor: '#a1a1aa',
       })
+    } else {
+      expect(windowDouble.setTitleBarOverlay).not.toHaveBeenCalled()
     }
   })
 
