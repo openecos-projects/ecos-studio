@@ -484,6 +484,9 @@ export class EccCliRuntimeService {
       throw new Error('New Workspaces must be direct children of the Project root.')
     }
     const initArgs = projectInitArgs(request, requestedProjectRoot)
+    // Validate the workspace transaction before initialization touches the project.
+    if (request.deriveFrom) workspaceCreateCommands(request, requestedProjectRoot)
+    else workspaceDraftArgs(request, requestedProjectRoot)
     if (initArgs) await this.cli.run(initArgs)
     const projectRoot = await realpath(requestedProjectRoot)
     await stat(join(projectRoot, 'project.json')).catch((error) => {
