@@ -2349,7 +2349,12 @@ function persistedRunSnapshot(
               code: 'run_interrupted',
               message: 'ECC execution was interrupted. See the run log.',
             }
-          : null),
+          : result.state === 'unknown'
+            ? {
+                code: 'run_outcome_unknown',
+                message: UNKNOWN_RUN_RESULT_MESSAGE,
+              }
+            : null),
   }
 }
 
