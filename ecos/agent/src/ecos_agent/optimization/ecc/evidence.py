@@ -19,7 +19,9 @@ from ecos_agent.optimization.parameters.contracts import MaterializationRef, Par
 from ecos_agent.workspace.parameters import PARAMS_TOML
 
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
-_TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
+CANDIDATE_TERMINAL_STATES = frozenset(
+    {"succeeded", "failed", "cancelled", "interrupted", "unknown"}
+)
 
 
 class OptimizationEccAdapterError(RuntimeError):
@@ -116,7 +118,7 @@ def _validate_candidate_manifest(
         "execution_scope": CANDIDATE_EXECUTION_SCOPE,
     }
     allowed_terminal_states = (
-        _TERMINAL_STATES if terminal_state == "cancelled" else {terminal_state}
+        CANDIDATE_TERMINAL_STATES if terminal_state == "cancelled" else {terminal_state}
     )
     if any(manifest.get(key) != value for key, value in expected.items()) or manifest.get(
         "terminal_state"

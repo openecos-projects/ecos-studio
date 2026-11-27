@@ -25,6 +25,7 @@ from ecos_agent.optimization.execution import (
     candidate_target_step,
 )
 from ecos_agent.optimization.ecc.evidence import (
+    CANDIDATE_TERMINAL_STATES as _TERMINAL_STATES,
     OptimizationEccAdapterError,
     validate_candidate_artifacts,
 )
@@ -51,7 +52,8 @@ _ALLOWED_METHODS = frozenset(
         "operation.ack_step_rendered",
     }
 )
-_TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled", "interrupted", "unknown"})
+
+
 class EccRpcTransport(Protocol):
     def call(self, method: str, params: dict[str, object]) -> dict[str, object]: ...
 
@@ -369,7 +371,7 @@ class EccCandidateRerunAdapter:
         }
         if all(value is None for value in values.values()):
             return None
-        if response.get("state") in {"failed", "cancelled"} and (
+        if response.get("state") in _TERMINAL_STATES - {"succeeded"} and (
             values["candidate_manifest_ref"] is None
             and values["candidate_manifest_sha256"] is None
         ):

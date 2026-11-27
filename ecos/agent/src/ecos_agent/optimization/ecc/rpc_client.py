@@ -13,7 +13,10 @@ import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from ecos_agent.optimization.ecc.evidence import OptimizationEccAdapterError
+from ecos_agent.optimization.ecc.evidence import (
+    CANDIDATE_TERMINAL_STATES,
+    OptimizationEccAdapterError,
+)
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SAFE_RPC_ERROR_DETAIL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .:_-]{0,255}$")
@@ -30,7 +33,6 @@ _ALLOWED_METHODS = frozenset(
         "operation.ack_step_rendered",
     }
 )
-_TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
 _FORWARDED_STEP_EVENTS = frozenset(
     {"step.started", "step.completed", "operation.rerun_prepared"}
 )
@@ -170,7 +172,7 @@ class EccContentLengthRpcClient:
             else:
                 if poll_callback is not None:
                     poll_callback(status)
-                if status.get("state") in _TERMINAL_STATES:
+                if status.get("state") in CANDIDATE_TERMINAL_STATES:
                     return status
             try:
                 event = self._events.get(
@@ -395,6 +397,8 @@ def _terminal_event(
         "operation.completed": "succeeded",
         "operation.failed": "failed",
         "operation.cancelled": "cancelled",
+        "operation.interrupted": "interrupted",
+        "operation.unknown": "unknown",
     }
     state = states.get(event.get("type"))
     if state is None:
