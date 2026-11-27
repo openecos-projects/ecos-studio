@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -9,6 +10,7 @@ import shutil
 import statistics
 import subprocess
 import time
+import tomllib
 from pathlib import Path
 from typing import NamedTuple
 
@@ -32,6 +34,11 @@ from ecos_agent.workspace.parameters import (
 )
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
+_LEGACY_CLOCK = re.compile(
+    r"create_clock\s+(?:-name\s+(?P<name>[\w.-]+)\s+)?"
+    r"-period\s+(?P<period>[\d.eE+-]+)\s+"
+    r"(?:\[get_ports\s+(?P<port>[\w.-]+)\]|(?P<bare_port>[\w.-]+))"
+)
 # Adaptive replay protocol: two replays establish epsilon when bitwise
 # identical; the third only runs when drift appears and needs bounding.
 _DEFAULT_REPLAYS = 3
@@ -176,6 +183,49 @@ def _validate_baseline(value: object) -> None:
         raise ValueError("Phase 8 baseline values are invalid")
 
 
+def _timing_input(
+    design: DesignSpec, frequency_mhz: float
+) -> tuple[str, bytes]:
+    source = design.sdc.read_bytes()
+    text = source.decode("utf-8")
+    try:
+        tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        pass
+    else:
+        return design.sdc.name, source
+
+    commands = [
+        line.strip() for line in text.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    clock = _LEGACY_CLOCK.fullmatch(commands[0]) if len(commands) == 1 else None
+    if clock is None:
+        raise ValueError(
+            f"Phase 8 timing input {design.sdc}: convert this SDC to ECC's five-field template"
+        )
+    port = clock["port"] or clock["bare_port"]
+    try:
+        period = float(clock["period"])
+    except ValueError as exc:
+        raise ValueError(f"Phase 8 SDC clock period is invalid: {design.sdc}") from exc
+    if port != design.clock_name or period <= 0 or not math.isclose(
+        1000 / period, frequency_mhz, rel_tol=1e-12
+    ):
+        raise ValueError(f"Phase 8 SDC clock does not match the frozen baseline: {design.sdc}")
+
+    # ECC copies this file to origin/. Bind that copy to the original manifest input.
+    primary = f"create_clock -name {clock['name'] or port} -period {clock['period']} [get_ports {port}]"
+    return f"{design.sdc.name}.timing.toml", (
+        f"# Source SDC sha256:{hashlib.sha256(source).hexdigest()}\n"
+        f"primary_clocks = {json.dumps(primary)}\n"
+        'generated_clocks = ""\n'
+        'clock_groups = ""\n'
+        'io_constraints = ""\n'
+        'timing_exceptions = ""\n'
+    ).encode("utf-8")
+
+
 def _ensure_workspace(
     manifest: ExperimentManifest,
     design: DesignSpec,
@@ -194,13 +244,18 @@ def _ensure_workspace(
     else:
         if workspace.exists():
             raise ValueError("incomplete Phase 8 workspace already exists")
+        timing_name, timing_content = _timing_input(design, manifest.baseline["frequency_mhz"])
         if not (project / "project.json").is_file():
             _run_ecc(["init", str(project), "--design-name", design.design_id], timeout)
+        timing_file = design.sdc
+        if timing_name != design.sdc.name:
+            timing_file = project / timing_name
+            timing_file.write_bytes(timing_content)
         settings = {
             "design.rtl": json.dumps([str(design.filelist.resolve())]),
             "design.top": design.top_module, "design.clock_port": design.clock_name,
             "design.frequency_mhz": manifest.baseline["frequency_mhz"],
-            "design.sdc": str(design.sdc.resolve()),
+            "design.sdc": str(timing_file.resolve()),
             "pdk.name": manifest.pdk_name, "pdk.root": str(manifest.pdk_root.resolve()),
             "flow.preset": "rtl2gds",
         }
@@ -247,13 +302,20 @@ def _verify_workspace_inputs(
     manifest: ExperimentManifest, design: DesignSpec, workspace: Path
 ) -> None:
     filelist = _workspace_file(workspace, Path("origin") / design.filelist.name)
-    sdc = _workspace_file(workspace, Path("origin") / design.sdc.name)
     refs = _filelist_refs(filelist)
     rtl = tuple(_workspace_file(workspace, Path("origin") / ref) for ref in refs)
     source_refs = _filelist_refs(design.filelist)
     if file_sha256(filelist) != file_sha256(design.filelist):
         raise ValueError("Phase 8 workspace filelist does not match")
-    if file_sha256(sdc) != file_sha256(design.sdc):
+    # Historical workspaces have the raw manifest SDC. New ones freeze the
+    # timing input consumed by ECC, including the source hash after conversion.
+    original = Path("origin") / design.sdc.name
+    if (workspace / original).exists():
+        matches = file_sha256(_workspace_file(workspace, original)) == file_sha256(design.sdc)
+    else:
+        name, content = _timing_input(design, manifest.baseline["frequency_mhz"])
+        matches = _workspace_file(workspace, Path("origin") / name).read_bytes() == content
+    if not matches:
         raise ValueError("Phase 8 workspace SDC does not match")
     actual_bundle = canonical_sha256(
         {ref: file_sha256(path) for ref, path in zip(refs, rtl, strict=True)}

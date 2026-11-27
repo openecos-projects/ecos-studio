@@ -1,4 +1,5 @@
 import json
+import tomllib
 from pathlib import Path
 
 from ecos_agent.workspace.contracts import GUI_WORKSPACE_FLOW_STEPS
@@ -98,7 +99,7 @@ def test_phase8_runner_uses_step_scoped_cli_for_canonical_flow(tmp_path, monkeyp
         encoding="utf-8",
     )
     baseline = {
-        "frequency_mhz": 50,
+        "frequency_mhz": 100,
         "max_fanout": 32,
         "core_utilization": 0.4,
         "core_aspect_ratio": 1.0,
@@ -118,8 +119,15 @@ def test_phase8_runner_uses_step_scoped_cli_for_canonical_flow(tmp_path, monkeyp
     )
     manifest = runner.ExperimentManifest(HASH, (design,), baseline, "ics55", tech.parents[2])
     calls = []
+    design.sdc.write_text("create_clock -period 10 clk\n", encoding="utf-8")
+    source_hash = runner.file_sha256(design.sdc)
 
-    monkeypatch.setattr(runner, "_run_ecc", lambda args, timeout: calls.append(args))
+    def run_ecc(args, timeout):
+        calls.append(args)
+        if args[0] == "init":
+            Path(args[1]).mkdir()
+
+    monkeypatch.setattr(runner, "_run_ecc", run_ecc)
     monkeypatch.setattr(runner, "_verify_workspace_binding", lambda *_args: None)
     monkeypatch.setattr(runner, "_verify_workspace_inputs", lambda *_args: None)
     monkeypatch.setattr(runner, "build_terminal_observation", lambda _workspace: _terminal_observation())
@@ -128,6 +136,27 @@ def test_phase8_runner_uses_step_scoped_cli_for_canonical_flow(tmp_path, monkeyp
 
     assert [call[0] for call in calls] == ["init", "project", "run"]
     assert f"placement:place.stop_overflow={baseline['target_overflow']}" in calls[2]
+    timing = Path(next(arg.split("=", 1)[1] for arg in calls[1] if arg.startswith("design.sdc=")))
+    converted = timing.read_text(encoding="utf-8")
+    assert source_hash in converted
+    assert runner.file_sha256(design.sdc) == source_hash
+    assert tomllib.loads(converted) == {
+        "primary_clocks": "create_clock -name clk -period 10 [get_ports clk]",
+        "generated_clocks": "",
+        "clock_groups": "",
+        "io_constraints": "",
+        "timing_exceptions": "",
+    }
+
+
+def test_phase8_does_not_convert_a_clock_at_a_different_baseline_frequency(tmp_path) -> None:
+    runner = _load_experiment_execution()
+    sdc = tmp_path / "design.sdc"
+    sdc.write_text("create_clock -period 10 clk\n", encoding="utf-8")
+    design = runner.DesignSpec("design", "top", "clk", tmp_path / "filelist.f", (), sdc)
+
+    with pytest.raises(ValueError, match="does not match the frozen baseline"):
+        runner._timing_input(design, 50)
 
 
 def test_phase8_runner_resumes_created_unstarted_workspace(
