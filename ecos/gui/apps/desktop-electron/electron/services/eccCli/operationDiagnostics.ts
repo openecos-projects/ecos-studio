@@ -4,6 +4,7 @@ import type {
   EccBackgroundOperationLogResult,
   EccRuntimeOperation,
 } from '@ecos-studio/shared'
+import { readFileRange } from '../readFileRange'
 import type { readOperationLog } from './operationLog'
 
 export async function buildOperationDiagnostics(
@@ -59,10 +60,9 @@ async function desktopRunMessages(path: string, runKey: string): Promise<string>
     const stat = await file.stat()
     if (!stat.isFile()) return ''
     const { size } = stat
-    const buffer = Buffer.alloc(Math.min(size, 128 * 1024))
-    const { bytesRead } = await file.read(buffer, 0, buffer.length, size - buffer.length)
+    const length = Math.min(size, 128 * 1024)
+    const buffer = await readFileRange(file, length, size - length)
     return buffer
-      .subarray(0, bytesRead)
       .toString('utf8')
       .split('\n')
       .filter((line) => line.includes(`[runtime] ECC run ${runKey} ended in `))
