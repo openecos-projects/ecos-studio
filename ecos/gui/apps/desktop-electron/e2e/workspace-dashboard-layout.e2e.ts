@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { basename, join } from 'node:path'
 import { stripVTControlCharacters } from 'node:util'
 import type { Page } from 'playwright-core'
 import { shellQuote } from '../electron/services/cliInstallerArtifacts'
@@ -586,6 +586,42 @@ describe('workspace dashboard layout', () => {
     await shot('bounded-cli-step-log')
     await log.getByRole('button', { name: 'Close', exact: true }).click()
   }, 180_000)
+
+  it('shows a saved run with only an endpoint in history and diagnostics', async () => {
+    const { page } = launched!
+    const operationId = randomUUID()
+    const logs = join(workspace.workspaceDir, 'log')
+    const finishedAt = Math.floor(Date.now() / 1000)
+    await mkdir(logs, { recursive: true })
+    await writeFile(
+      join(logs, operationId + '.run.json'),
+      JSON.stringify({
+        schema_version: 1,
+        run_id: operationId,
+        workspace_id: basename(workspace.workspaceDir),
+        started_at: finishedAt - 1,
+        finished_at: finishedAt,
+        state: 'succeeded',
+        through_step: 'synthesis',
+      }),
+    )
+    await writeFile(join(logs, operationId + '.log'), 'Saved ECC run\n')
+    await page.getByRole('button', { name: 'Run History' }).click()
+    const history = page.getByRole('dialog', { name: 'Run history' })
+    await expect
+      .poll(() => history.getByRole('row').filter({ hasText: operationId }).innerText())
+      .toContain('Run through Synthesis')
+    const report = await page.evaluate(
+      (request) => window.ecosDesktop.ecc.runtime.operationLog(request),
+      {
+        workspaceHandle: workspace.workspaceHandle,
+        operationId,
+        includeDiagnostics: true,
+      },
+    )
+    expect(report.diagnostics).toContain('Scope: start → synthesis')
+    await history.getByRole('button', { name: 'Close run history' }).click()
+  })
 
   it('keeps diagnostics separate when two workspaces reuse the same run ID', async () => {
     const { page } = launched!
