@@ -305,8 +305,13 @@ export function useDesignReportExport({
           } else if (entry.kind === 'power_report') {
             const report = await readWorkspaceText(entry.reference)
             if (report) {
+              const parsed = Object.fromEntries(
+                Object.entries(parsePowerRpt(report)).filter(
+                  ([, value]) => value !== null,
+                ),
+              )
               stepMetrics[step] = {
-                ...parsePowerRpt(report),
+                ...parsed,
                 ...(stepMetrics[step] as object),
               }
             }
