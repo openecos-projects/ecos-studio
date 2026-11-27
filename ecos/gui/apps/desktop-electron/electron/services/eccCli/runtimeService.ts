@@ -377,6 +377,7 @@ export class EccCliRuntimeService {
     workspaceId: string,
   ): Promise<unknown> {
     requireWorkspaceId(workspaceId)
+    await this.ensureContract()
     try {
       const { stdout } = await this.cli.run(
         ['flow', 'workspace', '--project', projectRoot, '--json', '--', workspaceId],
