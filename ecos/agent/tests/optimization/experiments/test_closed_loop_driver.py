@@ -220,3 +220,17 @@ def test_power_comparison_matches_recorded_measurement(candidate_id, candidate_u
         True if expected_delta is not None else None
     )
     assert rows["power_analysis_dynamic_uw"]["delta"] is None
+
+
+def test_power_comparison_skips_legacy_traces_without_provenance() -> None:
+    trace = CandidateTrace(
+        design_id="gcd", candidate_id="candidate", started=True, terminal_success=True,
+        terminal_utility=-4.0, dynamic_power=1.5,
+    )
+    comparison = build_metric_comparison(
+        _terminal_observation(), (trace,), {"power_analysis_dynamic_uw": 0.1},
+    )
+    row = comparison["metrics"]["power_analysis_dynamic_uw"]
+    assert row["reference"] == 2.5
+    assert row["delta"] is None
+    assert row["beyond_noise"] is None

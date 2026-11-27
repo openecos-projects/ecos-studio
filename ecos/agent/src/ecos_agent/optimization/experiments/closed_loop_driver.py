@@ -371,9 +371,6 @@ def build_metric_comparison(
                     candidate["corner"] == baseline.corner and candidate["unit"] == baseline.unit
                 ):
                     best_value = getattr(best, column)
-            elif measured is None and best is not None and metric_id == current_id:
-                # Earlier traces with no metadata used only the current power metrics.
-                best_value = getattr(best, column)
             rows[metric_id] = _comparison_row(
                 float(baseline.value) if baseline is not None else None,
                 best_value,
