@@ -131,7 +131,7 @@ def build_stage_observation(
     flow = _read_json(root, "home/flow.json")
     _require_successful_stage(flow, canonical_stage)
     parameters_ref, _parameters = read_workspace_parameters(root)
-    directories = step_directories(flow)
+    directories = _observation_step_directories(flow)
     directory = directories[canonical_stage]
     metrics_path = f"{directory}/analysis/qor_metrics.json"
     metrics_payload = _read_json(root, metrics_path)
@@ -233,7 +233,7 @@ def build_terminal_observation(workspace_root: Path) -> TerminalObservation:
     """Build the fixed terminal optimization observation without running ECC."""
     root = _workspace_root(workspace_root)
     flow = _read_json(root, "home/flow.json")
-    directories = step_directories(flow)
+    directories = _observation_step_directories(flow)
 
     def artifact_ref(key: str) -> str:
         stage, _, suffix = key.partition("/")
@@ -280,7 +280,7 @@ def build_terminal_observation(workspace_root: Path) -> TerminalObservation:
     )
     power_metrics = ()
     power_ref = None
-    if any(step["name"] == "power_analysis" and step["state"] == "Success" for step in flow["steps"]):
+    if any(step["name"] == "power_analysis" and step.get("state") == "Success" for step in flow["steps"]):
         reference = f'{directories["power_analysis"]}/feature/power_summary.json'
         if _is_file(root, reference):
             power_ref = reference
@@ -362,16 +362,21 @@ def build_candidate_terminal_observation(
         or payload.get("candidate_root_ref") != evidence.candidate_root_ref
     ):
         raise OptimizationObservationError("candidate workspace manifest is invalid")
-    if file_sha256(candidate_root / "home/flow.json") != payload.get("candidate_flow_sha256"):
+    candidate_flow = _safe_file(candidate_root, "home/flow.json")
+    if file_sha256(candidate_flow) != payload.get("candidate_flow_sha256"):
         raise OptimizationObservationError("candidate flow does not match its manifest")
     artifacts = payload.get("artifacts", {})
     if not isinstance(artifacts, dict):
         raise OptimizationObservationError("candidate artifact manifest is invalid")
     _parameters_ref, parameters = read_workspace_parameters(candidate_root)
+    flow = _read_json(candidate_root, "home/flow.json")
+    directories = _observation_step_directories(flow)
+    if "harden" not in directories:
+        raise OptimizationObservationError("candidate flow is missing the Harden step")
     harden_refs = dict(
         zip(
             ("harden_gds", "harden_lef", "harden_lib"),
-            harden_output_paths(parameters, step_directories(_read_json(candidate_root, "home/flow.json"))["harden"]),
+            harden_output_paths(parameters, directories["harden"]),
             strict=True,
         )
     )
@@ -699,6 +704,13 @@ def _workspace_path(root: Path, relative_path: str) -> Path:
         if path.is_symlink():
             raise OptimizationObservationError("workspace evidence path is unsafe or unavailable")
     return path
+
+
+def _observation_step_directories(flow: object) -> dict[str, str]:
+    try:
+        return step_directories(flow)
+    except ValueError as exc:
+        raise OptimizationObservationError("workspace flow is invalid") from exc
 
 
 def _require_successful_stage(flow: dict[str, Any], stage: ECCStepName) -> None:

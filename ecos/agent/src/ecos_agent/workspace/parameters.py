@@ -39,7 +39,12 @@ def read_workspace_dreamplace_seed(root: Path) -> int:
     Candidate reruns must hold this value fixed; substituting an episode-level
     seed silently changes a variable the baseline never held.
     """
-    config = f"{step_directory(root, 'placement')}/{DREAMPLACE_CONFIG}"
+    try:
+        config = f"{step_directory(root, 'placement')}/{DREAMPLACE_CONFIG}"
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise WorkspaceParametersError(
+            "workspace DREAMPlace step directory is unavailable"
+        ) from exc
     if not _path_present(root, config):
         raise WorkspaceParametersError(
             "workspace DREAMPlace seed evidence is unavailable"
