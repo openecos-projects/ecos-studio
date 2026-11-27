@@ -97,6 +97,7 @@ export function useWorkspaceJsonFile<T>(
       () => currentProject.value?.path ?? '',
       revision,
       () => session.projection.data?.artifacts,
+      () => (artifactKind ? undefined : session.projection.data?.flow),
     ],
     () => void load(),
     {
