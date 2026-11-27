@@ -485,18 +485,28 @@ const stepConfigDialogRef = ref<{ hasUnsavedChanges: boolean } | null>(null)
 const workspaceWizardInitialConfig = ref<WorkspaceWizardInitialConfig | undefined>()
 const workspaceWizardCreating = ref(false)
 const workspaceWizardError = ref('')
+let workspaceWizardSessionToken = 0
 const reconfigureWorkspacePath = ref('')
 const pendingWorkspaceUpdateConfig = ref<WorkspaceConfig | null>(null)
 const pendingWorkspaceWizardRequest = useWorkspaceWizardRequest()
+
+function openWorkspaceWizard(options?: {
+  initialConfig?: WorkspaceWizardInitialConfig
+  reconfigurePath?: string
+}): void {
+  workspaceWizardSessionToken += 1
+  workspaceWizardError.value = ''
+  workspaceWizardInitialConfig.value = options?.initialConfig
+  reconfigureWorkspacePath.value = options?.reconfigurePath ?? ''
+  showNewProjectWizard.value = true
+}
 
 watch(
   pendingWorkspaceWizardRequest,
   (request) => {
     if (!request) return
     consumeWorkspaceWizardRequest()
-    workspaceWizardInitialConfig.value = request.initialConfig
-    reconfigureWorkspacePath.value = ''
-    showNewProjectWizard.value = true
+    openWorkspaceWizard({ initialConfig: request.initialConfig })
   },
   { flush: 'sync' },
 )
@@ -1096,8 +1106,7 @@ async function driveQuickStartWorkspaceWizard(
   })
   showNewProjectWizard.value = false
   await nextTick()
-  workspaceWizardInitialConfig.value = { ...config }
-  showNewProjectWizard.value = true
+  openWorkspaceWizard({ initialConfig: { ...config } })
   try {
     for (let step = 1; step < 7; step += 1) {
       await clickQuickStartWizardButton('Continue', step, signal)
@@ -1402,6 +1411,7 @@ function toggleTerminalMaximized() {
 }
 
 function resetWorkspaceWizard() {
+  workspaceWizardSessionToken += 1
   workspaceWizardError.value = ''
   showNewProjectWizard.value = false
   workspaceWizardInitialConfig.value = undefined
@@ -1419,10 +1429,7 @@ function handleWizardClose() {
 }
 
 function showCreateWorkspaceWizard() {
-  workspaceWizardError.value = ''
-  workspaceWizardInitialConfig.value = undefined
-  reconfigureWorkspacePath.value = ''
-  showNewProjectWizard.value = true
+  openWorkspaceWizard()
 }
 
 const handleWizardCreate = async (config: WorkspaceConfig) => {
@@ -1453,18 +1460,23 @@ const handleWizardCreate = async (config: WorkspaceConfig) => {
     return
   }
 
+  const wizardSession = workspaceWizardSessionToken
   if (config.designTool === 'frontend') resetWorkspaceWizard()
   workspaceWizardError.value = ''
   workspaceWizardCreating.value = true
   try {
     if (!(await newProject(config))) {
-      if (config.designTool !== 'frontend' && showNewProjectWizard.value) {
+      if (
+        config.designTool !== 'frontend' &&
+        showNewProjectWizard.value &&
+        wizardSession === workspaceWizardSessionToken
+      ) {
         workspaceWizardError.value =
           lastWorkspaceCreationError.value || 'Workspace creation failed.'
       }
       return
     }
-    resetWorkspaceWizard()
+    if (wizardSession === workspaceWizardSessionToken) resetWorkspaceWizard()
   } finally {
     workspaceWizardCreating.value = false
   }
@@ -1565,12 +1577,14 @@ async function openWorkspaceReconfigureWizard() {
       await api.workspace.registerProjectReadRoot(projectContext.projectRoot)
     }
 
-    workspaceWizardInitialConfig.value = await buildReconfigureWizardInitialConfig(
+    const initialConfig = await buildReconfigureWizardInitialConfig(
       normalizedWorkspacePath,
       projectContext,
     )
-    reconfigureWorkspacePath.value = normalizedWorkspacePath
-    showNewProjectWizard.value = true
+    openWorkspaceWizard({
+      initialConfig,
+      reconfigurePath: normalizedWorkspacePath,
+    })
   } catch (error) {
     console.error('Failed to prepare workspace reconfiguration:', error)
     showToast({
