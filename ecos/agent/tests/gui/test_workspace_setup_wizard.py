@@ -58,7 +58,7 @@ def test_home_mode_separates_manual_flow_setup_from_optimization_entry(tmp_path:
 
     _send(provider, session_id, "3")
     assert provider.sessions[session_id].phase == "optimization_workspace"
-    assert "baseline workspace completed through Harden" in str(_last_event(events, "message")["text"])
+    assert "baseline workspace completed through harden" in str(_last_event(events, "message")["text"])
 
     workspace = tmp_path / "baseline-workspace"
     workspace.mkdir()
@@ -187,9 +187,9 @@ def test_existing_project_branch_requires_project_json_and_uses_workspace_name(
     flow_end_choice = _last_event(events, "interaction")["interaction"]
     assert flow_end_choice["title"] == "Choose the end step"
     assert _last_event(events, "message")["text"] == (
-        "The flow always starts at Synthesis and stops after the selected stage. "
-        "For example, choosing place runs Synthesis through place only; "
-        "Run all steps continues through Harden."
+        "The flow starts at synthesis and stops after the selected step. "
+        "For example, selecting placement stops after placement. "
+        "Run all steps continues through harden."
     )
     assert flow_end_choice["variant"] == "list"
     assert flow_end_choice["options"][0] == {
