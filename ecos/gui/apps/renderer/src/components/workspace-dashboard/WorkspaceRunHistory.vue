@@ -173,7 +173,10 @@ function message(error: unknown) {
 
 function scope({ selection }: EccRunHistoryEntry) {
   if (selection.only) return `${stepLabel(selection.only)} only`
-  if (!selection.fromStep) return 'Run flow'
+  if (!selection.fromStep)
+    return selection.throughStep
+      ? `Run through ${stepLabel(selection.throughStep)}`
+      : 'Run flow'
   const start = stepLabel(selection.fromStep)
   return selection.throughStep
     ? `${start} → ${stepLabel(selection.throughStep)}`

@@ -64,7 +64,10 @@ export function readRunSelection(value: unknown): RunSelection {
   if (only) return { only }
   const fromStep = stepName(scope.from_step)
   const throughStep = stepName(scope.through_step)
-  return fromStep ? { fromStep, ...(throughStep ? { throughStep } : {}) } : {}
+  return {
+    ...(fromStep ? { fromStep } : {}),
+    ...(throughStep ? { throughStep } : {}),
+  }
 }
 
 function stepName(value: unknown): string | undefined {

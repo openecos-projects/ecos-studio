@@ -2229,7 +2229,7 @@ function cliRunSnapshot(
     createdAt: startedAt,
     updatedAt: startedAt,
     origin: 'cli',
-    ...(fromStep ? { flowScope: { fromStep, throughStep } } : {}),
+    ...(only ? {} : { flowScope: { fromStep, throughStep } }),
   }
 }
 

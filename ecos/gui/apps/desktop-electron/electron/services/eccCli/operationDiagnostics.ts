@@ -28,8 +28,8 @@ export async function buildOperationDiagnostics(
       ...(persistedOnly ? [] : [`Origin: ${operation.origin}`]),
       `Scope: ${
         operation.step ||
-        (operation.flowScope?.fromStep
-          ? `${operation.flowScope.fromStep} → ${operation.flowScope.throughStep ?? 'end'}`
+        (operation.flowScope?.fromStep || operation.flowScope?.throughStep
+          ? `${operation.flowScope.fromStep ?? 'start'} → ${operation.flowScope.throughStep ?? 'end'}`
           : 'Full flow')
       }`,
       `State: ${state}`,
