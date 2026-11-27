@@ -24,7 +24,7 @@ DREAMPLACE_FILE = "config/dreamplace_ecc.json"
 CTS_FILE = "config/cts_ecc.json"
 ROUTE_FILE = "config/routing_ecc.json"
 
-WRITABLE_FILES = frozenset({PARAMS_TOML_FILE, DREAMPLACE_FILE, CTS_FILE, ROUTE_FILE})
+WRITABLE_FILES = frozenset({PARAMS_TOML_FILE, CTS_FILE, ROUTE_FILE})
 
 
 @dataclass(frozen=True)
