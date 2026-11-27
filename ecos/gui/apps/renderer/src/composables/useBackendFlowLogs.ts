@@ -23,6 +23,9 @@ export interface FlowLogSegment {
   totalSize?: number
   lastReadOffsetBytes?: number
   logPath?: string
+  logMtimeMs?: number
+  logSizeBytes?: number
+  ledgerStartedAtMs?: number
   contentComplete?: boolean
   contentLoading?: boolean
 }
@@ -150,19 +153,24 @@ export function useBackendFlowLogs() {
       const next = index.flow.steps.flatMap((step) => {
         const state = step.state.trim().toLowerCase()
         if (state === 'unstart') return []
-        const logPath = step.resources.log.file?.path
+        const log = step.resources.log.file
+        const logPath = log?.path
         const live = state === 'ongoing'
         const key = segmentKey({ stepName: step.name, tool: step.tool })
         const prior = existing.get(key)
-        const startedAtMs = live ? ledgerStartTime(step.info) : undefined
+        const startedAtMs = ledgerStartTime(step.info)
         const sameAttempt =
-          prior?.logPath === logPath &&
-          (!live || (prior?.live && (!startedAtMs || prior.startedAtMs === startedAtMs)))
+          prior &&
+          prior.logPath === logPath &&
+          prior.live === live &&
+          prior.ledgerStartedAtMs === startedAtMs &&
+          (live ||
+            (prior.logMtimeMs === log?.mtimeMs &&
+              prior.logSizeBytes === log?.sizeBytes &&
+              prior.state === step.state &&
+              prior.runtime === step.runtime))
         if (!sameAttempt) {
           deleteContent(key)
-          fullContentLoads.delete(key)
-        } else if (prior?.live && !live) {
-          // The completed step needs a tail read even if a live chunk is pending.
           fullContentLoads.delete(key)
         }
         return [
@@ -182,6 +190,9 @@ export function useBackendFlowLogs() {
             stepName: step.name,
             tool: step.tool,
             logPath,
+            logMtimeMs: log?.mtimeMs,
+            logSizeBytes: log?.sizeBytes,
+            ledgerStartedAtMs: startedAtMs,
           },
         ]
       })
