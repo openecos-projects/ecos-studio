@@ -64,8 +64,9 @@ function resolveHashRoute(initialRoute = '/', openWorkspacePath?: string): strin
 export async function createMainWindow(
   options: CreateMainWindowOptions = {},
 ): Promise<BrowserWindow> {
-  const useWindowControlsOverlay =
-    process.platform === 'linux' || process.platform === 'win32'
+  // Linux overlay controls draw above renderer modals. Use the renderer's
+  // window controls there so the modal backdrop covers the entire title bar.
+  const useWindowControlsOverlay = process.platform === 'win32'
   const mainWindow = new BrowserWindow({
     width: 1440,
     height: 960,

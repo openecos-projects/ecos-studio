@@ -52,14 +52,17 @@ describe('createMainWindow', () => {
         backgroundColor: '#ffffff',
       }),
     )
-    const options = browserWindowConstructor.mock.calls[0]
-    if (process.platform === 'linux' || process.platform === 'win32') {
-      expect(options).toEqual([
+    if (process.platform === 'win32') {
+      expect(browserWindowConstructor).toHaveBeenCalledWith(
         expect.objectContaining({
           titleBarStyle: 'hidden',
           titleBarOverlay: expect.objectContaining({ height: 40 }),
         }),
-      ])
+      )
+    } else {
+      expect(browserWindowConstructor).toHaveBeenCalledWith(
+        expect.not.objectContaining({ titleBarOverlay: expect.anything() }),
+      )
     }
     expect(windowDouble.maximize).toHaveBeenCalledTimes(1)
     expect(windowDouble.loadFile).toHaveBeenCalledWith(
