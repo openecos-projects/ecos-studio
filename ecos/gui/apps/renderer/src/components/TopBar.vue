@@ -317,11 +317,11 @@ watch(
   ([visible]) => {
     if (!visible) return
     const style = getComputedStyle(document.documentElement)
+    const background = style.getPropertyValue('--topbar-bg').trim()
+    const symbol = style.getPropertyValue('--text-secondary').trim()
+    if (!background || !symbol) return
     void desktopApi.window
-      .setTitleBarColors(
-        style.getPropertyValue('--topbar-bg').trim(),
-        style.getPropertyValue('--text-secondary').trim(),
-      )
+      .setTitleBarColors(background, symbol)
       .catch((error) => console.error('Failed to update window controls colors:', error))
   },
   { immediate: true, flush: 'post' },
