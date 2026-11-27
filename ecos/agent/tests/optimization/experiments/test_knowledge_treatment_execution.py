@@ -159,6 +159,34 @@ def test_phase8_does_not_convert_a_clock_at_a_different_baseline_frequency(tmp_p
         runner._timing_input(design, 50)
 
 
+def test_phase8_converts_the_archived_gcd_template_at_its_frozen_baseline(tmp_path) -> None:
+    runner = _load_experiment_execution()
+    sdc = tmp_path / "gcd.sdc"
+    sdc.write_text(
+        "# Auto-generated SDC file\n\n"
+        "set clk_name clk \n"
+        "set clk_port_name clk\n"
+        "set clk_freq_mhz 100\n"
+        "set clk_period [expr 1000.0 / $clk_freq_mhz]\n"
+        "set clk_io_pct 0.2\n"
+        "set clk_port [get_ports $clk_port_name]\n"
+        "create_clock -name $clk_name -period $clk_period $clk_port\n",
+        encoding="utf-8",
+    )
+    archived_hash = "sha256:762eb16c28aa1b7d438ec4c8078126c32008a995a63dc92c9009de54a9efdb6a"
+    assert runner.file_sha256(sdc) == archived_hash
+    design = runner.DesignSpec("gcd", "gcd", "clk", tmp_path / "filelist.f", (), sdc)
+
+    name, converted = runner._timing_input(design, 50)
+
+    assert name == "gcd.sdc.timing.toml"
+    assert archived_hash.encode() in converted
+    assert tomllib.loads(converted.decode())["primary_clocks"] == (
+        "create_clock -name clk -period 20 [get_ports clk]"
+    )
+    assert runner.file_sha256(sdc) == archived_hash
+
+
 def test_phase8_runner_resumes_created_unstarted_workspace(
     tmp_path, monkeypatch
 ) -> None:

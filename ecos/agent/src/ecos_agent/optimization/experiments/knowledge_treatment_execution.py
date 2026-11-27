@@ -39,6 +39,16 @@ _LEGACY_CLOCK = re.compile(
     r"-period\s+(?P<period>[\d.eE+-]+)\s+"
     r"(?:\[get_ports\s+(?P<port>[\w.-]+)\]|(?P<bare_port>[\w.-]+))"
 )
+_LEGACY_GENERATED_TIMING = re.compile(
+    r"# Auto-generated SDC file\s+"
+    r"set clk_name (?P<name>[\w.-]+)\s+"
+    r"set clk_port_name (?P<port>[\w.-]+)\s+"
+    r"set clk_freq_mhz [\d.eE+-]+\s+"
+    r"set clk_period \[expr 1000\.0 / \$clk_freq_mhz\]\s+"
+    r"set clk_io_pct 0\.2\s+"
+    r"set clk_port \[get_ports \$clk_port_name\]\s+"
+    r"create_clock -name \$clk_name -period \$clk_period \$clk_port\s*"
+)
 # Adaptive replay protocol: two replays establish epsilon when bitwise
 # identical; the third only runs when drift appears and needs bounding.
 _DEFAULT_REPLAYS = 3
@@ -195,6 +205,27 @@ def _timing_input(
     else:
         return design.sdc.name, source
 
+    generated = _LEGACY_GENERATED_TIMING.fullmatch(text)
+    if generated:
+        if generated["port"] != design.clock_name or frequency_mhz <= 0:
+            raise ValueError(f"Phase 8 SDC clock does not match the frozen baseline: {design.sdc}")
+        # The old ECC refresh used the workspace frequency for generated SDCs.
+        primary = f"create_clock -name {generated['name']} -period {1000 / frequency_mhz:.17g} [get_ports {generated['port']}]"
+    else:
+        primary = _legacy_primary_clock(design, text, frequency_mhz)
+
+    # ECC copies this file to origin/. Bind that copy to the original manifest input.
+    return f"{design.sdc.name}.timing.toml", (
+        f"# Source SDC sha256:{hashlib.sha256(source).hexdigest()}\n"
+        f"primary_clocks = {json.dumps(primary)}\n"
+        'generated_clocks = ""\n'
+        'clock_groups = ""\n'
+        'io_constraints = ""\n'
+        'timing_exceptions = ""\n'
+    ).encode("utf-8")
+
+
+def _legacy_primary_clock(design: DesignSpec, text: str, frequency_mhz: float) -> str:
     commands = [
         line.strip() for line in text.splitlines()
         if line.strip() and not line.lstrip().startswith("#")
@@ -214,16 +245,7 @@ def _timing_input(
     ):
         raise ValueError(f"Phase 8 SDC clock does not match the frozen baseline: {design.sdc}")
 
-    # ECC copies this file to origin/. Bind that copy to the original manifest input.
-    primary = f"create_clock -name {clock['name'] or port} -period {clock['period']} [get_ports {port}]"
-    return f"{design.sdc.name}.timing.toml", (
-        f"# Source SDC sha256:{hashlib.sha256(source).hexdigest()}\n"
-        f"primary_clocks = {json.dumps(primary)}\n"
-        'generated_clocks = ""\n'
-        'clock_groups = ""\n'
-        'io_constraints = ""\n'
-        'timing_exceptions = ""\n'
-    ).encode("utf-8")
+    return f"create_clock -name {clock['name'] or port} -period {clock['period']} [get_ports {port}]"
 
 
 def _ensure_workspace(
