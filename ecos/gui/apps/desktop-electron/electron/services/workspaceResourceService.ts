@@ -12,6 +12,7 @@ import type {
   EccPersistedEngineeringSnapshot,
 } from '@ecos-studio/shared'
 import type { ProjectScopeProvider } from './workspaceService'
+import { isPathWithinRoot } from './pathScope'
 import { readPersistedEngineeringSnapshot } from './eccCli/engineeringSnapshotReader'
 import {
   locateWorkspaceParametersFile,
@@ -763,12 +764,15 @@ function applyIndexedResources(
   for (const kind of ['def', 'verilog'] as const) {
     const artifact = outputs?.[kind]
     if (artifact?.exists) {
-      resources.output[kind] = createFile(resolve(root, artifact.path), 'output')
+      const path = resolve(root, artifact.path)
+      if (isPathWithinRoot(path, root))
+        resources.output[kind] = createFile(path, 'output')
     }
   }
   for (const artifact of snapshot.artifacts) {
     if (artifact.stepId !== step || artifact.availability !== 'available') continue
-    const path = join(root, artifact.reference)
+    const path = resolve(root, artifact.reference)
+    if (!isPathWithinRoot(path, root)) continue
     switch (artifact.kind) {
       case 'layout_image':
         resources.output.image = createFile(path, 'layout-image')

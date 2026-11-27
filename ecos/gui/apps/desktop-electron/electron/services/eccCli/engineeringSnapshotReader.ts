@@ -27,7 +27,8 @@ function isStepOutputArtifact(
     value === null ||
     (isRecord(value) &&
       typeof value.path === 'string' &&
-      value.path.length > 0 &&
+      value.path.trim().length > 0 &&
+      !/^(?:[/\\]|[A-Za-z]:)/.test(value.path) &&
       !value.path.includes('\0') &&
       !value.path.split(/[/\\]/).includes('..') &&
       typeof value.exists === 'boolean')
