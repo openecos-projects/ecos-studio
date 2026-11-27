@@ -282,6 +282,7 @@ function registerHandlers(
       operationStatus: vi.fn(),
       waitForOperation: vi.fn(),
       openWorkspace: vi.fn(),
+      previewWorkspaceCreation: vi.fn(),
       readWorkspaceBindingRequirement: vi.fn().mockResolvedValue({}),
       readWorkspaceConfiguration: vi.fn().mockResolvedValue({}),
       refreshConfig: vi.fn(),
@@ -2324,6 +2325,35 @@ describe('registerIpc', () => {
       'tool:yosys',
     )
   })
+
+  it.each(['create', 'select'] as const)(
+    'previews a %s Project without granting write access',
+    async (projectMode) => {
+      const { handlers, services } = registerHandlers()
+      const event = { sender: { id: 1 } }
+      const preview = { steps: ['synthesis'], maxParallelSteps: 1 }
+      services.workspaceService.pathExists.mockResolvedValue(true)
+      services.projectManagementReadService.readManifest.mockResolvedValue({
+        project_type: 'backend',
+      })
+      services.eccRuntimeService.previewWorkspaceCreation.mockResolvedValue(preview)
+      const payload = workspaceCreateRequest({
+        projectMode,
+        projectRoot: '/tmp/project',
+        targetDirectory: '/tmp/project/ws_1',
+      })
+      await expect(
+        handlers.get(desktopApiIpcChannels.productCommandExecute)?.(event, {
+          command: 'workspace.previewCreation',
+          payload,
+        }),
+      ).resolves.toEqual(preview)
+      expect(services.workspaceService.registerProjectRoot).not.toHaveBeenCalled()
+      expect(services.projectManagementReadService.readManifest).toHaveBeenCalledTimes(
+        projectMode === 'select' ? 1 : 0,
+      )
+    },
+  )
 
   it('preserves and rejects an invalid existing Binding before workspace creation', async () => {
     const { handlers, services } = registerHandlers()
