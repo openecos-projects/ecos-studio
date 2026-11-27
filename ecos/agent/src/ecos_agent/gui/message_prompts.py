@@ -73,8 +73,8 @@ def home_ready_prompt(language: str) -> str:
 def optimization_workspace_prompt(language: str) -> str:
     return _prompt(
         language,
-        "请输入已完成至 Harden 的 baseline workspace 绝对路径。优化将在隔离候选 workspace 中执行。",
-        "Enter the absolute path of a baseline workspace completed through Harden. Optimization runs in isolated candidate workspaces.",
+        "请输入已完成至 harden 的 baseline workspace 绝对路径。优化将在隔离候选 workspace 中执行。",
+        "Enter the absolute path of a baseline workspace completed through harden. Optimization runs in isolated candidate workspaces.",
     )
 
 
@@ -183,8 +183,8 @@ def design_name_prompt(language: str, recommendation: str = "") -> str:
 def flow_end_prompt(language: str) -> str:
     return _prompt(
         language,
-        "Flow 始终从 Synthesis 开始，并在所选阶段完成后停止。例如，选择 place 仅从 Synthesis 执行至 place；选择“执行全部步骤”则运行至 Harden。",
-        "The flow always starts at Synthesis and stops after the selected stage. For example, choosing place runs Synthesis through place only; Run all steps continues through Harden.",
+        "Flow 始终从 synthesis 开始，并在所选阶段完成后停止。例如，选择 placement 会运行至 placement。选择“执行全部步骤”会运行至 harden。",
+        "The flow starts at synthesis and stops after the selected step. For example, selecting placement stops after placement. Run all steps continues through harden.",
     )
 
 
