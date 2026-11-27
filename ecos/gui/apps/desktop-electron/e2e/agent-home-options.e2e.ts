@@ -4,8 +4,8 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Page } from 'playwright-core'
-import { launchE2EApp, resolveOutDir } from './support/launch'
-import { waitToolchainReady } from './support/journey'
+import { launchE2EApp, repoRoot, resolveOutDir } from './support/launch'
+import { importExternalPdk, waitToolchainReady } from './support/journey'
 
 const runRealAgent = process.env.ECOS_E2E_REAL_AGENT === '1'
 
@@ -15,6 +15,10 @@ describe.runIf(runRealAgent)('product e2e: real Agent home options', () => {
     const launched = await launchAgentApp(outDir)
     try {
       await waitToolchainReady(launched.page)
+      await importExternalPdk(
+        launched.page,
+        process.env.ECOS_E2E_PDK_ROOT ?? join(repoRoot, 'pdk/icsprout55-pdk'),
+      )
       await installMpc(launched.page)
       await launched.page.getByRole('button', { name: 'ECOS Agent', exact: true }).click()
       await launched.page.getByRole('dialog', { name: 'ECOS Agent' }).waitFor()
@@ -81,7 +85,7 @@ describe.runIf(runRealAgent)('product e2e: real Agent home options', () => {
       await clickChoice(launched.page, 'Get started', 'Optimize a completed design')
       await expect
         .poll(() => launched.page.locator('body').innerText(), { timeout: 60_000 })
-        .toContain('baseline workspace completed through Harden')
+        .toContain('baseline workspace completed through harden')
       await sendMessage(launched.page, workspace)
       await expect
         .poll(() => launched.page.locator('body').innerText(), { timeout: 60_000 })

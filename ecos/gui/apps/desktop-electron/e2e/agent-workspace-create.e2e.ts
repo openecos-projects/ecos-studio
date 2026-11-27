@@ -128,7 +128,7 @@ async function runWorkspaceUiScenario(options: WorkspaceUiScenario): Promise<voi
     await sendMessage(page, projectRoot)
     await submitForm(page, 'Workspace Name', 'ws_agent_e2e')
     await submitForm(page, 'Design Name', design.designName)
-    await clickChoice(page, 'Choose the end step', 'Synthesis')
+    await clickChoice(page, 'Choose the end step', 'synthesis')
     await submitForm(page, 'RTL path', design.rtlImport.verilog![0]!)
     await clickChoice(page, 'Optional filelist path', 'Skip')
     await clickChoice(page, 'Optional SDC path', 'Skip')
