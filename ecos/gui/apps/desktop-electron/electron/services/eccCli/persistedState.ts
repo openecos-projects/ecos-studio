@@ -1,6 +1,7 @@
 import { constants } from 'node:fs'
 import { open, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { readFileRange } from '../readFileRange'
 import {
   projectManifestForPresentation,
   type EccProjectManifest,
@@ -256,9 +257,8 @@ async function readBoundedJsonOnce(path: string, maxBytes: number): Promise<unkn
     const info = await handle.stat()
     if (!info.isFile() || info.size > maxBytes)
       throw new Error(`File is too large: ${path}`)
-    const buffer = Buffer.alloc(info.size)
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
-    return JSON.parse(buffer.subarray(0, bytesRead).toString('utf8'))
+    const buffer = await readFileRange(handle, info.size)
+    return JSON.parse(buffer.toString('utf8'))
   } finally {
     await handle.close()
   }

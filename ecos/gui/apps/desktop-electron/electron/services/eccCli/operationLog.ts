@@ -1,6 +1,7 @@
 import { constants } from 'node:fs'
 import { mkdir, open, readdir, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
+import { readFileRange } from '../readFileRange'
 import type {
   EccRunHistoryEntry,
   EccRunHistoryPage,
@@ -41,10 +42,9 @@ export async function readOperationLog(directory: string, runId: string) {
   try {
     const { size } = await handle.stat()
     const offset = Math.max(0, size - 64 * 1024)
-    const buffer = Buffer.alloc(size - offset)
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset)
+    const buffer = await readFileRange(handle, size - offset, offset)
     return {
-      content: buffer.subarray(0, bytesRead).toString('utf8'),
+      content: buffer.toString('utf8'),
       truncated: offset > 0,
     }
   } finally {
@@ -104,9 +104,8 @@ export async function readRunResult(
     try {
       const info = await handle.stat()
       if (!info.isFile() || info.size > MAX_RUN_RESULT_BYTES) return
-      const buffer = Buffer.alloc(info.size)
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
-      const record = JSON.parse(buffer.subarray(0, bytesRead).toString('utf8'))
+      const buffer = await readFileRange(handle, info.size)
+      const record = JSON.parse(buffer.toString('utf8'))
       if (
         record?.schema_version !== 1 ||
         record.run_id !== runId ||
