@@ -246,8 +246,6 @@ describe('ECC CLI workspace command planning', () => {
       [
         'workspace',
         'fork',
-        'ws_source',
-        'ws_1',
         '--project',
         '/projects/demo',
         '--from',
@@ -257,6 +255,9 @@ describe('ECC CLI workspace command planning', () => {
         '--command-id',
         'command-1',
         '--no-wait',
+        '--',
+        'ws_source',
+        'ws_1',
       ],
       [
         'param',
@@ -476,7 +477,7 @@ describe('ECC CLI RTL import planning', () => {
       ['init', root],
       ['workspace', 'create'],
     ])
-    const draft = JSON.parse(commands[1]!.at(-1)!)
+    const draft = JSON.parse(commands[1]![commands[1]!.indexOf('--draft') + 1]!)
     expect(draft.rtl).toEqual(['/inputs/design.v'])
     expect(draft.settings).not.toContainEqual(expect.stringMatching(/^design\.rtl=/))
   })
@@ -506,7 +507,9 @@ describe('ECC CLI RTL import planning', () => {
       ['init', root],
       ['workspace', 'create'],
     ])
-    expect(JSON.parse(commands[1]!.at(-1)!)).not.toHaveProperty('rtl')
+    expect(
+      JSON.parse(commands[1]![commands[1]!.indexOf('--draft') + 1]!),
+    ).not.toHaveProperty('rtl')
   })
 
   it('never imports for derived workspaces', async () => {

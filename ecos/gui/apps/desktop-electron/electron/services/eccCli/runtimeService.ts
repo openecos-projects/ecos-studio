@@ -373,9 +373,10 @@ export class EccCliRuntimeService {
     projectRoot: string,
     workspaceId: string,
   ): Promise<unknown> {
+    requireWorkspaceId(workspaceId)
     try {
       const { stdout } = await this.cli.run(
-        ['flow', 'workspace', workspaceId, '--project', projectRoot, '--json'],
+        ['flow', 'workspace', '--project', projectRoot, '--json', '--', workspaceId],
         { cwd: projectRoot, timeoutMs: 5_000 },
       )
       return JSON.parse(stdout)
@@ -437,7 +438,7 @@ export class EccCliRuntimeService {
       }
       const projectRoot = staging ?? (await realpath(requestedRoot))
       const { stdout } = await this.cli.run(
-        [...workspaceDraftArgs(request, projectRoot), '--preview', '--json'],
+        workspaceDraftArgs(request, projectRoot, ['--preview', '--json']),
         { cwd: projectRoot },
       )
       const records: unknown = JSON.parse(stdout)
@@ -2592,8 +2593,9 @@ function workspaceDraftUnsupported(error: unknown): boolean {
 export function workspaceDraftArgs(
   request: EccWorkspaceCreateRequest,
   projectRoot: string,
+  options: string[] = [],
 ): string[] {
-  const flow = requireRecord(request.workspaceSpec.flow)
+  const flow = validateWorkspaceCreationFlow(request)
   const selection = inputRolePaths(request)
   const filelist = selection.get('filelist')?.[0]
   const rtl = selection.get('rtl')
@@ -2610,10 +2612,10 @@ export function workspaceDraftArgs(
     rtl,
   }
   const target = resolve(request.targetDirectory)
+  const workspaceId = requireWorkspaceId(basename(target))
   return [
     'workspace',
     'create',
-    basename(target),
     '--project',
     projectRoot,
     '--path',
@@ -2625,6 +2627,9 @@ export function workspaceDraftArgs(
     ...parameterArgs(request.workspaceSpec.parameters),
     '--draft',
     JSON.stringify(draft),
+    ...options,
+    '--',
+    workspaceId,
   ]
 }
 
@@ -2632,9 +2637,10 @@ export function workspaceCreateCommands(
   request: EccWorkspaceCreateRequest,
   projectRoot: string,
 ): string[][] {
-  const workspaceId = basename(resolve(request.targetDirectory))
+  const workspaceId = requireWorkspaceId(basename(resolve(request.targetDirectory)))
+  const flow = validateWorkspaceCreationFlow(request)
   if (request.deriveFrom) {
-    const flow = requireRecord(request.workspaceSpec.flow)
+    const sourceId = requireWorkspaceId(request.deriveFrom.workspaceId)
     if (
       typeof flow.fromStepId !== 'string' ||
       !flow.fromStepId.trim() ||
@@ -2648,8 +2654,6 @@ export function workspaceCreateCommands(
       [
         'workspace',
         'fork',
-        request.deriveFrom.workspaceId,
-        workspaceId,
         '--project',
         projectRoot,
         '--from',
@@ -2659,6 +2663,9 @@ export function workspaceCreateCommands(
         '--command-id',
         request.commandId,
         '--no-wait',
+        '--',
+        sourceId,
+        workspaceId,
       ],
       ...(parameters.length
         ? [
@@ -2676,7 +2683,6 @@ export function workspaceCreateCommands(
         : []),
     ]
   }
-  const flow = requireRecord(request.workspaceSpec.flow)
   const edits = [
     ...flowEditFlags('--enable', flow.enableSteps),
     ...flowEditFlags('--disable', flow.disableSteps),
@@ -2697,7 +2703,6 @@ export function workspaceCreateCommands(
     [
       'workspace',
       'create',
-      workspaceId,
       '--project',
       projectRoot,
       '--path',
@@ -2707,8 +2712,29 @@ export function workspaceCreateCommands(
       '--no-wait',
       ...workspaceFlowArgs(request.workspaceSpec),
       ...parameterArgs(request.workspaceSpec.parameters),
+      '--',
+      workspaceId,
     ],
   ]
+}
+
+function requireWorkspaceId(value: unknown): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)) {
+    throw new Error('Invalid Workspace ID.')
+  }
+  return value
+}
+
+function validateWorkspaceCreationFlow(request: EccWorkspaceCreateRequest) {
+  const flow = requireRecord(request.workspaceSpec.flow)
+  const limit = flow.maxParallelSteps
+  if (
+    limit !== undefined &&
+    (typeof limit !== 'number' || !Number.isSafeInteger(limit) || limit < 1)
+  ) {
+    throw new Error('Flow concurrency must be a positive integer.')
+  }
+  return flow
 }
 
 function flowEditFlags(flag: string, value: unknown): string[] {
