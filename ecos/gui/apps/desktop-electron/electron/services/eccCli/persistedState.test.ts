@@ -69,6 +69,7 @@ describe('readWorkspaceFlow', () => {
       steps: [
         {
           checklistBlocked: true,
+          checklistStatus: 'blocked',
           checklistFailedItems: ['prerequisite:sta'],
           name: 'Harden',
           directory: '21_harden_ecc',

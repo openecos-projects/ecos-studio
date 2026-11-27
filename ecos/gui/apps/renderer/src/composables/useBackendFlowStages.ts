@@ -4,7 +4,11 @@ import { getStepMetadata, STEP_METADATA } from '@/api/type'
 import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
 import { useWorkspace } from './useWorkspace'
-import { projectBackendFlowSteps, projectRuntimeFlowSteps } from './backendFlowProjection'
+import {
+  clearStepAttempt,
+  projectBackendFlowSteps,
+  projectRuntimeFlowSteps,
+} from './backendFlowProjection'
 import {
   backendOptimisticRunValue,
   setBackendOptimisticRun,
@@ -91,6 +95,7 @@ export function useBackendFlowStages() {
       )
       if (activeStep && !steps.some((step) => step.state === 'running')) {
         activeStep.state = 'running'
+        clearStepAttempt(activeStep)
         if (operation.currentTool) activeStep.toolId = operation.currentTool
       }
     }
@@ -111,6 +116,7 @@ export function useBackendFlowStages() {
       ...step,
       ...(request.resetAll ? { state: 'not-started' as const } : {}),
     }))
+    if (request.resetAll) next.forEach(clearStepAttempt)
     const target = request.stepPath
       ? next.find(
           (step) =>
@@ -119,7 +125,10 @@ export function useBackendFlowStages() {
               request.stepPath.toLowerCase(),
         )
       : next.find((step) => step.state !== 'succeeded')
-    if (target) target.state = 'running'
+    if (target) {
+      target.state = 'running'
+      clearStepAttempt(target)
+    }
     return next
   })
   const dynamicFlowStages = computed<BackendFlowStage[]>(() =>

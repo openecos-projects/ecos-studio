@@ -22,6 +22,8 @@ export interface PersistedFlowStep {
   directory: string
   checklistBlocked?: boolean
   checklistFailedItems?: string[]
+  checklistStatus?: 'passed' | 'blocked' | 'attention' | 'unknown'
+  failureMessage?: string
   name: string
   peakMemory: number
   runtime: string
@@ -124,6 +126,7 @@ export function parseWorkspaceFlow(raw: unknown): PersistedFlow {
       value.input_step || (isRecord(value.info) ? value.info.input_step : null)
     const checklistBlocked =
       checklist?.status === 'blocked' || checklist?.blocked === true
+    const checklistStatus = checklistBlocked ? 'blocked' : checklist?.status
     const checklistFailedItems = Array.isArray(checklist?.failed_items)
       ? checklist.failed_items
           .filter(
@@ -147,6 +150,12 @@ export function parseWorkspaceFlow(raw: unknown): PersistedFlow {
           }
         : {}),
       directory: value.directory,
+      ...(checklistStatus === 'passed' ||
+      checklistStatus === 'blocked' ||
+      checklistStatus === 'attention' ||
+      checklistStatus === 'unknown'
+        ? { checklistStatus }
+        : {}),
       name: value.name,
       peakMemory:
         typeof value['peak memory (mb)'] === 'number' ? value['peak memory (mb)'] : 0,

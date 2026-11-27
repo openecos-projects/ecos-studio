@@ -595,6 +595,8 @@ export type EccOperationLogRequest =
     }
 
 export interface EccRuntimeStepSnapshot {
+  checklistStatus?: 'passed' | 'blocked' | 'attention' | 'unknown'
+  failureMessage?: string
   category?: 'PNR' | 'CHECKER'
   inputStep?: string
   directory?: string

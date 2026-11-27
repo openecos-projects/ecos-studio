@@ -64,26 +64,34 @@ export function projectRuntimeFlowSteps(
   const committedById = new Map(committed.map((step) => [step.stepId, step]))
   return runtimeSteps.flatMap((step, order) => {
     if (isObsoleteFlowStepName(step.name)) return []
-    const runtimeSeconds = parseRuntimeSeconds(step.runtime)
+    const planned = committedById.get(step.name)
+    const state = normalizeState(step.state, 'unknown')
+    const active = state === 'running' || state === 'not-started'
+    const runtimeSeconds = active ? null : parseRuntimeSeconds(step.runtime)
+    const checklistStatus = active
+      ? undefined
+      : (step.checklistStatus ??
+        checklistStatusValue(step.checklist_status) ??
+        checklistStatusValue(step.checklist))
     return [
       {
-        ...committedById.get(step.name),
+        stage: planned?.stage,
+        inputProducers: planned?.inputProducers,
+        designSource: planned?.designSource,
         name: step.name,
         order,
         peakMemoryMb: step.peakMemory,
         ...(runtimeSeconds === null ? {} : { runtimeSeconds }),
-        state: normalizeState(step.state, 'unknown'),
+        state,
         stepId: step.name,
-        ...(step.category ? { category: step.category } : {}),
-        ...(step.inputStep ? { inputStep: step.inputStep } : {}),
-        ...(step.directory ? { directory: step.directory } : {}),
-        ...(step.tool ? { toolId: step.tool } : {}),
-        ...(() => {
-          const checklistStatus =
-            checklistStatusValue(step.checklist_status) ??
-            checklistStatusValue(step.checklist)
-          return checklistStatus ? { checklistStatus } : {}
-        })(),
+        category: step.category || planned?.category,
+        inputStep: step.inputStep || planned?.inputStep,
+        directory: step.directory || planned?.directory,
+        toolId: step.tool || planned?.toolId,
+        ...(checklistStatus ? { checklistStatus } : {}),
+        ...(state === 'failed' && step.failureMessage
+          ? { failureMessage: step.failureMessage }
+          : {}),
       },
     ]
   })
@@ -186,6 +194,7 @@ export function projectBackendFlowSteps(
         ? 'failed'
         : 'succeeded'
     step.state = normalizeState(data.state, fallback)
+    if (started) clearStepAttempt(step)
     const error = data.error
     const failureMessage =
       typeof error === 'string'
@@ -213,4 +222,11 @@ export function projectBackendFlowSteps(
   }
 
   return steps.sort((left, right) => left.order - right.order)
+}
+
+export function clearStepAttempt(step: FlowStepSummary): void {
+  delete step.runtimeSeconds
+  delete step.peakMemoryMb
+  delete step.failureMessage
+  delete step.checklistStatus
 }

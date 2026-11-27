@@ -1740,6 +1740,29 @@ export class EccCliRuntimeService {
       return
     }
     const current = manifest?.runtime_processes?.[tracked.session.workspaceId]
+    if (flow) {
+      const failed = failedRunSteps(
+        flow,
+        tracked.operation.kind === 'step' ? tracked.operation.step : undefined,
+        tracked.operation.flowScope?.fromStep,
+        tracked.operation.flowScope?.throughStep,
+      )
+      await Promise.all(
+        failed.slice(0, 64).map(async (step) => {
+          const message = await readStepWorkerFailure(
+            tracked.session.directory,
+            step,
+            tracked.operation.createdAt,
+          )
+          if (message) step.failureMessage = message
+        }),
+      )
+      if (
+        refreshSequence !== tracked.refreshSequence ||
+        isTerminal(tracked.operation.state)
+      )
+        return
+    }
     const ongoing = flow?.steps.find((step) => step.state === 'Ongoing')
     const currentStep = ongoing?.name ?? tracked.operation.currentStep
     const currentTool = ongoing?.tool ?? tracked.operation.currentTool
@@ -1800,11 +1823,7 @@ export class EccCliRuntimeService {
     let workerFailure: string | undefined
     const workers: string[] = []
     for (const step of candidates) {
-      const message = await readStepWorkerFailure(
-        tracked.session.directory,
-        step,
-        tracked.operation.createdAt,
-      )
+      const message = step.failureMessage
       if (!message) continue
       workerFailure ??= message
       workers.push(`${step.name} (${step.attemptId})
@@ -2229,6 +2248,8 @@ export function operationFlowMatches(
       step.inputStep === candidate.inputStep &&
       step.tool === candidate.tool &&
       step.state === candidate.state &&
+      step.failureMessage === candidate.failureMessage &&
+      step.checklistStatus === candidate.checklistStatus &&
       step.runtime === candidate.runtime &&
       step.peakMemory === candidate.peakMemory
     )
