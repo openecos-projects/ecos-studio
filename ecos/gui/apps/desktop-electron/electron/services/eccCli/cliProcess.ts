@@ -99,8 +99,12 @@ export class EccCliProcess {
     if (options.stdin === undefined) child.stdin.end()
     else child.stdin.end(options.stdin)
     try {
-      const exitCode = await childExit(child)
-      const result = { exitCode, stdout: await stdout, stderr: await stderr }
+      const [exitCode, output, errors] = await Promise.all([
+        childExit(child),
+        stdout,
+        stderr,
+      ])
+      const result = { exitCode, stdout: output, stderr: errors }
       if (exitCode !== 0) {
         throw new EccCliCommandError(exitCode, result.stderr, result.stdout)
       }
@@ -154,8 +158,8 @@ function collect(
       const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
       size += data.length
       if (size > limit) {
-        child.kill('SIGTERM')
         reject(new Error(`ECC CLI ${streamName} exceeds ${limit} bytes`))
+        if (!child.killed) child.kill('SIGTERM')
         return
       }
       chunks.push(data)

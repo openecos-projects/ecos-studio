@@ -5,6 +5,25 @@ import { describe, expect, it } from 'vitest'
 import { EccCliCommandError, EccCliProcess } from './cliProcess'
 
 describe('EccCliProcess', () => {
+  it.each(['stdout', 'stderr'] as const)(
+    'reports the %s output limit',
+    async (stream) => {
+      const cli = new EccCliProcess({
+        resolveLaunch: () => ({
+          command: process.execPath,
+          args: [
+            '-e',
+            'process[process.argv[1]].write("x".repeat(2048)); setInterval(() => {}, 1000)',
+            stream,
+          ],
+        }),
+      })
+      await expect(
+        cli.run([], { maxStdoutBytes: 1024, maxStderrBytes: 1024 }),
+      ).rejects.toThrow(new RegExp('ECC CLI ' + stream + ' exceeds 1024 bytes'))
+    },
+  )
+
   it('uses argv without a shell and captures bounded output', async () => {
     const cli = new EccCliProcess({
       resolveLaunch: () => ({
