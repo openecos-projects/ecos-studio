@@ -137,9 +137,8 @@ def test_legacy_finished_flow_is_adopted_with_unverified_provenance(
     result = _run_replay(tmp_path / "ws", replay_root, 1, 60.0, dict(_FINGERPRINT))
 
     assert result == adopted
-    assert (replay_root / "terminal-observation.v1.json").read_text(
-        encoding="utf-8"
-    ) == adopted.model_dump_json()
+    cached = (replay_root / "terminal-observation.v1.json").read_text(encoding="utf-8")
+    assert json.loads(cached) == adopted.model_dump(mode="json")
     manifest = _load_replay_manifest(replay_root)
     assert manifest["provenance"] == "adopted"
     assert manifest["components"] == _FINGERPRINT
