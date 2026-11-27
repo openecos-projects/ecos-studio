@@ -432,7 +432,7 @@ describe('product e2e: backend rtl2gds journey', () => {
       await shot('offline-design-summary')
       await offline.getByText('Close', { exact: true }).click()
     } finally {
-      await openWorkspaceInUi(page, workspace!)
+      await openWorkspaceInUi(page, { ...workspace!, creationId: undefined })
       const opened = await page.evaluate(
         (directory) =>
           window.ecosDesktop.runtime.workspace.open({ designTool: 'backend', directory }),
