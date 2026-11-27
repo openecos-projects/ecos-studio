@@ -153,23 +153,27 @@ describe('readPersistedEngineeringSnapshot', () => {
     ).rejects.toThrow('ENGINEERING_WORKSPACE_ID_MISMATCH')
   })
 
-  it.each(['/outside/report.def', '\\outside\\report.def', 'C:report.def', '../out.def'])(
-    'omits step outputs with an out-of-workspace path (%s)',
-    async (path) => {
-      writeFileSync(
-        join(directory, 'home', 'engineering-snapshot.json'),
-        JSON.stringify({
-          ...JSON.parse(fixtureText('v6-valid.json')),
-          stepOutputs: {
-            directory: '.',
-            design: 'demo',
-            sdc: { path, exists: true },
-            steps: [],
-          },
-        }),
-      )
-      const snapshot = await readPersistedEngineeringSnapshot(directory)
-      expect(snapshot.stepOutputs).toBeUndefined()
-    },
-  )
+  it.each([
+    '/outside/report.def',
+    '\\outside\\report.def',
+    'C:report.def',
+    '../out.def',
+    '.',
+    './.',
+  ])('omits step outputs with an out-of-workspace path (%s)', async (path) => {
+    writeFileSync(
+      join(directory, 'home', 'engineering-snapshot.json'),
+      JSON.stringify({
+        ...JSON.parse(fixtureText('v6-valid.json')),
+        stepOutputs: {
+          directory: '.',
+          design: 'demo',
+          sdc: { path, exists: true },
+          steps: [],
+        },
+      }),
+    )
+    const snapshot = await readPersistedEngineeringSnapshot(directory)
+    expect(snapshot.stepOutputs).toBeUndefined()
+  })
 })

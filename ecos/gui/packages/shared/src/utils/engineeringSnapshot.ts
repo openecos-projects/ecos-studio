@@ -695,10 +695,18 @@ function normalizeArtifacts(
 }
 
 function safeRelativePath(value: unknown): boolean {
-  if (!nonEmptyString(value) || value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value)) {
+  if (
+    !nonEmptyString(value) ||
+    value.includes('\0') ||
+    /^(?:[/\\]|[A-Za-z]:)/.test(value)
+  ) {
     return false
   }
-  return !value.replace(/\\/g, '/').split('/').includes('..')
+  const segments = value.split(/[/\\]/)
+  return (
+    !segments.includes('..') &&
+    segments.some((segment) => segment !== '' && segment !== '.')
+  )
 }
 
 function record(value: unknown): value is Record<string, unknown> {

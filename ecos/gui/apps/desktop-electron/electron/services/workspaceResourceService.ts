@@ -765,14 +765,14 @@ function applyIndexedResources(
     const artifact = outputs?.[kind]
     if (artifact?.exists) {
       const path = resolve(root, artifact.path)
-      if (isPathWithinRoot(path, root))
+      if (path !== root && isPathWithinRoot(path, root))
         resources.output[kind] = createFile(path, 'output')
     }
   }
   for (const artifact of snapshot.artifacts) {
     if (artifact.stepId !== step || artifact.availability !== 'available') continue
     const path = resolve(root, artifact.reference)
-    if (!isPathWithinRoot(path, root)) continue
+    if (path === root || !isPathWithinRoot(path, root)) continue
     switch (artifact.kind) {
       case 'layout_image':
         resources.output.image = createFile(path, 'layout-image')

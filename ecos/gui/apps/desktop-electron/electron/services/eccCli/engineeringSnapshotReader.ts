@@ -23,15 +23,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isStepOutputArtifact(
   value: unknown,
 ): value is EccWorkspaceStepOutputArtifact | null {
+  if (value === null) return true
+  if (
+    !isRecord(value) ||
+    typeof value.path !== 'string' ||
+    value.path.trim().length === 0 ||
+    /^(?:[/\\]|[A-Za-z]:)/.test(value.path) ||
+    value.path.includes('\0') ||
+    typeof value.exists !== 'boolean'
+  ) {
+    return false
+  }
+  const segments = value.path.split(/[/\\]/)
   return (
-    value === null ||
-    (isRecord(value) &&
-      typeof value.path === 'string' &&
-      value.path.trim().length > 0 &&
-      !/^(?:[/\\]|[A-Za-z]:)/.test(value.path) &&
-      !value.path.includes('\0') &&
-      !value.path.split(/[/\\]/).includes('..') &&
-      typeof value.exists === 'boolean')
+    !segments.includes('..') &&
+    segments.some((segment) => segment !== '' && segment !== '.')
   )
 }
 
