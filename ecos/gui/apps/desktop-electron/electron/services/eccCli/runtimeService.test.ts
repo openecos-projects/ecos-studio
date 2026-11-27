@@ -812,8 +812,17 @@ describe('ECC CLI DEF View', () => {
     ).rejects.toMatchObject({ code: 'WORKSPACE_BUSY' })
     expect(run).toHaveBeenCalledTimes(1)
 
+    await expect(
+      service.closeWorkspace({ workspaceHandle: 'handle-1' }),
+    ).resolves.toEqual({
+      ok: true,
+      retained: true,
+    })
     releaseFirst()
     await expect(first).resolves.toMatchObject({ geometryManifestPath })
+    await expect(service.workspaceSession('handle-1')).rejects.toThrow(
+      'Workspace Session is not open',
+    )
   })
 })
 
@@ -1306,9 +1315,12 @@ describe('ECC CLI live flow projection', () => {
     })
     const service = new EccCliRuntimeService({ resolveLaunch: vi.fn() })
     try {
-      const { workspaceHandle } = await service.openWorkspace({
-        directory: workspaceDirectory,
-      })
+      const [opened, reused] = await Promise.all([
+        service.openWorkspace({ directory: workspaceDirectory }),
+        service.openWorkspace({ directory: workspaceDirectory }),
+      ])
+      const { workspaceHandle } = opened
+      expect(reused.workspaceHandle).toBe(workspaceHandle)
       expect(service.operationProjection().outcomes).toEqual([])
       await expect(service.reconcileOperationProjection()).resolves.toMatchObject({
         operations: [],
@@ -1502,13 +1514,28 @@ describe('ECC CLI live flow projection', () => {
     })
     const refresh = service.reconcileOperationProjection()
     await closing
+    let diagnostics: Promise<unknown> | undefined
     try {
-      await service.closeWorkspace({ workspaceHandle: 'handle-1' })
+      await expect(
+        service.closeWorkspace({ workspaceHandle: 'handle-1' }),
+      ).resolves.toEqual({
+        ok: true,
+      })
+      diagnostics = service
+        .operationLog({
+          workspaceHandle: 'handle-1',
+          operationId: runId,
+          includeDiagnostics: true,
+        })
+        .catch((error: unknown) => error)
     } finally {
       release()
       await refresh
       await watcher.close()
     }
+    await expect(diagnostics).resolves.toMatchObject({
+      diagnostics: expect.stringContaining(privateMessage),
+    })
     await expect(wait).resolves.toMatchObject({
       state: 'unknown',
       error: { code: 'run_outcome_unknown' },
