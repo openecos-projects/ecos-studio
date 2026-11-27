@@ -9,11 +9,6 @@ import { EventEmitter } from 'node:events'
 import { tmpdir } from 'node:os'
 import {
   assertEccCliPlatformSupported,
-  projectInitArgs,
-  projectManifestCreateArgs,
-  projectSettingsArgs,
-  rtlImportArgs,
-  workspaceCreateCommands,
   workspaceDefViewArgs,
   workspaceParameterValue,
   workspaceRefreshArgs,
@@ -22,6 +17,13 @@ import {
   declaredWorkspaceForDirectory,
   EccCliRuntimeService,
 } from './runtimeService'
+import {
+  projectInitArgs,
+  projectManifestCreateArgs,
+  projectSettingsArgs,
+  rtlImportArgs,
+  workspaceCreateCommands,
+} from './workspaceCreation'
 import { EccCliProcess } from './cliProcess'
 import { readProjectManifest } from './persistedState'
 
