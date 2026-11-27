@@ -323,12 +323,28 @@ class _PersistedEpisodeState(BaseModel):
             if (
                 self.objective_alignment.objective_contract_sha256
                 != self.objective.contract_sha256
-                or (
-                    not isinstance(self.objective, _ArchivedEpisodeObjective)
-                    and self.active_objective != build_active_objective(
-                        self.objective_alignment, self.objective, self.incumbent
+            ):
+                raise ValueError("active objective does not match episode alignment")
+            if isinstance(self.objective, _ArchivedEpisodeObjective):
+                if (
+                    self.active_objective is None
+                    or self.active_objective.alignment_contract_sha256
+                    != self.objective_alignment.alignment_contract_sha256
+                    or self.active_objective.original_primary_metric
+                    != self.objective.primary_metric
+                    or (
+                        self.active_objective.recovery_stage == "original"
+                        and (
+                            self.active_objective.active_primary_metric
+                            != self.objective.primary_metric
+                            or self.active_objective.active_preserve_metrics
+                            != self.objective.preserve_metrics
+                        )
                     )
-                )
+                ):
+                    raise ValueError("active objective does not match episode alignment")
+            elif self.active_objective != build_active_objective(
+                self.objective_alignment, self.objective, self.incumbent
             ):
                 raise ValueError("active objective does not match episode alignment")
         elif self.active_objective is not None:
