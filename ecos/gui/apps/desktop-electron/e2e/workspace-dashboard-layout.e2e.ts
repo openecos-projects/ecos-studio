@@ -561,30 +561,34 @@ describe('workspace dashboard layout', () => {
 
     await synthesis.getByRole('button', { name: 'Synthesis log', exact: true }).click()
     const log = page.getByRole('dialog', { name: 'Synthesis — Log', exact: true })
-    const copy = log.getByRole('button', { name: /^(Copied|Copy) log$/ })
-    await expect.poll(() => copy.isEnabled()).toBe(true)
-    const terminal = await waitFlowTerminal(page, workspace, operationId, 90_000)
-    expect(terminal.state).toBe('succeeded')
-    const steps = await readFlowSteps(workspace.workspaceDir)
-    expect(steps.find(({ name }) => name === 'placement')?.state).toBe('Unstart')
+    try {
+      const terminal = await waitFlowTerminal(page, workspace, operationId, 90_000)
+      expect(terminal.state).toBe('succeeded')
+      const steps = await readFlowSteps(workspace.workspaceDir)
+      expect(steps.find(({ name }) => name === 'placement')?.state).toBe('Unstart')
 
-    const logText = await readFile(
-      join(workspace.workspaceDir, '01_synthesis_yosys/log/synthesis.log'),
-      'utf8',
-    )
-    const lastLine = stripVTControlCharacters(logText).trimEnd().split('\n').at(-1)!
-    expect(lastLine).toBeTruthy()
-    await expect
-      .poll(
-        async () => {
-          await copy.click()
-          return app.evaluate(({ clipboard }) => clipboard.readText())
-        },
-        { timeout: 15_000 },
+      const logText = await readFile(
+        join(workspace.workspaceDir, '01_synthesis_yosys/log/synthesis.log'),
+        'utf8',
       )
-      .toContain(lastLine)
-    await shot('bounded-cli-step-log')
-    await log.getByRole('button', { name: 'Close', exact: true }).click()
+      const lastLine = stripVTControlCharacters(logText).trimEnd().split('\n').at(-1)!
+      expect(lastLine).toBeTruthy()
+      const copy = log.getByRole('button', { name: /^(Copied|Copy) log$/ })
+      await expect
+        .poll(
+          async () => {
+            if (!(await copy.isEnabled())) return ''
+            await copy.click()
+            return app.evaluate(({ clipboard }) => clipboard.readText())
+          },
+          { timeout: 15_000 },
+        )
+        .toContain(lastLine)
+      await shot('bounded-cli-step-log')
+    } finally {
+      await log.getByRole('button', { name: 'Close', exact: true }).click()
+      await log.waitFor({ state: 'hidden' })
+    }
   }, 180_000)
 
   it('shows a saved run with only an endpoint in history and diagnostics', async () => {
