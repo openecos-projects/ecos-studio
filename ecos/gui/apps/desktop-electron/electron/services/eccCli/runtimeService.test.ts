@@ -23,6 +23,7 @@ import {
   projectSettingsArgs,
   rtlImportArgs,
   workspaceCreateCommands,
+  workspaceDraftArgs,
 } from './workspaceCreation'
 import { EccCliProcess } from './cliProcess'
 import { readProjectManifest } from './persistedState'
@@ -1627,5 +1628,26 @@ describe('ECC CLI Workspace discovery', () => {
       entry: { workspace_id: 'ws_external' },
     })
     await expect(declaredWorkspaceForDirectory(manifest, project)).resolves.toBeNull()
+  })
+
+  it('rejects option-like step names and conflicting RTL inputs in workspace drafts', () => {
+    const badStep = request()
+    badStep.workspaceSpec.flow = { flowId: 'rtl2gds', fromStepId: '--help' }
+    expect(() => workspaceDraftArgs(badStep, '/projects/demo')).toThrow(
+      'Invalid ECC step name.',
+    )
+
+    const conflictingRtl = request()
+    conflictingRtl.workspaceSpec.inputs = [
+      { inputId: 'filelist', role: 'filelist' },
+      { inputId: 'rtl', role: 'rtl' },
+    ]
+    conflictingRtl.workspaceBindings.inputs = {
+      filelist: '/inputs/files.f',
+      rtl: '/inputs/top.v',
+    }
+    expect(() => workspaceDraftArgs(conflictingRtl, '/projects/demo')).toThrow(
+      'either a filelist or Verilog files, not both',
+    )
   })
 })

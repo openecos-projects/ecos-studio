@@ -12,8 +12,16 @@ import {
 function workspaceFlowArgs(spec: Record<string, unknown>): string[] {
   const flow = isRecord(spec.flow) ? spec.flow : {}
   return [
-    ...(typeof flow.fromStepId === 'string' ? ['--from', flow.fromStepId] : []),
-    ...(typeof flow.throughStepId === 'string' ? ['--to', flow.throughStepId] : []),
+    ...(flow.fromStepId !== undefined &&
+    flow.fromStepId !== null &&
+    flow.fromStepId !== ''
+      ? ['--from', requireStepName(flow.fromStepId)]
+      : []),
+    ...(flow.throughStepId !== undefined &&
+    flow.throughStepId !== null &&
+    flow.throughStepId !== ''
+      ? ['--to', requireStepName(flow.throughStepId)]
+      : []),
   ]
 }
 
@@ -242,6 +250,9 @@ export function workspaceDraftArgs(
   const selection = inputRolePaths(request)
   const filelist = selection.get('filelist')?.[0]
   const rtl = selection.get('rtl')
+  if (filelist && rtl?.length) {
+    throw new Error('RTL import accepts either a filelist or Verilog files, not both.')
+  }
   const values = (value: unknown) =>
     flowEditFlags('--step', value).filter((_, i) => i % 2)
   const draft = {
@@ -292,6 +303,8 @@ export function workspaceCreateCommands(
     ) {
       throw new Error('Creating from output requires a continuation step and endpoint.')
     }
+    const fromStep = requireStepName(flow.fromStepId)
+    const throughStep = requireStepName(flow.throughStepId)
     const parameters = parameterArgs(request.workspaceSpec.parameters)
     return [
       [
@@ -300,9 +313,9 @@ export function workspaceCreateCommands(
         '--project',
         projectRoot,
         '--from',
-        flow.fromStepId,
+        fromStep,
         '--to',
-        flow.throughStepId,
+        throughStep,
         '--command-id',
         request.commandId,
         '--no-wait',
@@ -364,6 +377,17 @@ export function workspaceCreateCommands(
 export function requireWorkspaceId(value: unknown): string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)) {
     throw new Error('Invalid Workspace ID.')
+  }
+  return value
+}
+
+export function requireStepName(value: unknown): string {
+  if (
+    typeof value !== 'string' ||
+    !/^[A-Za-z][A-Za-z0-9_]*(?:@[A-Za-z][A-Za-z0-9_]*)?$/.test(value) ||
+    value.length > 256
+  ) {
+    throw new Error('Invalid ECC step name.')
   }
   return value
 }

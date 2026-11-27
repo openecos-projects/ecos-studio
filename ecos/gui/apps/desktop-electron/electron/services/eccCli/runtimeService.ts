@@ -73,6 +73,7 @@ import {
   projectInitArgs,
   projectManifestCreateArgs,
   projectSettingsArgs,
+  requireStepName,
   requireWorkspaceId,
   rtlImportArgs,
   rtlImportSelection,
@@ -323,10 +324,11 @@ export class EccCliRuntimeService {
         const path = requireString(input.workspacePath)
         const existing = workspaceEntryForDirectory(manifest, path)
         if (!existing) {
+          const workspaceId = requireWorkspaceId(basename(path))
           await this.cli.run([
             'workspace',
             'import',
-            basename(path),
+            workspaceId,
             '--path',
             await realpath(path),
             '--project',
@@ -337,10 +339,13 @@ export class EccCliRuntimeService {
       } else if (type === 'import-workspace') {
         const input = requireRecord(requested.input)
         const path = requireString(input.workspacePath)
+        const workspaceId = requireWorkspaceId(
+          optionalString(input.workspaceId) ?? basename(path),
+        )
         await this.cli.run([
           'workspace',
           'import',
-          optionalString(input.workspaceId) ?? basename(path),
+          workspaceId,
           '--path',
           await realpath(path),
           '--project',
@@ -348,7 +353,7 @@ export class EccCliRuntimeService {
           '--no-wait',
         ])
       } else if (type === 'archive-workspace' || type === 'delete-workspace') {
-        const workspaceId = requireString(requested.workspaceId)
+        const workspaceId = requireWorkspaceId(requested.workspaceId)
         const snapshot = await readPersistedEngineeringSnapshot(
           workspaceDirectoryForId(manifest, workspaceId),
           workspaceId,
@@ -373,7 +378,7 @@ export class EccCliRuntimeService {
         await this.cli.run([
           'project',
           'baseline',
-          requireString(requested.workspaceId),
+          requireWorkspaceId(requested.workspaceId),
           '--project',
           root,
           ...(optionalString(requested.reason)
@@ -928,6 +933,7 @@ export class EccCliRuntimeService {
     step: string,
     snapshot: EccEngineeringSnapshot,
   ): Promise<EccWorkspaceStepConfigurationReadResult> {
+    const validatedStep = requireStepName(step)
     const result = await this.cli.run(
       [
         'param',
@@ -935,9 +941,9 @@ export class EccCliRuntimeService {
         '--project',
         projectRoot,
         '--workspace',
-        workspaceId,
+        requireWorkspaceId(workspaceId),
         '--step',
-        step,
+        validatedStep,
         '--all',
         '--plain',
       ],
@@ -1023,7 +1029,7 @@ export class EccCliRuntimeService {
     await this.runWorkspaceMutation(session, [
       'workspace',
       'reset-flow',
-      session.workspaceId,
+      requireWorkspaceId(session.workspaceId),
       '--project',
       session.projectRoot,
       ...(request.expectedWorkspaceRevision
@@ -1385,19 +1391,22 @@ export class EccCliRuntimeService {
       resolve(request.directory) !== session.directory ||
       dirname(target) !== session.projectRoot ||
       target === session.directory ||
-      !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(id)
+      !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id)
     ) {
       throw new Error('Invalid fork source or target directory.')
     }
+    const resetFromStep = request.resetFromStep
+      ? requireStepName(request.resetFromStep)
+      : undefined
     await this.cli.run(
       [
         'workspace',
         'fork',
-        session.workspaceId,
+        requireWorkspaceId(session.workspaceId),
         id,
         '--project',
         session.projectRoot,
-        ...(request.resetFromStep ? ['--from', request.resetFromStep] : []),
+        ...(resetFromStep ? ['--from', resetFromStep] : []),
         '--command-id',
         request.commandId || randomUUID(),
         '--no-wait',
@@ -1602,7 +1611,8 @@ export class EccCliRuntimeService {
       throw codedError('Workspace already has an active ECC run.', 'WORKSPACE_BUSY')
     }
     const runId = randomUUID()
-    const step = kind === 'step' ? (request as EccRuntimeStartStepRequest).step : ''
+    const step =
+      kind === 'step' ? requireStepName((request as EccRuntimeStartStepRequest).step) : ''
     const fromStep = kind === 'flow' ? request.fromStep : undefined
     if (fromStep !== undefined) {
       const flow = await readWorkspaceFlow(session.directory)
@@ -2516,7 +2526,7 @@ export function workspaceRefreshArgs(options: {
   return [
     'workspace',
     'refresh',
-    options.workspaceId,
+    requireWorkspaceId(options.workspaceId),
     '--project',
     options.projectRoot,
     ...(options.expectedWorkspaceRevision !== undefined
