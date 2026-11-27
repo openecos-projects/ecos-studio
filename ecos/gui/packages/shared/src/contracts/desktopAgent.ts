@@ -541,7 +541,7 @@ export interface DesktopAgentOptimizationPayload {
   active_primary_metric?: string
   action?: { direction: string; knob_id: string } | null
   alignment_sha256?: string
-  best_candidate?: DesktopAgentOptimizationCandidate
+  best_candidate?: DesktopAgentOptimizationCandidate | null
   calibration_completed?: number
   calibration_required?: number
   decisive_metric?: string | null
