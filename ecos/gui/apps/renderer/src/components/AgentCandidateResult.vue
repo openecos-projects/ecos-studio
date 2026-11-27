@@ -110,7 +110,8 @@ const canSave = computed(
 
 function open() {
   issue.value = ''
-  name.value ||= 'optimization-' + props.episode.episodeId.slice(-12)
+  const suffix = props.episode.episodeId.slice(-12).replace(/[^A-Za-z0-9_-]/g, '-')
+  name.value ||= 'optimization-' + (suffix || 'candidate')
   dialog.value?.showModal()
 }
 
