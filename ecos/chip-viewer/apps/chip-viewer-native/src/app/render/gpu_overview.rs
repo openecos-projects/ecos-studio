@@ -11,7 +11,8 @@ use super::*;
 
 /// Edge length of a lod-3 view tile in dbu. view.bin tiles use a
 /// `4096 << lod` dbu grid, so lod 3 tiles are 32768 dbu across.
-pub(super) const VIEW_TILE_LOD3_SIZE_DBU: f32 = 4096.0 * 8.0;
+pub(super) const VIEW_TILE_LOD3_SIZE_DBU: f32 = VIEW_TILE_BASE_SIZE_DBU * 8.0;
+const VIEW_TILE_BASE_SIZE_DBU: f32 = 4096.0;
 
 /// Legacy far-zoom entry point. Dense views can also use pixel-scale tiles
 /// when their estimated visible shape count exceeds the physical pixel count.
@@ -96,15 +97,19 @@ fn estimated_visible_shapes_per_pixel(
     }
 }
 
+fn base_tile_screen_px(zoom: f32, world: Rect32, canvas: egui::Rect, pixels_per_point: f32) -> f64 {
+    f64::from(VIEW_TILE_BASE_SIZE_DBU)
+        * f64::from(world_to_screen_scale(world, canvas, zoom))
+        * f64::from(pixels_per_point.max(0.1))
+}
+
 pub(super) fn pixel_overview_lod(
     zoom: f32,
     world: Rect32,
     canvas: egui::Rect,
     pixels_per_point: f32,
 ) -> u8 {
-    let tile_zero_screen_px = 4096.0_f64
-        * f64::from(world_to_screen_scale(world, canvas, zoom))
-        * f64::from(pixels_per_point.max(0.1));
+    let tile_zero_screen_px = base_tile_screen_px(zoom, world, canvas, pixels_per_point);
     if tile_zero_screen_px <= 0.0 {
         return 0;
     }
@@ -136,13 +141,16 @@ pub(super) fn should_use_view_tiles_for_state(
         return false;
     }
     if zoom > VIEW_TILE_OVERVIEW_ENTER_ZOOM {
-        return estimated_visible_shapes_per_pixel(
-            shape_count,
-            viewport,
-            world,
-            canvas,
-            pixels_per_point,
-        ) >= PIXEL_OVERVIEW_ENTER_SHAPES_PER_PIXEL;
+        // Counts alone cannot distinguish a sparse wire grid from a solid layer.
+        // Keep its geometry when even the finest summary cell spans multiple pixels.
+        return base_tile_screen_px(zoom, world, canvas, pixels_per_point) <= 1.0
+            && estimated_visible_shapes_per_pixel(
+                shape_count,
+                viewport,
+                world,
+                canvas,
+                pixels_per_point,
+            ) >= PIXEL_OVERVIEW_ENTER_SHAPES_PER_PIXEL;
     }
     // Primary signal: lod-3 tiles resolve to visible pixels on this canvas.
     if lod3_tile_screen_px(zoom, world, canvas) >= VIEW_TILE_MIN_SCREEN_PX {
@@ -199,13 +207,14 @@ impl ViewTileOverviewLatch {
                 && !has_draft
                 && !edit_enabled
                 && camera_activity == CameraActivity::Settled;
-            let dense = estimated_visible_shapes_per_pixel(
-                shape_count,
-                viewport,
-                world,
-                canvas,
-                pixels_per_point,
-            ) >= PIXEL_OVERVIEW_EXIT_SHAPES_PER_PIXEL;
+            let dense = base_tile_screen_px(zoom, world, canvas, pixels_per_point) <= 1.0
+                && estimated_visible_shapes_per_pixel(
+                    shape_count,
+                    viewport,
+                    world,
+                    canvas,
+                    pixels_per_point,
+                ) >= PIXEL_OVERVIEW_EXIT_SHAPES_PER_PIXEL;
             if !preconditions || (zoom > VIEW_TILE_OVERVIEW_EXIT_ZOOM && !dense) {
                 self.active = false;
             }
@@ -463,7 +472,7 @@ mod tests {
             1.0,
             CameraActivity::Settled,
         ));
-        assert!(should_use_view_tiles_for_state(
+        assert!(!should_use_view_tiles_for_state(
             16,
             false,
             false,
@@ -487,6 +496,35 @@ mod tests {
             1.0,
             CameraActivity::Settled,
         ));
+    }
+
+    #[test]
+    fn dense_filler_fit_uses_exact_geometry_even_after_far_overview() {
+        let world = Rect32 {
+            lx: -1,
+            ly: -1,
+            hx: 314_001,
+            hy: 315_401,
+        };
+        let canvas = test_canvas();
+        let mut latch = ViewTileOverviewLatch::default();
+        let mut overview = |zoom| {
+            latch.update(
+                6863,
+                false,
+                false,
+                zoom,
+                1_164_925,
+                world,
+                world,
+                canvas,
+                1.0,
+                CameraActivity::Settled,
+            )
+        };
+        assert!(!overview(1.0));
+        assert!(overview(0.3));
+        assert!(!overview(1.0));
     }
 
     #[test]
@@ -669,7 +707,12 @@ mod tests {
 
     #[test]
     fn pixel_overview_latch_uses_density_hysteresis_at_fit_zoom() {
-        let world = test_world();
+        let world = Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 8_000_000,
+            hy: 8_000_000,
+        };
         let canvas = test_canvas();
         let mut latch = ViewTileOverviewLatch::default();
 
@@ -713,7 +756,12 @@ mod tests {
 
     #[test]
     fn camera_interaction_exits_overview_and_allows_it_again_after_release() {
-        let world = test_world();
+        let world = Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 8_000_000,
+            hy: 8_000_000,
+        };
         let canvas = test_canvas();
         let mut latch = ViewTileOverviewLatch::default();
 
