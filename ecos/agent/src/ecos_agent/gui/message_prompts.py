@@ -354,12 +354,12 @@ def rerun_stage_prompt(language: str, stages: tuple[str, ...]) -> str:
         language,
         (
             "请选择重跑的起始阶段：这一阶及之后会在隔离 workspace 中重算；"
-            "之前的阶段会沿用源 workspace 的结果，不会从 Synthesis 重新跑起。"
+            "之前的阶段会沿用源 workspace 的结果，不会从 synthesis 重新跑起。"
         ),
         (
             "Choose the start stage for rerun: that stage and later ones will be "
             "recomputed in an isolated workspace. Earlier stages keep the source "
-            "workspace results — this does not restart from Synthesis."
+            "workspace results — this does not restart from synthesis."
         ),
     )
 
@@ -457,8 +457,8 @@ def workspace_continue_title(language: str) -> str:
 def workspace_signoff_inspection_prompt(language: str) -> str:
     return _prompt(
         language,
-        "Flow 已完成 Harden，正在检查 signoff checklist。",
-        "Harden completed. Checking the signoff checklist.",
+        "Flow 已完成 harden，正在检查 signoff checklist。",
+        "harden completed. Checking the signoff checklist.",
     )
 
 
