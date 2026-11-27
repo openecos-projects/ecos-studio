@@ -28,6 +28,7 @@ export function isCandidateOperationId(value: string): boolean {
 }
 
 export class CandidateOperations {
+  private readonly shutdownSignal = new AbortController()
   private readonly operations = new Map<string, CandidateRun>()
   private readonly controllers = new Set<AbortController>()
   private readonly active = new Map<Promise<EccRuntimeOperation>, SourceWorkspace>()
@@ -249,14 +250,21 @@ export class CandidateOperations {
   async wait(
     source: SourceWorkspace,
     operationId: string,
-    deadline = Infinity,
+    deadline = Date.now() + 60_000,
   ): Promise<EccRuntimeOperation> {
     const run = this.localOperation(source, operationId)
     if (run) return await run.terminal
+    const { signal } = this.shutdownSignal
     while (Date.now() < deadline) {
-      const operation = await this.status(source, operationId)
+      signal.throwIfAborted()
+      const { operation } = await this.readOperation(source, operationId, false, {
+        signal,
+        timeoutMs: Math.min(10_000, Math.max(1, deadline - Date.now())),
+      })
       if (isTerminal(operation.state)) return operation
-      await delay(1000)
+      await delay(Math.min(1000, Math.max(0, deadline - Date.now())), undefined, {
+        signal,
+      })
     }
     throw new Error('ECC candidate did not reach a terminal state before the deadline.')
   }
@@ -286,6 +294,7 @@ export class CandidateOperations {
   }
 
   async shutdown(): Promise<void> {
+    this.shutdownSignal.abort()
     for (const controller of this.controllers) controller.abort()
     await this.waitForIdle()
   }
@@ -305,6 +314,7 @@ export class CandidateOperations {
     source: SourceWorkspace,
     operationId: string,
     cancel = false,
+    options?: { signal: AbortSignal; timeoutMs: number },
   ) {
     const record = await this.query(
       candidateArgs('operation', source, [
@@ -313,6 +323,8 @@ export class CandidateOperations {
         ...(cancel ? ['--cancel'] : []),
       ]),
       source.projectRoot,
+      options?.timeoutMs,
+      options?.signal,
     )
     const value = record.operation
     if (
@@ -330,9 +342,14 @@ export class CandidateOperations {
     throw new Error('ECC candidate operation is unavailable.')
   }
 
-  private async query(args: string[], cwd?: string, timeoutMs = 10_000) {
+  private async query(
+    args: string[],
+    cwd?: string,
+    timeoutMs = 10_000,
+    signal?: AbortSignal,
+  ) {
     try {
-      const { stdout } = await this.cli.run(args, { cwd, timeoutMs })
+      const { stdout } = await this.cli.run(args, { cwd, timeoutMs, signal })
       const record = stdout.split('\n').map(readRecord).reverse().find(Boolean)
       if (!record) throw new Error('ECC candidate response is unavailable.')
       return record
