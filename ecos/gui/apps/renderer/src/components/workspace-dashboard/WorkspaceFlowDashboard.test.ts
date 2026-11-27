@@ -48,8 +48,30 @@ describe('workspace flow diagram', () => {
       ].map((stepId, order) => ({
         stepId,
         name: stepId,
+        category: [
+          'lvs',
+          'drc',
+          'antenna_check',
+          'post_route_lec',
+          'rcx',
+          'sta',
+          'power_analysis',
+          'emir',
+        ].includes(stepId)
+          ? 'CHECKER'
+          : 'PNR',
         stage: [1, 2, 3, 3, 3, 3, 3, 4, 4, 5, 6, 7][order],
-        ...(stepId === 'sta' ? { inputProducers: { parasitics: 'rcx' } } : {}),
+        ...(stepId === 'sta' || stepId === 'power_analysis'
+          ? { inputProducers: { filled: 'filler', parasitics: 'rcx' } }
+          : stepId === 'emir'
+            ? {
+                inputProducers: {
+                  filled: 'filler',
+                  parasitics: 'rcx',
+                  power: 'power_analysis',
+                },
+              }
+            : {}),
         order,
         state: 'succeeded',
       })),
@@ -105,7 +127,16 @@ describe('workspace flow diagram', () => {
     const wrapper = render()
     expect(wrapper.text()).not.toContain('Checks converge before Harden and Signoff')
     expect(wrapper.findAll('.flow-step-card')).toHaveLength(12)
-    expect(wrapper.get('svg').text()).not.toContain('drc → sta')
+    const svgText = wrapper.get('svg').text()
+    expect(svgText).not.toContain('drc → sta')
+    expect(svgText).not.toContain('sta → emir')
+    expect(svgText).toContain('rcx → sta')
+    expect(svgText).toContain('rcx → power_analysis')
+    expect(svgText).toContain('power_analysis → emir')
+    expect(svgText).toContain('lvs → harden')
+    expect(svgText).toContain('sta → harden')
+    expect(svgText).toContain('emir → harden')
+    expect(wrapper.findAll('svg > path.is-advisory')).toHaveLength(2)
     expect(wrapper.get('.flow-parallel-group').text()).toBe('Stage 3 · 5 steps')
     await wrapper.get('button[aria-label="Succeeded — run STA"]').trigger('click')
     expect(wrapper.get('.step-inputs').text()).toContain('parasitics')

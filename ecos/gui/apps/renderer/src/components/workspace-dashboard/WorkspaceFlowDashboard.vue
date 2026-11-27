@@ -88,19 +88,14 @@
                 </marker>
               </defs>
               <path
-                v-for="edge in topology.edges"
+                v-for="edge in orderedEdges"
                 :key="`${edge.from}:${edge.to}`"
                 :d="edgePath(edge)"
+                :class="{ 'is-advisory': edge.advisory }"
                 :marker-end="`url(#${arrowId})`"
               >
                 <title>{{ edge.from }} → {{ edge.to }}</title>
               </path>
-              <path
-                v-for="(path, index) in parallelTransitions"
-                :key="`stage-${index}`"
-                :d="path"
-                :marker-end="`url(#${arrowId})`"
-              />
             </svg>
             <div
               v-for="group in parallelGroups"
@@ -213,7 +208,7 @@ import StepLogDialog from './StepLogDialog.vue'
 import FlowSignoffCard from './FlowSignoffCard.vue'
 import { useFlowDiagramPan } from './useFlowDiagramPan'
 import { useCenteredFlowViewport } from './useCenteredFlowViewport'
-import { FLOW_CARD, flowGraphLayout } from './flowGraphLayout'
+import { FLOW_CARD, FLOW_GAP, flowGraphLayout } from './flowGraphLayout'
 
 const emit = defineEmits<{ layout: [thumbnail: HomeLayoutThumbnail] }>()
 const { projectedSteps, activeOperation, isLoading, error } = useBackendFlowStages()
@@ -249,32 +244,36 @@ const layout = computed(() => flowGraphLayout(topology.value))
 const positions = computed(() => layout.value.positions)
 const parallelGroups = computed(() =>
   topology.value.parallelGroups.map(({ stage, stepIds }) => {
-    const first = positions.value.get(stepIds[0]!)!
-    const last = positions.value.get(stepIds[stepIds.length - 1]!)!
+    const coords = stepIds.map((id) => positions.value.get(id)!)
+    const x = coords[0]!.x
+    const minY = Math.min(...coords.map((point) => point.y))
+    const maxY = Math.max(...coords.map((point) => point.y))
     return {
-      ...first,
+      x,
+      y: minY,
       stage,
       count: stepIds.length,
-      height: last.y - first.y + FLOW_CARD.height,
+      height: maxY - minY + FLOW_CARD.height,
     }
   }),
 )
-const parallelTransitions = computed(() => {
-  const firstGroup = parallelGroups.value[0]
-  if (!firstGroup) return []
-  const center = firstGroup.y + firstGroup.height / 2
-  const groupX = new Set(parallelGroups.value.map((group) => group.x))
-  const columns = [
-    ...new Set(topology.value.nodes.map((node) => positions.value.get(node.id)!.x)),
-  ]
-  return columns.slice(0, -1).flatMap((x, index) => {
-    const next = columns[index + 1]!
-    if (!groupX.has(x) && !groupX.has(next)) return []
-    const from = x + FLOW_CARD.width + (groupX.has(x) ? 6 : 0)
-    const to = next - (groupX.has(next) ? 8 : 3)
-    return [`M ${from} ${center} H ${to}`]
-  })
+const nodeColumns = computed(
+  () => new Map(topology.value.nodes.map((node) => [node.id, node.column])),
+)
+const edgeDegrees = computed(() => {
+  const incoming = new Map<string, number>()
+  const outgoing = new Map<string, number>()
+  for (const edge of topology.value.edges) {
+    outgoing.set(edge.from, (outgoing.get(edge.from) ?? 0) + 1)
+    incoming.set(edge.to, (incoming.get(edge.to) ?? 0) + 1)
+  }
+  return { incoming, outgoing }
 })
+// Draw advisory dashed edges before solid edges so shared convergence segments stay solid.
+const orderedEdges = computed(() => [
+  ...topology.value.edges.filter((edge) => edge.advisory),
+  ...topology.value.edges.filter((edge) => !edge.advisory),
+])
 const runningCount = computed(
   () => steps.value.filter((step) => step.status === 'running').length,
 )
@@ -349,8 +348,17 @@ function edgePath(edge: FlowEdge): string {
   const startX = from.x + FLOW_CARD.width
   const startY = from.y + FLOW_CARD.height / 2
   const endY = to.y + FLOW_CARD.height / 2
-  const midpoint = startX + (to.x - startX) / 2
-  return `M ${startX} ${startY} H ${midpoint} V ${endY} H ${to.x - 3}`
+  if (Math.abs(startY - endY) < 0.5) {
+    return `M ${startX} ${startY} H ${to.x - 3}`
+  }
+  const fromCol = nodeColumns.value.get(edge.from) ?? 0
+  const toCol = nodeColumns.value.get(edge.to) ?? fromCol + 1
+  const bendsRightAfterSource =
+    toCol > fromCol + 1 &&
+    (edgeDegrees.value.incoming.get(edge.to) ?? 0) <= 1 &&
+    (edgeDegrees.value.outgoing.get(edge.from) ?? 0) > 1
+  const bendX = bendsRightAfterSource ? startX + FLOW_GAP.x / 2 : to.x - FLOW_GAP.x / 2
+  return `M ${startX} ${startY} H ${bendX} V ${endY} H ${to.x - 3}`
 }
 function openDetails(kind: typeof detailKind.value, step: DashboardFlowStep): void {
   selectedId.value = step.id
@@ -549,6 +557,10 @@ output {
   stroke: currentColor;
   stroke-width: 1.5px;
 }
+.flow-edges > path.is-advisory {
+  stroke-dasharray: 5 4;
+  opacity: 0.78;
+}
 .flow-edges marker path {
   fill: currentColor;
 }
@@ -576,9 +588,9 @@ output {
 }
 .flow-parallel-group span {
   position: absolute;
-  bottom: calc(100% + 9px);
+  bottom: calc(100% + 7px);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 11px;
   white-space: nowrap;
 }
 .flow-execution-summary {
