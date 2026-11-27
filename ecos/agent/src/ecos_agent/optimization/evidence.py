@@ -80,7 +80,7 @@ PRESERVE_FORBIDDEN_NATURES = frozenset({MetricNature.DERIVED})
 
 
 def preserve_metric_is_forbidden(metric: "ObjectiveMetric") -> bool:
-    return METRIC_NATURES[metric.value] in PRESERVE_FORBIDDEN_NATURES
+    return METRIC_NATURES.get(metric.value) in PRESERVE_FORBIDDEN_NATURES
 
 _PLACE_QOR = "placement/analysis/qor_metrics.json"
 _ROUTE_QOR = "routing/analysis/qor_metrics.json"

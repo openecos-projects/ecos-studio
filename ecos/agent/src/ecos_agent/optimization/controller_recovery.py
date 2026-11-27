@@ -14,6 +14,7 @@ from ecos_agent.optimization.contracts import (
 )
 from ecos_agent.optimization.controller_models import (
     _PersistedEpisodeState,
+    _ArchivedEpisodeObjective,
     OptimizationEpisodeControllerError,
 )
 from ecos_agent.optimization.decision_audit import (
@@ -98,6 +99,11 @@ class ControllerRecoveryMixin:
             raise OptimizationEpisodeControllerError(
                 "episode state hash is invalid"
             ) from exc
+        if isinstance(snapshot.objective, _ArchivedEpisodeObjective):
+            raise OptimizationEpisodeControllerError(
+                "episode objective uses archived STA power metrics; "
+                "start a new optimization episode"
+            )
         replay = ledger.recover()
         planning_audit = OptimizationPlanningAudit(ledger.root)
         audit_replay = planning_audit.verify()

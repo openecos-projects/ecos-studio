@@ -26,6 +26,7 @@ from ecos_agent.optimization.parameters.effective_domain import (
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.geometry import GeometrySnapshot
 from ecos_agent.optimization.contracts import (
+    ArchivedPowerMetric,
     BudgetSnapshot,
     ExpectedEffect,
     ExpectedEffectDirection,
@@ -77,6 +78,7 @@ from ecos_agent.optimization.knowledge.cases import (
     select_empirical_cases,
 )
 from ecos_agent.optimization.ledger import (
+    _ArchivedActiveObjective,
     OptimizationInterventionStart,
     OptimizationLedger,
     OptimizationLedgerReplay,
@@ -206,6 +208,13 @@ class PendingExecutionRecord(_PersistedModel):
         return value
 
 
+class _ArchivedEpisodeObjective(OptimizationObjectiveContract):
+    primary_metric: ObjectiveMetric | ArchivedPowerMetric
+    preserve_metrics: tuple[ObjectiveMetric | ArchivedPowerMetric, ...] = Field(
+        default=(), max_length=2
+    )
+
+
 class _PersistedEpisodeState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -229,12 +238,12 @@ class _PersistedEpisodeState(BaseModel):
     started_at: float
     incumbent: TerminalObservation | None = None
     baseline_geometry: GeometrySnapshot | None = Field(default=None, exclude_if=lambda value: value is None)
-    objective: OptimizationObjectiveContract | None = None
+    objective: OptimizationObjectiveContract | _ArchivedEpisodeObjective | None = None
     objective_alignment: OptimizationObjectiveAlignment | None = None
     frozen_objective: RoutabilityObjectiveContract | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
-    active_objective: ActiveOptimizationObjective | None = None
+    active_objective: ActiveOptimizationObjective | _ArchivedActiveObjective | None = None
     parent_manifest_sha256: str | None = None
     ledger_event_count: int = Field(ge=0)
     ledger_chain_head_sha256: str | None = None
@@ -314,9 +323,11 @@ class _PersistedEpisodeState(BaseModel):
             if (
                 self.objective_alignment.objective_contract_sha256
                 != self.objective.contract_sha256
-                or self.active_objective
-                != build_active_objective(
-                    self.objective_alignment, self.objective, self.incumbent
+                or (
+                    not isinstance(self.objective, _ArchivedEpisodeObjective)
+                    and self.active_objective != build_active_objective(
+                        self.objective_alignment, self.objective, self.incumbent
+                    )
                 )
             ):
                 raise ValueError("active objective does not match episode alignment")
