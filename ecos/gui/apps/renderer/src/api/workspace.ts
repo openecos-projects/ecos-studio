@@ -201,15 +201,13 @@ export function backendWorkspaceOptions(
     'prefloorplan',
     'macroplacement',
     'postfloorplan',
-    'pre_floorplan',
-    'macro_placement',
-    'post_floorplan',
   ])
   const ctsApplies = parameterApplies(['cts'])
-  const placementApplies = parameterApplies(['placement', 'place', 'macroplacement'])
+  const placementApplies = parameterApplies(['placement', 'place'])
+  const scopedPlacement = selectedSteps.size === 0 || selectedSteps.has('placement')
   const placementSpecKey = (displayKey: string, fallback: string) => {
     const key = specKey(displayKey, fallback)
-    return selectedSteps.has('placement') && !key.includes(':') ? `placement:${key}` : key
+    return scopedPlacement && !key.includes(':') ? `placement:${key}` : key
   }
   const macroPlacementApplies = parameterApplies(['macroplacement'])
   const mpc = config.mpc as ProjectManifestMpc | null | undefined
@@ -354,10 +352,10 @@ export function backendWorkspaceOptions(
                 parameters.target_density,
                 0.2,
               ),
-              [placementSpecKey('target_overflow', 'place.target_overflow')]: numberValue(
-                parameters.target_overflow,
-                0.1,
-              ),
+              [placementSpecKey(
+                'target_overflow',
+                scopedPlacement ? 'place.stop_overflow' : 'place.target_overflow',
+              )]: numberValue(parameters.target_overflow, 0.1),
             }
           : {}),
         ...(ctsApplies && clockTreeSpecKey

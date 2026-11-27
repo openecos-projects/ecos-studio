@@ -19,12 +19,12 @@ fn builds_cli_sections_without_text_reports_and_preserves_unknowns() {
     let f = Fixture::new();
     put(
         &f,
-        "Harden_ecc/analysis/qor_metrics.json",
+        "21_harden_ecc/analysis/qor_metrics.json",
         json!({"metrics":[{"id":"die_area","value":1234.5}]}),
     );
     put(
         &f,
-        "Harden_ecc/feature/Harden.db.json",
+        "21_harden_ecc/feature/Harden.db.json",
         json!({"die_area":9999,"Design Layout":{"core_area":1000,"core_usage":0.4},"Instances":{"total":{"num":42}}}),
     );
     put(
@@ -32,7 +32,7 @@ fn builds_cli_sections_without_text_reports_and_preserves_unknowns() {
         "place_dreamplace/feature/place.json",
         json!({"die_area":5555}),
     );
-    let flow = json!({"steps":[{"name":"Harden","tool":"ecc","runtime":"0:2:3","peak memory (mb)":256,"state":"Success"},{"name":"place","tool":"dreamplace"}]});
+    let flow = json!({"steps":[{"name":"harden","tool":"ecc","directory":"21_harden_ecc","runtime":"0:2:3","peak memory (mb)":256,"state":"Success"},{"name":"place","tool":"dreamplace"}]});
     let snapshot =
         json!({"parameters":{"design":"gcd","top_module":"gcd","pdk":"ics55","clock_period":10}});
     let mut identity = DesignSummary::default();
@@ -60,28 +60,30 @@ fn configured_corners_roll_up_and_ipw_units_match_cli() {
     );
     put(
         &f,
-        "sta_ecc/feature/MIN_m40/Cbest/qor_summary.json",
+        "18_sta_ecc/feature/MIN_m40/Cbest/qor_summary.json",
         json!({"summary":{"setup":{"wns":2,"tns":0,"nvp":0},"hold":{"wns":-0.1,"tns":-0.2,"nvp":2}}}),
     );
     put(
         &f,
-        "sta_ecc/feature/MIN_m40/RCbest/qor_summary.json",
+        "18_sta_ecc/feature/MIN_m40/RCbest/qor_summary.json",
         json!({"summary":{"setup":{"wns":1,"tns":0,"nvp":0}}}),
     );
     put(
         &f,
-        "sta_ecc/feature/STALE/qor_summary.json",
+        "18_sta_ecc/feature/STALE/qor_summary.json",
         json!({"setup_wns":-999}),
     );
-    put(&f, "powerAnalysis_ecc/report/unused.json", json!({}));
+    put(&f, "19_power_analysis_ecc/report/unused.json", json!({}));
     std::fs::write(
-        f.0.join("powerAnalysis_ecc/report/powerAnalysis.rpt"),
+        f.0.join("19_power_analysis_ecc/report/power_analysis.rpt"),
         "Total Dynamic Power = 500 uW\nCell Leakage Power = 20 nW\n",
     )
     .unwrap();
     let report = load(
         &f.0,
-        None,
+        Some(
+            &json!({"steps":[{"name":"sta","tool":"ecc","directory":"18_sta_ecc"},{"name":"power_analysis","tool":"ecc","directory":"19_power_analysis_ecc"}]}),
+        ),
         Some(&json!({"parameters":{"clock_period":10}})),
         &mut DesignSummary::default(),
     );

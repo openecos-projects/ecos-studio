@@ -206,8 +206,8 @@ describe('workspace desktop bridge', () => {
       'floorplan.die_builder.mode': 'die_util',
       'floorplan.core_margin': [2, 2],
       'cts.max_fanout': 20,
-      'place.target_density': 0.4,
-      'place.target_overflow': 0.1,
+      'placement:place.target_density': 0.4,
+      'placement:place.stop_overflow': 0.1,
     })
   })
 

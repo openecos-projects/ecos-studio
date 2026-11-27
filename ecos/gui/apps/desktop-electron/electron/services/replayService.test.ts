@@ -58,7 +58,7 @@ describe('Replay workspace boundary', () => {
   it('preserves intervening steps and uses captured timing without rewriting the flow', async () => {
     const flow = {
       steps: [
-        { name: 'postFloorplan', tool: 'ecc', state: 'Success', runtime: '00:00:02' },
+        { name: 'lec@cts', tool: 'kepler_formal', state: 'Success', runtime: '00:00:02' },
         {
           name: 'preplace',
           tool: 'sizer',
@@ -87,7 +87,7 @@ describe('Replay workspace boundary', () => {
         step.seconds,
       ]),
     ).toEqual([
-      ['postFloorplan', 2],
+      ['lec@cts', 2],
       ['preplace', 3.25],
       ['place', 4.5],
     ])

@@ -77,8 +77,7 @@ pub(super) fn lookup(v: &Value, aliases: &[&str]) -> Option<f64> {
         })
 }
 pub(super) fn stage(name: &str) -> String {
-    let lower = name.to_ascii_lowercase();
-    match lower.as_str() {
+    match crate::replay::step_kind(name).as_str() {
         "synthesis" | "synth" => "Synth",
         "legalization" | "legal" => "Legal",
         "placement" | "place" => "Place",
@@ -96,6 +95,7 @@ pub(super) fn stage(name: &str) -> String {
 }
 pub(super) struct Sources<'a> {
     root: &'a Path,
+    directories: BTreeMap<String, String>,
     pub paths: Vec<PathBuf>,
     pub errors: Vec<String>,
     pub stages: BTreeMap<String, Value>,
@@ -105,6 +105,7 @@ impl<'a> Sources<'a> {
     pub fn new(root: &'a Path, parameters: Value) -> Self {
         Self {
             root,
+            directories: BTreeMap::new(),
             paths: vec![],
             errors: vec![],
             stages: BTreeMap::new(),
@@ -147,9 +148,16 @@ impl<'a> Sources<'a> {
             }
         }
     }
+    pub fn directory(&self, stage: &str, legacy: &str) -> String {
+        self.directories
+            .get(stage)
+            .cloned()
+            .unwrap_or_else(|| legacy.to_owned())
+    }
+
     pub fn collect(&mut self, flow: &Value) {
-        if let Some(parameters) = self.json("home/parameters.json") {
-            self.parameters = parameters;
+        if self.parameters.is_null() {
+            self.parameters = self.json("home/parameters.json").unwrap_or_default();
         }
         for step in array(&flow["steps"]) {
             let (Some(name), Some(tool)) = (step["name"].as_str(), step["tool"].as_str()) else {
@@ -161,7 +169,18 @@ impl<'a> Sources<'a> {
             {
                 continue;
             }
-            let directory = format!("{name}_{tool}");
+            let directory = match step.get("directory") {
+                None => format!("{name}_{tool}"),
+                Some(Value::String(dir))
+                    if !dir.is_empty()
+                        && !matches!(dir.as_str(), "." | "..")
+                        && !dir.contains(['/', '\\', ':', '\0']) =>
+                {
+                    dir.clone()
+                }
+                _ => continue,
+            };
+            self.directories.insert(stage(name), directory.clone());
             let mut merged = Map::new();
             for file in ["qor_metrics.json", "qor_summary.json"] {
                 if let Some(Value::Object(payload)) =

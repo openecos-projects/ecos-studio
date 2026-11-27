@@ -56,6 +56,8 @@ pub(super) fn corners(source: &mut Sources<'_>) -> BTreeMap<String, Value> {
             );
         }
     }
+    let sta = source.directory("STA", "sta_ecc");
+    let synth = source.directory("Synth", "Synthesis_yosys");
     for label in labels {
         if label
             .split('/')
@@ -64,9 +66,9 @@ pub(super) fn corners(source: &mut Sources<'_>) -> BTreeMap<String, Value> {
             continue;
         }
         let mut payload = source
-            .json(&format!("sta_ecc/feature/{label}/qor_summary.json"))
+            .json(&format!("{sta}/feature/{label}/qor_summary.json"))
             .unwrap_or_else(|| json!({}));
-        if let Some(text) = source.text(&format!("sta_ecc/report/{label}/qor_summary.rpt")) {
+        if let Some(text) = source.text(&format!("{sta}/report/{label}/qor_summary.rpt")) {
             add_timing_report(&mut payload, &text);
         }
         if payload.as_object().is_some_and(|v| !v.is_empty()) {
@@ -75,9 +77,12 @@ pub(super) fn corners(source: &mut Sources<'_>) -> BTreeMap<String, Value> {
     }
     if corners.is_empty() {
         let mut payload = source
-            .json("Synthesis_yosys/feature/post_synthesis/qor_summary.json")
+            .json(&format!("{synth}/feature/post_synthesis/qor_summary.json"))
             .unwrap_or_else(|| json!({}));
-        if let Some(text) = source.text("Synthesis_yosys/report/qor_summary.rpt") {
+        if let Some(text) = source
+            .text(&format!("{synth}/report/post_synthesis/qor_summary.rpt"))
+            .or_else(|| source.text(&format!("{synth}/report/qor_summary.rpt")))
+        {
             add_timing_report(&mut payload, &text);
         }
         if payload.as_object().is_some_and(|v| !v.is_empty()) {
@@ -153,10 +158,13 @@ pub(super) fn corner_value(corner: &Value, kind: &str, metric: &str) -> Option<f
     })
 }
 pub(super) fn power(source: &mut Sources<'_>) {
+    let power = source.directory("Power", "powerAnalysis_ecc");
+    let synth = source.directory("Synth", "Synthesis_yosys");
     let text = source
-        .text("powerAnalysis_ecc/report/powerAnalysis.rpt")
-        .or_else(|| source.text("powerAnalysis_ecc/data/pw/power_reporter/power.rpt"))
-        .or_else(|| source.text("Synthesis_yosys/report/power.rpt"));
+        .text(&format!("{power}/report/power_analysis.rpt"))
+        .or_else(|| source.text(&format!("{power}/report/powerAnalysis.rpt")))
+        .or_else(|| source.text(&format!("{power}/data/pw/power_reporter/power.rpt")))
+        .or_else(|| source.text(&format!("{synth}/report/power.rpt")));
     let Some(text) = text else {
         return;
     };

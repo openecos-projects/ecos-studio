@@ -1,7 +1,7 @@
 import type { EccRuntimeOperation } from '@ecos-studio/shared'
 import type { PersistedFlow } from './persistedState'
 
-const ADVISORY_STEPS = new Set(['antennaCheck', 'emir'])
+const ADVISORY_STEPS = new Set(['antenna_check', 'antennaCheck', 'emir'])
 
 export interface BlockedFlowStep {
   failedItems: string[]

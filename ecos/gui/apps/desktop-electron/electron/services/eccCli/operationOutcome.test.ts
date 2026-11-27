@@ -11,7 +11,7 @@ function step(
 }
 
 describe('ECC operation outcome', () => {
-  it.each(['antennaCheck', 'emir'])(
+  it.each(['antenna_check', 'antennaCheck', 'emir'])(
     'completes the flow after an incomplete %s without changing its execution state',
     (name) => {
       const flow: PersistedFlow = {

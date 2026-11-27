@@ -60,7 +60,7 @@ export async function buildReplayCatalog(workspace: string): Promise<string> {
     const step = record(raw)
     if (typeof step.name !== 'string' || typeof step.tool !== 'string')
       throw new Error('Invalid flow step')
-    if (!/^[\w -]+$/.test(step.name) || !/^[\w-]+$/.test(step.tool))
+    if (!/^(?:[\w -]+|lec@[\w-]+)$/.test(step.name) || !/^[\w-]+$/.test(step.tool))
       throw new Error('Invalid flow step identity')
     if (['Ongoing', 'Running'].includes(String(step.state)))
       throw new Error('Replay is available after the flow stops')

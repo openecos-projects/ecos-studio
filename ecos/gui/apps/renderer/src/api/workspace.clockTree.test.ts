@@ -29,6 +29,22 @@ describe('clock-tree workspace parameter projection', () => {
     expect(parameters['geometry.clock_tree']).toBe(true)
   })
 
+  it('omits global placement parameters for a macro-only range', () => {
+    const workspace = config(false)
+    workspace.flow_config = {
+      start_step: 'macro_placement',
+      end_step: 'macro_placement',
+      steps: ['macro_placement'],
+    }
+    const { parameters } = backendWorkspaceOptions(
+      workspace,
+      workspace.directory,
+    ).workspaceSpec
+    expect(Object.keys(parameters ?? {}).filter((key) => key.includes('place.'))).toEqual(
+      [],
+    )
+  })
+
   it('omits the parameter when an older ECC catalog does not advertise it', () => {
     const options = backendWorkspaceOptions(config(true), '/workspace/clock-tree')
 
