@@ -168,7 +168,8 @@ export class EccCliRuntimeService {
   private readonly agentWorkspaceIdentities = new Map<string, WorkspaceIdentity>()
   private readonly handleByDirectory = new Map<string, string>()
   private readonly openingByDirectory = new Map<string, Promise<EccWorkspaceOpenResult>>()
-  private readonly temporaryWorkspaces = new Map<string, number>()
+  private readonly temporaryOnlySessions = new Set<string>()
+  private readonly activeLeases = new Map<string, number>()
   private readonly pendingWorkspaceCloses = new Set<string>()
   private readonly knownProjectRoots = new Set<string>()
   private readonly operations = new Map<string, TrackedOperation>()
@@ -184,7 +185,13 @@ export class EccCliRuntimeService {
 
   constructor(private readonly options: EccCliRuntimeServiceOptions) {
     this.cli = new EccCliProcess(options)
-    this.candidates = new CandidateOperations(this.cli)
+    this.candidates = new CandidateOperations(this.cli, (source) => {
+      const handle = this.handleByDirectory.get(source.directory)
+      if (!handle) return
+      void this.releaseIdleWorkspace(handle).catch((error) =>
+        electronLogger.warn('[runtime] Candidate session cleanup failed', error),
+      )
+    })
   }
 
   /** Compatibility bridge for the project doctor IPC surface. The operation
@@ -557,7 +564,7 @@ export class EccCliRuntimeService {
     if (!opening && !existingHandle) {
       opening = this.initializeWorkspaceSession(directory)
         .then((result) => {
-          if (temporary) this.temporaryWorkspaces.set(result.workspaceHandle, 0)
+          if (temporary) this.temporaryOnlySessions.add(result.workspaceHandle)
           return result
         })
         .finally(() => this.openingByDirectory.delete(directory))
@@ -566,13 +573,19 @@ export class EccCliRuntimeService {
     const opened = opening ? await opening : undefined
     const handle = opened?.workspaceHandle ?? existingHandle!
     if (!temporary) {
-      this.temporaryWorkspaces.delete(handle)
+      this.temporaryOnlySessions.delete(handle)
       this.pendingWorkspaceCloses.delete(handle)
-    } else if (this.temporaryWorkspaces.has(handle)) {
-      this.temporaryWorkspaces.set(handle, this.temporaryWorkspaces.get(handle)! + 1)
+      const result = opened ?? (await this.workspaceSession(handle))
+      return reused ? { ...result, reused: true } : result
     }
-    const result = opened ?? (await this.workspaceSession(handle))
-    return reused ? { ...result, reused: true } : result
+    this.activeLeases.set(handle, (this.activeLeases.get(handle) ?? 0) + 1)
+    try {
+      const result = opened ?? (await this.workspaceSession(handle))
+      return reused ? { ...result, reused: true } : result
+    } catch (error) {
+      await this.releaseActiveLease(handle)
+      throw error
+    }
   }
 
   private async initializeWorkspaceSession(
@@ -646,24 +659,30 @@ export class EccCliRuntimeService {
     const opened = await this.openWorkspaceSession({ directory }, true)
     const handle = opened.workspaceHandle
     try {
-      this.rememberAgentWorkspace(handle)
       return await use(opened)
     } finally {
-      const leases = this.temporaryWorkspaces.get(handle)
-      if (leases !== undefined) {
-        this.temporaryWorkspaces.set(handle, leases - 1)
-        await this.releaseIdleWorkspace(handle)
-      }
+      await this.releaseActiveLease(handle)
     }
   }
 
+  private async releaseActiveLease(workspaceHandle: string): Promise<void> {
+    const remaining = (this.activeLeases.get(workspaceHandle) ?? 0) - 1
+    if (remaining > 0) {
+      this.activeLeases.set(workspaceHandle, remaining)
+      return
+    }
+    this.activeLeases.delete(workspaceHandle)
+    await this.releaseIdleWorkspace(workspaceHandle)
+  }
+
   private async releaseIdleWorkspace(workspaceHandle: string): Promise<void> {
-    const leases = this.temporaryWorkspaces.get(workspaceHandle)
+    if ((this.activeLeases.get(workspaceHandle) ?? 0) > 0) return
     if (
-      leases === 0 ||
-      (leases === undefined && this.pendingWorkspaceCloses.has(workspaceHandle))
-    )
+      this.temporaryOnlySessions.has(workspaceHandle) ||
+      this.pendingWorkspaceCloses.has(workspaceHandle)
+    ) {
       await this.closeWorkspace({ workspaceHandle })
+    }
   }
 
   private rememberAgentWorkspace(workspaceHandle: string): void {
@@ -682,6 +701,7 @@ export class EccCliRuntimeService {
     use: (opened: EccWorkspaceOpenResult) => Promise<T>,
   ): Promise<T> {
     const live = this.sessions.get(workspaceHandle)
+    if (live) this.rememberAgentWorkspace(workspaceHandle)
     const previous = live ?? this.agentWorkspaceIdentities.get(workspaceHandle)
     if (!previous) throw new Error('Workspace Session is not open.')
     return await this.withTemporaryWorkspace(previous.directory, async (opened) => {
@@ -707,9 +727,9 @@ export class EccCliRuntimeService {
     const active = operations.some(({ operation }) => operation.state === 'running')
     if (
       active ||
-      (this.temporaryWorkspaces.get(session.handle) ?? 0) > 0 ||
+      (this.activeLeases.get(session.handle) ?? 0) > 0 ||
       this.candidates.hasActive(session) ||
-      this.defViewsInFlight.has(session.directory)
+      this.defViewsInFlight.has(normalizeWorkspacePath(session.directory))
     ) {
       this.pendingWorkspaceCloses.add(session.handle)
       return { ok: true, retained: true }
@@ -726,7 +746,8 @@ export class EccCliRuntimeService {
       }
     }
     this.sessions.delete(request.workspaceHandle)
-    this.temporaryWorkspaces.delete(request.workspaceHandle)
+    this.temporaryOnlySessions.delete(request.workspaceHandle)
+    this.activeLeases.delete(request.workspaceHandle)
     this.pendingWorkspaceCloses.delete(request.workspaceHandle)
     this.handleByDirectory.delete(session.directory)
     await session.projectWatcher?.close()
@@ -1309,14 +1330,7 @@ export class EccCliRuntimeService {
     session: WorkspaceSession,
     request: EccCandidateRerunRequest | EccCandidateResumeRequest,
   ) {
-    const operation = await this.candidates.start(action, session, request)
-    void this.candidates
-      .wait(session, operation.operationId)
-      .finally(() => this.releaseIdleWorkspace(session.handle))
-      .catch((error) =>
-        electronLogger.warn('[runtime] Candidate session cleanup failed', error),
-      )
-    return operation
+    return await this.candidates.start(action, session, request)
   }
 
   async cleanupOptimizationCandidates(workspaceHandle: string, episodePrefix: string) {

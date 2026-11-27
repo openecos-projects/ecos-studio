@@ -33,7 +33,10 @@ export class CandidateOperations {
   private readonly controllers = new Set<AbortController>()
   private readonly active = new Map<Promise<EccRuntimeOperation>, SourceWorkspace>()
 
-  constructor(private readonly cli: EccCliProcess) {}
+  constructor(
+    private readonly cli: EccCliProcess,
+    private readonly onSettled?: (source: SourceWorkspace) => void,
+  ) {}
 
   async version(): Promise<{ eccVersion: string }> {
     const result = await this.query(['candidate', 'version'])
@@ -136,6 +139,7 @@ export class CandidateOperations {
         clearTimeout(timer)
         this.active.delete(terminal)
         this.controllers.delete(controller)
+        this.onSettled?.(source)
       })
     this.active.set(terminal, source)
     this.controllers.add(controller)
