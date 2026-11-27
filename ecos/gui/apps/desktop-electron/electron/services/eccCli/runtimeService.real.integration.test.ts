@@ -236,11 +236,24 @@ describeReal('ECC CLI runtime real integration', () => {
     ])
     await expect(access(secondRoot)).rejects.toThrow(/ENOENT/)
 
-    await service.agentWorkspaceSession(created.workspaceHandle)
+    await service.withAgentWorkspaceSession(created.workspaceHandle, async () => {})
     await service.closeWorkspace({ workspaceHandle: created.workspaceHandle })
-    const rebound = await service.agentWorkspaceSession(created.workspaceHandle)
+    const rebound = await service.withAgentWorkspaceSession(
+      created.workspaceHandle,
+      async (opened) => {
+        await expect(
+          service.workspaceSession(opened.workspaceHandle),
+        ).resolves.toMatchObject({
+          workspaceId: created.workspaceId,
+        })
+        return opened
+      },
+    )
     expect(rebound.workspaceId).toBe(created.workspaceId)
     expect(rebound.workspaceHandle).not.toBe(created.workspaceHandle)
+    await expect(service.workspaceSession(rebound.workspaceHandle)).rejects.toThrow(
+      'Workspace Session is not open',
+    )
     await service.shutdown()
 
     const restarted = createService(wrapper)
