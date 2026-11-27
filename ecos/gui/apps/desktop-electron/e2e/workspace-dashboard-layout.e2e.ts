@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { stripVTControlCharacters } from 'node:util'
 import type { Page } from 'playwright-core'
@@ -622,6 +622,67 @@ describe('workspace dashboard layout', () => {
     expect(report.diagnostics).toContain('Scope: start → synthesis')
     await history.getByRole('button', { name: 'Close run history' }).click()
   })
+
+  it('reloads the completed step log after rerunning with its dialog closed', async () => {
+    const { app, page } = launched!
+    const sibling = await createSiblingWorkspace('rerun-log')
+    await openWorkspaceInUi(page, sibling)
+    try {
+      expect((await runWorkspaceStep(page, sibling, 'synthesis', 90_000)).state).toBe(
+        'succeeded',
+      )
+      const path = join(sibling.workspaceDir, '01_synthesis_yosys/log/synthesis.log')
+      const oldMarker = 'Log from the first synthesis attempt'
+      await appendFile(path, '\n' + oldMarker + '\n')
+      const card = page.locator('.flow-step-card[data-step="synthesis"]')
+      const log = page.getByRole('dialog', { name: 'Synthesis — Log', exact: true })
+      const openLog = () =>
+        card.getByRole('button', { name: 'Synthesis log', exact: true }).click()
+      const copyLog = async () => {
+        await log.getByRole('button', { name: /^(Copied|Copy) log$/ }).click()
+        return await app.evaluate(({ clipboard }) => clipboard.readText())
+      }
+      await openLog()
+      await expect.poll(copyLog).toContain(oldMarker)
+      await log.getByRole('button', { name: 'Close', exact: true }).click()
+
+      const rerun = (await page.evaluate(
+        (payload) =>
+          window.ecosDesktop.productCommands.execute({
+            command: 'workspace.runStep',
+            payload,
+          }),
+        {
+          workspaceHandle: sibling.workspaceHandle,
+          expectedWorkspaceRevision: sibling.workspaceRevision,
+          idempotencyKey: randomUUID(),
+          step: 'synthesis',
+          rerun: true,
+        },
+      )) as { operationId: string }
+      expect(
+        (await waitFlowTerminal(page, sibling, rerun.operationId, 90_000)).state,
+      ).toBe('succeeded')
+      const nextLog = stripVTControlCharacters(await readFile(path, 'utf8'))
+      expect(nextLog).not.toContain(oldMarker)
+      const lastLine = nextLog.trimEnd().split('\n').at(-1)
+      expect(lastLine).toBeTruthy()
+      await openLog()
+      await expect.poll(copyLog).toContain(lastLine)
+      expect(await copyLog()).not.toContain(oldMarker)
+      await log.getByRole('button', { name: 'Close', exact: true }).click()
+    } finally {
+      await openWorkspaceInUi(page, { ...workspace, creationId: undefined })
+      const opened = await page.evaluate(
+        (directory) =>
+          window.ecosDesktop.runtime.workspace.open({ designTool: 'backend', directory }),
+        workspace.workspaceDir,
+      )
+      workspace.workspaceHandle = opened.workspaceHandle
+      workspace.workspaceRevision =
+        opened.workspaceRevision ?? workspace.workspaceRevision
+    }
+  }, 180_000)
 
   it('keeps diagnostics separate when two workspaces reuse the same run ID', async () => {
     const { page } = launched!

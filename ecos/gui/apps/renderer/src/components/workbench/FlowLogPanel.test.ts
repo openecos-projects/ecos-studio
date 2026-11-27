@@ -40,6 +40,10 @@ it('reads a live log at the refresh interval even when the segment is replaced a
     expect(ensureContent).toHaveBeenCalledTimes(1)
     await wrapper.setProps({ segments: [{ ...segment, live: false, state: 'Success' }] })
     expect(ensureContent).toHaveBeenCalledTimes(2)
+    await wrapper.setProps({
+      segments: [{ ...segment, live: false, state: 'Success', logRevision: 'new file' }],
+    })
+    expect(ensureContent).toHaveBeenCalledTimes(3)
   } finally {
     wrapper.unmount()
     vi.useRealTimers()

@@ -23,9 +23,7 @@ export interface FlowLogSegment {
   totalSize?: number
   lastReadOffsetBytes?: number
   logPath?: string
-  logMtimeMs?: number
-  logSizeBytes?: number
-  ledgerStartedAtMs?: number
+  logRevision?: string
   contentComplete?: boolean
   contentLoading?: boolean
 }
@@ -159,16 +157,20 @@ export function useBackendFlowLogs() {
         const key = segmentKey({ stepName: step.name, tool: step.tool })
         const prior = existing.get(key)
         const startedAtMs = ledgerStartTime(step.info)
-        const sameAttempt =
-          prior &&
-          prior.logPath === logPath &&
-          prior.live === live &&
-          prior.ledgerStartedAtMs === startedAtMs &&
-          (live ||
-            (prior.logMtimeMs === log?.mtimeMs &&
-              prior.logSizeBytes === log?.sizeBytes &&
-              prior.state === step.state &&
-              prior.runtime === step.runtime))
+        const logRevision = JSON.stringify(
+          live
+            ? [logPath, live, startedAtMs]
+            : [
+                logPath,
+                live,
+                startedAtMs,
+                log?.mtimeMs,
+                log?.sizeBytes,
+                step.state,
+                step.runtime,
+              ],
+        )
+        const sameAttempt = prior?.logRevision === logRevision
         if (!sameAttempt) {
           deleteContent(key)
           fullContentLoads.delete(key)
@@ -190,9 +192,7 @@ export function useBackendFlowLogs() {
             stepName: step.name,
             tool: step.tool,
             logPath,
-            logMtimeMs: log?.mtimeMs,
-            logSizeBytes: log?.sizeBytes,
-            ledgerStartedAtMs: startedAtMs,
+            logRevision,
           },
         ]
       })

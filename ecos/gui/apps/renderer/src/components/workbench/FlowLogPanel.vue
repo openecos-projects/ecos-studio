@@ -255,6 +255,7 @@ watch(
   [
     selectedKey,
     () => selectedSegment.value?.logPath,
+    () => selectedSegment.value?.logRevision,
     () => selectedSegment.value?.startedAtMs,
     () => selectedSegment.value?.live,
     () => expanded.value || dialogVisible.value,
