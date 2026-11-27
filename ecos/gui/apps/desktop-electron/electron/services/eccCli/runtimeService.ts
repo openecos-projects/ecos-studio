@@ -1534,9 +1534,13 @@ export class EccCliRuntimeService {
       return true
     }
     for (const projectRoot of this.knownProjectRoots) {
-      const manifest = await this.loadProjectManifest(projectRoot)
+      const manifest = await this.loadProjectManifest(projectRoot).catch((error) => {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        this.knownProjectRoots.delete(projectRoot)
+        return null
+      })
       if (
-        Object.values(manifest.runtime_processes ?? {}).some(
+        Object.values(manifest?.runtime_processes ?? {}).some(
           (entry) => runtimeResourceId(entry.runtime_id) === resourceId,
         )
       ) {
