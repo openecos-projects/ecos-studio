@@ -403,33 +403,43 @@ describe('product e2e: backend rtl2gds journey', () => {
     await live.getByText('Close', { exact: true }).click()
 
     const request = { workspaceHandle: workspace!.workspaceHandle }
+    const directory = workspace!.directory
     await page.evaluate(
       (payload) =>
         window.ecosDesktop.runtime.workspace.close({ designTool: 'backend', ...payload }),
       request,
     )
-    await expect(
-      page.evaluate(
-        (payload) => window.ecosDesktop.ecc.runtime.snapshot(payload),
-        request,
-      ),
-    ).rejects.toThrow('Workspace Session is not open')
+    try {
+      await expect(
+        page.evaluate(
+          (payload) => window.ecosDesktop.ecc.runtime.snapshot(payload),
+          request,
+        ),
+      ).rejects.toThrow('Workspace Session is not open')
 
-    const offline = await showReport()
-    const savePath = join(outDir, 'offline-design-summary.txt')
-    await app.evaluate(({ dialog }, filePath) => {
-      dialog.showSaveDialog = async () => ({ canceled: false, filePath })
-    }, savePath)
-    await offline.getByRole('button', { name: 'Save .txt', exact: true }).click()
-    await expect
-      .poll(() =>
-        readFile(savePath, 'utf8')
-          .then(metricRows)
-          .catch(() => []),
+      const offline = await showReport()
+      const savePath = join(outDir, 'offline-design-summary.txt')
+      await app.evaluate(({ dialog }, filePath) => {
+        dialog.showSaveDialog = async () => ({ canceled: false, filePath })
+      }, savePath)
+      await offline.getByRole('button', { name: 'Save .txt', exact: true }).click()
+      await expect
+        .poll(() =>
+          readFile(savePath, 'utf8')
+            .then(metricRows)
+            .catch(() => []),
+        )
+        .toEqual(expected)
+      await shot('offline-design-summary')
+      await offline.getByText('Close', { exact: true }).click()
+    } finally {
+      const opened = await page.evaluate(
+        (directory) =>
+          window.ecosDesktop.runtime.workspace.open({ designTool: 'backend', directory }),
+        directory,
       )
-      .toEqual(expected)
-    await shot('offline-design-summary')
-    await offline.getByText('Close', { exact: true }).click()
+      workspace!.workspaceHandle = opened.workspaceHandle
+    }
   }, 90_000)
 
   it.skipIf(!process.env.ECOS_E2E_LIT_SUITE)(
