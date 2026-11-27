@@ -329,8 +329,9 @@ def test_episode_state_verifies_strategy_fields_across_generations(
     assert snapshot.strategy_parent_config_sha256 is None
 
 
-def test_episode_state_replays_the_legacy_two_turn_stall_budget(
-    tmp_path: Path,
+@pytest.mark.parametrize("stall_budget", [2, 4])
+def test_episode_state_replays_stored_stall_budgets(
+    tmp_path: Path, stall_budget: int,
 ) -> None:
     from ecos_agent.optimization.controller import OptimizationEpisodeController
     from tests.optimization.controller.support import (
@@ -354,7 +355,7 @@ def test_episode_state_replays_the_legacy_two_turn_stall_budget(
     # Gen-older: episodes persisted under the frozen Literal[2] stall budget
     # store 2; the widened int field must keep replaying them unchanged.
     state = json.loads(controller.state_path.read_text(encoding="utf-8"))
-    state["budget"]["budget"]["max_planning_only_turns"] = 2
+    state["budget"]["budget"]["max_planning_only_turns"] = stall_budget
     value = {k: v for k, v in state.items() if k != "state_sha256"}
     state["state_sha256"] = canonical_sha256(value)
     controller.state_path.write_text(json.dumps(state), encoding="utf-8")
@@ -366,7 +367,7 @@ def test_episode_state_replays_the_legacy_two_turn_stall_budget(
         clock=_Clock(),
         execution_context=_execution_context(),
     )
-    assert recovered.budget.budget.max_planning_only_turns == 2
+    assert recovered.budget.budget.max_planning_only_turns == stall_budget
 
 
 def test_ledger_chains_still_append_and_replay(tmp_path: Path) -> None:
@@ -387,7 +388,23 @@ def test_replays_legacy_power_predictions_without_changing_their_hash(tmp_path: 
     }
     requested = {"knob_id": "place.target_density", "value": 0.6}
     payload = _start().model_dump(mode="json", exclude_unset=True)
-    payload.update(proposal_action=action, requested=requested)
+    archived_objective = {
+        "schema_version": "ecos.active_optimization_objective.v1",
+        "alignment_contract_sha256": HASH,
+        "original_primary_metric": "sta_typical_dynamic_power",
+        "active_primary_metric": "sta_typical_dynamic_power",
+        "active_preserve_metrics": ["sta_typical_leakage_power"],
+        "drc_count": 0,
+        "sta_setup_violation_count": 0,
+        "sta_hold_violation_count": 0,
+        "recovery_stage": "original",
+    }
+    payload.update(
+        proposal_action=action,
+        requested=requested,
+        active_objective=archived_objective,
+        objective_alignment_sha256=HASH,
+    )
     ledger_record = {
         "schema_version": "ecos.optimization_ledger_entry.v2",
         "sequence": 1,
