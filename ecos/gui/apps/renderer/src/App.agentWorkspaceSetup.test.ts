@@ -108,11 +108,18 @@ describe('workspace update', () => {
 
     expect(updateSource).not.toContain("=== 'backend'")
     expect(updateSource).not.toContain('refreshConfigApi')
-    expect(updateSource).toContain('buildReconfigureWizardInitialConfig')
     expect(updateSource).toContain(
-      'reconfigureWorkspacePath.value = normalizedWorkspacePath',
+      'const initialConfig = await buildReconfigureWizardInitialConfig(',
     )
-    expect(updateSource).toContain('showNewProjectWizard.value = true')
+    expect(updateSource).toMatch(
+      /openWorkspaceWizard\(\{\s*initialConfig,\s*reconfigurePath: normalizedWorkspacePath,\s*\}\)/,
+    )
+    const openStart = source.indexOf('function openWorkspaceWizard(')
+    const openWizard = source.slice(openStart, source.indexOf('\nwatch(', openStart))
+    expect(openWizard).toContain(
+      "reconfigureWorkspacePath.value = options?.reconfigurePath ?? ''",
+    )
+    expect(openWizard).toContain('showNewProjectWizard.value = true')
   })
 })
 
@@ -206,7 +213,7 @@ describe('quick start resources', () => {
     const driver = source.slice(start, end)
 
     expect(driver).toMatch(
-      /showNewProjectWizard\.value = false\s+await nextTick\(\)\s+workspaceWizardInitialConfig\.value = \{ \.\.\.config \}\s+showNewProjectWizard\.value = true/,
+      /showNewProjectWizard\.value = false\s+await nextTick\(\)\s+openWorkspaceWizard\(\{ initialConfig: \{ \.\.\.config \} \}\)/,
     )
   })
 
