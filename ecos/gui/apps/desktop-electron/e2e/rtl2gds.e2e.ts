@@ -403,7 +403,6 @@ describe('product e2e: backend rtl2gds journey', () => {
     await live.getByText('Close', { exact: true }).click()
 
     const request = { workspaceHandle: workspace!.workspaceHandle }
-    const directory = workspace!.workspaceDir
     await page.evaluate(
       (payload) =>
         window.ecosDesktop.runtime.workspace.close({ designTool: 'backend', ...payload }),
@@ -433,12 +432,15 @@ describe('product e2e: backend rtl2gds journey', () => {
       await shot('offline-design-summary')
       await offline.getByText('Close', { exact: true }).click()
     } finally {
+      await openWorkspaceInUi(page, workspace!)
       const opened = await page.evaluate(
         (directory) =>
           window.ecosDesktop.runtime.workspace.open({ designTool: 'backend', directory }),
-        directory,
+        workspace!.workspaceDir,
       )
       workspace!.workspaceHandle = opened.workspaceHandle
+      workspace!.workspaceRevision =
+        opened.workspaceRevision ?? workspace!.workspaceRevision
     }
   }, 90_000)
 
