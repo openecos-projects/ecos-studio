@@ -15,7 +15,7 @@ it('exports a failed STA run after closing the workspace during diagnostics coll
       pdkRoot: process.env.ECOS_E2E_PDK_ROOT ?? join(repoRoot, 'pdk/icsprout55-pdk'),
     })
     const target = join(outDir, 'sta-diagnostics.txt')
-    await app.evaluate(({ dialog }, filePath) => {
+    await app.evaluate(async ({ app, dialog }, filePath) => {
       const fs = process.getBuiltinModule(
         'node:fs/promises',
       ) as typeof import('node:fs/promises')
@@ -23,17 +23,29 @@ it('exports a failed STA run after closing the workspace during diagnostics coll
         'node:module',
       ) as typeof import('node:module')
       const open = fs.open
+      const path = process.getBuiltinModule('node:path') as typeof import('node:path')
+      const sessions = path.join(app.getPath('userData'), 'logs', 'sessions')
+      const session = (await fs.readdir(sessions)).find((entry) =>
+        entry.endsWith(`-${process.pid}`),
+      )
+      if (!session) throw new Error('Desktop log session is missing')
+      const logPath = path.join(sessions, session, 'main.log')
       let resume!: () => void
       const gate = new Promise<void>((resolve) => {
         resume = resolve
       })
+      const restore = () => {
+        fs.open = open
+        nodeModule.syncBuiltinESMExports()
+        resume()
+      }
       Object.assign(globalThis, {
         diagnosticsReadStarted: false,
-        resumeDiagnostics: resume,
+        resumeDiagnostics: restore,
       })
       fs.open = (async (...args: Parameters<typeof open>) => {
         // Pause the desktop log read that occurs after the failure is classified.
-        if (String(args[0]).endsWith('/main.log')) {
+        if (args[0] === logPath) {
           Object.assign(globalThis, { diagnosticsReadStarted: true })
           fs.open = open
           nodeModule.syncBuiltinESMExports()
@@ -83,6 +95,10 @@ it('exports a failed STA run after closing the workspace during diagnostics coll
       .toMatch(/State: failed[\s\S]*Failed worker attempts\s+sta \(/)
     await createMilestoneShots(page, outDir)('diagnostics-saved-after-close')
   } finally {
-    await close()
+    try {
+      await app.evaluate(() => Reflect.get(globalThis, 'resumeDiagnostics')?.())
+    } finally {
+      await close()
+    }
   }
 }, 120_000)
