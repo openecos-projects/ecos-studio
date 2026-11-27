@@ -38,12 +38,15 @@ def test_matching_cache_reuses_the_stored_observation(tmp_path, monkeypatch) -> 
     replay_root.mkdir()
     observation = _terminal_observation()
     _store_replay_cache(replay_root, observation, _FINGERPRINT, "produced")
+    workspace = tmp_path / "ws"
+    (workspace / "home").mkdir(parents=True)
+    (workspace / "home/params.toml").write_text('[design]\nname = "other"\n', encoding="utf-8")
     monkeypatch.setattr(
         "ecos_agent.optimization.calibrate_workspace._terminal_observation", _bomb
     )
 
     result = _run_replay(
-        tmp_path / "ws", replay_root, 1, 60.0, dict(_FINGERPRINT)
+        workspace, replay_root, 1, 60.0, dict(_FINGERPRINT)
     )
 
     assert result == observation
@@ -160,14 +163,15 @@ def test_toolchain_drift_refuses_to_reuse_the_cache(tmp_path) -> None:
     assert _load_replay_manifest(replay_root)["components"]["ecc_revision"] == "rev-0"
 
 
-@pytest.mark.parametrize("legacy_workspace", [False, True])
+@pytest.mark.parametrize("cache", ["old_parser", "missing_context", "legacy_workspace"])
 def test_unusable_workspace_reruns_the_flow_and_records_provenance(
-    tmp_path, monkeypatch, legacy_workspace
+    tmp_path, monkeypatch, cache
 ) -> None:
     replay_root = tmp_path / "default-replay-1"
     workspace = tmp_path / "ws"
-    workspace.mkdir()
-    if legacy_workspace:
+    (workspace / "home").mkdir(parents=True)
+    (workspace / "home/params.toml").write_text('[design]\nname = "gcd"\n', encoding="utf-8")
+    if cache == "legacy_workspace":
         home = replay_root / "workspace" / "home"
         home.mkdir(parents=True)
         (home / "flow.json").write_text(
@@ -175,8 +179,11 @@ def test_unusable_workspace_reruns_the_flow_and_records_provenance(
             encoding="utf-8",
         )
     else:
+        fingerprint = (
+            dict(_FINGERPRINT, parser_sha256="old") if cache == "old_parser" else _FINGERPRINT
+        )
         _store_replay_cache(
-            replay_root, _terminal_observation(), dict(_FINGERPRINT, parser_sha256="old"),
+            replay_root, _terminal_observation(), fingerprint,
             "produced", tmp_path / "cleaned-replay",
         )
     managed_replay = tmp_path / "managed-replay"
@@ -272,6 +279,8 @@ def test_unusable_workspace_reruns_the_flow_and_records_provenance(
     )
     assert row["context_fingerprint"] == opportunity["context_fingerprint"]
     assert row["covered_replay"] is False
+    assert _run_replay(workspace, replay_root, 1, 60.0, _FINGERPRINT) == produced
+    assert len(host.calls) == 4
 
 
 def test_epsilon_artifact_records_calibration_metadata(tmp_path) -> None:

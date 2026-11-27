@@ -229,14 +229,20 @@ def _require_same_inputs(
         )
 
 
+def _opportunity_design(workspace: Path) -> str | None:
+    from ecos_agent.optimization.knowledge.compiler import load_state_rule_manifest
+
+    design_id = _design_id(workspace)
+    return design_id if design_id in load_state_rule_manifest().scope else None
+
+
 def _store_opportunity_context(
     replay_root: Path, workspace: Path, index: int, ecc_revision: str
 ) -> None:
     from ecos_agent.optimization.experiments.knowledge_pilot import build_context_bank
-    from ecos_agent.optimization.knowledge.compiler import load_state_rule_manifest
 
-    design_id = _design_id(workspace)
-    if design_id not in load_state_rule_manifest().scope:
+    design_id = _opportunity_design(workspace)
+    if design_id is None:
         return
     context = build_context_bank(
         workspace=workspace,
@@ -277,16 +283,23 @@ def _run_replay(
         if managed:
             replay_workspace = Path(manifest["workspace"])
         _require_same_inputs(manifest, fingerprint, index)
-        if manifest["components"].get("parser_sha256") == fingerprint["parser_sha256"]:
+        has_workspace = replay_workspace.is_dir()
+        has_context = (replay_root / OPPORTUNITY_CONTEXT_FILE).is_file()
+        parser_matches = (
+            manifest["components"].get("parser_sha256") == fingerprint["parser_sha256"]
+        )
+        if parser_matches and (
+            has_workspace or has_context or _opportunity_design(workspace) is None
+        ):
             observation = TerminalObservation.model_validate_json(observation_path.read_bytes())
-            if managed and replay_workspace.is_dir():
-                if not (replay_root / OPPORTUNITY_CONTEXT_FILE).is_file():
+            if managed and has_workspace:
+                if not has_context:
                     _store_opportunity_context(
                         replay_root, replay_workspace, index, fingerprint["ecc_revision"]
                     )
                 _release_replay(workspace, _replay_key(workspace, fingerprint, index))
             return observation
-        if replay_workspace.is_dir():
+        if has_workspace:
             observation = _terminal_observation(replay_workspace)
             if managed:
                 _store_opportunity_context(
