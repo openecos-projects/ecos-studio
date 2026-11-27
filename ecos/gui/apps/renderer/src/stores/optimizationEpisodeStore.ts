@@ -160,10 +160,15 @@ export const useOptimizationEpisodeStore = defineStore('optimizationEpisodes', (
   }
 
   function waitForTerminal(sessionId: string): Promise<void> {
-    if (isTerminalEpisode(episodeForSession(sessionId)?.state)) return Promise.resolve()
+    const episodeId = episodeForSession(sessionId)?.episodeId
+    const isDone = () => {
+      const episode = episodes.value.find((entry) => entry.episodeId === episodeId)
+      return !episode || isTerminalEpisode(episode.state)
+    }
+    if (isDone()) return Promise.resolve()
     return new Promise((resolve) => {
       const stop = watch(episodes, () => {
-        if (!isTerminalEpisode(episodeForSession(sessionId)?.state)) return
+        if (!isDone()) return
         stop()
         resolve()
       })
