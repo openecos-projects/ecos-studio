@@ -22,6 +22,13 @@ import {
 } from './pdkInventoryMigration'
 import { assertManualPdkConfiguration } from './pdkManualConfiguration'
 import { ResourceMetadataRestoreError } from './resourceInstallErrors'
+import { EccCliCommandError } from './eccCli/cliProcess'
+
+const PDK_VERIFICATION_TTL_MS = 5_000
+type PdkVerification = Pick<
+  PdkInstallationSnapshot,
+  'readiness' | 'reason' | 'supportsEccDefaults'
+>
 
 export interface PdkInventoryServiceOptions {
   inventoryPath?: string
@@ -39,6 +46,14 @@ export interface ManagedPdkInstallationRequest extends PdkImportRequest {
 }
 
 export class PdkInventoryService {
+  private readonly verification = new Map<
+    string,
+    {
+      key: string
+      expiresAt: number
+      result: Promise<PdkVerification>
+    }
+  >()
   private operation: Promise<void> = Promise.resolve()
   private legacyCleanupComplete = false
   private readonly options: Required<
@@ -412,6 +427,7 @@ export class PdkInventoryService {
   ): Promise<PdkInstallationSnapshot> {
     const rootStats = await stat(installation.root).catch(() => null)
     if (!rootStats?.isDirectory()) {
+      this.verification.delete(installation.id)
       return {
         ...installation,
         readiness: 'missing',
@@ -419,20 +435,45 @@ export class PdkInventoryService {
         supportsEccDefaults: false,
       }
     }
+    const key = JSON.stringify([
+      installation.familyId,
+      installation.root,
+      installation.version,
+      installation.registrySha256,
+      rootStats.ino,
+      rootStats.mtimeMs,
+    ])
+    let cached = this.verification.get(installation.id)
+    if (cached?.key !== key || cached.expiresAt <= Date.now()) {
+      const pending = {
+        key,
+        expiresAt: Infinity,
+        result: this.verify(installation),
+      }
+      cached = pending
+      this.verification.set(installation.id, pending)
+      void pending.result.then(({ readiness }) => {
+        if (this.verification.get(installation.id) !== pending) return
+        if (readiness === 'unverified') this.verification.delete(installation.id)
+        else pending.expiresAt = Date.now() + PDK_VERIFICATION_TTL_MS
+      })
+    }
+    return { ...installation, ...(await cached.result) }
+  }
+
+  private async verify(installation: PdkInstallationRecord): Promise<PdkVerification> {
     try {
       if (!this.options.verifyDefaults)
         throw new Error('ECC PDK verification is unavailable')
       await this.options.verifyDefaults(installation)
       return {
-        ...installation,
         readiness: 'ready',
         reason: null,
         supportsEccDefaults: true,
       }
     } catch (error) {
       return {
-        ...installation,
-        readiness: 'unverified',
+        readiness: error instanceof EccCliCommandError ? 'invalid' : 'unverified',
         reason: error instanceof Error ? error.message : String(error),
         supportsEccDefaults: false,
       }
@@ -467,6 +508,10 @@ export class PdkInventoryService {
   }
 
   private async writeInventory(inventory: PdkInventoryFile): Promise<void> {
+    const ids = new Set(inventory.installations.map(({ id }) => id))
+    for (const id of this.verification.keys()) {
+      if (!ids.has(id)) this.verification.delete(id)
+    }
     await this.options.jsonWriter(this.options.inventoryPath, inventory)
   }
 
