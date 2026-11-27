@@ -159,6 +159,7 @@ def test_active_replay_is_cancelled_on_stop_or_deadline(tmp_path, monkeypatch, s
 
 def test_unsettled_cancellation_skips_replay_release(tmp_path, monkeypatch):
     elapsed = 0.0
+    cancelled = []
     released = []
 
     def host_call(method, params):
@@ -170,9 +171,10 @@ def test_unsettled_cancellation_skips_replay_release(tmp_path, monkeypatch):
         if method == "workspace.run":
             return {"operationId": "running", "state": "running"}
         if method == "operation.cancel":
+            cancelled.append(params)
             return {"accepted": True}
         if method == "operation.wait":
-            elapsed += 61.0
+            elapsed += 61.0 if cancelled else 1.0
             return {"state": "running"}
         if method == "workspace.releaseCalibrationReplay":
             released.append(params["workspaceHandle"])
@@ -189,6 +191,7 @@ def test_unsettled_cancellation_skips_replay_release(tmp_path, monkeypatch):
             1,
             2,
             {},
-            should_stop=lambda: elapsed >= 0,
+            should_stop=lambda: elapsed >= 1,
         )
+    assert cancelled == [{"workspaceHandle": "replay", "operationId": "running"}]
     assert released == []
