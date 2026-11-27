@@ -123,4 +123,24 @@ describe('dashboard flow data', () => {
       thumbnail: { id: 'place-image' },
     })
   })
+
+  it('shows unavailable instead of stale committed findings when checklistStatus is unknown', () => {
+    const steps = dashboardFlowSteps(
+      [
+        {
+          stepId: 'placement',
+          name: 'placement',
+          order: 0,
+          state: 'running',
+          checklistStatus: 'unknown',
+        },
+      ],
+      [finding('failed', true)],
+      [],
+    )
+    expect(steps[0]).toMatchObject({
+      status: 'running',
+      checkState: 'unavailable',
+    })
+  })
 })

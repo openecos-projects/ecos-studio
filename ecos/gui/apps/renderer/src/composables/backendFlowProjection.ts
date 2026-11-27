@@ -68,8 +68,8 @@ export function projectRuntimeFlowSteps(
     const state = normalizeState(step.state, 'unknown')
     const active = state === 'running' || state === 'not-started'
     const runtimeSeconds = active ? null : parseRuntimeSeconds(step.runtime)
-    const checklistStatus = active
-      ? undefined
+    const checklistStatus: FlowStepSummary['checklistStatus'] | undefined = active
+      ? 'unknown'
       : (step.checklistStatus ??
         checklistStatusValue(step.checklist_status) ??
         checklistStatusValue(step.checklist))
@@ -80,7 +80,7 @@ export function projectRuntimeFlowSteps(
         designSource: planned?.designSource,
         name: step.name,
         order,
-        peakMemoryMb: step.peakMemory,
+        ...(active ? {} : { peakMemoryMb: step.peakMemory }),
         ...(runtimeSeconds === null ? {} : { runtimeSeconds }),
         state,
         stepId: step.name,
@@ -228,5 +228,5 @@ export function clearStepAttempt(step: FlowStepSummary): void {
   delete step.runtimeSeconds
   delete step.peakMemoryMb
   delete step.failureMessage
-  delete step.checklistStatus
+  step.checklistStatus = 'unknown'
 }

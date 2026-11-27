@@ -126,3 +126,38 @@ it('projects persisted checklist status without changing legacy step state', () 
 
   expect(projected[0]).toMatchObject({ state: 'succeeded', checklistStatus: 'blocked' })
 })
+
+it('omits peakMemoryMb and marks checklistStatus unknown for active runtime steps', () => {
+  const projected = projectRuntimeFlowSteps(
+    [
+      {
+        name: 'placement',
+        tool: 'dreamplace',
+        state: 'Ongoing',
+        runtime: '00:01:00',
+        peakMemory: 512,
+        checklistStatus: 'blocked',
+      },
+    ],
+    [
+      {
+        name: 'placement',
+        order: 0,
+        state: 'failed',
+        stepId: 'placement',
+        runtimeSeconds: 60,
+        peakMemoryMb: 512,
+        checklistStatus: 'blocked',
+        failureMessage: 'prior failure',
+      },
+    ],
+  )
+
+  expect(projected[0]).toMatchObject({
+    state: 'running',
+    checklistStatus: 'unknown',
+  })
+  expect(projected[0]?.peakMemoryMb).toBeUndefined()
+  expect(projected[0]?.runtimeSeconds).toBeUndefined()
+  expect(projected[0]?.failureMessage).toBeUndefined()
+})

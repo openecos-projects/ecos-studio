@@ -72,7 +72,9 @@ export function dashboardFlowSteps(
               ? 'warning'
               : step.checklistStatus === 'passed'
                 ? 'passed'
-                : stepCheckState(checklist),
+                : step.checklistStatus === 'unknown'
+                  ? 'unavailable'
+                  : stepCheckState(checklist),
         thumbnail:
           thumbnails.find((thumbnail) => sameFlowStepName(thumbnail.step, step.stepId)) ??
           null,
