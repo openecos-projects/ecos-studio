@@ -1551,6 +1551,17 @@ export class EccCliRuntimeService {
       return true
     }
     for (const projectRoot of this.knownProjectRoots) {
+      const exists = await stat(join(projectRoot, 'project.json')).then(
+        (info) => info.isFile(),
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return false
+          throw error
+        },
+      )
+      if (!exists) {
+        this.knownProjectRoots.delete(projectRoot)
+        continue
+      }
       const manifest = await this.loadProjectManifest(projectRoot).catch((error) => {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
         this.knownProjectRoots.delete(projectRoot)
