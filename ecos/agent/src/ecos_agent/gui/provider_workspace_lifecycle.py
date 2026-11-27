@@ -250,7 +250,7 @@ class ProviderWorkspaceLifecycleMixin:
         flow_end_explicit = False
         if bootstrap.flow_end:
             self._update_workspace_setup(
-                session, flow_start="Synthesis", flow_end=bootstrap.flow_end
+                session, flow_start="synthesis", flow_end=bootstrap.flow_end
             )
             flow_end_explicit = True
         self._enter_create_flow_phase(
