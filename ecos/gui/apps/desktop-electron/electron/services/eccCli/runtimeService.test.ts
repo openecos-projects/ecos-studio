@@ -1102,11 +1102,14 @@ describe('ECC CLI live flow projection', () => {
         'peak memory (mb)': 64,
       },
     ])
-    vi.spyOn(EccCliProcess.prototype, 'run').mockResolvedValue({
+    vi.spyOn(EccCliProcess.prototype, 'run').mockImplementation(async (args) => ({
       exitCode: 0,
       stderr: '',
-      stdout: '',
-    })
+      stdout:
+        args[0] === 'version'
+          ? JSON.stringify({ schema_version: 2, runtime: 'ECC CLI', cli_contract: 1 })
+          : '',
+    }))
     const service = new EccCliRuntimeService({
       resolveLaunch: vi.fn(),
       runtimeId: 'runtime-1',
