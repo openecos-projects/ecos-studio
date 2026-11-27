@@ -148,6 +148,8 @@ export class EccCliRuntimeService {
   private readonly releasedDiagnosticRuns = new Map<string, Set<string>>()
   private readonly agentWorkspaceIdentities = new Map<string, WorkspaceIdentity>()
   private readonly handleByDirectory = new Map<string, string>()
+  private readonly openingByDirectory = new Map<string, Promise<EccWorkspaceOpenResult>>()
+  private readonly temporaryWorkspaces = new Map<string, number>()
   private readonly knownProjectRoots = new Set<string>()
   private readonly operations = new Map<string, TrackedOperation>()
   private readonly defViewsInFlight = new Set<string>()
@@ -516,11 +518,39 @@ export class EccCliRuntimeService {
   }
 
   async openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
+    return await this.openWorkspaceSession(request, false)
+  }
+
+  private async openWorkspaceSession(
+    request: EccWorkspaceOpenRequest,
+    temporary: boolean,
+  ): Promise<EccWorkspaceOpenResult> {
     await this.ensureContract()
     const directory = normalizeWorkspacePath(await realpath(request.directory))
+    let opening = this.openingByDirectory.get(directory)
     const existingHandle = this.handleByDirectory.get(directory)
-    if (existingHandle)
-      return { ...(await this.workspaceSession(existingHandle)), reused: true }
+    const reused = Boolean(opening || existingHandle)
+    if (!opening && !existingHandle) {
+      opening = this.initializeWorkspaceSession(directory)
+        .then((result) => {
+          if (temporary) this.temporaryWorkspaces.set(result.workspaceHandle, 0)
+          return result
+        })
+        .finally(() => this.openingByDirectory.delete(directory))
+      this.openingByDirectory.set(directory, opening)
+    }
+    const opened = opening ? await opening : await this.workspaceSession(existingHandle!)
+    const handle = opened.workspaceHandle
+    if (!temporary) this.temporaryWorkspaces.delete(handle)
+    else if (this.temporaryWorkspaces.has(handle)) {
+      this.temporaryWorkspaces.set(handle, this.temporaryWorkspaces.get(handle)! + 1)
+    }
+    return reused ? { ...opened, reused: true } : opened
+  }
+
+  private async initializeWorkspaceSession(
+    directory: string,
+  ): Promise<EccWorkspaceOpenResult> {
     const discovered = await this.discoverProject(directory)
     if (!discovered) throw new Error('Workspace is not declared by a Project Manifest.')
     const manifest = await this.loadProjectManifest(discovered.projectRoot)
@@ -562,13 +592,18 @@ export class EccCliRuntimeService {
     watcher.on('error', (error) =>
       electronLogger.warn('[runtime] ECC Project watcher failed', error),
     )
-    await new Promise<void>((ready) => watcher.once('ready', ready))
-    await this.restoreRegisteredOperation(
-      session,
-      await readProjectManifest(session.projectRoot),
-    )
-    this.emit({ type: 'runtime.ready', workspaceDirectory: directory })
-    return sessionResult(session)
+    try {
+      await new Promise<void>((ready) => watcher.once('ready', ready))
+      await this.restoreRegisteredOperation(
+        session,
+        await readProjectManifest(session.projectRoot),
+      )
+      this.emit({ type: 'runtime.ready', workspaceDirectory: directory })
+      return sessionResult(session)
+    } catch (error) {
+      await this.closeWorkspace({ workspaceHandle: session.handle })
+      throw error
+    }
   }
 
   async workspaceSession(workspaceHandle: string): Promise<EccWorkspaceOpenResult> {
@@ -577,36 +612,66 @@ export class EccCliRuntimeService {
     return sessionResult(session)
   }
 
+  async withTemporaryWorkspace<T>(
+    directory: string,
+    use: (opened: EccWorkspaceOpenResult) => Promise<T>,
+  ): Promise<T> {
+    const opened = await this.openWorkspaceSession({ directory }, true)
+    const handle = opened.workspaceHandle
+    try {
+      this.rememberAgentWorkspace(handle)
+      return await use(opened)
+    } finally {
+      const leases = this.temporaryWorkspaces.get(handle)
+      if (leases !== undefined) {
+        this.temporaryWorkspaces.set(handle, leases - 1)
+        await this.releaseTemporaryWorkspace(handle)
+      }
+    }
+  }
+
+  private async releaseTemporaryWorkspace(workspaceHandle: string): Promise<void> {
+    if (this.temporaryWorkspaces.get(workspaceHandle) === 0)
+      await this.closeWorkspace({ workspaceHandle })
+  }
+
+  private rememberAgentWorkspace(workspaceHandle: string): void {
+    const { directory, projectId, projectRoot, workspaceId } =
+      this.requireSession(workspaceHandle)
+    this.agentWorkspaceIdentities.set(workspaceHandle, {
+      directory,
+      projectId,
+      projectRoot,
+      workspaceId,
+    })
+  }
+
   async agentWorkspaceSession(workspaceHandle: string): Promise<EccWorkspaceOpenResult> {
     const live = this.sessions.get(workspaceHandle)
     if (live) {
-      const { directory, projectId, projectRoot, workspaceId } = live
-      this.agentWorkspaceIdentities.set(workspaceHandle, {
-        directory,
-        projectId,
-        projectRoot,
-        workspaceId,
-      })
+      this.rememberAgentWorkspace(workspaceHandle)
       return await this.workspaceSession(workspaceHandle)
     }
+    return await this.withAgentWorkspaceSession(workspaceHandle, async (opened) => opened)
+  }
 
-    const previous = this.agentWorkspaceIdentities.get(workspaceHandle)
+  async withAgentWorkspaceSession<T>(
+    workspaceHandle: string,
+    use: (opened: EccWorkspaceOpenResult) => Promise<T>,
+  ): Promise<T> {
+    const live = this.sessions.get(workspaceHandle)
+    const previous = live ?? this.agentWorkspaceIdentities.get(workspaceHandle)
     if (!previous) throw new Error('Workspace Session is not open.')
-    const project = await this.discoverProject(previous.directory)
-    if (
-      project?.projectId !== previous.projectId ||
-      project.projectRoot !== previous.projectRoot
-    ) {
-      throw new Error('Agent source Project identity changed.')
-    }
-    const opened = await this.openWorkspace({ directory: previous.directory })
-    if (
-      opened.directory !== previous.directory ||
-      opened.workspaceId !== previous.workspaceId
-    ) {
-      throw new Error('Agent source Workspace identity changed.')
-    }
-    return opened
+    return await this.withTemporaryWorkspace(previous.directory, async (opened) => {
+      const session = this.requireSession(opened.workspaceHandle)
+      if (
+        session.projectId !== previous.projectId ||
+        session.projectRoot !== previous.projectRoot ||
+        session.workspaceId !== previous.workspaceId
+      )
+        throw new Error('Agent source Workspace identity changed.')
+      return await use(opened)
+    })
   }
 
   async closeWorkspace(
@@ -636,6 +701,7 @@ export class EccCliRuntimeService {
       }
     }
     this.sessions.delete(request.workspaceHandle)
+    this.temporaryWorkspaces.delete(request.workspaceHandle)
     this.handleByDirectory.delete(session.directory)
     await session.projectWatcher?.close()
     for (const listener of this.releasedListeners) listener(request.workspaceHandle)
@@ -1169,7 +1235,7 @@ export class EccCliRuntimeService {
 
   async candidateRerun(request: EccCandidateRerunRequest) {
     await this.ensureContract()
-    return this.candidates.start(
+    return this.startCandidate(
       'rerun',
       this.requireSession(request.workspaceHandle),
       request,
@@ -1185,7 +1251,7 @@ export class EccCliRuntimeService {
 
   async candidateResume(request: EccCandidateResumeRequest) {
     await this.ensureContract()
-    return this.candidates.start(
+    return this.startCandidate(
       'resume',
       this.requireSession(request.workspaceHandle),
       request,
@@ -1205,6 +1271,21 @@ export class EccCliRuntimeService {
       manifestSha256,
       target,
     )
+  }
+
+  private async startCandidate(
+    action: 'rerun' | 'resume',
+    session: WorkspaceSession,
+    request: EccCandidateRerunRequest | EccCandidateResumeRequest,
+  ) {
+    const operation = await this.candidates.start(action, session, request)
+    void this.candidates
+      .wait(session, operation.operationId)
+      .finally(() => this.releaseTemporaryWorkspace(session.handle))
+      .catch((error) =>
+        electronLogger.warn('[runtime] Candidate session cleanup failed', error),
+      )
+    return operation
   }
 
   async cleanupOptimizationCandidates(workspaceHandle: string, episodePrefix: string) {
@@ -1933,6 +2014,7 @@ ${message}`)
             ? 'operation.unknown'
             : 'operation.failed',
     )
+    await this.releaseTemporaryWorkspace(tracked.session.handle)
   }
 
   private trimOutcomes() {

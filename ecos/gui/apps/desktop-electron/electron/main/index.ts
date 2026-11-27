@@ -527,15 +527,11 @@ async function ensureDesktopBridgeReady(): Promise<void> {
           ),
         startFlowOperation: (request) =>
           desktopServices.eccRuntimeService.startFlowOperation(request),
-        workspaceSession: async (workspaceHandle) => {
-          try {
-            return await desktopServices.eccRuntimeService.agentWorkspaceSession(
-              workspaceHandle,
-            )
-          } catch {
-            return null
-          }
-        },
+        withWorkspaceSession: (workspaceHandle, use) =>
+          desktopServices.eccRuntimeService.withAgentWorkspaceSession(
+            workspaceHandle,
+            (opened) => use(opened.workspaceHandle),
+          ),
       },
       join(app.getPath('userData'), 'agent', 'optimization-episodes.v1.json'),
     )

@@ -109,6 +109,10 @@ export interface AgentProviderHost {
   workspaceSession?(
     workspaceHandle: string,
   ): Promise<{ workspaceHandle: string } | null> | { workspaceHandle: string } | null
+  withWorkspaceSession?<T>(
+    workspaceHandle: string,
+    use: (workspaceHandle: string) => Promise<T>,
+  ): Promise<T>
 }
 
 interface AgentProviderProcessRuntimeOptions {
@@ -564,6 +568,11 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
       })
     }
     let workspaceHandle = readRequiredString(params, 'workspaceHandle')
+    if (this.host.withWorkspaceSession) {
+      return await this.host.withWorkspaceSession(workspaceHandle, (handle) =>
+        this.dispatchWorkspaceHostRequest(this.host!, method, params, handle),
+      )
+    }
     if (this.host.workspaceSession) {
       const session = await this.host.workspaceSession(workspaceHandle)
       if (!session) {
@@ -571,56 +580,70 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
       }
       workspaceHandle = session.workspaceHandle
     }
+    return await this.dispatchWorkspaceHostRequest(
+      this.host,
+      method,
+      params,
+      workspaceHandle,
+    )
+  }
+
+  private async dispatchWorkspaceHostRequest(
+    host: AgentProviderHost,
+    method: string,
+    params: Record<string, unknown>,
+    workspaceHandle: string,
+  ): Promise<unknown> {
     const request = { ...params, workspaceHandle }
     switch (method) {
       case 'workspace.deriveCalibrationReplay': {
-        if (!this.host.deriveCalibrationReplay) {
+        if (!host.deriveCalibrationReplay) {
           throw new Error('ECC calibration replay is unavailable.')
         }
-        return await this.host.deriveCalibrationReplay(
+        return await host.deriveCalibrationReplay(
           workspaceHandle,
           readRequiredString(params, 'replayKey'),
         )
       }
       case 'workspace.releaseCalibrationReplay': {
-        if (!this.host.releaseCalibrationReplay) {
+        if (!host.releaseCalibrationReplay) {
           throw new Error('ECC calibration replay cleanup is unavailable.')
         }
-        return await this.host.releaseCalibrationReplay(
+        return await host.releaseCalibrationReplay(
           workspaceHandle,
           readRequiredString(params, 'replayKey'),
         )
       }
       case 'candidate.capabilities':
-        return await this.host.candidateCapabilities({ workspaceHandle })
+        return await host.candidateCapabilities({ workspaceHandle })
       case 'candidate.rerun': {
-        const result = await this.host.candidateRerun(
+        const result = await host.candidateRerun(
           request as unknown as EccCandidateRerunRequest,
         )
         this.recordHostOperationAssociation('candidate.rerun', result)
         return result
       }
       case 'candidate.resume': {
-        const result = await this.host.candidateResume(
+        const result = await host.candidateResume(
           request as unknown as EccCandidateResumeRequest,
         )
         this.recordHostOperationAssociation('candidate.resume', result)
         return result
       }
       case 'workspace.run': {
-        const result = await this.host.startFlowOperation(
+        const result = await host.startFlowOperation(
           request as unknown as EccRuntimeStartFlowRequest,
         )
         this.recordHostOperationAssociation('workspace.run', result)
         return result
       }
       case 'operation.cancel':
-        return await this.host.cancelOperation({
+        return await host.cancelOperation({
           workspaceHandle,
           operationId: readRequiredString(params, 'operationId'),
         })
       case 'operation.status':
-        return await this.host.operationStatus({
+        return await host.operationStatus({
           workspaceHandle,
           operationId: readRequiredString(params, 'operationId'),
         })
@@ -634,12 +657,12 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
           throw new Error('Operation wait timeout is invalid.')
         }
         const deadline = Date.now() + Math.min(timeout, 60_000)
-        let status = await this.host.operationStatus(request)
+        let status = await host.operationStatus(request)
         while (status.state === 'running' || status.state === 'queued') {
           const remaining = deadline - Date.now()
           if (remaining <= 0) break
           await delay(Math.min(remaining, 1000))
-          status = await this.host.operationStatus(request)
+          status = await host.operationStatus(request)
         }
         return status
       }

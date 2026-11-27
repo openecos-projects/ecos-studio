@@ -591,6 +591,10 @@ export interface DesktopBridgeServices {
     openWorkspace(
       request: EccWorkspaceOpenRequest,
     ): Promise<{ directory: string; workspaceHandle: string }>
+    withTemporaryWorkspace?<T>(
+      directory: string,
+      use: (opened: { directory: string; workspaceHandle: string }) => Promise<T>,
+    ): Promise<T>
     readWorkspaceBindingRequirement(directory: string): Promise<Record<string, unknown>>
     readWorkspaceConfiguration(directory: string): Promise<ProjectWorkspaceConfiguration>
     refreshConfig(request: EccWorkspaceHandleRequest): Promise<unknown>
@@ -1272,80 +1276,93 @@ export function registerIpc(
    * partially applied save can leave Python's displayed values briefly stale;
    * the upgrade path is a host `workspace.parameters` query command.
    */
+  const withAgentWorkspace = async <T>(
+    directory: string,
+    use: (opened: { directory: string; workspaceHandle: string }) => Promise<T>,
+  ): Promise<T> => {
+    const runtime = services.eccRuntimeService
+    if (runtime.withTemporaryWorkspace)
+      return await runtime.withTemporaryWorkspace(directory, use)
+    return await use(await runtime.openWorkspace({ directory }))
+  }
+
   const resolveAgentWorkspaceContext = async (
     directory: string,
-  ): Promise<AgentWorkspaceContext> => {
-    const opened = await services.eccRuntimeService.openWorkspace({ directory })
-    const workspaceHandle = workspaceHandleFromResult(opened)
-    if (!workspaceHandle) throw new Error('ECC Workspace handle is unavailable.')
-    const snapshot = await services.eccRuntimeService.workspaceSnapshot({
-      workspaceHandle,
-    })
-    if (
-      !isRecord(snapshot) ||
-      typeof snapshot.directory !== 'string' ||
-      normalizeWorkspacePath(snapshot.directory) !== normalizeWorkspacePath(directory)
-    ) {
-      throw new Error('Agent Workspace context does not match its ECC session.')
-    }
-    const configuration = isRecord(snapshot.configuration) ? snapshot.configuration : null
-    const workspaceSpec = isRecord(configuration?.workspaceSpec)
-      ? configuration.workspaceSpec
-      : null
-    if (!workspaceSpec) throw new Error('ECC Workspace configuration is unavailable.')
-    const engineeringSnapshot = isRecord(snapshot.engineeringSnapshot)
-      ? snapshot.engineeringSnapshot
-      : null
-    const workspaceRevision = engineeringSnapshot?.workspaceRevision
-    if (!Number.isInteger(workspaceRevision) || Number(workspaceRevision) < 1) {
-      throw new Error('ECC Workspace Revision is unavailable.')
-    }
-    rememberWorkspaceParameterCatalog(
-      await services.eccRuntimeService.describeWorkspaceSpec(),
-    )
-    const stepConfigurations: Record<string, Record<string, unknown>> = {}
-    await Promise.all(
-      agentStepOptionSteps().map(async (step) => {
-        try {
-          const result = await services.eccRuntimeService.readWorkspaceStepConfiguration({
-            step,
-            workspaceHandle,
-          })
-          if (result.status !== 'available') return
-          stepConfigurations[step] = Object.fromEntries(
-            result.parameters.map((parameter) => [parameter.param, parameter.value]),
-          )
-        } catch {
-          // The step is not part of this Workspace flow; it contributes no options.
-        }
-      }),
-    )
-    const projectedParameters = isRecord(workspaceSpec.parameters)
-      ? { ...workspaceSpec.parameters }
-      : {}
-    const parameters = isRecord(snapshot.parameters) ? snapshot.parameters : {}
-    if (parameters.frequency_max !== undefined)
-      projectedParameters['design.frequency_mhz'] = parameters.frequency_max
-    if (isRecord(parameters.step_params)) {
-      for (const [step, stored] of Object.entries(parameters.step_params)) {
-        if (!isRecord(stored)) continue
-        for (const [name, value] of Object.entries(stored))
-          projectedParameters[`${step}:${name}`] = value
+  ): Promise<AgentWorkspaceContext> =>
+    await withAgentWorkspace(directory, async (opened) => {
+      const workspaceHandle = workspaceHandleFromResult(opened)
+      if (!workspaceHandle) throw new Error('ECC Workspace handle is unavailable.')
+      const snapshot = await services.eccRuntimeService.workspaceSnapshot({
+        workspaceHandle,
+      })
+      if (
+        !isRecord(snapshot) ||
+        typeof snapshot.directory !== 'string' ||
+        normalizeWorkspacePath(snapshot.directory) !== normalizeWorkspacePath(directory)
+      ) {
+        throw new Error('Agent Workspace context does not match its ECC session.')
       }
-    }
-    const design = isRecord(workspaceSpec.design) ? workspaceSpec.design : null
-    return {
-      workspaceHandle,
-      workspaceRevision: Number(workspaceRevision),
-      workspaceParameterValues: readAgentWorkspaceParameterValues(
-        projectedParameters,
-        stepConfigurations,
-      ),
-      ...(typeof design?.name === 'string' && design.name
-        ? { workspaceDesignId: design.name }
-        : {}),
-    }
-  }
+      const configuration = isRecord(snapshot.configuration)
+        ? snapshot.configuration
+        : null
+      const workspaceSpec = isRecord(configuration?.workspaceSpec)
+        ? configuration.workspaceSpec
+        : null
+      if (!workspaceSpec) throw new Error('ECC Workspace configuration is unavailable.')
+      const engineeringSnapshot = isRecord(snapshot.engineeringSnapshot)
+        ? snapshot.engineeringSnapshot
+        : null
+      const workspaceRevision = engineeringSnapshot?.workspaceRevision
+      if (!Number.isInteger(workspaceRevision) || Number(workspaceRevision) < 1) {
+        throw new Error('ECC Workspace Revision is unavailable.')
+      }
+      rememberWorkspaceParameterCatalog(
+        await services.eccRuntimeService.describeWorkspaceSpec(),
+      )
+      const stepConfigurations: Record<string, Record<string, unknown>> = {}
+      await Promise.all(
+        agentStepOptionSteps().map(async (step) => {
+          try {
+            const result =
+              await services.eccRuntimeService.readWorkspaceStepConfiguration({
+                step,
+                workspaceHandle,
+              })
+            if (result.status !== 'available') return
+            stepConfigurations[step] = Object.fromEntries(
+              result.parameters.map((parameter) => [parameter.param, parameter.value]),
+            )
+          } catch {
+            // The step is not part of this Workspace flow; it contributes no options.
+          }
+        }),
+      )
+      const projectedParameters = isRecord(workspaceSpec.parameters)
+        ? { ...workspaceSpec.parameters }
+        : {}
+      const parameters = isRecord(snapshot.parameters) ? snapshot.parameters : {}
+      if (parameters.frequency_max !== undefined)
+        projectedParameters['design.frequency_mhz'] = parameters.frequency_max
+      if (isRecord(parameters.step_params)) {
+        for (const [step, stored] of Object.entries(parameters.step_params)) {
+          if (!isRecord(stored)) continue
+          for (const [name, value] of Object.entries(stored))
+            projectedParameters[`${step}:${name}`] = value
+        }
+      }
+      const design = isRecord(workspaceSpec.design) ? workspaceSpec.design : null
+      return {
+        workspaceHandle,
+        workspaceRevision: Number(workspaceRevision),
+        workspaceParameterValues: readAgentWorkspaceParameterValues(
+          projectedParameters,
+          stepConfigurations,
+        ),
+        ...(typeof design?.name === 'string' && design.name
+          ? { workspaceDesignId: design.name }
+          : {}),
+      }
+    })
 
   const refreshAgentSessionWorkspaceContext = async (
     sender: IpcMainInvokeEvent['sender'],
@@ -1402,32 +1419,34 @@ export function registerIpc(
 
   services.agentRuntimeService?.setOptimizationStopReconciler?.(async (episode) => {
     const parent = episode.parentWorkspaceDirectory
-    const context = await resolveAgentWorkspaceContext(parent)
-    if (context.workspaceRevision !== episode.parentWorkspaceRevision) {
-      throw new Error('Optimization Parent Revision changed; Stop needs attention.')
-    }
-    const snapshot = await services.eccRuntimeService.workspaceSnapshot({
-      workspaceHandle: context.workspaceHandle,
-    })
-    if (
-      !isRecord(snapshot) ||
-      typeof snapshot.directory !== 'string' ||
-      normalizeWorkspacePath(snapshot.directory) !== normalizeWorkspacePath(parent) ||
-      !Array.isArray(snapshot.operations) ||
-      snapshot.operations.some(
-        (operation) =>
-          !isRecord(operation) ||
-          !['succeeded', 'failed', 'cancelled', 'interrupted', 'unknown'].includes(
-            String(operation.state),
-          ),
+    await withAgentWorkspace(parent, async ({ workspaceHandle }) => {
+      const context = await resolveAgentWorkspaceContext(parent)
+      if (context.workspaceRevision !== episode.parentWorkspaceRevision) {
+        throw new Error('Optimization Parent Revision changed; Stop needs attention.')
+      }
+      const snapshot = await services.eccRuntimeService.workspaceSnapshot({
+        workspaceHandle,
+      })
+      if (
+        !isRecord(snapshot) ||
+        typeof snapshot.directory !== 'string' ||
+        normalizeWorkspacePath(snapshot.directory) !== normalizeWorkspacePath(parent) ||
+        !Array.isArray(snapshot.operations) ||
+        snapshot.operations.some(
+          (operation) =>
+            !isRecord(operation) ||
+            !['succeeded', 'failed', 'cancelled', 'interrupted', 'unknown'].includes(
+              String(operation.state),
+            ),
+        )
+      ) {
+        throw new Error('Parent ECC Operation evidence is unavailable or active.')
+      }
+      await services.eccRuntimeService.stopOptimizationCandidates(
+        workspaceHandle,
+        optimizationCandidatePrefix(episode.episodeId),
       )
-    ) {
-      throw new Error('Parent ECC Operation evidence is unavailable or active.')
-    }
-    await services.eccRuntimeService.stopOptimizationCandidates(
-      context.workspaceHandle,
-      optimizationCandidatePrefix(episode.episodeId),
-    )
+    })
   })
 
   services.agentRuntimeService?.setOptimizationCandidateCleanup?.(async (episode) => {
@@ -1435,10 +1454,11 @@ export function registerIpc(
     if (!ecc.cleanupOptimizationCandidates) {
       throw new Error('ECC candidate cleanup is unavailable.')
     }
-    const context = await resolveAgentWorkspaceContext(episode.parentWorkspaceDirectory)
-    await ecc.cleanupOptimizationCandidates(
-      context.workspaceHandle,
-      optimizationCandidatePrefix(episode.episodeId),
+    await withAgentWorkspace(episode.parentWorkspaceDirectory, ({ workspaceHandle }) =>
+      ecc.cleanupOptimizationCandidates!(
+        workspaceHandle,
+        optimizationCandidatePrefix(episode.episodeId),
+      ),
     )
   })
 
@@ -1771,14 +1791,15 @@ export function registerIpc(
       ) {
         throw new Error('The candidate does not belong to this Optimization Episode.')
       }
-      const opened = await services.eccRuntimeService.openWorkspace({
-        directory: episode.parentWorkspaceDirectory,
-      })
-      const result = await services.eccRuntimeService.retainOptimizationCandidate(
-        opened.workspaceHandle,
-        candidate.candidate_id,
-        candidate.manifest_sha256,
-        name,
+      const result = await withAgentWorkspace(
+        episode.parentWorkspaceDirectory,
+        ({ workspaceHandle }) =>
+          services.eccRuntimeService.retainOptimizationCandidate(
+            workspaceHandle,
+            candidate.candidate_id,
+            candidate.manifest_sha256,
+            name,
+          ),
       )
       services.backendProjectComparisonService.invalidateWorkspace(result.directory)
       return result
