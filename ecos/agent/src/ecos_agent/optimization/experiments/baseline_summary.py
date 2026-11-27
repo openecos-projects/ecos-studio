@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import argparse
 import csv
-import json
 from pathlib import Path
 
+from ecos_agent.optimization.contracts import ArchivedPowerMetric, TerminalObservation
+from ecos_agent.optimization.metrics.contracts import TerminalEvaluationMetric
 from ecos_agent.optimization.observations import build_terminal_observation
 
 _METRIC_COLUMNS = (
@@ -29,6 +30,8 @@ _TIMING_COLUMNS = (
     "sta_hold_wns",
     "sta_hold_tns",
 )
+_ARCHIVED_POWER_COLUMNS = tuple(metric.value for metric in ArchivedPowerMetric)
+_ARCHIVED_POWER_UNIT_COLUMNS = tuple(f"{metric}_unit" for metric in _ARCHIVED_POWER_COLUMNS)
 _EVALUATION_COLUMNS = (
     "die_area",
     "core_area",
@@ -42,20 +45,22 @@ _EVALUATION_COLUMNS = (
     "lvs_count",
     "flow_tool_runtime",
     "flow_peak_memory",
-)
+) + _ARCHIVED_POWER_COLUMNS
 _GATE_COLUMNS = ("drc_clean", "lvs_clean", "sta_setup_closed", "sta_hold_closed")
 
 
-def _evaluation_values(observation) -> dict[str, float]:
+def _evaluation_metrics(
+    observation: TerminalObservation,
+) -> dict[str, TerminalEvaluationMetric]:
     # Corner-family metrics repeat per corner; keep the first (typical) value.
-    values: dict[str, float] = {}
+    values: dict[str, TerminalEvaluationMetric] = {}
     for metric in observation.evaluation_metrics:
-        values.setdefault(metric.metric_id, metric.value)
+        values.setdefault(metric.metric_id, metric)
     return values
 
 
 def _row(design_id: str, run: str, observation, epsilon_present: bool) -> dict:
-    evaluation = _evaluation_values(observation)
+    evaluation = _evaluation_metrics(observation)
     gates = {
         name: getattr(observation.signoff_gates, name).value
         for name in _GATE_COLUMNS
@@ -77,7 +82,14 @@ def _row(design_id: str, run: str, observation, epsilon_present: bool) -> dict:
         "eligible": eligible,
         **{column: observation.metrics.get(column) for column in _METRIC_COLUMNS},
         **{column: observation.timing_guardrail.get(column) for column in _TIMING_COLUMNS},
-        **{column: evaluation.get(column) for column in _EVALUATION_COLUMNS},
+        **{
+            column: evaluation[column].value if column in evaluation else None
+            for column in _EVALUATION_COLUMNS
+        },
+        **{
+            f"{column}_unit": evaluation[column].unit if column in evaluation else None
+            for column in _ARCHIVED_POWER_COLUMNS
+        },
         **gates,
     }
 
@@ -110,10 +122,10 @@ def main() -> int:
                     **{column: "" for column in _METRIC_COLUMNS},
                     **{column: "" for column in _TIMING_COLUMNS},
                     **{column: "" for column in _EVALUATION_COLUMNS},
+                    **{column: "" for column in _ARCHIVED_POWER_UNIT_COLUMNS},
                     **{column: "" for column in _GATE_COLUMNS},
                 }
             )
-            canonical_observation = None
         else:
             rows.append(
                 _row(design_id, "canonical", canonical_observation, epsilon_present)
@@ -136,11 +148,12 @@ def main() -> int:
                         **{column: "" for column in _METRIC_COLUMNS},
                         **{column: "" for column in _TIMING_COLUMNS},
                         **{column: "" for column in _EVALUATION_COLUMNS},
+                        **{column: "" for column in _ARCHIVED_POWER_UNIT_COLUMNS},
                         **{column: "" for column in _GATE_COLUMNS},
                     }
                 )
                 continue
-            observation = type(canonical_observation).model_validate_json(
+            observation = TerminalObservation.model_validate_json(
                 observation_path.read_bytes()
             )
             rows.append(
@@ -167,30 +180,29 @@ def main() -> int:
         "die_area",
         "power_analysis_dynamic_uw",
         "power_analysis_leakage_uw",
+        *_ARCHIVED_POWER_COLUMNS,
         "flow_tool_runtime",
         "flow_peak_memory",
     )
     for design_id in args.designs:
         design_rows = [row for row in rows if row["design"] == design_id]
         canonical = design_rows[0]
+        lines += [f"## {design_id}", ""]
         if canonical.get("error"):
-            lines.append(f"## {design_id}")
-            lines.append("")
             lines.append(
                 f"Canonical observation unavailable: {canonical['error']}"
             )
             lines.append("")
-            continue
-        lines.append(f"## {design_id}")
-        lines.append("")
         header = "| run | " + " | ".join(numeric) + " |"
         split = "|---" * (len(numeric) + 1) + "|"
         lines += [header, split]
         for row in design_rows:
-            cells = [
-                str(row[column]) if row[column] != "" else "-"
-                for column in numeric
-            ]
+            cells = []
+            for column in numeric:
+                value = row[column]
+                unit = row.get(f"{column}_unit")
+                cell = "-" if value in (None, "") else str(value)
+                cells.append(f"{cell} {unit}" if unit else cell)
             lines.append(f"| {row['run']} | " + " | ".join(cells) + " |")
         lines.append("")
         gates = {name: canonical[name] for name in _GATE_COLUMNS}
