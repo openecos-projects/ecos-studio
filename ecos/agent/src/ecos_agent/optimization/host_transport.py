@@ -9,7 +9,10 @@ from typing import Protocol
 from pathlib import Path
 
 from ecos_agent.optimization.ecc.adapter import EccCandidateRerunAdapter
-from ecos_agent.optimization.ecc.evidence import OptimizationEccAdapterError
+from ecos_agent.optimization.ecc.evidence import (
+    CANDIDATE_TERMINAL_STATES,
+    OptimizationEccAdapterError,
+)
 
 
 class HostCaller(Protocol):
@@ -32,9 +35,7 @@ def _require_host_transport() -> object:
     return _BOUND_HOST
 
 
-_TERMINAL_STATES = frozenset(
-    {"succeeded", "failed", "cancelled", "interrupted", "unknown"}
-)
+_TERMINAL_STATES = CANDIDATE_TERMINAL_STATES
 _PRODUCT_COMMAND_METHODS = frozenset(
     {
         "candidate.capabilities",

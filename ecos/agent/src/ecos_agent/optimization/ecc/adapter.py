@@ -258,11 +258,14 @@ class EccCandidateRerunAdapter:
         terminal_id, state = self._validate_operation(terminal, require_workspace=False)
         if terminal_id != intervention_id:
             raise OptimizationEccAdapterError("terminal operation id does not match")
-        outcome = (
-            OptimizationOutcomeKind.TIMED_OUT_CANCELLED
-            if state in {"cancelled", "failed", "interrupted"}
-            else None
-        )
+        if state not in _TERMINAL_STATES:
+            raise OptimizationEccAdapterError("terminal operation state is invalid")
+        outcome = {
+            "cancelled": OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
+            "failed": OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
+            "interrupted": OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
+            "unknown": OptimizationOutcomeKind.INDETERMINATE,
+        }.get(state)
         evidence = self._evidence(terminal)
         binding = self._binding_by_execution_id.get(intervention_id)
         application_receipt = self._application_receipt(
@@ -275,7 +278,8 @@ class EccCandidateRerunAdapter:
             binding[3] if binding else None,
             binding[4] if binding else None,
         )
-        self._binding_by_execution_id.pop(intervention_id, None)
+        if outcome is not None:
+            self._binding_by_execution_id.pop(intervention_id, None)
         return CandidateExecutionReceipt(
             execution_id=intervention_id,
             started=True,
