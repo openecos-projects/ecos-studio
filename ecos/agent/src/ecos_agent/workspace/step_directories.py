@@ -29,7 +29,14 @@ def step_directories(flow: object) -> dict[str, str]:
 
 def step_directory(root: Path, step: str) -> str:
     ledger = root / "home" / "flow.json"
-    if not ledger.resolve().is_relative_to(root.resolve()):
+    if ledger.is_symlink():
+        raise ValueError("ECC flow ledger must not be a symlink")
+    try:
+        resolved_ledger = ledger.resolve()
+        resolved_root = root.resolve()
+    except RuntimeError as exc:
+        raise ValueError("ECC flow ledger is invalid") from exc
+    if not resolved_ledger.is_relative_to(resolved_root):
         raise ValueError("ECC flow ledger is outside the workspace")
     directory = step_directories(json.loads(ledger.read_text(encoding="utf-8"))).get(step)
     if directory is None:

@@ -322,13 +322,13 @@ def _design_id_for_workspace(workspace: str) -> str | None:
         return design.strip()
     try:
         directory = step_directory(root, "placement")
-    except (OSError, ValueError, KeyError):
-        directory = None
-    if directory:
-        output = root / directory / "output"
-        if output.resolve().is_relative_to(root.resolve()):
-            for path in sorted(output.glob("*_placement.def.gz")):
-                return path.name.removesuffix("_placement.def.gz")
+        if directory:
+            output = root / directory / "output"
+            if output.resolve().is_relative_to(root.resolve()):
+                for path in sorted(output.glob("*_placement.def.gz")):
+                    return path.name.removesuffix("_placement.def.gz")
+    except (OSError, ValueError, KeyError, RuntimeError):
+        pass
     dirname = root.name.strip()
     return dirname or None
 

@@ -496,12 +496,18 @@ def _assemble_runner(
 
 def _parent_manifest_sha256(workspace: Path, terminal: TerminalObservation) -> str:
     parameters_ref, _parameters = _runtime_parameters(workspace)
+    try:
+        placement_dir = step_directory(workspace, "placement")
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise OptimizationRuntimeError(
+            "placement step directory is unavailable in workspace flow"
+        ) from exc
     checkpoint_manifest = build_optimization_artifact_manifest(
         workspace,
         (
             "home/flow.json",
             parameters_ref,
-            f"{step_directory(workspace, 'placement')}/analysis/qor_metrics.json",
+            f"{placement_dir}/analysis/qor_metrics.json",
         ),
     )
     return canonical_sha256(
