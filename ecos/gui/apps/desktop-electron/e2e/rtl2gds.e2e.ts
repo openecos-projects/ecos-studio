@@ -403,7 +403,7 @@ describe('product e2e: backend rtl2gds journey', () => {
     await live.getByText('Close', { exact: true }).click()
 
     const request = { workspaceHandle: workspace!.workspaceHandle }
-    const directory = workspace!.directory
+    const directory = workspace!.workspaceDir
     await page.evaluate(
       (payload) =>
         window.ecosDesktop.runtime.workspace.close({ designTool: 'backend', ...payload }),
