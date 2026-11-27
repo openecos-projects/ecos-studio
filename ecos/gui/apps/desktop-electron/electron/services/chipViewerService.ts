@@ -279,6 +279,7 @@ interface SnapshotInputs {
   lvsDataPath?: string
   manifestPath: string
   mapRootPath?: string
+  viewStep?: string
   staFeatureDirPath?: string
   workspaceStepDirectory: string
 }
@@ -933,6 +934,7 @@ export class ChipViewerService {
         {
           ...viewerSnapshotInputs,
           manifestPath: viewerManifestPath,
+          viewStep: mode === 'view' && !defView ? request.step : undefined,
         },
         () => {
           releaseViewer()
@@ -1126,6 +1128,8 @@ export class ChipViewerService {
     onExit?: () => void,
   ): Promise<void> {
     const viewerEnv = createChipViewerProcessEnv(this.env)
+    if (snapshotInputs.viewStep) viewerEnv.ECOS_CHIP_VIEWER_STEP = snapshotInputs.viewStep
+    else delete viewerEnv.ECOS_CHIP_VIEWER_STEP
     if (this.platform === 'linux' && !hasLinuxDisplayEnvironment(viewerEnv)) {
       throw new Error(
         [

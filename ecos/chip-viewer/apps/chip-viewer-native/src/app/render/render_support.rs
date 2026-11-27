@@ -3559,7 +3559,7 @@ pub(super) fn edit_capability_lines(
 pub(super) fn is_context_owner_type(owner_type: u8) -> bool {
     matches!(
         OwnerType::from_raw(owner_type),
-        Some(OwnerType::Row | OwnerType::TrackGrid | OwnerType::GCellGrid | OwnerType::Obs)
+        Some(OwnerType::TrackGrid | OwnerType::GCellGrid | OwnerType::Obs)
     )
 }
 

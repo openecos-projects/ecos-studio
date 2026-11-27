@@ -2279,7 +2279,7 @@ fn cpu_and_gpu_pin_candidates_share_kind_name_and_key() {
 fn context_owner_types_are_deferred_until_zoomed_in() {
     assert!(is_context_owner_type(OwnerType::TrackGrid as u8));
     assert!(is_context_owner_type(OwnerType::GCellGrid as u8));
-    assert!(is_context_owner_type(OwnerType::Row as u8));
+    assert!(!is_context_owner_type(OwnerType::Row as u8));
     assert!(is_context_owner_type(OwnerType::Obs as u8));
     assert!(!is_context_owner_type(OwnerType::NetWireSegment as u8));
     assert!(!is_context_owner_type(OwnerType::InstanceBBox as u8));

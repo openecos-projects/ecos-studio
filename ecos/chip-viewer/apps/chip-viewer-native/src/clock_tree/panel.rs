@@ -6,6 +6,14 @@ use super::{
 };
 
 impl ClockTreePanel {
+    pub(crate) fn open_graph(&mut self) {
+        self.open = true;
+        self.collapsed.clear();
+        self.rows_dirty = true;
+        self.center_root_view = false;
+        self.fit_tree_view = true;
+    }
+
     pub(crate) fn sidebar(&mut self, ui: &mut egui::Ui) -> Option<LayoutTarget> {
         self.poll(ui.ctx());
         if let Some(error) = &self.error {
@@ -87,11 +95,7 @@ impl ClockTreePanel {
             index.summary.min_buffers, index.summary.max_buffers
         ));
         if ui.button("Open clock graph").clicked() {
-            self.open = true;
-            self.collapsed.clear();
-            self.rows_dirty = true;
-            self.center_root_view = false;
-            self.fit_tree_view = true;
+            self.open_graph();
         }
         if self.open && ui.button("Close clock graph").clicked() {
             self.open = false;

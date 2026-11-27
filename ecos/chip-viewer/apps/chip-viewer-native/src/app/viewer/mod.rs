@@ -14,6 +14,7 @@ impl LoadedViewer {
         render_mode: crate::RenderMode,
     ) -> Self {
         let PreparedViewer {
+            step_view,
             db,
             stats,
             grid_bounds,
@@ -32,14 +33,22 @@ impl LoadedViewer {
         let mut layers =
             layer_ui_states_from_summaries(layer_catalog, &BTreeMap::new(), color_theme);
         let mut object_visibility = ObjectVisibility::default();
-        // A read-only view opens on the full layout. Edit mode keeps its
-        // placement-focused filters; later sidebar changes remain user-owned.
-        if !edit_enabled || all_visible {
+        let mut clock_tree = crate::clock_tree::ClockTreePanel::new(std::sync::Arc::clone(&db));
+        if let Some(step_view) = step_view {
+            if step_view.show_clock_tree {
+                if let Some(tree) = &mut clock_tree {
+                    tree.open_graph();
+                }
+            }
+            object_visibility = step_view.objects;
+            for layer in &mut layers {
+                layer.visible = step_view.physical_layers.contains(&layer.layer_id);
+            }
+        } else if !edit_enabled || all_visible {
             set_layer_visibility(&mut layers, true);
             object_visibility.set_all_visible(true);
         }
         let (analysis_loader, analysis_load_error) = analysis_paths.start_for(&db);
-        let clock_tree = crate::clock_tree::ClockTreePanel::new(std::sync::Arc::clone(&db));
         let analysis_tab = if clock_tree.is_some() {
             AnalysisTab::ClockTree
         } else {
@@ -6125,6 +6134,7 @@ impl LoadedViewer {
             stats,
             grid_bounds,
             drawing_category_counts: _,
+            step_view: _,
             snapshot_signature,
             layer_catalog,
         } = prepared;

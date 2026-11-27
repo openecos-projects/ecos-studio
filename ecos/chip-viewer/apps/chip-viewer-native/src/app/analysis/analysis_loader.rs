@@ -194,7 +194,9 @@ impl LoadedViewer {
     }
 
     pub(super) fn default_analysis_tab(&self) -> AnalysisTab {
-        if self.drc_overlay.is_some() {
+        if self.clock_tree.as_ref().is_some_and(|tree| tree.is_open()) {
+            AnalysisTab::ClockTree
+        } else if self.drc_overlay.is_some() {
             AnalysisTab::Drc
         } else if self.lvs_analysis.is_some() {
             AnalysisTab::Lvs

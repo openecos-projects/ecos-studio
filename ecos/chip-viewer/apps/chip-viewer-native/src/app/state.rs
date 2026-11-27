@@ -109,6 +109,7 @@ struct LoadingViewer {
 }
 
 struct PreparedViewer {
+    step_view: Option<step_view::StepView>,
     db: std::sync::Arc<ChipViewDb>,
     stats: SnapshotStats,
     grid_bounds: Option<Rect32>,
@@ -142,6 +143,7 @@ impl From<ChipViewDb> for PreparedViewer {
         let layer_catalog = db.layer_catalog();
         Self {
             db: std::sync::Arc::new(db),
+            step_view: None,
             stats,
             grid_bounds,
             drawing_category_counts,
@@ -947,7 +949,8 @@ impl DrawingCategory {
             Self::PdnPower => "Power net special wire segments (e.g. VDD, VCC).",
             Self::PdnGround => "Ground net special wire segments (e.g. VSS, GND).",
             Self::Vias => "Via owners are drawn on their assigned physical layer.",
-            Self::Placement | Self::Tracks | Self::GCells | Self::Obstructions => {
+            Self::Placement => "Show standard-cell placement rows.",
+            Self::Tracks | Self::GCells | Self::Obstructions => {
                 "Context geometry is shown after zooming in to keep the fitted route view readable."
             }
             _ => "Toggle this geometry category in the layout canvas.",

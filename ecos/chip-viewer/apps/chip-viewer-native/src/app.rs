@@ -67,6 +67,7 @@ mod search_worker;
 mod session_close;
 #[path = "app/session/snapshot_reload.rs"]
 mod snapshot_reload;
+mod step_view;
 #[path = "app/analysis/timing.rs"]
 mod timing;
 #[path = "app/viewer/mod.rs"]
@@ -161,7 +162,17 @@ impl ChipViewerApp {
         let load_manifest = manifest.clone();
         thread::spawn(move || {
             let result = ChipViewDb::open(&load_manifest)
-                .map(PreparedViewer::from)
+                .map(|db| {
+                    let mut prepared = PreparedViewer::from(db);
+                    if !edit_enabled
+                        && !env_flag_requested(std::env::var(PERF_ALL_VISIBLE_ENV).ok().as_deref())
+                    {
+                        prepared.step_view = std::env::var("ECOS_CHIP_VIEWER_STEP")
+                            .ok()
+                            .and_then(|step| step_view::StepView::prepare(&prepared.db, &step));
+                    }
+                    prepared
+                })
                 .map_err(|err| err.to_string());
             let _ = sender.send(result);
         });

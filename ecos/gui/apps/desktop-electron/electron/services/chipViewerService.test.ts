@@ -670,6 +670,7 @@ describe('ChipViewerService', () => {
         ANTENNA_DATA_PATH,
       ],
       expect.objectContaining({
+        env: expect.objectContaining({ ECOS_CHIP_VIEWER_STEP: STEP_NAME }),
         detached: true,
         stdio: ['ignore', expect.any(Number), expect.any(Number)],
       }),
