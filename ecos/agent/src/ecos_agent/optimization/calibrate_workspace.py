@@ -27,6 +27,7 @@ from pathlib import Path
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization.controller_helpers import _write_json_atomic
+from ecos_agent.optimization.ecc.evidence import CANDIDATE_TERMINAL_STATES
 from ecos_agent.optimization.host_transport import _require_host_transport
 from ecos_agent.optimization.observation_contracts import (
     TerminalObservation,
@@ -44,14 +45,16 @@ from ecos_agent.optimization.experiments.knowledge_treatment_execution import (
     _workspace_flow_succeeded,
 )
 
-_TERMINAL_STATES = frozenset(
-    {"succeeded", "failed", "cancelled", "interrupted", "unknown"}
-)
+_TERMINAL_STATES = CANDIDATE_TERMINAL_STATES
 _MIN_REPLAYS = 2
 _PROGRESS_INTERVAL_SECONDS = 30.0
 _CACHE_MANIFEST_SCHEMA = "ecos.replay_cache_manifest.v1"
 _REPLAY_INPUT_KEYS = ("ecc_revision", "origin_sha256", "parameters_sha256", "pdk_sha256")
 _LOGGER = logging.getLogger(__name__)
+
+
+class _ReplayCancellationUnsettledError(OptimizationRuntimeError):
+    """Raised when a cancelled calibration replay does not settle before timeout."""
 
 
 def write_noise_epsilon_artifact(
@@ -69,9 +72,8 @@ def write_noise_epsilon_artifact(
     }
     if metadata:
         payload.update(metadata)
-    artifact_path.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_json_atomic(artifact_path, payload)
     return payload
 
 
@@ -319,6 +321,7 @@ def _run_replay(
         return observation
     source_handle = _open_source(workspace)
     replay_key = _replay_key(workspace, fingerprint, index)
+    settled = True
     try:
         opened = _host_call(
             "workspace.deriveCalibrationReplay",
@@ -329,8 +332,17 @@ def _run_replay(
         _store_opportunity_context(replay_root, directory, index, fingerprint["ecc_revision"])
         _store_replay_cache(replay_root, observation, fingerprint, "produced", directory)
         return observation
+    except _ReplayCancellationUnsettledError:
+        settled = False
+        raise
     finally:
-        _release_replay(workspace, replay_key, source_handle)
+        if settled:
+            _release_replay(workspace, replay_key, source_handle)
+        else:
+            _LOGGER.warning(
+                "Skipping calibration replay %s cleanup because cancellation did not settle",
+                replay_key,
+            )
 
 
 def _replay_key(workspace: Path, fingerprint: dict[str, str], index: int) -> str:
@@ -372,7 +384,9 @@ def _cancel_replay_operation(workspace_handle: str, operation_id: str) -> None:
     while status.get("state") not in _TERMINAL_STATES:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise OptimizationRuntimeError("calibration replay did not settle after cancellation")
+            raise _ReplayCancellationUnsettledError(
+                "calibration replay did not settle after cancellation"
+            )
         status = _host_call(
             "operation.wait", {**request, "timeoutMs": min(1000, max(1, remaining * 1000))}
         )

@@ -47,8 +47,11 @@ export async function releaseCalibrationReplay(
     await verifyCalibrationReplay(source, directory, workspaceId)
     try {
       if (callbacks.isRunning(directory)) {
-        if (Date.now() >= deadline)
-          throw new Error('Calibration replay is still running.')
+        if (Date.now() >= deadline) {
+          throw Object.assign(new Error('Calibration replay is still running.'), {
+            code: 'workspace_busy',
+          })
+        }
         await delay(500)
         continue
       }

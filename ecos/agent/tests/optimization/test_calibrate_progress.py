@@ -155,3 +155,40 @@ def test_active_replay_is_cancelled_on_stop_or_deadline(tmp_path, monkeypatch, s
         )
     assert cancelled == [{"workspaceHandle": "replay", "operationId": "running"}]
     assert released == ["source"]
+
+
+def test_unsettled_cancellation_skips_replay_release(tmp_path, monkeypatch):
+    elapsed = 0.0
+    released = []
+
+    def host_call(method, params):
+        nonlocal elapsed
+        if method == "workspace.open":
+            return {"workspaceHandle": "source"}
+        if method == "workspace.deriveCalibrationReplay":
+            return {"workspaceHandle": "replay", "workspaceRevision": 1, "directory": str(tmp_path)}
+        if method == "workspace.run":
+            return {"operationId": "running", "state": "running"}
+        if method == "operation.cancel":
+            return {"accepted": True}
+        if method == "operation.wait":
+            elapsed += 61.0
+            return {"state": "running"}
+        if method == "workspace.releaseCalibrationReplay":
+            released.append(params["workspaceHandle"])
+            return {"ok": True}
+        raise AssertionError(f"unexpected host call: {method}")
+
+    module = "ecos_agent.optimization.calibrate_workspace"
+    monkeypatch.setattr(f"{module}._host_call", host_call)
+    monkeypatch.setattr(f"{module}.time.monotonic", lambda: elapsed)
+    with pytest.raises(OptimizationRuntimeError, match="did not settle"):
+        _run_replay(
+            tmp_path,
+            tmp_path / "cache",
+            1,
+            2,
+            {},
+            should_stop=lambda: elapsed >= 0,
+        )
+    assert released == []
