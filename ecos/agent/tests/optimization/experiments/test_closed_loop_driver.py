@@ -114,6 +114,12 @@ def test_metric_comparison_reports_reference_best_and_noise() -> None:
         area=11.0,
         dynamic_power=2.4,
         leakage_power=0.41,
+        power_measurements={
+            "leakage_power": next(
+                metric for metric in reference.evaluation_metrics
+                if metric.metric_id == "power_analysis_leakage_uw"
+            ).model_copy(update={"value": 0.41}).model_dump(mode="json"),
+        },
         frequency=105.0,
         drc=0.0,
         timing=0.1,
