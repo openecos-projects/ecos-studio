@@ -195,22 +195,17 @@ def _store_replay_cache(
     workspace: Path | None = None,
 ) -> None:
     replay_root.mkdir(parents=True, exist_ok=True)
-    (replay_root / "terminal-observation.v1.json").write_text(
-        observation.model_dump_json(), encoding="utf-8"
+    _write_json_atomic(
+        replay_root / "terminal-observation.v1.json", observation.model_dump(mode="json")
     )
-    (replay_root / "replay-cache-manifest.v1.json").write_text(
-        json.dumps(
-            {
-                "schema_version": _CACHE_MANIFEST_SCHEMA,
-                "provenance": provenance,
-                "components": dict(fingerprint),
-                **({"workspace": str(workspace)} if workspace is not None else {}),
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
+    _write_json_atomic(
+        replay_root / "replay-cache-manifest.v1.json",
+        {
+            "schema_version": _CACHE_MANIFEST_SCHEMA,
+            "provenance": provenance,
+            "components": dict(fingerprint),
+            **({"workspace": str(workspace)} if workspace is not None else {}),
+        },
     )
 
 
@@ -366,6 +361,23 @@ def _release_replay(workspace: Path, replay_key: str, source_handle: str | None 
         _LOGGER.warning("Could not clean up calibration replay %s: %s", replay_key, exc)
 
 
+def _cancel_replay_operation(workspace_handle: str, operation_id: str) -> None:
+    request = {"workspaceHandle": workspace_handle, "operationId": operation_id}
+    try:
+        status = _host_call("operation.cancel", request)
+    except Exception as exc:
+        _LOGGER.warning("Could not cancel calibration operation %s: %s", operation_id, exc)
+        status = {}
+    deadline = time.monotonic() + 60
+    while status.get("state") not in _TERMINAL_STATES:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise OptimizationRuntimeError("calibration replay did not settle after cancellation")
+        status = _host_call(
+            "operation.wait", {**request, "timeoutMs": min(1000, max(1, remaining * 1000))}
+        )
+
+
 def _execute_replay(
     opened: dict[str, object],
     index: int,
@@ -377,6 +389,7 @@ def _execute_replay(
     revision = opened.get("workspaceRevision")
     if not isinstance(workspace_handle, str) or not workspace_handle.strip():
         raise OptimizationRuntimeError("calibration workspace handle is missing")
+    workspace_handle = workspace_handle.strip()
     directory = opened.get("directory")
     if type(revision) is not int or revision < 1 or not isinstance(directory, str):
         raise OptimizationRuntimeError("calibration workspace identity is missing")
@@ -385,7 +398,7 @@ def _execute_replay(
     operation = _host_call(
         "workspace.run",
         {
-            "workspaceHandle": workspace_handle.strip(),
+            "workspaceHandle": workspace_handle,
             "expectedWorkspaceRevision": revision,
             "rerun": True,
             "idempotencyKey": f"noise-calibration.default-replay-{index}.{uuid4().hex}",
@@ -405,10 +418,7 @@ def _execute_replay(
             remaining = deadline - time.monotonic()
             stopped = should_stop is not None and should_stop()
             if stopped or remaining <= 0:
-                _host_call(
-                    "operation.cancel",
-                    {"workspaceHandle": workspace_handle, "operationId": operation_id},
-                )
+                _cancel_replay_operation(workspace_handle, operation_id)
                 if stopped:
                     raise OptimizationRuntimeError("noise calibration cancelled")
                 raise OptimizationRuntimeError(
@@ -417,7 +427,7 @@ def _execute_replay(
             status = _host_call(
                 "operation.wait",
                 {
-                    "workspaceHandle": workspace_handle.strip(),
+                    "workspaceHandle": workspace_handle,
                     "operationId": operation_id,
                     "timeoutMs": min(1000, max(1, remaining * 1000)),
                 },

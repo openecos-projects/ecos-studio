@@ -125,14 +125,19 @@ def test_active_replay_is_cancelled_on_stop_or_deadline(tmp_path, monkeypatch, s
         if method == "workspace.open":
             return {"workspaceHandle": "source"}
         if method == "workspace.deriveCalibrationReplay":
-            return {"workspaceHandle": "replay", "workspaceRevision": 1, "directory": str(tmp_path)}
+            return {"workspaceHandle": " replay ", "workspaceRevision": 1, "directory": str(tmp_path)}
         if method == "workspace.run":
             return {"operationId": "running", "state": "running"}
         if method == "operation.wait":
             assert 0 < params["timeoutMs"] <= 1000
+            assert params["workspaceHandle"] == "replay"
             elapsed += 1
+            if cancelled:
+                waited_for_cancel.append(True)
+                return {"state": "cancelled"}
             return {"state": "running"}
         if method == "workspace.releaseCalibrationReplay":
+            assert waited_for_cancel
             released.append(params["workspaceHandle"])
             raise RuntimeError("cleanup failed")
         assert method == "operation.cancel"
@@ -140,6 +145,7 @@ def test_active_replay_is_cancelled_on_stop_or_deadline(tmp_path, monkeypatch, s
         return {"accepted": True}
 
     module = "ecos_agent.optimization.calibrate_workspace"
+    waited_for_cancel = []
     monkeypatch.setattr(f"{module}._host_call", host_call)
     monkeypatch.setattr(f"{module}.time.monotonic", lambda: elapsed)
     with pytest.raises(OptimizationRuntimeError, match="cancelled" if stop else "timed out"):
