@@ -3098,9 +3098,12 @@ export function registerIpc(
       },
       prepareCreatePreview: async (createRequest) => {
         if (createRequest.projectMode !== 'create') {
-          await services.workspaceService.authorizeProjectManagementReadRoot(
-            createRequest.projectRoot ?? '',
-          )
+          const root = createRequest.projectRoot?.trim()
+          if (!root) throw new Error('Preview requires a Project root.')
+          const manifest = await services.projectManagementReadService?.readManifest(root)
+          if (!manifest || manifest.project_type === 'frontend') {
+            throw new Error('Preview requires an initialized backend Project.')
+          }
         }
         return await prepareWorkspaceCreatePreview(services, createRequest)
       },
