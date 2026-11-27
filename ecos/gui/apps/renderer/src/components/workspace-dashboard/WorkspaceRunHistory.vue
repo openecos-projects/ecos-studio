@@ -44,10 +44,10 @@
             <th scope="row" class="run-id">
               <code :title="run.runId">{{ run.runId }}</code>
             </th>
-            <td>{{ new Date(run.finishedAt * 1000).toLocaleString() }}</td>
+            <td>{{ formatFinishedAt(run.finishedAt) }}</td>
             <td>{{ scope(run) }}</td>
             <td>
-              {{ stateLabels[run.state] }}
+              {{ stateLabels[run.state] ?? stateLabels.unknown }}
               <small v-if="run.error" class="run-error">{{ run.error.message }}</small>
             </td>
             <td>
@@ -121,6 +121,13 @@ const stateLabels = {
   failed: 'Failed',
   cancelled: 'Cancelled',
   interrupted: 'Interrupted',
+  unknown: 'Unknown',
+}
+
+function formatFinishedAt(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return 'Unknown'
+  const date = new Date(value >= 1e12 ? value : value * 1000)
+  return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString()
 }
 
 watch(

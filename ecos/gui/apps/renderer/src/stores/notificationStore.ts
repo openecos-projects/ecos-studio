@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue'
+import { normalizeLocalPath } from '@ecos-studio/shared'
 
 export type AppNotificationSeverity = 'error' | 'warn' | 'info'
 
@@ -12,7 +13,7 @@ export function runNotificationKey({
   workspaceDirectory,
   operationId,
 }: RunDiagnosticsIdentity) {
-  return JSON.stringify([workspaceDirectory, operationId])
+  return JSON.stringify([normalizeLocalPath(workspaceDirectory), operationId])
 }
 
 export interface AppNotification {

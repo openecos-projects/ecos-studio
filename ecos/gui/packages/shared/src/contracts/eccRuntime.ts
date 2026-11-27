@@ -490,7 +490,7 @@ export interface EccRunHistoryEntry {
   runId: string
   startedAt: number
   finishedAt: number
-  state: 'succeeded' | 'failed' | 'cancelled' | 'interrupted'
+  state: 'succeeded' | 'failed' | 'cancelled' | 'interrupted' | 'unknown'
   selection: { only?: string; fromStep?: string; throughStep?: string }
   error?: { code: string; message: string }
 }

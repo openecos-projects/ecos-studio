@@ -185,7 +185,8 @@ function isRunTerminalState(value: unknown): value is RunTerminalState {
     value === 'succeeded' ||
     value === 'failed' ||
     value === 'cancelled' ||
-    value === 'interrupted'
+    value === 'interrupted' ||
+    value === 'unknown'
   )
 }
 
