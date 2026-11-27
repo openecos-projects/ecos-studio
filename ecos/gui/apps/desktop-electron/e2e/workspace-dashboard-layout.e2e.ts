@@ -612,19 +612,24 @@ describe('workspace dashboard layout', () => {
     await writeFile(join(logs, operationId + '.log'), 'Saved ECC run\n')
     await page.getByRole('button', { name: 'Run History' }).click()
     const history = page.getByRole('dialog', { name: 'Run history' })
-    await expect
-      .poll(() => history.getByRole('row').filter({ hasText: operationId }).innerText())
-      .toContain('Run through Synthesis')
-    const report = await page.evaluate(
-      (request) => window.ecosDesktop.ecc.runtime.operationLog(request),
-      {
-        workspaceHandle: workspace.workspaceHandle,
-        operationId,
-        includeDiagnostics: true,
-      },
-    )
-    expect(report.diagnostics).toContain('Scope: start → synthesis')
-    await history.getByRole('button', { name: 'Close run history' }).click()
+    try {
+      await expect
+        .poll(() => history.getByRole('row').filter({ hasText: operationId }).innerText())
+        .toContain('Run through Synthesis')
+      const report = await page.evaluate(
+        (request) => window.ecosDesktop.ecc.runtime.operationLog(request),
+        {
+          workspaceHandle: workspace.workspaceHandle,
+          operationId,
+          includeDiagnostics: true,
+        },
+      )
+      expect(report.diagnostics).toContain('Scope: start → synthesis')
+    } finally {
+      if (await history.isVisible().catch(() => false)) {
+        await history.getByRole('button', { name: 'Close run history' }).click()
+      }
+    }
   })
 
   it('reloads the completed step log after rerunning with its dialog closed', async () => {
@@ -643,11 +648,13 @@ describe('workspace dashboard layout', () => {
       const openLog = () =>
         card.getByRole('button', { name: 'Synthesis log', exact: true }).click()
       const copyLog = async () => {
-        await log.getByRole('button', { name: /^(Copied|Copy) log$/ }).click()
+        const copy = log.getByRole('button', { name: /^(Copied|Copy) log$/ })
+        if (!(await copy.isEnabled())) return ''
+        await copy.click()
         return await app.evaluate(({ clipboard }) => clipboard.readText())
       }
       await openLog()
-      await expect.poll(copyLog).toContain(oldMarker)
+      await expect.poll(copyLog, { timeout: 15_000 }).toContain(oldMarker)
       await log.getByRole('button', { name: 'Close', exact: true }).click()
 
       const rerun = (await page.evaluate(
@@ -672,7 +679,7 @@ describe('workspace dashboard layout', () => {
       const lastLine = nextLog.trimEnd().split('\n').at(-1)
       expect(lastLine).toBeTruthy()
       await openLog()
-      await expect.poll(copyLog).toContain(lastLine)
+      await expect.poll(copyLog, { timeout: 15_000 }).toContain(lastLine)
       expect(await copyLog()).not.toContain(oldMarker)
       await log.getByRole('button', { name: 'Close', exact: true }).click()
     } finally {

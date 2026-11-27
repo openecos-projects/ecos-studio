@@ -432,6 +432,10 @@ describe('product e2e: backend rtl2gds journey', () => {
       await shot('offline-design-summary')
       await offline.getByText('Close', { exact: true }).click()
     } finally {
+      const reportDialog = page.getByRole('dialog', { name: 'Export Design Summary' })
+      if (await reportDialog.isVisible().catch(() => false)) {
+        await reportDialog.getByText('Close', { exact: true }).click()
+      }
       await openWorkspaceInUi(page, { ...workspace!, creationId: undefined })
       const opened = await page.evaluate(
         (directory) =>
