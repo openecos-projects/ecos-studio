@@ -37,6 +37,13 @@ _ALLOWED_METHODS = frozenset(
 _FORWARDED_STEP_EVENTS = frozenset(
     {"step.started", "step.completed", "operation.rerun_prepared"}
 )
+_TERMINAL_EVENT_STATES = {
+    "operation.completed": "succeeded",
+    "operation.failed": "failed",
+    "operation.cancelled": "cancelled",
+    "operation.interrupted": "interrupted",
+    "operation.unknown": "unknown",
+}
 
 
 class EccContentLengthRpcClient:
@@ -281,11 +288,7 @@ class EccContentLengthRpcClient:
                     "params": ack,
                 }
             )
-        if event.get("type") in {
-            "operation.completed",
-            "operation.failed",
-            "operation.cancelled",
-        }:
+        if event.get("type") in _TERMINAL_EVENT_STATES:
             self._events.put(event)
         if event.get("type") in _FORWARDED_STEP_EVENTS and self.event_callback:
             try:
@@ -394,14 +397,7 @@ def _terminal_event(
 ) -> dict[str, object] | None:
     if event.get("operationId") != operation_id:
         return None
-    states = {
-        "operation.completed": "succeeded",
-        "operation.failed": "failed",
-        "operation.cancelled": "cancelled",
-        "operation.interrupted": "interrupted",
-        "operation.unknown": "unknown",
-    }
-    state = states.get(event.get("type"))
+    state = _TERMINAL_EVENT_STATES.get(event.get("type"))
     if state is None:
         return None
     terminal: dict[str, object] = {
