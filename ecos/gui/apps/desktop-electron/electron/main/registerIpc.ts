@@ -3076,7 +3076,11 @@ export function registerIpc(
         services.backendProjectComparisonService.invalidateWorkspace(workspaceDirectory)
       },
       prepareCreatePreview: async (createRequest) => {
-        await authorizeBackendProjectRootForCreate(services, createRequest)
+        if (createRequest.projectMode !== 'create') {
+          await services.workspaceService.authorizeProjectManagementReadRoot(
+            createRequest.projectRoot ?? '',
+          )
+        }
         return await prepareWorkspaceCreatePreview(services, createRequest)
       },
       prepareCreate: async (createRequest) => {
