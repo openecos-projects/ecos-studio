@@ -100,13 +100,7 @@ async function runFixtureCommand(
   })
 }
 
-async function createPdkArchive(
-  root: string,
-  options: { makefileContent?: string; valid?: boolean } = {},
-): Promise<{ path: string; sha256: string; size: number }> {
-  const sourceRoot = join(root, 'pdk-source')
-  const sourceDir = join(sourceRoot, 'icsprout55-pdk-1.10.100')
-  const archive = join(root, 'ics55.tar')
+async function createIcs55Views(sourceDir: string, valid = true): Promise<void> {
   await mkdir(join(sourceDir, 'IP'), { recursive: true })
   await mkdir(join(sourceDir, 'prtech'), { recursive: true })
   const stdcell = join(sourceDir, 'IP', 'STD_cell', 'ics55_LLSC_H7C_V1p10C100')
@@ -140,7 +134,7 @@ async function createPdkArchive(
     'library(test) {}\n',
     'utf8',
   )
-  if (options.valid !== false) {
+  if (valid) {
     await writeFile(
       join(
         stdcell,
@@ -152,6 +146,16 @@ async function createPdkArchive(
       'utf8',
     )
   }
+}
+
+async function createPdkArchive(
+  root: string,
+  options: { makefileContent?: string; valid?: boolean } = {},
+): Promise<{ path: string; sha256: string; size: number }> {
+  const sourceRoot = join(root, 'pdk-source')
+  const sourceDir = join(sourceRoot, 'icsprout55-pdk-1.10.100')
+  const archive = join(root, 'ics55.tar')
+  await createIcs55Views(sourceDir, options.valid !== false)
   await writeFile(join(sourceDir, 'README.md'), 'fixture pdk\n', 'utf8')
   if (options.makefileContent) {
     await writeFile(join(sourceDir, 'Makefile'), options.makefileContent, 'utf8')
@@ -2704,8 +2708,7 @@ describe('ResourceManagerService', () => {
   it('imports a row-bound local PDK when the scanned PDK id matches', async () => {
     const root = await createTempDir('ecos-resources-')
     const pdkRoot = join(root, 'local', 'ics55')
-    await mkdir(join(pdkRoot, 'IP'), { recursive: true })
-    await mkdir(join(pdkRoot, 'prtech'), { recursive: true })
+    await createIcs55Views(pdkRoot)
     const dirs = testResourceDirs(root)
     const service = new ResourceManagerService({
       ...dirs,
@@ -9534,10 +9537,8 @@ describe('ResourceManagerService', () => {
     const root = await createTempDir('ecos-resources-')
     const first = join(root, 'local-a', 'ics55')
     const second = join(root, 'local-b', 'ics55')
-    await mkdir(join(first, 'IP'), { recursive: true })
-    await mkdir(join(first, 'prtech'), { recursive: true })
-    await mkdir(join(second, 'IP'), { recursive: true })
-    await mkdir(join(second, 'prtech'), { recursive: true })
+    await createIcs55Views(first)
+    await createIcs55Views(second)
     const service = new ResourceManagerService(testResourceDirs(root))
 
     const firstResource = await service.importPdkPath(first)
@@ -9558,8 +9559,7 @@ describe('ResourceManagerService', () => {
   it('revalidates an existing local PDK when it is imported again', async () => {
     const root = await createTempDir('ecos-resources-')
     const pdkRoot = join(root, 'local', 'ics55')
-    await mkdir(join(pdkRoot, 'IP'), { recursive: true })
-    await mkdir(join(pdkRoot, 'prtech'), { recursive: true })
+    await createIcs55Views(pdkRoot)
     const service = new ResourceManagerService(testResourceDirs(root))
 
     const first = await service.importPdkPath(pdkRoot)
@@ -9577,8 +9577,7 @@ describe('ResourceManagerService', () => {
     const dirs = testResourceDirs(root)
     const pdkRoot = join(root, 'local', 'ics55')
     const pdkLink = join(root, 'local', 'ics55-link')
-    await mkdir(join(pdkRoot, 'IP'), { recursive: true })
-    await mkdir(join(pdkRoot, 'prtech'), { recursive: true })
+    await createIcs55Views(pdkRoot)
     await symlink(pdkRoot, pdkLink)
     await mkdir(dirs.resourcesDir, { recursive: true })
 
@@ -9826,8 +9825,7 @@ describe('ResourceManagerService', () => {
     const root = await createTempDir('ecos-resources-')
     const dirs = testResourceDirs(root)
     const pdkRoot = join(root, 'local', 'ics55')
-    await mkdir(join(pdkRoot, 'IP'), { recursive: true })
-    await mkdir(join(pdkRoot, 'prtech'), { recursive: true })
+    await createIcs55Views(pdkRoot)
     await writeTestManifest(root, {
       'pdk:ics55': {
         type: 'pdk',
