@@ -19,6 +19,7 @@ from ecos_agent.optimization.ecc.evidence import (
 )
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
+_WORKSPACE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 _SAFE_RPC_ERROR_DETAIL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .:_-]{0,255}$")
 _MAX_PAYLOAD_BYTES = 16 * 1024 * 1024
 _ALLOWED_METHODS = frozenset(
@@ -120,7 +121,7 @@ class EccContentLengthRpcClient:
             timeout_seconds=self._response_timeout_seconds,
         )
         workspace_id = result.get("workspaceId")
-        if not isinstance(workspace_id, str) or not _ID.fullmatch(workspace_id):
+        if not isinstance(workspace_id, str) or not _WORKSPACE_ID.fullmatch(workspace_id):
             raise OptimizationEccAdapterError("workspace session id is invalid")
         if result.get("directory") != str(directory.resolve()):
             raise OptimizationEccAdapterError(
