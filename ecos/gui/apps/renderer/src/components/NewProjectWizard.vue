@@ -1086,7 +1086,7 @@
                                   pdk.readiness === 'missing'
                                     ? 'Missing'
                                     : pdk.readiness === 'invalid'
-                                      ? 'Invalid'
+                                      ? 'Defaults invalid'
                                       : 'Unverified'
                                 }}
                               </span>
@@ -3938,7 +3938,11 @@ function pdkValidationMessage(pdk: import('../types').ImportedPdk): string {
 }
 
 function isPdkEligible(pdk?: import('../types').ImportedPdk): boolean {
-  return pdk?.readiness === 'ready' || pdk?.readiness === 'unverified'
+  return (
+    pdk?.readiness === 'ready' ||
+    pdk?.readiness === 'unverified' ||
+    pdk?.readiness === 'invalid'
+  )
 }
 
 function selectPdk(pdk: import('../types').ImportedPdk) {

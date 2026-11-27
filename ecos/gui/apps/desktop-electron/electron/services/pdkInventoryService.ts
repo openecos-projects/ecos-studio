@@ -227,7 +227,11 @@ export class PdkInventoryService {
           continue
         }
         const readiness = (await this.snapshot(installation)).readiness
-        if (readiness === 'ready' || readiness === 'unverified') {
+        if (
+          readiness === 'ready' ||
+          readiness === 'unverified' ||
+          (readiness === 'invalid' && request.requirement.manualConfig)
+        ) {
           matching.push(installation)
         }
       }
@@ -265,7 +269,10 @@ export class PdkInventoryService {
         )
       }
       const readiness = (await this.snapshot(installation)).readiness
-      if (readiness !== 'ready' && readiness !== 'unverified') {
+      if (
+        readiness === 'missing' ||
+        (readiness === 'invalid' && !request.requirement.manualConfig)
+      ) {
         throw new Error('PDK Installation is not eligible for Binding')
       }
       const binding: PdkInventoryBinding = {
@@ -306,7 +313,10 @@ export class PdkInventoryService {
         )
       }
       const snapshot = await this.snapshot(installation)
-      if (snapshot.readiness === 'missing' || snapshot.readiness === 'invalid') {
+      if (
+        snapshot.readiness === 'missing' ||
+        (snapshot.readiness === 'invalid' && !request.requirement.manualConfig)
+      ) {
         throw new Error(snapshot.reason ?? 'Bound PDK Installation is not usable')
       }
       if (snapshot.readiness === 'unverified' && !request.requirement.manualConfig) {
