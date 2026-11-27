@@ -199,10 +199,23 @@ def _timing_input(
     source = design.sdc.read_bytes()
     text = source.decode("utf-8")
     try:
-        tomllib.loads(text)
+        timing = tomllib.loads(text)
     except tomllib.TOMLDecodeError:
         pass
     else:
+        expected = {
+            "primary_clocks", "generated_clocks", "clock_groups",
+            "io_constraints", "timing_exceptions",
+        }
+        if (
+            timing.keys() != expected
+            or any(not isinstance(value, str) for value in timing.values())
+            or not any(
+                re.match(r"^\s*create_clock\s+", line)
+                for line in timing["primary_clocks"].splitlines()
+            )
+        ):
+            raise ValueError(f"Phase 8 timing template has no valid primary clock: {design.sdc}")
         return design.sdc.name, source
 
     generated = _LEGACY_GENERATED_TIMING.fullmatch(text)
