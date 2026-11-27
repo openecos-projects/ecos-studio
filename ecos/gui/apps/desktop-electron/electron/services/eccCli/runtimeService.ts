@@ -1184,6 +1184,12 @@ export class EccCliRuntimeService {
       )
     }
     const tracked = this.requireOperation(request)
+    const response = (accepted: boolean) => ({
+      accepted,
+      operationId: tracked.operation.operationId,
+      state: tracked.operation.state,
+    })
+    if (isTerminal(tracked.operation.state)) return response(false)
     tracked.requestedCancel = true
     try {
       await this.cli.run([
@@ -1197,16 +1203,14 @@ export class EccCliRuntimeService {
         tracked.operation.operationId,
       ])
     } catch (error) {
+      if (isTerminal(tracked.operation.state)) return response(false)
       tracked.requestedCancel = false
       throw error
     }
+    if (isTerminal(tracked.operation.state)) return response(true)
     tracked.operation = { ...tracked.operation, cancelRequested: true, updatedAt: now() }
     this.invalidate()
-    return {
-      accepted: true,
-      operationId: tracked.operation.operationId,
-      state: 'running',
-    }
+    return response(true)
   }
 
   async cancelOperationLegacy(operationId?: string) {
