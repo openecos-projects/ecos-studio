@@ -4576,6 +4576,7 @@ watch(
   () => projectContext.value.project_root,
   (root, previousRoot) => {
     if (previousRoot && previousRoot !== root) {
+      editedParameterFields.clear()
       declaredFlowSelection.value = undefined
       flowStepChoices.clear()
       lecInsertion.value = ''
@@ -4595,6 +4596,7 @@ watch(
     }
     if (currentStep.value === 6) void loadProjectEccPdkConfig()
   },
+  { flush: 'sync' },
 )
 
 watch(

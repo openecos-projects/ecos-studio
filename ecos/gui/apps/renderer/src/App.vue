@@ -1419,6 +1419,7 @@ function handleWizardClose() {
 }
 
 function showCreateWorkspaceWizard() {
+  workspaceWizardError.value = ''
   workspaceWizardInitialConfig.value = undefined
   reconfigureWorkspacePath.value = ''
   showNewProjectWizard.value = true
@@ -1457,8 +1458,10 @@ const handleWizardCreate = async (config: WorkspaceConfig) => {
   workspaceWizardCreating.value = true
   try {
     if (!(await newProject(config))) {
-      workspaceWizardError.value =
-        lastWorkspaceCreationError.value || 'Workspace creation failed.'
+      if (config.designTool !== 'frontend' && showNewProjectWizard.value) {
+        workspaceWizardError.value =
+          lastWorkspaceCreationError.value || 'Workspace creation failed.'
+      }
       return
     }
     resetWorkspaceWizard()
