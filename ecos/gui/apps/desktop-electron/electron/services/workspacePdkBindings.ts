@@ -65,11 +65,12 @@ export async function prepareWorkspaceCreatePreview(
   dependencies: WorkspacePdkBindingDependencies,
   request: EccWorkspaceCreateRequest,
 ): Promise<EccWorkspaceCreateRequest> {
-  const requestedMpc = request.workspaceSpec.mpc
-  if (requestedMpc === undefined || request.projectMode !== 'create') return request
+  const { projectMpc: _ignoredProjectMpc, ...sanitized } = request
+  const requestedMpc = sanitized.workspaceSpec.mpc
+  if (requestedMpc === undefined || sanitized.projectMode !== 'create') return sanitized
   const mpc = await resolveMpcBinding(dependencies, requestedMpc)
   if (!mpc) throw new Error('Project MPC Requirement is unbound')
-  return { ...request, projectMpc: mpc.projectMpc }
+  return { ...sanitized, projectMpc: mpc.projectMpc }
 }
 
 export async function prepareWorkspaceCreateBinding(
@@ -124,6 +125,7 @@ export async function prepareWorkspaceCreateBinding(
   const {
     pdkInstallationId: _pdkInstallationId,
     pdkRequirement: _pdkRequirement,
+    projectMpc: _ignoredProjectMpc,
     ...runtimeRequest
   } = request
   const { mpc: _mpc, ...workspaceBindings } = request.workspaceBindings

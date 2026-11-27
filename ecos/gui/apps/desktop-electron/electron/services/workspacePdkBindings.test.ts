@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   authorizeBackendProjectRootForCreate,
   prepareWorkspaceCreateBinding,
+  prepareWorkspaceCreatePreview,
   prepareWorkspaceOpenBinding,
 } from './workspacePdkBindings'
 
@@ -417,5 +418,34 @@ describe('manual external PDK resources', () => {
       },
       root: '/pdks/ics55',
     })
+  })
+
+  it('strips caller-supplied projectMpc when no MPC requirement is requested', async () => {
+    const { dependencies } = createDependencies()
+    dependencies.pdkInventoryService.resolveBinding.mockResolvedValue({})
+    const forgedMpc = {
+      designIndex: 0,
+      displayName: 'Forged',
+      resourceId: 'mpc:forged',
+      root: '/tmp/forged',
+      version: '1.0.0',
+    }
+    const baseRequest = {
+      commandId: 'create-no-mpc',
+      projectId: 'proj_demo',
+      projectMode: 'create' as const,
+      projectMpc: forgedMpc,
+      projectRoot: '/projects/demo',
+      targetDirectory: '/projects/demo/ws_1',
+      pdkRequirement: { familyId: 'ics55', manualConfig: null, version: null },
+      workspaceBindings: { inputs: {}, pdk: {} },
+      workspaceSpec: { pdk: { familyId: 'ics55', mode: 'default' } },
+    }
+
+    const preview = await prepareWorkspaceCreatePreview(dependencies, baseRequest)
+    expect(preview.projectMpc).toBeUndefined()
+
+    const prepared = await prepareWorkspaceCreateBinding(dependencies, baseRequest)
+    expect(prepared.projectMpc).toBeUndefined()
   })
 })
