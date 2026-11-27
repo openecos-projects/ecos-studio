@@ -30,7 +30,7 @@ export function isCandidateOperationId(value: string): boolean {
 export class CandidateOperations {
   private readonly operations = new Map<string, CandidateRun>()
   private readonly controllers = new Set<AbortController>()
-  private readonly active = new Set<Promise<EccRuntimeOperation>>()
+  private readonly active = new Map<Promise<EccRuntimeOperation>, SourceWorkspace>()
 
   constructor(private readonly cli: EccCliProcess) {}
 
@@ -136,7 +136,7 @@ export class CandidateOperations {
         this.active.delete(terminal)
         this.controllers.delete(controller)
       })
-    this.active.add(terminal)
+    this.active.set(terminal, source)
     this.controllers.add(controller)
     void terminal.then(
       (operation) => {
@@ -275,12 +275,14 @@ export class CandidateOperations {
     return { accepted, operationId, state: run.operation.state }
   }
 
-  hasActive(): boolean {
-    return this.active.size > 0
+  hasActive(source?: SourceWorkspace): boolean {
+    return source
+      ? [...this.active.values()].some((owner) => sameSource(source, owner))
+      : this.active.size > 0
   }
 
   async waitForIdle(): Promise<void> {
-    await Promise.allSettled(this.active)
+    await Promise.allSettled(this.active.keys())
   }
 
   async shutdown(): Promise<void> {

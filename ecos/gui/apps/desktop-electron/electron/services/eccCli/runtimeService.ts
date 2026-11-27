@@ -123,6 +123,7 @@ function runKey(session: WorkspaceSession, runId: string): string {
 
 interface TrackedOperation {
   diagnostics?: EccBackgroundOperationLogResult
+  diagnosticsPending?: Promise<EccBackgroundOperationLogResult>
   child?: { exit?: { code: number | null; signal: NodeJS.Signals | null } }
   operation: EccRuntimeOperation
   projectRoot: string
@@ -617,7 +618,12 @@ export class EccCliRuntimeService {
       ({ session: owner }) => owner.handle === request.workspaceHandle,
     )
     const active = operations.some(({ operation }) => operation.state === 'running')
-    if (active) return { ok: true, retained: true }
+    if (
+      active ||
+      this.candidates.hasActive(session) ||
+      this.defViewsInFlight.has(session.directory)
+    )
+      return { ok: true, retained: true }
     const diagnosticRuns = operations
       .filter(({ operation }) => capturesRunDiagnostics(operation.state))
       .map(({ operation }) => runKey(session, operation.operationId))
@@ -1362,6 +1368,7 @@ export class EccCliRuntimeService {
           operation.operationId === request.operationId &&
           keys?.has(runKey(session, operation.operationId)),
       )
+      if (cached?.diagnosticsPending) return await cached.diagnosticsPending
       if (cached?.diagnostics) return cached.diagnostics
     }
     const session = this.requireSession(request.workspaceHandle)
@@ -1381,6 +1388,7 @@ export class EccCliRuntimeService {
     if (!operation)
       throw new Error('ECC Operation is not owned by this Workspace Session.')
     if (request.includeDiagnostics) {
+      if (tracked?.diagnosticsPending) return await tracked.diagnosticsPending
       if (tracked?.diagnostics) return tracked.diagnostics
       if (result || capturesRunDiagnostics(operation.state)) {
         const log = await readOperationLog(
@@ -1888,21 +1896,29 @@ ${message}`)
         tracked.operation.error.message,
       )
     }
-    await tracked.watcher?.close()
+    const closing = tracked.watcher?.close()
     tracked.watcher = null
     if (tracked.poller) clearInterval(tracked.poller)
     tracked.poller = null
     if (captureDiagnostics) {
-      tracked.diagnostics = await buildOperationDiagnostics(
-        tracked.operation,
-        log,
-        workers,
-        this.options.mainLogFile,
-        runKey(tracked.session, tracked.operation.operationId),
+      tracked.diagnosticsPending = Promise.resolve(closing).then(() =>
+        buildOperationDiagnostics(
+          tracked.operation,
+          log,
+          workers,
+          this.options.mainLogFile,
+          runKey(tracked.session, tracked.operation.operationId),
+        ),
       )
     }
     this.outcomes.push(tracked)
     this.trimOutcomes()
+    if (tracked.diagnosticsPending) {
+      tracked.diagnostics = await tracked.diagnosticsPending
+      delete tracked.diagnosticsPending
+    } else {
+      await closing
+    }
     for (const resolveWait of tracked.waiters.splice(0))
       resolveWait({ ...tracked.operation })
     await this.refreshSessionRevision(tracked.session).catch(() => undefined)
@@ -1924,7 +1940,8 @@ ${message}`)
       (left, right) => right.operation.updatedAt - left.operation.updatedAt,
     )
     for (const outcome of this.outcomes.splice(RECENT_RUN_LIMIT)) {
-      delete outcome.diagnostics
+      const key = runKey(outcome.session, outcome.operation.operationId)
+      if (this.operations.get(key) === outcome) this.operations.delete(key)
     }
   }
 
