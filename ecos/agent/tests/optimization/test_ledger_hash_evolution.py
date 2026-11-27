@@ -378,6 +378,59 @@ def test_ledger_chains_still_append_and_replay(tmp_path: Path) -> None:
     assert len(replay.entries) == 2
 
 
+def test_archived_sta_objective_state_retains_its_hash(tmp_path: Path) -> None:
+    from ecos_agent.optimization.controller import OptimizationEpisodeController
+    from ecos_agent.optimization.controller_models import (
+        OptimizationEpisodeControllerError,
+        _PersistedEpisodeState,
+    )
+    from ecos_agent.optimization.objective_alignment import (
+        build_active_objective,
+        build_objective_alignment,
+    )
+    from tests.optimization.controller.support import (
+        CURRENT_VALUES, _Clock, _FakeCodex, _FakeEcc, _controller,
+        _execution_context, _observation, _proposal, _retrieval,
+    )
+    from tests.optimization.test_objective_alignment import _objective, _terminal
+
+    controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc())
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    state = json.loads(controller.state_path.read_bytes())
+    objective = _objective()
+    baseline = _terminal()
+    alignment = build_objective_alignment(objective, baseline)
+    active = build_active_objective(alignment, objective, baseline).model_dump(mode="json")
+    archived = objective.model_dump(mode="json", exclude={"contract_sha256"})
+    archived["primary_metric"] = "sta_typical_dynamic_power"
+    archived["preserve_metrics"] = ["sta_typical_leakage_power"]
+    archived["contract_sha256"] = canonical_sha256(archived)
+    alignment_data = alignment.model_dump(mode="json", exclude={"alignment_contract_sha256"})
+    alignment_data["objective_contract_sha256"] = archived["contract_sha256"]
+    alignment_hash = canonical_sha256(alignment_data)
+    alignment_data["alignment_contract_sha256"] = alignment_hash
+    active.update(
+        alignment_contract_sha256=alignment_hash,
+        original_primary_metric=archived["primary_metric"],
+        active_primary_metric=archived["primary_metric"],
+        active_preserve_metrics=archived["preserve_metrics"],
+    )
+    state.update(
+        incumbent=baseline.model_dump(mode="json"), objective=archived,
+        objective_alignment=alignment_data, active_objective=active,
+    )
+    state.pop("state_sha256")
+    state["state_sha256"] = canonical_sha256(state)
+    assert _PersistedEpisodeState.model_validate(state).model_dump(mode="json") == state
+    controller.state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    with pytest.raises(OptimizationEpisodeControllerError, match="archived STA power metrics"):
+        OptimizationEpisodeController.recover(
+            planner=_FakeCodex(_proposal), executor=_FakeEcc(), ledger=controller.ledger,
+            clock=_Clock(), execution_context=_execution_context(),
+        )
+
+
 def test_replays_legacy_power_predictions_without_changing_their_hash(tmp_path: Path) -> None:
     action = {
         "knob_id": "place.target_density",
